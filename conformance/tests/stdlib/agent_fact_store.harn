@@ -1,0 +1,54 @@
+import { invalidate_facts, recall_facts, store_fact } from "std/agent/fact"
+
+pipeline test_agent_fact_store(_task) {
+  let root = path_join(harness.fs.temp_dir(), "harn-agent-facts-" + uuid())
+  let opts = {root: root, namespace: "agent/facts"}
+  let first = store_fact(
+    {
+      kind: "Claim",
+      claim: "Alice prefers Rust examples",
+      confidence: 0.82,
+      evidence: [{kind: "FileRange", ref: "README.md:1-3", snippet: "Rust examples"}],
+      provenance: {agent: "codex", run_id: "run-1"},
+      valid_until: {event: "README preference guidance changes", asserted_at: "2026-05-23T22:00:00Z"},
+    },
+    opts + {now: "2026-05-23T22:00:00Z"},
+  )
+  store_fact(
+    {
+      kind: "Hypothesis",
+      claim: "Bob prefers TypeScript examples",
+      confidence: 0.4,
+      evidence: [{kind: "ToolOutput", ref: "tool:interview", snippet: "TypeScript"}],
+      provenance: {agent: "codex"},
+    },
+    opts + {now: "2026-05-23T22:00:01Z"},
+  )
+  assert_eq(first._type, "memory_record")
+  assert_eq(first.value.schema, "harn.fact.v1")
+  assert_eq(first.value.kind, "claim")
+  assert_eq(first.key, "fact:claim:" + first.value.id)
+  assert(contains(first.tags, "fact:evidence:file_range:README.md:1-3"))
+  assert(contains(first.tags, "fact:claim:evidence:file_range:README.md:1-3"))
+  assert_eq(first.value.evidence[0].kind, "file_range")
+  let confident = recall_facts("examples", nil, 0.8, opts + {limit: 5})
+  assert_eq(len(confident), 1)
+  assert_eq(confident[0].claim, "Alice prefers Rust examples")
+  assert_eq(confident[0].memory_key, first.key)
+  let claims = recall_facts("examples", "Claim", 0.0, opts + {limit: 5})
+  assert_eq(len(claims), 1)
+  assert_eq(claims[0].kind, "claim")
+  let invalidated = invalidate_facts(
+    {kind: "Claim", evidence: {kind: "FileRange", ref: "README.md:1-3"}},
+    opts + {now: "2026-05-23T22:00:02Z"},
+  )
+  assert_eq(invalidated.forgotten, 1)
+  assert_eq(len(recall_facts("Alice", nil, 0.0, opts + {limit: 5})), 0)
+  let bad_kind = try {
+    store_fact({kind: "Guess", claim: "unsupported", confidence: 0.5}, opts)
+  }
+  assert(is_err(bad_kind))
+  assert(contains(to_string(unwrap_err(bad_kind)), "HARN-FACT-002"))
+  harness.fs.delete(root)
+  __io_println("agent fact store ok")
+}

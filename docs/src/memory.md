@@ -24,6 +24,9 @@ let summary = memory_summarize("workspace/acme", {limit: 10})
 | `memory_summarize(namespace, window?, options?)` | `memory_summary` | Build an extractive summary over recent or query-filtered records |
 | `memory_forget(namespace, predicate, options?)` | `dict` | Append a tombstone for matching records |
 
+Typed fact helpers live in `std/agent/fact` and store `harn.fact.v1`
+envelopes on top of this same memory log.
+
 ## Storage
 
 The VM-native backend stores append-only JSONL events at
@@ -75,6 +78,43 @@ observations in the log for auditability.
 Predicates may be a string substring match, or a dict with any combination of
 `id`, `key`, `tag` / `tags`, and `query`. Dict predicates are conjunctive: all
 provided fields must match.
+
+## Typed facts
+
+`std/agent/fact` provides typed assertions over `std/memory` for agents that
+need durable, queryable claims rather than freeform observations:
+
+```harn
+import { recall_facts, store_fact } from "std/agent/fact"
+
+store_fact({
+  kind: "claim",
+  claim: "Alice prefers Rust examples",
+  confidence: 0.82,
+  evidence: [{kind: "file_range", ref: "README.md:1-3"}],
+  provenance: {agent: "codex", run_id: "run-1"},
+})
+
+let facts = recall_facts("Rust examples", "claim", 0.8)
+```
+
+Facts normalize to `harn.fact.v1` with `kind`, `claim`, `evidence`,
+`confidence`, `provenance`, optional `valid_until`, and `asserted_at`.
+`store_fact` writes the fact as `MemoryRecord.value`, sets the memory record id
+to the fact id, and uses the reserved key shape `fact:<kind>:<id>` with
+`fact`, `fact:<kind>`, `schema:harn.fact.v1`, and evidence tags. The default
+namespace is `project/facts`; pass `options.namespace`, `options.scope`, or
+normal memory options such as `root` to control placement.
+
+`recall_facts(query, kind?, min_confidence?, scope?)` returns normalized facts
+augmented with `score`, `memory_record_id`, `memory_key`, `memory_namespace`,
+and `stored_at`. `invalidate_facts(predicate, scope?)` appends memory
+tombstones; predicates accept an exact `fact_...` id string or a dict with
+`id`, `key`, `kind`, `claim`, `query`, `tag`, `tags`, `evidence_ref`, or
+`evidence`. Evidence predicates match canonical evidence tags such as
+`fact:evidence:file_range:README.md:1-3`; when `kind` is supplied, they match
+kind-scoped tags such as `fact:claim:evidence:file_range:README.md:1-3`.
+Validation failures include `HARN-FACT-NNN` codes.
 
 ## Vector and hybrid backends
 

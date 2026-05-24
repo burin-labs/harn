@@ -16,6 +16,13 @@ condensed series summaries instead of full per-patch history.
   compaction, and tool-disclosure experiments. The smoke manifest exercises
   three tasks across three context modes and writes stable JSON/JSONL/Markdown
   artifacts that hosted eval tooling and downstream products can ingest.
+- **Typed facts over memory (#2251).** Added `std/agent/fact` with
+  `harn.fact.v1` normalization, stable `fact_...` ids,
+  `store_fact(...)`, `recall_facts(...)`, and `invalidate_facts(...)`
+  wrappers over `std/memory`. Facts store as `MemoryRecord.value` under
+  reserved `fact:<kind>:<id>` keys, carry evidence/confidence/provenance,
+  add canonical evidence tags for invalidation, and surface `HARN-FACT-NNN`
+  validation codes.
 - **First-class compaction instructions (#2190).** Manual session compaction,
   transcript auto-compaction, host-triggered compaction, and `agent_loop`
   auto-compaction now accept a typed `CompactionPolicy` with optional

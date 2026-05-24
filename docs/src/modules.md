@@ -83,6 +83,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/edit`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
+`std/agent/fact`,
 `std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
 `std/review`, `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
@@ -1293,6 +1294,20 @@ Simulated-user helpers for eval harnesses:
 | `simulated_user_post_turn(answerer, options?)` | Build a `post_turn_callback` that answers plain-text clarification questions |
 | `simulated_user_status(answerer)` | Return public state such as reply and LLM-call counts |
 | `simulated_user_read_tools(registry?, options?)` | Alias for read-only host research tools appropriate for an agentic simulated user |
+
+### std/agent/fact
+
+Typed fact envelopes over `std/memory` for cross-session assertions:
+
+| Function | Description |
+|---|---|
+| `fact(input, options?)` | Normalize and validate a `harn.fact.v1` envelope with kind, claim, evidence, confidence, provenance, optional `valid_until`, and `asserted_at` |
+| `fact_id(kind, claim, evidence?, provenance?)` | Build a stable fact id from the normalized assertion fields |
+| `fact_key(fact)` | Return the reserved `fact:<kind>:<id>` memory key |
+| `fact_tags(fact, tags?)` | Return canonical fact memory tags, generic and kind-scoped evidence tags, and caller tags |
+| `store_fact(input, options?)` | Store a typed fact as `MemoryRecord.value`; `options.namespace` or `options.scope` selects the memory namespace |
+| `recall_facts(query, kind?, min_confidence?, scope?)` | Recall facts by memory query, kind, and minimum confidence |
+| `invalidate_facts(predicate, scope?)` | Append memory tombstones for matching facts by id, key, kind, claim/query, tags, or evidence |
 
 ### std/handoffs
 
