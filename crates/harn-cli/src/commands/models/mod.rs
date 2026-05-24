@@ -11,7 +11,7 @@ pub(crate) async fn run(args: ModelsArgs) {
     match args.command {
         ModelsCommand::List(args) => list::run(args).await,
         ModelsCommand::Install(args) => install::run(args).await,
-        ModelsCommand::Recommend(args) => recommend::run(&args),
+        ModelsCommand::Recommend(args) => recommend::run(&args).await,
         ModelsCommand::Test(args) => test::run(&args).await,
     }
 }

@@ -818,6 +818,18 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/explain.harn"),
     },
     StdlibCliScript {
+        name: "models/list",
+        source: include_str!("stdlib/cli/models/list.harn"),
+    },
+    StdlibCliScript {
+        name: "models/recommend",
+        source: include_str!("stdlib/cli/models/recommend.harn"),
+    },
+    StdlibCliScript {
+        name: "models/test",
+        source: include_str!("stdlib/cli/models/test.harn"),
+    },
+    StdlibCliScript {
         name: "scaffold/init",
         source: include_str!("stdlib/cli/scaffold/init.harn"),
     },

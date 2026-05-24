@@ -1,4 +1,24 @@
+//! `harn models recommend` — pick a starter model for the current
+//! machine and credentials.
+//!
+//! ## .harn dispatch (W9 — see harn#2309)
+//!
+//! The rule-lookup + rendering pipeline lives in
+//! `crates/harn-stdlib/src/stdlib/cli/models/recommend.harn`. Hardware
+//! probing (`sysctl` / `/proc/meminfo` / `nvidia-smi` /
+//! `MetalPerformanceShaders`), provider credential detection
+//! (`llm_config::provider_key_available`), and parsing
+//! `data/model_recommendations.toml` all stay in Rust — none of those
+//! capabilities are exposed to script-land today, and the sandbox
+//! would block the subprocess calls. The Rust shim collects everything
+//! into a single JSON payload and hands it across; the script picks
+//! the matching rule and formats the output.
+//!
+//! `HARN_CLI_IMPL=rust` keeps the legacy direct path for the
+//! parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
+
 use std::collections::BTreeSet;
+use std::io::Write as _;
 
 use serde::{Deserialize, Serialize};
 
@@ -6,6 +26,8 @@ use crate::cli::ModelRecommendArgs;
 use crate::commands::hardware::{
     bytes_to_gib_floor, bytes_to_gib_rounded, collect_hardware_snapshot, GpuKind, HardwareSnapshot,
 };
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 
 const RECOMMENDATIONS_TOML: &str = include_str!("../../../data/model_recommendations.toml");
 const CLOUD_DEFAULT_SENTINEL: &str = "$cloud_default";
@@ -20,6 +42,16 @@ const GPU_KEYS: [RecommendationGpu; 3] = [
     RecommendationGpu::Mps,
     RecommendationGpu::Cuda,
 ];
+
+/// Env var carrying the full recommend payload (hardware snapshot,
+/// has-provider-key flag, cloud-model resolution, parsed recommendation
+/// table) handed to the embedded `cli/models/recommend` script.
+const RECOMMEND_PAYLOAD_ENV: &str = "HARN_MODELS_RECOMMEND_PAYLOAD_JSON";
+
+/// Serialises the dispatch path so concurrent in-process callers don't
+/// race on the global env var. Same pattern as other partial-port
+/// commands (see harn#2305 / #2306).
+static DISPATCH_RECOMMEND_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,7 +119,7 @@ struct RecommendationTable {
     recommendations: Vec<RecommendationRule>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct RecommendationRule {
     ram_bucket: RamBucket,
     gpu: RecommendationGpu,
@@ -96,7 +128,7 @@ struct RecommendationRule {
     model_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct CloudModel {
     provider: String,
     model_id: String,
@@ -114,7 +146,73 @@ struct ModelRecommendation {
     hardware: HardwareSnapshot,
 }
 
-pub(crate) fn run(args: &ModelRecommendArgs) {
+/// JSON payload handed to the embedded `cli/models/recommend` script.
+/// The script picks the matching rule and renders — see the script's
+/// docstring for the input contract.
+#[derive(Debug, Serialize)]
+struct RecommendDispatchPayload<'a> {
+    hardware: &'a HardwareSnapshot,
+    has_provider_key: bool,
+    cloud_model: Option<&'a CloudModel>,
+    recommendations: &'a [RecommendationRule],
+}
+
+pub(crate) async fn run(args: &ModelRecommendArgs) {
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        run_legacy(args);
+        return;
+    }
+    let exit_code = run_dispatch(args).await;
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+}
+
+async fn run_dispatch(args: &ModelRecommendArgs) -> i32 {
+    let snapshot = collect_hardware_snapshot();
+    let cloud_model = detect_cloud_model();
+    let has_provider_key = cloud_model.is_some();
+    let table = match load_recommendation_table() {
+        Ok(table) => table,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    };
+    if let Err(error) = validate_recommendation_table(&table) {
+        eprintln!("error: {error}");
+        return 1;
+    }
+
+    let payload = RecommendDispatchPayload {
+        hardware: &snapshot,
+        has_provider_key,
+        cloud_model: cloud_model.as_ref(),
+        recommendations: &table.recommendations,
+    };
+    let payload_json = match serde_json::to_string(&payload) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise recommend payload: {error}");
+            return 1;
+        }
+    };
+
+    let _guard = DISPATCH_RECOMMEND_LOCK.lock().await;
+    let _payload_guard = ScopedEnvVar::set(RECOMMEND_PAYLOAD_ENV, &payload_json);
+    let outcome = dispatch::run_embedded_script("models/recommend", Vec::new(), args.json).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if !outcome.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+    outcome.exit_code
+}
+
+/// Legacy direct-render path. Kept verbatim for the parity-snapshot
+/// harness (#2299) until C1 (#2314) deletes it.
+fn run_legacy(args: &ModelRecommendArgs) {
     let snapshot = collect_hardware_snapshot();
     let cloud_model = detect_cloud_model();
     let has_provider_key = cloud_model.is_some();

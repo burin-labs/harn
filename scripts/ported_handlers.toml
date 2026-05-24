@@ -42,3 +42,15 @@ max_loc = 1201
 [[handler]]
 path = "crates/harn-cli/src/lib.rs"
 max_loc = 3120
+
+[[handler]]
+path = "crates/harn-cli/src/commands/models/list.rs"
+max_loc = 222
+
+[[handler]]
+path = "crates/harn-cli/src/commands/models/recommend.rs"
+max_loc = 500
+
+[[handler]]
+path = "crates/harn-cli/src/commands/models/test.rs"
+max_loc = 150

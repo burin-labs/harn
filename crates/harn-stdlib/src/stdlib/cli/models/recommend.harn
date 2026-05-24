@@ -1,0 +1,264 @@
+/**
+ * `harn models recommend` ported to .harn — see harn#2309 (W9).
+ *
+ * **Aggregation in Rust, render + lookup in .harn.** The Rust dispatch
+ * shim does the work that needs OS-level capabilities — hardware
+ * probing (`sysctl` / `/proc/meminfo` / `nvidia-smi` / `MetalPerformanceShaders`),
+ * provider credential detection (which reaches into
+ * `llm_config::provider_key_available`), and parsing the bundled
+ * `model_recommendations.toml`. It hands the result over as a single
+ * JSON payload here, and this script picks the matching rule from the
+ * recommendation table and renders it.
+ *
+ * The recommendation table itself ships pre-parsed — the script could
+ * read the TOML through `harness.fs`, but the file lives inside the
+ * CLI crate's `data/` and isn't part of the script sandbox's
+ * workspace_roots. Forwarding the parsed table keeps the script
+ * independent of the on-disk layout while still leaving the
+ * recommendation policy auditable from a single .harn source.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_RECOMMEND_PAYLOAD_JSON — JSON envelope:
+ *     {
+ *       "hardware": HardwareSnapshot,    // ram/gpu/disk
+ *       "has_provider_key": bool,
+ *       "cloud_model": {provider, model_id} | null,
+ *       "recommendations": [             // parsed model_recommendations.toml
+ *         {ram_bucket, gpu, has_provider_key, provider, model_id},
+ *         ...
+ *       ]
+ *     }
+ *   HARN_OUTPUT_JSON — "1" for the JSON envelope, else human text.
+ */
+const GIB: int = 1073741824
+
+const CLOUD_DEFAULT_SENTINEL: string = "$cloud_default"
+
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_int(value) -> int? {
+  if type_of(value) == "int" {
+    return value
+  }
+  return nil
+}
+
+/**
+ * Mirror the Rust impl's `bytes_to_gib_floor` (integer division). The
+ * Rust impl gates on `RamBucket::from_available_bytes`:
+ *   None         → "lt8"
+ *   0..=7  GiB   → "lt8"
+ *   8..=15 GiB   → "8_16"
+ *   16..=31 GiB  → "16_32"
+ *   _            → "32_plus"
+ */
+fn __ram_bucket_from_bytes(available_bytes) -> string {
+  let bytes = __safe_int(available_bytes)
+  if bytes == nil {
+    return "lt8"
+  }
+  let gib = bytes / GIB
+  if gib <= 7 {
+    return "lt8"
+  }
+  if gib <= 15 {
+    return "8_16"
+  }
+  if gib <= 31 {
+    return "16_32"
+  }
+  return "32_plus"
+}
+
+/**
+ * Round half-up GiB conversion. Matches `bytes_to_gib_rounded` in the
+ * Rust impl — used only for the human rationale string.
+ */
+fn __ram_gib_rounded(bytes) -> int {
+  let b = __safe_int(bytes) ?? 0
+  return (b + GIB / 2) / GIB
+}
+
+fn __gpu_label(gpu: string) -> string {
+  if gpu == "cuda" {
+    return "CUDA available"
+  }
+  if gpu == "mps" {
+    return "MPS available"
+  }
+  return "no GPU acceleration"
+}
+
+/**
+ * Find the rule matching `(ram_bucket, gpu, has_provider_key)`. The
+ * Rust impl already validates uniqueness + full coverage of the
+ * cross-product at table-load time; the script trusts that gate and
+ * uses a linear scan. Returns nil when no match exists (the dispatch
+ * shim treats that as an internal error since the table is bundled
+ * pre-validated).
+ */
+fn __find_rule(rules: list, ram_bucket: string, gpu: string, has_provider_key: bool) -> dict? {
+  for rule in rules {
+    if type_of(rule) != "dict" {
+      continue
+    }
+    let r_ram = __safe_string(rule["ram_bucket"], "")
+    let r_gpu = __safe_string(rule["gpu"], "")
+    let r_key = __safe_bool(rule["has_provider_key"], false)
+    if r_ram == ram_bucket && r_gpu == gpu && r_key == has_provider_key {
+      return rule
+    }
+  }
+  return nil
+}
+
+/**
+ * Normalize a `(provider, model_id)` pair to the selector the user
+ * passes to `--model`. Matches the Rust impl's `harn_selector_for`
+ * exactly:
+ *   * For ollama, `ollama/foo:bar` → `ollama:foo:bar`; otherwise pass
+ *     through (already in `provider:model` form).
+ *   * Otherwise strip the leading `provider/` if present.
+ */
+fn __harn_selector_for(provider: string, model_id: string) -> string {
+  if provider == "ollama" {
+    let prefix = "ollama/"
+    if len(model_id) >= len(prefix) && model_id[0:len(prefix)] == prefix {
+      return "ollama:" + model_id[len(prefix):len(model_id)]
+    }
+    return model_id
+  }
+  let prefix = provider + "/"
+  if len(model_id) >= len(prefix) && model_id[0:len(prefix)] == prefix {
+    return model_id[len(prefix):len(model_id)]
+  }
+  return model_id
+}
+
+fn __rationale(ram_bytes, gpu: string, has_provider_key: bool, model_id: string) -> string {
+  let ram = if __safe_int(ram_bytes) == nil {
+    "unknown free RAM"
+  } else {
+    to_string(__ram_gib_rounded(ram_bytes)) + " GB free"
+  }
+  let creds = if has_provider_key {
+    "cloud creds available"
+  } else {
+    "no cloud creds"
+  }
+  return ram + ", " + __gpu_label(gpu) + ", " + creds + " -> " + model_id
+}
+
+/**
+ * Resolve a rule against the optional cloud model. Returns
+ * `{provider, model_id}` (model_id already in display form, e.g.
+ * `openai/gpt-4o-mini` for cloud entries). Returns nil when the rule
+ * asks for a cloud default but no cloud model was detected — the Rust
+ * shim treats nil as a hard error since the table coverage gate
+ * guarantees the cloud branch only fires when `has_provider_key` is
+ * also true.
+ */
+fn __resolve_rule(rule: dict, cloud_model) -> dict? {
+  let model_id = __safe_string(rule["model_id"], "")
+  if model_id != CLOUD_DEFAULT_SENTINEL {
+    return {provider: __safe_string(rule["provider"], ""), model_id: model_id}
+  }
+  if type_of(cloud_model) != "dict" {
+    return nil
+  }
+  let provider = __safe_string(cloud_model["provider"], "")
+  let cloud_model_id = __safe_string(cloud_model["model_id"], "")
+  if provider == "" || cloud_model_id == "" {
+    return nil
+  }
+  return {provider: provider, model_id: provider + "/" + cloud_model_id}
+}
+
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_MODELS_RECOMMEND_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_MODELS_RECOMMEND_PAYLOAD_JSON not set by dispatch shim")
+    return 70
+  }
+  let payload = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse recommend payload: " + to_string(e))
+    return 70
+  }
+  let hardware = __safe_dict(payload["hardware"])
+  let ram = __safe_dict(hardware["ram"])
+  let gpu_snap = __safe_dict(hardware["gpu"])
+  let gpu = __safe_string(gpu_snap["kind"], "none")
+  let has_provider_key = __safe_bool(payload["has_provider_key"], false)
+  let cloud_model = payload["cloud_model"]
+  let rules = __safe_list(payload["recommendations"])
+  let ram_bucket = __ram_bucket_from_bytes(ram["available_bytes"])
+  let rule = __find_rule(rules, ram_bucket, gpu, has_provider_key)
+  if rule == nil {
+    harness.stdio
+      .eprintln(
+      "no model recommendation for ram_bucket=" + ram_bucket
+        + " gpu="
+        + gpu
+        + " has_provider_key="
+        + to_string(has_provider_key),
+    )
+    return 1
+  }
+  let resolved = __resolve_rule(rule, cloud_model)
+  if resolved == nil {
+    harness.stdio
+      .eprintln("recommendation table requested a cloud default without cloud credentials")
+    return 1
+  }
+  let provider = resolved["provider"]
+  let model_id = resolved["model_id"]
+  let harn_selector = __harn_selector_for(provider, model_id)
+  let rationale = __rationale(ram["available_bytes"], gpu, has_provider_key, model_id)
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    let envelope = {
+      model_id: model_id,
+      harn_selector: harn_selector,
+      provider: provider,
+      rationale: rationale,
+      ram_bucket: ram_bucket,
+      gpu: gpu,
+      has_provider_key: has_provider_key,
+      hardware: hardware,
+    }
+    harness.stdio.println(json_stringify_pretty(envelope))
+    return 0
+  }
+  harness.stdio.println(model_id)
+  harness.stdio.println(rationale)
+  return 0
+}
