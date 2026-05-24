@@ -1,0 +1,204 @@
+/**
+ * `harn precompile` ported to .harn — see harn#2313 (W13).
+ *
+ * Walks a file or directory tree, dispatches each `.harn` source to a
+ * `harn precompile <single-file>` child that runs the legacy Rust
+ * compiler. The .harn port owns:
+ *
+ *   * argv parsing (target, --out, --keep-going, --quiet)
+ *   * directory walking (single source vs recursive .harn discovery)
+ *   * per-file --out path mirroring under the source root
+ *   * the success/fail per-line render and trailing "N succeeded, N
+ *     failed" summary
+ *
+ * The actual parse+typecheck+compile work stays in Rust on the spawned
+ * child (toggled via HARN_CLI_IMPL=rust so the child doesn't recurse
+ * back into this script). That keeps the bytecode-cache wire-format,
+ * compiler diagnostics, and module artifact emission untouched while
+ * letting the orchestration / file-walk layer move into Harn.
+ *
+ * Inputs (from the dispatch shim in crates/harn-cli/src/commands/precompile.rs):
+ *   HARN_CLI_SELF_EXE   — absolute path to the running `harn` binary,
+ *                         captured via `std::env::current_exe()` so the
+ *                         child invocation is robust to $PATH ordering.
+ *   argv[0]             — target file or directory (required)
+ *   HARN_PRECOMPILE_OUT — output directory (optional; mirrors source tree)
+ *   HARN_PRECOMPILE_KEEP_GOING — "1" to continue after a per-file error
+ *   HARN_PRECOMPILE_QUIET      — "1" to suppress per-file progress
+ */
+fn __collect_harn_files(harness: Harness, root: string) -> list<string> {
+  // walk_dir returns a flat list of {path, is_dir, is_file, depth}. We
+  // only emit `.harn` files. Walk order is stable per the builtin
+  // contract; we sort + dedupe afterwards to match the Rust impl which
+  // calls `files.sort(); files.dedup();`.
+  //
+  // The Rust collect_harn_files() (crates/harn-cli/src/commands/mod.rs)
+  // also drops files with a sibling `<name>.conformance-skip` marker;
+  // mirror that here so a directory with skip markers walks identically.
+  let entries = harness.fs.walk(root)
+  var files = []
+  for entry in entries {
+    let path = entry["path"]
+    let is_file = entry["is_file"] ?? false
+    if !is_file {
+      continue
+    }
+    if path_extension(path) != ".harn" {
+      continue
+    }
+    let skip_marker = path_with_extension(path, "conformance-skip")
+    if harness.fs.exists(skip_marker) {
+      continue
+    }
+    files = files.push(path)
+  }
+  let sorted = files.sort()
+  // dedupe stable-sorted list: keep entry when it differs from previous.
+  var out = []
+  var prev = ""
+  for path in sorted {
+    if path != prev || len(out) == 0 {
+      out = out.push(path)
+    }
+    prev = path
+  }
+  return out
+}
+
+fn __destination_path(source_path: string, source_root: string, out_root: string, extension: string) -> string {
+  // Mirror the Rust output_path() exactly: when out_root is empty, write
+  // adjacent to source; otherwise compute the relative path from
+  // source_root and join under out_root, then swap the extension.
+  if out_root == "" {
+    return path_with_extension(source_path, extension)
+  }
+  let relative = if source_root == "" {
+    path_basename(source_path)
+  } else {
+    let rel = path_relative_to(source_path, source_root)
+    if rel == nil {
+      path_basename(source_path)
+    } else {
+      rel
+    }
+  }
+  let joined = path_join(out_root, relative)
+  return path_with_extension(joined, extension)
+}
+
+fn __ensure_parent(harness: Harness, path: string) {
+  let parent = path_parent(path)
+  if parent != "" && !harness.fs.exists(parent) {
+    harness.fs.mkdir(parent)
+  }
+}
+
+fn __spawn_precompile(bin: string, source_path: string, per_file_out: string) -> dict {
+  // Always force the child onto the Rust path: this script IS the .harn
+  // dispatch target, so leaving HARN_CLI_IMPL unset would re-enter us
+  // and spin forever. HARN_CLI_IMPL=rust short-circuits the dispatch
+  // wedge in crates/harn-cli/src/commands/precompile.rs.
+  //
+  // --quiet on the child suppresses its own per-file println; the
+  // parent script owns the user-visible output so the byte-for-byte
+  // shape is preserved when this port becomes the default.
+  var args = ["precompile", "--quiet", source_path]
+  if per_file_out != "" {
+    args = args.push("--out")
+    args = args.push(per_file_out)
+  }
+  let env = {HARN_CLI_IMPL: "rust"}
+  return spawn_captured({cmd: bin, args: args, env: env})
+}
+
+fn __render_failure(source: string, child: dict) -> string {
+  // Match the Rust eprintln format `{source}: {err}` where `err` is
+  // either the child's first stderr line or a compact exit summary.
+  let stderr = child["stderr"] ?? ""
+  let trimmed = trim(stderr)
+  if trimmed != "" {
+    let lines = split(trimmed, "\n")
+    return source + ": " + lines[0]
+  }
+  let exit_code = child["exit_code"] ?? -1
+  return source + ": precompile exited with code " + to_string(exit_code)
+}
+
+fn main(harness: Harness) {
+  if len(argv) < 1 {
+    harness.stdio.eprintln("precompile: target path is required")
+    exit(2)
+  }
+  let bin = harness.env.get_or("HARN_CLI_SELF_EXE", "")
+  if bin == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_CLI_SELF_EXE not set by dispatch shim")
+    exit(70)
+  }
+  let target = argv[0]
+  let out_root = harness.env.get_or("HARN_PRECOMPILE_OUT", "")
+  let keep_going = harness.env.get_or("HARN_PRECOMPILE_KEEP_GOING", "0") == "1"
+  let quiet = harness.env.get_or("HARN_PRECOMPILE_QUIET", "0") == "1"
+  if !harness.fs.exists(target) {
+    harness.stdio.eprintln("error: target does not exist: " + target)
+    exit(1)
+  }
+  let info = harness.fs.stat(target)
+  let is_dir = info["is_dir"] ?? false
+  let sources = if is_dir {
+    __collect_harn_files(harness, target)
+  } else {
+    [target]
+  }
+  let source_root = if is_dir {
+    target
+  } else {
+    ""
+  }
+  if len(sources) == 0 {
+    harness.stdio.eprintln("error: no .harn files found under " + target)
+    exit(1)
+  }
+  var compiled = 0
+  var failed = 0
+  for source in sources {
+    // For each source, pre-compute the destination dir so the child --out
+    // points at the exact directory the .harnbc should land in. This
+    // preserves the source-tree mirroring the Rust output_path() does;
+    // without this, the child (which sees a single-file target) would
+    // collapse everything into out_root with no subdirectories.
+    let per_file_out = if out_root == "" {
+      ""
+    } else {
+      let dest = __destination_path(source, source_root, out_root, "harnbc")
+      __ensure_parent(harness, dest)
+      path_parent(dest)
+    }
+    let child = __spawn_precompile(bin, source, per_file_out)
+    let exit_code = child["exit_code"] ?? -1
+    if exit_code == 0 {
+      compiled = compiled + 1
+      if !quiet {
+        let dest = __destination_path(source, source_root, out_root, "harnbc")
+        harness.stdio.println(source + " -> " + dest)
+      }
+    } else {
+      failed = failed + 1
+      harness.stdio.eprintln(__render_failure(source, child))
+      if !keep_going {
+        break
+      }
+    }
+  }
+  if !quiet {
+    harness.stdio
+      .eprintln(
+      "precompile: " + to_string(compiled) + " succeeded, "
+        + to_string(failed)
+        + " failed",
+    )
+  }
+  if failed > 0 {
+    exit(1)
+  }
+}

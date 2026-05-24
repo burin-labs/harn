@@ -199,7 +199,10 @@ fn precompile_then_run_skips_compile() {
         move || async move {
             let _env_guard = env_lock::lock_env().lock().await;
             harn_vm::reset_thread_local_state();
-            precompile::run(PrecompileArgs {
+            // Call the in-process Rust path directly. The async dispatch
+            // wrapper (`precompile::run`) spawns child processes which
+            // wouldn't see the in-process state these tests are pinning.
+            precompile::run_legacy(PrecompileArgs {
                 target,
                 out: None,
                 keep_going: false,
@@ -261,7 +264,10 @@ fn precompiled_imported_module_uses_adjacent_artifact() {
         move || async move {
             let _env_guard = env_lock::lock_env().lock().await;
             harn_vm::reset_thread_local_state();
-            precompile::run(PrecompileArgs {
+            // Call the in-process Rust path directly. The async dispatch
+            // wrapper (`precompile::run`) spawns child processes which
+            // wouldn't see the in-process state these tests are pinning.
+            precompile::run_legacy(PrecompileArgs {
                 target,
                 out: None,
                 keep_going: false,

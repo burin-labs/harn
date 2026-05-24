@@ -1,10 +1,26 @@
-//! Implementation of the `harn precompile` subcommand.
+//! `harn precompile` — dispatches the directory-walk + per-file fanout
+//! to the embedded `cli/precompile.harn` script (see harn#2313 / W13).
 //!
-//! Walks a file or directory tree, compiles every `.harn` file into a
-//! `.harnbc` artifact, and either writes it adjacent to the source or
-//! mirrors the directory layout under `--out`. The on-disk artifact is
-//! the same format the runtime cache writes, so a shipped `.harnbc`
-//! beside its source elides parse+compile in the runtime loader.
+//! The .harn port owns argv parsing, walking, --out path mirroring, and
+//! the per-file progress + summary render. The actual parse + typecheck
+//! + compile work stays on the legacy Rust path: the script spawns
+//!   `harn precompile <single-file>` per source with `HARN_CLI_IMPL=rust`
+//!   so the child resolves to [`run_legacy`] instead of recursing back
+//!   into the wedge.
+//!
+//! Phase deferrals: `harn time` and `harn bench` (the other two W13
+//! commands) stay Rust-only in this PR — both depend on in-process VM
+//! thread-locals (LLM trace summary, profile spans, `getrusage` CPU
+//! samples) that don't survive a `spawn_captured` subprocess boundary
+//! without inventing a new child-binary emit protocol. The W13 ticket
+//! description presumed an `--internal-phase-emit` protocol on `harn
+//! run` that doesn't actually exist in the current codebase; the
+//! preconditions for porting each are filed as #2348 (`harn bench` →
+//! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
+//!
+//! `HARN_CLI_IMPL=rust` keeps the legacy Rust impl reachable for the
+//! parity-snapshot harness (#2299) and the C1 LOC ratchet (#2314)
+//! until the .harn impl is the default everywhere.
 
 use std::path::{Path, PathBuf};
 
@@ -14,7 +30,64 @@ use harn_vm::module_artifact::ModuleArtifact;
 use crate::cli::PrecompileArgs;
 use crate::command_error;
 use crate::commands::collect_harn_files;
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
+
+/// Env var the embedded `cli/precompile` script reads to find the
+/// running `harn` binary path. Set from `std::env::current_exe()` so
+/// the child invocation is robust to $PATH ordering / test sandboxes.
+pub const PRECOMPILE_BIN_ENV: &str = "HARN_CLI_SELF_EXE";
+
+/// Output directory the script forwards to its per-file child via
+/// `--out`. Cleared on drop so a follow-on invocation in the same
+/// process sees a clean env.
+const PRECOMPILE_OUT_ENV: &str = "HARN_PRECOMPILE_OUT";
+const PRECOMPILE_KEEP_GOING_ENV: &str = "HARN_PRECOMPILE_KEEP_GOING";
+const PRECOMPILE_QUIET_ENV: &str = "HARN_PRECOMPILE_QUIET";
+
+pub async fn run(args: PrecompileArgs) {
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        run_legacy(args);
+        return;
+    }
+
+    let exe = std::env::current_exe().unwrap_or_else(|error| {
+        command_error(&format!("failed to resolve current executable: {error}"))
+    });
+    let exe_str = exe.to_string_lossy().into_owned();
+    let _bin = ScopedEnvVar::set(PRECOMPILE_BIN_ENV, &exe_str);
+    let _out = args
+        .out
+        .as_ref()
+        .map(|p| ScopedEnvVar::set(PRECOMPILE_OUT_ENV, &p.to_string_lossy()));
+    let _keep = if args.keep_going {
+        Some(ScopedEnvVar::set(PRECOMPILE_KEEP_GOING_ENV, "1"))
+    } else {
+        None
+    };
+    let _quiet = if args.quiet {
+        Some(ScopedEnvVar::set(PRECOMPILE_QUIET_ENV, "1"))
+    } else {
+        None
+    };
+
+    let argv = vec![args.target.to_string_lossy().into_owned()];
+    // Use the no-sandbox dispatch: precompile's target is whatever path
+    // the user passed, which is typically outside the script's
+    // tempfile-derived workspace root. The actual compile work still
+    // runs inside the spawned child's default sandbox; the orchestration
+    // layer this script implements just needs to read directory entries.
+    let exit = dispatch::dispatch_to_embedded_script_no_sandbox(
+        "precompile",
+        argv,
+        /* json_mode */ false,
+    )
+    .await;
+    if exit != 0 {
+        std::process::exit(exit);
+    }
+}
 
 /// Outcome aggregated across all sources walked in one invocation.
 #[derive(Default)]
@@ -31,7 +104,11 @@ struct PrecompileArtifacts {
     module_artifact: Option<ModuleArtifact>,
 }
 
-pub fn run(args: PrecompileArgs) {
+/// Legacy Rust impl, kept behind `HARN_CLI_IMPL=rust` for the
+/// parity-snapshot harness and as the inner compiler the .harn port
+/// dispatches each per-file child to. The C1 ratchet (#2314) removes
+/// this once the .harn impl is the production default everywhere.
+pub fn run_legacy(args: PrecompileArgs) {
     let target = args.target.clone();
     if !target.exists() {
         command_error(&format!("target does not exist: {}", target.display()));

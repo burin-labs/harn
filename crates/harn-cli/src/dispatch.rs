@@ -50,7 +50,10 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::cli_bytecode::find_cli_script_bytecode;
-use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
+use crate::commands::run::{
+    execute_run, execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
+    RunSandboxOptions,
+};
 use crate::env_guard::ScopedEnvVar;
 
 /// Env var ports read to decide whether to emit a JSON envelope vs.
@@ -94,6 +97,48 @@ pub async fn dispatch_to_embedded_script(
     outcome.exit_code
 }
 
+/// `dispatch_to_embedded_script` with the workspace-rooted sandbox
+/// disabled. Used by ports whose user-supplied file paths intentionally
+/// fall outside the workspace (e.g. `harn precompile <any-file.harn>`).
+/// Without this, the script's temp-file location becomes the sandbox
+/// root and `harness.fs.*` calls on the user's input path are denied.
+///
+/// Network egress, process spawning, and the rest of the host policy
+/// are unaffected — this only loosens the FS access check.
+pub async fn dispatch_to_embedded_script_no_sandbox(
+    script_name: &str,
+    argv: Vec<String>,
+    json_mode: bool,
+) -> i32 {
+    let mut outcome = run_embedded_script_with_sandbox(
+        script_name,
+        argv,
+        json_mode,
+        RunSandboxOptions::disabled(),
+    )
+    .await;
+    // The shared `execute_run` path prefixes a `warning: harn run
+    // --no-sandbox ...` banner whenever the sandbox is disabled. That
+    // banner is meant for direct `harn run --no-sandbox` invocations
+    // where the user explicitly opted out; here the sandbox is off by
+    // dispatch-wedge construction, not user choice, so the banner is
+    // noise — strip it before the outcome reaches the terminal.
+    outcome.stderr = strip_sandbox_warning(&outcome.stderr);
+    flush_outcome(&outcome);
+    outcome.exit_code
+}
+
+const SANDBOX_WARNING: &str =
+    "warning: harn run --no-sandbox disables filesystem, process, and egress sandbox defaults\n";
+
+fn strip_sandbox_warning(stderr: &str) -> String {
+    if let Some(rest) = stderr.strip_prefix(SANDBOX_WARNING) {
+        rest.to_string()
+    } else {
+        stderr.to_string()
+    }
+}
+
 /// Capture-mode variant suitable for tests: returns the full
 /// [`RunOutcome`] instead of writing to real stdio. Production code
 /// should prefer [`dispatch_to_embedded_script`] which flushes for you.
@@ -101,6 +146,28 @@ pub async fn run_embedded_script(
     script_name: &str,
     argv: Vec<String>,
     json_mode: bool,
+) -> RunOutcome {
+    run_embedded_script_inner(script_name, argv, json_mode, None).await
+}
+
+/// Capture-mode variant that runs the script with the given sandbox
+/// options instead of the default workspace-rooted sandbox. Use this
+/// when the script's job is to operate on user-supplied paths outside
+/// the workspace (see [`dispatch_to_embedded_script_no_sandbox`]).
+pub async fn run_embedded_script_with_sandbox(
+    script_name: &str,
+    argv: Vec<String>,
+    json_mode: bool,
+    sandbox: RunSandboxOptions,
+) -> RunOutcome {
+    run_embedded_script_inner(script_name, argv, json_mode, Some(sandbox)).await
+}
+
+async fn run_embedded_script_inner(
+    script_name: &str,
+    argv: Vec<String>,
+    json_mode: bool,
+    sandbox: Option<RunSandboxOptions>,
 ) -> RunOutcome {
     let Some(source) = harn_stdlib::find_cli_script(script_name) else {
         return RunOutcome {
@@ -143,17 +210,35 @@ pub async fn run_embedded_script(
     // restores the prior value on drop so tests stay isolated.
     let _scope = json_mode.then(|| ScopedEnvVar::set(JSON_MODE_ENV, "1"));
 
-    let outcome = execute_run(
-        &path_str,
-        false,
-        HashSet::new(),
-        argv,
-        Vec::new(),
-        CliLlmMockMode::Off,
-        None,
-        RunProfileOptions::default(),
-    )
-    .await;
+    let outcome = match sandbox {
+        Some(sandbox) => {
+            execute_run_with_sandbox_options(
+                &path_str,
+                false,
+                HashSet::new(),
+                argv,
+                Vec::new(),
+                CliLlmMockMode::Off,
+                None,
+                RunProfileOptions::default(),
+                sandbox,
+            )
+            .await
+        }
+        None => {
+            execute_run(
+                &path_str,
+                false,
+                HashSet::new(),
+                argv,
+                Vec::new(),
+                CliLlmMockMode::Off,
+                None,
+                RunProfileOptions::default(),
+            )
+            .await
+        }
+    };
 
     drop(temp);
     outcome

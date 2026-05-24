@@ -44,6 +44,10 @@ path = "crates/harn-cli/src/commands/eval_coding_agent.rs"
 max_loc = 2391
 
 [[handler]]
+path = "crates/harn-cli/src/commands/precompile.rs"
+max_loc = 285
+
+[[handler]]
 path = "crates/harn-cli/src/lib.rs"
 max_loc = 3120
 
