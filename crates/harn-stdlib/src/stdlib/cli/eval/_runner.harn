@@ -1,0 +1,118 @@
+/**
+ * Shared rendering helpers for the embedded eval scripts scripts.
+ *
+ * The leading underscore marks this as a private helper module: it is
+ * registered in `STDLIB_CLI_SCRIPTS` for discoverability and parity
+ * lints, but `main` is a no-op that exits non-zero — sibling scripts
+ * read its source as text and inline the helpers they need.
+ *
+ * The current dispatch wedge (#2294 / G1) does not yet support
+ * `import`s across embedded scripts, so the sibling renderers
+ * (`context.harn`, `tool_calls.harn`, `model_selector.harn`) duplicate
+ * the helpers they need. This module is the canonical source — sibling
+ * scripts must keep the inlined copies byte-identical, and the parity
+ * tests in `crates/harn-cli/tests/eval_cluster_dispatch.rs` enforce
+ * that the rendered outputs match the legacy Rust paths.
+ *
+ * Once #2300 / G7 (AOT bytecode embedding) ships the cross-script
+ * import surface, the duplicated bodies collapse to `import` lines
+ * pointing at this file. The W6 ticket (#2306) intentionally leaves
+ * that follow-up to a later wave.
+ */
+/**
+ * Coerce a JSON value to a string with a fallback for the wrong type.
+ * Used everywhere the embedded reports hand us a value that might be
+ * `nil` or a different shape than expected — the renderers prefer
+ * graceful degradation over hard crashes.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+/**
+ * Coerce a JSON value to a list, returning `[]` when the value is
+ * `nil` or a non-list shape.
+ */
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+/**
+ * Coerce a JSON value to a dict, returning `{}` when the value is
+ * `nil` or a non-dict shape.
+ */
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+/**
+ * Format a float with N decimal places, padded with trailing zeros.
+ * Mirrors Rust's `format!("{:.N}", x)` rounding (half-up via int math)
+ * and padding behavior so the rendered terminal/markdown output stays
+ * byte-identical with the legacy Rust path.
+ */
+fn __format_float_n(value, decimals: int) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  var multiplier = 1
+  var i = 0
+  while i < decimals {
+    multiplier = multiplier * 10
+    i = i + 1
+  }
+  let scaled = to_int(round(abs_f * to_float(multiplier))) ?? 0
+  let whole = scaled / multiplier
+  let frac = scaled - whole * multiplier
+  var frac_str = to_string(frac)
+  while len(frac_str) < decimals {
+    frac_str = "0" + frac_str
+  }
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  if decimals == 0 {
+    return sign + to_string(whole)
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+/**
+ * Escape Markdown table cell content by replacing `|` with `\|`.
+ * Mirrors Rust's `value.replace('|', "\\|")` used by the eval
+ * renderers' table writers.
+ */
+fn __md_escape(s: string) -> string {
+  return s.replace("|", "\\|")
+}
+
+/**
+ * Stub entrypoint — this module is a helper-only file. The dispatch
+ * wedge surfaces a software-error exit code if anyone tries to invoke
+ * it directly. Registered in `STDLIB_CLI_SCRIPTS` for discoverability
+ * (so `harn cli scripts list` shows it) and parity-lint coverage.
+ * Returns an int rather than calling `exit()` so the dispatch wedge's
+ * captured stderr buffer flushes back to the Rust shim.
+ */
+fn main(harness: Harness) -> int {
+  harness.stdio
+    .eprintln(
+    "internal error: eval/_runner is a helper module; invoke a sibling eval script instead",
+  )
+  return 70
+}

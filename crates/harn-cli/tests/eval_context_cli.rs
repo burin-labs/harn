@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! In-process coverage for `harn eval context`.
 
 use std::fs;
@@ -12,8 +14,8 @@ fn workspace_root() -> &'static Path {
         .expect("crate lives under crates/harn-cli")
 }
 
-#[test]
-fn context_smoke_manifest_writes_stable_report_artifacts() {
+#[tokio::test]
+async fn context_smoke_manifest_writes_stable_report_artifacts() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let output = tmp.path().join("context-eval");
     let manifest = workspace_root().join("examples/evals/context-engineering-smoke.json");
@@ -23,7 +25,7 @@ fn context_smoke_manifest_writes_stable_report_artifacts() {
         json: false,
     };
 
-    let exit = harn_cli::commands::eval_context::run(args);
+    let exit = harn_cli::commands::eval_context::run(args).await;
     assert_eq!(exit, 0, "context eval smoke fixture should pass");
 
     let summary_raw = fs::read_to_string(output.join("summary.json")).expect("summary exists");

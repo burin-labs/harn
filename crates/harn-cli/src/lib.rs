@@ -1130,7 +1130,7 @@ async fn async_main() {
                 }
             }
             Some(EvalCommand::Context(context_args)) => {
-                let code = commands::eval_context::run(context_args);
+                let code = commands::eval_context::run(context_args).await;
                 if code != 0 {
                     process::exit(code);
                 }
