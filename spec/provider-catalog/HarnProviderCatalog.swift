@@ -1699,11 +1699,13 @@ public let harnProviderCatalogJSON = #"""
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "reasoning_summary"
       },
       "reasoning": {
-        "modes": [],
-        "effort_supported": false,
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -1723,6 +1725,8 @@ public let harnProviderCatalogJSON = #"""
       "capability_tags": [
         "streaming",
         "tools",
+        "thinking",
+        "extended_thinking",
         "structured_output"
       ]
     },
@@ -1741,17 +1745,17 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
@@ -1778,7 +1782,8 @@ public let harnProviderCatalogJSON = #"""
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "structured_output"
       ]
     },
     {
@@ -1796,17 +1801,17 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
@@ -1833,7 +1838,8 @@ public let harnProviderCatalogJSON = #"""
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "structured_output"
       ]
     },
     {
@@ -2577,8 +2583,6 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -3533,24 +3537,26 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
@@ -3570,7 +3576,9 @@ public let harnProviderCatalogJSON = #"""
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "thinking",
+        "structured_output"
       ]
     },
     {

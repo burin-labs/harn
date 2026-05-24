@@ -8,9 +8,10 @@ use super::{
     OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
     OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
     PackageCacheCommand, PackageCommand, PackageScaffoldCommand, PersonaCommand, ProjectTemplate,
-    ProviderToolProbeModeArg, ProvidersCommand, PublishArgs, RunsCommand, SessionCommand,
-    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand,
-    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    ProviderCapabilitiesCommand, ProviderCommand, ProviderToolProbeModeArg, ProvidersCommand,
+    PublishArgs, RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand,
+    SkillsCommand, ToolCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg,
+    TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -81,6 +82,18 @@ fn test_parses_config_validate_and_schema() {
         panic!("expected schema command");
     };
     assert_eq!(schema.output, Some(PathBuf::from("schema.json")));
+}
+
+#[test]
+fn test_parses_provider_capabilities_audit_json() {
+    let cli = Cli::parse_from(["harn", "provider", "capabilities", "audit", "--json"]);
+
+    let Command::Provider(args) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::Capabilities(capabilities) = args.command;
+    let ProviderCapabilitiesCommand::Audit(audit) = capabilities.command;
+    assert!(audit.json);
 }
 
 #[test]

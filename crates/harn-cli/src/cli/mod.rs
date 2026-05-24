@@ -153,8 +153,8 @@ pub(crate) use portal::PortalArgs;
 pub use precompile::PrecompileArgs;
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{
-    ModelInfoArgs, ProviderCatalogArgs, ProviderProbeArgs, ProviderReadyArgs,
-    ProviderToolProbeArgs, ProviderToolProbeModeArg,
+    ModelInfoArgs, ProviderArgs, ProviderCapabilitiesCommand, ProviderCatalogArgs, ProviderCommand,
+    ProviderProbeArgs, ProviderReadyArgs, ProviderToolProbeArgs, ProviderToolProbeModeArg,
 };
 pub(crate) use providers::{
     ProvidersArgs, ProvidersCommand, ProvidersExportArgs, ProvidersMatrixArgs,
@@ -451,6 +451,8 @@ SCRIPTING
     Local(LocalArgs),
     /// Validate and generate provider/model catalog artifacts.
     Providers(ProvidersArgs),
+    /// Inspect provider/model capabilities.
+    Provider(ProviderArgs),
     /// Print the provider/model catalog Harn loaded as JSON.
     ProviderCatalog(ProviderCatalogArgs),
     /// Probe a provider's /models endpoint and optionally verify a served model.

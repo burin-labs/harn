@@ -1090,6 +1090,18 @@ unparsable model listings, and missing models. It does not run local launcher
 scripts; host applications that auto-start local servers should report launch
 failures themselves and then call this probe again.
 
+## harn provider capabilities audit
+
+Check that every priced chat model in the loaded provider catalog has an
+explicit capability rule for both `native_tools` and `preferred_tool_format`.
+The command exits non-zero and lists suggested defaults when catalog rows need
+coverage.
+
+```bash
+harn provider capabilities audit
+harn provider capabilities audit --json
+```
+
 ## harn provider-probe
 
 Snapshot a provider's readiness and local loaded-model state as JSON. For
