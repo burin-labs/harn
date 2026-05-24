@@ -19,9 +19,19 @@
 //! dir handling, harness install, skill loader, and store/metadata/
 //! checkpoint builtins for free.
 //!
-//! A future ticket may replace the temp-file path with an in-memory
-//! entry point if cold-start budgets demand it (harn#2300 / G7 AOT
-//! bytecode embedding is the planned next step).
+//! ## AOT fast path (G7 / harn#2300)
+//!
+//! [`crate::cli_bytecode`] precompiles every embedded script at build
+//! time into a `.harnbc` artifact (the same on-disk format the runtime
+//! bytecode cache writes). When AOT is enabled (the default; opt out
+//! with [`DISABLE_AOT_ENV`]) the wedge writes that artifact adjacent
+//! to its source tempfile before handing off to `execute_run`. The
+//! runtime's existing `adjacent_cache_path` check picks the artifact
+//! up and skips parse + typecheck + compile entirely. On any mismatch
+//! (e.g. the user flipped `HARN_DISABLE_OPTIMIZATIONS` between build
+//! and run) the cache header rejects the artifact and the loader
+//! transparently falls back to source compilation — no crash, no
+//! special handling at the dispatch layer.
 //!
 //! ## Example shim
 //!
@@ -37,7 +47,9 @@
 
 use std::collections::HashSet;
 use std::io::Write;
+use std::path::Path;
 
+use crate::cli_bytecode::find_cli_script_bytecode;
 use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 use crate::env_guard::ScopedEnvVar;
 
@@ -46,6 +58,21 @@ use crate::env_guard::ScopedEnvVar;
 /// the host (clap) saw `--json`; left untouched otherwise so a
 /// user-provided value in the environment still wins.
 pub const JSON_MODE_ENV: &str = "HARN_OUTPUT_JSON";
+
+/// Opt-out for the AOT bytecode fast path added in G7 (harn#2300).
+/// When set to any truthy value (anything but unset, `0`, `false`,
+/// `no`, or `off`), dispatch never drops the embedded bytecode
+/// artifact adjacent to the tempfile and the runtime always parses,
+/// type-checks, and compiles the source. Useful for debugging a
+/// discrepancy between AOT and from-source behavior.
+pub const DISABLE_AOT_ENV: &str = "HARN_DISABLE_AOT_CLI";
+
+/// Shared with `bytecode_cache`. When set to any value, dispatch logs
+/// a single-line `eprintln!` whenever it dropped an embedded bytecode
+/// artifact but observably failed to use the fast path (write error,
+/// missing-OUT_DIR build, etc.). Off by default to keep happy-path
+/// stderr clean.
+pub const CACHE_DEBUG_ENV: &str = "HARN_BYTECODE_CACHE_DEBUG";
 
 /// Exit code returned when the named script can't be found in
 /// [`harn_stdlib::STDLIB_CLI_SCRIPTS`]. Matches `EX_SOFTWARE` from
@@ -102,6 +129,14 @@ pub async fn run_embedded_script(
     };
     let path_str = temp.path().to_string_lossy().into_owned();
 
+    // AOT fast path (G7 / harn#2300): if a precompiled `.harnbc`
+    // artifact was emitted at build time for this script, drop it next
+    // to the source tempfile so the existing runtime loader picks it
+    // up via its adjacent-cache check. On any failure (write error,
+    // header mismatch at load time, AOT not built into this binary)
+    // the loader transparently falls back to source compilation.
+    let _adjacent = maybe_drop_adjacent_bytecode(script_name, temp.path());
+
     // Set HARN_OUTPUT_JSON only when the host explicitly asked for JSON
     // mode. If json_mode=false we leave the env alone — a user shell
     // export still wins, matching the NO_COLOR convention. ScopedEnvVar
@@ -130,6 +165,66 @@ fn flush_outcome(outcome: &RunOutcome) {
     }
     if !outcome.stdout.is_empty() {
         let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+}
+
+/// RAII guard that removes a dropped-adjacent bytecode file when the
+/// dispatch wedge finishes — without this the temp directory would
+/// leak a `.harnbc` per invocation. `Drop` is a best-effort cleanup;
+/// any I/O error is swallowed because the tempfile cleanup already
+/// covers the common-case "the OS will reap /tmp" path.
+struct AdjacentBytecodeGuard {
+    path: std::path::PathBuf,
+}
+
+impl Drop for AdjacentBytecodeGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// True when the AOT fast path is enabled for this invocation. Reads
+/// `HARN_DISABLE_AOT_CLI` with the same parsing rule as
+/// [`harn_vm::bytecode_cache::cache_enabled`] so users can flip both
+/// switches with the same conventions.
+fn aot_enabled() -> bool {
+    match std::env::var(DISABLE_AOT_ENV).ok().as_deref() {
+        Some(value) => matches!(
+            value.to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "no" | "off"
+        ),
+        None => true,
+    }
+}
+
+fn cache_debug_enabled() -> bool {
+    std::env::var_os(CACHE_DEBUG_ENV).is_some()
+}
+
+/// Materialize the embedded `.harnbc` for `script_name` next to the
+/// dispatch tempfile. Returns the RAII guard that cleans the file up
+/// on drop, or `None` when AOT is disabled, no artifact is registered,
+/// or the adjacent path can't be computed.
+fn maybe_drop_adjacent_bytecode(
+    script_name: &str,
+    source_tempfile_path: &Path,
+) -> Option<AdjacentBytecodeGuard> {
+    if !aot_enabled() {
+        return None;
+    }
+    let bytes = find_cli_script_bytecode(script_name)?;
+    let adjacent = harn_vm::bytecode_cache::adjacent_cache_path(source_tempfile_path)?;
+    match std::fs::write(&adjacent, bytes) {
+        Ok(()) => Some(AdjacentBytecodeGuard { path: adjacent }),
+        Err(err) => {
+            if cache_debug_enabled() {
+                eprintln!(
+                    "[harn] AOT bytecode drop failed for `{script_name}` at {}: {err}",
+                    adjacent.display()
+                );
+            }
+            None
+        }
     }
 }
 

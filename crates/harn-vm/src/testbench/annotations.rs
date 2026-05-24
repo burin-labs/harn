@@ -450,6 +450,15 @@ pub struct CrystallizeAnchor {
 
 /// One on-disk line in the annotations file. Tagged-enum dispatch keeps
 /// the file homogeneous JSONL.
+///
+/// The size disparity between `Header` and `Annotation` is intentional:
+/// every JSONL file starts with exactly one `Header`, then any number of
+/// `Annotation` lines. Boxing `Annotation` would add a heap indirection
+/// to the hot deserialize loop to save a few bytes on the one-off header
+/// — an obvious lose. Surfaced by the host-target compile of `harn-vm`
+/// introduced when `harn-cli`'s build script gained `harn-vm` as a
+/// build-dep for the AOT bytecode embedding pass (G7 / harn#2300).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnnotationLine {

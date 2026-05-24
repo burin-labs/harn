@@ -2,6 +2,7 @@
 
 pub mod acp;
 pub mod cli;
+mod cli_bytecode;
 pub mod commands;
 pub mod config;
 #[doc(hidden)]
