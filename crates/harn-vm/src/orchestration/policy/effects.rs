@@ -440,6 +440,7 @@ fn harness_method_effect(node: &SNode) -> Option<EffectRecord> {
             },
             EffectScope::Write,
         ),
+        ("crypto", "sha256") => return None,
         // System-introspection methods (`cpu`, `memory`, `gpus`,
         // `temperature`, `platform`, `processes`) are pure host reads
         // — no state mutation, no resource consumed. They're gated by
@@ -973,6 +974,13 @@ mod tests {
                     && effect.scope == EffectScope::Write),
             "expected Fs write effect, got {effects:?}"
         );
+    }
+
+    #[test]
+    fn harness_crypto_sha256_is_pure_for_handoff_effects() {
+        let source = r#"fn main(harness: Harness) { harness.crypto.sha256("hello") }"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(effects.is_empty(), "expected no effects, got {effects:?}");
     }
 
     #[test]

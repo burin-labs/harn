@@ -680,14 +680,18 @@ log(url_decode("hello+world"))         // hello world
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `sha256(string)` | string: string | string | SHA-256 hash, returned as a lowercase hex-encoded string |
-| `sha256_hex(string_or_bytes)` | string_or_bytes: string or bytes | string | Like `sha256(...)` but accepts a `bytes` value directly without stringifying. Use this when content-addressing binary payloads (e.g. `harn eval *`, `harn trace import`, `harn doctor` file fingerprints). For string inputs the digest matches `sha256(...)` |
+| `harness.crypto.sha256(string_or_bytes)` | string_or_bytes: string or bytes | string | Harness-scoped SHA-256 hash, returned as lowercase hex. Accepts `bytes` directly without stringifying, so content-addressing scripts can hash binary payloads unambiguously |
+| `sha256_hex(string_or_bytes)` | string_or_bytes: string or bytes | string | Compatibility alias for `harness.crypto.sha256(...)`. For string inputs the digest matches `sha256(...)` |
 | `md5(string)` | string: string | string | MD5 hash, returned as a lowercase hex-encoded string |
 
 Example:
 
 ```harn
-log(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
-log(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
+fn main(harness: Harness) {
+  log(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+  log(harness.crypto.sha256(bytes_from_string("hello")))
+  log(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
+}
 ```
 
 ### HMAC and signature comparison

@@ -2020,7 +2020,7 @@ fn harness_sub_handle_for(object: &SNode, method: &str) -> Option<(&'static str,
 }
 
 const HARNESS_SUB_HANDLES: &[&str] = &[
-    "stdio", "clock", "fs", "env", "random", "net", "process", "system", "llm",
+    "stdio", "clock", "fs", "env", "random", "net", "process", "crypto", "system", "llm",
 ];
 
 fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
@@ -2568,6 +2568,23 @@ fn main(harness: Harness) {
         assert!(
             calls.iter().any(|name| name == "spawn_captured"),
             "expected harness.process.spawn_captured to lower to ambient spawn_captured, got: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn harness_crypto_method_call_is_attributed_to_sha256_hex() {
+        let report = analyze(
+            r#"
+fn main(harness: Harness) {
+  harness.crypto.sha256("hello")
+}
+"#,
+        );
+
+        let calls = handler_call_names(&report);
+        assert!(
+            calls.iter().any(|name| name == "sha256_hex"),
+            "expected harness.crypto.sha256 to lower to ambient sha256_hex, got: {calls:?}"
         );
     }
 

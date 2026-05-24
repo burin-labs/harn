@@ -29,6 +29,7 @@ pub mod event_log;
 pub mod events;
 pub mod flow;
 pub mod harness;
+pub(crate) mod harness_crypto;
 pub mod harness_net;
 pub mod harness_system;
 mod http;
@@ -144,9 +145,9 @@ pub use corrections::{
     CORRECTION_EVENT_KIND, CORRECTION_SCHEMA_V0,
 };
 pub use harness::{
-    DenyEvent, Harness, HarnessCall, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessLlm,
-    HarnessNet, HarnessProcess, HarnessRandom, HarnessStdio, HarnessSystem, MockAwareClock,
-    MockHarnessBuilder, VmHarness,
+    DenyEvent, Harness, HarnessCall, HarnessClock, HarnessCrypto, HarnessEnv, HarnessFs,
+    HarnessKind, HarnessLlm, HarnessNet, HarnessProcess, HarnessRandom, HarnessStdio,
+    HarnessSystem, MockAwareClock, MockHarnessBuilder, VmHarness,
 };
 pub use harness_net::{
     bypass_enabled as net_policy_bypass_enabled, NetMatcher, NetPolicy, NetPolicyAudit,

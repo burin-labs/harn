@@ -373,7 +373,9 @@ fn direct_effects(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
 
 fn host_call_surface(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    if !direct_capabilities(call).is_empty() {
+    if !direct_capabilities(call).is_empty()
+        || matches!(call.display_name.as_str(), "harness.crypto.sha256")
+    {
         out.insert(call.display_name.clone());
     }
     if call.name == "host_call" {

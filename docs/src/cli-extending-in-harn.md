@@ -366,17 +366,16 @@ the directory.
 When a port discovers a gap in the `harness.*` namespace — something
 the Rust handler does that no `.harn` script can — the answer is a new
 builtin via the G4 pattern ([#2297][g4]). G4 landed a first round of
-free builtins (`sha256_hex`, `term_width`,
-`term_height`, `mkdtemp`, `glob`, `llm_catalog`,
-`llm_provider_status`) that today live as top-level functions so the
+free builtins (`term_width`, `term_height`, `mkdtemp`, `glob`,
+`llm_catalog`, `llm_provider_status`) that today live as top-level functions so the
 ports could move. Directory policy that can be expressed from env vars
 belongs in `std/cli/paths` instead of a host capability. `spawn_captured`
-has since moved to `harness.process.spawn_captured`, and the LLM catalog
-helpers have moved to `harness.llm.catalog()` and
-`harness.llm.providers()`. Prefer the canonical `harness.X.Y` sub-handle
-when the script receives a `Harness` parameter; top-level helpers remain
-aliases for scripts that run outside that shape. Add new capabilities the
-same way:
+has since moved to `harness.process.spawn_captured`, `sha256_hex` is a
+compatibility alias for `harness.crypto.sha256`, and the LLM catalog helpers
+have moved to `harness.llm.catalog()` and `harness.llm.providers()`. Prefer
+the canonical `harness.X.Y` sub-handle when the script receives a `Harness`
+parameter; top-level helpers remain aliases for scripts that run outside that
+shape. Add new capabilities the same way:
 
 1. Register the builtin in `crates/harn-vm/src/stdlib/<area>.rs` with
    `register_builtin` and the matching `Harness` accessor.

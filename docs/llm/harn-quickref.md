@@ -2460,6 +2460,9 @@ query_stringify([{key: "name", value: "ali ce"}])
 
 - Hashes: `sha3_256`, `sha3_512`, `blake3` (in addition to existing
   SHA-2 family + MD5).
+- Harness-scoped content addressing: `harness.crypto.sha256(value) ->
+  string` accepts strings or bytes and returns lowercase SHA-256 hex.
+  `sha256_hex(value)` remains as a compatibility alias.
 - Ed25519 signatures: `ed25519_keypair() -> {private, public}` (hex),
   `ed25519_sign(priv, msg) -> string` (hex sig),
   `ed25519_verify(pub, msg, sig) -> bool`.

@@ -200,11 +200,13 @@ fn graph_json_attributes_harness_sub_handle_calls_to_capabilities() {
         r#"
 fn main(harness: Harness) {
   let body = harness.fs.read_text("README.md")
+  let digest = harness.crypto.sha256(body)
   harness.fs.mkdtemp("harn-graph-")
   harness.net.get("https://example.test/data")
   harness.llm.catalog()
   harness.llm.providers()
   harness.stdio.println(body)
+  harness.stdio.println(digest)
 }
 "#,
     )
@@ -254,8 +256,9 @@ fn main(harness: Harness) {
     let host_call_strings: Vec<&str> = host_calls.iter().filter_map(|v| v.as_str()).collect();
     assert!(
         host_call_strings.contains(&"harness.llm.catalog")
-            && host_call_strings.contains(&"harness.llm.providers"),
-        "expected harness.llm.* host calls, got: {host_call_strings:?}"
+            && host_call_strings.contains(&"harness.llm.providers")
+            && host_call_strings.contains(&"harness.crypto.sha256"),
+        "expected harness.llm.* and harness.crypto.sha256 host calls, got: {host_call_strings:?}"
     );
 }
 

@@ -1,6 +1,6 @@
 //! Method dispatch for the `Harness` capability handle and its
 //! sub-handles. Every sub-handle (`stdio`, `clock`, `fs`, `env`,
-//! `random`, `net`, `process`, `system`, `llm`) is wired end-to-end in
+//! `random`, `net`, `process`, `crypto`, `system`, `llm`) is wired end-to-end in
 //! real, mock, and null modes;
 //! sandbox / egress rejections raised inside a sub-handle method are
 //! tagged with the `HARN-CAP-201` diagnostic code so callers can
@@ -84,6 +84,7 @@ impl crate::vm::Vm {
             HarnessKind::Random => self.call_harness_random_method(handle, method, args),
             HarnessKind::Net => self.call_harness_net_method(handle, method, args).await,
             HarnessKind::Process => self.call_harness_process_method(handle, method, args),
+            HarnessKind::Crypto => self.call_harness_crypto_method(handle, method, args),
             HarnessKind::Llm => self.call_harness_llm_method(handle, method),
         }
     }
@@ -616,6 +617,18 @@ impl crate::vm::Vm {
         }
     }
 
+    fn call_harness_crypto_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        match method {
+            "sha256" => Ok(crate::harness_crypto::sha256_hex_value(args)),
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
     async fn call_mock_harness_method(
         &mut self,
         handle: &VmHarness,
@@ -744,6 +757,10 @@ impl crate::vm::Vm {
                     message: "MockHarness has no process spawn response".to_string(),
                     category: ErrorCategory::NotFound,
                 }),
+                _ => Err(method_unsupported(handle, method)),
+            },
+            HarnessKind::Crypto => match method {
+                "sha256" => Ok(crate::harness_crypto::sha256_hex_value(args)),
                 _ => Err(method_unsupported(handle, method)),
             },
             HarnessKind::System => {
