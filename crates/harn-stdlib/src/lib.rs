@@ -802,6 +802,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/echo.harn"),
     },
     StdlibCliScript {
+        name: "try",
+        source: include_str!("stdlib/cli/try.harn"),
+    },
+    StdlibCliScript {
         name: "version",
         source: include_str!("stdlib/cli/version.harn"),
     },
