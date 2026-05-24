@@ -1,0 +1,249 @@
+/**
+ * `harn eval tool-calls` rendering layer ported to .harn — see harn#2306
+ * (W6).
+ *
+ * **Pragmatic partial port.** The Rust handler is ~1000 LOC of llm-call
+ * fanout: it builds a planner script, drives `llm_call` via
+ * `execute_run`, optionally drives a binder for canonicalization, runs
+ * a predicate judge for judge-mode cases, scores each case against the
+ * dataset, and aggregates a per-case + summary report. Every llm_call
+ * goes through VM internals (`harn_vm::llm`, `llm_config`) that aren't
+ * reachable from script-land today.
+ *
+ * What this script owns: two narrow rendering surfaces that are
+ * decoupled from the run pipeline —
+ *
+ *   1. The post-run **summary line** the legacy handler prints to
+ *      stdout after the per-case lines (`tool-call eval: N/M passed
+ *      (X.Y%), total_cost_usd=...`). The per-case streaming lines stay
+ *      in Rust because they're emitted *during* the eval loop, not
+ *      after the report is assembled.
+ *
+ *   2. The **regression-check** subcommand's render — both the success
+ *      line and the over-budget failure line. The numerical comparison
+ *      (drop_pp vs max_drop_pp) is trivial enough that the .harn side
+ *      can own it end-to-end given a `{current, baseline, label,
+ *      max_drop_pp}` envelope from Rust. Reading the summary JSON files
+ *      stays on the Rust side so we don't have to thread the sandbox's
+ *      `workspace_roots` restriction around `--against /tmp/foo.json`.
+ *
+ * Inputs (from the dispatch shim in crates/harn-cli/src/commands/eval_tool_calls.rs):
+ *   HARN_EVAL_TOOL_CALLS_MODE     — one of:
+ *     "summary"    — render the post-run summary line.
+ *     "regression" — render the regression-check verdict.
+ *   HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON — the envelope appropriate to MODE:
+ *     summary    → {passed_cases, total_cases, pass_rate, total_cost_usd}
+ *     regression → {current_pass_rate, baseline_pass_rate,
+ *                   max_drop_pp, label, total_cases_mismatch (bool),
+ *                   current_total_cases, baseline_total_cases}
+ *
+ * The wider port (replacing the Rust pipeline) is gated on G4 (#2297).
+ * C1 (#2314) will delete the `HARN_CLI_IMPL=rust` escape hatch.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+/**
+ * Format a float as `"X.Y"` (1 decimal, half-up padded). Matches
+ * Rust's `format!("{:.1}", x)`. Used in the summary's `pass_rate * 100`
+ * and `drop_pp` renderings.
+ */
+fn __format_float_1(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 10.0)) ?? 0
+  let whole = scaled / 10
+  let frac = scaled - whole * 10
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(whole) + "." + to_string(frac)
+}
+
+/**
+ * Format a float as `"X.YY"` (2 decimals, half-up padded). Used for
+ * `drop_pp` and `max_drop_pp` lines.
+ */
+fn __format_float_2(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 100.0)) ?? 0
+  let whole = scaled / 100
+  let frac = scaled - whole * 100
+  var frac_str = to_string(frac)
+  while len(frac_str) < 2 {
+    frac_str = "0" + frac_str
+  }
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+/**
+ * Format a float as `"X.YYYYYY"` (6 decimals, half-up padded). Used
+ * for the summary's `total_cost_usd={:.6}` line.
+ */
+fn __format_float_6(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 1000000.0)) ?? 0
+  let whole = scaled / 1000000
+  let frac = scaled - whole * 1000000
+  var frac_str = to_string(frac)
+  while len(frac_str) < 6 {
+    frac_str = "0" + frac_str
+  }
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+fn __render_summary_line(envelope: dict) -> string {
+  let passed = envelope["passed_cases"] ?? 0
+  let total = envelope["total_cases"] ?? 0
+  let pass_rate = envelope["pass_rate"] ?? 0.0
+  let cost = envelope["total_cost_usd"] ?? 0.0
+  let pct = if type_of(pass_rate) == "float" || type_of(pass_rate) == "int" {
+    (to_float(pass_rate) ?? 0.0) * 100.0
+  } else {
+    0.0
+  }
+  return "tool-call eval: " + to_string(passed)
+    + "/"
+    + to_string(total)
+    + " passed ("
+    + __format_float_1(pct)
+    + "%), total_cost_usd="
+    + __format_float_6(cost)
+}
+
+/**
+ * Render the regression-check verdict. Returns a dict
+ * `{stdout: "...", stderr: "...", exit_code: N}` so the Rust dispatch
+ * shim can route each channel to the right destination — keeping the
+ * legacy behavior where the success line goes to stdout and the
+ * failure line goes to stderr.
+ */
+fn __render_regression(envelope: dict) -> dict {
+  let current_total = envelope["current_total_cases"]
+  let baseline_total = envelope["baseline_total_cases"]
+  if envelope["total_cases_mismatch"] ?? false {
+    return {
+      stdout: "",
+      stderr: "error: current summary has " + to_string(current_total)
+        + " cases but baseline has "
+        + to_string(baseline_total),
+      exit_code: 1,
+    }
+  }
+  let current_pass = to_float(envelope["current_pass_rate"]) ?? 0.0
+  let baseline_pass = to_float(envelope["baseline_pass_rate"]) ?? 0.0
+  let max_drop_pp = to_float(envelope["max_drop_pp"]) ?? 0.0
+  let drop_pp = (baseline_pass - current_pass) * 100.0
+  let label = __safe_string(envelope["label"], "current")
+  if drop_pp > max_drop_pp {
+    return {
+      stdout: "",
+      stderr: "error: " + label + " pass rate dropped by "
+        + __format_float_2(drop_pp)
+        + " pp, above max "
+        + __format_float_2(max_drop_pp)
+        + " pp",
+      exit_code: 1,
+    }
+  }
+  let drop_shown = if drop_pp > 0.0 {
+    drop_pp
+  } else {
+    0.0
+  }
+  return {
+    stdout: label + ": pass rate " + __format_float_1(current_pass * 100.0)
+      + "% vs baseline "
+      + __format_float_1(baseline_pass * 100.0)
+      + "% (drop "
+      + __format_float_2(drop_shown)
+      + " pp, max "
+      + __format_float_2(max_drop_pp)
+      + " pp)",
+    stderr: "",
+    exit_code: 0,
+  }
+}
+
+/**
+ * Entrypoint. Returns an integer exit code rather than calling
+ * `exit()` so the dispatch wedge's captured stdout/stderr buffers
+ * flush back to the Rust shim — `exit()` in the embedded `harn run`
+ * pipeline calls `std::process::exit` which would terminate the host
+ * binary mid-render and drop the captured streams. The Rust shim
+ * reads the returned Int via `exit_code_from_return_value` and
+ * forwards it.
+ */
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON not set by dispatch shim")
+    return 70
+  }
+  let envelope = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse payload: " + to_string(e))
+    return 70
+  }
+  let mode = harness.env.get_or("HARN_EVAL_TOOL_CALLS_MODE", "summary")
+  if mode == "summary" {
+    harness.stdio.println(__render_summary_line(envelope))
+    return 0
+  }
+  if mode == "regression" {
+    let verdict = __render_regression(envelope)
+    let stderr_text = __safe_string(verdict["stderr"], "")
+    let stdout_text = __safe_string(verdict["stdout"], "")
+    if stderr_text != "" {
+      harness.stdio.eprintln(stderr_text)
+    }
+    if stdout_text != "" {
+      harness.stdio.println(stdout_text)
+    }
+    return verdict["exit_code"] ?? 0
+  }
+  harness.stdio.eprintln("internal error: unknown HARN_EVAL_TOOL_CALLS_MODE: " + mode)
+  return 70
+}

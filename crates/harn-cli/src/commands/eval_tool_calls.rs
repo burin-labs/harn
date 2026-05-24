@@ -1,4 +1,30 @@
+//! `harn eval tool-calls` — tool-call accuracy / latency / cost eval runner
+//! plus regression-check subcommand.
+//!
+//! ## .harn dispatch (W6 partial port — see harn#2306)
+//!
+//! The **eval pipeline** (planner / binder / judge fanout, scoring,
+//! per-case streaming output) stays in Rust — every LLM call goes
+//! through VM internals (`harn_vm::llm`, `llm_config`) that aren't
+//! reachable from script-land today.
+//!
+//! Two narrow **rendering surfaces** are delegated to
+//! `crates/harn-stdlib/src/stdlib/cli/eval/tool_calls.harn`:
+//!
+//!   1. The post-run summary line emitted after the per-case streaming
+//!      lines (`tool-call eval: N/M passed (X.Y%), total_cost_usd=...`).
+//!   2. The `regression-check` subcommand's verdict — both the success
+//!      stdout line and the over-budget stderr failure. Reading the
+//!      summary JSON files stays on the Rust side because the script
+//!      runs in the `harn run` sandbox where `harness.fs.read_text` is
+//!      restricted to `workspace_roots`, but `--against /tmp/foo.json`
+//!      is a common invocation pattern.
+//!
+//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path for the
+//! parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
+
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use harn_vm::clock::{Clock, RealClock};
@@ -11,6 +37,25 @@ use serde_json::Value as JsonValue;
 
 use crate::cli::{EvalToolCallsArgs, EvalToolCallsCommand, EvalToolCallsRegressionArgs};
 use crate::commands::eval_model_selector::{resolve_selector, ModelSelector};
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
+
+/// Env var the embedded `cli/eval/tool_calls` script reads to pick up
+/// the rendering payload. The Rust shim assembles a small JSON
+/// envelope (the shape depends on `HARN_EVAL_TOOL_CALLS_MODE`) and
+/// hands it off so the script only has to format it.
+const TOOL_CALLS_PAYLOAD_ENV: &str = "HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON";
+
+/// Env var the script reads to pick the rendering mode — either
+/// `"summary"` (post-eval summary line) or `"regression"` (regression
+/// check verdict).
+const TOOL_CALLS_MODE_ENV: &str = "HARN_EVAL_TOOL_CALLS_MODE";
+
+/// Serialises the dispatch-render path so concurrent in-process callers
+/// don't race on the global env vars the Rust shim sets to hand the
+/// payload off to the .harn script. Mirrors the pattern in
+/// `eval_context.rs` / W5's `eval_prompt.rs` (see harn#2305 / #2306).
+static DISPATCH_RENDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PhaseReport {
@@ -96,7 +141,9 @@ struct RawPhaseOutput {
 
 pub async fn run(args: EvalToolCallsArgs) -> i32 {
     match args.command {
-        Some(EvalToolCallsCommand::RegressionCheck(regression)) => run_regression_check(regression),
+        Some(EvalToolCallsCommand::RegressionCheck(regression)) => {
+            run_regression_check(regression).await
+        }
         None => run_eval(args).await,
     }
 }
@@ -179,19 +226,69 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         output_dir.join("summary.json").display(),
         output_dir.join("per_case.jsonl").display()
     );
-    println!(
-        "tool-call eval: {}/{} passed ({:.1}%), total_cost_usd={:.6}",
-        summary.passed_cases,
-        summary.total_cases,
-        summary.pass_rate * 100.0,
-        summary.total_cost_usd
-    );
+
+    let summary_line = if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        // Legacy direct-render path kept for the parity-snapshot harness
+        // (#2299) until C1 (#2314) deletes this escape hatch.
+        legacy_summary_line(&summary)
+    } else {
+        match dispatch_summary_line(&summary).await {
+            Ok(line) => line,
+            Err(code) => return code,
+        }
+    };
+    println!("{summary_line}");
 
     if had_infra_error {
         1
     } else {
         0
     }
+}
+
+fn legacy_summary_line(summary: &EvalSummary) -> String {
+    format!(
+        "tool-call eval: {}/{} passed ({:.1}%), total_cost_usd={:.6}",
+        summary.passed_cases,
+        summary.total_cases,
+        summary.pass_rate * 100.0,
+        summary.total_cost_usd,
+    )
+}
+
+#[derive(Debug, Serialize)]
+struct SummaryEnvelope {
+    passed_cases: usize,
+    total_cases: usize,
+    pass_rate: f64,
+    total_cost_usd: f64,
+}
+
+async fn dispatch_summary_line(summary: &EvalSummary) -> Result<String, i32> {
+    let envelope = SummaryEnvelope {
+        passed_cases: summary.passed_cases,
+        total_cases: summary.total_cases,
+        pass_rate: summary.pass_rate,
+        total_cost_usd: summary.total_cost_usd,
+    };
+    let payload_json = match serde_json::to_string(&envelope) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise tool-calls summary envelope: {error}");
+            return Err(1);
+        }
+    };
+    let _guard = DISPATCH_RENDER_LOCK.lock().await;
+    let _payload = ScopedEnvVar::set(TOOL_CALLS_PAYLOAD_ENV, &payload_json);
+    let _mode = ScopedEnvVar::set(TOOL_CALLS_MODE_ENV, "summary");
+    let outcome = dispatch::run_embedded_script("eval/tool_calls", Vec::new(), false).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if outcome.exit_code != 0 {
+        return Err(outcome.exit_code);
+    }
+    Ok(outcome.stdout.trim_end_matches('\n').to_string())
 }
 
 async fn run_case(
@@ -847,9 +944,10 @@ fn default_output_dir() -> PathBuf {
         .join(now.to_string())
 }
 
-fn run_regression_check(args: EvalToolCallsRegressionArgs) -> i32 {
+async fn run_regression_check(args: EvalToolCallsRegressionArgs) -> i32 {
     let current_path = args
         .current
+        .clone()
         .unwrap_or_else(|| PathBuf::from(".harn-runs/tool-call-eval/latest/summary.json"));
     let current = match read_regression_summary(&current_path) {
         Ok(summary) => summary,
@@ -865,6 +963,32 @@ fn run_regression_check(args: EvalToolCallsRegressionArgs) -> i32 {
             return 1;
         }
     };
+    let label = args
+        .planner
+        .as_deref()
+        .or_else(|| {
+            current
+                .planner
+                .as_ref()
+                .map(|planner| planner.selector.as_str())
+        })
+        .unwrap_or("current")
+        .to_string();
+
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        // Legacy direct-render path kept for the parity-snapshot harness
+        // (#2299) until C1 (#2314) deletes this escape hatch.
+        return legacy_regression_render(&current, &baseline, &label, args.max_drop_pp);
+    }
+    dispatch_regression_render(&current, &baseline, &label, args.max_drop_pp).await
+}
+
+fn legacy_regression_render(
+    current: &RegressionSummary,
+    baseline: &RegressionSummary,
+    label: &str,
+    max_drop_pp: f64,
+) -> i32 {
     if let (Some(current_cases), Some(baseline_cases)) = (current.total_cases, baseline.total_cases)
     {
         if current_cases != baseline_cases {
@@ -875,20 +999,10 @@ fn run_regression_check(args: EvalToolCallsRegressionArgs) -> i32 {
         }
     }
     let drop_pp = (baseline.pass_rate - current.pass_rate) * 100.0;
-    let label = args
-        .planner
-        .as_deref()
-        .or_else(|| {
-            current
-                .planner
-                .as_ref()
-                .map(|planner| planner.selector.as_str())
-        })
-        .unwrap_or("current");
-    if drop_pp > args.max_drop_pp {
+    if drop_pp > max_drop_pp {
         eprintln!(
             "error: {label} pass rate dropped by {:.2} pp, above max {:.2} pp",
-            drop_pp, args.max_drop_pp
+            drop_pp, max_drop_pp
         );
         return 1;
     }
@@ -897,9 +1011,65 @@ fn run_regression_check(args: EvalToolCallsRegressionArgs) -> i32 {
         current.pass_rate * 100.0,
         baseline.pass_rate * 100.0,
         drop_pp.max(0.0),
-        args.max_drop_pp
+        max_drop_pp
     );
     0
+}
+
+#[derive(Debug, Serialize)]
+struct RegressionEnvelope<'a> {
+    current_pass_rate: f64,
+    baseline_pass_rate: f64,
+    max_drop_pp: f64,
+    label: &'a str,
+    total_cases_mismatch: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_total_cases: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline_total_cases: Option<usize>,
+}
+
+async fn dispatch_regression_render(
+    current: &RegressionSummary,
+    baseline: &RegressionSummary,
+    label: &str,
+    max_drop_pp: f64,
+) -> i32 {
+    let total_cases_mismatch = matches!(
+        (current.total_cases, baseline.total_cases),
+        (Some(c), Some(b)) if c != b
+    );
+    let envelope = RegressionEnvelope {
+        current_pass_rate: current.pass_rate,
+        baseline_pass_rate: baseline.pass_rate,
+        max_drop_pp,
+        label,
+        total_cases_mismatch,
+        current_total_cases: current.total_cases,
+        baseline_total_cases: baseline.total_cases,
+    };
+    let payload_json = match serde_json::to_string(&envelope) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise regression envelope: {error}");
+            return 1;
+        }
+    };
+    let _guard = DISPATCH_RENDER_LOCK.lock().await;
+    let _payload = ScopedEnvVar::set(TOOL_CALLS_PAYLOAD_ENV, &payload_json);
+    let _mode = ScopedEnvVar::set(TOOL_CALLS_MODE_ENV, "regression");
+    let outcome = dispatch::run_embedded_script("eval/tool_calls", Vec::new(), false).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if !outcome.stdout.is_empty() {
+        // The script's stdout already terminates with a newline (via
+        // harness.stdio.println), so forward it verbatim. Trim is not
+        // applied so byte-identity with the legacy `println!` path
+        // (which also emits a single trailing newline) stays trivial.
+        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+    outcome.exit_code
 }
 
 fn read_regression_summary(path: &Path) -> Result<RegressionSummary, String> {

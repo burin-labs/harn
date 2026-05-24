@@ -1,0 +1,243 @@
+/**
+ * `harn eval context` rendering layer ported to .harn — see harn#2306
+ * (W6).
+ *
+ * **Pragmatic partial port.** The Rust handler in
+ * `crates/harn-cli/src/commands/eval_context.rs` does manifest loading,
+ * `evaluate_context_eval_manifest` invocation (which reaches deep into
+ * `harn_vm::orchestration::context_eval` — projection policies, mode
+ * runs, scoring), and writes `summary.json` + `per_run.jsonl` to disk.
+ * None of that is portable to script-land today without G4 (#2297)
+ * exposing the orchestration surface.
+ *
+ * What this script owns: the **markdown report body** rendered into
+ * `summary.md`, plus the one-line human summary the legacy handler
+ * prints to stdout, plus the JSON pretty rendering used when the
+ * caller passes `--json`. The Rust shim writes the JSON artifacts and
+ * the markdown file on its side (the script runs in the standard
+ * `harn run` sandbox where `harness.fs.write_text` is restricted to
+ * `workspace_roots`, but users invoke `--output /tmp/...` constantly).
+ *
+ * Inputs (from the dispatch shim in crates/harn-cli/src/commands/eval_context.rs):
+ *   HARN_EVAL_CONTEXT_REPORT_JSON — serialised `ContextEvalReport`.
+ *   HARN_EVAL_CONTEXT_OUTPUT_MODE — one of:
+ *     "markdown" — render the summary.md body to stdout (default).
+ *     "summary"  — render the one-line human summary to stdout.
+ *     "json"     — render the JSON pretty form to stdout for `--json`.
+ *
+ * The wider port (replacing the Rust shim) is gated on G4 (#2297).
+ * C1 (#2314) will delete the `HARN_CLI_IMPL=rust` escape hatch.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+/**
+ * Format a float as `"X.YYYY"` (4 decimals, half-up padded).
+ * Mirrors Rust's `format!("{:.4}", x)` exactly so the markdown body
+ * stays byte-identical with the legacy renderer.
+ */
+fn __format_float_4(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 10000.0)) ?? 0
+  let whole = scaled / 10000
+  let frac = scaled - whole * 10000
+  var frac_str = to_string(frac)
+  while len(frac_str) < 4 {
+    frac_str = "0" + frac_str
+  }
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+/**
+ * Format a float as `"X.YY"` (2 decimals, half-up padded). Used for
+ * the one-line summary text `mean_correctness={:.2} mean_tool_quality={:.2}`.
+ */
+fn __format_float_2(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 100.0)) ?? 0
+  let whole = scaled / 100
+  let frac = scaled - whole * 100
+  var frac_str = to_string(frac)
+  while len(frac_str) < 2 {
+    frac_str = "0" + frac_str
+  }
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+/**
+ * Format a float as `"X.YYYYYY"` (6 decimals, half-up padded). Used
+ * for the `cost USD: {:.6}` line in summary.md.
+ */
+fn __format_float_6(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 1000000.0)) ?? 0
+  let whole = scaled / 1000000
+  let frac = scaled - whole * 1000000
+  var frac_str = to_string(frac)
+  while len(frac_str) < 6 {
+    frac_str = "0" + frac_str
+  }
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+fn __escape_md(value: string) -> string {
+  return value.replace("|", "\\|")
+}
+
+fn __render_markdown(report: dict) -> string {
+  let aggregate = __safe_dict(report["aggregate"])
+  let manifest_name = report["manifest_name"]
+  let title = if type_of(manifest_name) == "string" {
+    manifest_name
+  } else {
+    __safe_string(report["manifest_id"], "")
+  }
+  let pass = report["pass"] ?? false
+  let status = if pass {
+    "PASS"
+  } else {
+    "FAIL"
+  }
+  var out = "# Context Eval: " + title + "\n\n"
+  out = out + "- status: " + status + "\n"
+  out = out + "- runs: " + to_string(report["passed_runs"] ?? 0)
+    + "/"
+    + to_string(report["total_runs"] ?? 0)
+    + " passed\n"
+  out = out + "- mean correctness: "
+    + __format_float_4(aggregate["mean_final_correctness"] ?? 0.0)
+    + "\n"
+  out = out + "- mean tool quality: "
+    + __format_float_4(aggregate["mean_tool_call_quality"] ?? 0.0)
+    + "\n"
+  out = out + "- input tokens: " + to_string(aggregate["total_input_tokens"] ?? 0) + "\n"
+  out = out + "- output tokens: " + to_string(aggregate["total_output_tokens"] ?? 0) + "\n"
+  out = out + "- cost USD: " + __format_float_6(aggregate["total_cost_usd"] ?? 0.0) + "\n\n"
+  out = out
+    + "| task | mode | pass | correctness | tools | reads before edit | input tokens | compactions | cache key |\n"
+  out = out + "|---|---|---:|---:|---:|---:|---:|---:|---|\n"
+  for run in __safe_list(report["runs"]) {
+    let run_d = __safe_dict(run)
+    let correctness = __safe_dict(run_d["final_correctness"])
+    let tool_quality = __safe_dict(run_d["tool_call_quality"])
+    let cache = __safe_dict(run_d["cache"])
+    let passed_label = if run_d["passed"] ?? false {
+      "yes"
+    } else {
+      "no"
+    }
+    out = out + "| " + __escape_md(__safe_string(run_d["task_id"], ""))
+      + " | "
+      + __escape_md(__safe_string(run_d["mode_id"], ""))
+      + " | "
+      + passed_label
+      + " | "
+      + __format_float_4(correctness["score"] ?? 0.0)
+      + " | "
+      + __format_float_4(tool_quality["score"] ?? 0.0)
+      + " | "
+      + to_string(run_d["reads_before_first_edit"] ?? 0)
+      + " | "
+      + to_string(run_d["input_tokens"] ?? 0)
+      + " | "
+      + to_string(run_d["compaction_count"] ?? 0)
+      + " | `"
+      + __safe_string(cache["key"], "")
+      + "` |\n"
+  }
+  return out
+}
+
+fn __render_summary_line(report: dict) -> string {
+  let aggregate = __safe_dict(report["aggregate"])
+  return "context eval: " + to_string(report["passed_runs"] ?? 0)
+    + "/"
+    + to_string(report["total_runs"] ?? 0)
+    + " passed, mean_correctness="
+    + __format_float_2(aggregate["mean_final_correctness"] ?? 0.0)
+    + ", mean_tool_quality="
+    + __format_float_2(aggregate["mean_tool_call_quality"] ?? 0.0)
+}
+
+/**
+ * Entrypoint. Returns an integer exit code rather than calling
+ * `exit()` so the dispatch wedge's captured stdout/stderr buffers
+ * flush back to the Rust shim — `exit()` in the embedded `harn run`
+ * pipeline calls `std::process::exit` which terminates the host
+ * binary mid-render and drops the captured streams.
+ */
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_EVAL_CONTEXT_REPORT_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_EVAL_CONTEXT_REPORT_JSON not set by dispatch shim")
+    return 70
+  }
+  let report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse ContextEvalReport: " + to_string(e))
+    return 70
+  }
+  let mode = harness.env.get_or("HARN_EVAL_CONTEXT_OUTPUT_MODE", "markdown")
+  let payload = if mode == "summary" {
+    __render_summary_line(report)
+  } else if mode == "json" {
+    json_stringify_pretty(report)
+  } else {
+    __render_markdown(report)
+  }
+  __io_print(payload)
+  return 0
+}

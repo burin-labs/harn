@@ -809,6 +809,25 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         name: "echo",
         source: include_str!("stdlib/cli/echo.harn"),
     },
+    // Helper module for the embedded `eval/*` scripts. Has a stub `main`
+    // that exits non-zero — sibling scripts inline its helpers until the
+    // dispatch wedge gains a cross-script import surface (#2300 / G7).
+    StdlibCliScript {
+        name: "eval/_runner",
+        source: include_str!("stdlib/cli/eval/_runner.harn"),
+    },
+    StdlibCliScript {
+        name: "eval/context",
+        source: include_str!("stdlib/cli/eval/context.harn"),
+    },
+    StdlibCliScript {
+        name: "eval/model_selector",
+        source: include_str!("stdlib/cli/eval/model_selector.harn"),
+    },
+    StdlibCliScript {
+        name: "eval/tool_calls",
+        source: include_str!("stdlib/cli/eval/tool_calls.harn"),
+    },
     StdlibCliScript {
         name: "eval/prompt",
         source: include_str!("stdlib/cli/eval/prompt.harn"),
