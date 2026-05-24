@@ -168,6 +168,21 @@ fn emit_cli_script_bytecode() {
         return;
     }
 
+    // Windows hits STATUS_STACK_OVERFLOW invoking `compile_source` from
+    // the build-script default thread (8 MiB on Linux/macOS, ~1 MiB on
+    // Windows). The compiler's recursive walks need more headroom than
+    // the default Windows stack provides, and the build script runs
+    // before `RUST_MIN_STACK` can take effect. Skip AOT on Windows —
+    // dispatch falls back to source compilation transparently and the
+    // first-run bytecode cache (HARN_BYTECODE_CACHE) still kicks in.
+    // Re-enable when the compiler hot path is rewritten to be
+    // iteration-bounded, or when a spawn-thread-with-stack-size shim
+    // wraps `compile_source` in this build script.
+    if cfg!(target_os = "windows") {
+        write_table(&table_path, &[]);
+        return;
+    }
+
     let mut entries: Vec<(String, String)> = Vec::new();
     for script in harn_stdlib::STDLIB_CLI_SCRIPTS {
         let name = script.name;
