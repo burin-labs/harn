@@ -1,0 +1,14 @@
+import { envelope } from "std/cli/render"
+
+fn main(harness: Harness) {
+  let env = envelope(
+    {
+      schema_version: 2,
+      api_stability: "experimental",
+      payload: {count: 0},
+      warnings: ["one row was skipped: empty key"],
+    },
+  )
+  // warnings appears between apiStability and payload.
+  harness.stdio.println(json_stringify(env))
+}
