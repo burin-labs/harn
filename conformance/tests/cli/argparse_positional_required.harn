@@ -1,0 +1,17 @@
+import { parse, parser } from "std/cli/argparse"
+
+fn main(harness: Harness) {
+  let spec = parser(
+    {
+      name: "demo",
+      args: [
+        {name: "input", kind: "positional", required: true},
+        {name: "output", kind: "positional", required: false},
+      ],
+    },
+  )
+  let r = parse(spec, ["foo.txt", "bar.txt"])
+  harness.stdio.println(r.ok.input)
+  harness.stdio.println(r.ok.output)
+  harness.stdio.println(len(r.ok.rest))
+}
