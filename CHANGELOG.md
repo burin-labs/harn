@@ -29,6 +29,13 @@ condensed series summaries instead of full per-patch history.
   `agent_session_open(..., {workspace_anchor: ...})` or
   `agent_session_set_workspace_anchor(...)`. Foundation for the
   cross-project handoff epic (#2208).
+- **MCP RC authorization hardening (#2186).** Centralized MCP OAuth/OIDC
+  discovery helpers for protected-resource metadata, `WWW-Authenticate`
+  parsing, OAuth/OIDC authorization-server discovery, issuer binding, scope
+  selection, registration-mode selection, and native-app dynamic registration.
+  `harn mcp login` and `harn connect` now share the helper surface, validate
+  authorization-response issuers, and keep HTTP OAuth guidance separate from
+  local stdio credential handling.
 - **Reusable context-engineering eval primitives (#2195).** Added
   `harn eval context` plus portable `harn.context_eval.manifest.v1` and
   `harn.context_eval.report.v1` shapes for deterministic pack, projection,

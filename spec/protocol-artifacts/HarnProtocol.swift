@@ -42,6 +42,16 @@ public enum HarnProtocolConstants {
         "ttlMs",
         "cacheScope",
     ]
+    public static let mcpOAuthClientRegistrationModes: [String] = [
+        "pre_registered",
+        "client_id_metadata_document",
+        "dynamic_client_registration",
+        "manual",
+    ]
+    public static let mcpOAuthApplicationTypes: [String] = [
+        "native",
+        "web",
+    ]
     public static let acpSessionUpdateExtensions: [String] = [
         "available_commands_update",
         "fs_watch",
@@ -488,6 +498,30 @@ public enum HarnMCPLoggingLevel: String, Codable, Sendable, CaseIterable {
         "critical",
         "alert",
         "emergency",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnMCPOAuthClientRegistrationMode: String, Codable, Sendable, CaseIterable {
+    case preRegistered = "pre_registered"
+    case clientIdMetadataDocument = "client_id_metadata_document"
+    case dynamicClientRegistration = "dynamic_client_registration"
+    case manual = "manual"
+
+    public static let allCases: [Self] = [
+        "pre_registered",
+        "client_id_metadata_document",
+        "dynamic_client_registration",
+        "manual",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnMCPOAuthApplicationType: String, Codable, Sendable, CaseIterable {
+    case native = "native"
+    case web = "web"
+
+    public static let allCases: [Self] = [
+        "native",
+        "web",
     ].map { Self(rawValue: $0)! }
 }
 
@@ -1234,4 +1268,78 @@ public struct HarnMCPPrompt: Codable, Sendable, Equatable {
     public var title: String?
     public var description: String?
     public var arguments: [HarnACPObject]?
+}
+
+public struct HarnMCPOAuthProtectedResourceMetadata: Codable, Sendable, Equatable {
+    public var resource: String?
+    public var authorizationServers: [String]
+    public var scopesSupported: [String]?
+    public var bearerMethodsSupported: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case resource
+        case authorizationServers = "authorization_servers"
+        case scopesSupported = "scopes_supported"
+        case bearerMethodsSupported = "bearer_methods_supported"
+    }
+}
+
+public struct HarnMCPOAuthAuthorizationServerMetadata: Codable, Sendable, Equatable {
+    public var issuer: String
+    public var authorizationEndpoint: String
+    public var tokenEndpoint: String
+    public var registrationEndpoint: String?
+    public var tokenEndpointAuthMethodsSupported: [String]?
+    public var codeChallengeMethodsSupported: [String]?
+    public var scopesSupported: [String]?
+    public var clientIdMetadataDocumentSupported: Bool?
+    public var authorizationResponseIssParameterSupported: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case issuer
+        case authorizationEndpoint = "authorization_endpoint"
+        case tokenEndpoint = "token_endpoint"
+        case registrationEndpoint = "registration_endpoint"
+        case tokenEndpointAuthMethodsSupported = "token_endpoint_auth_methods_supported"
+        case codeChallengeMethodsSupported = "code_challenge_methods_supported"
+        case scopesSupported = "scopes_supported"
+        case clientIdMetadataDocumentSupported = "client_id_metadata_document_supported"
+        case authorizationResponseIssParameterSupported = "authorization_response_iss_parameter_supported"
+    }
+}
+
+public struct HarnMCPOAuthWwwAuthenticateChallenge: Codable, Sendable, Equatable {
+    public var scheme: String
+    public var params: [String: String]
+}
+
+public struct HarnMCPOAuthDiscoveryResult: Codable, Sendable, Equatable {
+    public var protectedResourceMetadataUrl: String
+    public var protectedResourceMetadata: HarnMCPOAuthProtectedResourceMetadata
+    public var authorizationServerIssuer: String
+    public var authorizationServerMetadataUrl: String
+    public var authorizationServerMetadataKind: String
+    public var authorizationServerMetadata: HarnMCPOAuthAuthorizationServerMetadata
+    public var challenge: HarnMCPOAuthWwwAuthenticateChallenge?
+    public var scopes: [String]
+}
+
+public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, Equatable {
+    public var clientName: String
+    public var redirectUris: [String]
+    public var grantTypes: [String]
+    public var responseTypes: [String]
+    public var tokenEndpointAuthMethod: String
+    public var applicationType: HarnMCPOAuthApplicationType
+    public var scope: String?
+
+    enum CodingKeys: String, CodingKey {
+        case clientName = "client_name"
+        case redirectUris = "redirect_uris"
+        case grantTypes = "grant_types"
+        case responseTypes = "response_types"
+        case tokenEndpointAuthMethod = "token_endpoint_auth_method"
+        case applicationType = "application_type"
+        case scope
+    }
 }

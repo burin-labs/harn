@@ -71,6 +71,8 @@ struct StoredConnectorToken {
     #[serde(default)]
     client_secret: Option<String>,
     token_endpoint_auth_method: String,
+    #[serde(default)]
+    issuer: Option<String>,
     resource: String,
     #[serde(default)]
     scopes: Option<String>,
@@ -99,32 +101,8 @@ struct ConnectIndexEntry {
     last_used_at_unix: Option<i64>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-struct OAuthProtectedResource {
-    #[serde(default)]
-    authorization_servers: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct OAuthServerMetadata {
-    authorization_endpoint: String,
-    token_endpoint: String,
-    #[serde(default)]
-    registration_endpoint: Option<String>,
-    #[serde(default)]
-    token_endpoint_auth_methods_supported: Vec<String>,
-    #[serde(default)]
-    code_challenge_methods_supported: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DynamicClientRegistrationResponse {
-    client_id: String,
-    #[serde(default)]
-    client_secret: Option<String>,
-    #[serde(default)]
-    token_endpoint_auth_method: Option<String>,
-}
+type OAuthServerMetadata = harn_vm::mcp_auth::OAuthAuthorizationServerMetadata;
+type DynamicClientRegistrationResponse = harn_vm::mcp_auth::OAuthDynamicClientRegistrationResponse;
 
 #[derive(Clone, Debug, Deserialize)]
 struct TokenResponse {

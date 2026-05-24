@@ -271,6 +271,16 @@
       "notifications/initialized",
       "notifications/message"
     ],
+    "oauthApplicationTypes": [
+      "native",
+      "web"
+    ],
+    "oauthClientRegistrationModes": [
+      "pre_registered",
+      "client_id_metadata_document",
+      "dynamic_client_registration",
+      "manual"
+    ],
     "protocolVersion": "2025-11-25",
     "protocolVersions": [
       "DRAFT-2026-v1",

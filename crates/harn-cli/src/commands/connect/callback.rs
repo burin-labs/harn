@@ -8,6 +8,11 @@ use super::OAUTH_CALLBACK_TIMEOUT;
 
 const CALLBACK_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+pub(super) struct OAuthCallbackResponse {
+    pub(super) code: String,
+    pub(super) issuer: Option<String>,
+}
+
 pub(super) fn bind_loopback_listener(redirect_uri: &str) -> Result<(TcpListener, String), String> {
     let mut parsed =
         Url::parse(redirect_uri).map_err(|error| format!("Invalid redirect URI: {error}"))?;
@@ -38,17 +43,22 @@ pub(super) fn bind_loopback_listener(redirect_uri: &str) -> Result<(TcpListener,
     Ok((listener, parsed.to_string()))
 }
 
-pub(super) fn wait_for_oauth_code(
+pub(super) fn wait_for_oauth_response(
     listener: TcpListener,
     redirect_uri: &str,
     expected_state: &str,
-) -> Result<String, String> {
+) -> Result<OAuthCallbackResponse, String> {
     let query = wait_for_callback_query(listener, redirect_uri, Some(expected_state))?;
-    query
-        .into_iter()
+    let code = query
+        .iter()
         .find(|(key, _)| key == "code")
-        .map(|(_, value)| value)
-        .ok_or_else(|| "OAuth callback did not include an authorization code".to_string())
+        .map(|(_, value)| value.clone())
+        .ok_or_else(|| "OAuth callback did not include an authorization code".to_string())?;
+    let issuer = query
+        .into_iter()
+        .find(|(key, _)| key == "iss")
+        .map(|(_, value)| value);
+    Ok(OAuthCallbackResponse { code, issuer })
 }
 
 pub(super) fn wait_for_github_installation(

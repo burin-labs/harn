@@ -4,6 +4,13 @@ use std::path::PathBuf;
 use std::{env, fs, process};
 
 use base64::Engine;
+use harn_vm::mcp_auth::{
+    determine_token_endpoint_auth_method, discover_mcp_oauth, dynamic_client_registration_body,
+    ensure_pkce_s256_supported, select_client_registration_mode,
+    validate_authorization_response_issuer, validate_issuer_binding,
+    validate_token_endpoint_auth_method, OAuthClientRegistrationMode,
+    OAuthClientRegistrationOptions,
+};
 use harn_vm::secrets::{KeyringSecretProvider, SecretBytes, SecretId, SecretProvider};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -38,36 +45,13 @@ pub(crate) struct StoredOAuthToken {
     pub client_id: String,
     pub client_secret: Option<String>,
     pub token_endpoint_auth_method: String,
+    pub issuer: String,
     pub resource: String,
     pub scopes: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-struct OAuthProtectedResource {
-    #[serde(default)]
-    authorization_servers: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct OAuthServerMetadata {
-    authorization_endpoint: String,
-    token_endpoint: String,
-    #[serde(default)]
-    registration_endpoint: Option<String>,
-    #[serde(default)]
-    token_endpoint_auth_methods_supported: Vec<String>,
-    #[serde(default)]
-    code_challenge_methods_supported: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DynamicClientRegistrationResponse {
-    client_id: String,
-    #[serde(default)]
-    client_secret: Option<String>,
-    #[serde(default)]
-    token_endpoint_auth_method: Option<String>,
-}
+type OAuthServerMetadata = harn_vm::mcp_auth::OAuthAuthorizationServerMetadata;
+type DynamicClientRegistrationResponse = harn_vm::mcp_auth::OAuthDynamicClientRegistrationResponse;
 
 #[derive(Clone, Debug, Deserialize)]
 struct TokenResponse {
@@ -102,7 +86,13 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 eprintln!("error: {error}");
                 process::exit(1);
             });
-            delete_stored_token(&server.url)
+            let discovery = discover_oauth_server(&server.url)
+                .await
+                .unwrap_or_else(|error| {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                });
+            delete_stored_token(&server.url, &discovery.issuer)
                 .await
                 .unwrap_or_else(|error| {
                     eprintln!("error: {error}");
@@ -118,7 +108,13 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 eprintln!("error: {error}");
                 process::exit(1);
             });
-            match load_stored_token(&server.url).await {
+            let discovery = discover_oauth_server(&server.url)
+                .await
+                .unwrap_or_else(|error| {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                });
+            match load_stored_token(&server.url, &discovery.issuer).await {
                 Ok(Some(token)) => {
                     println!("Server: {}", server.name);
                     println!("URL: {}", server.url);
@@ -133,6 +129,7 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                     );
                     println!("Client ID: {}", token.client_id);
                     println!("Token auth method: {}", token.token_endpoint_auth_method);
+                    println!("Issuer: {}", token.issuer);
                 }
                 Ok(None) => {
                     println!("Server: {}", server.name);
@@ -165,12 +162,14 @@ pub(crate) async fn resolve_auth_for_server(
         return Ok(AuthResolution::None);
     }
 
-    let Some(mut stored) = load_stored_token(&server.url).await? else {
+    let discovery = discover_oauth_server(&server.url).await?;
+    let Some(mut stored) = load_stored_token(&server.url, &discovery.issuer).await? else {
         return Ok(AuthResolution::None);
     };
+    validate_issuer_binding(&stored.issuer, &discovery.issuer)?;
 
     if token_needs_refresh(&stored) {
-        stored = refresh_token_if_needed(&stored).await?;
+        stored = refresh_token_if_needed(&stored, &discovery).await?;
         save_stored_token(&stored).await?;
     }
 
@@ -184,31 +183,41 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
     })?;
     let discovery = discover_oauth_server(&server.url).await?;
     ensure_pkce_support(&discovery.metadata)?;
+    let requested_scopes = options
+        .scope
+        .clone()
+        .or(server.scopes.clone())
+        .or_else(|| (!discovery.scopes.is_empty()).then(|| discovery.scopes.join(" ")));
 
+    let configured_client_id = options.client_id.clone().or(server.client_id.clone());
+    let configured_client_secret = options
+        .client_secret
+        .clone()
+        .or(server.client_secret.clone());
+    let registration_mode = select_client_registration_mode(
+        &discovery.metadata,
+        OAuthClientRegistrationOptions {
+            client_id: configured_client_id.as_deref(),
+            client_secret: configured_client_secret.as_deref(),
+            client_id_metadata_document_url: configured_client_id.as_deref(),
+        },
+    );
     let (client_id, client_secret, token_auth_method) = if let Some(client_id) =
-        options.client_id.clone().or(server.client_id.clone())
+        configured_client_id.clone()
     {
-        let token_auth_method = determine_token_auth_method(
-            &discovery.metadata,
-            options
-                .client_secret
-                .clone()
-                .or(server.client_secret.clone())
-                .as_ref(),
-        )?;
-        (
-            client_id,
-            options
-                .client_secret
-                .clone()
-                .or(server.client_secret.clone()),
-            token_auth_method,
-        )
-    } else if let Some(registration_endpoint) = &discovery.metadata.registration_endpoint {
+        let token_auth_method =
+            determine_token_auth_method(&discovery.metadata, configured_client_secret.as_ref())?;
+        (client_id, configured_client_secret, token_auth_method)
+    } else if registration_mode == OAuthClientRegistrationMode::DynamicClientRegistration {
+        let registration_endpoint = discovery
+            .metadata
+            .registration_endpoint
+            .as_deref()
+            .ok_or_else(|| "dynamic client registration endpoint missing".to_string())?;
         let registration = dynamic_client_registration(
             registration_endpoint,
             &options.redirect_uri,
-            options.scope.as_deref().or(server.scopes.as_deref()),
+            requested_scopes.as_deref(),
         )
         .await?;
         let auth_method = registration
@@ -222,7 +231,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         )
     } else {
         return Err(
-            "No client_id available. Supply --client-id (optionally --client-secret) or use a server that supports dynamic client registration.".to_string()
+            "No client_id available. Supply --client-id, use a Client ID Metadata Document URL as --client-id when supported, or use a server that supports dynamic client registration.".to_string()
         );
     };
 
@@ -237,7 +246,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         &state,
         &code_challenge,
         &server.url,
-        options.scope.as_deref().or(server.scopes.as_deref()),
+        requested_scopes.as_deref(),
     )?;
 
     println!("Server: {} ({})", server.name, server.url);
@@ -249,7 +258,8 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         println!("Open this URL manually:\n{}", auth_url);
     }
 
-    let code = wait_for_oauth_code(callback_listener, &options.redirect_uri, &state)?;
+    let callback = wait_for_oauth_response(callback_listener, &options.redirect_uri, &state)?;
+    validate_authorization_response_issuer(&discovery.metadata, callback.issuer.as_deref())?;
     let token = exchange_authorization_code(
         &discovery.metadata,
         AuthorizationCodeExchange {
@@ -258,8 +268,8 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
             token_auth_method: &token_auth_method,
             redirect_uri: &options.redirect_uri,
             resource: &server.url,
-            scopes: options.scope.as_deref().or(server.scopes.as_deref()),
-            code: &code,
+            scopes: requested_scopes.as_deref(),
+            code: &callback.code,
             code_verifier: &code_verifier,
         },
     )
@@ -275,8 +285,9 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         client_id,
         client_secret,
         token_endpoint_auth_method: token_auth_method,
+        issuer: discovery.issuer,
         resource: server.url.clone(),
-        scopes: options.scope.clone().or(server.scopes),
+        scopes: requested_scopes,
     };
     save_stored_token(&stored).await?;
     println!("OAuth token stored for {}.", server.name);
@@ -352,112 +363,19 @@ fn find_manifest() -> Result<(PathBuf, package::Manifest), String> {
 }
 
 async fn discover_oauth_server(server_url: &str) -> Result<OAuthDiscoveryResult, String> {
-    let resource_url =
-        Url::parse(server_url).map_err(|error| format!("Invalid server URL: {error}"))?;
-    let resource_metadata =
-        fetch_first_json::<OAuthProtectedResource>(&protected_resource_candidates(&resource_url))
-            .await?
-            .ok_or_else(|| "OAuth protected resource metadata not found".to_string())?;
-    let auth_server_url = resource_metadata
-        .authorization_servers
-        .first()
-        .cloned()
-        .ok_or_else(|| {
-            "OAuth protected resource metadata did not advertise an authorization server"
-                .to_string()
-        })?;
-    let auth_server = Url::parse(&auth_server_url).map_err(|error| {
-        format!("Invalid authorization server URL '{auth_server_url}': {error}")
-    })?;
-    let metadata =
-        fetch_first_json::<OAuthServerMetadata>(&authorization_server_candidates(&auth_server))
-            .await?
-            .ok_or_else(|| "Authorization server metadata not found".to_string())?;
-    Ok(OAuthDiscoveryResult { metadata })
-}
-
-fn protected_resource_candidates(resource_url: &Url) -> Vec<Url> {
-    let mut urls = Vec::new();
-    let path = resource_url
-        .path()
-        .trim_start_matches('/')
-        .trim_end_matches('/');
-    if !path.is_empty() {
-        let mut url = resource_url.clone();
-        url.set_path(&format!("/.well-known/oauth-protected-resource/{path}"));
-        url.set_query(None);
-        url.set_fragment(None);
-        urls.push(url);
-    }
-    let mut root = resource_url.clone();
-    root.set_path("/.well-known/oauth-protected-resource");
-    root.set_query(None);
-    root.set_fragment(None);
-    urls.push(root);
-    urls
-}
-
-fn authorization_server_candidates(auth_server_url: &Url) -> Vec<Url> {
-    let mut urls = Vec::new();
-    let path = auth_server_url.path().trim_end_matches('/');
-    if !path.is_empty() && path != "/" {
-        let trimmed = path.trim_start_matches('/');
-        let mut oauth = auth_server_url.clone();
-        oauth.set_path(&format!(
-            "/.well-known/oauth-authorization-server/{trimmed}"
-        ));
-        oauth.set_query(None);
-        oauth.set_fragment(None);
-        urls.push(oauth);
-
-        let mut oidc = auth_server_url.clone();
-        oidc.set_path(&format!("/.well-known/openid-configuration/{trimmed}"));
-        oidc.set_query(None);
-        oidc.set_fragment(None);
-        urls.push(oidc);
-    }
-
-    let mut oauth = auth_server_url.clone();
-    oauth.set_path("/.well-known/oauth-authorization-server");
-    oauth.set_query(None);
-    oauth.set_fragment(None);
-    urls.push(oauth);
-
-    let mut oidc = auth_server_url.clone();
-    oidc.set_path("/.well-known/openid-configuration");
-    oidc.set_query(None);
-    oidc.set_fragment(None);
-    urls.push(oidc);
-    urls
-}
-
-async fn fetch_first_json<T: for<'de> Deserialize<'de>>(
-    candidates: &[Url],
-) -> Result<Option<T>, String> {
     let client = reqwest::Client::new();
-    for candidate in candidates {
-        let response = match client.get(candidate.clone()).send().await {
-            Ok(response) => response,
-            Err(_) => continue,
-        };
-        if !response.status().is_success() {
-            continue;
-        }
-        let parsed = response
-            .json::<T>()
-            .await
-            .map_err(|error| format!("Failed to parse {}: {error}", candidate))?;
-        return Ok(Some(parsed));
-    }
-    Ok(None)
+    let discovery = discover_mcp_oauth(&client, server_url)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(OAuthDiscoveryResult {
+        metadata: discovery.authorization_server_metadata,
+        issuer: discovery.authorization_server_issuer,
+        scopes: discovery.scopes,
+    })
 }
 
 fn ensure_pkce_support(metadata: &OAuthServerMetadata) -> Result<(), String> {
-    let methods = &metadata.code_challenge_methods_supported;
-    if methods.is_empty() || methods.iter().any(|method| method == "S256") {
-        return Ok(());
-    }
-    Err("Authorization server does not advertise PKCE S256 support".to_string())
+    ensure_pkce_s256_supported(metadata)
 }
 
 async fn dynamic_client_registration(
@@ -466,16 +384,7 @@ async fn dynamic_client_registration(
     scopes: Option<&str>,
 ) -> Result<DynamicClientRegistrationResponse, String> {
     let client = reqwest::Client::new();
-    let mut body = serde_json::json!({
-        "client_name": "Harn CLI",
-        "redirect_uris": [redirect_uri],
-        "grant_types": ["authorization_code", "refresh_token"],
-        "response_types": ["code"],
-        "token_endpoint_auth_method": "none",
-    });
-    if let Some(scopes) = scopes {
-        body["scope"] = serde_json::json!(scopes);
-    }
+    let body = dynamic_client_registration_body("Harn CLI", [redirect_uri], scopes);
     let response = client
         .post(registration_endpoint)
         .json(&body)
@@ -499,24 +408,7 @@ fn determine_token_auth_method(
     metadata: &OAuthServerMetadata,
     client_secret: Option<&String>,
 ) -> Result<String, String> {
-    let methods = &metadata.token_endpoint_auth_methods_supported;
-    if client_secret.is_some() {
-        if methods.is_empty() || methods.iter().any(|method| method == "client_secret_post") {
-            return Ok("client_secret_post".to_string());
-        }
-        if methods.iter().any(|method| method == "client_secret_basic") {
-            return Ok("client_secret_basic".to_string());
-        }
-        return Err(
-            "Authorization server does not support client_secret_post or client_secret_basic"
-                .to_string(),
-        );
-    }
-
-    if methods.is_empty() || methods.iter().any(|method| method == "none") {
-        return Ok("none".to_string());
-    }
-    Err("Authorization server requires client authentication. Supply --client-secret or configure a registered client.".to_string())
+    determine_token_endpoint_auth_method(metadata, client_secret.map(String::as_str))
 }
 
 fn build_authorization_url(
@@ -563,11 +455,16 @@ fn bind_callback_listener(redirect_uri: &str) -> Result<TcpListener, String> {
     Ok(listener)
 }
 
-fn wait_for_oauth_code(
+struct OAuthCallbackResponse {
+    code: String,
+    issuer: Option<String>,
+}
+
+fn wait_for_oauth_response(
     listener: TcpListener,
     redirect_uri: &str,
     expected_state: &str,
-) -> Result<String, String> {
+) -> Result<OAuthCallbackResponse, String> {
     let expected_path = Url::parse(redirect_uri)
         .map_err(|error| format!("Invalid redirect URI: {error}"))?
         .path()
@@ -615,11 +512,16 @@ fn wait_for_oauth_code(
     };
     let _ = stream.write_all(response.as_bytes());
 
-    callback_url
+    let code = callback_url
         .query_pairs()
         .find(|(key, _)| key == "code")
         .map(|(_, value)| value.into_owned())
-        .ok_or_else(|| "OAuth callback did not include an authorization code".to_string())
+        .ok_or_else(|| "OAuth callback did not include an authorization code".to_string())?;
+    let issuer = callback_url
+        .query_pairs()
+        .find(|(key, _)| key == "iss")
+        .map(|(_, value)| value.into_owned());
+    Ok(OAuthCallbackResponse { code, issuer })
 }
 
 async fn exchange_authorization_code(
@@ -660,10 +562,14 @@ struct AuthorizationCodeExchange<'a> {
     code_verifier: &'a str,
 }
 
-async fn refresh_token_if_needed(token: &StoredOAuthToken) -> Result<StoredOAuthToken, String> {
+async fn refresh_token_if_needed(
+    token: &StoredOAuthToken,
+    discovery: &OAuthDiscoveryResult,
+) -> Result<StoredOAuthToken, String> {
     if !token_needs_refresh(token) {
         return Ok(token.clone());
     }
+    validate_issuer_binding(&token.issuer, &discovery.issuer)?;
 
     let refresh_token = token.refresh_token.clone().ok_or_else(|| {
         "Stored OAuth token has expired and does not include a refresh token".to_string()
@@ -677,7 +583,7 @@ async fn refresh_token_if_needed(token: &StoredOAuthToken) -> Result<StoredOAuth
     ];
     let refreshed = request_token(
         &client,
-        &token.token_endpoint,
+        &discovery.metadata.token_endpoint,
         &token.token_endpoint_auth_method,
         &token.client_id,
         token.client_secret.as_deref(),
@@ -692,10 +598,11 @@ async fn refresh_token_if_needed(token: &StoredOAuthToken) -> Result<StoredOAuth
         expires_at_unix: refreshed
             .expires_in
             .map(|seconds| current_unix_timestamp().saturating_add(seconds)),
-        token_endpoint: token.token_endpoint.clone(),
+        token_endpoint: discovery.metadata.token_endpoint.clone(),
         client_id: token.client_id.clone(),
         client_secret: token.client_secret.clone(),
         token_endpoint_auth_method: token.token_endpoint_auth_method.clone(),
+        issuer: token.issuer.clone(),
         resource: token.resource.clone(),
         scopes: token.scopes.clone(),
     })
@@ -709,6 +616,7 @@ async fn request_token(
     client_secret: Option<&str>,
     form: &[(&str, String)],
 ) -> Result<TokenResponse, String> {
+    validate_token_endpoint_auth_method(token_auth_method)?;
     let mut request = client.post(token_endpoint).form(form);
     match token_auth_method {
         "client_secret_basic" => {
@@ -773,15 +681,21 @@ async fn save_stored_token(token: &StoredOAuthToken) -> Result<(), String> {
         .map_err(|error| format!("Failed to serialize OAuth token: {error}"))?;
     oauth_token_provider()
         .put(
-            &token_secret_id(&token.resource),
+            &token_secret_id(&token.resource, &token.issuer),
             SecretBytes::from(payload.into_bytes()),
         )
         .await
         .map_err(|error| format!("Failed to store OAuth token in keyring: {error}"))
 }
 
-async fn load_stored_token(resource: &str) -> Result<Option<StoredOAuthToken>, String> {
-    let payload = match oauth_token_provider().get(&token_secret_id(resource)).await {
+async fn load_stored_token(
+    resource: &str,
+    issuer: &str,
+) -> Result<Option<StoredOAuthToken>, String> {
+    let payload = match oauth_token_provider()
+        .get(&token_secret_id(resource, issuer))
+        .await
+    {
         Ok(secret) => secret,
         Err(harn_vm::secrets::SecretError::NotFound { .. }) => return Ok(None),
         Err(error) => return Err(format!("Failed to read OAuth token from keyring: {error}")),
@@ -792,15 +706,19 @@ async fn load_stored_token(resource: &str) -> Result<Option<StoredOAuthToken>, S
     Ok(Some(token))
 }
 
-async fn delete_stored_token(resource: &str) -> Result<(), String> {
+async fn delete_stored_token(resource: &str, issuer: &str) -> Result<(), String> {
     oauth_token_provider()
-        .delete(&token_secret_id(resource))
+        .delete(&token_secret_id(resource, issuer))
         .await
         .map_err(|error| format!("Failed to delete OAuth token from keyring: {error}"))
 }
 
-fn token_store_account(resource: &str) -> String {
-    let digest = Sha256::digest(resource.as_bytes());
+fn token_store_account(resource: &str, issuer: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(resource.as_bytes());
+    hasher.update([0]);
+    hasher.update(issuer.as_bytes());
+    let digest = hasher.finalize();
     format!(
         "mcp-{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
@@ -811,8 +729,8 @@ fn oauth_token_provider() -> KeyringSecretProvider {
     KeyringSecretProvider::new(KEYRING_SERVICE)
 }
 
-fn token_secret_id(resource: &str) -> SecretId {
-    SecretId::new("", token_store_account(resource))
+fn token_secret_id(resource: &str, issuer: &str) -> SecretId {
+    SecretId::new("", token_store_account(resource, issuer))
 }
 
 fn format_expiry(unix: i64) -> String {
@@ -837,6 +755,7 @@ fn html_response(status: u16, message: &str) -> String {
         400 => ("Authorization Failed", "#c76b19", "Retry Needed"),
         _ => ("Callback Error", "#b42318", "Invalid Request"),
     };
+    let message = html_escape(message);
     format!(
         r#"{status_line}
 Content-Type: text/html; charset=utf-8
@@ -877,18 +796,38 @@ p {{ margin: 0; color: #c6cfdb; font-size: 15px; line-height: 1.55; }}
     )
 }
 
+fn html_escape(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
 struct OAuthDiscoveryResult {
     metadata: OAuthServerMetadata,
+    issuer: String,
+    scopes: Vec<String>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_vm::mcp_auth::{
+        authorization_server_metadata_candidates, protected_resource_metadata_candidates,
+    };
 
     #[test]
     fn protected_resource_candidate_prefers_path_specific_url() {
         let url = Url::parse("https://example.com/mcp/notion").unwrap();
-        let candidates = protected_resource_candidates(&url);
+        let candidates = protected_resource_metadata_candidates(&url);
         assert_eq!(
             candidates[0].as_str(),
             "https://example.com/.well-known/oauth-protected-resource/mcp/notion"
@@ -902,21 +841,34 @@ mod tests {
     #[test]
     fn authorization_server_candidate_prefers_path_specific_metadata() {
         let url = Url::parse("https://auth.example.com/oauth").unwrap();
-        let candidates = authorization_server_candidates(&url);
+        let candidates = authorization_server_metadata_candidates(&url);
         assert_eq!(
-            candidates[0].as_str(),
+            candidates[0].url.as_str(),
             "https://auth.example.com/.well-known/oauth-authorization-server/oauth"
         );
         assert_eq!(
-            candidates[1].as_str(),
+            candidates[1].url.as_str(),
             "https://auth.example.com/.well-known/openid-configuration/oauth"
+        );
+        assert_eq!(
+            candidates[2].url.as_str(),
+            "https://auth.example.com/oauth/.well-known/openid-configuration"
         );
     }
 
     #[test]
     fn token_store_account_is_stable() {
-        let first = token_store_account("https://mcp.notion.com");
-        let second = token_store_account("https://mcp.notion.com");
+        let first = token_store_account("https://mcp.notion.com", "https://auth.example");
+        let second = token_store_account("https://mcp.notion.com", "https://auth.example");
+        let other = token_store_account("https://mcp.notion.com", "https://other.example");
         assert_eq!(first, second);
+        assert_ne!(first, other);
+    }
+
+    #[test]
+    fn callback_html_response_escapes_message() {
+        let response = html_response(400, "<script>alert('x')</script>&");
+        assert!(response.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;"));
+        assert!(!response.contains("<script>"));
     }
 }
