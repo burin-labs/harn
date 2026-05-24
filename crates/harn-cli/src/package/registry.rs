@@ -2,6 +2,17 @@ use super::errors::PackageError;
 use super::*;
 use semver::{Version, VersionReq};
 
+const PRESERVED_GIT_ENV: &[&str] = &[
+    "PATH",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PackageCacheMetadata {
     version: u32,
@@ -1173,6 +1184,61 @@ pub(crate) fn is_full_git_sha(value: &str) -> bool {
     value.len() == 40 && value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
 }
 
+struct HardenedGitEnv {
+    _temp_dir: tempfile::TempDir,
+    home: PathBuf,
+    config_home: PathBuf,
+    global_config: PathBuf,
+    system_config: PathBuf,
+}
+
+impl HardenedGitEnv {
+    fn new() -> Result<Self, PackageError> {
+        let temp_dir = tempfile::Builder::new()
+            .prefix("harn-git-env-")
+            .tempdir()
+            .map_err(|error| {
+                PackageError::Registry(format!("failed to create isolated git env: {error}"))
+            })?;
+        let home = temp_dir.path().join("home");
+        let config_home = temp_dir.path().join("xdg-config");
+        fs::create_dir_all(&home)
+            .map_err(|error| format!("failed to create {}: {error}", home.display()))?;
+        fs::create_dir_all(&config_home)
+            .map_err(|error| format!("failed to create {}: {error}", config_home.display()))?;
+        let global_config = home.join(".gitconfig");
+        let system_config = temp_dir.path().join("gitconfig-system");
+        Ok(Self {
+            _temp_dir: temp_dir,
+            home,
+            config_home,
+            global_config,
+            system_config,
+        })
+    }
+
+    fn apply_to(&self, command: &mut process::Command, cwd: Option<&Path>) {
+        if let Some(dir) = cwd {
+            command.current_dir(dir);
+        }
+        // Registry git URLs are untrusted input, so fetches must not inherit
+        // user Git config, credential helpers, SSH agents, or askpass hooks.
+        command.env_clear();
+        for name in PRESERVED_GIT_ENV {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+        command
+            .env("HOME", &self.home)
+            .env("XDG_CONFIG_HOME", &self.config_home)
+            .env("GIT_CONFIG_GLOBAL", &self.global_config)
+            .env("GIT_CONFIG_SYSTEM", &self.system_config)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0");
+    }
+}
+
 pub(crate) fn git_output<I, S>(
     args: I,
     cwd: Option<&Path>,
@@ -1181,15 +1247,11 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let git_env = HardenedGitEnv::new()?;
     let mut command = process::Command::new("git");
+    git_env.apply_to(&mut command, cwd);
     command.args(args);
-    if let Some(dir) = cwd {
-        command.current_dir(dir);
-    }
     command
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
         .output()
         .map_err(|error| PackageError::Registry(format!("failed to run git: {error}")))
 }
@@ -1901,6 +1963,52 @@ abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
     #[test]
     fn pick_ls_remote_commit_returns_none_on_empty_output() {
         assert_eq!(pick_ls_remote_commit(""), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hardened_git_env_scrubs_ambient_git_credentials_and_config() {
+        let git_env = HardenedGitEnv::new().unwrap();
+        let mut command = process::Command::new("/usr/bin/env");
+        command
+            .env("HOME", "/sensitive/home")
+            .env("XDG_CONFIG_HOME", "/sensitive/config")
+            .env("GIT_ASKPASS", "/sensitive/askpass")
+            .env("GIT_SSH_COMMAND", "ssh -i /sensitive/key")
+            .env("SSH_AUTH_SOCK", "/sensitive/agent.sock")
+            .env("GIT_CONFIG_COUNT", "1")
+            .env(
+                "GIT_CONFIG_KEY_0",
+                "http.https://attacker.example/.extraheader",
+            )
+            .env("GIT_CONFIG_VALUE_0", "Authorization: bearer secret");
+        git_env.apply_to(&mut command, None);
+
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "env probe failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let vars: std::collections::BTreeMap<_, _> = stdout
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+
+        assert_eq!(Path::new(&vars["HOME"]), git_env.home);
+        assert_eq!(Path::new(&vars["XDG_CONFIG_HOME"]), git_env.config_home);
+        assert_eq!(Path::new(&vars["GIT_CONFIG_GLOBAL"]), git_env.global_config);
+        assert_eq!(Path::new(&vars["GIT_CONFIG_SYSTEM"]), git_env.system_config);
+        assert_eq!(vars["GIT_CONFIG_NOSYSTEM"], "1");
+        assert_eq!(vars["GIT_TERMINAL_PROMPT"], "0");
+        assert!(!vars.contains_key("GIT_ASKPASS"));
+        assert!(!vars.contains_key("GIT_SSH_COMMAND"));
+        assert!(!vars.contains_key("SSH_AUTH_SOCK"));
+        assert!(!vars.contains_key("GIT_CONFIG_COUNT"));
+        assert!(!vars.contains_key("GIT_CONFIG_KEY_0"));
+        assert!(!vars.contains_key("GIT_CONFIG_VALUE_0"));
     }
 
     #[test]
