@@ -46,10 +46,14 @@ fn __payload(session, llm_result, iteration) {
   }
 }
 
-fn __should_skip(judge_cfg, llm_result, attempts, stall_warning) {
+fn __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations) {
   let max_attempts = judge_cfg?.max_attempts ?? 3
   if attempts >= max_attempts {
     return {skip: true, reason: "max_attempts_reached"}
+  }
+  let skip_when_iterations_remaining = judge_cfg?.skip_when_iterations_remaining ?? 1
+  if remaining_iterations != nil && remaining_iterations <= skip_when_iterations_remaining {
+    return {skip: true, reason: "low_iteration_budget"}
   }
   let skip_empty = judge_cfg?.skip_when_empty ?? true
   let text = llm_result?.text ?? ""
@@ -143,17 +147,21 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
   let usage = verdict?.typed_checkpoint?.usage ?? {}
   let provider = verdict?.typed_checkpoint?.provider ?? ""
   let model = verdict?.typed_checkpoint?.model ?? ""
-  let cost_est = estimate_call_cost(
-    {
-      provider: provider,
-      model: model,
-      input_tokens: usage?.input_tokens ?? 0,
-      output_tokens: usage?.output_tokens ?? 0,
-      cache_read_tokens: usage?.cache_read_tokens ?? 0,
-      cache_write_tokens: usage?.cache_write_tokens ?? 0,
-      calls: 1,
-    },
-  )
+  let cost_est = if provider != "" && model != "" {
+    estimate_call_cost(
+      {
+        provider: provider,
+        model: model,
+        input_tokens: usage?.input_tokens ?? 0,
+        output_tokens: usage?.output_tokens ?? 0,
+        cache_read_tokens: usage?.cache_read_tokens ?? 0,
+        cache_write_tokens: usage?.cache_write_tokens ?? 0,
+        calls: 1,
+      },
+    )
+  } else {
+    {cost_usd: 0}
+  }
   agent_emit_event(
     session_id,
     "step_judge_decision",
@@ -171,6 +179,8 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
       judge_duration_ms: verdict?.judge_duration_ms ?? 0,
       on_veto: on_veto,
       vetoed: verdict.vetoed,
+      skipped: verdict?.skipped ?? false,
+      reason: verdict?.reason,
       input_tokens: usage?.input_tokens ?? 0,
       output_tokens: usage?.output_tokens ?? 0,
       cost_usd: cost_est?.cost_usd ?? 0,
@@ -192,8 +202,12 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
  *
  * Skip-path returns `{vetoed: false, skipped: true, reason: ...}` so
  * the caller can treat skip and pass uniformly. Reasons:
- * `not_configured`, `max_attempts_reached`, `empty_response`,
- * `stall_already_detected`, `judge_error` (when fail_open).
+ * `not_configured`, `max_attempts_reached`, `low_iteration_budget`,
+ * `empty_response`, `stall_already_detected`, `judge_error` (when
+ * fail_open). `skip_when_iterations_remaining` defaults to `1`, so a
+ * configured step judge does not veto a turn when no regeneration turn
+ * remains. Configured skip paths emit `step_judge_decision` with
+ * `skipped: true`.
  *
  * @effects: [host]
  * @allocation: heap
@@ -201,20 +215,37 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
  * @api_stability: experimental
  * @example: agent_step_judge(session, llm_result, opts, iteration, stall_warning, attempts)
  */
-pub fn agent_step_judge(session, llm_result, opts, iteration = 0, stall_warning = nil, attempts = 0) {
+pub fn agent_step_judge(
+  session,
+  llm_result,
+  opts,
+  iteration = 0,
+  stall_warning = nil,
+  attempts = 0,
+  remaining_iterations = nil,
+) {
   let judge_cfg = opts?.step_judge
   if judge_cfg == nil {
     return {vetoed: false, skipped: true, reason: "not_configured"}
   }
-  let skip = __should_skip(judge_cfg, llm_result, attempts, stall_warning)
+  let on_veto = judge_cfg?.on_veto ?? "replace"
+  let skip = __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)
   if skip.skip {
-    return {vetoed: false, skipped: true, reason: skip.reason}
+    let verdict = {
+      vetoed: false,
+      skipped: true,
+      reason: skip.reason,
+      verdict: "pass",
+      critique: "",
+      reasoning: "",
+      confidence: 1.0,
+      judge_duration_ms: 0,
+    }
+    __emit_decision(session.session_id, iteration, on_veto, verdict)
+    return verdict + {on_veto: on_veto, attempts: attempts}
   }
   let payload = __payload(session, llm_result, iteration)
   let verdict = __invoke(harness, judge_cfg, opts, payload)
-  let on_veto = judge_cfg?.on_veto ?? "replace"
-  if !(verdict?.skipped ?? false) {
-    __emit_decision(session.session_id, iteration, on_veto, verdict)
-  }
+  __emit_decision(session.session_id, iteration, on_veto, verdict)
   return verdict + {on_veto: on_veto, attempts: attempts + 1}
 }

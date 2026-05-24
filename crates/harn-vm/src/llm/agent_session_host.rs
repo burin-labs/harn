@@ -1459,6 +1459,11 @@ fn build_agent_event(
                 .and_then(|m| m.get("vetoed"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            skipped: payload_obj
+                .and_then(|m| m.get("skipped"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            reason: get_opt_string("reason"),
             on_veto: get_string("on_veto"),
             input_tokens: payload_obj
                 .and_then(|m| m.get("input_tokens"))

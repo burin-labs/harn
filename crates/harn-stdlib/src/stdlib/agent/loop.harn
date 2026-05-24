@@ -1269,7 +1269,16 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
       }
       if turn_opts?.step_judge != nil {
-        let step_verdict = agent_step_judge(session, llm_result, turn_opts, turn_index + 1, stall_warning, step_judge_attempts)
+        let remaining_iterations = current_max - turn_index
+        let step_verdict = agent_step_judge(
+          session,
+          llm_result,
+          turn_opts,
+          turn_index + 1,
+          stall_warning,
+          step_judge_attempts,
+          remaining_iterations,
+        )
         if step_verdict.vetoed {
           step_judge_attempts = step_judge_attempts + 1
           let on_veto = step_verdict?.on_veto ?? "replace"

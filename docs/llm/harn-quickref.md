@@ -1783,6 +1783,14 @@ values must be positive integers, and `initial <= max`. Workflow stage
 `model_policy` accepts the same `iteration_budget` shape and passes it through
 to the per-stage `agent_loop`.
 
+`step_judge: {...}` runs a structured per-turn critique after an assistant
+turn and before tool dispatch. It can veto with `on_veto: "replace"` to remove
+the assistant turn before regeneration, or `"retain"` to leave it in the
+transcript. `skip_when_iterations_remaining` defaults to `1`, so single-turn
+or final-turn loops skip the judge instead of spending their last turn on a
+veto that cannot be regenerated. Skip decisions emit `step_judge_decision`
+with `skipped: true` and a stable `reason` such as `"low_iteration_budget"`.
+
 Pass `stop_after_successful_tools: ["name", ...]` to terminate the loop
 the moment any of those tools is dispatched successfully. Same shape as
 Vercel AI SDK's `stopWhen: hasToolCall(name)` and OpenAI Agents SDK's

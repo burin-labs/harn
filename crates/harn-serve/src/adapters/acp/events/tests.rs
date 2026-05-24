@@ -518,6 +518,38 @@ async fn protocol_conformance_agent_event_fixture_is_adapter_generated() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn step_judge_decision_agent_event_marks_skipped_reason() {
+    let actual = collect_notifications(vec![AgentEvent::StepJudgeDecision {
+        session_id: "session-1".to_string(),
+        iteration: 1,
+        verdict: "pass".to_string(),
+        reasoning: String::new(),
+        critique: String::new(),
+        confidence: 1.0,
+        judge_duration_ms: 0,
+        vetoed: false,
+        skipped: true,
+        reason: Some("low_iteration_budget".to_string()),
+        on_veto: "replace".to_string(),
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0.0,
+        provider: String::new(),
+        model: String::new(),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "step_judge_decision");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["skipped"], true);
+    assert_eq!(params["reason"], "low_iteration_budget");
+    assert_eq!(params["vetoed"], false);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn harn_extension_session_update_fixtures_are_pinned() {
     let actual = collect_notifications(extension_fixture_events()).await;
     let expected: serde_json::Value = serde_json::from_str(include_str!(
