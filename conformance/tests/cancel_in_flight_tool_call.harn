@@ -1,0 +1,21 @@
+/**
+ * Verifies `cancel_in_flight_tool_call` returns the right shape for the
+ * easy cases — not_found (no live call), bad input (empty call_id).
+ *
+ * Mid-flight cancellation (which depends on tokio task scheduling) is
+ * covered by harn-vm integration tests under
+ * `crates/harn-vm/tests/tool_call_cancellation.rs`. The conformance
+ * surface focuses on the deterministic return shape so the wire
+ * contract stays observable.
+ */
+pipeline main() {
+  let missing = cancel_in_flight_tool_call(
+    "no-such-session",
+    "no-such-call",
+    {reason: "nothing in flight", inject_reminder: false, timeout_ms: 0},
+  )
+  __io_println(missing.status)
+  __io_println(missing.call_id)
+  __io_println(missing.tool ?? "nil_tool")
+  __io_println(missing.reason)
+}

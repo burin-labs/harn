@@ -166,6 +166,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             "list": {},
             "resume": {},
             "restoreToolCall": {},
+            "cancelToolCall": {},
         })
     );
     assert!(init["result"]["agentCapabilities"]["sessionCapabilities"]

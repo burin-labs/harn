@@ -21,6 +21,7 @@ export const ACP_AGENT_METHODS = [
   "session/revoke_inject",
   "session/truncate",
   "session/remind",
+  "session/cancel_tool_call",
   "session/close",
   "session/stop",
 ] as const
@@ -37,6 +38,7 @@ export const ACP_AGENT_METHOD = {
   sessionRevokeInject: "session/revoke_inject",
   sessionTruncate: "session/truncate",
   sessionRemind: "session/remind",
+  sessionCancelToolCall: "session/cancel_tool_call",
   sessionClose: "session/close",
   /** @deprecated Use session/close; session/stop will be removed after one release. */
   sessionStop: "session/stop",

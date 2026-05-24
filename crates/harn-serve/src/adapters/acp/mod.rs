@@ -1268,6 +1268,52 @@ impl AcpServer {
         mark_cancelled_session(&self.session_cancellations, params);
     }
 
+    /// Targeted preemption: stop one in-flight tool call without tearing
+    /// down the whole session. Mirrors the `cancel_in_flight_tool_call`
+    /// Harn builtin so hosts have a single semantic across protocol and
+    /// in-VM call sites.
+    fn handle_session_cancel_tool_call(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = params.get("sessionId").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, "session/cancel_tool_call requires sessionId");
+            return;
+        };
+        let call_id = params
+            .get("toolCallId")
+            .or_else(|| params.get("tool_call_id"))
+            .or_else(|| params.get("callId"))
+            .or_else(|| params.get("call_id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if call_id.is_empty() {
+            self.send_error(id, -32602, "session/cancel_tool_call requires toolCallId");
+            return;
+        }
+        let reason = params
+            .get("reason")
+            .and_then(|value| value.as_str())
+            .unwrap_or("host cancelled in-flight tool call")
+            .to_string();
+        let inject_reminder = params
+            .get("injectReminder")
+            .or_else(|| params.get("inject_reminder"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true);
+        let outcome =
+            harn_vm::tool_call_cancellations::cancel(session_id, call_id, reason, inject_reminder);
+        let tool_name = outcome
+            .tool_name
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null);
+        self.send_response(
+            id,
+            serde_json::json!({
+                "status": outcome.status.as_str(),
+                "callId": call_id,
+                "tool": tool_name,
+            }),
+        );
+    }
+
     fn handle_session_close(
         &mut self,
         id: &serde_json::Value,
@@ -2442,6 +2488,12 @@ impl AcpServer {
             }
             "session/cancel" => {
                 self.handle_session_cancel(&params);
+            }
+            "session/cancel_tool_call" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_cancel_tool_call(&id, &params);
             }
             "session/close" => {
                 if self.reject_unauthenticated(&id) {

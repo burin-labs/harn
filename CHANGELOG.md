@@ -63,6 +63,21 @@ condensed series summaries instead of full per-patch history.
   debuggers/replay. The race-window described in the issue
   ("model wants tool, host injects stop, tool fires anyway") is now
   closed and covered by `crates/harn-vm/tests/agent_loop_steering_seams.rs`.
+- **Mid-tool preemption via `cancel_in_flight_tool_call` (#2213).** New
+  stdlib builtin `cancel_in_flight_tool_call(session_id, call_id, opts?)`
+  and matching ACP method `session/cancel_tool_call` let a host (or a
+  Harn script) abort one in-flight tool call without tearing down the
+  session — perfect for "stop the `git push --force` I just saw the
+  model emit" without losing the rest of the agent state. The cancelled
+  call returns to the loop shaped as `status: "cancelled"` (distinct
+  from `status: "error"`) so the model can tell "the host stopped me"
+  from "the tool errored." Options cover the human-facing `reason`
+  (surfaced to the model on resumption), `inject_reminder` (default
+  `true`, queues a system reminder explaining the cancel), and
+  `timeout_ms` (default `5000`, returns `status: "timeout"` if the
+  dispatch hasn't unwound). Both surfaces share a per-call cancellation
+  registry keyed by `(session_id, call_id)`; the bridge stdio path also
+  honors `session/cancel_tool_call` notifications.
 - **`agent_session_push_bridge_injection(session_id, options)`.** Inverse
   of `agent_session_drain_bridge_injections` — lets a Harn-driven host
   (custom CLI, conformance test, trigger connector) queue a reminder onto

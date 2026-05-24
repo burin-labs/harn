@@ -1,9 +1,10 @@
 //! Agent / orchestration / sub-agent builtin signatures.
 
 use super::shapes::{
-    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, AGENT_SPAWN_CONFIG, LLM_CALL_OPTIONS,
-    LLM_CALL_RESULT, LLM_CALL_SAFE_RESULT, RESUME_CONDITIONS_OR_NIL, SESSION_ANCESTRY,
-    SESSION_SNAPSHOT, SUB_AGENT_OPTIONS, SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
+    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, AGENT_SPAWN_CONFIG,
+    CANCEL_IN_FLIGHT_TOOL_CALL_OPTS, LLM_CALL_OPTIONS, LLM_CALL_RESULT, LLM_CALL_SAFE_RESULT,
+    RESUME_CONDITIONS_OR_NIL, SESSION_ANCESTRY, SESSION_SNAPSHOT, SUB_AGENT_OPTIONS,
+    SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
@@ -327,6 +328,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("status", TY_STRING_OR_DICT),
         ],
         TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "cancel_in_flight_tool_call",
+        &[
+            Param::new("session_id", TY_STRING),
+            Param::new("call_id", TY_STRING),
+            Param::optional("opts", CANCEL_IN_FLIGHT_TOOL_CALL_OPTS),
+        ],
+        TY_DICT,
     ),
     BuiltinSignature::simple(
         "agent_session_compact",

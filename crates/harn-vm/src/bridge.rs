@@ -619,6 +619,44 @@ fn session_remind_payload_from_value(
     })
 }
 
+/// Parse the params of a `session/cancel_tool_call` notification and fire
+/// the per-tool-call cancellation. Mirrors the shape used by the public
+/// `cancel_in_flight_tool_call` builtin so hosts have one wire format
+/// regardless of which surface they came through.
+///
+/// Stdio bridges send this as a notification (no id, no response); the
+/// builtin handles request/response semantics in Harn. We deliberately
+/// drop malformed payloads silently because notifications can't reply
+/// with an error — logging would also be too noisy for partial drops.
+fn handle_cancel_tool_call_notification(params: &serde_json::Value) {
+    let session_id = params
+        .get("sessionId")
+        .or_else(|| params.get("session_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let call_id = params
+        .get("toolCallId")
+        .or_else(|| params.get("tool_call_id"))
+        .or_else(|| params.get("callId"))
+        .or_else(|| params.get("call_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    if call_id.is_empty() {
+        return;
+    }
+    let reason = params
+        .get("reason")
+        .and_then(|value| value.as_str())
+        .unwrap_or("host cancelled in-flight tool call")
+        .to_string();
+    let inject_reminder = params
+        .get("injectReminder")
+        .or_else(|| params.get("inject_reminder"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    crate::tool_call_cancellations::cancel(session_id, call_id, reason, inject_reminder);
+}
+
 fn queued_session_remind_from_params(params: &serde_json::Value) -> Result<QueuedReminder, String> {
     let mode = QueuedUserMessageMode::from_str(
         params
@@ -701,6 +739,8 @@ impl HostBridge {
                             if let Ok(reminder) = queued_session_remind_from_params(params) {
                                 queued_clone.push_session_reminder(reminder).await;
                             }
+                        } else if method == "session/cancel_tool_call" {
+                            handle_cancel_tool_call_notification(&msg["params"]);
                         }
                     }
                     continue;

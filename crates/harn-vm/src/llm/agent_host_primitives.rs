@@ -221,6 +221,56 @@ fn agent_primitive_denied_tool(
     })
 }
 
+/// Build the `tool_result` shape used when a call was preempted by
+/// `cancel_in_flight_tool_call`. Distinct from `agent_primitive_denied_tool`
+/// so the model can tell "user stopped me mid-run" from "the tool errored".
+fn agent_primitive_cancelled_tool(
+    tool_name: &str,
+    tool_call_id: &str,
+    tool_args: &serde_json::Value,
+    reason: &str,
+    executor: Option<serde_json::Value>,
+    execution_duration_ms: u64,
+    approval_status: Option<&'static str>,
+) -> serde_json::Value {
+    let rendered = if reason.is_empty() {
+        format!("[cancelled in-flight: {tool_name}]")
+    } else {
+        format!("[cancelled in-flight: {tool_name}] {reason}")
+    };
+    let observation = format!(
+        "[cancelled call to {name}]\n{reason}\n[end of {name} cancellation]\n",
+        name = tool_name,
+        reason = if reason.is_empty() {
+            "cancelled by host"
+        } else {
+            reason
+        },
+    );
+    let error_message = if reason.is_empty() {
+        format!("tool call cancelled in-flight: {tool_name}")
+    } else {
+        format!("tool call cancelled in-flight: {reason}")
+    };
+    serde_json::json!({
+        "ok": false,
+        "status": "cancelled",
+        "tool_name": tool_name,
+        "tool_call_id": tool_call_id,
+        "arguments": tool_args,
+        "result": serde_json::Value::Null,
+        "rendered_result": rendered,
+        "observation": observation,
+        "error": error_message,
+        "error_category": crate::agent_events::ToolCallErrorCategory::Cancelled.as_str(),
+        "executor": executor,
+        "approval": approval_status,
+        "execution_duration_ms": execution_duration_ms,
+        "cancelled": true,
+        "cancellation_reason": reason,
+    })
+}
+
 fn attach_hook_reminder_audit(
     mut result: serde_json::Value,
     reports: Vec<serde_json::Value>,
@@ -742,7 +792,14 @@ async fn host_agent_dispatch_tool_call(
     } else {
         Some(&session_mcp)
     };
-    let outcome = crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
+    let (cancel_handle, _cancel_guard) = crate::tool_call_cancellations::register(
+        session_id.clone(),
+        tool_id.clone(),
+        tool_name.clone(),
+    )
+    .map(|(handle, guard)| (Some(handle), Some(guard)))
+    .unwrap_or((None, None));
+    let dispatch_future = crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
         agent_tools::dispatch_tool_execution_with_mcp(
             &tool_name,
             &tool_args,
@@ -753,13 +810,71 @@ async fn host_agent_dispatch_tool_call(
             tool_backoff_ms,
         )
         .await
-    })
-    .await;
+    });
+    let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {
+        Some(handle) => {
+            // Race the dispatch against the cancellation signal. When the
+            // signal wins, the dispatch future is dropped immediately — the
+            // tool's own resources unwind via tokio's drop guarantees.
+            // Tools that hold non-droppable state (long-lived subprocesses)
+            // can additionally honor the per-call handle through
+            // `crate::tool_call_cancellations::lookup` to coordinate
+            // graceful shutdown.
+            //
+            // The dispatch arm is `biased`, so a dispatch that finishes in
+            // the same tick as cancellation still wins — the side effect
+            // already landed, so reporting "cancelled" then would lie about
+            // what actually happened.
+            let cancel_wait = handle.cancelled();
+            tokio::pin!(cancel_wait);
+            tokio::pin!(dispatch_future);
+            tokio::select! {
+                biased;
+                outcome = &mut dispatch_future => (outcome, false),
+                _ = &mut cancel_wait => (
+                    agent_tools::ToolDispatchOutcome {
+                        result: Err(VmError::CategorizedError {
+                            message: handle
+                                .reason()
+                                .unwrap_or_else(|| "tool call cancelled in-flight".to_string()),
+                            category: crate::value::ErrorCategory::Cancelled,
+                        }),
+                        executor: None,
+                    },
+                    true,
+                ),
+            }
+        }
+        None => (dispatch_future.await, false),
+    };
     let execution_duration_ms = started.elapsed().as_millis() as u64;
     let executor = outcome
         .executor
         .as_ref()
         .and_then(|executor| serde_json::to_value(executor).ok());
+
+    // If the dispatch was actually preempted by `cancel_in_flight_tool_call`,
+    // surface a `status: "cancelled"` tool_result rather than tearing down
+    // the loop the way a session-wide cancel would. Honors the user's
+    // intent without lying about side effects that may have already
+    // landed before the cancel arrived (the dispatch arm above wins ties).
+    if preempted_by_cancel {
+        let reason = cancel_handle
+            .as_ref()
+            .and_then(|handle| handle.reason())
+            .unwrap_or_default();
+        let cancelled = agent_primitive_cancelled_tool(
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            &reason,
+            executor.clone(),
+            execution_duration_ms,
+            approval_status,
+        );
+        let cancelled = attach_hook_reminder_audit(cancelled, hook_reminder_reports);
+        return Ok(json_to_vm_value(&cancelled));
+    }
 
     match outcome.result {
         Ok(raw_result) => {

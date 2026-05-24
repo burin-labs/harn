@@ -122,13 +122,24 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     .doc("Seed a new agent session from an LLM transcript JSONL sidecar."),
 ];
 
-const AGENT_SESSION_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
-    &[
-        async_builtin!("agent_session_compact", agent_session_compact_builtin)
-            .signature("agent_session_compact(id, opts?)")
-            .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-            .doc("Compact an agent session transcript with the host compaction runtime."),
-    ];
+const AGENT_SESSION_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
+    async_builtin!("agent_session_compact", agent_session_compact_builtin)
+        .signature("agent_session_compact(id, opts?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Compact an agent session transcript with the host compaction runtime."),
+    async_builtin!(
+        "cancel_in_flight_tool_call",
+        cancel_in_flight_tool_call_builtin
+    )
+    .signature("cancel_in_flight_tool_call(session_id, call_id, opts?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+    .doc(
+        "Abort a specific in-flight tool call. Targets one call rather \
+         than the whole session — returns {status, call_id, tool} where \
+         status is \"cancelled\", \"already_cancelled\", \"not_found\", \
+         or \"timeout\".",
+    ),
+];
 
 const AGENT_SESSION_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("agent.session")
@@ -806,6 +817,126 @@ fn record_agent_session_compaction(
         compaction_policy: config.policy.metadata_json(),
     });
     Ok(())
+}
+
+const CANCEL_TOOL_CALL_OPT_KEYS: &[&str] = &["reason", "inject_reminder", "timeout_ms"];
+
+/// Default grace period (in milliseconds) for `cancel_in_flight_tool_call`
+/// to wait for the dispatch to unwind before returning `timeout`. Matches
+/// the issue spec (#2213).
+const CANCEL_TOOL_CALL_DEFAULT_TIMEOUT_MS: i64 = 5_000;
+
+async fn cancel_in_flight_tool_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = arg_string_required(&args, 0, "cancel_in_flight_tool_call", "session_id")?;
+    let call_id = arg_string_required(&args, 1, "cancel_in_flight_tool_call", "call_id")?;
+    if call_id.trim().is_empty() {
+        return Err(err(
+            "cancel_in_flight_tool_call: `call_id` must be non-empty",
+        ));
+    }
+    let opts = opts_dict_arg(&args, 2, "cancel_in_flight_tool_call")?;
+    for key in opts.keys() {
+        if !CANCEL_TOOL_CALL_OPT_KEYS.contains(&key.as_str()) {
+            let expected = CANCEL_TOOL_CALL_OPT_KEYS.join(", ");
+            return Err(err(format!(
+                "cancel_in_flight_tool_call: unknown option key '{key}' (expected one of: {expected})"
+            )));
+        }
+    }
+    let reason = opt_string(&opts, "cancel_in_flight_tool_call", "reason")?
+        .unwrap_or_else(|| "host cancelled in-flight tool call".to_string());
+    let inject_reminder =
+        arg_bool_opt(&opts, "cancel_in_flight_tool_call", "inject_reminder", true)?;
+    let timeout_ms = match opts.get("timeout_ms") {
+        None | Some(VmValue::Nil) => CANCEL_TOOL_CALL_DEFAULT_TIMEOUT_MS,
+        Some(value) => value
+            .as_int()
+            .ok_or_else(|| err("cancel_in_flight_tool_call: `timeout_ms` must be an int"))?,
+    };
+    if timeout_ms < 0 {
+        return Err(err("cancel_in_flight_tool_call: `timeout_ms` must be >= 0"));
+    }
+
+    let outcome = crate::tool_call_cancellations::cancel(
+        &session_id,
+        &call_id,
+        reason.clone(),
+        inject_reminder,
+    );
+
+    if matches!(
+        outcome.status,
+        crate::tool_call_cancellations::CancelStatus::Cancelled
+    ) && inject_reminder
+    {
+        push_cancellation_reminder(&session_id, &call_id, outcome.tool_name.as_deref(), &reason)
+            .await;
+    }
+
+    let mut final_status = outcome.status.as_str();
+    if matches!(
+        outcome.status,
+        crate::tool_call_cancellations::CancelStatus::Cancelled
+    ) {
+        if let Some(handle) = outcome.handle.as_ref() {
+            if timeout_ms > 0 {
+                let timeout = std::time::Duration::from_millis(timeout_ms as u64);
+                let wait_result = tokio::time::timeout(timeout, handle.completed()).await;
+                if wait_result.is_err() && !handle.is_completed() {
+                    final_status = "timeout";
+                }
+            }
+        }
+    }
+
+    let mut result = BTreeMap::new();
+    result.insert(
+        "status".to_string(),
+        VmValue::String(Rc::from(final_status)),
+    );
+    result.insert("call_id".to_string(), VmValue::String(Rc::from(call_id)));
+    result.insert(
+        "tool".to_string(),
+        outcome
+            .tool_name
+            .map(|name| VmValue::String(Rc::from(name)))
+            .unwrap_or(VmValue::Nil),
+    );
+    result.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
+    Ok(VmValue::Dict(Rc::new(result)))
+}
+
+async fn push_cancellation_reminder(
+    session_id: &str,
+    call_id: &str,
+    tool_name: Option<&str>,
+    reason: &str,
+) {
+    let Some(bridge) = crate::llm::current_host_bridge() else {
+        return;
+    };
+    let body = match tool_name {
+        Some(name) => {
+            format!("Tool call `{name}` (call_id={call_id}) was cancelled by the host: {reason}")
+        }
+        None => format!("Tool call call_id={call_id} was cancelled by the host: {reason}"),
+    };
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "mode": "interrupt_immediate",
+        "reminder": {
+            "id": uuid::Uuid::now_v7().to_string(),
+            "tags": ["tool_call_cancelled"],
+            "dedupe_key": format!("cancel:{call_id}"),
+            "preserve_on_compact": false,
+            "propagate": "session",
+            "role_hint": "system",
+            "source": "bridge",
+            "body": body,
+            "fired_at_turn": 0,
+        }
+    });
+    let _ = bridge.push_queued_session_remind_from_params(&params).await;
 }
 
 fn compact_usize_opt(

@@ -36,6 +36,7 @@ const ACP_AGENT_METHODS: &[&str] = &[
     "session/revoke_inject",
     "session/truncate",
     "session/remind",
+    "session/cancel_tool_call",
     "session/close",
     "session/stop",
 ];

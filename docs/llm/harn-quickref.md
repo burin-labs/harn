@@ -2303,6 +2303,17 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`,
   compaction, accepts the same compaction policy fields as
   `transcript_auto_compact`, and errors on unknown option keys.
 - `agent_session_length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
+- `cancel_in_flight_tool_call(session_id, call_id, opts?)` — abort one
+  in-flight tool call without closing the session. `opts.reason` is
+  surfaced to the model, `opts.inject_reminder` (default `true`) queues
+  a system reminder so the model knows it was stopped, and
+  `opts.timeout_ms` (default `5000`) bounds how long to wait for the
+  dispatch to unwind. Returns
+  `{status, call_id, tool, reason}` where status is `"cancelled"`,
+  `"already_cancelled"`, `"not_found"`, or `"timeout"`. The cancelled
+  call returns to the loop as `status: "cancelled"` so the model can
+  distinguish "the host stopped me" from "the tool errored". The same
+  surface is exposed over ACP as `session/cancel_tool_call`.
 
 Session snapshots include `metadata.transcript_budget` after hard retention
 budget pressure. `last_action` records whether Harn rejected, trimmed, or

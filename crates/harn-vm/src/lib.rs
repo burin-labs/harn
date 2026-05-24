@@ -76,6 +76,7 @@ pub(crate) mod synchronization;
 pub mod tenant;
 pub mod testbench;
 pub mod tool_annotations;
+pub mod tool_call_cancellations;
 pub mod tool_surface;
 pub mod tracing;
 pub mod triggers;
