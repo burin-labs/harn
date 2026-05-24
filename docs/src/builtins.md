@@ -1034,7 +1034,10 @@ CIDR ranges (`127.0.0.0/8`), and optional port restrictions
 (`api.example.com:443`). Deny rules override allow rules; `default: "deny"`
 turns the policy into an allowlist. Operators can seed the same policy without
 editing scripts via comma-separated `HARN_EGRESS_ALLOW`, `HARN_EGRESS_DENY`,
-and `HARN_EGRESS_DEFAULT=deny`.
+and `HARN_EGRESS_DEFAULT=deny`. Under default `harn run`, the worktree
+sandbox denies network side effects before destination policy is consulted;
+use `egress_policy(...)` for network-enabled host policies or explicit
+`--no-sandbox` runs.
 
 ```harn
 pipeline main(task) {

@@ -373,6 +373,41 @@ impl RunProfileOptions {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunSandboxOptions {
+    /// Install the default `harn run` sandbox for this invocation.
+    pub enabled: bool,
+    /// Override the workspace root used by the default sandbox. This is
+    /// intended for host-generated scripts whose source file lives outside
+    /// the workspace they operate on.
+    pub workspace_root: Option<PathBuf>,
+}
+
+impl Default for RunSandboxOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            workspace_root: None,
+        }
+    }
+}
+
+impl RunSandboxOptions {
+    /// Disable the default direct-run sandbox and egress guard.
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            workspace_root: None,
+        }
+    }
+
+    /// Constrain the default sandbox to an explicit workspace root.
+    pub fn with_workspace_root(mut self, workspace_root: impl Into<PathBuf>) -> Self {
+        self.workspace_root = Some(workspace_root.into());
+        self
+    }
+}
+
 #[derive(Clone)]
 pub struct RunInterruptTokens {
     pub cancel_token: Arc<AtomicBool>,
@@ -388,6 +423,7 @@ struct ExecuteRunInputs<'a> {
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
+    sandbox: RunSandboxOptions,
     interrupt_tokens: Option<RunInterruptTokens>,
     json: Option<(RunJsonOptions, Box<dyn io::Write + Send>)>,
     timing: Option<&'a mut RunTiming>,
@@ -466,6 +502,7 @@ pub(crate) async fn run_file(
         llm_mock_mode,
         attestation,
         profile,
+        RunSandboxOptions::default(),
         None,
         HarnpackRunOptions::default(),
     )
@@ -495,6 +532,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
+    sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
     harnpack: HarnpackRunOptions,
 ) {
@@ -513,6 +551,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         llm_mock_mode,
         attestation,
         profile,
+        sandbox,
         interrupt_tokens: Some(interrupt_tokens.clone()),
         json: json_with_stdout,
         timing: None,
@@ -548,6 +587,7 @@ pub(crate) async fn run_resume_with_skill_dirs(
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
+    sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
 ) {
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
@@ -584,6 +624,7 @@ pipeline main(task) {
         llm_mock_mode,
         attestation,
         profile,
+        sandbox,
         json,
         HarnpackRunOptions::default(),
     )
@@ -638,6 +679,113 @@ impl Drop for StdoutPassthroughGuard {
     fn drop(&mut self) {
         harn_vm::set_stdout_passthrough(self.previous);
     }
+}
+
+struct ExecutionPolicyGuard;
+
+impl Drop for ExecutionPolicyGuard {
+    fn drop(&mut self) {
+        harn_vm::orchestration::pop_execution_policy();
+    }
+}
+
+struct RunSandboxScope {
+    _execution_policy: Option<ExecutionPolicyGuard>,
+    _egress_policy: Option<harn_vm::egress::ExplicitEgressPolicyGuard>,
+}
+
+impl RunSandboxScope {
+    fn disabled() -> Self {
+        Self {
+            _execution_policy: None,
+            _egress_policy: None,
+        }
+    }
+}
+
+fn install_run_sandbox_scope(
+    options: &RunSandboxOptions,
+    workspace_root: &Path,
+    stderr: &mut String,
+) -> RunSandboxScope {
+    if !options.enabled {
+        stderr.push_str(
+            "warning: harn run --no-sandbox disables filesystem, process, and egress sandbox defaults\n",
+        );
+        return RunSandboxScope::disabled();
+    }
+
+    let execution_policy = if harn_vm::orchestration::current_execution_policy().is_none() {
+        harn_vm::orchestration::push_execution_policy(default_run_capability_policy(
+            workspace_root,
+        ));
+        Some(ExecutionPolicyGuard)
+    } else {
+        None
+    };
+    let egress_policy = Some(harn_vm::egress::require_explicit_egress_policy_for_host());
+
+    RunSandboxScope {
+        _execution_policy: execution_policy,
+        _egress_policy: egress_policy,
+    }
+}
+
+fn default_run_capability_policy(
+    workspace_root: &Path,
+) -> harn_vm::orchestration::CapabilityPolicy {
+    harn_vm::orchestration::CapabilityPolicy {
+        workspace_roots: vec![normalize_run_workspace_root(workspace_root)
+            .display()
+            .to_string()],
+        side_effect_level: Some("process_exec".to_string()),
+        sandbox_profile: harn_vm::orchestration::SandboxProfile::Worktree,
+        ..harn_vm::orchestration::CapabilityPolicy::default()
+    }
+}
+
+fn normalize_run_workspace_root(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn default_run_workspace_root(project_root: Option<&Path>, source_parent: &Path) -> PathBuf {
+    project_root
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| source_parent.to_path_buf())
+}
+
+fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json::Value {
+    let active_policy = harn_vm::orchestration::current_execution_policy();
+    let active = active_policy.is_some();
+    let workspace_roots = active_policy
+        .as_ref()
+        .map(|policy| policy.workspace_roots.clone())
+        .unwrap_or_default();
+    let profile = active_policy
+        .as_ref()
+        .map(|policy| policy.sandbox_profile.as_str())
+        .unwrap_or("unrestricted");
+    let egress = if sandbox.enabled {
+        "explicit_policy_required"
+    } else if active {
+        "host_policy"
+    } else {
+        "unrestricted"
+    };
+
+    serde_json::json!({
+        "run_default_enabled": sandbox.enabled,
+        "active": active,
+        "workspace_roots": workspace_roots,
+        "profile": profile,
+        "egress": egress,
+    })
 }
 
 // User-facing copy on Ctrl-C. We want the operator to know that a brief
@@ -720,7 +868,7 @@ pub async fn execute_run(
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
 ) -> RunOutcome {
-    execute_run_with_harnpack_options(
+    execute_run_with_harnpack_and_sandbox_options(
         path,
         trace,
         denied_builtins,
@@ -729,6 +877,37 @@ pub async fn execute_run(
         llm_mock_mode,
         attestation,
         profile,
+        RunSandboxOptions::default(),
+        HarnpackRunOptions::default(),
+    )
+    .await
+}
+
+/// [`execute_run`] with an explicit sandbox policy override for in-process
+/// callers whose source path is intentionally outside the workspace they
+/// operate on.
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_run_with_sandbox_options(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
+    sandbox: RunSandboxOptions,
+) -> RunOutcome {
+    execute_run_with_harnpack_and_sandbox_options(
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        sandbox,
         HarnpackRunOptions::default(),
     )
     .await
@@ -750,6 +929,34 @@ pub async fn execute_run_with_harnpack_options(
     profile: RunProfileOptions,
     harnpack: HarnpackRunOptions,
 ) -> RunOutcome {
+    execute_run_with_harnpack_and_sandbox_options(
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        RunSandboxOptions::default(),
+        harnpack,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_run_with_harnpack_and_sandbox_options(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
+    sandbox: RunSandboxOptions,
+    harnpack: HarnpackRunOptions,
+) -> RunOutcome {
     execute_run_inner(ExecuteRunInputs {
         path,
         trace,
@@ -759,6 +966,7 @@ pub async fn execute_run_with_harnpack_options(
         llm_mock_mode,
         attestation,
         profile,
+        sandbox,
         interrupt_tokens: None,
         json: None,
         timing: None,
@@ -794,6 +1002,7 @@ pub async fn execute_run_json(
         llm_mock_mode,
         attestation,
         profile,
+        sandbox: RunSandboxOptions::default(),
         interrupt_tokens: None,
         json: Some((options, out)),
         timing: None,
@@ -809,6 +1018,7 @@ pub(crate) async fn execute_run_with_timing(
     path: &str,
     script_argv: Vec<String>,
     timing: Option<&mut RunTiming>,
+    sandbox: RunSandboxOptions,
 ) -> RunOutcome {
     execute_run_inner(ExecuteRunInputs {
         path,
@@ -819,6 +1029,7 @@ pub(crate) async fn execute_run_with_timing(
         llm_mock_mode: CliLlmMockMode::Off,
         attestation: None,
         profile: RunProfileOptions::default(),
+        sandbox,
         interrupt_tokens: None,
         json: None,
         timing,
@@ -840,6 +1051,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         llm_mock_mode,
         attestation,
         profile,
+        sandbox,
         interrupt_tokens,
         json,
         mut timing,
@@ -932,6 +1144,11 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     // Metadata/store rooted at harn.toml when present; source dir otherwise.
     let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
     let store_base = project_root.as_deref().unwrap_or(source_parent);
+    let sandbox_root = sandbox
+        .workspace_root
+        .clone()
+        .unwrap_or_else(|| default_run_workspace_root(project_root.as_deref(), source_parent));
+    let _sandbox_scope = install_run_sandbox_scope(&sandbox, &sandbox_root, &mut stderr);
     let attestation_started_at_ms = now_ms();
     let attestation_log = if attestation.is_some() {
         Some(harn_vm::event_log::install_memory_for_current_thread(256))
@@ -946,6 +1163,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 "pipeline": path,
                 "argv": &script_argv,
                 "project_root": store_base.display().to_string(),
+                "sandbox": run_sandbox_attestation(&sandbox),
             }),
         )
         .await;
@@ -1815,11 +2033,14 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
 
 #[cfg(test)]
 mod tests {
+    use super::harnpack::HarnpackRunOptions;
     use super::{
-        execute_explain_cost, execute_run, split_eval_header, CliLlmMockMode, RunProfileOptions,
-        StdoutPassthroughGuard,
+        default_run_workspace_root, execute_explain_cost, execute_run,
+        execute_run_with_harnpack_and_sandbox_options, run_sandbox_attestation, split_eval_header,
+        CliLlmMockMode, RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
     };
     use std::collections::HashSet;
+    use std::path::Path;
 
     #[test]
     fn split_eval_header_no_imports_returns_full_body() {
@@ -1908,6 +2129,197 @@ pipeline main() {
         );
     }
 
+    #[test]
+    fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
+        let project = tempfile::TempDir::new().expect("project");
+        let source_parent = project.path().join("scripts");
+        let cwd = std::env::current_dir().expect("cwd");
+
+        assert_eq!(
+            default_run_workspace_root(Some(project.path()), &source_parent),
+            project.path()
+        );
+        assert_eq!(default_run_workspace_root(None, Path::new("scripts")), cwd);
+    }
+
+    #[test]
+    fn run_sandbox_attestation_reports_effective_policy() {
+        harn_vm::reset_thread_local_state();
+        let policy = harn_vm::orchestration::CapabilityPolicy {
+            workspace_roots: vec!["/tmp/workspace".to_string()],
+            sandbox_profile: harn_vm::orchestration::SandboxProfile::OsHardened,
+            ..harn_vm::orchestration::CapabilityPolicy::default()
+        };
+        harn_vm::orchestration::push_execution_policy(policy);
+
+        let metadata = run_sandbox_attestation(&RunSandboxOptions::disabled());
+
+        assert_eq!(metadata["run_default_enabled"], false);
+        assert_eq!(metadata["active"], true);
+        assert_eq!(metadata["workspace_roots"][0], "/tmp/workspace");
+        assert_eq!(metadata["profile"], "os_hardened");
+        assert_eq!(metadata["egress"], "host_policy");
+        harn_vm::reset_thread_local_state();
+    }
+
+    #[tokio::test]
+    async fn execute_run_default_sandbox_reports_worktree_profile() {
+        harn_vm::reset_thread_local_state();
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let script = temp.path().join("main.harn");
+        std::fs::write(
+            &script,
+            r#"
+pipeline main() {
+  __io_println(sandbox_active_profile())
+}
+"#,
+        )
+        .expect("write script");
+
+        let outcome = execute_run(
+            &script.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+        )
+        .await;
+
+        assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+        assert_eq!(outcome.stdout.trim(), "worktree");
+        harn_vm::reset_thread_local_state();
+    }
+
+    #[tokio::test]
+    async fn execute_run_default_sandbox_blocks_outside_workspace_read() {
+        harn_vm::reset_thread_local_state();
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        let outside = temp.path().join("outside.txt");
+        std::fs::create_dir(&project).expect("create project");
+        std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+        std::fs::write(&outside, "secret").expect("write outside");
+        let script = project.join("main.harn");
+        let outside_literal = outside.to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            &script,
+            format!(
+                r#"
+pipeline main() {{
+  __io_println(sandbox_active_profile())
+  let _ = read_file("{}")
+}}
+"#,
+                outside_literal
+            ),
+        )
+        .expect("write script");
+
+        let outcome = execute_run(
+            &script.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+        )
+        .await;
+
+        assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
+        assert!(
+            outcome.stderr.contains("sandbox violation"),
+            "stderr:\n{}",
+            outcome.stderr
+        );
+        harn_vm::reset_thread_local_state();
+    }
+
+    #[tokio::test]
+    async fn execute_run_no_sandbox_allows_outside_workspace_read() {
+        harn_vm::reset_thread_local_state();
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        let outside = temp.path().join("outside.txt");
+        std::fs::create_dir(&project).expect("create project");
+        std::fs::write(&outside, "secret").expect("write outside");
+        let script = project.join("main.harn");
+        let outside_literal = outside.to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            &script,
+            format!(
+                r#"
+pipeline main() {{
+  __io_println(sandbox_active_profile())
+  __io_println(read_file("{}"))
+}}
+"#,
+                outside_literal
+            ),
+        )
+        .expect("write script");
+
+        let outcome = execute_run_with_harnpack_and_sandbox_options(
+            &script.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+            RunSandboxOptions::disabled(),
+            HarnpackRunOptions::default(),
+        )
+        .await;
+
+        assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+        assert_eq!(outcome.stdout.trim(), "unrestricted\nsecret");
+        assert!(outcome.stderr.contains("--no-sandbox"));
+        harn_vm::reset_thread_local_state();
+    }
+
+    #[tokio::test]
+    async fn execute_run_denies_network_by_default() {
+        harn_vm::reset_thread_local_state();
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let script = temp.path().join("main.harn");
+        std::fs::write(
+            &script,
+            r#"
+pipeline main() {
+  let _ = http_get("https://example.com/")
+}
+"#,
+        )
+        .expect("write script");
+
+        let outcome = execute_run(
+            &script.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+        )
+        .await;
+
+        assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
+        assert!(
+            outcome.stderr.contains("exceeds network ceiling"),
+            "stderr:\n{}",
+            outcome.stderr
+        );
+        harn_vm::reset_thread_local_state();
+    }
+
     #[cfg(feature = "hostlib")]
     #[tokio::test]
     async fn execute_run_installs_hostlib_gate() {
@@ -1968,7 +2380,7 @@ pipeline main() {
         )
         .expect("write script");
 
-        let outcome = execute_run(
+        let outcome = execute_run_with_harnpack_and_sandbox_options(
             &temp.path().to_string_lossy(),
             false,
             HashSet::new(),
@@ -1977,6 +2389,8 @@ pipeline main() {
             CliLlmMockMode::Off,
             None,
             RunProfileOptions::default(),
+            RunSandboxOptions::disabled(),
+            HarnpackRunOptions::default(),
         )
         .await;
 

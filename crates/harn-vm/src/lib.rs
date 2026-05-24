@@ -386,6 +386,7 @@ pub fn reset_thread_local_state() {
     http::reset_http_state();
     channels::reset_channel_state();
     event_log::reset_active_event_log();
+    egress::clear_explicit_egress_policy_requirement_for_host();
     stdlib::reset_stdlib_state();
     connectors::clear_active_connector_clients();
     orchestration::clear_runtime_hooks();

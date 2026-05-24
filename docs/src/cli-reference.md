@@ -13,6 +13,7 @@ harn run --profile --profile-json profile.json <file.harn>
 harn run -e 'log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
+harn run --no-sandbox <file.harn>
 harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
 harn run --attest <file.harn>
@@ -33,6 +34,7 @@ harn run --resume .harn/workers/worker_...json
 | `--resume <handle-or-snapshot>` | Cold-restore a suspended top-level agent from its persisted worker snapshot |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
+| `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
 | `--receipt-out <path>` | Write the receipt to a specific JSON path |
@@ -78,6 +80,14 @@ You can also run a file directly without the `run` subcommand:
 ```bash
 harn main.harn
 ```
+
+By default, `harn run` installs a worktree sandbox before executing
+the VM. Filesystem and subprocess cwd access are rooted at the nearest
+`harn.toml` project root, or at the invocation working directory when
+no project manifest is present. Network side effects are denied by the
+same default policy. Use `--no-sandbox` only for scripts that need the
+old unrestricted process behavior; the CLI emits a warning when this
+escape hatch is used.
 
 Before starting the VM, `harn run <file>` builds the cross-module
 graph for the entry file. When all imports resolve, unknown call
@@ -368,6 +378,7 @@ and per-tool-call latency. Today only `harn time run` is supported.
 harn time run main.harn
 harn time run main.harn --json
 harn time run main.harn --json --no-cache
+harn time run main.harn --no-sandbox
 harn time run -e 'log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```
@@ -415,7 +426,8 @@ output is redirected to stderr so `harn time run … --json | jq …` works
 without filtering. Diagnostics and non-zero exit codes from the wrapped
 run still propagate through `harn time`. `--no-cache` sets
 `HARN_BYTECODE_CACHE=0` for the duration of the invocation only,
-forcing a cold parse/typecheck/compile.
+forcing a cold parse/typecheck/compile. `--no-sandbox` is forwarded to
+the wrapped `harn run` path.
 
 ## harn viz
 

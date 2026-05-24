@@ -84,14 +84,16 @@ embedders ship richer behavior via the `HostCallBridge` trait described in
 
 ## Process sandbox
 
-The runtime confines every subprocess it spawns under an active
-capability ceiling. The default profile is `worktree` —
-workspace-root path enforcement plus best-effort OS-level
-confinement (Linux Landlock + seccomp, macOS sandbox-exec, Windows
-AppContainer + Job Object). Pipelines that spawn untrusted code opt
-into `os_hardened`, which makes the OS confinement *required* and
-turns every spawn into a `tool_rejected` if the platform mechanism
-is missing.
+`harn run` installs a default `worktree` capability ceiling before
+executing user code. The runtime confines every subprocess it spawns
+under that ceiling unless the operator passes `--no-sandbox`. The
+default profile is workspace-root path enforcement plus best-effort
+OS-level confinement (Linux Landlock + seccomp, macOS sandbox-exec,
+Windows AppContainer + Job Object), with network side effects denied
+by the default ceiling. Pipelines that spawn untrusted code opt into
+`os_hardened`, which makes the OS confinement *required* and turns
+every spawn into a `tool_rejected` if the platform mechanism is
+missing.
 
 See [Process sandboxing](./sandboxing.md) for the full per-platform
 capability → kernel-knob mapping table, profile selection examples,

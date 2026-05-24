@@ -6336,8 +6336,28 @@ persona_step_allowlist = ["legacy_helper"]
 
 ## Sandbox mode
 
-The `harn run` command supports sandbox flags that restrict which builtins
-a program may call.
+The `harn run` command installs a default worktree sandbox before the
+VM starts. The default policy uses `sandbox_profile: "worktree"`,
+roots filesystem/process access at the nearest `harn.toml` project
+root (or the invocation working directory when no project manifest is
+present), allows local process execution, and denies network side
+effects. This makes direct runs fail closed for filesystem escapes,
+subprocess working directories, and outbound HTTP/connectors unless
+the operator explicitly opts out.
+
+`harn run` also supports builtin allow/deny flags that restrict which
+builtins a program may call.
+
+### --no-sandbox
+
+```bash
+harn run --no-sandbox script.harn
+```
+
+Disables the default worktree filesystem/process sandbox and the
+network side-effect ceiling for this invocation. The CLI emits a
+warning when this escape hatch is used. `--deny` / `--allow` still
+apply when present.
 
 ### --deny
 
@@ -6426,11 +6446,12 @@ per-platform mechanisms are:
   derived from the same policy.
 
 `SandboxProfile::Unrestricted` skips both path enforcement and OS
-confinement (used by `harn run` when no orchestration policy is
-active). `SandboxProfile::Wasi` is testbench-only — subprocesses are
-intercepted by the process tape and resolved against recorded WASI
-modules. See the [sandboxing guide](https://harnlang.com/sandboxing.html) for
-the full per-platform capability → kernel-knob mapping table.
+confinement; `harn run --no-sandbox` is the CLI escape hatch that
+leaves direct runs in that state. `SandboxProfile::Wasi` is
+testbench-only — subprocesses are intercepted by the process tape and
+resolved against recorded WASI modules. See the
+[sandboxing guide](https://harnlang.com/sandboxing.html) for the full
+per-platform capability → kernel-knob mapping table.
 
 ## Test framework
 

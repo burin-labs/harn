@@ -9,7 +9,9 @@ use tempfile::TempDir;
 use url::Url;
 
 use crate::cli::PackageScaffoldOpenapiArgs;
-use crate::commands::run::{execute_run, CliLlmMockMode, RunProfileOptions};
+use crate::commands::run::{
+    execute_run_with_sandbox_options, CliLlmMockMode, RunProfileOptions, RunSandboxOptions,
+};
 use crate::commands::scaffold_common::{
     harn_identifier, harn_string_literal, pascal_identifier_from_snake, validate_harn_identifier,
     write_bytes, write_file,
@@ -395,12 +397,17 @@ async fn generate_sdk_source(
     client_name: &str,
     default_base_url: &str,
 ) -> Result<(), PackageError> {
-    let tmp = tempfile::tempdir()
-        .map_err(|error| format!("failed to create OpenAPI generation temp dir: {error}"))?;
     if let Some(parent) = out_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
+    let package_root = out_path
+        .parent()
+        .and_then(Path::parent)
+        .or_else(|| out_path.parent())
+        .unwrap_or_else(|| Path::new("."));
+    let tmp = tempfile::tempdir()
+        .map_err(|error| format!("failed to create OpenAPI generation temp dir: {error}"))?;
     let script_path = tmp.path().join("generate_openapi_sdk.harn");
     let script = format!(
         r#"import {{ codegen_module, parse }} from {import_path}
@@ -431,7 +438,7 @@ pipeline default() {{
     );
     fs::write(&script_path, script)
         .map_err(|error| format!("failed to write {}: {error}", script_path.display()))?;
-    let outcome = execute_run(
+    let outcome = execute_run_with_sandbox_options(
         &script_path.display().to_string(),
         false,
         HashSet::new(),
@@ -446,6 +453,7 @@ pipeline default() {{
         CliLlmMockMode::Off,
         None,
         RunProfileOptions::default(),
+        RunSandboxOptions::default().with_workspace_root(package_root),
     )
     .await;
     if outcome.exit_code != 0 {
@@ -1042,7 +1050,7 @@ paths: {}
             false,
         )
         .unwrap();
-        let outcome = execute_run(
+        let outcome = execute_run_with_sandbox_options(
             &out.join("tests/smoke.harn").display().to_string(),
             false,
             HashSet::new(),
@@ -1051,6 +1059,7 @@ paths: {}
             CliLlmMockMode::Off,
             None,
             RunProfileOptions::default(),
+            RunSandboxOptions::disabled(),
         )
         .await;
         assert_eq!(outcome.exit_code, 0, "{}{}", outcome.stderr, outcome.stdout);

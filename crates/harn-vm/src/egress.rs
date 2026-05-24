@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::{HashMap, HashSet};
@@ -18,6 +19,10 @@ pub const HARN_EGRESS_ALLOW_ENV: &str = "HARN_EGRESS_ALLOW";
 pub const HARN_EGRESS_DENY_ENV: &str = "HARN_EGRESS_DENY";
 pub const HARN_EGRESS_DEFAULT_ENV: &str = "HARN_EGRESS_DEFAULT";
 pub const EGRESS_AUDIT_TOPIC: &str = "connectors.egress.audit";
+
+thread_local! {
+    static REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH: RefCell<usize> = const { RefCell::new(0) };
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DefaultAction {
@@ -165,11 +170,38 @@ pub fn reset_egress_policy_for_host() {
         guard.env_checked = false;
         guard.policy = None;
     }
+    clear_explicit_egress_policy_requirement_for_host();
+}
+
+pub(crate) fn clear_explicit_egress_policy_requirement_for_host() {
+    REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH.with(|depth| *depth.borrow_mut() = 0);
 }
 
 #[cfg(test)]
 pub fn reset_egress_policy_for_tests() {
     reset_egress_policy_for_host();
+}
+
+/// Scope outbound network to explicit `egress_policy(...)` /
+/// `HARN_EGRESS_*` configuration. Without a configured policy, URL
+/// checks return [`EgressBlocked`] before opening a socket.
+pub fn require_explicit_egress_policy_for_host() -> ExplicitEgressPolicyGuard {
+    REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH.with(|depth| {
+        *depth.borrow_mut() += 1;
+    });
+    ExplicitEgressPolicyGuard
+}
+
+#[derive(Debug)]
+pub struct ExplicitEgressPolicyGuard;
+
+impl Drop for ExplicitEgressPolicyGuard {
+    fn drop(&mut self) {
+        REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH.with(|depth| {
+            let mut depth = depth.borrow_mut();
+            *depth = depth.saturating_sub(1);
+        });
+    }
 }
 
 fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmError> {
@@ -178,17 +210,26 @@ fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlocked>, VmEr
         let guard = state().read().expect("egress policy state poisoned");
         #[cfg(test)]
         {
-            guard
-                .test_policies
-                .get(&std::thread::current().id())
-                .cloned()
+            let thread_id = std::thread::current().id();
+            guard.test_policies.get(&thread_id).cloned()
         }
         #[cfg(not(test))]
         {
             guard.policy.clone()
         }
     };
+    let require_explicit_policy =
+        REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH.with(|depth| *depth.borrow() > 0);
     let Some(configured) = configured else {
+        if require_explicit_policy {
+            let target = EgressTarget::parse(raw_url)?;
+            return Ok(Some(blocked(
+                surface,
+                raw_url,
+                &target,
+                "no egress policy configured".to_string(),
+            )));
+        }
         return Ok(None);
     };
     let target = EgressTarget::parse(raw_url)?;
@@ -780,6 +821,58 @@ mod tests {
             "https://api.example.com/resource?access_token=%5Bredacted%5D&ok=1"
         );
         assert!(!blocked.to_string().contains("secret-token"));
+    }
+
+    #[test]
+    fn require_explicit_policy_blocks_unconfigured_egress() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_egress_policy_for_tests();
+        {
+            let _scope = require_explicit_egress_policy_for_host();
+            let blocked = check_url("http_get", "https://api.example.com/status")
+                .unwrap()
+                .expect("missing policy blocks");
+            assert_eq!(blocked.reason, "no egress policy configured");
+            assert_eq!(blocked.host, "api.example.com");
+        }
+        assert!(check_url("http_get", "https://api.example.com/status")
+            .unwrap()
+            .is_none());
+        reset_egress_policy_for_tests();
+    }
+
+    #[test]
+    fn reset_thread_local_state_clears_required_policy_scope() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_egress_policy_for_tests();
+        let _scope = require_explicit_egress_policy_for_host();
+
+        crate::reset_thread_local_state();
+
+        assert!(check_url("http_get", "https://api.example.com/status")
+            .unwrap()
+            .is_none());
+        reset_egress_policy_for_tests();
+    }
+
+    #[test]
+    fn explicit_environment_policy_satisfies_required_policy_scope() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_egress_policy_for_tests();
+        std::env::set_var(HARN_EGRESS_ALLOW_ENV, "api.example.com");
+        std::env::set_var(HARN_EGRESS_DEFAULT_ENV, "deny");
+        let _scope = require_explicit_egress_policy_for_host();
+
+        assert!(check_url("http_get", "https://api.example.com/status")
+            .unwrap()
+            .is_none());
+        assert!(check_url("http_get", "https://other.example.com/status")
+            .unwrap()
+            .is_some());
+
+        std::env::remove_var(HARN_EGRESS_ALLOW_ENV);
+        std::env::remove_var(HARN_EGRESS_DEFAULT_ENV);
+        reset_egress_policy_for_tests();
     }
 
     #[test]
