@@ -861,6 +861,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/models/test.harn"),
     },
     StdlibCliScript {
+        name: "precompile",
+        source: include_str!("stdlib/cli/precompile.harn"),
+    },
+    StdlibCliScript {
         name: "routes",
         source: include_str!("stdlib/cli/routes.harn"),
     },
