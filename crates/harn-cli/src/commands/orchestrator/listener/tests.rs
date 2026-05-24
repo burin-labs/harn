@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use axum::http::{header, StatusCode};
 use futures::{SinkExt, StreamExt};
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{json, Value as JsonValue};
 
 use super::acp_hub::ACP_PATH;
@@ -19,7 +20,7 @@ use harn_vm::secrets::{
 use harn_vm::{
     ProviderId, TriggerBindingSource, TriggerBindingSpec, TriggerHandlerSpec, TriggerRetryConfig,
 };
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use tempfile::{tempdir, TempDir};
 
 use crate::commands::orchestrator::origin_guard::OriginAllowList;
@@ -135,28 +136,12 @@ fn webhook_route(path: &str) -> RouteConfig {
 }
 
 fn github_signature(secret: &str, body: &[u8]) -> String {
-    const BLOCK: usize = 64;
-    let mut key = secret.as_bytes().to_vec();
-    if key.len() > BLOCK {
-        key = Sha256::digest(&key).to_vec();
-    }
-    key.resize(BLOCK, 0);
-    let mut inner_pad = vec![0x36; BLOCK];
-    let mut outer_pad = vec![0x5c; BLOCK];
-    for i in 0..BLOCK {
-        inner_pad[i] ^= key[i];
-        outer_pad[i] ^= key[i];
-    }
-    let mut inner = Sha256::new();
-    inner.update(&inner_pad);
-    inner.update(body);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(&outer_pad);
-    outer.update(inner_digest);
-    let digest = outer.finalize();
-    let encoded = digest
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(body);
+    let encoded = mac
+        .finalize()
+        .into_bytes()
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();

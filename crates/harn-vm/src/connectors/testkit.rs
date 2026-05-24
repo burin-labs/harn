@@ -8,7 +8,6 @@ use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
-use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -564,27 +563,7 @@ pub fn webhook_binding(
 }
 
 fn hmac_sha256_hex(secret: &[u8], data: &[u8]) -> String {
-    const BLOCK_SIZE: usize = 64;
-    let mut key = if secret.len() > BLOCK_SIZE {
-        Sha256::digest(secret).to_vec()
-    } else {
-        secret.to_vec()
-    };
-    key.resize(BLOCK_SIZE, 0);
-    let mut outer = vec![0x5c; BLOCK_SIZE];
-    let mut inner = vec![0x36; BLOCK_SIZE];
-    for i in 0..BLOCK_SIZE {
-        outer[i] ^= key[i];
-        inner[i] ^= key[i];
-    }
-    let mut inner_hash = Sha256::new();
-    inner_hash.update(&inner);
-    inner_hash.update(data);
-    let inner_result = inner_hash.finalize();
-    let mut outer_hash = Sha256::new();
-    outer_hash.update(&outer);
-    outer_hash.update(inner_result);
-    hex::encode(outer_hash.finalize())
+    hex::encode(crate::connectors::hmac::hmac_sha256(secret, data))
 }
 
 pub async fn advance_until<F>(

@@ -59,6 +59,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 futures = "0.3"
 blake3 = "1"
 sha2 = "0.11"
+hmac = "0.13"
 tar = { version = "0.4", default-features = false }
 flate2 = "1"
 subtle = "2.6"
@@ -99,7 +100,6 @@ default = ["hostlib"]
 hostlib = ["dep:harn-hostlib", "harn-serve/hostlib"]
 
 [dev-dependencies]
-hmac = "0.13"
 rcgen = "0.14"
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 wat = "1"
