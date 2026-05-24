@@ -1,0 +1,518 @@
+/**
+ * `harn eval coding-agent` rendering layer ported to .harn — see
+ * harn#2307 (W7).
+ *
+ * **Pragmatic partial port.** The Rust handler in
+ * `crates/harn-cli/src/commands/eval_coding_agent.rs` is ~2.2k LOC and
+ * is tightly entangled with VM internals: it builds a fixture/model/
+ * tool-format matrix, invokes `execute_run` per cell (which spins up
+ * the embedded coding-agent driver against live or mock provider
+ * credentials), snapshots Ollama state via `local::runtime`, fans out
+ * step-judge presets, scores per-run summaries, builds rollups + a
+ * native/text comparison + follow-up suggestions, and writes
+ * `summary.json`, `per_run.jsonl`, and `local_readiness.json` to disk.
+ * None of that is reachable from script-land today without exposing a
+ * wider VM surface than W7 should land — the same constraint that
+ * shaped W5 / W6.
+ *
+ * What this script owns: the **rendering / reporting layer** — the
+ * `summary.md` body, the `followups.md` body, the post-run human one-
+ * line summary, and the `--json` pretty form of the assembled
+ * `EvalSummary`. The Rust shim does all the matrix execution, run
+ * scoring, rollup, comparison, and follow-up generation, collects the
+ * result into an `EvalSummary`, serialises it to JSON, and hands it
+ * off here.
+ *
+ * The on-disk JSON artifacts (`summary.json`, `per_run.jsonl`,
+ * `local_readiness.json`) stay on the serde-driven Rust path because
+ * Harn's `json_stringify_pretty` sorts dict keys alphabetically while
+ * serde emits struct fields in declaration order — and those artifacts
+ * are consumed by regression-check / hosted ingestion / the
+ * experiment driver in `experiments/step-judge/run.sh`, which depend
+ * on the serde struct-field byte order.
+ *
+ * Inputs (from the dispatch shim in crates/harn-cli/src/commands/eval_coding_agent.rs):
+ *   HARN_EVAL_CODING_AGENT_SUMMARY_JSON — serialised `EvalSummary`.
+ *   HARN_EVAL_CODING_AGENT_MODE — one of:
+ *     "markdown"  — render the summary.md body to stdout.
+ *     "followups" — render the followups.md body to stdout.
+ *     "summary"   — render the one-line human summary to stdout.
+ *     "json"      — render the JSON pretty form to stdout for `--json`.
+ *
+ * The Rust shim serialises these env vars under a tokio Mutex so
+ * concurrent in-process callers (the existing eval_coding_agent_cli
+ * test plus any future fanout caller) don't clobber each other mid-
+ * dispatch. Pattern mirrors W5 / W6.
+ *
+ * The wider port (replacing the Rust shim) is gated on G4 (#2297)
+ * exposing `execute_run`, `snapshot_provider`, `llm_pricing_per_1k`,
+ * and `provider_key_available` to script-land. C1 (#2314) will delete
+ * the `HARN_CLI_IMPL=rust` escape hatch.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+/**
+ * Format a float as `"X.YYYYYY"` (6 decimals, half-up padded). Mirrors
+ * Rust's `format!("{:.6}", x)` rounding/padding so the rendered
+ * markdown/summary lines stay byte-identical with the legacy path.
+ */
+fn __format_float_6(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 1000000.0)) ?? 0
+  let whole = scaled / 1000000
+  let frac = scaled - whole * 1000000
+  var frac_str = to_string(frac)
+  while len(frac_str) < 6 {
+    frac_str = "0" + frac_str
+  }
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+/**
+ * Format a float as `"+X.Y"` / `"-X.Y"` (1 decimal, always signed,
+ * half-up padded). Mirrors Rust's `format!("{:+.1}", x)` for the
+ * baseline-comparison `net lift: **{:+.1}pp**` line.
+ */
+fn __format_float_signed_1(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 10.0)) ?? 0
+  let whole = scaled / 10
+  let frac = scaled - whole * 10
+  let frac_str = to_string(frac)
+  // Rust's `{:+.1}` prints a `+` for zero (and positive values), `-` for
+  // negative — match that even when the rounded value is 0.0.
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    "+"
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+/**
+ * Escape Markdown table cell content by replacing `|` with `\|`.
+ * Mirrors Rust's `value.replace('|', "\\|")`.
+ */
+fn __md_escape(s: string) -> string {
+  return s.replace("|", "\\|")
+}
+
+/**
+ * Build the `selector_label` string the way Rust's `selector_label`
+ * helper does — the serialised `EvalSummary` already emits a
+ * `selector.selector` field that matches the label, so prefer that
+ * when present and fall back to `"provider:model"`.
+ */
+fn __selector_label(selector: dict) -> string {
+  let raw = selector["selector"]
+  if type_of(raw) == "string" {
+    return raw
+  }
+  return __safe_string(selector["provider"], "")
+    + ":"
+    + __safe_string(selector["model"], "")
+}
+
+/**
+ * Format an `Option<i64>` as the rendered `i64.to_string()` or `"-"`
+ * for `None`. Mirrors the legacy
+ * `value.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())`
+ * pattern used in the native/text comparison table.
+ */
+fn __optional_int_mark(value) -> string {
+  if type_of(value) == "int" {
+    return to_string(value)
+  }
+  if type_of(value) == "float" {
+    return to_string(to_int(value) ?? 0)
+  }
+  return "-"
+}
+
+/**
+ * Format an `Option<bool>` as `"yes"` / `"no"` / `"-"`. Mirrors Rust's
+ * `optional_bool_mark`.
+ */
+fn __optional_bool_mark(value) -> string {
+  if type_of(value) == "bool" {
+    if value {
+      return "yes"
+    }
+    return "no"
+  }
+  return "-"
+}
+
+/**
+ * URL-encode a markdown link target the way Rust's `markdown_link`
+ * does: replace `' '` with `%20`, `'('` with `%28`, `')'` with `%29`.
+ * The label gets its `|` characters escaped for the table cell.
+ */
+fn __markdown_link(label: string, target: string) -> string {
+  let target_encoded = target
+    .replace(" ", "%20")
+    .replace("(", "%28")
+    .replace(")", "%29")
+  return "[" + __md_escape(label) + "](" + target_encoded + ")"
+}
+
+fn __comparison_evidence_links(comparison: dict) -> string {
+  var links = []
+  let native = comparison["native_evidence_path"]
+  if type_of(native) == "string" {
+    links = links + [__markdown_link("native", native)]
+  }
+  let text = comparison["text_evidence_path"]
+  if type_of(text) == "string" {
+    links = links + [__markdown_link("text", text)]
+  }
+  if len(links) == 0 {
+    return "-"
+  }
+  return join(links, "<br>")
+}
+
+fn __render_rollup_table(title: string, rollups) -> string {
+  var out = "## " + title + "\n\n"
+  out = out + "| key | passed | failed | skipped | total | cost |\n"
+  out = out + "|---|---:|---:|---:|---:|---:|\n"
+  for rollup in __safe_list(rollups) {
+    let rd = __safe_dict(rollup)
+    out = out + "| `"
+      + __md_escape(__safe_string(rd["key"], ""))
+      + "` | "
+      + to_string(rd["passed_runs"] ?? 0)
+      + " | "
+      + to_string(rd["failed_runs"] ?? 0)
+      + " | "
+      + to_string(rd["skipped_runs"] ?? 0)
+      + " | "
+      + to_string(rd["total_runs"] ?? 0)
+      + " | "
+      + __format_float_6(rd["total_cost_usd"] ?? 0.0)
+      + " |\n"
+  }
+  out = out + "\n"
+  return out
+}
+
+fn __render_runs_table(runs) -> string {
+  var out = "\n## Runs\n\n"
+  out = out
+    + "| fixture | run | provider | model | tool format | fixture sequence | tool calls | status | iterations | tokens | cost | transcript | output |\n"
+  out = out + "|---|---|---|---|---|---|---|---|---:|---:|---:|---|---|\n"
+  for run in __safe_list(runs) {
+    let rd = __safe_dict(run)
+    let selector = __safe_dict(rd["selector"])
+    let sequence = __safe_list(rd["tool_sequence"])
+    let tool_sequence = if len(sequence) == 0 {
+      "-"
+    } else {
+      __md_escape(join(sequence, ", "))
+    }
+    let input_tokens = rd["input_tokens"] ?? 0
+    let output_tokens = rd["output_tokens"] ?? 0
+    out = out + "| `"
+      + __safe_string(rd["fixture_id"], "")
+      + "` | `"
+      + __safe_string(rd["run_id"], "")
+      + "` | `"
+      + __safe_string(selector["provider"], "")
+      + "` | `"
+      + __md_escape(__safe_string(selector["model"], ""))
+      + "` | `"
+      + __safe_string(rd["tool_format"], "")
+      + "` | `"
+      + __safe_string(rd["fixture_tool_sequence"], "")
+      + "` | `"
+      + tool_sequence
+      + "` | "
+      + __safe_string(rd["status"], "")
+      + " | "
+      + to_string(rd["iterations"] ?? 0)
+      + " | "
+      + to_string(input_tokens + output_tokens)
+      + " | "
+      + __format_float_6(rd["cost_usd"] ?? 0.0)
+      + " | "
+      + __markdown_link(
+      to_string(rd["transcript_event_count"] ?? 0),
+      __safe_string(rd["transcript_events_path"], ""),
+    )
+      + " | `"
+      + __safe_string(rd["output_dir"], "")
+      + "` |\n"
+  }
+  return out
+}
+
+fn __render_baseline_comparison(comparison: dict) -> string {
+  var out = "\n## Baseline Comparison\n\n"
+  let label = __safe_string(comparison["baseline_label"], "")
+  let label_suffix = if label == "" {
+    ""
+  } else {
+    " (label: `" + label + "`)"
+  }
+  out = out + "Compared against `"
+    + __safe_string(comparison["baseline_path"], "")
+    + "`"
+    + label_suffix
+    + ".\n\n"
+  out = out + "- regressions: **"
+    + to_string(comparison["regressions_count"] ?? 0)
+    + "** (baseline passed, this cell failed)\n"
+    + "- recoveries: **"
+    + to_string(comparison["recoveries_count"] ?? 0)
+    + "** (baseline failed, this cell passed)\n"
+    + "- net lift: **"
+    + __format_float_signed_1(comparison["net_lift_pp"] ?? 0.0)
+    + "pp**\n\n"
+  let regressions = __safe_list(comparison["regressions"])
+  if len(regressions) > 0 {
+    out = out + "### Regressions\n\n"
+    for delta in regressions {
+      let dd = __safe_dict(delta)
+      out = out + "- `"
+        + __safe_string(dd["fixture_id"], "")
+        + "`: `"
+        + __safe_string(dd["baseline_status"], "")
+        + "` → `"
+        + __safe_string(dd["cell_status"], "")
+        + "`\n"
+    }
+    out = out + "\n"
+  }
+  let recoveries = __safe_list(comparison["recoveries"])
+  if len(recoveries) > 0 {
+    out = out + "### Recoveries\n\n"
+    for delta in recoveries {
+      let dd = __safe_dict(delta)
+      out = out + "- `"
+        + __safe_string(dd["fixture_id"], "")
+        + "`: `"
+        + __safe_string(dd["baseline_status"], "")
+        + "` → `"
+        + __safe_string(dd["cell_status"], "")
+        + "`\n"
+    }
+    out = out + "\n"
+  }
+  return out
+}
+
+fn __render_comparison_table(comparisons) -> string {
+  var out = "\n## Native/Text Comparison\n\n"
+  out = out
+    + "| fixture | selector | native | text | equivalent | verifier | tools | rejected delta | token delta | iteration delta | evidence |\n"
+  out = out + "|---|---|---|---|---|---|---|---:|---:|---:|---|\n"
+  for comparison in __safe_list(comparisons) {
+    let cd = __safe_dict(comparison)
+    let selector = __safe_dict(cd["selector"])
+    let native_status = if type_of(cd["native_status"]) == "string" {
+      cd["native_status"]
+    } else {
+      "-"
+    }
+    let text_status = if type_of(cd["text_status"]) == "string" {
+      cd["text_status"]
+    } else {
+      "-"
+    }
+    out = out + "| `"
+      + __safe_string(cd["fixture_id"], "")
+      + "` | `"
+      + __selector_label(selector)
+      + "` | "
+      + native_status
+      + " | "
+      + text_status
+      + " | "
+      + __optional_bool_mark(cd["equivalent"])
+      + " | "
+      + __optional_bool_mark(cd["verifier_match"])
+      + " | "
+      + __optional_bool_mark(cd["tool_sequence_match"])
+      + " | "
+      + __optional_int_mark(cd["rejected_tool_call_delta_text_minus_native"])
+      + " | "
+      + __optional_int_mark(cd["token_delta_text_minus_native"])
+      + " | "
+      + __optional_int_mark(cd["iteration_delta_text_minus_native"])
+      + " | "
+      + __comparison_evidence_links(cd)
+      + " |\n"
+  }
+  return out
+}
+
+fn __render_divergence_evidence(comparisons) -> string {
+  var diverged = []
+  for comparison in __safe_list(comparisons) {
+    let cd = __safe_dict(comparison)
+    if len(__safe_list(cd["divergence_reasons"])) > 0 {
+      diverged = diverged + [cd]
+    }
+  }
+  if len(diverged) == 0 {
+    return ""
+  }
+  var out = "\n## Native/Text Divergence Evidence\n\n"
+  for comparison in diverged {
+    let selector = __safe_dict(comparison["selector"])
+    out = out + "- `"
+      + __safe_string(comparison["fixture_id"], "")
+      + "` `"
+      + __selector_label(selector)
+      + "`: "
+      + join(__safe_list(comparison["divergence_reasons"]), "; ")
+      + "\n"
+    if len(__safe_list(comparison["evidence_paths"])) > 0 {
+      out = out + "  Evidence: "
+        + __comparison_evidence_links(comparison)
+        + "\n"
+    }
+  }
+  return out
+}
+
+fn __render_markdown(summary: dict) -> string {
+  let fixture_ids = __safe_list(summary["fixture_ids"])
+  var out = "# Coding Agent Harness Quality Suite\n\n"
+  out = out + "- fixtures: `"
+    + join(fixture_ids, "`, `")
+    + "`\n- passed: "
+    + to_string(summary["passed_runs"] ?? 0)
+    + "/"
+    + to_string(summary["total_runs"] ?? 0)
+    + "\n- skipped: "
+    + to_string(summary["skipped_runs"] ?? 0)
+    + "\n- total_cost_usd: "
+    + __format_float_6(summary["total_cost_usd"] ?? 0.0)
+    + "\n\n"
+  let rollups = __safe_dict(summary["rollups"])
+  out = out + __render_rollup_table("By Fixture", rollups["by_fixture"])
+  out = out + __render_rollup_table("By Provider", rollups["by_provider"])
+  out = out + __render_rollup_table("By Model", rollups["by_model"])
+  out = out + __render_rollup_table("By Tool Format", rollups["by_tool_format"])
+  out = out + __render_rollup_table("By Tool Sequence", rollups["by_tool_sequence"])
+  out = out + __render_runs_table(summary["runs"])
+  let baseline = summary["baseline_comparison"]
+  if type_of(baseline) == "dict" {
+    out = out + __render_baseline_comparison(baseline)
+  }
+  let comparisons = __safe_list(summary["comparisons"])
+  if len(comparisons) > 0 {
+    out = out + __render_comparison_table(comparisons)
+  }
+  out = out + __render_divergence_evidence(comparisons)
+  return out
+}
+
+fn __render_followups(summary: dict) -> string {
+  var out = "# Follow-up Issue Candidates\n\n"
+  let followups = __safe_list(summary["followups"])
+  if len(followups) == 0 {
+    out = out + "No follow-up issue candidates were generated from this run.\n"
+    return out
+  }
+  for followup in followups {
+    let fd = __safe_dict(followup)
+    out = out + "## "
+      + __safe_string(fd["title"], "")
+      + "\n\n"
+      + __safe_string(fd["body"], "")
+      + "\n\n"
+    let run_ids = __safe_list(fd["run_ids"])
+    if len(run_ids) > 0 {
+      out = out + "- run_ids: `" + join(run_ids, "`, `") + "`\n"
+    }
+    let labels = __safe_list(fd["labels"])
+    if len(labels) > 0 {
+      out = out + "- labels: `" + join(labels, "`, `") + "`\n"
+    }
+    out = out + "\n"
+  }
+  return out
+}
+
+fn __render_summary_line(summary: dict) -> string {
+  return "coding-agent eval: "
+    + to_string(summary["passed_runs"] ?? 0)
+    + "/"
+    + to_string(summary["total_runs"] ?? 0)
+    + " passed, "
+    + to_string(summary["skipped_runs"] ?? 0)
+    + " skipped, total_cost_usd="
+    + __format_float_6(summary["total_cost_usd"] ?? 0.0)
+}
+
+/**
+ * Entrypoint. Returns an integer exit code rather than calling
+ * `exit()` so the dispatch wedge's captured stdout/stderr buffers
+ * flush back to the Rust shim — `exit()` in the embedded `harn run`
+ * pipeline calls `std::process::exit` which terminates the host
+ * binary mid-render and drops the captured streams.
+ */
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_EVAL_CODING_AGENT_SUMMARY_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_EVAL_CODING_AGENT_SUMMARY_JSON not set by dispatch shim")
+    return 70
+  }
+  let summary = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse EvalSummary: " + to_string(e))
+    return 70
+  }
+  let mode = harness.env.get_or("HARN_EVAL_CODING_AGENT_MODE", "summary")
+  let payload = if mode == "markdown" {
+    __render_markdown(summary)
+  } else if mode == "followups" {
+    __render_followups(summary)
+  } else if mode == "json" {
+    json_stringify_pretty(summary)
+  } else {
+    __render_summary_line(summary)
+  }
+  __io_print(payload)
+  return 0
+}

@@ -1,0 +1,257 @@
+#![recursion_limit = "256"]
+
+//! `harn eval coding-agent` partial-port verification (harn#2307 / W7).
+//!
+//! The rendering layer for `harn eval coding-agent` ships in
+//! `crates/harn-stdlib/src/stdlib/cli/eval/coding_agent.harn`. This
+//! test asserts parity against the legacy Rust render path on every
+//! output the wedge actually owns:
+//!
+//!   * `summary.md` — byte-identical (the .harn renderer mirrors the
+//!     Rust markdown writer line-for-line).
+//!   * `followups.md` — byte-identical (same reasoning).
+//!   * The post-run one-line stdout summary
+//!     (`coding-agent eval: ...`) — byte-identical.
+//!   * The `--json` pretty stdout payload — structurally identical
+//!     (Harn's `json_stringify_pretty` sorts dict keys alphabetically;
+//!     serde emits struct fields in declaration order).
+//!   * The on-disk `summary.json` artifact — byte-identical across
+//!     impls (the artifact always stays on the serde-driven Rust path
+//!     because hosted ingestion + the experiment driver in
+//!     `experiments/step-judge/run.sh` both depend on the serde
+//!     struct-field byte order). This guards against an accidental
+//!     future port that routes the JSON artifact through Harn's
+//!     alphabetical-key serialiser.
+//!
+//! Aggregation (matrix execution, `execute_run` fanout, scoring,
+//! rollups, comparisons, follow-up suggestions, Ollama snapshot) stays
+//! in Rust on both impls — only the formatting differs — so the
+//! parity bar is byte-identity for text/markdown surfaces and
+//! structural equality for the JSON stdout path.
+//!
+//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path so this
+//! test can compare both sides at runtime until the C1 ratchet (#2314)
+//! deletes it.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+#[test]
+fn summary_md_is_byte_identical_between_impls() {
+    // Use a single shared output dir for both impls. The aggregated
+    // report bakes the output_dir + per-run transcript paths into the
+    // rendered tables, so reusing the same dir keeps those strings
+    // identical between the two subprocess runs. Sequential reset_dir
+    // handles the per-run dir overwrites without interfering.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let shared_out = dir.path().join("bench");
+
+    let harn = run_eval_coding_agent(&shared_out, false, &[]);
+    assert_eq!(harn.exit_code, 1, "harn stderr={}", harn.stderr);
+    let harn_md = fs::read_to_string(shared_out.join("summary.md")).expect("harn summary.md");
+
+    let rust = run_eval_coding_agent(&shared_out, false, &[("HARN_CLI_IMPL", "rust")]);
+    assert_eq!(rust.exit_code, 1, "rust stderr={}", rust.stderr);
+    let rust_md = fs::read_to_string(shared_out.join("summary.md")).expect("rust summary.md");
+
+    assert_eq!(
+        harn_md, rust_md,
+        "summary.md diverged\n--- rust ---\n{}\n--- harn ---\n{}",
+        rust_md, harn_md
+    );
+}
+
+#[test]
+fn followups_md_is_byte_identical_between_impls() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let shared_out = dir.path().join("bench");
+
+    let harn = run_eval_coding_agent(&shared_out, false, &[]);
+    assert_eq!(harn.exit_code, 1, "harn stderr={}", harn.stderr);
+    let harn_md = fs::read_to_string(shared_out.join("followups.md")).expect("harn followups.md");
+
+    let rust = run_eval_coding_agent(&shared_out, false, &[("HARN_CLI_IMPL", "rust")]);
+    assert_eq!(rust.exit_code, 1, "rust stderr={}", rust.stderr);
+    let rust_md = fs::read_to_string(shared_out.join("followups.md")).expect("rust followups.md");
+
+    assert_eq!(
+        harn_md, rust_md,
+        "followups.md diverged\n--- rust ---\n{}\n--- harn ---\n{}",
+        rust_md, harn_md
+    );
+}
+
+#[test]
+fn stdout_summary_line_is_byte_identical_between_impls() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let harn_out = dir.path().join("harn");
+    let rust_out = dir.path().join("rust");
+
+    let harn = run_eval_coding_agent(&harn_out, false, &[]);
+    let rust = run_eval_coding_agent(&rust_out, false, &[("HARN_CLI_IMPL", "rust")]);
+    assert_eq!(
+        harn.stdout, rust.stdout,
+        "stdout summary line diverged\n--- rust ---\n{}\n--- harn ---\n{}",
+        rust.stdout, harn.stdout
+    );
+}
+
+#[test]
+fn json_stdout_is_structurally_identical_between_impls() {
+    // Harn's `json_stringify_pretty` sorts dict keys alphabetically;
+    // serde's `to_string_pretty` emits struct fields in declaration
+    // order. The wire byte order can therefore differ even though the
+    // parsed shapes match — assert structural equality, not byte
+    // identity, for the JSON path.
+    //
+    // We normalise `elapsed_ms` to 0 across both runs because the
+    // matrix executor measures wall-clock per cell and the two
+    // subprocess invocations naturally produce different millisecond
+    // counts; everything else in the report is deterministic when the
+    // output dir is reused.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let shared_out = dir.path().join("bench");
+
+    let harn = run_eval_coding_agent(&shared_out, true, &[]);
+    let rust = run_eval_coding_agent(&shared_out, true, &[("HARN_CLI_IMPL", "rust")]);
+
+    let mut harn_value: serde_json::Value =
+        serde_json::from_str(&harn.stdout).expect("harn --json stdout parses");
+    let mut rust_value: serde_json::Value =
+        serde_json::from_str(&rust.stdout).expect("rust --json stdout parses");
+    zero_timing_fields(&mut harn_value);
+    zero_timing_fields(&mut rust_value);
+    assert_eq!(
+        rust_value, harn_value,
+        "--json stdout diverged structurally"
+    );
+}
+
+#[test]
+fn summary_json_artifact_keeps_serde_struct_field_order_across_impls() {
+    // The on-disk `summary.json` is consumed by hosted ingestion + the
+    // experiment driver in `experiments/step-judge/run.sh`, both of
+    // which depend on serde's struct-field order. The .harn rendering
+    // port intentionally leaves this artifact on the Rust path — this
+    // test guards against an accidental future port that routes the
+    // JSON artifact through Harn's alphabetical-key serialiser.
+    //
+    // We assert that the top-level keys appear in serde declaration
+    // order (not alphabetical) on both impls. We also assert structural
+    // equality (with timing fields zeroed) so a future divergence in
+    // any field surfaces here.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let shared_out = dir.path().join("bench");
+
+    run_eval_coding_agent(&shared_out, false, &[]);
+    let harn_json = fs::read_to_string(shared_out.join("summary.json")).expect("harn summary.json");
+
+    run_eval_coding_agent(&shared_out, false, &[("HARN_CLI_IMPL", "rust")]);
+    let rust_json = fs::read_to_string(shared_out.join("summary.json")).expect("rust summary.json");
+
+    // Both files should start with `schema_version` (the first
+    // serde-declared field on EvalSummary) and `fixture_ids` second —
+    // confirming serde struct-field order, not alphabetical-key order.
+    for (label, body) in [("harn", &harn_json), ("rust", &rust_json)] {
+        let first_field_pos = body.find("\"schema_version\"").unwrap_or(usize::MAX);
+        let fixture_ids_pos = body.find("\"fixture_ids\"").unwrap_or(usize::MAX);
+        assert!(
+            first_field_pos < fixture_ids_pos,
+            "{label} summary.json top-level keys should follow serde struct-field order \
+             (schema_version before fixture_ids), but got {body}"
+        );
+    }
+
+    let mut harn_value: serde_json::Value =
+        serde_json::from_str(&harn_json).expect("harn summary.json parses");
+    let mut rust_value: serde_json::Value =
+        serde_json::from_str(&rust_json).expect("rust summary.json parses");
+    zero_timing_fields(&mut harn_value);
+    zero_timing_fields(&mut rust_value);
+    assert_eq!(harn_value, rust_value, "summary.json diverged structurally");
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────
+
+/// Walk a `serde_json::Value` tree and zero any `elapsed_ms` /
+/// `duration_ms` fields so two invocations of the same coding-agent
+/// matrix produce structurally equal reports. The matrix executor
+/// measures wall-clock per cell and the two subprocess runs naturally
+/// produce different millisecond counts — every other field in the
+/// rendered report is deterministic once the output dir is reused.
+fn zero_timing_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if key == "elapsed_ms" || key == "duration_ms" {
+                    *child = serde_json::Value::Number(serde_json::Number::from(0));
+                } else {
+                    zero_timing_fields(child);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                zero_timing_fields(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+struct ProcessOutcome {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+}
+
+/// Invoke `harn eval coding-agent` in mock-only matrix mode. The mock
+/// provider has no LLM credentials and the in-process driver may
+/// either pass (CI w/ python3 + the embedded coding_agent_suite.harn
+/// driver round-tripping) or fail with infra_error rows. Either way
+/// the rendered outputs must match across impls.
+fn run_eval_coding_agent(output: &Path, json: bool, extra_env: &[(&str, &str)]) -> ProcessOutcome {
+    let mut argv = vec![
+        "eval".to_string(),
+        "coding-agent".to_string(),
+        "--model".to_string(),
+        "mock:mock".to_string(),
+        "--tool-format".to_string(),
+        "native,text".to_string(),
+        "--max-runs".to_string(),
+        "2".to_string(),
+        "--output".to_string(),
+        output.display().to_string(),
+    ];
+    if json {
+        argv.push("--json".to_string());
+    }
+    run_harn(&argv, extra_env)
+}
+
+fn run_harn(argv: &[String], extra_env: &[(&str, &str)]) -> ProcessOutcome {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    for arg in argv {
+        cmd.arg(arg);
+    }
+    // Drop ambient env that could perturb the renders across the two
+    // subprocess invocations.
+    for key in ["NO_COLOR", "HARN_COLOR", "HARN_CLI_IMPL"] {
+        cmd.env_remove(key);
+    }
+    let mut env_map: BTreeMap<&str, &str> = BTreeMap::new();
+    for (k, v) in extra_env {
+        env_map.insert(*k, *v);
+    }
+    for (k, v) in &env_map {
+        cmd.env(*k, *v);
+    }
+    let output = cmd.output().expect("spawn harn eval coding-agent");
+    ProcessOutcome {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code().unwrap_or(-1),
+    }
+}
