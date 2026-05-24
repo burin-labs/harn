@@ -651,7 +651,7 @@ async fn version() -> Response {
 }
 
 async fn openapi_json() -> Response {
-    match serde_yaml::from_str::<Value>(OPENAPI_YAML) {
+    match serde_yml::from_str::<Value>(OPENAPI_YAML) {
         Ok(value) => Json(value).into_response(),
         Err(error) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,

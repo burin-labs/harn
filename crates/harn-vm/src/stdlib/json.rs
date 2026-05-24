@@ -84,7 +84,7 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
 
     vm.register_builtin("yaml_parse", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
-        match serde_yaml::from_str::<serde_yaml::Value>(&text) {
+        match serde_yml::from_str::<serde_yml::Value>(&text) {
             Ok(value) => match serde_json::to_value(value) {
                 Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
                 Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -100,7 +100,7 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
     vm.register_builtin("yaml_stringify", |args, _out| {
         let value = args.first().unwrap_or(&VmValue::Nil);
         let data_value = vm_value_to_data_value(value);
-        serde_yaml::to_string(&data_value)
+        serde_yml::to_string(&data_value)
             .map(|text| VmValue::String(Rc::from(text)))
             .map_err(|error| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(

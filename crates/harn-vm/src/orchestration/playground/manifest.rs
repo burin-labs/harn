@@ -236,7 +236,7 @@ impl ScenarioManifest {
             .map(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
             .unwrap_or(false);
         let manifest: ScenarioManifest = if is_yaml {
-            serde_yaml::from_slice(bytes).map_err(|error| {
+            serde_yml::from_slice(bytes).map_err(|error| {
                 VmError::Runtime(format!(
                     "failed to parse YAML scenario manifest {}: {error}",
                     path.display()
@@ -445,6 +445,10 @@ mod tests {
         ScenarioManifest::parse(s.as_bytes(), &PathBuf::from("test.json")).unwrap()
     }
 
+    fn yaml(s: &str) -> ScenarioManifest {
+        ScenarioManifest::parse(s.as_bytes(), &PathBuf::from("test.yaml")).unwrap()
+    }
+
     #[test]
     fn parses_minimal_manifest() {
         let m = json(
@@ -457,6 +461,21 @@ mod tests {
         );
         assert_eq!(m.scenario, "x");
         assert_eq!(m.repos.len(), 1);
+    }
+
+    #[test]
+    fn parses_yaml_manifest() {
+        let m = yaml(
+            r#"_type: merge_captain_playground_scenario
+scenario: x
+owner: burin-labs
+repos:
+  - name: alpha
+    default_branch: main
+"#,
+        );
+        assert_eq!(m.scenario, "x");
+        assert_eq!(m.repos[0].name, "alpha");
     }
 
     #[test]
