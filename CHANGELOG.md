@@ -19,6 +19,15 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Workspace path-scope permissions (#2216).** Dynamic permission policies now
+  support a `path_scope` matcher via `std/tools.path_scope(...)`. It checks
+  path-bearing tool args against the active session `workspace_anchor`, can
+  include mounted roots by mount mode, and emits structured denial reasons.
+  Sessions also expose `workspace_policy.default_mount_mode` through
+  `agent_session_open(..., {workspace_policy: ...})`,
+  `agent_session_workspace_policy(id)`, and
+  `agent_session_set_workspace_policy(id, policy)`; the runtime default is
+  `read_only`.
 - **CLI path helpers (#2341).** Added `std/cli/paths` with
   `xdg_config_home(app_name)`, `xdg_data_home(app_name)`, and
   `xdg_cache_home(app_name)`. The pure-Harn helpers honor absolute XDG

@@ -26,7 +26,7 @@ use std::time::Instant;
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::VmValue;
-use crate::workspace_anchor::{WorkspaceAnchor, WORKSPACE_ANCHOR_METADATA_KEY};
+use crate::workspace_anchor::{WorkspaceAnchor, WorkspacePolicy, WORKSPACE_ANCHOR_METADATA_KEY};
 
 /// Default cap on concurrent sessions per VM thread. Beyond this the
 /// least-recently-accessed session is evicted on the next `open`.
@@ -140,6 +140,9 @@ pub struct SessionState {
     /// the route's native thinking shape. Exposed over ACP as
     /// `session/set_config_option(configId="thought_level")`.
     pub pinned_reasoning_policy: Option<String>,
+    /// Session-local workspace defaults. Persona and host policy layers
+    /// can update this without rewriting the current anchor.
+    pub workspace_policy: WorkspacePolicy,
     /// Typed workspace anchor for the session. Primary path plus any
     /// additional mounted roots; consumed by permission matchers, the
     /// bundle exporter, and host-side cross-project handoff flows
@@ -168,6 +171,7 @@ impl SessionState {
             system_prompt: None,
             pinned_model: None,
             pinned_reasoning_policy: None,
+            workspace_policy: WorkspacePolicy::default(),
             workspace_anchor: None,
             transcript_budget_policy: default_transcript_budget_policy(),
             last_transcript_budget_action: None,
@@ -617,6 +621,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         src_pinned_model,
         src_pinned_reasoning_policy,
         src_workspace_anchor,
+        src_workspace_policy,
         src_transcript_budget_policy,
         src_last_transcript_budget_action,
         dst,
@@ -633,6 +638,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             src.pinned_model.clone(),
             src.pinned_reasoning_policy.clone(),
             src.workspace_anchor.clone(),
+            src.workspace_policy.clone(),
             src.transcript_budget_policy.clone(),
             src.last_transcript_budget_action.clone(),
             dst,
@@ -649,6 +655,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.pinned_model = src_pinned_model;
             state.pinned_reasoning_policy = src_pinned_reasoning_policy;
             state.workspace_anchor = src_workspace_anchor;
+            state.workspace_policy = src_workspace_policy;
             state.transcript_budget_policy = src_transcript_budget_policy;
             state.last_transcript_budget_action = src_last_transcript_budget_action;
             state.last_accessed = Instant::now();
@@ -2002,6 +2009,30 @@ pub fn workspace_anchor(id: &str) -> Option<WorkspaceAnchor> {
     })
 }
 
+/// Set session-local workspace defaults. Returns `Ok(true)` when the
+/// policy changed.
+pub fn set_workspace_policy(id: &str, policy: WorkspacePolicy) -> Result<bool, String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let changed = state.workspace_policy != policy;
+        state.workspace_policy = policy;
+        state.last_accessed = Instant::now();
+        Ok(changed)
+    })
+}
+
+/// Read the session's workspace policy, if the session exists.
+pub fn workspace_policy(id: &str) -> Option<WorkspacePolicy> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .map(|state| state.workspace_policy.clone())
+    })
+}
+
 fn empty_transcript(id: &str) -> VmValue {
     use crate::llm::helpers::new_transcript_with;
     new_transcript_with(Some(id.to_string()), Vec::new(), None, None)
@@ -2191,6 +2222,10 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .as_ref()
             .map(WorkspaceAnchor::to_vm_value)
             .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "workspace_policy".to_string(),
+        state.workspace_policy.to_vm_value(),
     );
     VmValue::Dict(Rc::new(next))
 }

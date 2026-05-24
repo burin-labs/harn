@@ -1,0 +1,102 @@
+import { path_scope } from "std/tools"
+
+fn path_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "Read",
+    "Read a file",
+    {
+      handler: { args -> "read " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "Write",
+    "Write a file",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+fn run_one(session, tool_name, path, permissions) {
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "call_" + tool_name, name: tool_name, arguments: {path: path}}]})
+  llm_mock({text: "done"})
+  return agent_loop(
+    "Use " + tool_name,
+    nil,
+    {
+      session_id: session,
+      provider: "mock",
+      tools: path_tools(),
+      tool_format: "native",
+      max_iterations: 2,
+      permissions: permissions,
+    },
+  )
+}
+
+pipeline main() {
+  let outside = agent_session_open(
+    "path-scope-outside",
+    {workspace_anchor: {primary: "/tmp/harn-anchor-a", anchored_at: "2026-05-24T00:00:00Z"}},
+  )
+  let denied = run_one(outside, "Read", "/tmp/harn-anchor-b/file.txt", {allow: {Read: path_scope()}})
+  let denied_events = transcript_events_by_kind(denied?.transcript, "PermissionDeny")
+  assert(len(denied_events) == 1, "outside path is denied")
+  assert(
+    json_stringify(denied_events)
+      .contains("path '/tmp/harn-anchor-b/file.txt' is outside anchor /tmp/harn-anchor-a"),
+    "denial reason names the path and anchor",
+  )
+  let extended = agent_session_open(
+    "path-scope-extend",
+    {
+      workspace_anchor: {
+        primary: "/tmp/harn-anchor-a",
+        additional_roots: [{path: "/tmp/harn-anchor-b", mount_mode: "extend"}],
+        anchored_at: "2026-05-24T00:00:00Z",
+      },
+    },
+  )
+  let allowed = run_one(extended, "Read", "/tmp/harn-anchor-b/file.txt", {allow: {Read: path_scope()}})
+  assert(
+    len(transcript_events_by_kind(allowed?.transcript, "PermissionGrant")) == 1,
+    "extend mount allows read",
+  )
+  assert(len(allowed?.tools?.rejected ?? []) == 0, "extend mount does not reject read")
+  let read_only = agent_session_open(
+    "path-scope-read-only",
+    {
+      workspace_anchor: {
+        primary: "/tmp/harn-anchor-a",
+        additional_roots: [{path: "/tmp/harn-anchor-b"}],
+        anchored_at: "2026-05-24T00:00:00Z",
+      },
+    },
+  )
+  let read_allowed = run_one(read_only, "Read", "/tmp/harn-anchor-b/file.txt", {allow: {Read: path_scope()}})
+  assert(
+    len(transcript_events_by_kind(read_allowed?.transcript, "PermissionGrant")) == 1,
+    "read-only mount allows Read",
+  )
+  let write_denied = run_one(
+    read_only,
+    "Write",
+    "/tmp/harn-anchor-b/file.txt",
+    {allow: {Write: path_scope({mount_modes: ["extend"]})}},
+  )
+  assert(
+    len(transcript_events_by_kind(write_denied?.transcript, "PermissionDeny")) == 1,
+    "read-only mount denies Write when only extend mounts are writable",
+  )
+  assert(write_denied?.tools?.rejected[0] == "Write", "write call is rejected")
+  log("agent_path_scope_permissions tests passed")
+}
