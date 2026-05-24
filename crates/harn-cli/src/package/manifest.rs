@@ -652,6 +652,8 @@ pub struct McpServerConfig {
     #[serde(default)]
     pub protocol_version: Option<String>,
     #[serde(default)]
+    pub protocol_mode: Option<String>,
+    #[serde(default)]
     pub proxy_server_name: Option<String>,
     /// When `true`, the server is NOT booted up-front. It boots on the
     /// first `mcp_call` or on skill activation that declares it in
