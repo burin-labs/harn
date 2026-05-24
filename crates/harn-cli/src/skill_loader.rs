@@ -17,7 +17,7 @@ use harn_vm::skills::{
     build_fs_discovery, default_system_dirs, default_user_dir, install_current_skill_registry,
     parse_env_skills_path, skill_manifest_ref_to_vm, strip_untrusted_command_frontmatter,
     BoundSkillRegistry, DiscoveryOptions, DiscoveryReport, FsLayerConfig, Layer, LayeredDiscovery,
-    ManifestSource, SkillManifestRef,
+    ManifestSource, Skill, SkillFetcher, SkillManifestRef,
 };
 use harn_vm::value::VmValue;
 
@@ -49,7 +49,10 @@ pub struct LoadedSkills {
     /// re-fetch a single SKILL.md after `skills/update` fires.
     #[allow(dead_code)]
     pub discovery: Arc<LayeredDiscovery>,
+    fetcher: SkillFetcher,
 }
+
+const REQUIRE_SIGNED_SKILLS_ENV: &str = "HARN_REQUIRE_SIGNED_SKILLS";
 
 /// Build a [`LoadedSkills`] from CLI inputs. Does no I/O unless one of
 /// the input layers has a directory to walk.
@@ -90,11 +93,14 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
     cfg.system_dirs = default_system_dirs();
 
     let discovery = Arc::new(build_fs_discovery(&cfg, options));
-    let report = discovery.build_report();
+    let raw_report = discovery.build_report();
+    let require_signed_skills = env_requires_signed_skills();
 
     let mut loader_warnings = Vec::new();
     let mut entries: Vec<VmValue> = Vec::new();
-    for winner in &report.winners {
+    let mut included_winners = Vec::new();
+    let mut fetch_policies = BTreeMap::new();
+    for winner in &raw_report.winners {
         if !winner.unknown_fields.is_empty() {
             loader_warnings.push(format!(
                 "skills: {} has unknown frontmatter fields: {}",
@@ -109,12 +115,7 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
         // enumeration time.
         let provenance = build_provenance_report_for_ref(winner, registry_url.clone());
         if let Some(report) = provenance.as_ref() {
-            if matches!(
-                report.status,
-                VerificationStatus::InvalidSignature
-                    | VerificationStatus::MissingSigner
-                    | VerificationStatus::UntrustedSigner
-            ) {
+            if should_warn_about_provenance(report) {
                 loader_warnings.push(format!(
                     "skills: {} provenance check: {}",
                     winner.id,
@@ -122,13 +123,23 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
                 ));
             }
         }
+        let required = require_signed_skills || winner.manifest.require_signature;
+        if should_omit_skill(winner, provenance.as_ref(), required) {
+            loader_warnings.push(format!(
+                "skills: {} omitted: {}",
+                winner.id,
+                provenance_failure_summary(winner, provenance.as_ref(), required)
+            ));
+            continue;
+        }
         let mut entry = match skill_manifest_ref_to_vm(winner) {
             VmValue::Dict(map) => (*map).clone(),
             _ => BTreeMap::new(),
         };
-        if let Some(report) = provenance {
-            entry.insert("provenance".to_string(), provenance_to_vm(&report));
-            if strip_untrusted_command_frontmatter(&mut entry) {
+        let strip_hooks = should_strip_executable_frontmatter(provenance.as_ref());
+        if let Some(report) = provenance.as_ref() {
+            entry.insert("provenance".to_string(), provenance_to_vm(report));
+            if strip_hooks && strip_untrusted_command_frontmatter(&mut entry) {
                 loader_warnings.push(format!(
                     "skills: {} command frontmatter omitted because provenance check did not verify: {}",
                     winner.id,
@@ -136,8 +147,36 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
                 ));
             }
         }
+        fetch_policies.insert(
+            winner.id.clone(),
+            SkillRuntimePolicy {
+                require_verified: should_require_verified_on_fetch(
+                    winner,
+                    provenance.as_ref(),
+                    required,
+                ),
+                strip_hooks,
+            },
+        );
+        included_winners.push(winner.clone());
         entries.push(VmValue::Dict(Rc::new(entry)));
     }
+
+    let included_ids: std::collections::BTreeSet<String> = included_winners
+        .iter()
+        .map(|winner| winner.id.clone())
+        .collect();
+    let mut report = raw_report;
+    report.winners = included_winners;
+    report
+        .shadowed
+        .retain(|shadowed| included_ids.contains(&shadowed.id));
+    report.unknown_fields = report
+        .winners
+        .iter()
+        .filter(|winner| !winner.unknown_fields.is_empty())
+        .map(|winner| (winner.id.clone(), winner.unknown_fields.clone()))
+        .collect();
 
     let mut registry: BTreeMap<String, VmValue> = BTreeMap::new();
     registry.insert(
@@ -146,13 +185,127 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
     );
     registry.insert("skills".to_string(), VmValue::List(Rc::new(entries)));
     let registry_value = VmValue::Dict(Rc::new(registry));
+    let fetcher = build_policy_fetcher(discovery.clone(), registry_url, fetch_policies);
 
     LoadedSkills {
         registry: registry_value,
         report,
         loader_warnings,
         discovery,
+        fetcher,
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SkillRuntimePolicy {
+    require_verified: bool,
+    strip_hooks: bool,
+}
+
+fn env_requires_signed_skills() -> bool {
+    std::env::var(REQUIRE_SIGNED_SKILLS_ENV)
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
+
+fn should_warn_about_provenance(report: &VerificationReport) -> bool {
+    !matches!(
+        report.status,
+        VerificationStatus::Verified | VerificationStatus::MissingSignature
+    )
+}
+
+fn should_strip_executable_frontmatter(report: Option<&VerificationReport>) -> bool {
+    report.is_some_and(|report| !report.is_verified())
+}
+
+fn layer_drops_failed_provenance(layer: Layer) -> bool {
+    matches!(layer, Layer::User | Layer::System)
+}
+
+fn should_omit_skill(
+    winner: &SkillManifestRef,
+    provenance: Option<&VerificationReport>,
+    required: bool,
+) -> bool {
+    if required {
+        return !provenance.is_some_and(VerificationReport::is_verified);
+    }
+    layer_drops_failed_provenance(winner.layer)
+        && provenance.is_some_and(|report| {
+            !matches!(
+                report.status,
+                VerificationStatus::Verified | VerificationStatus::MissingSignature
+            )
+        })
+}
+
+fn should_require_verified_on_fetch(
+    winner: &SkillManifestRef,
+    provenance: Option<&VerificationReport>,
+    required: bool,
+) -> bool {
+    required
+        || layer_drops_failed_provenance(winner.layer)
+            && provenance
+                .is_some_and(|report| report.status != VerificationStatus::MissingSignature)
+}
+
+fn provenance_failure_summary(
+    winner: &SkillManifestRef,
+    provenance: Option<&VerificationReport>,
+    required: bool,
+) -> String {
+    let policy = if required {
+        "a trusted signature is required"
+    } else {
+        "user/system skills with failed provenance are not loaded"
+    };
+    match provenance {
+        Some(report) => format!("{policy}; {}", report.human_summary()),
+        None => format!(
+            "{policy}; no filesystem-backed provenance is available for {}",
+            winner.id
+        ),
+    }
+}
+
+fn build_policy_fetcher(
+    discovery: Arc<LayeredDiscovery>,
+    registry_url: Option<String>,
+    policies: BTreeMap<String, SkillRuntimePolicy>,
+) -> SkillFetcher {
+    let policies = Arc::new(policies);
+    Arc::new(move |id| {
+        let policy = policies
+            .get(id)
+            .copied()
+            .ok_or_else(|| format!("skill '{id}' not found"))?;
+        let mut skill = discovery.fetch(id)?;
+        let provenance = build_provenance_report_for_skill(&skill, registry_url.clone());
+        if policy.require_verified
+            && !provenance
+                .as_ref()
+                .is_some_and(VerificationReport::is_verified)
+        {
+            return Err(format!(
+                "UnsignedSkillError: skill '{id}' requires a trusted signature"
+            ));
+        }
+        if policy.strip_hooks
+            || provenance
+                .as_ref()
+                .is_some_and(|report| !report.is_verified())
+        {
+            skill.manifest.hooks.clear();
+        }
+        Ok(skill)
+    })
 }
 
 fn build_provenance_report_for_ref(
@@ -163,16 +316,43 @@ fn build_provenance_report_for_ref(
         return None;
     }
     let skill_path = PathBuf::from(&winner.origin).join("SKILL.md");
+    build_provenance_report(
+        &skill_path,
+        registry_url,
+        winner.manifest.trusted_signers.clone(),
+        winner.manifest.trusted_endorsers.clone(),
+    )
+}
+
+fn build_provenance_report_for_skill(
+    skill: &Skill,
+    registry_url: Option<String>,
+) -> Option<VerificationReport> {
+    let skill_path = skill.skill_dir.as_ref()?.join("SKILL.md");
+    build_provenance_report(
+        &skill_path,
+        registry_url,
+        skill.manifest.trusted_signers.clone(),
+        skill.manifest.trusted_endorsers.clone(),
+    )
+}
+
+fn build_provenance_report(
+    skill_path: &Path,
+    registry_url: Option<String>,
+    allowed_signers: Vec<String>,
+    allowed_endorsers: Vec<String>,
+) -> Option<VerificationReport> {
     let options = VerifyOptions {
         registry_url,
-        allowed_signers: winner.manifest.trusted_signers.clone(),
-        allowed_endorsers: winner.manifest.trusted_endorsers.clone(),
+        allowed_signers,
+        allowed_endorsers,
     };
-    match skill_provenance::verify_skill(&skill_path, &options) {
+    match skill_provenance::verify_skill(skill_path, &options) {
         Ok(report) => Some(report),
         Err(error) => Some(VerificationReport {
-            skill_path: skill_path.clone(),
-            signature_path: skill_provenance::signature_path_for(&skill_path),
+            skill_path: skill_path.to_path_buf(),
+            signature_path: skill_provenance::signature_path_for(skill_path),
             skill_sha256: String::new(),
             signer_fingerprint: None,
             signed_at: None,
@@ -350,10 +530,10 @@ fn apply_option_overrides(options: &mut DiscoveryOptions, resolved: &ResolvedSki
 /// `skill_registry` so `skill_count(skills)` still returns `0`.
 pub fn install_skills_global(vm: &mut harn_vm::Vm, loaded: &LoadedSkills) {
     vm.set_global("skills", loaded.registry.clone());
-    let discovery = loaded.discovery.clone();
+    let fetcher = loaded.fetcher.clone();
     install_current_skill_registry(Some(BoundSkillRegistry {
         registry: loaded.registry.clone(),
-        fetcher: Arc::new(move |id| discovery.fetch(id)),
+        fetcher,
     }));
 }
 
@@ -590,6 +770,177 @@ mod tests {
                 .loader_warnings
                 .iter()
                 .any(|warning| warning.contains("does not match the current contents")),
+            "{:?}",
+            loaded.loader_warnings
+        );
+    }
+
+    #[test]
+    fn manifest_required_signature_omits_unverified_skill_at_startup() {
+        let _cwd = lock_cwd();
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = set_home(tmp.path());
+
+        let skill_dir = tmp.path().join("deploy");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: deploy\nshort: deploy short card\nrequire_signature: true\n---\nbody",
+        )
+        .unwrap();
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![tmp.path().to_path_buf()],
+            source_path: None,
+        });
+        assert_eq!(loaded.report.winners.len(), 0);
+        assert_eq!(registry_entries(&loaded).len(), 0);
+        assert!(
+            loaded
+                .loader_warnings
+                .iter()
+                .any(|warning| warning.contains("deploy omitted") && warning.contains("missing")),
+            "{:?}",
+            loaded.loader_warnings
+        );
+    }
+
+    #[test]
+    fn unsigned_skill_loads_without_executable_hooks() {
+        let _cwd = lock_cwd();
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = set_home(tmp.path());
+
+        let skill_dir = tmp.path().join("deploy");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            concat!(
+                "---\n",
+                "name: deploy\n",
+                "short: deploy short card\n",
+                "hooks:\n",
+                "  on-activate: \"echo should-not-surface\"\n",
+                "---\n",
+                "body",
+            ),
+        )
+        .unwrap();
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![tmp.path().to_path_buf()],
+            source_path: None,
+        });
+        let entries = registry_entries(&loaded);
+        assert_eq!(entries.len(), 1);
+        let entry = entries[0].as_dict().expect("entry should be a dict");
+        assert!(
+            !entry.contains_key("hooks"),
+            "unsigned executable frontmatter should be stripped: {entry:?}"
+        );
+        assert!(
+            entry.contains_key("provenance"),
+            "startup entry should still carry provenance status"
+        );
+    }
+
+    #[test]
+    fn user_layer_drops_skill_when_signature_fails() {
+        let _cwd = lock_cwd();
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = set_home(tmp.path());
+
+        let user_skills = tmp.path().join(".harn").join("skills");
+        let skill_dir = user_skills.join("deploy");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: deploy\nshort: deploy short card\n---\nbody",
+        )
+        .unwrap();
+
+        let keys = skill_provenance::generate_keypair(tmp.path().join("signer.pem")).unwrap();
+        skill_provenance::sign_skill(skill_dir.join("SKILL.md"), &keys.private_key_path).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: deploy\nshort: deploy short card\n---\nbody changed",
+        )
+        .unwrap();
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: Vec::new(),
+            source_path: None,
+        });
+        assert_eq!(registry_entries(&loaded).len(), 0);
+        assert!(
+            loaded
+                .loader_warnings
+                .iter()
+                .any(|warning| warning.contains("deploy omitted")
+                    && warning.contains("does not match the current contents")),
+            "{:?}",
+            loaded.loader_warnings
+        );
+    }
+
+    #[test]
+    fn user_layer_unsigned_skill_fetches_without_hooks() {
+        let _cwd = lock_cwd();
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = set_home(tmp.path());
+
+        let skill_dir = tmp.path().join(".harn").join("skills").join("deploy");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            concat!(
+                "---\n",
+                "name: deploy\n",
+                "short: deploy short card\n",
+                "hooks:\n",
+                "  on-activate: \"echo should-not-surface\"\n",
+                "---\n",
+                "body",
+            ),
+        )
+        .unwrap();
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: Vec::new(),
+            source_path: None,
+        });
+        assert_eq!(registry_entries(&loaded).len(), 1);
+        let fetched = (loaded.fetcher)("deploy").expect("unsigned user skill loads");
+        assert!(
+            fetched.manifest.hooks.is_empty(),
+            "policy fetcher should not rehydrate unsigned hooks"
+        );
+    }
+
+    #[test]
+    fn global_require_signed_skills_omits_unsigned_skill() {
+        let _cwd = lock_cwd();
+        let _env = lock_env().blocking_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = set_home(tmp.path());
+        let _require = ScopedEnvVar::set(REQUIRE_SIGNED_SKILLS_ENV, "1");
+        write_skill(tmp.path(), "deploy", "deploy", "body");
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![tmp.path().to_path_buf()],
+            source_path: None,
+        });
+        assert_eq!(registry_entries(&loaded).len(), 0);
+        assert!(
+            loaded
+                .loader_warnings
+                .iter()
+                .any(|warning| warning.contains("deploy omitted")
+                    && warning.contains("trusted signature")),
             "{:?}",
             loaded.loader_warnings
         );

@@ -31,6 +31,8 @@ pub struct LoadSkillOptions {
     pub model_invocation: bool,
 }
 
+const EXECUTABLE_FRONTMATTER_FIELDS: &[&str] = &["hooks", "command", "run"];
+
 thread_local! {
     static CURRENT_SKILL_REGISTRY: RefCell<Option<BoundSkillRegistry>> = const { RefCell::new(None) };
 }
@@ -151,6 +153,14 @@ fn hydrate_skill_entry(
     match skill_entry_to_vm(&loaded) {
         VmValue::Dict(dict) => {
             let mut hydrated = (*dict).clone();
+            // Loader-side provenance checks may redact executable metadata
+            // from the startup registry. Lazy body hydration must not restore
+            // those fields from the raw SKILL.md.
+            for field in EXECUTABLE_FRONTMATTER_FIELDS {
+                if !entry.contains_key(*field) {
+                    hydrated.remove(*field);
+                }
+            }
             for (key, value) in entry {
                 hydrated.entry(key).or_insert(value);
             }
@@ -448,5 +458,47 @@ mod tests {
         assert!(!loaded.entry.contains_key("hooks"));
         assert!(!loaded.entry.contains_key("command"));
         assert!(!loaded.entry.contains_key("run"));
+    }
+
+    #[test]
+    fn hydration_does_not_restore_stripped_executable_frontmatter() {
+        let entry = BTreeMap::from([
+            ("name".to_string(), string("deploy")),
+            ("short".to_string(), string("deploy short card")),
+        ]);
+        let registry = registry_with_entry(entry);
+
+        let fetcher: SkillFetcher = Arc::new(|_| {
+            Ok(Skill {
+                manifest: SkillManifest {
+                    name: "deploy".to_string(),
+                    short: "deploy short card".to_string(),
+                    hooks: BTreeMap::from([(
+                        "on-activate".to_string(),
+                        "echo should-not-surface".to_string(),
+                    )]),
+                    ..SkillManifest::default()
+                },
+                body: "body".to_string(),
+                skill_dir: None,
+                layer: Layer::Cli,
+                namespace: None,
+                unknown_fields: Vec::new(),
+            })
+        });
+
+        let loaded = load_skill_from_registry_with_options(
+            &registry,
+            Some(&fetcher),
+            "deploy",
+            LoadSkillOptions::default(),
+            "load_skill",
+        )
+        .expect("skill should load");
+        assert_eq!(loaded.rendered_body, "body");
+        assert!(
+            !loaded.entry.contains_key("hooks"),
+            "sanitized startup registry entry should remain authoritative"
+        );
     }
 }

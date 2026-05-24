@@ -218,6 +218,12 @@ condensed series summaries instead of full per-patch history.
   be positive integers, and `iteration_budget.initial` cannot exceed
   `iteration_budget.max`. Invalid workflow stage budgets now fail with a clear
   `agent_loop` diagnostic before any provider call.
+- **Skill provenance now fails closed where policy requires it (#2259).**
+  Skills that declare `require_signature`, or runs started with
+  `HARN_REQUIRE_SIGNED_SKILLS=1`, are omitted from the startup registry unless
+  their detached signature chain verifies. User and system layer skills are also
+  dropped on failed provenance checks, and unverified skills no longer surface
+  executable hook frontmatter.
 
 - **Provider tool-mode normalization is stricter.** Text-mode tool calls no
   longer leak native provider schemas or orphan native tool-result messages,

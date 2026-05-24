@@ -182,18 +182,20 @@ trusted_endorsers:
 When enforcement is active:
 
 - missing signatures, invalid signatures, unknown signers, disallowed
-  signers, or missing endorsements all block the load with
+  signers, or missing endorsements keep the skill out of the startup
+  registry or block a direct `load_skill(...)` call with
   `UnsignedSkillError`
 - the attached provenance metadata carries the precise status, such as
   `missing_signature`, `invalid_signature`, `missing_signer`,
   `untrusted_signer`, or `missing_endorsement`
 
 Unsigned skills still load by default unless one of those policies is
-enabled. Command-bearing frontmatter is stricter: filesystem-backed
-skills only surface `hooks`, `command`, or `run` fields when the
-attached provenance verifies as trusted. Untrusted, unsigned, or
-tampered skills keep their metadata and lazy-loadable body, but those
-frontmatter command fields are omitted from the runtime registry.
+enabled. User and system layer skills are stricter: a failed provenance
+check is enough to omit the entry by default, though a completely
+unsigned skill can still be listed. For listed filesystem-backed skills,
+executable frontmatter is only surfaced when the attached provenance
+verifies as trusted. Untrusted, unsigned, or tampered skills omit
+`hooks`, `command`, and `run` fields from the runtime registry.
 
 ## Trust records and OpenTrustGraph
 
