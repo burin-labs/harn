@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone bench-llm bench-orchestration bench-cli-cold-start all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-support check-provider-support gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift
+.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone bench-llm bench-orchestration bench-cli-cold-start all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-support check-provider-support gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -444,3 +444,10 @@ lint-no-rust-prompt-prose:
 
 lint-no-xfail-regression:
 	@cargo run --quiet --bin harn -- run scripts/check_xfail_count.harn
+
+# CI ratchet: fail if any Rust CLI handler listed in
+# scripts/ported_handlers.toml grows past its budgeted LOC. Tracks
+# epic #2293 (subticket #2314 = C1). See the script header for how to
+# add new entries / adjust budgets.
+check-ported-handler-loc:
+	@cargo run --quiet --bin harn -- run scripts/check_ported_handler_loc.harn

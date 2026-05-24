@@ -1,0 +1,119 @@
+// CI ratchet: fail if any handler listed in scripts/ported_handlers.toml
+// grows beyond its committed LOC budget. The intent is to catch *new*
+// growth in the legacy Rust dispatch path while a CLI subcommand is in
+// the middle of being ported off Rust onto the self-hosted `.harn`
+// cli/* stack — without forcing a clean-up of the existing baseline.
+//
+// Budgets are set to the current LOC + a small slack (~5 lines) so a
+// no-op refactor doesn't trip the gate but a real regression does.
+// When a port advances and shrinks the Rust handler, drop the budget
+// to the new current+5 in the same PR.
+//
+// Line counts match `wc -l` (number of `\n` characters), which is what
+// the budgets in ported_handlers.toml were measured against.
+//
+// Tracks epic #2293 (subticket #2314 = C1).
+let CONFIG_PATH = "scripts/ported_handlers.toml"
+
+/**
+ * Count lines in `text`, matching `wc -l` semantics: the number of
+ * newline characters. Files that end with a trailing newline (the
+ * conventional shape for source files) report the same count as
+ * `wc -l` on disk.
+ */
+pub fn count_lines(text: string) -> int {
+  return text.split("\n").count - 1
+}
+
+/**
+ * Compute the LOC for a single file path. Returns `nil` if the file
+ * is missing — callers decide whether that's a hard error (a budgeted
+ * file should always exist) or a soft skip.
+ */
+pub fn loc_for(path: string) -> int? {
+  if !harness.fs.exists(path) {
+    return nil
+  }
+  return count_lines(harness.fs.read_text(path))
+}
+
+/**
+ * Pure check used by `collect_violations`. Given a handler's configured
+ * `path` / `max_loc` and the `actual` LOC (or `nil` if the file is
+ * missing), return a violation record or `nil` if the entry is within
+ * budget. Split out so tests can exercise the rules without touching
+ * the filesystem.
+ */
+pub fn evaluate_handler(path, max_loc, actual) {
+  if path == nil || path == "" || max_loc == nil {
+    return {path: path, actual: nil, max_loc: max_loc, reason: "invalid entry: path and max_loc are required"}
+  }
+  if actual == nil {
+    return {path: path, actual: nil, max_loc: max_loc, reason: "missing file"}
+  }
+  if actual > max_loc {
+    return {path: path, actual: actual, max_loc: max_loc, reason: "over budget"}
+  }
+  return nil
+}
+
+/**
+ * Walk a parsed `[[handler]]` array and return the subset that exceeds
+ * its budget, as `{path, actual, max_loc, reason}` records. Missing
+ * files are surfaced as violations so a typo in the config fails the
+ * gate instead of silently passing.
+ */
+pub fn collect_violations(handlers) -> list {
+  var violations = []
+  for handler in handlers {
+    let path = handler?.path
+    let max_loc = handler?.max_loc
+    let actual = if path == nil || path == "" {
+      nil
+    } else {
+      loc_for(path)
+    }
+    let v = evaluate_handler(path, max_loc, actual)
+    if v != nil {
+      violations = violations + [v]
+    }
+  }
+  return violations
+}
+
+pipeline main(task) {
+  if !harness.fs.exists(CONFIG_PATH) {
+    __io_eprintln("error: missing ${CONFIG_PATH}")
+    return 1
+  }
+  let parsed = try {
+    toml_parse(harness.fs.read_text(CONFIG_PATH))
+  } catch (err) {
+    __io_eprintln("error: failed to parse ${CONFIG_PATH}: ${err}")
+    return 1
+  }
+  let handlers = parsed?.handler ?? []
+  if handlers.count == 0 {
+    __io_eprintln("error: ${CONFIG_PATH} has no [[handler]] entries")
+    return 1
+  }
+  let violations = collect_violations(handlers)
+  if violations.count == 0 {
+    __io_println("ported-handler LOC ratchet OK (${handlers.count} handler(s) within budget)")
+    return 0
+  }
+  __io_eprintln("::error::ported-handler LOC ratchet failed (${violations.count} violation(s)):")
+  for v in violations {
+    if v.reason == "missing file" {
+      __io_eprintln("  ${v.path}: missing (budget was ${v.max_loc})")
+    } else if v.reason == "invalid entry: path and max_loc are required" {
+      __io_eprintln("  <invalid entry>: ${v.reason}")
+    } else {
+      __io_eprintln("  ${v.path}: ${v.actual} > ${v.max_loc}")
+    }
+  }
+  __io_eprintln(
+    "hint: a ported handler grew. Either shrink it back (preferred — the ratchet exists to keep the Rust dispatch path from regrowing) or, if the growth is intentional, bump the budget in ${CONFIG_PATH} with rationale in the commit message.",
+  )
+  return 1
+}

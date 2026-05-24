@@ -1,0 +1,71 @@
+// Tests for scripts/check_ported_handler_loc.harn — exercise the helper
+// functions on synthetic inputs (no filesystem dependency).
+import "../check_ported_handler_loc.harn"
+
+@test
+pipeline test_count_lines_trailing_newline(task) {
+  // Matches `wc -l`: "a\nb\nc\n" has 3 newlines.
+  assert_eq(count_lines("a\nb\nc\n"), 3)
+}
+
+@test
+pipeline test_count_lines_no_trailing_newline(task) {
+  // Also `wc -l` behavior: only newline characters count.
+  assert_eq(count_lines("a\nb\nc"), 2)
+}
+
+@test
+pipeline test_count_lines_empty_string(task) {
+  assert_eq(count_lines(""), 0)
+}
+
+@test
+pipeline test_count_lines_single_newline(task) {
+  assert_eq(count_lines("\n"), 1)
+}
+
+@test
+pipeline test_evaluate_handler_within_budget_returns_nil(task) {
+  assert_eq(evaluate_handler("a.rs", 100, 50), nil)
+}
+
+@test
+pipeline test_evaluate_handler_at_budget_returns_nil(task) {
+  // At-budget is OK; only strict over trips the ratchet.
+  assert_eq(evaluate_handler("a.rs", 100, 100), nil)
+}
+
+@test
+pipeline test_evaluate_handler_over_budget(task) {
+  let v = evaluate_handler("a.rs", 100, 101)
+  assert_eq(v.path, "a.rs")
+  assert_eq(v.actual, 101)
+  assert_eq(v.max_loc, 100)
+  assert_eq(v.reason, "over budget")
+}
+
+@test
+pipeline test_evaluate_handler_missing_file(task) {
+  let v = evaluate_handler("ghost.rs", 100, nil)
+  assert_eq(v.path, "ghost.rs")
+  assert_eq(v.actual, nil)
+  assert_eq(v.reason, "missing file")
+}
+
+@test
+pipeline test_evaluate_handler_invalid_empty_path(task) {
+  let v = evaluate_handler("", 100, 50)
+  assert_eq(v.reason, "invalid entry: path and max_loc are required")
+}
+
+@test
+pipeline test_evaluate_handler_invalid_nil_path(task) {
+  let v = evaluate_handler(nil, 100, 50)
+  assert_eq(v.reason, "invalid entry: path and max_loc are required")
+}
+
+@test
+pipeline test_evaluate_handler_invalid_nil_max_loc(task) {
+  let v = evaluate_handler("a.rs", nil, 50)
+  assert_eq(v.reason, "invalid entry: path and max_loc are required")
+}
