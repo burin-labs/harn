@@ -100,6 +100,14 @@ pub fn harness_system_ambient(method: &str) -> Option<&'static str> {
     }
 }
 
+pub fn harness_llm_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "catalog" => Some("llm_catalog"),
+        "providers" => Some("llm_provider_status"),
+        _ => None,
+    }
+}
+
 pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'static str> {
     match sub_handle {
         "stdio" => harness_stdio_ambient(method),
@@ -110,6 +118,22 @@ pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'st
         "net" => harness_net_ambient(method),
         "process" => harness_process_ambient(method),
         "system" => harness_system_ambient(method),
+        "llm" => harness_llm_ambient(method),
+        _ => None,
+    }
+}
+
+pub fn harness_type_sub_handle(type_name: &str) -> Option<&'static str> {
+    match type_name {
+        "HarnessStdio" => Some("stdio"),
+        "HarnessClock" => Some("clock"),
+        "HarnessFs" => Some("fs"),
+        "HarnessEnv" => Some("env"),
+        "HarnessRandom" => Some("random"),
+        "HarnessNet" => Some("net"),
+        "HarnessProcess" => Some("process"),
+        "HarnessSystem" => Some("system"),
+        "HarnessLlm" => Some("llm"),
         _ => None,
     }
 }

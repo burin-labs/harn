@@ -325,6 +325,9 @@ fn direct_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         | "agent_loop" => {
             out.insert("llm.call".to_string());
         }
+        "llm_catalog" | "llm_provider_status" => {
+            out.insert("llm.catalog".to_string());
+        }
         "spawn_agent" | "send_input" | "resume_agent" | "wait_agent" | "close_agent"
         | "worker_trigger" => {
             out.insert("worker.dispatch".to_string());
@@ -358,6 +361,7 @@ fn direct_effects(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
             "network.http" => "net.http".to_string(),
             "process.exec" => "process.exec".to_string(),
             "llm.call" => "llm.call".to_string(),
+            "llm.catalog" => "llm.catalog".to_string(),
             "worker.dispatch" => "worker.dispatch".to_string(),
             "human.approval" => "human.approval".to_string(),
             "template.render" => "template.render".to_string(),

@@ -3,19 +3,16 @@
 //!
 //! `Harness` is the Harn-language analog of an explicit-capability handle: a
 //! single value the runtime hands to a script's `main` so that stdio, clock,
-//! filesystem, environment, randomness, network, process, and system access become surface in
-//! the type system instead of ambient globals. Each sub-handle (`stdio`,
-//! `clock`, `fs`, `env`, `random`, `net`, `process`, `system`) is a distinct named type that
-//! anchors the surface for its capability slice.
+//! filesystem, environment, randomness, network, process, system, and LLM
+//! catalog access become surface in the type system instead of ambient
+//! globals. Each sub-handle (`stdio`, `clock`, `fs`, `env`, `random`, `net`,
+//! `process`, `system`, `llm`) is a distinct named type that anchors the
+//! surface for its capability slice.
 //!
 //! This module defines:
 //!   * The runtime [`Harness`] value (and its sub-handle wrappers).
-//!   * [`Harness::real`], the production constructor that wraps wall-clock
-//!     time, `tokio::fs`, `std::env`, `rand::thread_rng`, and `reqwest`. The
-//!     downstream migration tickets (E4.2-E4.4) populate the per-handle
-//!     method surface against this concrete state; the E4.2 stdio surface is
-//!     wired while filesystem, environment, randomness, and network methods
-//!     still land in later slices.
+//!   * [`Harness::real`], the production constructor that wraps the concrete
+//!     host state used by the sub-handle method dispatchers.
 //!   * [`VmHarness`], the compact `VmValue` payload that carries the same
 //!     state through the bytecode VM and distinguishes the root handle from
 //!     its sub-handles via [`HarnessKind`].
@@ -45,6 +42,7 @@ pub enum HarnessKind {
     Net,
     Process,
     System,
+    Llm,
 }
 
 impl HarnessKind {
@@ -62,6 +60,7 @@ impl HarnessKind {
             HarnessKind::Net => "HarnessNet",
             HarnessKind::Process => "HarnessProcess",
             HarnessKind::System => "HarnessSystem",
+            HarnessKind::Llm => "HarnessLlm",
         }
     }
 
@@ -78,6 +77,7 @@ impl HarnessKind {
             HarnessKind::Net => Some("net"),
             HarnessKind::Process => Some("process"),
             HarnessKind::System => Some("system"),
+            HarnessKind::Llm => Some("llm"),
         }
     }
 
@@ -92,6 +92,7 @@ impl HarnessKind {
             "net" => Some(HarnessKind::Net),
             "process" => Some(HarnessKind::Process),
             "system" => Some(HarnessKind::System),
+            "llm" => Some(HarnessKind::Llm),
             _ => None,
         }
     }
@@ -106,6 +107,7 @@ impl HarnessKind {
         HarnessKind::Net,
         HarnessKind::Process,
         HarnessKind::System,
+        HarnessKind::Llm,
     ];
 
     /// Every kind a Harn-script type annotation may reference.
@@ -119,6 +121,7 @@ impl HarnessKind {
         HarnessKind::Net,
         HarnessKind::Process,
         HarnessKind::System,
+        HarnessKind::Llm,
     ];
 }
 
@@ -625,6 +628,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.llm`.
+    pub fn llm(&self) -> HarnessLlm {
+        HarnessLlm {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Lower this handle into the `VmValue::Harness` payload.
     pub fn into_vm_value(self) -> crate::value::VmValue {
         crate::value::VmValue::harness(VmHarness {
@@ -711,6 +721,12 @@ pub struct HarnessSystem {
     inner: Arc<HarnessInner>,
 }
 
+/// llm sub-handle: `catalog`, `providers`.
+#[derive(Debug, Clone)]
+pub struct HarnessLlm {
+    inner: Arc<HarnessInner>,
+}
+
 macro_rules! sub_handle_inner {
     ($($ty:ty),* $(,)?) => {
         $(
@@ -731,6 +747,7 @@ sub_handle_inner!(
     HarnessNet,
     HarnessProcess,
     HarnessSystem,
+    HarnessLlm,
 );
 
 impl HarnessClock {
@@ -925,6 +942,7 @@ mod tests {
             r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#,
             r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf", args: ["x"]}) }"#,
             r#"fn main(harness: Harness) { harness.system.cpu() }"#,
+            r#"fn main(harness: Harness) { harness.llm.catalog() }"#,
         ] {
             let error = run_harness_source(source, harness.clone()).expect_err("call denied");
             assert!(
@@ -949,6 +967,7 @@ mod tests {
                 (HarnessKind::Net, "get"),
                 (HarnessKind::Process, "spawn_captured"),
                 (HarnessKind::System, "cpu"),
+                (HarnessKind::Llm, "catalog"),
             ]
         );
         assert_eq!(events[0].args, vec!["blocked"]);
@@ -979,6 +998,7 @@ fn main(harness: Harness) {
   __io_println(harness.fs.exists("/missing"))
   __io_println(harness.random.gen_u64())
   __io_println(harness.net.get("https://example.test"))
+  __io_println(len(harness.llm.catalog()) > 0)
 }
 "#,
             harness.clone(),
@@ -988,7 +1008,7 @@ fn main(harness: Harness) {
         assert_eq!(harness.captured_stdio(), "partial line\n");
         assert_eq!(
             output,
-            "1700000000000\n1700000000250\n250\nvalue\ndata\nfalse\n42\nbody\n"
+            "1700000000000\n1700000000250\n250\nvalue\ndata\nfalse\n42\nbody\ntrue\n"
         );
         let observed: Vec<_> = harness
             .calls()
@@ -1009,6 +1029,7 @@ fn main(harness: Harness) {
                 (HarnessKind::Fs, "exists".to_string()),
                 (HarnessKind::Random, "gen_u64".to_string()),
                 (HarnessKind::Net, "get".to_string()),
+                (HarnessKind::Llm, "catalog".to_string()),
             ]
         );
     }

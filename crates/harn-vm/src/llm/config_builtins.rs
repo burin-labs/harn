@@ -110,9 +110,8 @@ const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
             "Return the full configured model catalog as a list of dicts: \
              `[{id, name, provider, context_window, runtime_context_window, capabilities, \
              quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`. \
-             Read-only view of `llm_config::model_catalog_entries()` used by `harn models list` \
-             and `harn models recommend`. Free-builtin landing site for the deferred \
-             `harness.llm.catalog` sub-handle (see #2297).",
+             Alias for the read-only `harness.llm.catalog()` handle method, available for \
+             scripts that do not receive a `Harness` parameter.",
         ),
     SyncBuiltin::new("llm_provider_status", llm_provider_status_builtin)
         .signature("llm_provider_status()")
@@ -122,9 +121,9 @@ const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
              configured provider plus runtime-registered names. `available` is true when \
              credentials resolve via the configured env vars (or when the provider uses \
              multi-step auth like Bedrock/Vertex). `credential_status` is one of \
-             `\"ok\"`, `\"missing\"`, `\"not_required\"`, `\"deferred\"`. Used by `harn providers` \
-             and `harn doctor`. Free-builtin landing site for the deferred \
-             `harness.llm.providers` sub-handle (see #2297).",
+             `\"ok\"`, `\"missing\"`, `\"not_required\"`, `\"deferred\"`. Alias for the \
+             read-only `harness.llm.providers()` handle method, available for scripts that \
+             do not receive a `Harness` parameter.",
         ),
 ];
 
@@ -381,15 +380,19 @@ fn provider_register_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
     Ok(VmValue::Bool(true))
 }
 
-fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+pub(crate) fn llm_catalog_value() -> VmValue {
     let entries: Vec<VmValue> = llm_config::model_catalog_entries()
         .into_iter()
         .map(|(id, model)| model_def_to_vm_value(&id, &model))
         .collect();
-    Ok(VmValue::List(Rc::new(entries)))
+    VmValue::List(Rc::new(entries))
 }
 
-fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(llm_catalog_value())
+}
+
+pub(crate) fn llm_provider_status_value() -> VmValue {
     // Mirror `llm_providers()` for the name set so runtime-registered
     // providers also show up, but enrich each entry with a credential
     // probe so callers like `harn providers` and `harn doctor` can
@@ -437,7 +440,11 @@ fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
         );
         entries.push(VmValue::Dict(Rc::new(entry)));
     }
-    Ok(VmValue::List(Rc::new(entries)))
+    VmValue::List(Rc::new(entries))
+}
+
+fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(llm_provider_status_value())
 }
 
 fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

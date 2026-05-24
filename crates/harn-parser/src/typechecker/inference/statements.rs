@@ -1324,7 +1324,7 @@ impl TypeChecker {
                 ..
             } => {
                 self.check_node(object, scope);
-                if self.check_harness_fs_method_call(object, method, args, scope, span) {
+                if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
                 for arg in args {
@@ -1340,7 +1340,7 @@ impl TypeChecker {
             } => {
                 self.check_unnecessary_safe_method_call(snode, object, scope);
                 self.check_node(object, scope);
-                if self.check_harness_fs_method_call(object, method, args, scope, span) {
+                if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
                 for arg in args {

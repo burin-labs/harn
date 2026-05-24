@@ -144,9 +144,9 @@ pub use corrections::{
     CORRECTION_EVENT_KIND, CORRECTION_SCHEMA_V0,
 };
 pub use harness::{
-    DenyEvent, Harness, HarnessCall, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessNet,
-    HarnessProcess, HarnessRandom, HarnessStdio, HarnessSystem, MockAwareClock, MockHarnessBuilder,
-    VmHarness,
+    DenyEvent, Harness, HarnessCall, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessLlm,
+    HarnessNet, HarnessProcess, HarnessRandom, HarnessStdio, HarnessSystem, MockAwareClock,
+    MockHarnessBuilder, VmHarness,
 };
 pub use harness_net::{
     bypass_enabled as net_policy_bypass_enabled, NetMatcher, NetPolicy, NetPolicyAudit,

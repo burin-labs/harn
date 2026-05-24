@@ -2,8 +2,9 @@
 
 ## What it means
 
-A `harness.fs.*`, `harness.env.*`, `harness.random.*`, or
-`harness.net.*` method was rejected by the active sandbox profile.
+A `harness.fs.*`, `harness.env.*`, `harness.random.*`, `harness.net.*`,
+`harness.system.*`, or `harness.llm.*` method was rejected by the active
+sandbox profile.
 Examples:
 
 - `harness.fs.write_text("/etc/passwd", ...)` from a script whose
