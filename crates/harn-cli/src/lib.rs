@@ -899,9 +899,11 @@ async fn async_main() {
                 }
             }
         }
-        Command::Init(args) => commands::init::init_project(args.name.as_deref(), args.template),
+        Command::Init(args) => {
+            commands::init::init_project(args.name.as_deref(), args.template).await
+        }
         Command::New(args) => match commands::init::resolve_new_args(&args) {
-            Ok((name, template)) => commands::init::init_project(name.as_deref(), template),
+            Ok((name, template)) => commands::init::init_project(name.as_deref(), template).await,
             Err(error) => {
                 eprintln!("error: {error}");
                 process::exit(1);
@@ -1468,7 +1470,7 @@ async fn async_main() {
         },
         Command::Tool(args) => match args.command {
             ToolCommand::New(new_args) => {
-                if let Err(error) = commands::tool::run_new(&new_args) {
+                if let Err(error) = commands::tool::run_new(&new_args).await {
                     eprintln!("error: {error}");
                     process::exit(1);
                 }
