@@ -962,6 +962,36 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::StructuralValidatorDecision {
+                session_id,
+                iteration,
+                rule,
+                diagnostic,
+                recommended_action,
+                vetoed,
+                skipped,
+                reason,
+                on_failure,
+                attempts,
+                max_attempts,
+            } => {
+                self.emit_agent_event_ext(
+                    "structural_validator_decision",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "rule": rule,
+                        "diagnostic": diagnostic,
+                        "recommendedAction": recommended_action,
+                        "vetoed": vetoed,
+                        "skipped": skipped,
+                        "reason": reason,
+                        "onFailure": on_failure,
+                        "attempts": attempts,
+                        "maxAttempts": max_attempts,
+                    }),
+                );
+            }
             AgentEvent::TypedCheckpoint {
                 session_id,
                 checkpoint,

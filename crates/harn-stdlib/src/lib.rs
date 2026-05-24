@@ -302,6 +302,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/tool_binder.harn"),
     },
     StdlibSource {
+        module: "llm/structural_validator",
+        source: include_str!("stdlib/llm/structural_validator.harn"),
+    },
+    StdlibSource {
         module: "llm/refine",
         source: include_str!("stdlib/llm/refine.harn"),
     },
