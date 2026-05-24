@@ -1,0 +1,44 @@
+/**
+ * `harn version` ported to .harn — see harn#2301 (W1).
+ *
+ * Build-time constants come from env vars set by the dispatch shim in
+ * crates/harn-cli/src/lib.rs's `Command::Version` arm: HARN_BUILD_NAME,
+ * HARN_BUILD_VERSION, HARN_BUILD_DESCRIPTION. The shim reads them from
+ * `env!("CARGO_PKG_NAME")` etc. so they always reflect the workspace
+ * version that built this binary.
+ *
+ * The banner and JSON envelope shapes must stay byte-for-byte
+ * compatible with the Rust handler — the parity harness
+ * (crates/harn-cli/tests/parity_dispatch.rs) pins them.
+ */
+fn render_banner(version: string) -> string {
+  return "\n ╱▔▔╲\n ╱    ╲    harn v" + version
+    + "\n │ ◆  │    the agent harness language\n │    │\n ╰──╯╱\n   ╱╱\n"
+}
+
+fn render_json(name: string, version: string, description: string) -> string {
+  // Mirrors json_envelope::JsonEnvelope::ok(VERSION_SCHEMA_VERSION, payload)
+  // from harn-cli — schemaVersion 1, ok: true, data: {name, version, description},
+  // error: null, warnings: []. The key order matches serde's struct order so
+  // the parity snapshot lines up byte-for-byte with the Rust handler.
+  let env = {
+    schemaVersion: 1,
+    ok: true,
+    data: {name: name, version: version, description: description},
+    error: nil,
+    warnings: [],
+  }
+  return json_stringify_pretty(env)
+}
+
+fn main(harness: Harness) {
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  let version = harness.env.get_or("HARN_BUILD_VERSION", "unknown")
+  if json_mode {
+    let name = harness.env.get_or("HARN_BUILD_NAME", "harn-cli")
+    let description = harness.env.get_or("HARN_BUILD_DESCRIPTION", "")
+    harness.stdio.println(render_json(name, version, description))
+  } else {
+    harness.stdio.println(render_banner(version))
+  }
+}

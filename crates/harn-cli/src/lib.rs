@@ -153,10 +153,9 @@ async fn async_main() {
     };
     match subcommand {
         Command::Version(args) => {
-            if args.json {
-                print_version_json();
-            } else {
-                print_version();
+            let exit = run_version(args).await;
+            if exit != 0 {
+                process::exit(exit);
             }
         }
         Command::Upgrade(args) => {
@@ -1552,6 +1551,33 @@ fn print_version_json() {
     };
     let envelope = json_envelope::JsonEnvelope::ok(VERSION_SCHEMA_VERSION, payload);
     println!("{}", json_envelope::to_string_pretty(&envelope));
+}
+
+/// Run `harn version`. Dispatches to the embedded `.harn` script by
+/// default; set `HARN_CLI_IMPL=rust` to keep the legacy Rust handlers
+/// (used by the parity-snapshot harness to compare both impls).
+async fn run_version(args: cli::VersionArgs) -> i32 {
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        if args.json {
+            print_version_json();
+        } else {
+            print_version();
+        }
+        return 0;
+    }
+    // Build-time constants travel to the script via scoped env vars
+    // rather than a new builtin — the script reads them with
+    // `env_or("HARN_BUILD_VERSION", "unknown")`.
+    let _name = env_guard::ScopedEnvVar::set("HARN_BUILD_NAME", env!("CARGO_PKG_NAME"));
+    let _version = env_guard::ScopedEnvVar::set("HARN_BUILD_VERSION", env!("CARGO_PKG_VERSION"));
+    let _description =
+        env_guard::ScopedEnvVar::set("HARN_BUILD_DESCRIPTION", env!("CARGO_PKG_DESCRIPTION"));
+    let argv = if args.json {
+        vec!["--json".to_string()]
+    } else {
+        Vec::new()
+    };
+    dispatch::dispatch_to_embedded_script("version", argv, args.json).await
 }
 
 async fn print_model_info(args: &ModelInfoArgs) -> bool {
