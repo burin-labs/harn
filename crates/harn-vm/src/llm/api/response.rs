@@ -848,6 +848,25 @@ pub(super) fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
     if let Some(n) = usage.get("cached_prompt_tokens").and_then(|v| v.as_i64()) {
         return n;
     }
+    // DeepSeek (and a few OpenRouter passthrough shapes):
+    // usage.prompt_cache_hit_tokens. Falling through to 0 silently hides
+    // genuine cache hits when this is the only field the provider sets.
+    if let Some(n) = usage
+        .get("prompt_cache_hit_tokens")
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
+    // OpenRouter `cache_discount` shape: `usage.cache.read_input_tokens`
+    // (newer 2026-04 wire format their docs reference under "Caching →
+    // Anthropic / Claude").
+    if let Some(n) = usage
+        .get("cache")
+        .and_then(|d| d.get("read_input_tokens"))
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
     0
 }
 
@@ -861,29 +880,44 @@ pub(super) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
     {
         return n;
     }
-    usage
+    if let Some(n) = usage
         .get("prompt_tokens_details")
         .and_then(|d| d.get("cache_write_tokens"))
         .and_then(|v| v.as_i64())
-        .or_else(|| {
-            usage
-                .get("prompt_tokens_details")
-                .and_then(|d| d.get("cache_creation_input_tokens"))
-                .and_then(|v| v.as_i64())
-        })
-        .or_else(|| {
-            usage
-                .get("input_tokens_details")
-                .and_then(|d| d.get("cache_write_tokens"))
-                .and_then(|v| v.as_i64())
-        })
-        .or_else(|| {
-            usage
-                .get("input_tokens_details")
-                .and_then(|d| d.get("cache_creation_input_tokens"))
-                .and_then(|v| v.as_i64())
-        })
-        .unwrap_or(0)
+    {
+        return n;
+    }
+    if let Some(n) = usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cache_creation_input_tokens"))
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
+    if let Some(n) = usage
+        .get("input_tokens_details")
+        .and_then(|d| d.get("cache_write_tokens"))
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
+    if let Some(n) = usage
+        .get("input_tokens_details")
+        .and_then(|d| d.get("cache_creation_input_tokens"))
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
+    // OpenRouter newer `cache.write_input_tokens` shape — matches the
+    // counterpart added to `extract_cache_read_tokens` above.
+    if let Some(n) = usage
+        .get("cache")
+        .and_then(|d| d.get("write_input_tokens"))
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
+    0
 }
 
 #[cfg(test)]
@@ -920,6 +954,37 @@ mod tests {
 
         assert_eq!(extract_cache_read_tokens(&usage), 120);
         assert_eq!(extract_cache_write_tokens(&usage), 40);
+    }
+
+    #[test]
+    fn cache_tokens_support_deepseek_prompt_cache_hit_field() {
+        // DeepSeek (and some OpenRouter passthrough shapes for it) reports
+        // cache hits as `prompt_cache_hit_tokens` instead of the
+        // Anthropic-style top-level or OpenAI-style nested field. Without
+        // this row a real cache hit reads as 0 (harn#2320).
+        let usage = serde_json::json!({
+            "prompt_tokens": 9100,
+            "completion_tokens": 42,
+            "prompt_cache_hit_tokens": 8800
+        });
+        assert_eq!(extract_cache_read_tokens(&usage), 8800);
+    }
+
+    #[test]
+    fn cache_tokens_support_openrouter_cache_subobject_shape() {
+        // OpenRouter's newer 2026-04 "Caching → Anthropic" wire shape
+        // surfaces cache attribution under a `cache` sub-object instead
+        // of mirroring Anthropic's top-level fields verbatim.
+        let usage = serde_json::json!({
+            "prompt_tokens": 9100,
+            "completion_tokens": 42,
+            "cache": {
+                "read_input_tokens": 8800,
+                "write_input_tokens": 220
+            }
+        });
+        assert_eq!(extract_cache_read_tokens(&usage), 8800);
+        assert_eq!(extract_cache_write_tokens(&usage), 220);
     }
 
     #[test]

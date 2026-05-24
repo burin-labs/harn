@@ -708,6 +708,30 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 
+# OpenRouter-routed Anthropic models. Kept as distinct catalog entries
+# so `openrouter:anthropic/claude-*` resolves with the right capability
+# matrix — without these, native-tools requests fail with `option `tools`
+# is not supported by ... (provider openrouter)` because the lookup
+# falls back to a no-tools shape. OpenRouter passes Anthropic's
+# native-tools API through verbatim, including prompt-caching headers
+# (cache attribution surface differs — tracked separately in #2320).
+# Pricing matches the direct Anthropic API; OpenRouter adds its own
+# margin at request time.
+
+[models."anthropic/claude-haiku-4-5"]
+name = "Claude Haiku 4.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+
+[models."anthropic/claude-sonnet-4-6"]
+name = "Claude Sonnet 4.6 (via OpenRouter)"
+provider = "openrouter"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+
 [models."claude-3-opus-20240229"]
 name = "Claude Opus 3"
 provider = "anthropic"

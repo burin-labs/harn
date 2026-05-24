@@ -139,6 +139,17 @@ pub struct EvalCodingAgentArgs {
     /// (e.g. "replicate-1", "probe-judge-arch-gpt"). Defaults to empty.
     #[arg(long = "run-label", default_value = "")]
     pub run_label: String,
+    /// Path to a previous coding-agent `summary.json` (or its parent dir).
+    /// When present, the new summary embeds a `baseline_comparison` block
+    /// listing per-fixture regressions (baseline passed but this cell
+    /// failed) and recoveries (baseline failed but this cell passed),
+    /// plus aggregate counts and a net lift in percentage points.
+    /// Useful for cross-cell A/Bs (provider sweep, prompt change, step
+    /// judge on/off) where net pass-rate hides destructive interactions
+    /// like the cli-help-flag regression the step-judge experiment
+    /// surfaced (harn#2318).
+    #[arg(long = "baseline-comparison-against")]
+    pub baseline_comparison_against: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

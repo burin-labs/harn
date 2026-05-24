@@ -148,6 +148,36 @@ OpenRouter, which doesn't hit any of these constraints), but the fixes
 unblock a future v2.1 experiment that re-runs the GO cell against
 direct Anthropic native tools to measure Effect 1's contribution.
 
+## v3 audit fixes (follow-up PR)
+
+The remaining four follow-up issues filed during the v2 audit ship as
+fixes in this round:
+
+- **#2317** (Haiku text-format collapse) — investigation showed the
+  failure is Haiku ignoring the tool protocol entirely (not malformed
+  tags). Prompt-side mitigations made it worse in probes; the real
+  workaround is to use native tools, unblocked by #2319 below.
+  Documented in the issue thread.
+- **#2318** (regression-rate metric) — `harn eval coding-agent`
+  gains `--baseline-comparison-against <path>`. summary.json now
+  embeds a `baseline_comparison` block (regressions, recoveries, net
+  lift pp); summary.md surfaces it. Catches the destructive case the
+  original experiment hid in the +33pp headline.
+- **#2319** (OpenRouter Anthropic native-tools catalog gap) — added
+  explicit `[[provider.openrouter]]` rules for `anthropic/claude-*`
+  in `capabilities.toml` plus matching `providers.toml` rows for
+  pricing. The `openrouter → openai` family chain was skipping the
+  Anthropic capability rows entirely. Live-tested:
+  `--tool-format native` now reaches the agent loop end-to-end. This
+  unblocks a future v3.1 experiment that A/Bs the GO cell against
+  native tools to measure Effect 1's contribution.
+- **#2320** (cache attribution) — `extract_cache_{read,write}_tokens`
+  now also accepts DeepSeek's `prompt_cache_hit_tokens` field and
+  OpenRouter's newer `usage.cache.{read,write}_input_tokens` shape.
+  Full resolution still requires upstream cache_control forwarding
+  through the OpenAI-compat adapter for `openrouter:anthropic/*`
+  targets — tracked.
+
 ## Raw data
 
 `summary.json` per cell in `results/main-grid-2026-05-23/`.
