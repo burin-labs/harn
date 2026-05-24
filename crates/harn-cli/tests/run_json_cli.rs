@@ -6,7 +6,7 @@
 
 use std::process::Command;
 
-use harn_cli::commands::run::json_events::RUN_JSON_SCHEMA_VERSION;
+use harn_cli::commands::run::{json_events::RUN_JSON_SCHEMA_VERSION, RUN_SUMMARY_SCHEMA_VERSION};
 use harn_cli::tests::common::json_envelope::assert_envelope;
 use serde_json::Value;
 
@@ -29,6 +29,38 @@ fn parse_ndjson(stdout: &[u8]) -> Vec<Value> {
                 .unwrap_or_else(|error| panic!("ndjson line not valid JSON ({error}): {line}"))
         })
         .collect()
+}
+
+fn last_json_line(bytes: &[u8]) -> Value {
+    let text = String::from_utf8_lossy(bytes);
+    let line = text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_else(|| panic!("expected at least one stderr line, got: {text:?}"));
+    serde_json::from_str(line).unwrap_or_else(|error| {
+        panic!("last stderr line is not valid JSON ({error}): {line}\nfull stderr:\n{text}")
+    })
+}
+
+fn write_llm_summary_script(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    write_script(
+        dir,
+        name,
+        r#"
+pipeline main(_) {
+    llm_mock_clear()
+    llm_mock({
+      text: "pong",
+      input_tokens: 7,
+      output_tokens: 5,
+      model: "mock",
+    })
+    let response = llm_call("ping", nil, {provider: "mock"})
+    __io_println(response.text)
+}
+"#,
+    )
 }
 
 #[test]
@@ -112,6 +144,287 @@ pipeline main(_) {
     let last = lines.last().expect("at least one event");
     assert_eq!(last["data"]["event_type"], "result");
     assert_eq!(last["data"]["exit_code"], 0);
+}
+
+#[test]
+fn run_emit_summary_json_defaults_to_terminal_stderr_and_reports_llm_metrics() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let script = write_llm_summary_script(tmp.path(), "summary_llm.harn");
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--emit-summary-json")
+        .arg(&script)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn harn run --emit-summary-json");
+
+    assert!(
+        output.status.success(),
+        "exit={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "pong\n");
+
+    let summary = last_json_line(&output.stderr);
+    assert_eq!(
+        summary["schema_version"].as_u64(),
+        Some(u64::from(RUN_SUMMARY_SCHEMA_VERSION))
+    );
+    assert_eq!(summary["event"], "run_summary");
+    assert_eq!(summary["exit_code"].as_i64(), Some(0));
+    assert!(
+        summary["wall_time_ms"].as_u64().is_some(),
+        "summary: {summary}"
+    );
+    assert_eq!(summary["llm"]["call_count"].as_i64(), Some(1));
+    assert_eq!(summary["llm"]["input_tokens"].as_i64(), Some(7));
+    assert_eq!(summary["llm"]["output_tokens"].as_i64(), Some(5));
+    assert!(summary["llm"]["time_ms"].as_i64().is_some());
+    assert!(summary["llm"]["cost_usd"].as_f64().is_some());
+}
+
+#[test]
+fn run_emit_summary_json_keeps_llm_metrics_when_trace_is_rendered() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let script = write_llm_summary_script(tmp.path(), "summary_llm_trace.harn");
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--trace")
+        .arg("--emit-summary-json")
+        .arg(&script)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn traced harn run --emit-summary-json");
+
+    assert!(
+        output.status.success(),
+        "exit={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "pong\n");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("LLM trace"),
+        "expected human trace before summary: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let summary = last_json_line(&output.stderr);
+    assert_eq!(summary["event"], "run_summary");
+    assert_eq!(summary["llm"]["call_count"].as_i64(), Some(1));
+    assert_eq!(summary["llm"]["input_tokens"].as_i64(), Some(7));
+    assert_eq!(summary["llm"]["output_tokens"].as_i64(), Some(5));
+}
+
+#[test]
+fn run_emit_summary_json_file_sink_does_not_change_run_json_stdout() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let script = write_script(
+        tmp.path(),
+        "summary_file.harn",
+        r#"
+pipeline main(_) {
+    __io_println("hello")
+}
+"#,
+    );
+    let summary_path = tmp.path().join("run-summary.jsonl");
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--json")
+        .arg("--emit-summary-json")
+        .arg("--summary-file")
+        .arg(&summary_path)
+        .arg(&script)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn harn run --json --emit-summary-json");
+
+    assert!(
+        output.status.success(),
+        "exit={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "summary-file should keep stderr clean: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let lines = parse_ndjson(&output.stdout);
+    assert_eq!(
+        lines.last().unwrap()["data"]["event_type"],
+        "result",
+        "stdout NDJSON must remain the run event stream: {lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .all(|line| line["data"]["event_type"].as_str() != Some("run_summary")),
+        "summary must not be mixed into --json stdout: {lines:?}"
+    );
+
+    let summary_text = std::fs::read_to_string(&summary_path).expect("read summary file");
+    let summary: Value = serde_json::from_str(summary_text.trim()).expect("summary json");
+    assert_eq!(
+        summary["schema_version"].as_u64(),
+        Some(u64::from(RUN_SUMMARY_SCHEMA_VERSION))
+    );
+    assert_eq!(summary["event"], "run_summary");
+    assert_eq!(summary["exit_code"].as_i64(), Some(0));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_emit_summary_json_fd_sink_writes_inherited_descriptor() {
+    use std::os::fd::AsRawFd;
+
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let script = write_script(
+        tmp.path(),
+        "summary_fd.harn",
+        r#"
+pipeline main(_) {
+    __io_println("fd")
+}
+"#,
+    );
+    let summary_path = tmp.path().join("summary-fd.jsonl");
+    let summary_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(true)
+        .open(&summary_path)
+        .expect("open summary fd");
+    let fd = summary_file.as_raw_fd();
+
+    // Rust opens files close-on-exec. Clear the bit around this spawn so the
+    // child can exercise the real --summary-fd path without changing stdio.
+    // SAFETY: `fd` comes from a live `File`, and `fcntl` does not take ownership.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    assert!(
+        flags >= 0,
+        "fcntl(F_GETFD): {}",
+        std::io::Error::last_os_error()
+    );
+    // SAFETY: `fd` is still owned by `summary_file`; this only updates its
+    // close-on-exec flag until we restore the original flag set below.
+    let clear_result = unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) };
+    assert!(
+        clear_result >= 0,
+        "fcntl(F_SETFD clear CLOEXEC): {}",
+        std::io::Error::last_os_error()
+    );
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--emit-summary-json")
+        .arg("--summary-fd")
+        .arg(fd.to_string())
+        .arg(&script)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn harn run --summary-fd");
+
+    // SAFETY: `fd` is still open, and restoring the saved flag set preserves
+    // the descriptor's ownership and offset.
+    let restore_result = unsafe { libc::fcntl(fd, libc::F_SETFD, flags) };
+    assert!(
+        restore_result >= 0,
+        "fcntl(F_SETFD restore): {}",
+        std::io::Error::last_os_error()
+    );
+    drop(summary_file);
+
+    assert!(
+        output.status.success(),
+        "exit={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "fd\n");
+    assert!(
+        output.stderr.is_empty(),
+        "--summary-fd should keep stderr clean: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let summary_text = std::fs::read_to_string(&summary_path).expect("read summary fd file");
+    let summary: Value = serde_json::from_str(summary_text.trim()).expect("summary json");
+    assert_eq!(
+        summary["schema_version"].as_u64(),
+        Some(u64::from(RUN_SUMMARY_SCHEMA_VERSION))
+    );
+    assert_eq!(summary["event"], "run_summary");
+    assert_eq!(summary["exit_code"].as_i64(), Some(0));
+}
+
+#[test]
+fn run_emit_summary_json_reports_runtime_failure_exit_code() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let script = write_script(
+        tmp.path(),
+        "summary_failure.harn",
+        r#"
+pipeline main(_) {
+    throw "boom"
+}
+"#,
+    );
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--emit-summary-json")
+        .arg(&script)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn failing harn run --emit-summary-json");
+
+    assert_eq!(output.status.code(), Some(1));
+    let summary = last_json_line(&output.stderr);
+    assert_eq!(
+        summary["schema_version"].as_u64(),
+        Some(u64::from(RUN_SUMMARY_SCHEMA_VERSION))
+    );
+    assert_eq!(summary["event"], "run_summary");
+    assert_eq!(summary["exit_code"].as_i64(), Some(1));
+}
+
+#[test]
+fn run_emit_summary_json_reports_compile_failure_exit_code() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let script = write_script(
+        tmp.path(),
+        "summary_compile_failure.harn",
+        r#"
+pipeline main(_) {
+    let =
+}
+"#,
+    );
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--emit-summary-json")
+        .arg(&script)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn compile-failing harn run --emit-summary-json");
+
+    assert_eq!(output.status.code(), Some(1));
+    let summary = last_json_line(&output.stderr);
+    assert_eq!(
+        summary["schema_version"].as_u64(),
+        Some(u64::from(RUN_SUMMARY_SCHEMA_VERSION))
+    );
+    assert_eq!(summary["event"], "run_summary");
+    assert_eq!(summary["exit_code"].as_i64(), Some(1));
 }
 
 #[test]

@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use harn_parser::DiagnosticSeverity;
 use harn_vm::event_log::EventLog;
+use serde::Serialize;
 
 use crate::commands::mcp::{self, AuthResolution};
 use crate::commands::time::RunTiming;
@@ -32,6 +33,58 @@ pub struct RunJsonOptions {
     /// Suppress `stdout` / `stderr` events. Transcript, tool, hook,
     /// persona, and the terminal result/error events still flow.
     pub quiet: bool,
+}
+
+/// Post-run summary configuration for `harn run --emit-summary-json`.
+#[derive(Clone, Debug)]
+pub struct RunSummaryOptions {
+    pub sink: RunSummarySink,
+}
+
+#[derive(Clone, Debug)]
+pub enum RunSummarySink {
+    /// Append the summary to the captured stderr buffer so it remains
+    /// terminal after all diagnostics that `run_file_with_skill_dirs`
+    /// flushes on return.
+    Stderr,
+    File(PathBuf),
+    Fd(i32),
+}
+
+#[derive(Serialize)]
+struct RunSummary<'a> {
+    schema_version: u32,
+    event: &'static str,
+    wall_time_ms: u64,
+    exit_code: i32,
+    llm: RunSummaryLlm,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    profile: Option<&'a harn_vm::profile::RunProfile>,
+}
+
+#[derive(Serialize)]
+struct RunSummaryLlm {
+    call_count: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+    time_ms: i64,
+    cost_usd: f64,
+}
+
+pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 1;
+
+pub(crate) fn run_summary_options_from_args(
+    args: &crate::cli::RunArgs,
+) -> Option<RunSummaryOptions> {
+    args.emit_summary_json.then(|| RunSummaryOptions {
+        sink: if let Some(path) = args.summary_file.clone() {
+            RunSummarySink::File(path)
+        } else if let Some(fd) = args.summary_fd {
+            RunSummarySink::Fd(fd)
+        } else {
+            RunSummarySink::Stderr
+        },
+    })
 }
 
 pub(crate) enum RunFileMcpServeMode {
@@ -169,8 +222,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     }
 
     let parse_start = Instant::now();
-    let (parsed_source, program) = parse_source_file(path);
-    debug_assert_eq!(parsed_source, source, "parse_source_file re-read drifted");
+    let program = parse_source_for_run(path, &source, stderr)?;
     if let Some(t) = timing.as_deref_mut() {
         t.parse = parse_start.elapsed();
     }
@@ -215,6 +267,81 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     }
 
     Some(LoadedChunk { source, chunk })
+}
+
+fn parse_source_for_run(
+    path: &str,
+    source: &str,
+    stderr: &mut String,
+) -> Option<Vec<harn_parser::SNode>> {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let tokens = match lexer.tokenize() {
+        Ok(tokens) => tokens,
+        Err(error) => {
+            let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
+                source,
+                path,
+                &error_span_from_lex(&error),
+                "error",
+                harn_parser::diagnostic::lexer_error_code(&error),
+                &error.to_string(),
+                Some("here"),
+                None,
+            );
+            stderr.push_str(&diagnostic);
+            return None;
+        }
+    };
+
+    let mut parser = harn_parser::Parser::new(tokens);
+    match parser.parse() {
+        Ok(program) => Some(program),
+        Err(error) => {
+            if parser.all_errors().is_empty() {
+                render_parse_error(path, source, &error, stderr);
+            } else {
+                for error in parser.all_errors() {
+                    render_parse_error(path, source, error, stderr);
+                }
+            }
+            None
+        }
+    }
+}
+
+fn render_parse_error(
+    path: &str,
+    source: &str,
+    error: &harn_parser::ParserError,
+    stderr: &mut String,
+) {
+    let span = error_span_from_parse(error);
+    let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
+        source,
+        path,
+        &span,
+        "error",
+        harn_parser::diagnostic::parser_error_code(error),
+        &harn_parser::diagnostic::parser_error_message(error),
+        Some(harn_parser::diagnostic::parser_error_label(error)),
+        harn_parser::diagnostic::parser_error_help(error),
+    );
+    stderr.push_str(&diagnostic);
+}
+
+fn error_span_from_lex(error: &harn_lexer::LexerError) -> harn_lexer::Span {
+    match error {
+        harn_lexer::LexerError::UnexpectedCharacter(_, span)
+        | harn_lexer::LexerError::UnterminatedString(span)
+        | harn_lexer::LexerError::UnterminatedBlockComment(span) => *span,
+    }
+}
+
+fn error_span_from_parse(error: &harn_parser::ParserError) -> harn_lexer::Span {
+    match error {
+        harn_parser::ParserError::Unexpected { span, .. } => *span,
+        harn_parser::ParserError::UnexpectedEof { span, .. } => *span,
+    }
 }
 
 /// Run the static type checker against `program` with cross-module
@@ -426,6 +553,7 @@ struct ExecuteRunInputs<'a> {
     sandbox: RunSandboxOptions,
     interrupt_tokens: Option<RunInterruptTokens>,
     json: Option<(RunJsonOptions, Box<dyn io::Write + Send>)>,
+    summary: Option<RunSummaryOptions>,
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
 }
@@ -504,6 +632,7 @@ pub(crate) async fn run_file(
         profile,
         RunSandboxOptions::default(),
         None,
+        None,
         HarnpackRunOptions::default(),
     )
     .await;
@@ -534,6 +663,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     profile: RunProfileOptions,
     sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
+    summary: Option<RunSummaryOptions>,
     harnpack: HarnpackRunOptions,
 ) {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
@@ -554,6 +684,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         sandbox,
         interrupt_tokens: Some(interrupt_tokens.clone()),
         json: json_with_stdout,
+        summary,
         timing: None,
         harnpack,
     })
@@ -589,6 +720,7 @@ pub(crate) async fn run_resume_with_skill_dirs(
     profile: RunProfileOptions,
     sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
+    summary: Option<RunSummaryOptions>,
 ) {
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
 
@@ -626,6 +758,7 @@ pipeline main(task) {
         profile,
         sandbox,
         json,
+        summary,
         HarnpackRunOptions::default(),
     )
     .await;
@@ -969,6 +1102,7 @@ async fn execute_run_with_harnpack_and_sandbox_options(
         sandbox,
         interrupt_tokens: None,
         json: None,
+        summary: None,
         timing: None,
         harnpack,
     })
@@ -1005,6 +1139,7 @@ pub async fn execute_run_json(
         sandbox: RunSandboxOptions::default(),
         interrupt_tokens: None,
         json: Some((options, out)),
+        summary: None,
         timing: None,
         harnpack: HarnpackRunOptions::default(),
     })
@@ -1032,6 +1167,7 @@ pub(crate) async fn execute_run_with_timing(
         sandbox,
         interrupt_tokens: None,
         json: None,
+        summary: None,
         timing,
         harnpack: HarnpackRunOptions::default(),
     })
@@ -1054,9 +1190,11 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         sandbox,
         interrupt_tokens,
         json,
+        summary,
         mut timing,
         harnpack,
     } = inputs;
+    let run_started = Instant::now();
 
     // `--json` installs an in-process sink that diverts every
     // observable VM event (stdout, stderr, transcript, tool, hook,
@@ -1076,7 +1214,15 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let resolved_path: &str = if harnpack::looks_like_harnpack(Path::new(path)) {
         let outcome = match harnpack::prepare_harnpack(Path::new(path), &harnpack, &mut stderr) {
             Ok(prepared) => prepared,
-            Err(err) => return finalize_harnpack_error(stderr, json_session, err),
+            Err(err) => {
+                return finalize_harnpack_error(
+                    stderr,
+                    json_session,
+                    summary.as_ref(),
+                    run_started,
+                    err,
+                );
+            }
         };
         harn_vm::run_events::emit(harn_vm::run_events::RunEvent::PackRun {
             bundle_hash: outcome.bundle_hash.clone(),
@@ -1086,7 +1232,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             dry_run_verify: harnpack.dry_run_verify,
         });
         if harnpack.dry_run_verify {
-            return finalize_harnpack_dry_run(stderr, json_session, &outcome);
+            return finalize_harnpack_dry_run(
+                stderr,
+                json_session,
+                summary.as_ref(),
+                run_started,
+                &outcome,
+            );
         }
         owned_run_path = outcome.entrypoint_path.to_string_lossy().into_owned();
         owned_run_path.as_str()
@@ -1097,14 +1249,17 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let Some(LoadedChunk { source, chunk }) =
         compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
     else {
-        if let Some(session) = json_session {
-            return session.finalize_error("compile_error", stderr, 1);
-        }
-        return RunOutcome {
+        let message = stderr.clone();
+        return finalize_run_error(
             stdout,
             stderr,
-            exit_code: 1,
-        };
+            json_session,
+            summary.as_ref(),
+            run_started,
+            None,
+            "compile_error",
+            message,
+        );
     };
     let path = resolved_path;
 
@@ -1113,7 +1268,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     // instruction; `run_main` covers `vm.execute` proper.
     let setup_start = Instant::now();
 
-    if trace {
+    if trace || summary.is_some() {
         harn_vm::llm::enable_tracing();
     }
     if profile.is_enabled() {
@@ -1121,14 +1276,16 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     }
     if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
         stderr.push_str(&format!("error: {error}\n"));
-        if let Some(session) = json_session {
-            return session.finalize_error("llm_mock_install", error, 1);
-        }
-        return RunOutcome {
+        return finalize_run_error(
             stdout,
             stderr,
-            exit_code: 1,
-        };
+            json_session,
+            summary.as_ref(),
+            run_started,
+            None,
+            "llm_mock_install",
+            error,
+        );
     }
 
     let mut vm = harn_vm::Vm::new();
@@ -1226,27 +1383,31 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         stderr.push_str(&format!(
             "error: failed to install manifest triggers: {error}\n"
         ));
-        if let Some(session) = json_session {
-            return session.finalize_error("manifest_triggers", error.to_string(), 1);
-        }
-        return RunOutcome {
+        return finalize_run_error(
             stdout,
             stderr,
-            exit_code: 1,
-        };
+            json_session,
+            summary.as_ref(),
+            run_started,
+            None,
+            "manifest_triggers",
+            error.to_string(),
+        );
     }
     if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
         stderr.push_str(&format!(
             "error: failed to install manifest hooks: {error}\n"
         ));
-        if let Some(session) = json_session {
-            return session.finalize_error("manifest_hooks", error.to_string(), 1);
-        }
-        return RunOutcome {
+        return finalize_run_error(
             stdout,
             stderr,
-            exit_code: 1,
-        };
+            json_session,
+            summary.as_ref(),
+            run_started,
+            None,
+            "manifest_hooks",
+            error.to_string(),
+        );
     }
 
     // Run inside a LocalSet so spawn_local works for concurrency builtins.
@@ -1268,14 +1429,21 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     }
     if let Err(error) = persist_cli_llm_mock_recording(&llm_mock_mode) {
         stderr.push_str(&format!("error: {error}\n"));
-        if let Some(session) = json_session {
-            return session.finalize_error("llm_mock_record", error, 1);
-        }
-        return RunOutcome {
+        let profile_rollup = if profile.is_enabled() {
+            Some(harn_vm::profile::build(&harn_vm::tracing::peek_spans()))
+        } else {
+            None
+        };
+        return finalize_run_error(
             stdout,
             stderr,
-            exit_code: 1,
-        };
+            json_session,
+            summary.as_ref(),
+            run_started,
+            profile_rollup.as_ref(),
+            "llm_mock_record",
+            error,
+        );
     }
 
     // Always drain any captured stderr accumulated during execution.
@@ -1302,14 +1470,21 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             stderr.push_str(&format!(
                 "error: failed to emit provenance receipt: {error}\n"
             ));
-            if let Some(session) = json_session {
-                return session.finalize_error("attestation", error.to_string(), 1);
-            }
-            return RunOutcome {
+            let profile_rollup = if profile.is_enabled() {
+                Some(harn_vm::profile::build(&harn_vm::tracing::peek_spans()))
+            } else {
+                None
+            };
+            return finalize_run_error(
                 stdout,
                 stderr,
-                exit_code: 1,
-            };
+                json_session,
+                summary.as_ref(),
+                run_started,
+                profile_rollup.as_ref(),
+                "attestation",
+                error.to_string(),
+            );
         }
         harn_vm::event_log::reset_active_event_log();
     }
@@ -1317,54 +1492,100 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     match execution {
         Ok((output, return_value)) => {
             stdout.push_str(output);
+            let profile_rollup = if profile.is_enabled() {
+                Some(harn_vm::profile::build(&harn_vm::tracing::peek_spans()))
+            } else {
+                None
+            };
+            let summary_llm = summary.as_ref().map(|_| run_summary_llm_snapshot());
             if trace {
                 stderr.push_str(&render_trace_summary());
             }
-            if profile.is_enabled() {
-                if let Err(error) = render_and_persist_profile(&profile, &mut stderr) {
+            if let Some(profile_rollup) = profile_rollup.as_ref() {
+                if let Err(error) =
+                    render_and_persist_profile_rollup(&profile, profile_rollup, &mut stderr)
+                {
                     stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
                 }
             }
             if exit_code != 0 {
                 stderr.push_str(&render_return_value_error(&return_value));
             }
+            let summary_emission = emit_run_summary_for_exit(
+                summary.as_ref(),
+                run_started,
+                exit_code,
+                profile_rollup.as_ref(),
+                summary_llm,
+                json_session.is_some(),
+                &mut stderr,
+            );
             if let Some(session) = json_session {
+                if let Some(error) = summary_emission.error {
+                    let mut outcome = session.finalize_error(
+                        "summary",
+                        format!("failed to emit run summary: {error}"),
+                        1,
+                    );
+                    outcome.stderr = summary_emission.stderr;
+                    return outcome;
+                }
                 let value = harn_vm::llm::vm_value_to_json(&return_value);
-                return session.finalize_result(value, exit_code);
+                let mut outcome = session.finalize_result(value, summary_emission.exit_code);
+                outcome.stderr = summary_emission.stderr;
+                return outcome;
             }
             RunOutcome {
                 stdout,
                 stderr,
-                exit_code,
+                exit_code: summary_emission.exit_code,
             }
         }
         Err(rendered_error) => {
             stderr.push_str(&rendered_error);
-            if profile.is_enabled() {
-                if let Err(error) = render_and_persist_profile(&profile, &mut stderr) {
+            let profile_rollup = if profile.is_enabled() {
+                Some(harn_vm::profile::build(&harn_vm::tracing::peek_spans()))
+            } else {
+                None
+            };
+            if let Some(profile_rollup) = profile_rollup.as_ref() {
+                if let Err(error) =
+                    render_and_persist_profile_rollup(&profile, profile_rollup, &mut stderr)
+                {
                     stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
                 }
             }
+            let summary_emission = emit_run_summary_for_exit(
+                summary.as_ref(),
+                run_started,
+                1,
+                profile_rollup.as_ref(),
+                None,
+                json_session.is_some(),
+                &mut stderr,
+            );
             if let Some(session) = json_session {
-                return session.finalize_error("runtime", rendered_error, 1);
+                let mut outcome =
+                    session.finalize_error("runtime", rendered_error, summary_emission.exit_code);
+                outcome.stderr = summary_emission.stderr;
+                return outcome;
             }
             RunOutcome {
                 stdout,
                 stderr,
-                exit_code: 1,
+                exit_code: summary_emission.exit_code,
             }
         }
     }
 }
 
-fn render_and_persist_profile(
+fn render_and_persist_profile_rollup(
     options: &RunProfileOptions,
+    profile: &harn_vm::profile::RunProfile,
     stderr: &mut String,
 ) -> Result<(), String> {
-    let spans = harn_vm::tracing::peek_spans();
-    let profile = harn_vm::profile::build(&spans);
     if options.text {
-        stderr.push_str(&harn_vm::profile::render(&profile));
+        stderr.push_str(&harn_vm::profile::render(profile));
     }
     if let Some(path) = options.json_path.as_ref() {
         if let Some(parent) = path.parent() {
@@ -1373,11 +1594,136 @@ fn render_and_persist_profile(
                     .map_err(|error| format!("create {}: {error}", parent.display()))?;
             }
         }
-        let json = serde_json::to_string_pretty(&profile)
+        let json = serde_json::to_string_pretty(profile)
             .map_err(|error| format!("serialize profile: {error}"))?;
         fs::write(path, json).map_err(|error| format!("write {}: {error}", path.display()))?;
     }
     Ok(())
+}
+
+fn build_run_summary<'a>(
+    started: Instant,
+    exit_code: i32,
+    profile: Option<&'a harn_vm::profile::RunProfile>,
+    llm: RunSummaryLlm,
+) -> RunSummary<'a> {
+    RunSummary {
+        schema_version: RUN_SUMMARY_SCHEMA_VERSION,
+        event: "run_summary",
+        wall_time_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        exit_code,
+        llm,
+        profile,
+    }
+}
+
+fn run_summary_llm_snapshot() -> RunSummaryLlm {
+    let (input_tokens, output_tokens, time_ms, call_count) = harn_vm::llm::peek_trace_summary();
+    let cost_usd = harn_vm::llm::peek_total_cost();
+    RunSummaryLlm {
+        call_count,
+        input_tokens,
+        output_tokens,
+        time_ms,
+        cost_usd: if cost_usd.is_finite() { cost_usd } else { 0.0 },
+    }
+}
+
+struct RunSummaryEmission {
+    stderr: String,
+    exit_code: i32,
+    error: Option<String>,
+}
+
+fn emit_run_summary_for_exit(
+    options: Option<&RunSummaryOptions>,
+    started: Instant,
+    exit_code: i32,
+    profile: Option<&harn_vm::profile::RunProfile>,
+    llm: Option<RunSummaryLlm>,
+    json_mode: bool,
+    stderr: &mut String,
+) -> RunSummaryEmission {
+    let mut summary_stderr = String::new();
+    let mut final_exit_code = exit_code;
+    let mut summary_error = None;
+
+    if let Some(options) = options {
+        let llm = llm.unwrap_or_else(run_summary_llm_snapshot);
+        let summary = build_run_summary(started, exit_code, profile, llm);
+        let summary_target = if json_mode {
+            &mut summary_stderr
+        } else {
+            stderr
+        };
+        if let Err(error) = emit_run_summary(options, &summary, summary_target) {
+            summary_target.push_str(&format!("error: failed to emit run summary: {error}\n"));
+            if final_exit_code == 0 {
+                final_exit_code = 1;
+                summary_error = Some(error);
+            }
+        }
+    }
+
+    RunSummaryEmission {
+        stderr: summary_stderr,
+        exit_code: final_exit_code,
+        error: summary_error,
+    }
+}
+
+fn emit_run_summary(
+    options: &RunSummaryOptions,
+    summary: &RunSummary<'_>,
+    stderr: &mut String,
+) -> Result<(), String> {
+    let line = serde_json::to_string(summary)
+        .map_err(|error| format!("serialize run summary: {error}"))?
+        + "\n";
+    match &options.sink {
+        RunSummarySink::Stderr => {
+            stderr.push_str(&line);
+            Ok(())
+        }
+        RunSummarySink::File(path) => write_run_summary_file(path, &line),
+        RunSummarySink::Fd(fd) => write_run_summary_fd(*fd, &line),
+    }
+}
+
+fn write_run_summary_file(path: &Path, line: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("create {}: {error}", parent.display()))?;
+        }
+    }
+    fs::write(path, line).map_err(|error| format!("write {}: {error}", path.display()))
+}
+
+#[cfg(unix)]
+fn write_run_summary_fd(fd: i32, line: &str) -> Result<(), String> {
+    use std::fs::File;
+    use std::os::unix::io::FromRawFd;
+
+    if fd < 0 {
+        return Err(format!("invalid --summary-fd {fd}: must be non-negative"));
+    }
+    let duped = unsafe { libc::dup(fd) };
+    if duped < 0 {
+        return Err(format!(
+            "duplicate --summary-fd {fd}: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    let mut file = unsafe { File::from_raw_fd(duped) };
+    file.write_all(line.as_bytes())
+        .and_then(|_| file.flush())
+        .map_err(|error| format!("write --summary-fd {fd}: {error}"))
+}
+
+#[cfg(not(unix))]
+fn write_run_summary_fd(_fd: i32, _line: &str) -> Result<(), String> {
+    Err("--summary-fd is only supported on Unix platforms".to_string())
 }
 
 async fn append_run_provenance_event(
@@ -1550,6 +1896,38 @@ impl Drop for JsonRunSession {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn finalize_run_error(
+    stdout: String,
+    mut stderr: String,
+    json_session: Option<JsonRunSession>,
+    summary: Option<&RunSummaryOptions>,
+    started: Instant,
+    profile: Option<&harn_vm::profile::RunProfile>,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> RunOutcome {
+    let summary_emission = emit_run_summary_for_exit(
+        summary,
+        started,
+        1,
+        profile,
+        None,
+        json_session.is_some(),
+        &mut stderr,
+    );
+    if let Some(session) = json_session {
+        let mut outcome = session.finalize_error(code, message, summary_emission.exit_code);
+        outcome.stderr = summary_emission.stderr;
+        return outcome;
+    }
+    RunOutcome {
+        stdout,
+        stderr,
+        exit_code: summary_emission.exit_code,
+    }
+}
+
 /// Translate a preflight failure into either the `--json` error event
 /// stream or a plain stderr message plus exit-code 1. Keeps the
 /// `.harnpack` verify path's error reporting consistent with the rest
@@ -1557,17 +1935,23 @@ impl Drop for JsonRunSession {
 fn finalize_harnpack_error(
     mut stderr: String,
     json_session: Option<JsonRunSession>,
+    summary: Option<&RunSummaryOptions>,
+    started: Instant,
     err: HarnpackError,
 ) -> RunOutcome {
-    stderr.push_str(&format!("error: {}\n", err.message));
-    if let Some(session) = json_session {
-        return session.finalize_error(err.code, err.message, 1);
-    }
-    RunOutcome {
-        stdout: String::new(),
+    let code = err.code;
+    let message = err.message;
+    stderr.push_str(&format!("error: {message}\n"));
+    finalize_run_error(
+        String::new(),
         stderr,
-        exit_code: 1,
-    }
+        json_session,
+        summary,
+        started,
+        None,
+        code,
+        message,
+    )
 }
 
 /// Successful `--dry-run-verify` path. Reports the bundle hash and
@@ -1577,6 +1961,8 @@ fn finalize_harnpack_error(
 fn finalize_harnpack_dry_run(
     mut stderr: String,
     json_session: Option<JsonRunSession>,
+    summary_options: Option<&RunSummaryOptions>,
+    started: Instant,
     prepared: &PreparedHarnpack,
 ) -> RunOutcome {
     let summary = format!(
@@ -1584,7 +1970,25 @@ fn finalize_harnpack_dry_run(
         prepared.bundle_hash, prepared.signature_verified, prepared.cache_hit
     );
     stderr.push_str(&summary);
+    let summary_emission = emit_run_summary_for_exit(
+        summary_options,
+        started,
+        0,
+        None,
+        None,
+        json_session.is_some(),
+        &mut stderr,
+    );
     if let Some(session) = json_session {
+        if let Some(error) = summary_emission.error {
+            let mut outcome = session.finalize_error(
+                "summary",
+                format!("failed to emit run summary: {error}"),
+                1,
+            );
+            outcome.stderr = summary_emission.stderr;
+            return outcome;
+        }
         let value = serde_json::json!({
             "bundle_hash": prepared.bundle_hash,
             "signature_verified": prepared.signature_verified,
@@ -1592,12 +1996,14 @@ fn finalize_harnpack_dry_run(
             "cache_hit": prepared.cache_hit,
             "dry_run_verify": true,
         });
-        return session.finalize_result(value, 0);
+        let mut outcome = session.finalize_result(value, summary_emission.exit_code);
+        outcome.stderr = summary_emission.stderr;
+        return outcome;
     }
     RunOutcome {
         stdout: String::new(),
         stderr,
-        exit_code: 0,
+        exit_code: summary_emission.exit_code,
     }
 }
 

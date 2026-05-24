@@ -245,6 +245,41 @@ fn test_parses_run_llm_mock_flags() {
 }
 
 #[test]
+fn test_parses_run_summary_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--emit-summary-json",
+        "--summary-file",
+        "summary.jsonl",
+        "main.harn",
+    ]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.emit_summary_json);
+    assert_eq!(
+        args.summary_file.as_deref(),
+        Some(std::path::Path::new("summary.jsonl"))
+    );
+    assert_eq!(args.summary_fd, None);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--emit-summary-json",
+        "--summary-fd",
+        "3",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.summary_fd, Some(3));
+}
+
+#[test]
 fn test_parses_eval_tool_calls_args() {
     let cli = Cli::parse_from([
         "harn",

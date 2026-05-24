@@ -46,6 +46,9 @@ harn run --resume .harn/workers/worker_...json
 | `--attest-agent <id>` | Agent id used to load or create the Ed25519 signing key |
 | `--json` | Emit a versioned NDJSON event stream on stdout instead of mixed pipeline output |
 | `--quiet` | When `--json` is set, drop `stdout` and `stderr` events (transcript/tool/hook/persona/result still flow) |
+| `--emit-summary-json` | Emit one terminal `run_summary` JSON object as a single NDJSON line; defaults to stderr |
+| `--summary-file <path>` | Write `--emit-summary-json` output to a file instead of stderr |
+| `--summary-fd <fd>` | Write `--emit-summary-json` output to an already-open Unix file descriptor |
 | `--allow-unsigned` | When running a `.harnpack`, accept bundles that carry no Ed25519 signature (local-dev override) |
 | `--dry-run-verify` | When running a `.harnpack`, verify the signature and replay into the cache without executing the entrypoint |
 
@@ -79,6 +82,45 @@ through `jq -c .` for live filtering:
 ```bash
 harn run --json examples/hello.harn | jq -c '.data | {seq, event_type}'
 ```
+
+### Post-run summary JSON
+
+`harn run --emit-summary-json <file>` emits one raw JSON object after
+the run finishes. This is a separate opt-in sink from `harn run --json`
+so consumers that need aggregate metrics can keep the event stream
+contract unchanged. By default the line is appended to stderr after
+human diagnostics; use `--summary-file <path>` or `--summary-fd <fd>`
+to isolate it from the script's own stderr.
+
+Shape (`schema_version: 1`):
+
+```json
+{
+  "schema_version": 1,
+  "event": "run_summary",
+  "wall_time_ms": 1234,
+  "exit_code": 0,
+  "llm": {
+    "call_count": 2,
+    "input_tokens": 1024,
+    "output_tokens": 256,
+    "time_ms": 480,
+    "cost_usd": 0.0042
+  },
+  "profile": {
+    "total_wall_ms": 1234,
+    "by_kind": [],
+    "residual_ms": 12,
+    "top_llm_calls": [],
+    "top_tool_calls": [],
+    "steps": []
+  }
+}
+```
+
+`profile` is present only when the run enables profiling with
+`--profile` or `--profile-json`. The LLM metrics are collected whenever
+summary JSON is requested, even without `--trace`.
 
 You can also run a file directly without the `run` subcommand:
 
