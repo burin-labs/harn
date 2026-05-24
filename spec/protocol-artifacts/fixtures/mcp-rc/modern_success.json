@@ -1,0 +1,87 @@
+{
+  "name": "harn.mcp_rc.modern_success",
+  "description": "Modern client posts server/discover, then tools/list, then tools/call. Every response carries resultType=complete and the conservative cache hints.",
+  "kind": "exchange",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "resultType": "complete",
+        "protocolVersion": "DRAFT-2026-v1",
+        "supportedVersions": ["DRAFT-2026-v1", "2025-11-25"],
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "harn-rc-compat-server", "version": "0.1.0"}
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "resultType": "complete",
+        "ttlMs": 5000,
+        "cacheScope": "private",
+        "tools": [
+          {
+            "name": "echo",
+            "title": "Echo",
+            "description": "Return the input string back to the caller.",
+            "inputSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {"message": {"type": "string"}},
+              "required": ["message"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "tools/call",
+      "params": {
+        "name": "echo",
+        "arguments": {"message": "hi"},
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "resultType": "complete",
+        "content": [{"type": "text", "text": "ok:{\"message\":\"hi\"}"}],
+        "isError": false
+      }
+    }
+  ]
+}

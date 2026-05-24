@@ -42,4 +42,4 @@ pub use error::DispatchError;
 pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
 pub use mcp_prompts::FilePromptCatalog;
 pub use replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
-pub use tls::{HstsConfig, HttpTlsConfig};
+pub use tls::{bind_listener, HstsConfig, HttpTlsConfig};

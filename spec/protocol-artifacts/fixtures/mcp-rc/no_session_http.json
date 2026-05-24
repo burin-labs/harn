@@ -1,0 +1,34 @@
+{
+  "name": "harn.mcp_rc.no_session_http",
+  "description": "Modern tools/list posted to an HTTP MCP server without an Mcp-Session-Id. The server must accept the request and the response must not echo a session id back.",
+  "kind": "http_header_exchange",
+  "documents": [
+    {
+      "MCP-Protocol-Version": "DRAFT-2026-v1",
+      "Mcp-Method": "tools/list",
+      "Mcp-Name": ""
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "method": "tools/list",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "result": {
+        "resultType": "complete",
+        "ttlMs": 5000,
+        "cacheScope": "private",
+        "tools": []
+      }
+    }
+  ]
+}

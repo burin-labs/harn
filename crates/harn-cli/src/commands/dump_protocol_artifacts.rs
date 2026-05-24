@@ -438,7 +438,13 @@ fn generate_readme() -> String {
          - `go/harnprotocol/harnprotocol.go`: Go package with structs, typed string\n\
            aliases, and constants mirroring the Python and Swift bindings.\n\
          - `fixtures/round_trip.json`: representative JSON envelopes used by\n\
-           `make check-bindings` to exercise Python and Go round-trips.\n\n\
+           `make check-bindings` to exercise Python and Go round-trips.\n\
+         - `fixtures/mcp-rc/`: hand-authored MCP DRAFT-2026-v1 wire fixtures\n\
+           (modern success, unsupported-version retry, cache hints,\n\
+           input-required, header mismatch, no-session HTTP, recursive\n\
+           `$defs` tool schema, legacy 2025-11-25 compat) replayed by\n\
+           `make mcp-rc-conformance` and republished here for Burin Code\n\
+           and harn-cloud test suites.\n\n\
          Compatibility rule: additive enum values and optional fields are minor-version\n\
          compatible; removing or renaming a wire value requires a Harn minor-version\n\
          migration note and a regenerated artifact diff.\n",

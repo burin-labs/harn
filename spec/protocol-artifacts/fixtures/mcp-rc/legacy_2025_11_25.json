@@ -1,0 +1,39 @@
+{
+  "name": "harn.mcp_rc.legacy_2025_11_25",
+  "description": "Pre-RC client posts initialize + tools/list. Responses must not include any RC envelope fields (resultType, ttlMs, cacheScope) so existing 2025-11-25 clients stay byte-for-byte compatible.",
+  "kind": "exchange",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-11-25",
+        "clientInfo": {"name": "harn-rc-compat-legacy", "version": "0.1.0"},
+        "capabilities": {}
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {"tools": {}, "logging": {}},
+        "serverInfo": {"name": "harn-server", "version": "0.0.0"}
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": []
+      }
+    }
+  ]
+}

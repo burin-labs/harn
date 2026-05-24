@@ -37,7 +37,11 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{stream, StreamExt};
-use harn_vm::mcp_protocol;
+use harn_vm::mcp_protocol::{
+    self, apply_rc_result_envelope, enforce_request_protocol_version, negotiate_rc_http_request,
+    parse_request_metadata, rc_name_header_value, server_discover_result, McpCacheHint,
+    McpProtocolMode, DRAFT_PROTOCOL_VERSION,
+};
 use serde_json::{json, Value as JsonValue};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
@@ -50,9 +54,11 @@ use crate::{
     ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
-pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+pub const MCP_PROTOCOL_VERSION: &str = mcp_protocol::PROTOCOL_VERSION;
 
-const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";
+const MCP_PROTOCOL_HEADER: &str = mcp_protocol::RC_HEADER_PROTOCOL_VERSION;
+const MCP_METHOD_HEADER: &str = mcp_protocol::RC_HEADER_METHOD;
+const MCP_NAME_HEADER: &str = mcp_protocol::RC_HEADER_NAME;
 const MCP_SESSION_HEADER: &str = "mcp-session-id";
 const DEPRECATION_HEADER: &str = "deprecation";
 
@@ -114,6 +120,10 @@ pub struct McpServer {
 struct ConnectionState {
     initialized: bool,
     client_identity: String,
+    /// Sticky protocol mode pinned by the first negotiated request on this
+    /// session. Modern RC requests can promote a session without an
+    /// `initialize`; legacy `initialize` keeps it at the stable version.
+    protocol_mode: McpProtocolMode,
 }
 
 impl Default for ConnectionState {
@@ -121,6 +131,7 @@ impl Default for ConnectionState {
         Self {
             initialized: false,
             client_identity: "unknown".to_string(),
+            protocol_mode: McpProtocolMode::Legacy,
         }
     }
 }
@@ -160,6 +171,16 @@ impl SharedSession {
 
     fn update_connection(&self, connection: ConnectionState) {
         self.inner.lock().expect("session poisoned").connection = connection;
+    }
+
+    /// Promote a session to Modern. Sticky once set: any later request
+    /// on the same session inherits Modern envelopes even if it omits the
+    /// `_meta` block. `server/discover` and any RC-tagged request both
+    /// call this; legacy `initialize` does not.
+    fn promote_to_modern(&self) {
+        let mut guard = self.inner.lock().expect("session poisoned");
+        guard.connection.initialized = true;
+        guard.connection.protocol_mode = McpProtocolMode::Modern;
     }
 
     fn insert_call(&self, request_id: String, active: ActiveCall) {
@@ -319,6 +340,18 @@ impl McpServer {
     }
 
     pub async fn run_http(self: Arc<Self>, options: McpHttpServeOptions) -> Result<(), String> {
+        let listener = crate::tls::bind_listener(options.bind)?;
+        self.run_http_from_listener(listener, options).await
+    }
+
+    /// Serve over a pre-bound TCP listener. Tests use this entry point
+    /// so they can capture the assigned ephemeral port before starting
+    /// the server and avoid bind/poll handshakes.
+    pub async fn run_http_from_listener(
+        self: Arc<Self>,
+        listener: std::net::TcpListener,
+        options: McpHttpServeOptions,
+    ) -> Result<(), String> {
         let state = HttpState {
             server: self,
             options: options.clone(),
@@ -339,7 +372,6 @@ impl McpServer {
             .layer(DefaultBodyLimit::max(crate::DEFAULT_HTTP_BODY_LIMIT_BYTES))
             .with_state(state.clone());
         let router = crate::tls::apply_security_headers(router, &options.tls);
-        let listener = crate::tls::bind_listener(options.bind)?;
         let local_addr = listener
             .local_addr()
             .map_err(|error| format!("failed to read local addr: {error}"))?;
@@ -396,8 +428,32 @@ impl McpServer {
             return ImmediateResult::Accepted;
         }
 
+        // RC per-request negotiation. Modern clients tag every payload
+        // with `_meta.io.modelcontextprotocol/protocolVersion`; legacy
+        // payloads simply omit it. Reject the request up front when the
+        // version is recognized but unsupported (-32004), so peers can
+        // retry with a mutually supported version.
+        let metadata = parse_request_metadata(&params);
+        let request_mode = match enforce_request_protocol_version(&id, &metadata) {
+            Ok(Some(mode)) => mode,
+            Ok(None) => McpProtocolMode::Legacy,
+            Err(response) => return ImmediateResult::Response(response),
+        };
+
+        if method == mcp_protocol::METHOD_SERVER_DISCOVER {
+            session.promote_to_modern();
+            return ImmediateResult::Response(self.handle_server_discover(id));
+        }
+
         if method == "initialize" {
             return ImmediateResult::Response(self.handle_initialize(id, &session, &params));
+        }
+
+        // RC requests implicitly bootstrap a session: a Modern peer can
+        // skip `initialize` entirely and the connection is pinned forward
+        // by the first RC-tagged request.
+        if request_mode.is_modern() {
+            session.promote_to_modern();
         }
 
         let connection = session.connection();
@@ -408,6 +464,7 @@ impl McpServer {
                 "server not initialized",
             ));
         }
+        let mode = connection.protocol_mode;
 
         if let Err(response) = self
             .authorize_protocol_method(id.clone(), method, &auth)
@@ -427,31 +484,45 @@ impl McpServer {
             "logging/setLevel" => {
                 ImmediateResult::Response(harn_vm::jsonrpc::response(id, json!({})))
             }
-            "tools/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
-                id,
-                self.tools_list_result(&params),
+            "tools/list" => ImmediateResult::Response(envelope(
+                harn_vm::jsonrpc::response(id, self.tools_list_result(&params)),
+                mode,
+                Some(McpCacheHint::list_default()),
             )),
             "tools/call" => match self.prepare_stream_job(id, params, session, connection, auth) {
                 Ok(job) => ImmediateResult::Stream(Box::new(job)),
                 Err(response) => ImmediateResult::Response(response),
             },
-            "resources/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
-                id,
-                self.resources_list_result(&params),
+            "resources/list" => ImmediateResult::Response(envelope(
+                harn_vm::jsonrpc::response(id, self.resources_list_result(&params)),
+                mode,
+                Some(McpCacheHint::list_default()),
             )),
-            "resources/read" => ImmediateResult::Response(self.handle_resources_read(id, &params)),
-            "resources/templates/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
-                id,
-                self.resources_templates_list_result(&params),
+            "resources/read" => ImmediateResult::Response(envelope(
+                self.handle_resources_read(id, &params),
+                mode,
+                Some(McpCacheHint::read_default()),
             )),
-            "prompts/list" => ImmediateResult::Response(harn_vm::jsonrpc::response(
-                id,
-                self.prompts_list_result(&params),
+            "resources/templates/list" => ImmediateResult::Response(envelope(
+                harn_vm::jsonrpc::response(id, self.resources_templates_list_result(&params)),
+                mode,
+                Some(McpCacheHint::list_default()),
             )),
-            "prompts/get" => ImmediateResult::Response(self.handle_prompts_get(id, &params)),
-            mcp_protocol::METHOD_COMPLETION_COMPLETE => {
-                ImmediateResult::Response(self.handle_completion_complete(id, &params))
-            }
+            "prompts/list" => ImmediateResult::Response(envelope(
+                harn_vm::jsonrpc::response(id, self.prompts_list_result(&params)),
+                mode,
+                Some(McpCacheHint::list_default()),
+            )),
+            "prompts/get" => ImmediateResult::Response(envelope(
+                self.handle_prompts_get(id, &params),
+                mode,
+                None,
+            )),
+            mcp_protocol::METHOD_COMPLETION_COMPLETE => ImmediateResult::Response(envelope(
+                self.handle_completion_complete(id, &params),
+                mode,
+                None,
+            )),
             _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
                 ImmediateResult::Response(
                     mcp_protocol::unsupported_latest_spec_method_response(id, method)
@@ -476,17 +547,13 @@ impl McpServer {
             .get("protocolVersion")
             .and_then(JsonValue::as_str)
             .unwrap_or_default();
-        if !requested.is_empty() && requested != MCP_PROTOCOL_VERSION {
-            return harn_vm::jsonrpc::error_response_with_data(
-                id,
-                -32602,
-                "Unsupported protocol version",
-                json!({
-                    "supported": [MCP_PROTOCOL_VERSION],
-                    "requested": requested,
-                }),
-            );
-        }
+        let negotiated = if requested.is_empty() {
+            MCP_PROTOCOL_VERSION
+        } else if mcp_protocol::is_supported_protocol_version(requested) {
+            requested
+        } else {
+            return mcp_protocol::unsupported_protocol_version_response(id, requested);
+        };
 
         let client_name = params
             .pointer("/clientInfo/name")
@@ -496,11 +563,41 @@ impl McpServer {
             .pointer("/clientInfo/version")
             .and_then(JsonValue::as_str)
             .unwrap_or("unknown");
+        let protocol_mode = if negotiated == DRAFT_PROTOCOL_VERSION {
+            McpProtocolMode::Modern
+        } else {
+            McpProtocolMode::Legacy
+        };
         session.update_connection(ConnectionState {
             initialized: true,
             client_identity: format!("{client_name}/{client_version}"),
+            protocol_mode,
         });
 
+        envelope(
+            harn_vm::jsonrpc::response(
+                id,
+                json!({
+                    "protocolVersion": negotiated,
+                    "capabilities": self.server_capabilities(),
+                    "serverInfo": self.server_info(),
+                }),
+            ),
+            protocol_mode,
+            None,
+        )
+    }
+
+    fn handle_server_discover(&self, id: JsonValue) -> JsonValue {
+        let result = server_discover_result(
+            JsonValue::Object(self.server_capabilities()),
+            self.server_info(),
+            None,
+        );
+        harn_vm::jsonrpc::response(id, result)
+    }
+
+    fn server_capabilities(&self) -> serde_json::Map<String, JsonValue> {
         let mut capabilities = serde_json::Map::new();
         if !self.catalog.functions.is_empty() {
             capabilities.insert("tools".to_string(), json!({}));
@@ -518,7 +615,10 @@ impl McpServer {
                 mcp_protocol::completions_capability(),
             );
         }
+        capabilities
+    }
 
+    fn server_info(&self) -> JsonValue {
         let mut server_info = json!({
             "name": self.server_name,
             "version": env!("CARGO_PKG_VERSION"),
@@ -526,15 +626,7 @@ impl McpServer {
         if let Some(card) = &self.server_card {
             server_info["card"] = card.clone();
         }
-
-        harn_vm::jsonrpc::response(
-            id,
-            json!({
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": capabilities,
-                "serverInfo": server_info,
-            }),
-        )
+        server_info
     }
 
     fn handle_cancel_notification(&self, session: &SharedSession, params: &JsonValue) {
@@ -629,6 +721,7 @@ impl McpServer {
     ) {
         let cancel_token = Arc::new(AtomicBool::new(false));
         let cancelled = Arc::new(AtomicBool::new(false));
+        let mode = job.context.connection.protocol_mode;
         job.context.session.insert_call(
             job.request_key.clone(),
             ActiveCall {
@@ -669,34 +762,31 @@ impl McpServer {
             return;
         }
 
-        match result {
-            Ok(response) => notify(harn_vm::jsonrpc::response(
-                job.request_id,
-                tool_call_success(response),
-            )),
-            Err(DispatchError::Validation(message)) => notify(harn_vm::jsonrpc::error_response(
-                job.request_id,
-                -32602,
-                &message,
-            )),
-            Err(DispatchError::Unauthorized(message)) => notify(harn_vm::jsonrpc::error_response(
-                job.request_id,
-                -32001,
-                &message,
-            )),
-            Err(DispatchError::MissingExport(message)) => notify(harn_vm::jsonrpc::error_response(
-                job.request_id,
-                -32602,
-                &message,
-            )),
+        let response = match result {
+            Ok(response) => envelope(
+                harn_vm::jsonrpc::response(job.request_id, tool_call_success(response)),
+                mode,
+                None,
+            ),
+            Err(DispatchError::Validation(message)) => {
+                harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
+            }
+            Err(DispatchError::Unauthorized(message)) => {
+                harn_vm::jsonrpc::error_response(job.request_id, -32001, &message)
+            }
+            Err(DispatchError::MissingExport(message)) => {
+                harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
+            }
             Err(DispatchError::Execution(message))
             | Err(DispatchError::Cancelled(message))
             | Err(DispatchError::Io(message))
-            | Err(DispatchError::Cache(message)) => notify(harn_vm::jsonrpc::response(
-                job.request_id,
-                tool_call_error(message),
-            )),
-        }
+            | Err(DispatchError::Cache(message)) => envelope(
+                harn_vm::jsonrpc::response(job.request_id, tool_call_error(message)),
+                mode,
+                None,
+            ),
+        };
+        notify(response);
     }
 
     fn tools_list_result(&self, params: &JsonValue) -> JsonValue {
@@ -845,6 +935,21 @@ impl McpServer {
             ),
         }
     }
+}
+
+/// Wrap a JSON-RPC response in the RC envelope (resultType + optional
+/// cache hints) when the connection has been promoted to Modern. Legacy
+/// responses pass through byte-for-byte so existing 2025-11-25 clients
+/// see no wire change.
+fn envelope(
+    mut response: JsonValue,
+    mode: McpProtocolMode,
+    cache: Option<McpCacheHint>,
+) -> JsonValue {
+    if let Some(result) = response.get_mut("result") {
+        apply_rc_result_envelope(result, mode, cache.as_ref());
+    }
+    response
 }
 
 fn requires_protocol_auth(method: &str) -> bool {

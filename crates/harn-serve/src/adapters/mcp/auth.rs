@@ -44,6 +44,15 @@ pub(super) fn lookup_or_create_session(
         }
         return Err(Box::new(StatusCode::NOT_FOUND.into_response()));
     }
+    // Modern clients are session-less: every request carries its own
+    // `_meta.protocolVersion` and `Mcp-*` headers, so the server never
+    // mints a sticky session id for them. Legacy clients still bootstrap
+    // a session on `initialize` and must replay the assigned
+    // `Mcp-Session-Id` on subsequent calls.
+    if is_session_less_method(method) || is_modern_request(request) {
+        let session = SharedSession::new();
+        return Ok((String::new(), session, false));
+    }
     if method != "initialize" {
         return Err(Box::new(StatusCode::BAD_REQUEST.into_response()));
     }
@@ -51,6 +60,23 @@ pub(super) fn lookup_or_create_session(
     let session = SharedSession::new();
     sessions.insert(session_id.clone(), session.clone());
     Ok((session_id, session, true))
+}
+
+fn is_session_less_method(method: &str) -> bool {
+    method == mcp_protocol::METHOD_SERVER_DISCOVER
+}
+
+fn is_modern_request(request: &JsonValue) -> bool {
+    // Any request that ships `_meta.protocolVersion` is RC-shaped, even
+    // if the named version is one we cannot speak. The dispatch layer
+    // emits the canonical `-32004` reply in that case; we must accept
+    // the request here so the JSON body actually reaches dispatch
+    // instead of getting bounced as a 400.
+    request
+        .pointer("/params/_meta")
+        .and_then(JsonValue::as_object)
+        .map(|meta| meta.contains_key(mcp_protocol::RC_META_KEY_PROTOCOL_VERSION))
+        .unwrap_or(false)
 }
 
 pub(super) fn attach_http_headers(
@@ -105,11 +131,36 @@ pub(super) fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Re
     else {
         return Ok(());
     };
-    if value == MCP_PROTOCOL_VERSION || value == "2025-03-26" {
+    // Accept the stable version, the RC profile, and the prior stable
+    // (`2025-03-26`) for clients still in the lifecycle's compatibility
+    // window. Anything else is a hard 400 so a fuzzed or wrong-product
+    // header never falls through.
+    if value == "2025-03-26" || mcp_protocol::is_supported_protocol_version(value) {
         Ok(())
     } else {
         Err(Box::new(StatusCode::BAD_REQUEST.into_response()))
     }
+}
+
+/// Cross-check the RC-required `Mcp-Method` / `Mcp-Name` headers against
+/// the parsed JSON-RPC body. A mismatch is a JSON-RPC `-32600` error so
+/// the caller can ship it back as either an HTTP 200 with the error body
+/// (RC spec) or an HTTP 400.
+pub(super) fn validate_rc_routing_headers(
+    headers: &HeaderMap,
+    request: &JsonValue,
+) -> Result<(), JsonValue> {
+    let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
+    let method = request.get("method").and_then(JsonValue::as_str);
+    let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+    let name = method.and_then(|m| rc_name_header_value(m, &params));
+    negotiate_rc_http_request(
+        |key| headers.get(key).and_then(|value| value.to_str().ok()),
+        method,
+        name.as_deref(),
+        &id,
+    )
+    .map(|_| ())
 }
 
 pub(super) fn validate_origin(headers: &HeaderMap) -> Result<(), Box<Response>> {
