@@ -1,17 +1,16 @@
 # Pool cookbook
 
-Four end-to-end patterns for agent pools (#1883). Each recipe is a
-complete, copy-paste starting point. For the surface reference see
-[Agent pools](../agent-pools.md); for the LLM-friendly quickref see
-the "Agent pools" section in `docs/llm/harn-quickref.md`.
+End-to-end patterns for agent pools. Each recipe is a self-contained,
+copy-paste starting point. For the surface reference see
+[Agent pools](../agent-pools.md); for the LLM-friendly quickref see the
+"Agent pools" section in `docs/llm/harn-quickref.md`.
 
 The recipes use `harn,ignore` fences because they wire up full
-multi-pipeline topologies (producer pipeline, pool-draining pipeline,
-and trigger handlers). Each fragment type-checks; the orchestration
-loop assumes a host that runs the constituent pipelines (such as
-`harn orchestrator`).
+multi-pipeline topologies (producer, pool-draining pipeline, trigger
+handlers). Each fragment type-checks; the orchestration loop assumes a
+host that runs the constituent pipelines, such as `harn orchestrator`.
 
-## 1. Rate-limited webhook processor
+## Rate-limited webhook processor
 
 Every webhook source posts to a single `channel:webhook.received`
 channel. A pool with `max_concurrent: 10`, a per-source fair queue,
@@ -56,7 +55,8 @@ pipeline webhook_intake_setup() {
 }
 
 fn process_webhook(payload) {
-  // Idempotent handler — see recipe 4 for the durable-key pattern.
+  // Idempotent handler — see "Burst absorber for nightly batch jobs"
+  // below for the durable-key pattern.
   return upsert_event(payload.source, payload.body)
 }
 ```
@@ -77,7 +77,7 @@ deploy. Pipeline scope reloads queued tasks from
 `.harn/pools/<pipeline_id>__webhook-work.jsonl` so an in-flight burst
 does not vanish on restart.
 
-## 2. GPU-routed inference pool
+## GPU-routed inference pool
 
 A multi-tenant inference service has four GPUs. Each inference call
 must run on exactly one GPU; the pool's `max_concurrent` is sized to
@@ -148,7 +148,7 @@ worker tier (#306). Today this fails with a `host-routed (harn-cloud)
 `scope: "session"` for local development and flip the scope at deploy
 time.
 
-## 3. Cross-customer fairness
+## Cross-customer fairness
 
 A SaaS backend runs per-customer agent tasks (PR review, doc gen,
 test triage). Without fairness, a single noisy customer's batch of
@@ -207,10 +207,10 @@ without losing any work.
 
 Why `scope: "pipeline"`: the queue depth at restart can be tens of
 thousands of tasks. Pipeline scope reloads them and resumes
-draining; the per-task idempotency key (see recipe 4) catches the
+draining; the per-task idempotency key from "Burst absorber" catches the
 brief window where in-flight tasks are re-enqueued.
 
-## 4. Burst absorber for nightly batch jobs
+## Burst absorber for nightly batch jobs
 
 A nightly cron triggers thousands of report-generation tasks. They
 need to all *eventually* run, but only a few at a time to avoid

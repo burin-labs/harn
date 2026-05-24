@@ -1,23 +1,20 @@
 # Tool hooks cookbook
 
-Copy-paste recipes for the
-[`preset_run_command`](../tool-hooks.md) wrapper. Each recipe is
-self-contained — drop it into a `pipeline default(task) { ... }` body,
-wire the returned closure into your `agent_loop`'s `run_command`
-handler, and you have working catalogue-driven command guards.
+Copy-paste recipes for the [`preset_run_command`](../tool-hooks.md)
+wrapper. Drop one into a `pipeline default(task) { ... }` body, wire
+the returned closure into your `agent_loop`'s `run_command` handler,
+and you have working catalogue-driven command guards.
 
 For the full surface reference see [Preset tool hooks](../tool-hooks.md).
-To extend the shipped catalogues see [Contributing preset
-hooks](../contributing/preset-hooks.md).
+To extend the shipped catalogues see
+[Contributing preset hooks](../contributing/preset-hooks.md).
 
-The recipes use `harn,ignore` fences because they show full
-agent-loop topologies (handler + dispatch + transcript wiring) that
-need an active session to type-check end-to-end. Each fragment is the
-same shape as the conformance fixtures under
-`conformance/tests/stdlib/tool_hooks_*.harn`, so you can copy and
-adapt them with confidence.
+The recipes use `harn,ignore` fences because they show full agent-loop
+topologies (handler + dispatch + transcript wiring) that need an active
+session to type-check end-to-end. Each fragment matches a conformance
+fixture under `conformance/tests/stdlib/tool_hooks_*.harn`.
 
-## 1. Rust agent: safe `cargo`
+## Rust agent: safe `cargo`
 
 A Rust coding agent should never thrash the workspace lockfile, should
 keep `println!` output visible from `cargo test`, and should never
@@ -52,7 +49,7 @@ What fires here:
 - The universal catalogue's `git push --force main` and `rm -rf /`
   denies fire regardless of `stacks`.
 
-## 2. Python agent: virtualenv-friendly defaults
+## Python agent: virtualenv-friendly defaults
 
 Same shape, different opt-in. The Python catalogue rewrites `find` to
 `rg --files`, warns on system-wide `pip install`, and keeps `pytest`
@@ -70,7 +67,7 @@ pipeline default(task) {
 }
 ```
 
-## 3. TypeScript agent: refuse `--legacy-peer-deps`
+## TypeScript agent: refuse `--legacy-peer-deps`
 
 The TypeScript catalogue's `ts.npm_install_force_resolution` rule is
 informational by default (warning severity, no rewrite). For a
@@ -92,9 +89,9 @@ pipeline default(task) {
 With `tool_hooks_mode_deny_with_explanation` as the wrapper-wide mode,
 **every** match denies — not just the npm one. For per-rule
 gradations, use the default rewrite-with-audit mode and write
-deny-only `custom_rules` (recipe 5).
+deny-only `custom_rules` (see the SQL recipe below).
 
-## 4. Swift agent: protect `.build/` from accidental cleans
+## Swift agent: protect `.build/` from accidental cleans
 
 The Swift catalogue ships one rule by default. Compose it with custom
 rules for project-specific extensions:
@@ -124,7 +121,7 @@ pipeline default(task) {
 }
 ```
 
-## 5. SQL agent: deny `SELECT *` without a `LIMIT`
+## SQL agent: deny `SELECT *` without a `LIMIT`
 
 The shipped `sql.select_star_warning` rule is `severity: "warning"`
 without a rewrite — it surfaces the pattern but doesn't block. To
@@ -161,7 +158,7 @@ Custom rules are matched before the registry, so the deny fires
 ahead of the catalogue's softer warning. The default mode would
 otherwise let unbounded `SELECT *` through with a warning audit.
 
-## 6. Harn dogfood agent: silence `cargo run --bin harn`
+## Harn dogfood agent: silence `cargo run --bin harn`
 
 The Harn catalogue patches CLAUDE.md's "always pass `--quiet`"
 guidance into the dispatcher itself. Opt-in is one line:
@@ -182,7 +179,7 @@ A bare `cargo run --bin harn -- run examples/hello.harn` rewrites to
 `cargo --quiet run --bin harn -- run examples/hello.harn`, and the
 audit envelope explains why.
 
-## 7. Multi-stack agent with classifier fallback
+## Multi-stack agent with classifier fallback
 
 A polyglot agent needs every shipped catalogue plus a model-driven
 fallback for ad-hoc commands. The classifier is opt-in — leaving
@@ -222,7 +219,7 @@ What the classifier adds:
   `tool_hook_classifier_verdict` audit entry so you can see exactly
   which decisions were model-driven.
 
-## 8. Audit-only rollout (preview, then enforce)
+## Audit-only rollout: preview, then enforce
 
 Roll a new catalogue out by running it in `passthrough_only_audit`
 mode first; collect the `tool_rule_warning` audit entries; once the
@@ -248,7 +245,7 @@ pipeline default(task) {
 with your transcript persistence to retain the rule-firings beyond
 the pipeline run.
 
-## 9. Preview without executing
+## Preview without executing
 
 Omit `inner` to get decision envelopes back without running anything.
 Useful for unit tests, dry-runs, and replaying a transcript with
@@ -271,7 +268,7 @@ Audit + reminder side effects still fire in preview mode, so a
 test asserting on `lifecycle_audit_log_take()` sees the rule
 firings even though no command actually executed.
 
-## 10. Composing with `register_tool_hook`
+## Composing with `register_tool_hook`
 
 `preset_run_command` is the in-tool wrapper for `run_command`-shaped
 tools. The general
