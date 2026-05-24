@@ -23,6 +23,7 @@
     ".burin",
     ".claude",
     ".harn-runs",
+    "meta_scratch",
     "docs/src/SUMMARY.md",
     "conformance/tests/**/.harn/**/*.md",
     // Generated drift report fixture for the provider catalog refresh
