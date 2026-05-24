@@ -1,8 +1,5 @@
 # HARN-STD-101 — public stdlib function missing metadata
 
-**Category:** Stdlib (STD)
-**Variant:** `Code::LintMissingStdlibMetadata`
-
 ## What it means
 
 Every public stdlib function ships with a declarative metadata block above
@@ -44,9 +41,3 @@ pub fn render_readme(path: string) -> Result<string, FsError> { ... }
 The lint considers `@effects: []` and `@errors: []` valid declarations — they
 explicitly assert "no effects" and "infallible" respectively, which is what
 agents need to read out of the graph.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.

@@ -1,7 +1,5 @@
 # HARN-RMD-008
 
-**Variant:** `Code::ReminderUnsupportedHookEvent`
-
 A hook handler returned a reminder effect from a lifecycle event that cannot
 inject reminders. Worker lifecycle events are observational and must not mutate
 the active transcript with reminder effects.

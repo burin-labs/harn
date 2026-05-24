@@ -1,8 +1,5 @@
 # HARN-LNT-054 — ambient fs builtin replaced by `harness.fs.*`
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientFsBuiltin` (ambient fs builtin)
-
 ## What it means
 
 The lint fires on any call to `read_file`, `write_file`, `file_exists`,
@@ -27,9 +24,3 @@ while the migration is in flight, but every new call site should use the
   `harn fix --apply --safety surface-changing --harness-threading thread-params`.
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.

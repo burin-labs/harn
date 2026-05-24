@@ -1,8 +1,5 @@
 # HARN-CST-001 — const initializer exceeded the step budget
 
-**Category:** Const-eval sandbox (CST)
-**Variant:** `Code::ConstEvalStepLimit`
-
 ## What it means
 
 The bounded compile-time evaluator counts every reduction step it
@@ -24,5 +21,5 @@ const HUGE = sum_to(1_000_000)
 
 ## Stability
 
-This code is stable. The default budget may grow over time; tightening it
-would require a deprecation cycle.
+The default budget may grow over time; tightening it would require a
+deprecation cycle.

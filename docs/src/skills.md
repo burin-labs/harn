@@ -159,19 +159,16 @@ let rendered = skill_render(deploy, ["prod", "us-east-1"])
 
 ## Progressive disclosure with `load_skill`
 
-Harn supports lazy skill loading in two places:
+Lazy skill loading surfaces in two places, both resolving the skill id
+against the active registry and applying the same substitution rules:
 
-- `load_skill("deploy")` is a stdlib builtin for Harn code. It resolves
-  the requested skill against the startup registry, lazily hydrates the
-  full `SKILL.md`, applies substitution, and returns the rendered body
-  as a string.
+- `load_skill("deploy")` is a stdlib builtin for Harn code. It hydrates
+  the full `SKILL.md`, applies substitution, and returns the rendered
+  body as a string.
 - When an agent loop receives a skill registry through `skills:`, Harn
   also exposes a runtime-owned `load_skill({ name })` tool for the
   model. That tool calls the same lazy loader and returns the rendered
   body in the next turn.
-
-Both paths resolve the requested skill id against the active registry
-and apply the same substitution rules described above.
 
 Builtin example:
 
@@ -267,11 +264,11 @@ name = "acme/ops"
 
 - `paths` is joined against the directory holding harn.toml and
   supports a single trailing `*` component (`packages/*/skills`).
-- `lookup_order` lets you invert a layer's priority — for example, to
-  prefer `user` over `project` on a personal checkout without touching
-  the repo.
-- `disable` kicks entire layers out of discovery. Disabled layers are
-  reported by `harn doctor`.
+- `lookup_order` inverts layer priority — for example, preferring
+  `user` over `project` on a personal checkout without touching the
+  repo.
+- `disable` removes entire layers from discovery; `harn doctor` reports
+  the disabled set.
 - `signer_registry_url` points at a flat directory or URL prefix that
   serves `<fingerprint>.pub` signer files for skill signature
   verification.
@@ -466,8 +463,8 @@ Match results for: deploy the staging service
    2. review              score=0.400  [project]   1 keyword hit(s)
 ```
 
-Useful when authoring a SKILL.md to confirm its `short:` and
-`when_to_use:` frontmatter actually attracts the right prompts.
+Confirms that a SKILL.md's `short:` and `when_to_use:` frontmatter
+attract the intended prompts.
 
 ### `harn skills install <spec>`
 

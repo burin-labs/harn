@@ -1,8 +1,5 @@
 # HARN-LNT-057 — ambient net builtin replaced by `harness.net.*`
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientNetBuiltin` (ambient net builtin)
-
 ## What it means
 
 The lint fires on calls to the ambient `http_get`, `http_post`,
@@ -27,9 +24,3 @@ follow-up ticket.
   `harn fix --apply --safety surface-changing --harness-threading thread-params`.
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.

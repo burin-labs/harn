@@ -1,8 +1,5 @@
 # HARN-CAP-301 — child agent effect set exceeds the parent's declared effects
 
-**Category:** Host capability (CAP)
-**Variant:** `Code::EffectInheritanceViolation` (effect inheritance violation)
-
 ## What it means
 
 A spawned child agent requests typed side-effects (`harness.net.*`,
@@ -55,8 +52,6 @@ Both shapes are marked `safety: surface-changing`, so `harn fix --apply
 
 ## Stability
 
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly. The matched
-`EffectInheritanceViolation` runtime payload's `_type` discriminator
-(`effect_inheritance_violation`) is part of the same stable contract.
+The matched `EffectInheritanceViolation` runtime payload's `_type`
+discriminator (`effect_inheritance_violation`) is part of the stable
+contract.

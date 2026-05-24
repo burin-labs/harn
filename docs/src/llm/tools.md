@@ -122,8 +122,8 @@ log(result.text)
 
 - `math::calc`, `regex::match`, `strings::count_char`, and `crypto::sha256`
   stay fully deterministic because they are just stdlib code.
-- `vision::ocr` now returns `StructuredText` instead of an opaque blob, so the
-  model gets token, line, and block structure back in the tool result.
+- `vision::ocr` returns `StructuredText` with token, line, and block
+  structure so the model can branch on fields in the tool result.
 - The current OCR backend shells out to `tesseract`, but the runtime keeps the
   backend pluggable, runs it through the process sandbox under an active handler
   policy, and records OCR metadata plus structured output on `audit.vision_ocr`
@@ -134,10 +134,9 @@ log(result.text)
 - Reach for typed stdlib tools before inventing a new MCP server or host bridge
   surface.
 - Keep tool names product-facing and stable even if the handler body is simple.
-- Make return schemas concrete enough that the model can branch on fields
-  instead of scraping prose.
-- When the result should be inspectable by later steps, return a dict or list,
-  not a formatted string.
+- Return structured dicts or lists with concrete schemas so the model
+  (and later pipeline steps) can branch on fields instead of scraping
+  prose strings.
 
 ## Host-backed tool helpers
 

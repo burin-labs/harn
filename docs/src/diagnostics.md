@@ -58,6 +58,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## TYP — Type checker
 
+Harn's static type checker rejects programs whose types do not unify. Type errors block compilation — Harn refuses to run a program until they are fixed.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-TYP-001`](#harn-typ-001) | expected and actual types are incompatible | `casts/insert-explicit-conversion` | `scope-local` |
@@ -88,6 +90,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## PAR — Parser / lexer
 
+The lexer or parser raises these before type checking begins. Harn cannot build an AST from the source until the offending token sequence is repaired.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-PAR-001`](#harn-par-001) | parser found an unexpected token | — | — |
@@ -97,6 +101,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-PAR-005`](#harn-par-005) | block comment is unterminated | — | — |
 
 ## NAM — Naming and resolution
+
+Name resolution failed: the identifier, field, or attribute referenced does not match anything in the visible scope. Harn cannot proceed without a binding.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -116,6 +122,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## CAP — Capabilities
 
+A host capability call (file I/O, network, HITL approval, tool host, etc.) failed static validation. Capabilities are the trust boundary between Harn scripts and the embedding host, so checks are strict by design.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-CAP-001`](#harn-cap-001) | capability payload is invalid | — | — |
@@ -130,6 +138,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## LLM — LLM calls
 
+An `llm_call(...)` invocation violates the schema Harn enforces. Schema-validated, provider-portable LLM calls are a load-bearing Harn contract; drift in the options table is rejected at check time.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-LLM-001`](#harn-llm-001) | LLM option key is not recognized | — | — |
@@ -139,6 +149,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-LLM-005`](#harn-llm-005) | prompt branches on provider identity instead of capability flags | `llm/use-capability-flag` | `capability-changing` |
 
 ## ORC — Orchestration constructs
+
+An orchestration construct — agent / workflow / pipeline / tool definition, or a call to an orchestration builtin — is shaped in a way the orchestrator cannot accept.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -155,6 +167,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## STD — Stdlib usage
 
+A stdlib symbol is used in a way Harn does not support, or has been renamed/removed and the call site still references the old surface.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-STD-001`](#harn-std-001) | stdlib symbol has been renamed or deprecated | `stdlib/migrate-renamed` | `scope-local` |
@@ -163,6 +177,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-STD-101`](#harn-std-101) | public stdlib function is missing declared metadata | `doc/add-stdlib-metadata` | `behavior-preserving` |
 
 ## PRM — Prompt templates
+
+A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because its front matter is missing required fields or because the body references slots the schema does not declare.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -176,6 +192,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## MOD — Modules and exports
 
+A module-level import declaration cannot be satisfied or has been authored in a shape Harn rejects. Module boundaries are checked before the body is type-checked.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-MOD-001`](#harn-mod-001) | module import cannot be resolved | `imports/fix-path` | `scope-local` |
@@ -186,6 +204,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-MOD-006`](#harn-mod-006) | module re-exports conflict | — | — |
 
 ## RMD — Reminder lifecycle
+
+Reminder lifecycle errors are raised by `session/remind` and friends when the payload, tags, or scheduling do not match the documented contract.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -199,6 +219,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-RMD-008`](#harn-rmd-008) | hook event does not support reminder effects | — | — |
 
 ## SUS — Suspend / resume lifecycle
+
+Suspend / resume lifecycle errors are raised when a worker is suspended, resumed, or queried outside the lifecycle states the operation supports.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -217,6 +239,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-SUS-013`](#harn-sus-013) | lifecycle receipt signed timestamp failed verification | — | — |
 
 ## LNT — Lint rules
+
+Lints are not hard errors. The code compiles, but Harn flags the pattern as likely-incorrect, unidiomatic, or risky in a production agent. Most lints can be auto-fixed.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -280,6 +304,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## FMT — Formatter
 
+The formatter could not produce a canonical layout — either the input contains a construct it does not know how to render, or a layout rule was violated in a way auto-fix cannot resolve.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-FMT-001`](#harn-fmt-001) | formatter could not parse the source | — | — |
@@ -288,6 +314,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## IMP — Import resolution
 
+Import resolution failed at a deeper layer than `MOD` — the file, symbol, or package referenced in an import declaration could not be located, parsed, or exposed.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-IMP-001`](#harn-imp-001) | import target cannot be resolved | `imports/fix-path` | `scope-local` |
@@ -295,6 +323,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-IMP-003`](#harn-imp-003) | import graph contains a cycle | — | — |
 
 ## OWN — Ownership and mutability
+
+Harn's binding-and-mutability discipline rejects this usage. `let` bindings may not be reassigned; `mut` bindings should actually be reassigned somewhere.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -305,6 +335,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## RCV — Error recovery
 
+A recovery construct (`try`, `rescue`) is in an invalid position or shaped in a way Harn's error-recovery rules cannot accept.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-RCV-001`](#harn-rcv-001) | rescue construct is outside a function body | `errors/wrap-in-fn` | `surface-changing` |
@@ -312,6 +344,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-RCV-003`](#harn-rcv-003) | rescue construct is invalid | — | — |
 
 ## MAT — Match exhaustiveness
+
+A `match` expression is incomplete, ambiguous, or otherwise invalid. Harn requires arms to cover every variant of the scrutinee type — partial matches must opt in with an explicit catch-all.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -321,6 +355,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## POL — Runtime policies
 
+A runtime policy (pool backpressure, scheduling, quotas) rejected the attempt. Policies are configurable, but defaults are tuned for safety over throughput.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-POL-001`](#harn-pol-001) | pool backpressure rejected a submit | — | — |
@@ -328,11 +364,15 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 ## MET — Compile-time meta restrictions
 
+A `const` binding's right-hand side must be a pure expression evaluable at compile time under the const-eval sandbox. These codes flag constructs the sandbox rejects.
+
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-MET-001`](#harn-met-001) | expression is not permitted in a const initializer | — | — |
 
 ## CST — Const-eval sandbox
+
+The bounded const-eval sandbox enforces step, recursion, and capability limits on every `const` initializer so a hostile or accidental expression cannot stall the compiler.
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
@@ -353,9 +393,6 @@ expected and actual types are incompatible
 - Insert an explicit conversion or correct the operand type
 - **See also:** [`HARN-TYP-005`](#harn-typ-005), [`HARN-TYP-006`](#harn-typ-006), [`HARN-TYP-004`](#harn-typ-004), [`HARN-TYP-007`](#harn-typ-007), [`HARN-TYP-009`](#harn-typ-009)
 
-**Category:** Type checker (TYP)
-**Variant:** `Code::TypeMismatch`
-
 #### What it means
 
 Harn's type checker compared the inferred ("actual") type of an expression
@@ -374,48 +411,11 @@ into one of the more specific TYP codes (assignment, argument, return, etc.).
 - If the mismatch is between a concrete type and an optional, use
   `?`-chaining or supply a default with `??`.
 
-#### See also
-
-- HARN-TYP-004 — return-type mismatch.
-- HARN-TYP-005 — assignment-type mismatch.
-- HARN-TYP-006 — argument-type mismatch.
-- HARN-TYP-007 — let-binding initializer type mismatch.
-- HARN-TYP-009 — struct-field type mismatch.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-002`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
 
 binary operator is not defined for the operand types
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::InvalidBinaryOperator` (invalid binary operator)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: binary operator is not defined for the operand types.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-003`
 
@@ -425,29 +425,6 @@ string concatenation should be rewritten as interpolation
 
 - **Repair:** `style/string-interpolation` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Rewrite string concatenation as an interpolation literal
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::StringInterpolationRewrite` (string interpolation rewrite)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: string concatenation should be rewritten as interpolation.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-004`
 
@@ -459,29 +436,6 @@ returned expression does not match the declared return type
 - Insert an explicit conversion or correct the operand type
 - **See also:** [`HARN-TYP-001`](#harn-typ-001), [`HARN-TYP-008`](#harn-typ-008)
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::ReturnTypeMismatch` (return type mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: returned expression does not match the declared return type.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-005`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
@@ -491,29 +445,6 @@ assigned value does not match the target type
 - **Repair:** `casts/insert-explicit-conversion` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Insert an explicit conversion or correct the operand type
 - **See also:** [`HARN-TYP-001`](#harn-typ-001), [`HARN-TYP-007`](#harn-typ-007)
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::AssignmentTypeMismatch` (assignment type mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: assigned value does not match the target type.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-006`
 
@@ -525,29 +456,6 @@ argument value does not match the parameter type
 - Insert an explicit conversion or correct the operand type
 - **See also:** [`HARN-TYP-001`](#harn-typ-001), [`HARN-TYP-012`](#harn-typ-012)
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::ArgumentTypeMismatch` (argument type mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: argument value does not match the parameter type.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-007`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
@@ -557,29 +465,6 @@ initializer does not match the declared variable type
 - **Repair:** `casts/insert-explicit-conversion` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Insert an explicit conversion or correct the operand type
 - **See also:** [`HARN-TYP-001`](#harn-typ-001), [`HARN-TYP-005`](#harn-typ-005)
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::VariableTypeMismatch` (variable type mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: initializer does not match the declared variable type.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-008`
 
@@ -591,29 +476,6 @@ closure return expression does not match its declared type
 - Insert an explicit conversion or correct the operand type
 - **See also:** [`HARN-TYP-004`](#harn-typ-004)
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::ClosureReturnTypeMismatch` (closure return type mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: closure return expression does not match its declared type.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-009`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
@@ -623,29 +485,6 @@ field value does not match its declared type
 - **Repair:** `casts/insert-explicit-conversion` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Insert an explicit conversion or correct the operand type
 - **See also:** [`HARN-TYP-001`](#harn-typ-001), [`HARN-TYP-022`](#harn-typ-022)
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::FieldTypeMismatch` (field type mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: field value does not match its declared type.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-010`
 
@@ -657,29 +496,6 @@ method receiver or result type is incompatible
 - Insert an explicit conversion or correct the operand type
 - **See also:** [`HARN-TYP-001`](#harn-typ-001), [`HARN-TYP-018`](#harn-typ-018)
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::MethodTypeMismatch` (method type mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: method receiver or result type is incompatible.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-011`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
@@ -688,29 +504,7 @@ callable does not accept type arguments
 
 - **See also:** [`HARN-TYP-012`](#harn-typ-012), [`HARN-TYP-013`](#harn-typ-013)
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::GenericTypeArgumentUnsupported` (generic type argument
 unsupported)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: callable does not accept type arguments.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-012`
 
@@ -720,29 +514,7 @@ type argument does not satisfy the generic parameter
 
 - **See also:** [`HARN-TYP-013`](#harn-typ-013), [`HARN-TYP-015`](#harn-typ-015)
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::GenericTypeArgumentMismatch` (generic type argument
 mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: type argument does not satisfy the generic parameter.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-013`
 
@@ -752,29 +524,6 @@ generic call has the wrong number of type arguments
 
 - **See also:** [`HARN-TYP-012`](#harn-typ-012), [`HARN-TYP-014`](#harn-typ-014)
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::GenericTypeArgumentArity` (generic type argument arity)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: generic call has the wrong number of type arguments.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-014`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
@@ -782,9 +531,6 @@ dispatch on it directly.
 declaration has the wrong number of type parameters
 
 - **See also:** [`HARN-TYP-013`](#harn-typ-013)
-
-**Category:** Type checker (TYP)
-**Variant:** `Code::TypeParameterArity`
 
 #### What it means
 
@@ -811,17 +557,6 @@ let xs = pair::<int, string>(1, "two")
 - For type aliases and structs, the same rule applies: `Map<K, V>` needs two
   arguments, not one and not three.
 
-#### See also
-
-- HARN-TYP-013 — call site uses the wrong number of generic type arguments.
-- HARN-TYP-015 — type argument violates a `where`-clause constraint.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-015`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
@@ -830,57 +565,11 @@ type argument does not satisfy a where-clause constraint
 
 - **See also:** [`HARN-TYP-012`](#harn-typ-012)
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::WhereConstraintMismatch` (where constraint mismatch)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: type argument does not satisfy a where-clause constraint.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-016`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
 
 expression must be iterable
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::IterableExpected` (iterable expected)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: expression must be iterable.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-017`
 
@@ -891,57 +580,11 @@ subscript index type is invalid
 - **Repair:** `casts/insert-explicit-conversion` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Insert an explicit conversion or correct the operand type
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::InvalidIndexType` (invalid index type)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: subscript index type is invalid.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-018`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
 
 expression must be callable
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::CallableExpected` (callable expected)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: expression must be callable.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-019`
 
@@ -952,29 +595,6 @@ cast cannot be proven valid
 - **Repair:** `casts/remove-unchecked` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Remove the unchecked cast or guard it with a type test
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::InvalidCast` (invalid cast)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: cast cannot be proven valid.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-020`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
@@ -984,57 +604,11 @@ type name cannot be resolved
 - **Repair:** `imports/fix-path` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the import path with a resolvable target
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::UnknownTypeName` (unknown type name)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: type name cannot be resolved.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-021`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
 
 variant type is used in an invalid position
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::InvalidVariantUse` (invalid variant use)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: variant type is used in an invalid position.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-022`
 
@@ -1042,57 +616,11 @@ dispatch on it directly.
 
 struct literal is invalid
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::InvalidStructLiteral` (invalid struct literal)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: struct literal is invalid.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-023`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
 
 enum construction is invalid
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::InvalidEnumConstruct` (invalid enum construct)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: enum construction is invalid.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-TYP-024`
 
@@ -1100,57 +628,11 @@ dispatch on it directly.
 
 pattern binding is invalid for the expected type
 
-**Category:** Type checker (TYP)  
-**Variant:** `Code::InvalidPatternBinding` (invalid pattern binding)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: pattern binding is invalid for the expected type.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-TYP-025`
 
 **Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
 
 optional access is invalid for the receiver type
-
-**Category:** Type checker (TYP)  
-**Variant:** `Code::InvalidOptionalAccess` (invalid optional access)
-
-#### What it means
-
-Harn's static type checker reports this when it cannot reconcile the types
-involved at this position. Type errors block compilation — Harn refuses to run a
-program whose types do not line up.
-
-Specifically: optional access is invalid for the receiver type.
-
-#### How to fix
-
-- Adjust the expression so its inferred type matches the surrounding context.
-- Widen the declared type at the binding / parameter / return position to accept the actual type.
-- Convert the value explicitly (`as`, a stdlib coercion, etc.) when a safe conversion exists.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PAR-001`
 
@@ -1158,26 +640,10 @@ dispatch on it directly.
 
 parser found an unexpected token
 
-**Category:** Parser (PAR)  
-**Variant:** `Code::ParserUnexpectedToken` (parser unexpected token)
-
-#### What it means
-
-The lexer or parser raises this before type checking even starts. Harn cannot
-build an AST from the source until the offending token sequence is repaired.
-
-Specifically: parser found an unexpected token.
-
 #### How to fix
 
 - Re-read the source around the highlighted span and restore the missing token(s).
 - If the surrounding construct is a multi-line expression, check brace / bracket balance.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PAR-002`
 
@@ -1185,26 +651,10 @@ dispatch on it directly.
 
 parser reached end of file while expecting syntax
 
-**Category:** Parser (PAR)  
-**Variant:** `Code::ParserUnexpectedEof` (parser unexpected eof)
-
-#### What it means
-
-The lexer or parser raises this before type checking even starts. Harn cannot
-build an AST from the source until the offending token sequence is repaired.
-
-Specifically: parser reached end of file while expecting syntax.
-
 #### How to fix
 
 - Re-read the source around the highlighted span and restore the missing token(s).
 - If the surrounding construct is a multi-line expression, check brace / bracket balance.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PAR-003`
 
@@ -1212,26 +662,10 @@ dispatch on it directly.
 
 lexer found an unexpected character
 
-**Category:** Parser (PAR)  
-**Variant:** `Code::ParserUnexpectedCharacter` (parser unexpected character)
-
-#### What it means
-
-The lexer or parser raises this before type checking even starts. Harn cannot
-build an AST from the source until the offending token sequence is repaired.
-
-Specifically: lexer found an unexpected character.
-
 #### How to fix
 
 - Re-read the source around the highlighted span and restore the missing token(s).
 - If the surrounding construct is a multi-line expression, check brace / bracket balance.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PAR-004`
 
@@ -1239,26 +673,10 @@ dispatch on it directly.
 
 string literal is unterminated
 
-**Category:** Parser (PAR)  
-**Variant:** `Code::ParserUnterminatedString` (parser unterminated string)
-
-#### What it means
-
-The lexer or parser raises this before type checking even starts. Harn cannot
-build an AST from the source until the offending token sequence is repaired.
-
-Specifically: string literal is unterminated.
-
 #### How to fix
 
 - Re-read the source around the highlighted span and restore the missing token(s).
 - If the surrounding construct is a multi-line expression, check brace / bracket balance.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PAR-005`
 
@@ -1266,27 +684,12 @@ dispatch on it directly.
 
 block comment is unterminated
 
-**Category:** Parser (PAR)  
-**Variant:** `Code::ParserUnterminatedBlockComment` (parser unterminated block
 comment)
-
-#### What it means
-
-The lexer or parser raises this before type checking even starts. Harn cannot
-build an AST from the source until the offending token sequence is repaired.
-
-Specifically: block comment is unterminated.
 
 #### How to fix
 
 - Re-read the source around the highlighted span and restore the missing token(s).
 - If the surrounding construct is a multi-line expression, check brace / bracket balance.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-001`
 
@@ -1298,27 +701,10 @@ variable name cannot be resolved
 - Rename to the closest in-scope identifier
 - **See also:** [`HARN-NAM-002`](#harn-nam-002), [`HARN-NAM-010`](#harn-nam-010)
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::UndefinedVariable` (undefined variable)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: variable name cannot be resolved.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-002`
 
@@ -1330,27 +716,10 @@ function name cannot be resolved
 - Rename to the closest in-scope identifier
 - **See also:** [`HARN-NAM-008`](#harn-nam-008), [`HARN-NAM-010`](#harn-nam-010)
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::UndefinedFunction` (undefined function)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: function name cannot be resolved.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-003`
 
@@ -1360,27 +729,10 @@ attribute name is not recognized
 
 - **See also:** [`HARN-NAM-012`](#harn-nam-012), [`HARN-NAM-011`](#harn-nam-011)
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::UnknownAttribute` (unknown attribute)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: attribute name is not recognized.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-004`
 
@@ -1392,27 +744,10 @@ field name does not exist on the target type
 - Rename to the closest in-scope identifier
 - **See also:** [`HARN-NAM-005`](#harn-nam-005), [`HARN-TYP-022`](#harn-typ-022)
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::UnknownField` (unknown field)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: field name does not exist on the target type.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-005`
 
@@ -1424,27 +759,10 @@ method name does not exist on the receiver type
 - Rename to the closest in-scope identifier
 - **See also:** [`HARN-NAM-004`](#harn-nam-004), [`HARN-TYP-018`](#harn-typ-018)
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::UnknownMethod` (unknown method)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: method name does not exist on the receiver type.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-006`
 
@@ -1452,27 +770,10 @@ dispatch on it directly.
 
 argument name is duplicated
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::DuplicateArgument` (duplicate argument)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: argument name is duplicated.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-007`
 
@@ -1480,27 +781,10 @@ dispatch on it directly.
 
 option key is not recognized
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::UnknownOption` (unknown option)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: option key is not recognized.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-008`
 
@@ -1511,27 +795,10 @@ builtin name cannot be resolved
 - **Repair:** `bindings/rename-to-closest` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Rename to the closest in-scope identifier
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::UnknownBuiltin` (unknown builtin)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: builtin name cannot be resolved.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-009`
 
@@ -1542,27 +809,10 @@ function call targets a deprecated declaration
 - **Repair:** `stdlib/migrate-renamed` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Rename the call to the renamed stdlib symbol
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::DeprecatedFunction` (deprecated function)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: function call targets a deprecated declaration.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-010`
 
@@ -1573,27 +823,10 @@ declaration reference cannot be resolved
 - **Repair:** `bindings/rename-to-closest` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Rename to the closest in-scope identifier
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::UnknownDeclaration` (unknown declaration)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: declaration reference cannot be resolved.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-011`
 
@@ -1603,27 +836,10 @@ attribute is attached to an unsupported declaration
 
 - **See also:** [`HARN-NAM-003`](#harn-nam-003), [`HARN-NAM-012`](#harn-nam-012)
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::InvalidAttributeTarget` (invalid attribute target)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: attribute is attached to an unsupported declaration.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-012`
 
@@ -1633,27 +849,10 @@ attribute argument is invalid
 
 - **See also:** [`HARN-NAM-003`](#harn-nam-003), [`HARN-NAM-011`](#harn-nam-011)
 
-**Category:** Name resolution (NAM)  
-**Variant:** `Code::InvalidAttributeArgument` (invalid attribute argument)
-
-#### What it means
-
-Name resolution failed: the identifier, field, or attribute referenced here does
-not match anything in the visible scope. Harn cannot proceed without a binding
-for it.
-
-Specifically: attribute argument is invalid.
-
 #### How to fix
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-NAM-101`
 
@@ -1663,9 +862,6 @@ dispatch on it directly.
 
 - **Repair:** `bindings/thread-harness-needs-param` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Add a `harness: Harness` parameter where the stdio capability handle is required and update local callers
-
-**Category:** Name resolution (NAM)
-**Variant:** `Code::InvalidMainSignature` (invalid `main` signature)
 
 #### What it means
 
@@ -1709,40 +905,16 @@ fn main(_harness: Harness) {
 If the function does not need to be the entrypoint, rename it (e.g. `helper`,
 `run_once`) so the convention does not apply.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-CAP-001`
 
 **Category:** `CAP` (Capabilities) &nbsp;·&nbsp; **API stability:** `stable`
 
 capability payload is invalid
 
-**Category:** Host capability (CAP)  
-**Variant:** `Code::CapabilityPayloadInvalid` (capability payload invalid)
-
-#### What it means
-
-A host capability call (file I/O, network, HITL approval, tool host, etc.) is
-shaped in a way Harn cannot statically validate. Capabilities are the trust
-boundary between Harn scripts and the embedding host, so the check is strict by
-design.
-
-Specifically: capability payload is invalid.
-
 #### How to fix
 
 - Match the capability signature documented in the Harn capability spec.
 - If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-CAP-002`
 
@@ -1750,28 +922,10 @@ dispatch on it directly.
 
 human approval construct is missing policy
 
-**Category:** Host capability (CAP)  
-**Variant:** `Code::HitlMissingApprovalPolicy` (hitl missing approval policy)
-
-#### What it means
-
-A host capability call (file I/O, network, HITL approval, tool host, etc.) is
-shaped in a way Harn cannot statically validate. Capabilities are the trust
-boundary between Harn scripts and the embedding host, so the check is strict by
-design.
-
-Specifically: human approval construct is missing policy.
-
 #### How to fix
 
 - Match the capability signature documented in the Harn capability spec.
 - If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-CAP-003`
 
@@ -1779,29 +933,12 @@ dispatch on it directly.
 
 human approval argument is invalid
 
-**Category:** Host capability (CAP)  
-**Variant:** `Code::HitlInvalidApprovalArgument` (hitl invalid approval
 argument)
-
-#### What it means
-
-A host capability call (file I/O, network, HITL approval, tool host, etc.) is
-shaped in a way Harn cannot statically validate. Capabilities are the trust
-boundary between Harn scripts and the embedding host, so the check is strict by
-design.
-
-Specifically: human approval argument is invalid.
 
 #### How to fix
 
 - Match the capability signature documented in the Harn capability spec.
 - If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-CAP-004`
 
@@ -1813,28 +950,10 @@ capability result must be checked
 - Check the result or wrap the call in a `rescue` block
 - **See also:** [`HARN-RCV-001`](#harn-rcv-001), [`HARN-RCV-002`](#harn-rcv-002)
 
-**Category:** Host capability (CAP)  
-**Variant:** `Code::CapabilityResultUnchecked` (capability result unchecked)
-
-#### What it means
-
-A host capability call (file I/O, network, HITL approval, tool host, etc.) is
-shaped in a way Harn cannot statically validate. Capabilities are the trust
-boundary between Harn scripts and the embedding host, so the check is strict by
-design.
-
-Specifically: capability result must be checked.
-
 #### How to fix
 
 - Match the capability signature documented in the Harn capability spec.
 - If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-CAP-005`
 
@@ -1844,28 +963,10 @@ host capability operation is not declared
 
 - **See also:** [`HARN-CAP-006`](#harn-cap-006)
 
-**Category:** Host capability (CAP)  
-**Variant:** `Code::CapabilityUnknownOperation` (capability unknown operation)
-
-#### What it means
-
-A host capability call (file I/O, network, HITL approval, tool host, etc.) is
-shaped in a way Harn cannot statically validate. Capabilities are the trust
-boundary between Harn scripts and the embedding host, so the check is strict by
-design.
-
-Specifically: host capability operation is not declared.
-
 #### How to fix
 
 - Match the capability signature documented in the Harn capability spec.
 - If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-CAP-006`
 
@@ -1873,29 +974,12 @@ dispatch on it directly.
 
 host capability call must use a static operation name
 
-**Category:** Host capability (CAP)  
-**Variant:** `Code::CapabilityCallStaticNameRequired` (capability call static
 name required)
-
-#### What it means
-
-A host capability call (file I/O, network, HITL approval, tool host, etc.) is
-shaped in a way Harn cannot statically validate. Capabilities are the trust
-boundary between Harn scripts and the embedding host, so the check is strict by
-design.
-
-Specifically: host capability call must use a static operation name.
 
 #### How to fix
 
 - Match the capability signature documented in the Harn capability spec.
 - If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-CAP-007`
 
@@ -1906,28 +990,10 @@ tool host capability binding is invalid
 - **Repair:** `manual/review-capability-binding` &nbsp;·&nbsp; **Safety:** `needs-human`
 - Review the capability binding; the fix is not mechanical
 
-**Category:** Host capability (CAP)  
-**Variant:** `Code::CapabilityBindingInvalid` (capability binding invalid)
-
-#### What it means
-
-A host capability call (file I/O, network, HITL approval, tool host, etc.) is
-shaped in a way Harn cannot statically validate. Capabilities are the trust
-boundary between Harn scripts and the embedding host, so the check is strict by
-design.
-
-Specifically: tool host capability binding is invalid.
-
 #### How to fix
 
 - Match the capability signature documented in the Harn capability spec.
 - If approval / receipt handling is required, wire it through `human_approval` or the equivalent before calling the capability.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-CAP-201`
 
@@ -1936,9 +1002,6 @@ dispatch on it directly.
 harness capability denied by active sandbox profile
 
 - **See also:** [`HARN-CAP-001`](#harn-cap-001)
-
-**Category:** Host capability (CAP)  
-**Variant:** `Code::SandboxCapabilityDenied` (sandbox capability denied)
 
 #### What it means
 
@@ -1976,12 +1039,6 @@ script to discover the denial.
 - For tests, switch from `Harness::real()` to `Harness::mock()` /
   `Harness::null()` so the call is recorded without touching the host.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.
-
 ### `HARN-CAP-301`
 
 **Category:** `CAP` (Capabilities) &nbsp;·&nbsp; **API stability:** `stable`
@@ -1991,9 +1048,6 @@ child agent effect set exceeds the parent's declared effects
 - **Repair:** `policy/narrow-child-effects` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Narrow the child agent's effects to a subset of the parent's, or widen the parent's declared effects
 - **See also:** [`HARN-CAP-001`](#harn-cap-001), [`HARN-CAP-007`](#harn-cap-007)
-
-**Category:** Host capability (CAP)
-**Variant:** `Code::EffectInheritanceViolation` (effect inheritance violation)
 
 #### What it means
 
@@ -2047,11 +1101,9 @@ Both shapes are marked `safety: surface-changing`, so `harn fix --apply
 
 #### Stability
 
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly. The matched
-`EffectInheritanceViolation` runtime payload's `_type` discriminator
-(`effect_inheritance_violation`) is part of the same stable contract.
+The matched `EffectInheritanceViolation` runtime payload's `_type`
+discriminator (`effect_inheritance_violation`) is part of the stable
+contract.
 
 ### `HARN-LLM-001`
 
@@ -2061,28 +1113,11 @@ LLM option key is not recognized
 
 - **See also:** [`HARN-LLM-002`](#harn-llm-002), [`HARN-LLM-004`](#harn-llm-004)
 
-**Category:** LLM call (LLM)  
-**Variant:** `Code::UnknownLlmOption` (unknown llm option)
-
-#### What it means
-
-The `llm_call(...)` invocation here violates the schema Harn enforces for LLM
-calls. Schema-validated, provider-portable LLM calls are a load-bearing Harn
-contract; drift in the options table is rejected at check time.
-
-Specifically: LLM option key is not recognized.
-
 #### How to fix
 
 - Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
 - Drop or rename deprecated options to the names listed in the LLM call quickref.
 - Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LLM-002`
 
@@ -2094,28 +1129,11 @@ LLM option key is deprecated
 - Replace the deprecated option with its supported equivalent
 - **See also:** [`HARN-LLM-001`](#harn-llm-001)
 
-**Category:** LLM call (LLM)  
-**Variant:** `Code::DeprecatedLlmOption` (deprecated llm option)
-
-#### What it means
-
-The `llm_call(...)` invocation here violates the schema Harn enforces for LLM
-calls. Schema-validated, provider-portable LLM calls are a load-bearing Harn
-contract; drift in the options table is rejected at check time.
-
-Specifically: LLM option key is deprecated.
-
 #### How to fix
 
 - Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
 - Drop or rename deprecated options to the names listed in the LLM call quickref.
 - Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LLM-003`
 
@@ -2127,28 +1145,11 @@ LLM call is missing schema validation
 - Add a typed output schema to the LLM call
 - **See also:** [`HARN-LLM-004`](#harn-llm-004), [`HARN-LLM-001`](#harn-llm-001)
 
-**Category:** LLM call (LLM)  
-**Variant:** `Code::LlmSchemaMissing` (llm schema missing)
-
-#### What it means
-
-The `llm_call(...)` invocation here violates the schema Harn enforces for LLM
-calls. Schema-validated, provider-portable LLM calls are a load-bearing Harn
-contract; drift in the options table is rejected at check time.
-
-Specifically: LLM call is missing schema validation.
-
 #### How to fix
 
 - Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
 - Drop or rename deprecated options to the names listed in the LLM call quickref.
 - Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LLM-004`
 
@@ -2158,28 +1159,11 @@ LLM schema option is invalid
 
 - **See also:** [`HARN-LLM-003`](#harn-llm-003), [`HARN-LLM-001`](#harn-llm-001)
 
-**Category:** LLM call (LLM)  
-**Variant:** `Code::LlmSchemaInvalid` (llm schema invalid)
-
-#### What it means
-
-The `llm_call(...)` invocation here violates the schema Harn enforces for LLM
-calls. Schema-validated, provider-portable LLM calls are a load-bearing Harn
-contract; drift in the options table is rejected at check time.
-
-Specifically: LLM schema option is invalid.
-
 #### How to fix
 
 - Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
 - Drop or rename deprecated options to the names listed in the LLM call quickref.
 - Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LLM-005`
 
@@ -2191,28 +1175,11 @@ prompt branches on provider identity instead of capability flags
 - Branch on a capability flag instead of provider identity
 - **See also:** [`HARN-PRM-004`](#harn-prm-004)
 
-**Category:** LLM call (LLM)  
-**Variant:** `Code::LlmProviderIdentityBranch` (llm provider identity branch)
-
-#### What it means
-
-The `llm_call(...)` invocation here violates the schema Harn enforces for LLM
-calls. Schema-validated, provider-portable LLM calls are a load-bearing Harn
-contract; drift in the options table is rejected at check time.
-
-Specifically: prompt branches on provider identity instead of capability flags.
-
 #### How to fix
 
 - Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
 - Drop or rename deprecated options to the names listed in the LLM call quickref.
 - Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-001`
 
@@ -2220,9 +1187,6 @@ dispatch on it directly.
 
 orchestration construct has invalid arity
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::OrchestrationArity` (orchestration arity)
-
 #### What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -2230,17 +1194,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: orchestration construct has invalid arity.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-002`
 
@@ -2248,9 +1204,6 @@ dispatch on it directly.
 
 orchestration construct argument has invalid type
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::OrchestrationType` (orchestration type)
-
 #### What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -2258,17 +1211,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: orchestration construct argument has invalid type.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-003`
 
@@ -2276,9 +1221,6 @@ dispatch on it directly.
 
 agent declaration is invalid
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::AgentDefinitionInvalid` (agent definition invalid)
-
 #### What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -2286,17 +1228,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: agent declaration is invalid.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-004`
 
@@ -2304,9 +1238,6 @@ dispatch on it directly.
 
 workflow declaration is invalid
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::WorkflowDefinitionInvalid` (workflow definition invalid)
-
 #### What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -2314,17 +1245,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: workflow declaration is invalid.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-005`
 
@@ -2332,9 +1255,6 @@ dispatch on it directly.
 
 tool declaration is invalid
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::ToolDefinitionInvalid` (tool definition invalid)
-
 #### What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -2342,17 +1262,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: tool declaration is invalid.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-006`
 
@@ -2360,9 +1272,6 @@ dispatch on it directly.
 
 pipeline declaration is invalid
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::PipelineDefinitionInvalid` (pipeline definition invalid)
-
 #### What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -2370,17 +1279,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: pipeline declaration is invalid.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-007`
 
@@ -2388,9 +1289,6 @@ dispatch on it directly.
 
 select construct is invalid
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::InvalidSelectConstruct` (invalid select construct)
-
 #### What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -2398,17 +1296,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: select construct is invalid.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-008`
 
@@ -2419,9 +1309,6 @@ statement cannot be reached
 - **Repair:** `control-flow/remove-dead` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Remove the unreachable code
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::UnreachableCode` (unreachable code)
-
 #### What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -2429,17 +1316,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: statement cannot be reached.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-009`
 
@@ -2447,8 +1326,6 @@ dispatch on it directly.
 
 Flow invariant attribute set is invalid
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::FlowInvariantAttributeInvalid` (flow invariant attribute
 invalid)
 
 #### What it means
@@ -2458,26 +1335,15 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: Flow invariant attribute set is invalid.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-ORC-010`
 
 **Category:** `ORC` (Orchestration constructs) &nbsp;·&nbsp; **API stability:** `stable`
 
 execution target path cannot be found
-
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::ExecutionTargetMissing` (execution target missing)
 
 #### What it means
 
@@ -2486,17 +1352,9 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: execution target path cannot be found.
-
 #### How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-STD-001`
 
@@ -2507,26 +1365,15 @@ stdlib symbol has been renamed or deprecated
 - **Repair:** `stdlib/migrate-renamed` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Rename the call to the renamed stdlib symbol
 
-**Category:** Stdlib (STD)  
-**Variant:** `Code::DeprecatedStdlibSymbol` (deprecated stdlib symbol)
-
 #### What it means
 
 A stdlib symbol is being used in a way Harn does not support, or has been
 renamed / deprecated since the script was written. The stdlib is the live source
 of truth for what's available.
 
-Specifically: stdlib symbol has been renamed or deprecated.
-
 #### How to fix
 
 - Switch to the supported / renamed stdlib API listed in the diagnostic help text.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-STD-002`
 
@@ -2534,26 +1381,15 @@ dispatch on it directly.
 
 stdlib call is invalid
 
-**Category:** Stdlib (STD)  
-**Variant:** `Code::StdlibUsageInvalid` (stdlib usage invalid)
-
 #### What it means
 
 A stdlib symbol is being used in a way Harn does not support, or has been
 renamed / deprecated since the script was written. The stdlib is the live source
 of truth for what's available.
 
-Specifically: stdlib call is invalid.
-
 #### How to fix
 
 - Switch to the supported / renamed stdlib API listed in the diagnostic help text.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-STD-003`
 
@@ -2561,26 +1397,15 @@ dispatch on it directly.
 
 builtin call has invalid arity
 
-**Category:** Stdlib (STD)  
-**Variant:** `Code::BuiltinArity` (builtin arity)
-
 #### What it means
 
 A stdlib symbol is being used in a way Harn does not support, or has been
 renamed / deprecated since the script was written. The stdlib is the live source
 of truth for what's available.
 
-Specifically: builtin call has invalid arity.
-
 #### How to fix
 
 - Switch to the supported / renamed stdlib API listed in the diagnostic help text.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-STD-101`
 
@@ -2590,9 +1415,6 @@ public stdlib function is missing declared metadata
 
 - **Repair:** `doc/add-stdlib-metadata` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Add `@effects`, `@allocation`, `@errors`, `@api_stability`, and `@example` fields to the stdlib function's doc block
-
-**Category:** Stdlib (STD)
-**Variant:** `Code::LintMissingStdlibMetadata`
 
 #### What it means
 
@@ -2636,12 +1458,6 @@ The lint considers `@effects: []` and `@errors: []` valid declarations — they
 explicitly assert "no effects" and "infallible" respectively, which is what
 agents need to read out of the graph.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-PRM-001`
 
 **Category:** `PRM` (Prompt templates) &nbsp;·&nbsp; **API stability:** `stable`
@@ -2650,27 +1466,16 @@ prompt template cannot be parsed
 
 - **See also:** [`HARN-PRM-007`](#harn-prm-007)
 
-**Category:** Prompt template (PRM)  
-**Variant:** `Code::PromptTemplateParse` (prompt template parse)
-
 #### What it means
 
 A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because
 the template body is malformed or because it references the model surface in a
 way that violates Harn's prompt safety rules.
 
-Specifically: prompt template cannot be parsed.
-
 #### How to fix
 
 - Fix the template syntax (`{{ }}`, `{% %}` are the only structural delimiters).
 - Replace identity-based branching with capability flags from the LLM call options.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PRM-002`
 
@@ -2682,27 +1487,16 @@ prompt template has too many capability-aware branches
 - Plan a human-led change; auto-apply is not safe here
 - **See also:** [`HARN-LNT-044`](#harn-lnt-044)
 
-**Category:** Prompt template (PRM)  
-**Variant:** `Code::PromptVariantExplosion` (prompt variant explosion)
-
 #### What it means
 
 A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because
 the template body is malformed or because it references the model surface in a
 way that violates Harn's prompt safety rules.
 
-Specifically: prompt template has too many capability-aware branches.
-
 #### How to fix
 
 - Fix the template syntax (`{{ }}`, `{% %}` are the only structural delimiters).
 - Replace identity-based branching with capability flags from the LLM call options.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PRM-003`
 
@@ -2714,27 +1508,16 @@ prompt construction risks direct injection
 - Pass the untrusted input through a structured placeholder
 - **See also:** [`HARN-LNT-026`](#harn-lnt-026)
 
-**Category:** Prompt template (PRM)  
-**Variant:** `Code::PromptInjectionRisk` (prompt injection risk)
-
 #### What it means
 
 A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because
 the template body is malformed or because it references the model surface in a
 way that violates Harn's prompt safety rules.
 
-Specifically: prompt construction risks direct injection.
-
 #### How to fix
 
 - Fix the template syntax (`{{ }}`, `{% %}` are the only structural delimiters).
 - Replace identity-based branching with capability flags from the LLM call options.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PRM-004`
 
@@ -2746,8 +1529,6 @@ prompt template branches on provider identity
 - Branch on a capability flag instead of provider identity
 - **See also:** [`HARN-LLM-005`](#harn-llm-005), [`HARN-LNT-046`](#harn-lnt-046)
 
-**Category:** Prompt template (PRM)  
-**Variant:** `Code::PromptProviderIdentityBranch` (prompt provider identity
 branch)
 
 #### What it means
@@ -2756,18 +1537,10 @@ A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because
 the template body is malformed or because it references the model surface in a
 way that violates Harn's prompt safety rules.
 
-Specifically: prompt template branches on provider identity.
-
 #### How to fix
 
 - Fix the template syntax (`{{ }}`, `{% %}` are the only structural delimiters).
 - Replace identity-based branching with capability flags from the LLM call options.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PRM-005`
 
@@ -2778,27 +1551,16 @@ prompt references a tool outside the declared surface
 - **Repair:** `prompts/add-tool-to-surface` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Add the referenced tool to the declared tool surface
 
-**Category:** Prompt template (PRM)  
-**Variant:** `Code::PromptToolSurfaceUnknown` (prompt tool surface unknown)
-
 #### What it means
 
 A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because
 the template body is malformed or because it references the model surface in a
 way that violates Harn's prompt safety rules.
 
-Specifically: prompt references a tool outside the declared surface.
-
 #### How to fix
 
 - Fix the template syntax (`{{ }}`, `{% %}` are the only structural delimiters).
 - Replace identity-based branching with capability flags from the LLM call options.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PRM-006`
 
@@ -2809,8 +1571,6 @@ prompt references a deferred tool without tool search
 - **Repair:** `prompts/add-tool-to-surface` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Add the referenced tool to the declared tool surface
 
-**Category:** Prompt template (PRM)  
-**Variant:** `Code::PromptToolSurfaceDeferredReference` (prompt tool surface
 deferred reference)
 
 #### What it means
@@ -2819,18 +1579,10 @@ A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because
 the template body is malformed or because it references the model surface in a
 way that violates Harn's prompt safety rules.
 
-Specifically: prompt references a deferred tool without tool search.
-
 #### How to fix
 
 - Fix the template syntax (`{{ }}`, `{% %}` are the only structural delimiters).
 - Replace identity-based branching with capability flags from the LLM call options.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-PRM-007`
 
@@ -2838,27 +1590,16 @@ dispatch on it directly.
 
 prompt or template target cannot be found
 
-**Category:** Prompt template (PRM)  
-**Variant:** `Code::PromptTargetMissing` (prompt target missing)
-
 #### What it means
 
 A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because
 the template body is malformed or because it references the model surface in a
 way that violates Harn's prompt safety rules.
 
-Specifically: prompt or template target cannot be found.
-
 #### How to fix
 
 - Fix the template syntax (`{{ }}`, `{% %}` are the only structural delimiters).
 - Replace identity-based branching with capability flags from the LLM call options.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MOD-001`
 
@@ -2870,27 +1611,16 @@ module import cannot be resolved
 - Replace the import path with a resolvable target
 - **See also:** [`HARN-IMP-001`](#harn-imp-001), [`HARN-IMP-002`](#harn-imp-002)
 
-**Category:** Module / import (MOD)  
-**Variant:** `Code::ModuleImportUnresolved` (module import unresolved)
-
 #### What it means
 
 A module-level import declaration cannot be satisfied or has been authored in a
 non-canonical form. The module graph must resolve cleanly before any further
 checks.
 
-Specifically: module import cannot be resolved.
-
 #### How to fix
 
 - Confirm the import path resolves on disk and the imported symbol is exported.
 - Run `harn lint --fix` to auto-sort / dedupe import groups.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MOD-002`
 
@@ -2902,27 +1632,16 @@ module import is unused
 - Remove the unused import
 - **See also:** [`HARN-LNT-017`](#harn-lnt-017)
 
-**Category:** Module / import (MOD)  
-**Variant:** `Code::ModuleImportUnused` (module import unused)
-
 #### What it means
 
 A module-level import declaration cannot be satisfied or has been authored in a
 non-canonical form. The module graph must resolve cleanly before any further
 checks.
 
-Specifically: module import is unused.
-
 #### How to fix
 
 - Confirm the import path resolves on disk and the imported symbol is exported.
 - Run `harn lint --fix` to auto-sort / dedupe import groups.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MOD-003`
 
@@ -2933,27 +1652,16 @@ module imports are not in canonical order
 - **Repair:** `imports/reorder` &nbsp;·&nbsp; **Safety:** `format-only`
 - Reorder imports into canonical grouping
 
-**Category:** Module / import (MOD)  
-**Variant:** `Code::ModuleImportOrder` (module import order)
-
 #### What it means
 
 A module-level import declaration cannot be satisfied or has been authored in a
 non-canonical form. The module graph must resolve cleanly before any further
 checks.
 
-Specifically: module imports are not in canonical order.
-
 #### How to fix
 
 - Confirm the import path resolves on disk and the imported symbol is exported.
 - Run `harn lint --fix` to auto-sort / dedupe import groups.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MOD-004`
 
@@ -2961,27 +1669,16 @@ dispatch on it directly.
 
 module export is invalid
 
-**Category:** Module / import (MOD)  
-**Variant:** `Code::ModuleExportInvalid` (module export invalid)
-
 #### What it means
 
 A module-level import declaration cannot be satisfied or has been authored in a
 non-canonical form. The module graph must resolve cleanly before any further
 checks.
 
-Specifically: module export is invalid.
-
 #### How to fix
 
 - Confirm the import path resolves on disk and the imported symbol is exported.
 - Run `harn lint --fix` to auto-sort / dedupe import groups.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MOD-005`
 
@@ -2989,27 +1686,16 @@ dispatch on it directly.
 
 module imports expose colliding names
 
-**Category:** Module / import (MOD)  
-**Variant:** `Code::ModuleImportCollision` (module import collision)
-
 #### What it means
 
 A module-level import declaration cannot be satisfied or has been authored in a
 non-canonical form. The module graph must resolve cleanly before any further
 checks.
 
-Specifically: module imports expose colliding names.
-
 #### How to fix
 
 - Confirm the import path resolves on disk and the imported symbol is exported.
 - Run `harn lint --fix` to auto-sort / dedupe import groups.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MOD-006`
 
@@ -3017,27 +1703,16 @@ dispatch on it directly.
 
 module re-exports conflict
 
-**Category:** Module / import (MOD)  
-**Variant:** `Code::ModuleReExportConflict` (module re export conflict)
-
 #### What it means
 
 A module-level import declaration cannot be satisfied or has been authored in a
 non-canonical form. The module graph must resolve cleanly before any further
 checks.
 
-Specifically: module re-exports conflict.
-
 #### How to fix
 
 - Confirm the import path resolves on disk and the imported symbol is exported.
 - Run `harn lint --fix` to auto-sort / dedupe import groups.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-RMD-001`
 
@@ -3046,8 +1721,6 @@ dispatch on it directly.
 reminder lifecycle option key is not recognized
 
 - **See also:** [`HARN-RMD-002`](#harn-rmd-002), [`HARN-RMD-005`](#harn-rmd-005)
-
-**Variant:** `Code::ReminderUnknownOption` (reminder lifecycle option key is not recognized)
 
 Reminder lifecycle option tables reject unknown keys so reminder shape stays stable across
 transcript transforms, hooks, and bridge integrations.
@@ -3065,8 +1738,6 @@ reminder payload shape is invalid
 
 - **See also:** [`HARN-RMD-001`](#harn-rmd-001), [`HARN-RMD-005`](#harn-rmd-005)
 
-**Variant:** `Code::ReminderInvalidShape`
-
 The reminder payload shape is invalid.
 
 `session/remind` expects a typed reminder object, not a user-message payload.
@@ -3080,8 +1751,6 @@ when present, boolean `preserve_on_compact`, and one of the documented
 **Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
 
 user_block reminder role hint is not supported by the selected provider
-
-**Variant:** `Code::ReminderUnsupportedUserBlockRoleHint`
 
 The pipeline hardcodes `role_hint: "user_block"` while also selecting an LLM
 provider/model route that cannot render reminders as Anthropic-style user
@@ -3097,8 +1766,6 @@ provider-specific reminder shape.
 
 discardable reminder has no TTL
 
-**Variant:** `Code::ReminderInfiniteDiscardable`
-
 A reminder literal sets `preserve_on_compact: false` while leaving
 `ttl_turns` unset or `nil`. That reminder can live forever during normal
 turns, but it is allowed to disappear at the next transcript compaction.
@@ -3113,8 +1780,6 @@ Set a finite `ttl_turns` for short-lived nudges, or set
 reminder propagate value is not recognized
 
 - **See also:** [`HARN-RMD-001`](#harn-rmd-001), [`HARN-RMD-002`](#harn-rmd-002)
-
-**Variant:** `Code::ReminderUnknownPropagate`
 
 A reminder specified an unsupported `propagate` value. Reminder propagation must
 be one of `all`, `session`, or `none`.
@@ -3138,8 +1803,6 @@ transcript.inject_reminder(transcript(), {
 reminder provider returned a malformed reminder spec
 
 - **See also:** [`HARN-RMD-002`](#harn-rmd-002)
-
-**Variant:** `Code::ReminderProviderMalformedSpec`
 
 A reminder provider closure returned a value that could not be parsed as a
 `ReminderSpec`. Provider closures may return `nil`, a reminder spec, an effect
@@ -3167,8 +1830,6 @@ too many reminder providers are enabled
 
 - **See also:** [`HARN-RMD-004`](#harn-rmd-004)
 
-**Variant:** `Code::ReminderProviderBloat`
-
 An `agent_loop` enables more than eight distinct reminder providers. Many
 providers can inject overlapping ambient context and increase prompt size.
 
@@ -3190,8 +1851,6 @@ agent_loop(task, nil, {
 hook event does not support reminder effects
 
 - **See also:** [`HARN-RMD-006`](#harn-rmd-006)
-
-**Variant:** `Code::ReminderUnsupportedHookEvent`
 
 A hook handler returned a reminder effect from a lifecycle event that cannot
 inject reminders. Worker lifecycle events are observational and must not mutate
@@ -3462,27 +2121,10 @@ renamed stdlib symbol lint
 - Rename the call to the renamed stdlib symbol
 - **See also:** [`HARN-STD-001`](#harn-std-001)
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintRenamedStdlibSymbol` (lint renamed stdlib symbol)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: renamed stdlib symbol lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-002`
 
@@ -3490,27 +2132,10 @@ dispatch on it directly.
 
 cyclomatic complexity lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintCyclomaticComplexity` (lint cyclomatic complexity)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: cyclomatic complexity lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-003`
 
@@ -3521,27 +2146,10 @@ naming convention lint
 - **Repair:** `style/rename-to-convention` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Rename to match the casing convention for this kind
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintNamingConvention` (lint naming convention)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: naming convention lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-004`
 
@@ -3552,28 +2160,12 @@ eager collection conversion lint
 - **Repair:** `collections/prefer-lazy` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the eager collection step with a lazy variant
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintEagerCollectionConversion` (lint eager collection
 conversion)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: eager collection conversion lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-005`
 
@@ -3584,27 +2176,10 @@ redundant clone lint
 - **Repair:** `clones/remove-redundant` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Remove the redundant clone
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintRedundantClone` (lint redundant clone)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: redundant clone lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-006`
 
@@ -3615,28 +2190,12 @@ long-running workflow cleanup lint
 - **Repair:** `manual/needs-human` &nbsp;·&nbsp; **Safety:** `needs-human`
 - Plan a human-led change; auto-apply is not safe here
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintLongRunningWithoutCleanup` (lint long running without
 cleanup)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: long-running workflow cleanup lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-007`
 
@@ -3647,27 +2206,10 @@ MCP tool annotations lint
 - **Repair:** `manual/needs-human` &nbsp;·&nbsp; **Safety:** `needs-human`
 - Plan a human-led change; auto-apply is not safe here
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintMcpToolAnnotations` (lint mcp tool annotations)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: MCP tool annotations lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-008`
 
@@ -3675,28 +2217,12 @@ dispatch on it directly.
 
 PR open without secret scan lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintPrOpenWithoutSecretScan` (lint pr open without secret
 scan)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: PR open without secret scan lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-009`
 
@@ -3707,27 +2233,10 @@ shadow variable lint
 - **Repair:** `bindings/rename-shadow` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Rename the shadowing binding to a distinct name
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintShadowVariable` (lint shadow variable)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: shadow variable lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-010`
 
@@ -3735,27 +2244,10 @@ dispatch on it directly.
 
 persona hook target lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintPersonaHookTarget` (lint persona hook target)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: persona hook target lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-011`
 
@@ -3766,27 +2258,10 @@ dead code after return lint
 - **Repair:** `control-flow/remove-dead` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Remove the unreachable code
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintDeadCodeAfterReturn` (lint dead code after return)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: dead code after return lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-012`
 
@@ -3797,27 +2272,10 @@ let then return lint
 - **Repair:** `control-flow/flatten` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Flatten the unnecessary control flow construct
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintLetThenReturn` (lint let then return)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: let then return lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-013`
 
@@ -3828,28 +2286,12 @@ unhandled approval result lint
 - **Repair:** `errors/check-or-rescue` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Check the result or wrap the call in a `rescue` block
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnhandledApprovalResult` (lint unhandled approval
 result)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unhandled approval result lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-014`
 
@@ -3860,27 +2302,10 @@ unused variable lint
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Prefix the unused binding with `_` to silence the lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnusedVariable` (lint unused variable)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unused variable lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-015`
 
@@ -3891,27 +2316,10 @@ unused pattern binding lint
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Prefix the unused binding with `_` to silence the lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnusedPatternBinding` (lint unused pattern binding)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unused pattern binding lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-016`
 
@@ -3922,27 +2330,10 @@ unused parameter lint
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Prefix the unused binding with `_` to silence the lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnusedParameter` (lint unused parameter)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unused parameter lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-017`
 
@@ -3954,27 +2345,10 @@ unused import lint
 - Remove the unused import
 - **See also:** [`HARN-MOD-002`](#harn-mod-002)
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnusedImport` (lint unused import)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unused import lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-018`
 
@@ -3986,27 +2360,10 @@ mutable never reassigned lint
 - Drop `mut` since the binding is never reassigned
 - **See also:** [`HARN-OWN-002`](#harn-own-002)
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintMutableNeverReassigned` (lint mutable never reassigned)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: mutable never reassigned lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-019`
 
@@ -4017,27 +2374,10 @@ unused function lint
 - **Repair:** `declarations/remove-unused` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Remove the unused declaration
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnusedFunction` (lint unused function)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unused function lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-020`
 
@@ -4048,27 +2388,10 @@ unused type lint
 - **Repair:** `declarations/remove-unused` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Remove the unused declaration
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnusedType` (lint unused type)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unused type lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-021`
 
@@ -4076,28 +2399,12 @@ dispatch on it directly.
 
 persona body must call steps lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintPersonaBodyMustCallSteps` (lint persona body must call
 steps)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: persona body must call steps lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-022`
 
@@ -4105,27 +2412,10 @@ dispatch on it directly.
 
 undefined function lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUndefinedFunction` (lint undefined function)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: undefined function lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-023`
 
@@ -4133,27 +2423,10 @@ dispatch on it directly.
 
 pipeline return type lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintPipelineReturnType` (lint pipeline return type)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: pipeline return type lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-024`
 
@@ -4164,27 +2437,10 @@ missing harndoc lint
 - **Repair:** `doc/add-harndoc` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Add a `///` doc comment describing this declaration
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintMissingHarndoc` (lint missing harndoc)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: missing harndoc lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-025`
 
@@ -4192,27 +2448,10 @@ dispatch on it directly.
 
 assert outside test lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAssertOutsideTest` (lint assert outside test)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: assert outside test lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-026`
 
@@ -4224,27 +2463,10 @@ prompt injection risk lint
 - Pass the untrusted input through a structured placeholder
 - **See also:** [`HARN-PRM-003`](#harn-prm-003)
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintPromptInjectionRisk` (lint prompt injection risk)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: prompt injection risk lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-027`
 
@@ -4252,27 +2474,10 @@ dispatch on it directly.
 
 connector effect policy lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintConnectorEffectPolicy` (lint connector effect policy)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: connector effect policy lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-028`
 
@@ -4283,27 +2488,10 @@ unnecessary cast lint
 - **Repair:** `casts/remove-redundant` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Remove the redundant cast
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnnecessaryCast` (lint unnecessary cast)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unnecessary cast lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-029`
 
@@ -4314,27 +2502,10 @@ untyped dict access lint
 - **Repair:** `types/add-shape-annotation` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Annotate the dict with a concrete shape type
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUntypedDictAccess` (lint untyped dict access)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: untyped dict access lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-030`
 
@@ -4345,27 +2516,10 @@ constant logical operand lint
 - **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Simplify the expression to its canonical form
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintConstantLogicalOperand` (lint constant logical operand)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: constant logical operand lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-031`
 
@@ -4376,27 +2530,10 @@ pointless comparison lint
 - **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Simplify the expression to its canonical form
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintPointlessComparison` (lint pointless comparison)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: pointless comparison lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-032`
 
@@ -4407,27 +2544,10 @@ comparison to bool lint
 - **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Simplify the expression to its canonical form
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintComparisonToBool` (lint comparison to bool)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: comparison to bool lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-033`
 
@@ -4435,27 +2555,10 @@ dispatch on it directly.
 
 invalid binary operator literal lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintInvalidBinaryOpLiteral` (lint invalid binary op literal)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: invalid binary operator literal lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-034`
 
@@ -4466,27 +2569,10 @@ redundant nil ternary lint
 - **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Simplify the expression to its canonical form
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintRedundantNilTernary` (lint redundant nil ternary)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: redundant nil ternary lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-035`
 
@@ -4497,27 +2583,10 @@ empty block lint
 - **Repair:** `blocks/remove-empty` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Remove the empty block or fill in an explicit body
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintEmptyBlock` (lint empty block)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: empty block lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-036`
 
@@ -4528,27 +2597,10 @@ unnecessary else return lint
 - **Repair:** `control-flow/flatten` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Flatten the unnecessary control flow construct
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnnecessaryElseReturn` (lint unnecessary else return)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unnecessary else return lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-037`
 
@@ -4560,27 +2612,10 @@ duplicate match arm lint
 - Remove the duplicated match arm
 - **See also:** [`HARN-MAT-002`](#harn-mat-002)
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintDuplicateMatchArm` (lint duplicate match arm)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: duplicate match arm lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-038`
 
@@ -4588,27 +2623,10 @@ dispatch on it directly.
 
 require in test lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintRequireInTest` (lint require in test)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: require in test lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-039`
 
@@ -4616,27 +2634,10 @@ dispatch on it directly.
 
 break outside loop lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintBreakOutsideLoop` (lint break outside loop)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: break outside loop lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-040`
 
@@ -4644,27 +2645,10 @@ dispatch on it directly.
 
 template parse lint
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintTemplateParse` (lint template parse)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: template parse lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-041`
 
@@ -4675,27 +2659,10 @@ blank line between items lint
 - **Repair:** `format/reformat` &nbsp;·&nbsp; **Safety:** `format-only`
 - Apply canonical formatting
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintBlankLineBetweenItems` (lint blank line between items)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: blank line between items lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-042`
 
@@ -4706,27 +2673,10 @@ trailing comma lint
 - **Repair:** `format/reformat` &nbsp;·&nbsp; **Safety:** `format-only`
 - Apply canonical formatting
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintTrailingComma` (lint trailing comma)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: trailing comma lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-043`
 
@@ -4737,27 +2687,10 @@ unnecessary parentheses lint
 - **Repair:** `format/reformat` &nbsp;·&nbsp; **Safety:** `format-only`
 - Apply canonical formatting
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnnecessaryParentheses` (lint unnecessary parentheses)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unnecessary parentheses lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-044`
 
@@ -4769,28 +2702,12 @@ template variant explosion lint
 - Plan a human-led change; auto-apply is not safe here
 - **See also:** [`HARN-PRM-002`](#harn-prm-002)
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintTemplateVariantExplosion` (lint template variant
 explosion)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: template variant explosion lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-045`
 
@@ -4801,27 +2718,10 @@ require file header lint
 - **Repair:** `format/reformat` &nbsp;·&nbsp; **Safety:** `format-only`
 - Apply canonical formatting
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintRequireFileHeader` (lint require file header)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: require file header lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-046`
 
@@ -4833,28 +2733,12 @@ template provider identity branch lint
 - Branch on a capability flag instead of provider identity
 - **See also:** [`HARN-PRM-004`](#harn-prm-004)
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintTemplateProviderIdentityBranch` (lint template provider
 identity branch)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: template provider identity branch lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-047`
 
@@ -4865,27 +2749,10 @@ import order lint
 - **Repair:** `imports/reorder` &nbsp;·&nbsp; **Safety:** `format-only`
 - Reorder imports into canonical grouping
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintImportOrder` (lint import order)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: import order lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-048`
 
@@ -4896,28 +2763,12 @@ prefer optional shorthand lint
 - **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Simplify the expression to its canonical form
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintPreferOptionalShorthand` (lint prefer optional
 shorthand)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: prefer optional shorthand lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-049`
 
@@ -4928,27 +2779,10 @@ legacy doc comment lint
 - **Repair:** `doc/migrate-comment-style` &nbsp;·&nbsp; **Safety:** `format-only`
 - Migrate the legacy comment to canonical doc syntax
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintLegacyDocComment` (lint legacy doc comment)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: legacy doc comment lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-050`
 
@@ -4960,27 +2794,10 @@ deprecated LLM options lint
 - Replace the deprecated option with its supported equivalent
 - **See also:** [`HARN-LLM-002`](#harn-llm-002), [`HARN-LLM-001`](#harn-llm-001)
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintDeprecatedLlmOptions` (lint deprecated llm options)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: deprecated LLM options lint.
-
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-051`
 
@@ -4991,28 +2808,12 @@ unnecessary safe navigation lint
 - **Repair:** `expressions/simplify` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
 - Simplify the expression to its canonical form
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintUnnecessarySafeNavigation` (lint unnecessary safe
 navigation)
-
-#### What it means
-
-This is a lint, not a hard error. The code compiles, but Harn flags the pattern
-as likely-incorrect, unidiomatic, or risky in a production agent. Lints can
-typically be auto-fixed.
-
-Specifically: unnecessary safe navigation lint.
 
 #### How to fix
 
 - Apply the lint's auto-fix where one is offered (`harn lint --fix`).
 - Suppress the lint with an attribute only when the surrounding code is intentionally non-idiomatic.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-LNT-052`
 
@@ -5023,9 +2824,6 @@ ambient clock builtin replaced by `harness.clock.*`
 - **Repair:** `bindings/thread-harness-clock` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the ambient clock builtin with the corresponding `harness.clock.*` method
 - **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
-
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientClockBuiltin` (ambient clock builtin)
 
 #### What it means
 
@@ -5050,12 +2848,6 @@ the migration is in flight, but every new call site should use the
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-LNT-053`
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
@@ -5065,9 +2857,6 @@ ambient stdio builtin replaced by `harness.stdio.*`
 - **Repair:** `bindings/thread-harness` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Thread the existing `harness` binding through local helper calls and replace the ambient stdio builtin with `harness.stdio.*`
 - **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
-
-**Category:** Lint (LNT)
-**Variant:** `Code::LintAmbientStdioBuiltin` (ambient stdio builtin)
 
 #### What it means
 
@@ -5094,12 +2883,6 @@ code should use `harness.stdio.print`, `harness.stdio.println`,
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-LNT-054`
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
@@ -5109,9 +2892,6 @@ ambient fs builtin replaced by `harness.fs.*`
 - **Repair:** `bindings/thread-harness-fs` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the ambient fs builtin with the corresponding `harness.fs.*` method
 - **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
-
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientFsBuiltin` (ambient fs builtin)
 
 #### What it means
 
@@ -5138,12 +2918,6 @@ while the migration is in flight, but every new call site should use the
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.
-
 ### `HARN-LNT-055`
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
@@ -5153,9 +2927,6 @@ ambient env builtin replaced by `harness.env.*`
 - **Repair:** `bindings/thread-harness-env` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the ambient env builtin with the corresponding `harness.env.*` method
 - **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
-
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientEnvBuiltin` (ambient env builtin)
 
 #### What it means
 
@@ -5178,12 +2949,6 @@ while the migration is in flight, but every new call site should use
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.
-
 ### `HARN-LNT-056`
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
@@ -5193,9 +2958,6 @@ ambient random builtin replaced by `harness.random.*`
 - **Repair:** `bindings/thread-harness-random` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the ambient random builtin with the corresponding `harness.random.*` method
 - **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
-
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientRandomBuiltin` (ambient random builtin)
 
 #### What it means
 
@@ -5221,12 +2983,6 @@ through the `Rng.*` surface for tests that need deterministic output.
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.
-
 ### `HARN-LNT-057`
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
@@ -5236,9 +2992,6 @@ ambient net builtin replaced by `harness.net.*`
 - **Repair:** `bindings/thread-harness-net` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the ambient net builtin with the corresponding `harness.net.*` method
 - **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
-
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientNetBuiltin` (ambient net builtin)
 
 #### What it means
 
@@ -5265,20 +3018,11 @@ follow-up ticket.
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.
-
 ### `HARN-FMT-001`
 
 **Category:** `FMT` (Formatter) &nbsp;·&nbsp; **API stability:** `stable`
 
 formatter could not parse the source
-
-**Category:** Formatter (FMT)  
-**Variant:** `Code::FormatterParseFailed` (formatter parse failed)
 
 #### What it means
 
@@ -5286,17 +3030,9 @@ The formatter could not produce a canonical layout for this source — either
 because parsing failed first, or because the existing layout drifts from the
 canonical form.
 
-Specifically: formatter could not parse the source.
-
 #### How to fix
 
 - Run `harn fmt` to bring the file to canonical form, or fix the parse error blocking the formatter.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-FMT-002`
 
@@ -5307,26 +3043,15 @@ source is not in canonical format
 - **Repair:** `format/reformat` &nbsp;·&nbsp; **Safety:** `format-only`
 - Apply canonical formatting
 
-**Category:** Formatter (FMT)  
-**Variant:** `Code::FormatterWouldReformat` (formatter would reformat)
-
 #### What it means
 
 The formatter could not produce a canonical layout for this source — either
 because parsing failed first, or because the existing layout drifts from the
 canonical form.
 
-Specifically: source is not in canonical format.
-
 #### How to fix
 
 - Run `harn fmt` to bring the file to canonical form, or fix the parse error blocking the formatter.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-FMT-003`
 
@@ -5337,26 +3062,15 @@ formatter normalized trailing comma layout
 - **Repair:** `format/reformat` &nbsp;·&nbsp; **Safety:** `format-only`
 - Apply canonical formatting
 
-**Category:** Formatter (FMT)  
-**Variant:** `Code::FormatterTrailingComma` (formatter trailing comma)
-
 #### What it means
 
 The formatter could not produce a canonical layout for this source — either
 because parsing failed first, or because the existing layout drifts from the
 canonical form.
 
-Specifically: formatter normalized trailing comma layout.
-
 #### How to fix
 
 - Run `harn fmt` to bring the file to canonical form, or fix the parse error blocking the formatter.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-IMP-001`
 
@@ -5368,26 +3082,15 @@ import target cannot be resolved
 - Replace the import path with a resolvable target
 - **See also:** [`HARN-MOD-001`](#harn-mod-001), [`HARN-IMP-002`](#harn-imp-002)
 
-**Category:** Import resolution (IMP)  
-**Variant:** `Code::ImportResolutionFailed` (import resolution failed)
-
 #### What it means
 
 Import resolution failed at a deeper layer than `MOD` — the file, symbol, or
 module graph cannot be constructed. Compilation cannot proceed.
 
-Specifically: import target cannot be resolved.
-
 #### How to fix
 
 - Add the missing module or symbol, or update the import path.
 - Break import cycles by extracting the shared definitions into a third module.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-IMP-002`
 
@@ -5395,26 +3098,15 @@ dispatch on it directly.
 
 imported symbol does not exist
 
-**Category:** Import resolution (IMP)  
-**Variant:** `Code::ImportSymbolMissing` (import symbol missing)
-
 #### What it means
 
 Import resolution failed at a deeper layer than `MOD` — the file, symbol, or
 module graph cannot be constructed. Compilation cannot proceed.
 
-Specifically: imported symbol does not exist.
-
 #### How to fix
 
 - Add the missing module or symbol, or update the import path.
 - Break import cycles by extracting the shared definitions into a third module.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-IMP-003`
 
@@ -5424,26 +3116,15 @@ import graph contains a cycle
 
 - **See also:** [`HARN-IMP-001`](#harn-imp-001)
 
-**Category:** Import resolution (IMP)  
-**Variant:** `Code::ImportCycle` (import cycle)
-
 #### What it means
 
 Import resolution failed at a deeper layer than `MOD` — the file, symbol, or
 module graph cannot be constructed. Compilation cannot proceed.
 
-Specifically: import graph contains a cycle.
-
 #### How to fix
 
 - Add the missing module or symbol, or update the import path.
 - Break import cycles by extracting the shared definitions into a third module.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-OWN-001`
 
@@ -5455,27 +3136,10 @@ immutable binding is reassigned
 - Mark the binding `mut` so it can be reassigned
 - **See also:** [`HARN-OWN-002`](#harn-own-002)
 
-**Category:** Ownership / mutability (OWN)  
-**Variant:** `Code::ImmutableAssignment` (immutable assignment)
-
-#### What it means
-
-Harn's binding-and-mutability discipline rejects this usage. Bindings declared
-`let` may not be reassigned; bindings declared `mut` should actually be
-reassigned somewhere.
-
-Specifically: immutable binding is reassigned.
-
 #### How to fix
 
 - Switch the binding kind (`let` ↔ `mut`) to match its actual use.
 - Restructure so owned values do not escape their scope.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-OWN-002`
 
@@ -5487,36 +3151,16 @@ mutable binding is never reassigned
 - Drop `mut` since the binding is never reassigned
 - **See also:** [`HARN-LNT-018`](#harn-lnt-018)
 
-**Category:** Ownership / mutability (OWN)  
-**Variant:** `Code::MutableNeverReassigned` (mutable never reassigned)
-
-#### What it means
-
-Harn's binding-and-mutability discipline rejects this usage. Bindings declared
-`let` may not be reassigned; bindings declared `mut` should actually be
-reassigned somewhere.
-
-Specifically: mutable binding is never reassigned.
-
 #### How to fix
 
 - Switch the binding kind (`let` ↔ `mut`) to match its actual use.
 - Restructure so owned values do not escape their scope.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-OWN-003`
 
 **Category:** `OWN` (Ownership and mutability) &nbsp;·&nbsp; **API stability:** `stable`
 
 owned value escapes its valid scope
-
-**Category:** Ownership / mutability (OWN)
-**Variant:** `Code::OwnershipEscape` (ownership escape)
 
 #### What it means
 
@@ -5566,39 +3210,16 @@ fn open_log() -> channel {
 - **Drop the value explicitly** with `drop(x)` if you need to release earlier
   than the enclosing block would close it.
 
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
-
 ### `HARN-OWN-004`
 
 **Category:** `OWN` (Ownership and mutability) &nbsp;·&nbsp; **API stability:** `stable`
 
 unvalidated boundary value is used directly
 
-**Category:** Ownership / mutability (OWN)  
-**Variant:** `Code::BoundaryValueUnvalidated` (boundary value unvalidated)
-
-#### What it means
-
-Harn's binding-and-mutability discipline rejects this usage. Bindings declared
-`let` may not be reassigned; bindings declared `mut` should actually be
-reassigned somewhere.
-
-Specifically: unvalidated boundary value is used directly.
-
 #### How to fix
 
 - Switch the binding kind (`let` ↔ `mut`) to match its actual use.
 - Restructure so owned values do not escape their scope.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-RCV-001`
 
@@ -5610,26 +3231,15 @@ rescue construct is outside a function body
 - Move the construct inside a function body
 - **See also:** [`HARN-RCV-002`](#harn-rcv-002), [`HARN-RCV-003`](#harn-rcv-003)
 
-**Category:** Recovery (try / rescue) (RCV)  
-**Variant:** `Code::RescueOutsideFunction` (rescue outside function)
-
 #### What it means
 
 A recovery construct (`try`, `rescue`) is in an invalid position or is shaped in
 a way Harn's structured-error handling does not support.
 
-Specifically: rescue construct is outside a function body.
-
 #### How to fix
 
 - Move the construct inside a function body, or wrap it in one.
 - Use `try` / `rescue` only around expressions that can produce structured errors.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-RCV-002`
 
@@ -5641,26 +3251,15 @@ try construct is outside a function body
 - Move the construct inside a function body
 - **See also:** [`HARN-RCV-001`](#harn-rcv-001)
 
-**Category:** Recovery (try / rescue) (RCV)  
-**Variant:** `Code::TryOutsideFunction` (try outside function)
-
 #### What it means
 
 A recovery construct (`try`, `rescue`) is in an invalid position or is shaped in
 a way Harn's structured-error handling does not support.
 
-Specifically: try construct is outside a function body.
-
 #### How to fix
 
 - Move the construct inside a function body, or wrap it in one.
 - Use `try` / `rescue` only around expressions that can produce structured errors.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-RCV-003`
 
@@ -5668,26 +3267,15 @@ dispatch on it directly.
 
 rescue construct is invalid
 
-**Category:** Recovery (try / rescue) (RCV)  
-**Variant:** `Code::InvalidRescueConstruct` (invalid rescue construct)
-
 #### What it means
 
 A recovery construct (`try`, `rescue`) is in an invalid position or is shaped in
 a way Harn's structured-error handling does not support.
 
-Specifically: rescue construct is invalid.
-
 #### How to fix
 
 - Move the construct inside a function body, or wrap it in one.
 - Use `try` / `rescue` only around expressions that can produce structured errors.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MAT-001`
 
@@ -5699,26 +3287,15 @@ match expression is not exhaustive
 - Add arms covering the missing variants
 - **See also:** [`HARN-MAT-003`](#harn-mat-003), [`HARN-MAT-002`](#harn-mat-002)
 
-**Category:** Pattern match (MAT)  
-**Variant:** `Code::NonExhaustiveMatch` (non exhaustive match)
-
 #### What it means
 
 A `match` expression is incomplete, ambiguous, or otherwise invalid. Harn
 enforces exhaustive matching to keep agent decision logic auditable.
 
-Specifically: match expression is not exhaustive.
-
 #### How to fix
 
 - Add arms covering the remaining variants, or use a wildcard `_` arm as the explicit fallback.
 - Remove duplicate arms — each variant should appear at most once.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MAT-002`
 
@@ -5730,26 +3307,15 @@ match expression contains a duplicate arm
 - Remove the duplicated match arm
 - **See also:** [`HARN-MAT-001`](#harn-mat-001), [`HARN-LNT-037`](#harn-lnt-037)
 
-**Category:** Pattern match (MAT)  
-**Variant:** `Code::DuplicateMatchArm` (duplicate match arm)
-
 #### What it means
 
 A `match` expression is incomplete, ambiguous, or otherwise invalid. Harn
 enforces exhaustive matching to keep agent decision logic auditable.
 
-Specifically: match expression contains a duplicate arm.
-
 #### How to fix
 
 - Add arms covering the remaining variants, or use a wildcard `_` arm as the explicit fallback.
 - Remove duplicate arms — each variant should appear at most once.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-MAT-003`
 
@@ -5757,26 +3323,15 @@ dispatch on it directly.
 
 match pattern is invalid
 
-**Category:** Pattern match (MAT)  
-**Variant:** `Code::InvalidMatchPattern` (invalid match pattern)
-
 #### What it means
 
 A `match` expression is incomplete, ambiguous, or otherwise invalid. Harn
 enforces exhaustive matching to keep agent decision logic auditable.
 
-Specifically: match pattern is invalid.
-
 #### How to fix
 
 - Add arms covering the remaining variants, or use a wildcard `_` arm as the explicit fallback.
 - Remove duplicate arms — each variant should appear at most once.
-
-#### Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
 
 ### `HARN-POL-001`
 
@@ -5811,9 +3366,6 @@ bounded queue instead.
 **Category:** `MET` (Compile-time meta restrictions) &nbsp;·&nbsp; **API stability:** `stable`
 
 expression is not permitted in a const initializer
-
-**Category:** Meta (MET)
-**Variant:** `Code::ConstEvalDisallowedExpression`
 
 #### What it means
 
@@ -5855,18 +3407,14 @@ let _ = [X, Y, NS, COUNT]
 
 #### Stability
 
-This code is stable. Adding additional pure builtins to the const-eval
-allowlist remains backwards-compatible — newly permitted expressions
-simply stop being rejected.
+Adding pure builtins to the const-eval allowlist is backwards-compatible —
+newly permitted expressions stop being rejected.
 
 ### `HARN-CST-001`
 
 **Category:** `CST` (Const-eval sandbox) &nbsp;·&nbsp; **API stability:** `stable`
 
 const initializer exceeded the step budget
-
-**Category:** Const-eval sandbox (CST)
-**Variant:** `Code::ConstEvalStepLimit`
 
 #### What it means
 
@@ -5889,17 +3437,14 @@ const HUGE = sum_to(1_000_000)
 
 #### Stability
 
-This code is stable. The default budget may grow over time; tightening it
-would require a deprecation cycle.
+The default budget may grow over time; tightening it would require a
+deprecation cycle.
 
 ### `HARN-CST-002`
 
 **Category:** `CST` (Const-eval sandbox) &nbsp;·&nbsp; **API stability:** `stable`
 
 const initializer exceeded the recursion depth budget
-
-**Category:** Const-eval sandbox (CST)
-**Variant:** `Code::ConstEvalRecursionLimit`
 
 #### What it means
 
@@ -5916,17 +3461,14 @@ unbounded stack frame chain.
 
 #### Stability
 
-This code is stable. The default budget may grow over time; tightening it
-would require a deprecation cycle.
+The default budget may grow over time; tightening it would require a
+deprecation cycle.
 
 ### `HARN-CST-003`
 
 **Category:** `CST` (Const-eval sandbox) &nbsp;·&nbsp; **API stability:** `stable`
 
 const initializer attempted a sandboxed capability
-
-**Category:** Const-eval sandbox (CST)
-**Variant:** `Code::ConstEvalSandboxViolation`
 
 #### What it means
 
@@ -5953,18 +3495,14 @@ const W = harness.clock.now()
 
 #### Stability
 
-This code is stable. The denylist is enforced by allowlist (only listed
-pure builtins are accepted), so newly added stdlib functions stay
-sandboxed by default.
+The denylist is enforced by allowlist (only listed pure builtins are
+accepted), so newly added stdlib functions stay sandboxed by default.
 
 ### `HARN-CST-004`
 
 **Category:** `CST` (Const-eval sandbox) &nbsp;·&nbsp; **API stability:** `stable`
 
 const initializer raised a runtime error during evaluation
-
-**Category:** Const-eval sandbox (CST)
-**Variant:** `Code::ConstEvalRuntimeError`
 
 #### What it means
 
@@ -5986,7 +3524,3 @@ const BAD = "a" + 1
 - Inspect the offending operand and supply a valid value.
 - If the expression depends on a value that is only known at runtime,
   use `let` instead of `const`.
-
-#### Stability
-
-This code is stable.

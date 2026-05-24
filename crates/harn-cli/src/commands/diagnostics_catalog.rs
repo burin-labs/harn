@@ -218,6 +218,10 @@ impl Renderer {
             )
             .expect("write");
             out.push('\n');
+            if let Some(intro) = category_intro(*category) {
+                out.push_str(intro);
+                out.push_str("\n\n");
+            }
             out.push_str("| Code | Summary | Repair | Safety |\n");
             out.push_str("|---|---|---|---|\n");
             for entry in entries {
@@ -354,6 +358,64 @@ fn code_envelope(entry: &RegistryEntry) -> CodeEnvelope<'static> {
         explanation_present: !entry.code.explanation().trim().is_empty(),
         api_stability: "stable",
     }
+}
+
+/// One-paragraph orientation shown once at the top of each category section.
+/// Returns `None` for categories whose codes are diverse enough that a single
+/// preamble would mislead. Hoisting this here keeps per-code explanation
+/// files focused on what is unique to each code.
+const fn category_intro(category: Category) -> Option<&'static str> {
+    let intro = match category {
+        Category::Typ => "Harn's static type checker rejects programs whose types do not unify. \
+            Type errors block compilation — Harn refuses to run a program until they are fixed.",
+        Category::Par => "The lexer or parser raises these before type checking begins. Harn cannot \
+            build an AST from the source until the offending token sequence is repaired.",
+        Category::Nam => "Name resolution failed: the identifier, field, or attribute referenced does \
+            not match anything in the visible scope. Harn cannot proceed without a binding.",
+        Category::Cap => "A host capability call (file I/O, network, HITL approval, tool host, etc.) \
+            failed static validation. Capabilities are the trust boundary between Harn scripts and \
+            the embedding host, so checks are strict by design.",
+        Category::Llm => "An `llm_call(...)` invocation violates the schema Harn enforces. \
+            Schema-validated, provider-portable LLM calls are a load-bearing Harn contract; drift in \
+            the options table is rejected at check time.",
+        Category::Orc => "An orchestration construct — agent / workflow / pipeline / tool definition, \
+            or a call to an orchestration builtin — is shaped in a way the orchestrator cannot \
+            accept.",
+        Category::Std => "A stdlib symbol is used in a way Harn does not support, or has been \
+            renamed/removed and the call site still references the old surface.",
+        Category::Prm => "A prompt template (`.harn.prompt` / `.prompt`) failed validation, either \
+            because its front matter is missing required fields or because the body references slots \
+            the schema does not declare.",
+        Category::Mod => "A module-level import declaration cannot be satisfied or has been authored \
+            in a shape Harn rejects. Module boundaries are checked before the body is type-checked.",
+        Category::Lnt => "Lints are not hard errors. The code compiles, but Harn flags the pattern as \
+            likely-incorrect, unidiomatic, or risky in a production agent. Most lints can be auto-fixed.",
+        Category::Fmt => "The formatter could not produce a canonical layout — either the input \
+            contains a construct it does not know how to render, or a layout rule was violated in a \
+            way auto-fix cannot resolve.",
+        Category::Imp => "Import resolution failed at a deeper layer than `MOD` — the file, symbol, or \
+            package referenced in an import declaration could not be located, parsed, or exposed.",
+        Category::Own => "Harn's binding-and-mutability discipline rejects this usage. `let` bindings \
+            may not be reassigned; `mut` bindings should actually be reassigned somewhere.",
+        Category::Rcv => "A recovery construct (`try`, `rescue`) is in an invalid position or shaped \
+            in a way Harn's error-recovery rules cannot accept.",
+        Category::Mat => "A `match` expression is incomplete, ambiguous, or otherwise invalid. \
+            Harn requires arms to cover every variant of the scrutinee type — partial matches must \
+            opt in with an explicit catch-all.",
+        Category::Met => "A `const` binding's right-hand side must be a pure expression evaluable at \
+            compile time under the const-eval sandbox. These codes flag constructs the sandbox \
+            rejects.",
+        Category::Cst => "The bounded const-eval sandbox enforces step, recursion, and capability \
+            limits on every `const` initializer so a hostile or accidental expression cannot stall \
+            the compiler.",
+        Category::Pol => "A runtime policy (pool backpressure, scheduling, quotas) rejected the \
+            attempt. Policies are configurable, but defaults are tuned for safety over throughput.",
+        Category::Rmd => "Reminder lifecycle errors are raised by `session/remind` and friends when \
+            the payload, tags, or scheduling do not match the documented contract.",
+        Category::Sus => "Suspend / resume lifecycle errors are raised when a worker is suspended, \
+            resumed, or queried outside the lifecycle states the operation supports.",
+    };
+    Some(intro)
 }
 
 /// Human-readable title for a diagnostic category. Used in the markdown

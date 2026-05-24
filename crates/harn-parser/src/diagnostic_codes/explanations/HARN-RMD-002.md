@@ -1,7 +1,5 @@
 # HARN-RMD-002
 
-**Variant:** `Code::ReminderInvalidShape`
-
 The reminder payload shape is invalid.
 
 `session/remind` expects a typed reminder object, not a user-message payload.

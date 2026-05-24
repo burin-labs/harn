@@ -1,8 +1,5 @@
 # HARN-CAP-201 — harness capability denied by active sandbox profile
 
-**Category:** Host capability (CAP)  
-**Variant:** `Code::SandboxCapabilityDenied` (sandbox capability denied)
-
 ## What it means
 
 A `harness.fs.*`, `harness.env.*`, `harness.random.*`, or
@@ -38,9 +35,3 @@ script to discover the denial.
   actually needs, then narrow the call site to those.
 - For tests, switch from `Harness::real()` to `Harness::mock()` /
   `Harness::null()` so the call is recorded without touching the host.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.

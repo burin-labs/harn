@@ -1,8 +1,5 @@
 # HARN-CST-003 — const initializer attempted a sandboxed capability
 
-**Category:** Const-eval sandbox (CST)
-**Variant:** `Code::ConstEvalSandboxViolation`
-
 ## What it means
 
 The compile-time evaluator denies any expression that would touch the
@@ -28,6 +25,5 @@ const W = harness.clock.now()
 
 ## Stability
 
-This code is stable. The denylist is enforced by allowlist (only listed
-pure builtins are accepted), so newly added stdlib functions stay
-sandboxed by default.
+The denylist is enforced by allowlist (only listed pure builtins are
+accepted), so newly added stdlib functions stay sandboxed by default.

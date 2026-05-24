@@ -81,7 +81,7 @@ A provider record carries:
 | `default_scopes` | Used when `opts.scopes` is not set |
 | `pkce_required` | Informational; PKCE is unconditionally used by the client |
 | `refresh_handling` | `{strategy, refresh_grant, rotates_refresh_token, notes}` |
-| `documented_quirks` | List of provider gotchas worth surfacing to operators |
+| `documented_quirks` | Provider-specific constraints and gotchas |
 | `documentation_url` | Vendor doc link for "go read the source" |
 
 `provider("github", overrides?)` is a string-keyed factory for the same
@@ -281,8 +281,9 @@ spec-blessed enums.
 
 ## Redaction (`std/oauth/redaction`)
 
-The runtime ships a catalog of high-confidence token patterns (JWT,
-GitHub PAT classic + fine-grained, Slack `xox*`, AWS `AKIA`, OpenAI
+The redaction module recognizes a catalog of high-confidence token
+patterns (JWT, GitHub PAT classic + fine-grained, Slack `xox*`, AWS
+`AKIA`, OpenAI
 `sk-`, Stripe `sk_live_`/`sk_test_`, GitLab `glpat-`, npm `npm_`,
 `Authorization: Bearer ...`). Persisted transcripts, audit receipts,
 OTel span attributes, and system reminders run every string through
@@ -380,9 +381,9 @@ second writer wins and the first refresh is effectively wasted. The
 client's 75% TTL pre-refresh window keeps the race narrow, but pin
 refresh to a single worker if you have a high-fanout deployment.
 
-Also note that Slack's bot scopes and user scopes are separate from the
-"Sign in with Slack" identity scopes — pick the right scope family
-before requesting consent.
+Slack's bot scopes and user scopes are separate from the "Sign in with
+Slack" identity scopes — pick the right scope family before requesting
+consent.
 
 ### Linear
 
@@ -704,10 +705,10 @@ let token_set = device_flow(
 // On subsequent CI runs the file backend already has the token; skip device_flow.
 ```
 
-The same pattern works for Google, Microsoft, and GitLab. Note that
-Slack, Linear, Notion, Atlassian, Discord, and Bitbucket do not
-advertise device endpoints — `device_flow(...)` will raise on
-construction if `provider.device_code_url` is nil.
+The same pattern works for Google, Microsoft, and GitLab. Slack,
+Linear, Notion, Atlassian, Discord, and Bitbucket do not advertise
+device endpoints — `device_flow(...)` raises on construction if
+`provider.device_code_url` is nil.
 
 ### Org-shared GitHub bot (`harn_cloud_org`)
 

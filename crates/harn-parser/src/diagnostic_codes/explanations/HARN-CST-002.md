@@ -1,8 +1,5 @@
 # HARN-CST-002 — const initializer exceeded the recursion depth budget
 
-**Category:** Const-eval sandbox (CST)
-**Variant:** `Code::ConstEvalRecursionLimit`
-
 ## What it means
 
 The compile-time evaluator tracks how deeply it has recursed into nested
@@ -18,5 +15,5 @@ unbounded stack frame chain.
 
 ## Stability
 
-This code is stable. The default budget may grow over time; tightening it
-would require a deprecation cycle.
+The default budget may grow over time; tightening it would require a
+deprecation cycle.

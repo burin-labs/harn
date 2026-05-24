@@ -943,8 +943,8 @@ space, and GPU detection. It creates or updates:
 - `harn.toml` in the current directory
 - `.env` in the current directory
 
-Run `source .env` before invoking Harn if you want the shell to use the selected
-provider/model defaults.
+To pick up the selected provider/model defaults in your shell, run
+`source .env` before invoking Harn.
 
 ## harn doctor
 

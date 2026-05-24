@@ -1,8 +1,5 @@
 # HARN-TYP-014 — declaration has the wrong number of type parameters
 
-**Category:** Type checker (TYP)
-**Variant:** `Code::TypeParameterArity`
-
 ## What it means
 
 A generic declaration (function, type alias, or struct) was written with a
@@ -27,14 +24,3 @@ let xs = pair::<int, string>(1, "two")
   declaration to match the arity the callers expect.
 - For type aliases and structs, the same rule applies: `Map<K, V>` needs two
   arguments, not one and not three.
-
-## See also
-
-- HARN-TYP-013 — call site uses the wrong number of generic type arguments.
-- HARN-TYP-015 — type argument violates a `where`-clause constraint.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.

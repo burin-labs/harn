@@ -2827,9 +2827,7 @@ and offline analysis.
 | `transcript_add_asset(transcript, asset)` | transcript, asset | transcript | Register a durable asset reference on a transcript |
 | `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
 | `transcript_events_by_kind(transcript, kind)` | transcript, kind | list | Filter transcript events by their `kind` field |
-| `transcript_reminder_event(reminder)` | reminder: dict | event dict | Build a normalized `system_reminder` event (see [System reminders](./system-reminders.md)) |
-| `transcript.inject_reminder(transcript, options)` | transcript, options | dict | Transcript transform that appends a pending reminder event, returns `{transcript, reminder_id, deduped_count}`, and emits a dedupe lifecycle event when EventLog is active. |
-| `transcript.clear_reminders(transcript, selector)` | transcript, selector | dict | Pure transcript transform that removes pending reminders by `id`, `tag`, or `dedupe_key` and returns `{transcript, removed_count}`. |
+| `transcript_reminder_event(reminder)` | reminder: dict | event dict | Build a normalized `system_reminder` event (see [System reminders](./system-reminders.md)). Reminder injection and clearing live in [Transcript helpers](#transcript-helpers) above. |
 | `transcript_suspension_event(suspension)` | suspension: dict | event dict | Build a normalized `suspension` lifecycle event |
 | `transcript_resumption_event(resumption)` | resumption: dict | event dict | Build a normalized `resumption` lifecycle event |
 | `transcript_drain_decision_event(drain)` | drain: dict | event dict | Build a normalized `drain_decision` lifecycle event |

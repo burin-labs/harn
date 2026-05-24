@@ -1,7 +1,7 @@
 # Bridge protocol
 
-Harn's stdio bridge uses JSON-RPC 2.0 notifications and requests for host/runtime
-coordination that sits below ACP session semantics.
+Harn's stdio bridge uses JSON-RPC 2.0 notifications and requests for
+host/runtime coordination below ACP session semantics.
 
 ## Tool lifecycle observation
 
@@ -42,11 +42,10 @@ ACP variants:
 - `tool_call_update`
 - `plan`
 
-Harn also emits host-facing lifecycle updates that are not ACP-standard.
-They are intentionally kept as top-level `sessionUpdate` discriminators
-for compatibility with existing Burin Code and other host renderers, and
-are advertised during `initialize` under
-`agentCapabilities._meta.harn.sessionUpdateExtensions`:
+Harn emits additional host-facing lifecycle updates outside ACP. They
+ride as top-level `sessionUpdate` discriminators for compatibility with
+existing Burin Code and other host renderers, advertised during
+`initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`:
 
 - `available_commands_update`
 - `fs_watch`
@@ -64,10 +63,9 @@ are advertised during `initialize` under
 - `transcript_compacted`
 - `worker_update`
 
-Hosts that do not recognize one of these values should ignore it using
-normal ACP forward-compatibility behavior. Hosts that render Harn
-extensions should key off the explicit extension list from `initialize`
-instead of discovering behavior from a local allow-list.
+Unknown values should be ignored per ACP forward-compatibility rules.
+Hosts that render Harn extensions should key off the explicit extension
+list from `initialize` instead of a local allow-list.
 
 Harn keeps its tool-rendering extensions under `tool_call._meta.harn` and
 `tool_call_update._meta.harn`, following ACP's extension convention while
@@ -761,7 +759,7 @@ Host-issued notification. No parameters. Invalidates the VM's cached
 skill catalog; the CLI re-runs layered discovery (including another
 `skills/list` call) on the next iteration boundary — for `harn watch`,
 between file changes; for long-running agents, between turns. A VM
-without an active bridge simply ignores the notification.
+without an active bridge ignores the notification.
 
 ## Host-delegated skill matching
 

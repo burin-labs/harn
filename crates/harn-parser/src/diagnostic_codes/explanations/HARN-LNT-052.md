@@ -1,8 +1,5 @@
 # HARN-LNT-052 — ambient clock builtin replaced by `harness.clock.*`
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientClockBuiltin` (ambient clock builtin)
-
 ## What it means
 
 The lint fires on any call to `now_ms`, `monotonic_ms`, `sleep_ms`,
@@ -25,9 +22,3 @@ the migration is in flight, but every new call site should use the
   `harn fix --apply --safety surface-changing --harness-threading thread-params`.
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.
