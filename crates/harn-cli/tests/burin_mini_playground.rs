@@ -19,7 +19,10 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};
-use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
+use harn_cli::commands::run::{
+    execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
+    RunSandboxOptions,
+};
 use harn_cli::tests::common::{cwd_lock, env_lock};
 use tempfile::TempDir;
 
@@ -472,13 +475,14 @@ fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
     let report = experiment_root.join("evals/fixtures/rate_limit_auth-report.json");
     let semantic = temp.path().join("rate_limit_auth.semantic.json");
     let semantic_clone = semantic.clone();
+    let sandbox_root = temp.path().to_path_buf();
 
     let outcome: RunOutcome = run_in_harn_runtime(move || async move {
         let _env_guard = env_lock::lock_env().lock().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         std::env::set_var("BURIN_MINI_SEMANTIC_EVAL_MODE", "heuristic");
-        let result = execute_run(
+        let result = execute_run_with_sandbox_options(
             &evaluator.to_string_lossy(),
             false,
             HashSet::new(),
@@ -491,6 +495,7 @@ fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
             CliLlmMockMode::Off,
             None,
             RunProfileOptions::default(),
+            RunSandboxOptions::default().with_workspace_root(sandbox_root),
         )
         .await;
         std::env::remove_var("BURIN_MINI_SEMANTIC_EVAL_MODE");

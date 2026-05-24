@@ -1,9 +1,18 @@
 # Process sandboxing
 
-Harn ships an OS-level process sandbox that engages whenever a
-subprocess is spawned under an active capability policy. The sandbox
-runs in addition to the workspace-root path enforcement and the
-approval-policy DSL — defense in depth, not a replacement.
+Harn ships a default `harn run` worktree sandbox plus an OS-level
+process sandbox that engages whenever a subprocess is spawned under an
+active capability policy. The OS sandbox runs in addition to the
+workspace-root path enforcement and the approval-policy DSL — defense
+in depth, not a replacement.
+
+Direct `harn run` invocations install a `worktree` capability policy
+before the VM starts. The policy roots filesystem and process-cwd
+access at the nearest `harn.toml` project root, or at the invocation
+working directory when no manifest is present, and sets the
+side-effect ceiling below `network`. Pass `--no-sandbox` to opt out
+for a single run; the CLI prints a warning when that escape hatch is
+used.
 
 ## Sandbox profiles
 
@@ -178,7 +187,7 @@ scripts and conformance fixtures:
 |---|---|---|
 | `sandbox_active_backend()` | `string` | name of the compiled-in backend (`linux`, `macos`, `windows`, `openbsd`, `noop`) |
 | `sandbox_backend_available()` | `bool` | whether the platform mechanism behind the backend is reachable on the running host |
-| `sandbox_active_profile()` | `string` | profile carried by the current execution policy (`unrestricted` if no policy is active) |
+| `sandbox_active_profile()` | `string` | profile carried by the current execution policy (`worktree` under default `harn run`, `unrestricted` if no policy is active) |
 
 ## Replay fidelity
 
@@ -197,8 +206,8 @@ mechanism.
 
 - gVisor / Firecracker / Kata containers — those belong to
   `harn-cloud`'s `SandboxBackend` impl, not the local runtime.
-- Network egress allow/deny by domain — leave to `with_consent` /
-  `approval_policy.rules`.
+- Destination-level network egress allow/deny — use `egress_policy(...)`
+  or `HARN_EGRESS_*` once a host policy allows network side effects.
 - Sandboxing for in-process work (LLM calls, deterministic Harn
   evaluation). Capability ceilings and the approval policy are the
   enforcement layers there; the OS sandbox only kicks in when Harn

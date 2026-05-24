@@ -118,6 +118,10 @@ condensed series summaries instead of full per-patch history.
   catalog metadata and lazy-loadable body by default, but Harn strips
   command-bearing frontmatter (`hooks`, `command`, `run`) from both the
   startup registry and lazy hydration path unless provenance verifies.
+- **`harn run` is sandboxed by default (#2258).** Direct runs now push a
+  `worktree` capability policy before user code executes. The policy roots
+  filesystem and subprocess cwd access at the project/cwd root and denies
+  network side effects unless the operator explicitly passes `--no-sandbox`.
 - **Schema traversal hardening (#2202).** Runtime schema canonicalization,
   JSON Schema/OpenAPI export, validation, runtime parameter assertions,
   sub-agent return-schema validation, and JSON-stream schema setup now share

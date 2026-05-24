@@ -122,13 +122,14 @@ pub fn enforce_tool_arg_constraints(
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxProfile {
-    /// No path enforcement, no OS confinement. Used by `harn run` when
-    /// no orchestration policy is active and by escape hatches that
-    /// explicitly disable isolation.
+    /// No path enforcement, no OS confinement. Used by direct VM
+    /// embeddings with no orchestration policy and by escape hatches
+    /// that explicitly disable isolation.
     Unrestricted,
     /// Workspace-root path enforcement plus best-effort OS confinement.
     /// Honors `HARN_HANDLER_SANDBOX={off,warn,enforce}` for the OS
-    /// portion. Default for orchestrator-launched workflows.
+    /// portion. Default for `harn run` and orchestrator-launched
+    /// workflows.
     #[default]
     Worktree,
     /// Workspace-root path enforcement plus required OS confinement.

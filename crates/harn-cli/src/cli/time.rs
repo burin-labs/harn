@@ -31,6 +31,10 @@ pub(crate) struct TimeRunArgs {
     /// invocation only.
     #[arg(long = "no-cache")]
     pub no_cache: bool,
+    /// Disable the default worktree filesystem/process sandbox and
+    /// network egress fail-closed guard for this run.
+    #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
+    pub no_sandbox: bool,
     /// Positional arguments passed to the pipeline as the global `argv`
     /// list. Place them after a `--` separator: `harn time run script.harn -- a b c`.
     #[arg(last = true)]

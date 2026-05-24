@@ -219,6 +219,11 @@ async fn async_main() {
                 agent_id: args.attest_agent.clone(),
             });
             let profile_options = run_profile_options(&args.profile);
+            let sandbox_options = if args.no_sandbox {
+                commands::run::RunSandboxOptions::disabled()
+            } else {
+                commands::run::RunSandboxOptions::default()
+            };
             let json_options = args
                 .json
                 .then_some(commands::run::RunJsonOptions { quiet: args.quiet });
@@ -237,6 +242,7 @@ async fn async_main() {
                     llm_mock_mode,
                     attestation,
                     profile_options,
+                    sandbox_options.clone(),
                     json_options,
                 )
                 .await;
@@ -270,6 +276,7 @@ async fn async_main() {
                             llm_mock_mode.clone(),
                             attestation.clone(),
                             profile_options.clone(),
+                            sandbox_options.clone(),
                             json_options.clone(),
                             harnpack_options.clone(),
                         )
@@ -290,6 +297,7 @@ async fn async_main() {
                             llm_mock_mode,
                             attestation,
                             profile_options,
+                            sandbox_options,
                             json_options,
                             harnpack_options,
                         )

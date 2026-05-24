@@ -23,6 +23,10 @@ pub(crate) struct RunArgs {
     /// Allow only the listed builtins as a comma-separated list.
     #[arg(long, conflicts_with = "deny")]
     pub allow: Option<String>,
+    /// Disable the default worktree filesystem/process sandbox and
+    /// network egress fail-closed guard for this run.
+    #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
+    pub no_sandbox: bool,
     /// Evaluate inline Harn code instead of a file.
     #[arg(short = 'e')]
     pub eval: Option<String>,

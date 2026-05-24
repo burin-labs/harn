@@ -24,8 +24,8 @@ pipeline default() {
     "noop"
   }
   __io_println(backend == expected)
-  // Without an active orchestration policy the script runs at the
-  // unrestricted profile — that is the documented `harn run` default.
+  // The conformance runner exercises the direct VM path; `harn run`
+  // installs its default worktree policy in CLI-specific coverage.
   __io_println(sandbox_active_profile())
   // Each shipped backend reports availability as `true` on its host.
   // (Linux Landlock/seccomp are runtime-detected by the per-mechanism
