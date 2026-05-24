@@ -892,6 +892,26 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     register_hash!(vm, "sha512_256", sha2::Digest, sha2::Sha512_256);
     register_hash!(vm, "md5", md5::Digest, md5::Md5);
 
+    // `sha256_hex(input)` returns the lowercase hex SHA-256 digest of
+    // `input` taken as a byte sequence. Unlike `sha256(...)`, this accepts
+    // `Bytes` values directly without stringifying them first, so
+    // content-addressing scripts (used by `harn eval *`, `harn trace import`,
+    // and `harn doctor` file fingerprints) can hash binary payloads
+    // unambiguously. For string inputs the result matches `sha256(...)`.
+    // This is the free-builtin landing site for the deferred
+    // `harness.crypto.sha256` sub-handle (see #2297).
+    vm.register_builtin("sha256_hex", |args, _out| {
+        use sha2::Digest;
+        let bytes = match args.first() {
+            Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
+            Some(other) => other.display().into_bytes(),
+            None => Vec::new(),
+        };
+        let digest = sha2::Sha256::digest(&bytes);
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        Ok(VmValue::String(Rc::from(hex)))
+    });
+
     // HMAC-SHA256 over (key, message). Both inputs are taken as their byte
     // sequences (string `display()` of nil/numbers stringifies first). The
     // returned hex string is what most webhook providers send in their

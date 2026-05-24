@@ -1,0 +1,14 @@
+// Free-builtin landing site for the deferred `harness.fs.mkdtemp`
+// sub-handle (see #2297). Verifies the returned path exists, lives
+// under the host temp dir, and gets the requested prefix.
+let dir = mkdtemp("harn-cli-host-caps-")
+
+__io_println(harness.fs.exists(dir))
+
+__io_println(dir.starts_with(harness.fs.temp_dir()))
+
+__io_println(dir.contains("harn-cli-host-caps-"))
+
+harness.fs.delete(dir)
+
+__io_println(!harness.fs.exists(dir))

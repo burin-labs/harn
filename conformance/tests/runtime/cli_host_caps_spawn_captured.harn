@@ -1,0 +1,20 @@
+// Free-builtin landing site for the deferred `harness.process.spawn_captured`
+// sub-handle (see #2297). Verifies the synchronous capture shape returns
+// `{exit_code, stdout, stderr, duration_ms, success, timed_out}`.
+let ok = spawn_captured({cmd: "printf", args: ["hi"]})
+
+__io_println(ok.exit_code)
+
+__io_println(ok.stdout)
+
+__io_println(ok.success)
+
+__io_println(ok.timed_out)
+
+__io_println(ok.duration_ms >= 0)
+
+let fail = spawn_captured({cmd: "sh", args: ["-c", "exit 7"]})
+
+__io_println(fail.exit_code)
+
+__io_println(fail.success)

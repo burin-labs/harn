@@ -1,0 +1,17 @@
+// Free-builtin landing site for the deferred `harness.llm.catalog`
+// sub-handle (see #2297). Verifies the catalog returns a list of
+// dicts with the expected shape. Doesn't assert specific model ids
+// (the catalog evolves with provider releases) — just shape.
+let entries = llm_catalog()
+
+__io_println(len(entries) > 0)
+
+let first = entries[0]
+
+__io_println(first.id != nil)
+
+__io_println(first.provider != nil)
+
+__io_println(first.capabilities != nil)
+
+__io_println(first.context_window >= 0)

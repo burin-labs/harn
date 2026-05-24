@@ -103,6 +103,29 @@ const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
         .signature("llm_config(provider?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
         .doc("Return configured provider settings, or all provider settings when no provider is passed."),
+    SyncBuiltin::new("llm_catalog", llm_catalog_builtin)
+        .signature("llm_catalog()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc(
+            "Return the full configured model catalog as a list of dicts: \
+             `[{id, name, provider, context_window, runtime_context_window, capabilities, \
+             quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`. \
+             Read-only view of `llm_config::model_catalog_entries()` used by `harn models list` \
+             and `harn models recommend`. Free-builtin landing site for the deferred \
+             `harness.llm.catalog` sub-handle (see #2297).",
+        ),
+    SyncBuiltin::new("llm_provider_status", llm_provider_status_builtin)
+        .signature("llm_provider_status()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc(
+            "Return a list of `{name, available, credential_status}` dicts describing every \
+             configured provider plus runtime-registered names. `available` is true when \
+             credentials resolve via the configured env vars (or when the provider uses \
+             multi-step auth like Bedrock/Vertex). `credential_status` is one of \
+             `\"ok\"`, `\"missing\"`, `\"not_required\"`, `\"deferred\"`. Used by `harn providers` \
+             and `harn doctor`. Free-builtin landing site for the deferred \
+             `harness.llm.providers` sub-handle (see #2297).",
+        ),
 ];
 
 const LLM_RATE_LIMIT_SYNC_BUILTINS: &[SyncBuiltin] =
@@ -356,6 +379,65 @@ fn provider_register_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
     }
     super::provider::register_provider_name(&name);
     Ok(VmValue::Bool(true))
+}
+
+fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let entries: Vec<VmValue> = llm_config::model_catalog_entries()
+        .into_iter()
+        .map(|(id, model)| model_def_to_vm_value(&id, &model))
+        .collect();
+    Ok(VmValue::List(Rc::new(entries)))
+}
+
+fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    // Mirror `llm_providers()` for the name set so runtime-registered
+    // providers also show up, but enrich each entry with a credential
+    // probe so callers like `harn providers` and `harn doctor` can
+    // render a single table without making N follow-up calls.
+    let mut names: std::collections::BTreeSet<String> =
+        llm_config::provider_names().into_iter().collect();
+    names.extend(super::provider::registered_provider_names());
+
+    let mut entries = Vec::with_capacity(names.len());
+    for name in names {
+        let mut entry = BTreeMap::new();
+        entry.insert("name".to_string(), VmValue::String(Rc::from(name.clone())));
+
+        // Providers with `auth_style = "none"` (e.g. local Ollama) and
+        // the multi-step auth providers (Bedrock/Vertex) report
+        // `credential_status = "not_required"` / `"deferred"` rather
+        // than `"ok"` so callers can distinguish a successfully
+        // resolved API key from a deferred resolution. `mock` always
+        // reports `"not_required"`.
+        let (available, credential_status) = if name == "mock" {
+            (true, "not_required")
+        } else if matches!(name.as_str(), "bedrock" | "vertex") {
+            (true, "deferred")
+        } else if let Some(pdef) = llm_config::provider_config(&name) {
+            if pdef.auth_style == "none" {
+                (true, "not_required")
+            } else {
+                match super::helpers::resolve_api_key(&name) {
+                    Ok(_) => (true, "ok"),
+                    Err(_) => (false, "missing"),
+                }
+            }
+        } else {
+            // Runtime-registered providers without config entries fall
+            // back to a credential probe through the standard helper.
+            match super::helpers::resolve_api_key(&name) {
+                Ok(_) => (true, "ok"),
+                Err(_) => (false, "missing"),
+            }
+        };
+        entry.insert("available".to_string(), VmValue::Bool(available));
+        entry.insert(
+            "credential_status".to_string(),
+            VmValue::String(Rc::from(credential_status)),
+        );
+        entries.push(VmValue::Dict(Rc::new(entry)));
+    }
+    Ok(VmValue::List(Rc::new(entries)))
 }
 
 fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

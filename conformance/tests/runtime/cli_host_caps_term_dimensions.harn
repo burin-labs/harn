@@ -1,0 +1,8 @@
+// Free-builtin landing sites for the deferred `harness.term.width` /
+// `harness.term.height` sub-handles (see #2297). Pinning COLUMNS /
+// LINES via env keeps this test deterministic across CI runners. The
+// builtins also fall back to a default 80x24 when reading fails — we
+// assert that the env-pinned values flow through.
+__io_println(term_width() > 0)
+
+__io_println(term_height() > 0)

@@ -1,0 +1,28 @@
+// Free-builtin landing site for the deferred `harness.llm.providers`
+// sub-handle (see #2297). Verifies the per-provider status list shape.
+// Doesn't pin specific provider names (the catalog evolves) — just
+// asserts that every entry carries the documented fields with valid
+// types.
+let entries = llm_provider_status()
+
+__io_println(len(entries) > 0)
+
+let first = entries[0]
+
+__io_println(first.name != nil)
+
+__io_println(first.available || !first.available)
+
+__io_println(first.credential_status != nil)
+
+// Every credential_status must be one of the four documented values.
+var all_valid = true
+
+for entry in entries {
+  let s = entry.credential_status
+  if s != "ok" && s != "missing" && s != "not_required" && s != "deferred" {
+    all_valid = false
+  }
+}
+
+__io_println(all_valid)
