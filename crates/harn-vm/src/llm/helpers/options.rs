@@ -460,6 +460,98 @@ fn classify_native_shape(
     crate::llm::provider::provider_native_tool_search_shape(provider, model)
 }
 
+fn parse_api_mode_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<crate::llm::api::LlmApiMode, VmError> {
+    let Some(raw) = options.and_then(|o| o.get("api_mode").or_else(|| o.get("api"))) else {
+        return Ok(crate::llm::api::LlmApiMode::ChatCompletions);
+    };
+    match raw {
+        VmValue::Nil => Ok(crate::llm::api::LlmApiMode::ChatCompletions),
+        VmValue::String(value) => {
+            let normalized = value.trim().to_ascii_lowercase().replace('-', "_");
+            match normalized.as_str() {
+                "chat" | "chat_completions" | "chat_completion" | "completions" => {
+                    Ok(crate::llm::api::LlmApiMode::ChatCompletions)
+                }
+                "responses" | "response" => Ok(crate::llm::api::LlmApiMode::Responses),
+                other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    format!(
+                        "api_mode: expected \"chat_completions\" or \"responses\", got \"{other}\""
+                    ),
+                )))),
+            }
+        }
+        other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            format!("api_mode: expected a string, got {}", other.type_name()),
+        )))),
+    }
+}
+
+fn enforce_responses_provider_gate(mode: crate::llm::api::LlmApiMode, provider: &str) -> bool {
+    mode == crate::llm::api::LlmApiMode::Responses && provider != "openai" && provider != "mock"
+}
+
+fn parse_provider_tools_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Vec<serde_json::Value>, VmError> {
+    let Some(raw) = options.and_then(|o| o.get("provider_tools").or_else(|| o.get("hosted_tools")))
+    else {
+        return Ok(Vec::new());
+    };
+    match raw {
+        VmValue::Nil | VmValue::Bool(false) => Ok(Vec::new()),
+        VmValue::Dict(_) => Ok(vec![vm_value_to_json(raw)]),
+        VmValue::List(list) => list
+            .iter()
+            .map(|value| match value {
+                VmValue::String(kind) => Ok(serde_json::json!({"type": kind.as_ref()})),
+                VmValue::Dict(_) => Ok(vm_value_to_json(value)),
+                other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    format!(
+                        "provider_tools: expected each entry to be a dict or string, got {}",
+                        other.type_name()
+                    ),
+                )))),
+            })
+            .collect(),
+        other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            format!(
+                "provider_tools: expected a list or dict, got {}",
+                other.type_name()
+            ),
+        )))),
+    }
+}
+
+fn opt_bool_field(
+    options: Option<&BTreeMap<String, VmValue>>,
+    key: &str,
+) -> Result<Option<bool>, VmError> {
+    match options.and_then(|o| o.get(key)) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            format!("{key}: expected a bool, got {}", other.type_name()),
+        )))),
+    }
+}
+
+fn opt_responses_store_field(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Option<bool>, VmError> {
+    if let Some(value) = opt_bool_field(options, "response_store")? {
+        return Ok(Some(value));
+    }
+    if let Some(value) = opt_bool_field(options, "responses_store")? {
+        return Ok(Some(value));
+    }
+    match options.and_then(|o| o.get("store")) {
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        _ => Ok(None),
+    }
+}
+
 fn parse_schema_value(
     raw: Option<&VmValue>,
     field: &str,
@@ -1165,7 +1257,7 @@ fn compose_system_prompt_with_reminders(
 pub(crate) fn extract_llm_options(
     args: &[VmValue],
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
-    use crate::llm::api::{LlmCallOptions, ToolSearchMode, ToolSearchVariant};
+    use crate::llm::api::{LlmApiMode, LlmCallOptions, ToolSearchMode, ToolSearchVariant};
     use crate::llm::provider::{provider_supports_defer_loading, provider_tool_search_variants};
     use crate::llm::tools::{extract_deferred_tool_names, vm_tools_to_native};
 
@@ -1225,6 +1317,12 @@ pub(crate) fn extract_llm_options(
     let fallback_chain = parse_fallback_chain_option(options.as_ref());
     let api_key = resolve_api_key(&provider)?;
     let caps = crate::llm::capabilities::lookup(&provider, &model);
+    let api_mode = parse_api_mode_option(options.as_ref())?;
+    if enforce_responses_provider_gate(api_mode, &provider) {
+        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+            "api_mode: \"responses\" is only supported by provider \"openai\"; got provider \"{provider}\""
+        )))));
+    }
     let session_id = opt_str(&options, "session_id")
         .filter(|value| !value.is_empty())
         .or_else(crate::agent_sessions::current_session_id);
@@ -1471,6 +1569,12 @@ pub(crate) fn extract_llm_options(
     } else {
         None
     };
+    let provider_tools = parse_provider_tools_option(options.as_ref())?;
+    if enforce_capability_gates && !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
+        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            "provider_tools requires api_mode: \"responses\"",
+        ))));
+    }
 
     // tool_search option parsing: three shapes accepted.
     //   - shorthand string: "bm25" | "regex" | "hybrid" (mode: auto)
@@ -1643,6 +1747,29 @@ pub(crate) fn extract_llm_options(
         .and_then(|o| o.get(&provider))
         .and_then(|v| v.as_dict())
         .map(vm_value_dict_to_json);
+    let previous_response_id =
+        opt_str(&options, "previous_response_id").filter(|value| !value.trim().is_empty());
+    let store = opt_responses_store_field(options.as_ref())?;
+    let background = opt_bool_field(options.as_ref(), "background")?;
+    let truncation = opt_str(&options, "truncation").filter(|value| !value.trim().is_empty());
+    let compact = opt_bool_field(options.as_ref(), "compact")?;
+    let include = opt_str_list(&options, "include");
+    let max_tool_calls = opt_int(&options, "max_tool_calls");
+
+    if enforce_capability_gates
+        && api_mode != LlmApiMode::Responses
+        && (previous_response_id.is_some()
+            || store.is_some()
+            || background.is_some()
+            || truncation.is_some()
+            || compact.is_some()
+            || include.is_some()
+            || max_tool_calls.is_some())
+    {
+        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            "Responses-only options require api_mode: \"responses\"",
+        ))));
+    }
 
     let prefill = options
         .as_ref()
@@ -1671,6 +1798,7 @@ pub(crate) fn extract_llm_options(
         provider,
         model,
         api_key,
+        api_mode,
         route_policy,
         fallback_chain,
         route_fallbacks,
@@ -1703,6 +1831,7 @@ pub(crate) fn extract_llm_options(
         vision,
         tools: tools_val,
         native_tools,
+        provider_tools,
         tool_choice,
         tool_search,
         cache,
@@ -1710,6 +1839,13 @@ pub(crate) fn extract_llm_options(
         idle_timeout,
         stream,
         provider_overrides,
+        previous_response_id,
+        store,
+        background,
+        truncation,
+        compact,
+        include,
+        max_tool_calls,
         budget,
         prefill,
         structural_experiment,

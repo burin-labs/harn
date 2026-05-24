@@ -1,0 +1,60 @@
+/**
+ * Native OpenAI Responses mode is an explicit llm_call option. The
+ * deterministic mock records the normalized request so provider-sensitive
+ * scripts can assert that structured output, hosted tools, remote MCP, and
+ * conversation controls survive option extraction without live credentials.
+ */
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({text: "{\"ok\":true}"})
+  let result = llm_call(
+    "return a structured answer",
+    nil,
+    {
+      provider: "mock",
+      model: "gpt-5.4-preview",
+      api_mode: "responses",
+      output_format: {
+        kind: "json_schema",
+        schema: {type: "object", properties: {ok: {type: "boolean"}}, required: ["ok"]},
+        strict: true,
+      },
+      provider_tools: [
+        {type: "web_search"},
+        {
+          type: "mcp",
+          server_label: "docs",
+          server_url: "https://mcp.example.test",
+          require_approval: "always",
+        },
+      ],
+      previous_response_id: "resp_prev",
+      response_store: false,
+      background: true,
+      truncation: "auto",
+      compact: true,
+      include: ["web_search_call.action"],
+      max_tool_calls: 2,
+    },
+  )
+  assert(result.text == "{\"ok\":true}", "mock response returned")
+  let calls = llm_mock_calls()
+  assert(len(calls) == 1, "one LLM call recorded")
+  let call = calls[0]
+  assert(call.api_mode == "responses", "Responses mode recorded")
+  assert(call.output_format.kind == "json_schema", "structured output kind recorded")
+  assert(call.output_format.schema.properties.ok.type == "boolean", "schema recorded")
+  assert(len(call.provider_tools) == 2, "provider tools recorded")
+  assert(call.provider_tools[0].type == "web_search", "hosted tool recorded")
+  assert(call.provider_tools[1].type == "mcp", "remote MCP tool recorded")
+  assert(call.provider_tools[1].server_label == "docs", "remote MCP metadata recorded")
+  assert(call.provider_tools[1].require_approval == "always", "provider approval policy recorded")
+  assert(call.previous_response_id == "resp_prev", "previous response id recorded")
+  assert(!call.store, "store flag recorded")
+  assert(call.background, "background flag recorded")
+  assert(call.truncation == "auto", "truncation policy recorded")
+  assert(call.compact, "standalone compaction flag recorded")
+  assert(call.include[0] == "web_search_call.action", "include list recorded")
+  assert(call.max_tool_calls == 2, "tool-call limit recorded")
+  log("openai_responses_mode_mock tests passed")
+}

@@ -501,7 +501,7 @@ fn count_input_tokens(messages: &[serde_json::Value]) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::ThinkingConfig;
+    use crate::llm::api::{LlmApiMode, ThinkingConfig};
     use crate::llm::api::{LlmRequestPayload, LlmRouteFallback, OutputFormat};
 
     fn fake_request() -> LlmRequestPayload {
@@ -509,6 +509,7 @@ mod tests {
             provider: "fake".to_string(),
             model: "fake-model".to_string(),
             api_key: String::new(),
+            api_mode: LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),
             route_fallbacks: Vec::<LlmRouteFallback>::new(),
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
@@ -532,11 +533,19 @@ mod tests {
             anthropic_beta_features: Vec::new(),
             vision: false,
             native_tools: None,
+            provider_tools: Vec::new(),
             tool_choice: None,
             cache: false,
             timeout: None,
             stream: true,
             provider_overrides: None,
+            previous_response_id: None,
+            store: None,
+            background: None,
+            truncation: None,
+            compact: None,
+            include: None,
+            max_tool_calls: None,
             prefill: None,
             session_id: None,
             reminder_lifecycle: Vec::new(),

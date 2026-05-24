@@ -190,6 +190,30 @@ pub struct ProviderRule {
     pub defer_loading: Option<bool>,
     #[serde(default)]
     pub tool_search: Option<Vec<String>>,
+    /// Whether Harn supports this route through the provider's native
+    /// Responses-style API instead of generic chat completions.
+    #[serde(default)]
+    pub responses_api: Option<bool>,
+    /// Provider-hosted tools Harn can pass through without local execution.
+    #[serde(default)]
+    pub hosted_tools: Option<Vec<String>>,
+    /// Whether provider-hosted remote MCP connectors can be mediated by the
+    /// provider for this route.
+    #[serde(default)]
+    pub remote_mcp: Option<bool>,
+    /// Whether provider-managed previous-response conversation state is
+    /// available.
+    #[serde(default)]
+    pub conversation_state: Option<bool>,
+    /// Whether provider-side truncation/compaction controls are available.
+    #[serde(default)]
+    pub compaction: Option<bool>,
+    /// Whether provider-side background Responses jobs are available.
+    #[serde(default)]
+    pub background_mode: Option<bool>,
+    /// Approval policy modes available when provider-hosted tools execute.
+    #[serde(default)]
+    pub tool_approval_policy: Option<String>,
     #[serde(default)]
     pub max_tools: Option<u32>,
     #[serde(default)]
@@ -370,6 +394,13 @@ pub struct Capabilities {
     pub native_tool_wire_format: String,
     pub defer_loading: bool,
     pub tool_search: Vec<String>,
+    pub responses_api: bool,
+    pub hosted_tools: Vec<String>,
+    pub remote_mcp: bool,
+    pub conversation_state: bool,
+    pub compaction: bool,
+    pub background_mode: bool,
+    pub tool_approval_policy: Option<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
     pub vision: bool,
@@ -422,6 +453,13 @@ impl Default for Capabilities {
             native_tool_wire_format: "openai".to_string(),
             defer_loading: false,
             tool_search: Vec::new(),
+            responses_api: false,
+            hosted_tools: Vec::new(),
+            remote_mcp: false,
+            conversation_state: false,
+            compaction: false,
+            background_mode: false,
+            tool_approval_policy: None,
             max_tools: None,
             prompt_caching: false,
             vision: false,
@@ -569,7 +607,17 @@ pub fn set_user_overrides_from_manifest_toml(src: &str) -> Result<(), String> {
 /// later rules (and later layers in the family chain) are ignored.
 pub fn lookup(provider: &str, model: &str) -> Capabilities {
     let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
-    lookup_with(provider, model, builtin(), user.as_ref())
+    let mut caps = lookup_with(provider, model, builtin(), user.as_ref());
+    if provider != "openai" && provider != "mock" {
+        caps.responses_api = false;
+        caps.hosted_tools.clear();
+        caps.remote_mcp = false;
+        caps.conversation_state = false;
+        caps.compaction = false;
+        caps.background_mode = false;
+        caps.tool_approval_policy = None;
+    }
+    caps
 }
 
 /// Return the currently-effective provider capability rule matrix. User
@@ -766,6 +814,13 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         native_tool_wire_format: None,
         defer_loading: None,
         tool_search: None,
+        responses_api: None,
+        hosted_tools: None,
+        remote_mcp: None,
+        conversation_state: None,
+        compaction: None,
+        background_mode: None,
+        tool_approval_policy: None,
         max_tools: None,
         prompt_caching: None,
         vision: None,
@@ -826,6 +881,13 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .unwrap_or_else(|| "openai".to_string()),
         defer_loading: rule.defer_loading.unwrap_or(false),
         tool_search: rule.tool_search.clone().unwrap_or_default(),
+        responses_api: rule.responses_api.unwrap_or(false),
+        hosted_tools: rule.hosted_tools.clone().unwrap_or_default(),
+        remote_mcp: rule.remote_mcp.unwrap_or(false),
+        conversation_state: rule.conversation_state.unwrap_or(false),
+        compaction: rule.compaction.unwrap_or(false),
+        background_mode: rule.background_mode.unwrap_or(false),
+        tool_approval_policy: rule.tool_approval_policy.clone(),
         max_tools: rule.max_tools,
         prompt_caching: rule.prompt_caching.unwrap_or(false),
         vision: rule_vision(rule),

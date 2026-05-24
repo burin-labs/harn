@@ -175,6 +175,23 @@ they use OpenAI-style `tool_calls` / `tools` and OpenAI-style structured-output
 parameters rather than Gemini `functionCall`, `functionResponse`, or
 `responseJsonSchema` parts.
 
+### OpenAI Responses API
+
+OpenAI has two Harn paths. The default path is the generic
+OpenAI-compatible chat-completions adapter. The native Responses path is
+selected explicitly with
+`llm_call(..., {provider: "openai", api_mode: "responses"})`.
+
+Responses mode is for OpenAI-native hosted tools, remote MCP connectors,
+previous-response chaining, background jobs, and provider-side
+truncation/compaction controls. Ordinary Harn `tools` still work in this mode
+and Harn executes, approves, and audits them locally. Use `provider_tools` (or
+`hosted_tools`) only when OpenAI should execute the hosted tool or remote MCP
+connector. In that case OpenAI owns per-tool execution and approval according
+to the tool config; Harn records provider-native IDs, normalized
+`provider_tool_call` blocks, and `provider_response_id`, but it does not
+locally mediate each remote call.
+
 ### Capability matrix + `harn.toml` overrides
 
 The provider support table above is **not** hard-coded: it's the output
@@ -213,6 +230,10 @@ if caps.tools && "bm25" in caps.tool_search {
   })
 }
 ```
+
+OpenAI Responses-capable rows also expose `responses_api`, `hosted_tools`,
+`remote_mcp`, `conversation_state`, `compaction`, `background_mode`, and
+`tool_approval_policy`.
 
 The same matrix is the source of truth for Harn's default tool-calling
 mode. Alias-level `tool_format` still wins when set explicitly, but
@@ -276,6 +297,13 @@ entry accepts these fields:
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini and Vertex accept Harn's canonical tool definitions and their adapters emit Google `functionDeclarations`. |
 | `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
+| `responses_api` | bool | Whether Harn exposes this route through the native OpenAI Responses path. Generic OpenAI-compatible providers do not claim this even when they inherit other OpenAI-family capabilities. |
+| `hosted_tools` | list of strings | Provider-hosted tool kinds Harn can pass through without local execution, such as `web_search`, `file_search`, `code_interpreter`, or `mcp` / `remote_mcp`. |
+| `remote_mcp` | bool | Provider-hosted remote MCP connectors are available. |
+| `conversation_state` | bool | Provider-managed previous-response chaining is available. |
+| `compaction` | bool | Provider-side truncation/compaction controls are available. |
+| `background_mode` | bool | Provider-side background jobs are available. |
+| `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
 | `prefers_xml_scaffolding` | bool | Logical prompt sections should prefer XML tags such as `<task>` / `<examples>`. |

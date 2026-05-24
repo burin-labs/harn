@@ -749,6 +749,31 @@ pub(crate) fn capabilities_to_vm_value(
         string_list_to_vm_value(caps.tool_search.clone()),
     );
     dict.insert(
+        "responses_api".to_string(),
+        VmValue::Bool(caps.responses_api),
+    );
+    dict.insert(
+        "hosted_tools".to_string(),
+        string_list_to_vm_value(caps.hosted_tools.clone()),
+    );
+    dict.insert("remote_mcp".to_string(), VmValue::Bool(caps.remote_mcp));
+    dict.insert(
+        "conversation_state".to_string(),
+        VmValue::Bool(caps.conversation_state),
+    );
+    dict.insert("compaction".to_string(), VmValue::Bool(caps.compaction));
+    dict.insert(
+        "background_mode".to_string(),
+        VmValue::Bool(caps.background_mode),
+    );
+    dict.insert(
+        "tool_approval_policy".to_string(),
+        caps.tool_approval_policy
+            .as_deref()
+            .map(|value| VmValue::String(Rc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
         "max_tools".to_string(),
         caps.max_tools
             .map(|n| VmValue::Int(n as i64))

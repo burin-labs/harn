@@ -3,7 +3,8 @@ use std::time::Instant;
 use serde::Serialize;
 
 use super::api::{
-    vm_call_llm_full_streaming, LlmCallOptions, LlmRoutePolicy, OutputFormat, ThinkingConfig,
+    vm_call_llm_full_streaming, LlmApiMode, LlmCallOptions, LlmRoutePolicy, OutputFormat,
+    ThinkingConfig,
 };
 use crate::value::{VmError, VmValue};
 
@@ -58,6 +59,7 @@ pub async fn run_model_smoke_test(
         provider: provider.clone(),
         model: model_id.clone(),
         api_key,
+        api_mode: LlmApiMode::ChatCompletions,
         route_policy: LlmRoutePolicy::Manual,
         fallback_chain: Vec::new(),
         route_fallbacks: Vec::new(),
@@ -93,6 +95,7 @@ pub async fn run_model_smoke_test(
         vision: false,
         tools: None,
         native_tools: None,
+        provider_tools: Vec::new(),
         tool_choice: None,
         tool_search: None,
         cache: false,
@@ -100,6 +103,13 @@ pub async fn run_model_smoke_test(
         idle_timeout: None,
         stream: true,
         provider_overrides: None,
+        previous_response_id: None,
+        store: None,
+        background: None,
+        truncation: None,
+        compact: None,
+        include: None,
+        max_tool_calls: None,
         budget: None,
         prefill: None,
         structural_experiment: None,

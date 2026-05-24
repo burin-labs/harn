@@ -18,6 +18,7 @@ mod gemini;
 mod mock;
 mod ollama;
 pub(crate) mod openai_compat;
+pub(crate) mod openai_responses;
 pub(crate) mod vertex;
 
 pub(crate) use anthropic::AnthropicProvider;
@@ -27,4 +28,5 @@ pub(crate) use gemini::GeminiProvider;
 pub(crate) use mock::MockProvider;
 pub(crate) use ollama::OllamaProvider;
 pub(crate) use openai_compat::OpenAiCompatibleProvider;
+pub(crate) use openai_responses::OpenAiResponsesProvider;
 pub(crate) use vertex::VertexProvider;
