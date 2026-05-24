@@ -1284,6 +1284,38 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn openrouter_anthropic_claude_models_support_native_tools() {
+        // Regression for #2319: without explicit openrouter rules,
+        // openrouter:anthropic/claude-* used to fall through the
+        // openrouter→openai family chain and miss the [[provider.anthropic]]
+        // matchers entirely, so native-tool requests HTTP 400'd with
+        // "option `tools` is not supported by ... (provider openrouter)".
+        reset();
+        for model in [
+            "anthropic/claude-haiku-4-5",
+            "anthropic/claude-haiku-4-5-20251001",
+            "anthropic/claude-sonnet-4-6",
+            "anthropic/claude-sonnet-4-7",
+            "anthropic/claude-opus-4-7",
+        ] {
+            let caps = lookup("openrouter", model);
+            assert!(
+                caps.native_tools,
+                "{model} via openrouter should report native_tools=true",
+            );
+            assert!(
+                caps.prompt_caching,
+                "{model} via openrouter should report prompt_caching=true",
+            );
+            assert_eq!(
+                caps.structured_output.as_deref(),
+                Some("tool_use"),
+                "{model} via openrouter should structured_output=tool_use (matches direct anthropic)",
+            );
+        }
+    }
+
+    #[test]
     fn openrouter_deepseek_v32_defaults_to_text_tools() {
         reset();
         let caps = lookup("openrouter", "deepseek/deepseek-v3.2");

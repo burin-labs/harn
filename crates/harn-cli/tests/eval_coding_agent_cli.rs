@@ -51,6 +51,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         step_judge_on_veto: None,
         step_judge_adversarial: false,
         run_label: String::new(),
+        baseline_comparison_against: None,
     };
 
     let exit = run_in_harn_runtime(|| async move {

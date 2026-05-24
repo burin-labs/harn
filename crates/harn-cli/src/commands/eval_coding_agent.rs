@@ -225,6 +225,44 @@ struct EvalSummary {
     /// "replicate-1", "probe-rubric-adversarial"). Empty when unset.
     #[serde(skip_serializing_if = "String::is_empty")]
     run_label: String,
+    /// Optional per-fixture diff against a prior run's `summary.json`,
+    /// listing regressions (baseline passed, this cell failed) and
+    /// recoveries (baseline failed, this cell passed) plus aggregate
+    /// counts and a net lift in percentage points. Populated when the
+    /// caller passes `--baseline-comparison-against <path>` (harn#2318).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline_comparison: Option<BaselineComparison>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+struct BaselineComparison {
+    /// `output_dir` or `run_label` of the baseline summary, for context.
+    baseline_label: String,
+    /// Resolved path to the baseline `summary.json` that was diffed against.
+    baseline_path: String,
+    regressions: Vec<FixtureStatusDelta>,
+    recoveries: Vec<FixtureStatusDelta>,
+    /// Fixtures that passed in both runs.
+    unchanged_passes: Vec<String>,
+    /// Fixtures that failed in both runs.
+    unchanged_failures: Vec<String>,
+    /// Fixtures present in only one of the two runs (skipped from the
+    /// diff but listed for visibility).
+    missing_in_baseline: Vec<String>,
+    missing_in_cell: Vec<String>,
+    regressions_count: usize,
+    recoveries_count: usize,
+    /// `(recoveries_count - regressions_count) / total_fixtures_compared * 100`,
+    /// rounded to one decimal place. Negative when the cell regresses more
+    /// than it recovers.
+    net_lift_pp: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FixtureStatusDelta {
+    fixture_id: String,
+    baseline_status: String,
+    cell_status: String,
 }
 
 struct LocalRunGuard {
@@ -307,6 +345,16 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         reports.push(report);
     }
 
+    let baseline_comparison = match &args.baseline_comparison_against {
+        Some(path) => match load_baseline_comparison(path, &reports) {
+            Ok(comparison) => Some(comparison),
+            Err(error) => {
+                eprintln!("error: --baseline-comparison-against: {error}");
+                return 1;
+            }
+        },
+        None => None,
+    };
     let summary = build_summary(
         &output_dir,
         fixtures,
@@ -318,6 +366,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
             .clone()
             .filter(|s| !s.is_empty() && s != "none"),
         args.run_label.clone(),
+        baseline_comparison,
     );
     if let Err(error) = write_outputs(&output_dir, &summary) {
         eprintln!("error: failed to write benchmark outputs: {error}");
@@ -1010,6 +1059,7 @@ fn build_matrix(
     matrix
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_summary(
     output_dir: &Path,
     fixtures: Vec<FixtureDefinition>,
@@ -1019,6 +1069,7 @@ fn build_summary(
     runs: Vec<RunReport>,
     step_judge_preset: Option<String>,
     run_label: String,
+    baseline_comparison: Option<BaselineComparison>,
 ) -> EvalSummary {
     let passed_runs = runs.iter().filter(|run| run.passed).count();
     let skipped_runs = runs.iter().filter(|run| run.skipped).count();
@@ -1065,7 +1116,133 @@ fn build_summary(
         followups,
         step_judge_preset,
         run_label,
+        baseline_comparison,
     }
+}
+
+fn load_baseline_comparison(path: &Path, runs: &[RunReport]) -> Result<BaselineComparison, String> {
+    let resolved = if path.is_dir() {
+        path.join("summary.json")
+    } else {
+        path.to_path_buf()
+    };
+    let raw = fs::read_to_string(&resolved)
+        .map_err(|e| format!("failed to read {}: {e}", resolved.display()))?;
+    let baseline: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("failed to parse {} as JSON: {e}", resolved.display()))?;
+    let baseline_runs = baseline
+        .get("runs")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("{} has no `runs` array", resolved.display()))?;
+    // Index baseline status by fixture_id. When the baseline has multiple
+    // runs per fixture (e.g. native + text), prefer the first passing run
+    // so a fixture passes the comparison if ANY baseline variant did.
+    let mut baseline_status: BTreeMap<String, &str> = BTreeMap::new();
+    for run in baseline_runs {
+        let fixture_id = match run.get("fixture_id").and_then(|v| v.as_str()) {
+            Some(id) => id.to_string(),
+            None => continue,
+        };
+        let passed = run.get("passed").and_then(|v| v.as_bool()).unwrap_or(false);
+        let skipped = run
+            .get("skipped")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let status = if skipped {
+            "skipped"
+        } else if passed {
+            "passed"
+        } else {
+            "failed"
+        };
+        baseline_status
+            .entry(fixture_id)
+            .and_modify(|existing| {
+                if *existing != "passed" && status == "passed" {
+                    *existing = status;
+                }
+            })
+            .or_insert(status);
+    }
+    let mut cell_status: BTreeMap<String, &str> = BTreeMap::new();
+    for run in runs {
+        let status = if run.skipped {
+            "skipped"
+        } else if run.passed {
+            "passed"
+        } else {
+            "failed"
+        };
+        cell_status
+            .entry(run.fixture_id.clone())
+            .and_modify(|existing| {
+                if *existing != "passed" && status == "passed" {
+                    *existing = status;
+                }
+            })
+            .or_insert(status);
+    }
+    let mut regressions = Vec::new();
+    let mut recoveries = Vec::new();
+    let mut unchanged_passes = Vec::new();
+    let mut unchanged_failures = Vec::new();
+    let mut missing_in_baseline = Vec::new();
+    let mut missing_in_cell = Vec::new();
+    for (fixture, cell) in &cell_status {
+        match baseline_status.get(fixture) {
+            None => missing_in_baseline.push(fixture.clone()),
+            Some(base) => match (*base, *cell) {
+                ("passed", "passed") => unchanged_passes.push(fixture.clone()),
+                ("passed", _) => regressions.push(FixtureStatusDelta {
+                    fixture_id: fixture.clone(),
+                    baseline_status: (*base).to_string(),
+                    cell_status: (*cell).to_string(),
+                }),
+                (_, "passed") => recoveries.push(FixtureStatusDelta {
+                    fixture_id: fixture.clone(),
+                    baseline_status: (*base).to_string(),
+                    cell_status: (*cell).to_string(),
+                }),
+                _ => unchanged_failures.push(fixture.clone()),
+            },
+        }
+    }
+    for fixture in baseline_status.keys() {
+        if !cell_status.contains_key(fixture) {
+            missing_in_cell.push(fixture.clone());
+        }
+    }
+    let baseline_label = baseline
+        .get("run_label")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .or_else(|| baseline.get("output_dir").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+    let regressions_count = regressions.len();
+    let recoveries_count = recoveries.len();
+    let total_compared =
+        regressions_count + recoveries_count + unchanged_passes.len() + unchanged_failures.len();
+    let net_lift_pp = if total_compared == 0 {
+        0.0
+    } else {
+        let raw =
+            (recoveries_count as f64 - regressions_count as f64) / total_compared as f64 * 100.0;
+        (raw * 10.0).round() / 10.0
+    };
+    Ok(BaselineComparison {
+        baseline_label,
+        baseline_path: resolved.display().to_string(),
+        regressions,
+        recoveries,
+        unchanged_passes,
+        unchanged_failures,
+        missing_in_baseline,
+        missing_in_cell,
+        regressions_count,
+        recoveries_count,
+        net_lift_pp,
+    })
 }
 
 fn build_rollups(runs: &[RunReport]) -> EvalRollups {
@@ -1380,6 +1557,44 @@ fn render_markdown(summary: &EvalSummary) -> String {
             ),
             run.output_dir
         ));
+    }
+    if let Some(comparison) = &summary.baseline_comparison {
+        out.push_str("\n## Baseline Comparison\n\n");
+        out.push_str(&format!(
+            "Compared against `{}`{}.\n\n",
+            comparison.baseline_path,
+            if comparison.baseline_label.is_empty() {
+                String::new()
+            } else {
+                format!(" (label: `{}`)", comparison.baseline_label)
+            },
+        ));
+        out.push_str(&format!(
+            "- regressions: **{}** (baseline passed, this cell failed)\n- recoveries: **{}** (baseline failed, this cell passed)\n- net lift: **{:+.1}pp**\n\n",
+            comparison.regressions_count,
+            comparison.recoveries_count,
+            comparison.net_lift_pp,
+        ));
+        if !comparison.regressions.is_empty() {
+            out.push_str("### Regressions\n\n");
+            for delta in &comparison.regressions {
+                out.push_str(&format!(
+                    "- `{}`: `{}` → `{}`\n",
+                    delta.fixture_id, delta.baseline_status, delta.cell_status,
+                ));
+            }
+            out.push('\n');
+        }
+        if !comparison.recoveries.is_empty() {
+            out.push_str("### Recoveries\n\n");
+            for delta in &comparison.recoveries {
+                out.push_str(&format!(
+                    "- `{}`: `{}` → `{}`\n",
+                    delta.fixture_id, delta.baseline_status, delta.cell_status,
+                ));
+            }
+            out.push('\n');
+        }
     }
     if !summary.comparisons.is_empty() {
         out.push_str("\n## Native/Text Comparison\n\n");
@@ -1798,9 +2013,142 @@ mod tests {
             followups: Vec::new(),
             step_judge_preset: None,
             run_label: String::new(),
+            baseline_comparison: None,
         };
         let md = render_markdown(&summary);
         assert!(md.contains("a\\|b"));
+    }
+
+    #[test]
+    fn baseline_comparison_reports_regressions_and_recoveries() {
+        // Synthetic baseline summary.json — two fixtures, both passed.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let baseline_path = tmp.path().join("baseline_summary.json");
+        let baseline = serde_json::json!({
+            "schema_version": 2,
+            "runs": [
+                {"fixture_id": "python-add", "passed": true, "skipped": false},
+                {"fixture_id": "cli-help-flag", "passed": true, "skipped": false},
+                {"fixture_id": "test-output-first", "passed": false, "skipped": false},
+            ],
+        });
+        std::fs::write(&baseline_path, serde_json::to_string(&baseline).unwrap())
+            .expect("write baseline");
+
+        // Cell run: cli-help-flag REGRESSED (was passing), test-output-first RECOVERED.
+        let selector = ModelSelector {
+            selector: "mock:mock".to_string(),
+            provider: "mock".to_string(),
+            model: "mock".to_string(),
+        };
+        let runs = vec![
+            RunReport {
+                run_id: "r1".to_string(),
+                fixture_id: "python-add".to_string(),
+                fixture_name: "Python add".to_string(),
+                fixture_tool_sequence: "multi-tool".to_string(),
+                selector: selector.clone(),
+                tool_format: "native".to_string(),
+                status: "passed".to_string(),
+                passed: true,
+                skipped: false,
+                skipped_reason: None,
+                output_dir: "out/r1".to_string(),
+                transcript_events_path: "out/r1/t.jsonl".to_string(),
+                workspace_root: None,
+                elapsed_ms: 0,
+                duration_ms: 0,
+                iterations: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: 0.0,
+                pricing_known: false,
+                tool_calls: 0,
+                rejected_tool_calls: 0,
+                tool_sequence: Vec::new(),
+                successful_tools: Vec::new(),
+                transcript_event_count: 0,
+                verification_success: true,
+                harn_exit_code: 0,
+                error: None,
+                stderr_excerpt: None,
+                local_cleanup: None,
+            },
+            RunReport {
+                run_id: "r2".to_string(),
+                fixture_id: "cli-help-flag".to_string(),
+                fixture_name: "CLI help flag".to_string(),
+                fixture_tool_sequence: "multi-tool".to_string(),
+                selector: selector.clone(),
+                tool_format: "native".to_string(),
+                status: "failed".to_string(),
+                passed: false,
+                skipped: false,
+                skipped_reason: None,
+                output_dir: "out/r2".to_string(),
+                transcript_events_path: "out/r2/t.jsonl".to_string(),
+                workspace_root: None,
+                elapsed_ms: 0,
+                duration_ms: 0,
+                iterations: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: 0.0,
+                pricing_known: false,
+                tool_calls: 0,
+                rejected_tool_calls: 0,
+                tool_sequence: Vec::new(),
+                successful_tools: Vec::new(),
+                transcript_event_count: 0,
+                verification_success: false,
+                harn_exit_code: 1,
+                error: None,
+                stderr_excerpt: None,
+                local_cleanup: None,
+            },
+            RunReport {
+                run_id: "r3".to_string(),
+                fixture_id: "test-output-first".to_string(),
+                fixture_name: "Test output first".to_string(),
+                fixture_tool_sequence: "multi-tool".to_string(),
+                selector,
+                tool_format: "native".to_string(),
+                status: "passed".to_string(),
+                passed: true,
+                skipped: false,
+                skipped_reason: None,
+                output_dir: "out/r3".to_string(),
+                transcript_events_path: "out/r3/t.jsonl".to_string(),
+                workspace_root: None,
+                elapsed_ms: 0,
+                duration_ms: 0,
+                iterations: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: 0.0,
+                pricing_known: false,
+                tool_calls: 0,
+                rejected_tool_calls: 0,
+                tool_sequence: Vec::new(),
+                successful_tools: Vec::new(),
+                transcript_event_count: 0,
+                verification_success: true,
+                harn_exit_code: 0,
+                error: None,
+                stderr_excerpt: None,
+                local_cleanup: None,
+            },
+        ];
+        let comparison = load_baseline_comparison(&baseline_path, &runs).expect("compare");
+        assert_eq!(comparison.regressions_count, 1);
+        assert_eq!(comparison.regressions[0].fixture_id, "cli-help-flag");
+        assert_eq!(comparison.recoveries_count, 1);
+        assert_eq!(comparison.recoveries[0].fixture_id, "test-output-first");
+        assert_eq!(comparison.unchanged_passes, vec!["python-add".to_string()]);
+        assert_eq!(
+            comparison.net_lift_pp, 0.0,
+            "+1 recovery and -1 regression should net to 0pp lift across 3 compared fixtures"
+        );
     }
 
     #[test]
