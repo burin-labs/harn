@@ -1523,6 +1523,20 @@ prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
 [[provider.openrouter]]
+model_match = "mistralai/mistral*"
+native_tools = true
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.openrouter]]
 model_match = "mistralai/devstral*"
 native_tools = true
 structured_output = "native"

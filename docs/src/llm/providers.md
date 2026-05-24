@@ -25,7 +25,9 @@ llama.cpp / MLX download, launch, context-window, endpoint, and
 `provider-ready` verification commands.
 
 For model-specific feature support, see the generated
-[provider capability matrix](../provider-matrix.md).
+[provider capability matrix](../provider-matrix.md). For provider-family
+recommendations, endpoint notes, and downstream JSON support data, see
+[provider support recommendations](../provider-support.md).
 
 | Provider | Environment variable | Default model |
 |---|---|---|

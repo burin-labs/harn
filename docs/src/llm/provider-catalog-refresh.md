@@ -77,7 +77,8 @@ harn providers matrix --check
 `make gen-provider-catalog` runs `harn providers export`, and
 `make check-provider-catalog` runs
 `harn providers validate --check-artifacts`. The full `make all` gate
-includes `check-provider-catalog`, `check-provider-matrix`, and the
+includes `check-provider-catalog`, `check-provider-matrix`,
+`check-provider-support`, and the
 refresh workflow drift gate.
 
 For local or private models, pass a providers-style TOML overlay to

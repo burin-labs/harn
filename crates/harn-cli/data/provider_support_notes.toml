@@ -1,0 +1,210 @@
+# Curated provider-support guidance layered onto generated catalog and
+# capability data by `harn providers support`.
+
+[[entry]]
+id = "anthropic"
+catalog_provider = "anthropic"
+display_name = "Anthropic"
+endpoint_style = "Anthropic Messages API"
+recommended_model = "claude-haiku-4-5-20251001"
+recommended_selector = "haiku"
+recommended_tool_format = "native"
+usage_confidence = "high"
+recommended_options = [
+  'provider = "anthropic"',
+  'model = "haiku"',
+  'tool_format = "native"',
+  'structured_output_mode = "xml_tagged"',
+]
+notes = [
+  "Native tools, prompt caching, file upload, and XML-oriented scaffolding are first-class in Harn capability data.",
+  "Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported.",
+]
+caveats = [
+  "Strict JSON output is modeled as tool-use or XML-tagged output rather than OpenAI-style response_json_schema.",
+]
+mcp_notes = [
+  "No provider-specific MCP connector is required; Harn exposes MCP tools through the runtime tool registry.",
+]
+
+[[entry]]
+id = "openai"
+catalog_provider = "openai"
+display_name = "OpenAI"
+endpoint_style = "OpenAI chat completions / Responses-compatible routes"
+recommended_model = "gpt-4o-mini"
+recommended_selector = "mid"
+recommended_tool_format = "native"
+usage_confidence = "high"
+recommended_options = [
+  'provider = "openai"',
+  'model = "mid"',
+  'tool_format = "native"',
+  'structured_output_mode = "native_json"',
+]
+notes = [
+  "OpenAI-family routes default to native tool calls and native JSON structured output when the model row supports tools.",
+  "Reasoning models use developer-role instructions and reasoning-summary transcript projection where the capability row declares it.",
+]
+caveats = [
+  "Use explicit reasoning effort only on reasoning rows; non-reasoning chat models should keep thinking disabled.",
+]
+mcp_notes = [
+  "Hosted MCP behavior is normalized through Harn tool definitions; provider-side hosted tools remain a separate provider feature.",
+]
+
+[[entry]]
+id = "gemini"
+catalog_provider = "gemini"
+display_name = "Gemini API"
+endpoint_style = "Gemini generateContent"
+recommended_model = "gemini-2.5-flash"
+recommended_selector = "gemini:gemini-2.5-flash"
+recommended_tool_format = "native"
+usage_confidence = "medium"
+recommended_options = [
+  'provider = "gemini"',
+  'model = "gemini-2.5-flash"',
+  'tool_format = "native"',
+  'structured_output_mode = "native_json"',
+]
+notes = [
+  "Harn lowers native tools to Gemini function declarations and maps function responses back into the transcript.",
+  "Gemini response usage maps cached-content token counts when the provider reports them.",
+]
+caveats = [
+  "Harn does not create Gemini context-cache resources yet; cache accounting is therefore observational.",
+]
+mcp_notes = [
+  "MCP tools are regular Harn runtime tools before they become Gemini function declarations.",
+]
+
+[[entry]]
+id = "mistral"
+catalog_provider = "openrouter"
+display_name = "Mistral via OpenRouter"
+endpoint_style = "OpenAI-compatible chat completions through OpenRouter"
+recommended_model = "mistralai/mistral-small-2603"
+recommended_selector = "openrouter:mistralai/mistral-small-2603"
+recommended_tool_format = "native"
+usage_confidence = "medium"
+recommended_options = [
+  'provider = "openrouter"',
+  'model = "mistralai/mistral-small-2603"',
+  'tool_format = "native"',
+]
+notes = [
+  "Harn catalogs hosted Mistral routes through OpenRouter today, so endpoint and auth behavior are OpenAI-compatible.",
+  "Use this row for Mistral-family recommendation surfaces until a direct Mistral provider is cataloged.",
+]
+caveats = [
+  "Provider-native behavior depends on the OpenRouter model route; run the coding-agent benchmark before promoting it to a default for critical harnesses.",
+]
+mcp_notes = [
+  "MCP tools are rendered as OpenAI-compatible tool definitions on this route.",
+]
+
+[[entry]]
+id = "ollama"
+catalog_provider = "ollama"
+display_name = "Ollama"
+endpoint_style = "Ollama native chat API"
+recommended_model = "devstral-small-2:24b"
+recommended_selector = "devstral-small-2"
+recommended_tool_format = "text"
+usage_confidence = "high"
+recommended_options = [
+  'provider = "ollama"',
+  'model = "devstral-small-2"',
+  'tool_format = "text"',
+  'thinking = "off"',
+]
+notes = [
+  "Local Ollama model quality varies by template and quantization; Harn defaults known fragile routes to the text-tool contract.",
+  "Use `harn provider-tool-probe` receipts to promote aliases from unknown to native/text/disabled on a machine.",
+]
+caveats = [
+  "Some Ollama native tool parsers reject otherwise valid text-mode model output; the capability table records those routes as text-only.",
+]
+local_setup_notes = [
+  "Run `harn models install devstral-small-2` or `harn models install qwen3.6-coding`, then verify with `harn provider-ready ollama --model <model>`.",
+]
+mcp_notes = [
+  "MCP tools are local Harn tools; prefer the text tool contract unless a probe proves native calls work for the installed model.",
+]
+
+[[entry]]
+id = "local"
+catalog_provider = "local"
+display_name = "OpenAI-compatible local server"
+endpoint_style = "OpenAI-compatible chat completions"
+recommended_model = "gemma-4-26b-a4b-it"
+recommended_selector = "local-gemma4"
+recommended_tool_format = "text"
+usage_confidence = "low"
+recommended_options = [
+  'provider = "local"',
+  'model = "local-gemma4"',
+  'tool_format = "text"',
+]
+notes = [
+  "Use this generic provider when a local server speaks OpenAI chat completions but does not need a provider-specific quirk profile.",
+]
+caveats = [
+  "Prefer `llamacpp` or `mlx` when those runtimes are known, because their capability rows can encode template-specific behavior.",
+]
+local_setup_notes = [
+  "Set `LOCAL_LLM_BASE_URL` and either `LOCAL_LLM_MODEL` or an explicit Harn model selector, then run `harn provider-ready local`.",
+]
+mcp_notes = [
+  "MCP tools are exposed as OpenAI-compatible tool definitions unless the route is configured to prefer Harn text tools.",
+]
+
+[[entry]]
+id = "llamacpp"
+catalog_provider = "llamacpp"
+display_name = "llama.cpp server"
+endpoint_style = "OpenAI-compatible llama-server"
+recommended_model = "qwen3.6-35b-a3b-ud-q4-k-xl"
+recommended_selector = "llamacpp-qwen3.6-q4"
+recommended_tool_format = "text"
+usage_confidence = "medium"
+recommended_options = [
+  'provider = "llamacpp"',
+  'model = "llamacpp-qwen3.6-q4"',
+  'tool_format = "text"',
+  'thinking = "off"',
+]
+notes = [
+  "llama.cpp gets its own provider so Harn can model Qwen chat-template and thinking behavior separately from generic local OpenAI-compatible servers.",
+]
+caveats = [
+  "Run both provider readiness and tool probes after changing GGUF, context, KV-cache, or chat-template settings.",
+]
+local_setup_notes = [
+  "Run `harn models install local-qwen3.6-gguf` for the recommended download and launch commands.",
+]
+
+[[entry]]
+id = "mlx"
+catalog_provider = "mlx"
+display_name = "MLX OpenAI-compatible server"
+endpoint_style = "OpenAI-compatible MLX server"
+recommended_model = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+recommended_selector = "mlx-qwen3.6-27b"
+recommended_tool_format = "native"
+usage_confidence = "medium"
+recommended_options = [
+  'provider = "mlx"',
+  'model = "mlx-qwen3.6-27b"',
+  'tool_format = "native"',
+]
+notes = [
+  "MLX routes use native tools only after the served identity and tool probe match the cataloged model.",
+]
+caveats = [
+  "`mlx-vlm` server flags vary by release; launch first, then verify with `harn provider-ready mlx`.",
+]
+local_setup_notes = [
+  "Run `harn models install local-qwen3.6-27b` for the venv, download, launch, and verification commands.",
+]

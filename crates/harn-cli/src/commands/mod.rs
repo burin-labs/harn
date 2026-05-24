@@ -45,6 +45,7 @@ pub(crate) mod portal;
 pub mod precompile;
 pub(crate) mod protocol_conformance;
 pub(crate) mod provider;
+pub(crate) mod provider_support;
 pub(crate) mod providers;
 pub(crate) mod quickstart;
 pub(crate) mod repl;

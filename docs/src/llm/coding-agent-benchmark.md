@@ -87,6 +87,17 @@ or a raw coding-agent `summary.json`. Without an input path, it reads the latest
 benchmark report and falls back to bundled seed evidence. `harn quickstart` uses
 the same recommendation order when choosing among installed local Ollama models.
 
+Use the same `summary.json` to refresh the generated provider support page and
+JSON sidecar:
+
+```sh
+harn providers support \
+  --empirical .harn-runs/coding-agent-bench/latest/summary.json
+```
+
+The checked-in page stays deterministic when no empirical input is supplied, so
+CI can run `make check-provider-support` without depending on local API keys.
+
 ## Reading Results
 
 Use the rollups and native/text comparison table to spot provider abstraction

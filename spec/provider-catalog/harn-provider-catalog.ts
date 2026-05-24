@@ -3194,17 +3194,17 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
@@ -3231,7 +3231,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "structured_output"
       ]
     },
     {
@@ -3249,17 +3250,17 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
@@ -3286,7 +3287,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "structured_output"
       ]
     },
     {

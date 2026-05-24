@@ -929,6 +929,11 @@ async fn async_main() {
                     command_error(&error);
                 }
             }
+            ProvidersCommand::Support(support) => {
+                if let Err(error) = commands::provider_support::run(&support) {
+                    command_error(&error);
+                }
+            }
             ProvidersCommand::Recommend(recommend) => {
                 if let Err(error) = commands::providers::run_recommend(&recommend) {
                     command_error(&error);

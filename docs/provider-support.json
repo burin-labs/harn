@@ -1,0 +1,1116 @@
+{
+  "schema_version": 1,
+  "generated_by": "harn providers support",
+  "sources": {
+    "provider_catalog_schema_version": 2,
+    "capability_matrix": "crates/harn-vm/src/llm/capabilities.toml",
+    "notes": "crates/harn-cli/data/provider_support_notes.toml",
+    "empirical": []
+  },
+  "providers": [
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic",
+      "catalog_provider": "anthropic",
+      "endpoint_style": "Anthropic Messages API",
+      "classification": "hosted",
+      "auth_env": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "recommended": {
+        "selector": "haiku",
+        "provider": "anthropic",
+        "model": "claude-haiku-4-5-20251001",
+        "display_name": "Claude Haiku 4.5",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"anthropic\"",
+          "model = \"haiku\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"xml_tagged\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "tool_use",
+        "structured_output_mode": "xml_tagged",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "Native tools, prompt caching, file upload, and XML-oriented scaffolding are first-class in Harn capability data.",
+        "Claude 4.7 rows use adaptive thinking; older Claude 4 rows use explicit thinking controls where supported."
+      ],
+      "caveats": [
+        "Strict JSON output is modeled as tool-use or XML-tagged output rather than OpenAI-style response_json_schema."
+      ],
+      "mcp_notes": [
+        "No provider-specific MCP connector is required; Harn exposes MCP tools through the runtime tool registry."
+      ],
+      "local_setup_notes": []
+    },
+    {
+      "id": "azure_openai",
+      "display_name": "Azure Openai",
+      "catalog_provider": "azure_openai",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_AD_TOKEN",
+        "AZURE_OPENAI_BEARER_TOKEN"
+      ],
+      "recommended": {
+        "selector": "azure_openai:gpt-*",
+        "provider": "azure_openai",
+        "model": "gpt-*",
+        "display_name": null,
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"azure_openai\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "bedrock",
+      "display_name": "Bedrock",
+      "catalog_provider": "bedrock",
+      "endpoint_style": "AWS Bedrock Converse",
+      "classification": "hosted",
+      "auth_env": [],
+      "recommended": {
+        "selector": "bedrock:anthropic.claude-*",
+        "provider": "bedrock",
+        "model": "anthropic.claude-*",
+        "display_name": null,
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"bedrock\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"xml_tagged\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "xml_tagged",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "cerebras",
+      "display_name": "Cerebras",
+      "catalog_provider": "cerebras",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "CEREBRAS_API_KEY"
+      ],
+      "recommended": {
+        "selector": "cerebras:gpt-oss-120b",
+        "provider": "cerebras",
+        "model": "gpt-oss-120b",
+        "display_name": "GPT-OSS 120B (Cerebras)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"cerebras\"",
+          "model = \"gpt-oss-120b\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "dashscope",
+      "display_name": "Dashscope",
+      "catalog_provider": "dashscope",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "DASHSCOPE_API_KEY"
+      ],
+      "recommended": {
+        "selector": "dashscope:qwen3.6*",
+        "provider": "dashscope",
+        "model": "qwen3.6*",
+        "display_name": null,
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"dashscope\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"delimited\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [
+          "disable_directive:/no_think",
+          "enabled"
+        ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "deepseek",
+      "display_name": "Deepseek",
+      "catalog_provider": "deepseek",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "DEEPSEEK_API_KEY"
+      ],
+      "recommended": {
+        "selector": "deepseek",
+        "provider": "deepseek",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"deepseek\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "fireworks",
+      "display_name": "Fireworks",
+      "catalog_provider": "fireworks",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "FIREWORKS_API_KEY"
+      ],
+      "recommended": {
+        "selector": "fireworks:*qwen3.6*",
+        "provider": "fireworks",
+        "model": "*qwen3.6*",
+        "display_name": null,
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"fireworks\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"delimited\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [
+          "disable_directive:/no_think",
+          "enabled"
+        ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "gemini",
+      "display_name": "Gemini API",
+      "catalog_provider": "gemini",
+      "endpoint_style": "Gemini generateContent",
+      "classification": "hosted",
+      "auth_env": [
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY"
+      ],
+      "recommended": {
+        "selector": "gemini:gemini-2.5-flash",
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "display_name": "Gemini 2.5 Flash",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"gemini\"",
+          "model = \"gemini-2.5-flash\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "adaptive",
+          "effort",
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "medium"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "Harn lowers native tools to Gemini function declarations and maps function responses back into the transcript.",
+        "Gemini response usage maps cached-content token counts when the provider reports them."
+      ],
+      "caveats": [
+        "Harn does not create Gemini context-cache resources yet; cache accounting is therefore observational."
+      ],
+      "mcp_notes": [
+        "MCP tools are regular Harn runtime tools before they become Gemini function declarations."
+      ],
+      "local_setup_notes": []
+    },
+    {
+      "id": "groq",
+      "display_name": "Groq",
+      "catalog_provider": "groq",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "GROQ_API_KEY"
+      ],
+      "recommended": {
+        "selector": "groq",
+        "provider": "groq",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"groq\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "huggingface",
+      "display_name": "Huggingface",
+      "catalog_provider": "huggingface",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "HF_TOKEN",
+        "HUGGINGFACE_API_KEY"
+      ],
+      "recommended": {
+        "selector": "huggingface:qwen/qwen3.6*",
+        "provider": "huggingface",
+        "model": "qwen/qwen3.6*",
+        "display_name": null,
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"huggingface\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"delimited\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [
+          "disable_directive:/no_think",
+          "enabled"
+        ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "llamacpp",
+      "display_name": "llama.cpp server",
+      "catalog_provider": "llamacpp",
+      "endpoint_style": "OpenAI-compatible llama-server",
+      "classification": "local",
+      "auth_env": [],
+      "recommended": {
+        "selector": "llamacpp-qwen3.6-q4",
+        "provider": "llamacpp",
+        "model": "qwen3.6-35b-a3b-ud-q4-k-xl",
+        "display_name": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"llamacpp\"",
+          "model = \"llamacpp-qwen3.6-q4\"",
+          "tool_format = \"text\"",
+          "thinking = \"off\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "text_only",
+        "structured_output_transport": "native",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [
+          "disable_directive:/no_think",
+          "enabled"
+        ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "medium"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "llama.cpp gets its own provider so Harn can model Qwen chat-template and thinking behavior separately from generic local OpenAI-compatible servers."
+      ],
+      "caveats": [
+        "Run both provider readiness and tool probes after changing GGUF, context, KV-cache, or chat-template settings."
+      ],
+      "mcp_notes": [],
+      "local_setup_notes": [
+        "Run `harn models install local-qwen3.6-gguf` for the recommended download and launch commands."
+      ]
+    },
+    {
+      "id": "local",
+      "display_name": "OpenAI-compatible local server",
+      "catalog_provider": "local",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "local",
+      "auth_env": [],
+      "recommended": {
+        "selector": "local-gemma4",
+        "provider": "local",
+        "model": "gemma-4-26b-a4b-it",
+        "display_name": "Gemma 4 26B MoE (local)",
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"local\"",
+          "model = \"local-gemma4\"",
+          "tool_format = \"text\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "text_only",
+        "structured_output_transport": "none",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "low"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "Use this generic provider when a local server speaks OpenAI chat completions but does not need a provider-specific quirk profile."
+      ],
+      "caveats": [
+        "Prefer `llamacpp` or `mlx` when those runtimes are known, because their capability rows can encode template-specific behavior."
+      ],
+      "mcp_notes": [
+        "MCP tools are exposed as OpenAI-compatible tool definitions unless the route is configured to prefer Harn text tools."
+      ],
+      "local_setup_notes": [
+        "Set `LOCAL_LLM_BASE_URL` and either `LOCAL_LLM_MODEL` or an explicit Harn model selector, then run `harn provider-ready local`."
+      ]
+    },
+    {
+      "id": "mistral",
+      "display_name": "Mistral via OpenRouter",
+      "catalog_provider": "openrouter",
+      "endpoint_style": "OpenAI-compatible chat completions through OpenRouter",
+      "classification": "hosted",
+      "auth_env": [
+        "OPENROUTER_API_KEY"
+      ],
+      "recommended": {
+        "selector": "openrouter:mistralai/mistral-small-2603",
+        "provider": "openrouter",
+        "model": "mistralai/mistral-small-2603",
+        "display_name": "Mistral Small 4",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"openrouter\"",
+          "model = \"mistralai/mistral-small-2603\"",
+          "tool_format = \"native\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "medium"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "Harn catalogs hosted Mistral routes through OpenRouter today, so endpoint and auth behavior are OpenAI-compatible.",
+        "Use this row for Mistral-family recommendation surfaces until a direct Mistral provider is cataloged."
+      ],
+      "caveats": [
+        "Provider-native behavior depends on the OpenRouter model route; run the coding-agent benchmark before promoting it to a default for critical harnesses."
+      ],
+      "mcp_notes": [
+        "MCP tools are rendered as OpenAI-compatible tool definitions on this route."
+      ],
+      "local_setup_notes": []
+    },
+    {
+      "id": "mlx",
+      "display_name": "MLX OpenAI-compatible server",
+      "catalog_provider": "mlx",
+      "endpoint_style": "OpenAI-compatible MLX server",
+      "classification": "local",
+      "auth_env": [],
+      "recommended": {
+        "selector": "mlx-qwen3.6-27b",
+        "provider": "mlx",
+        "model": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+        "display_name": "Qwen3.6 27B (MLX 4-bit)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"mlx\"",
+          "model = \"mlx-qwen3.6-27b\"",
+          "tool_format = \"native\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [
+          "disable_directive:/no_think",
+          "enabled"
+        ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "medium"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "MLX routes use native tools only after the served identity and tool probe match the cataloged model."
+      ],
+      "caveats": [
+        "`mlx-vlm` server flags vary by release; launch first, then verify with `harn provider-ready mlx`."
+      ],
+      "mcp_notes": [],
+      "local_setup_notes": [
+        "Run `harn models install local-qwen3.6-27b` for the venv, download, launch, and verification commands."
+      ]
+    },
+    {
+      "id": "ollama",
+      "display_name": "Ollama",
+      "catalog_provider": "ollama",
+      "endpoint_style": "Ollama native chat API",
+      "classification": "local",
+      "auth_env": [],
+      "recommended": {
+        "selector": "devstral-small-2",
+        "provider": "ollama",
+        "model": "devstral-small-2:24b",
+        "display_name": "Devstral Small 2 24B",
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"ollama\"",
+          "model = \"devstral-small-2\"",
+          "tool_format = \"text\"",
+          "thinking = \"off\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "text_only",
+        "structured_output_transport": "format_kw",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "Local Ollama model quality varies by template and quantization; Harn defaults known fragile routes to the text-tool contract.",
+        "Use `harn provider-tool-probe` receipts to promote aliases from unknown to native/text/disabled on a machine."
+      ],
+      "caveats": [
+        "Some Ollama native tool parsers reject otherwise valid text-mode model output; the capability table records those routes as text-only."
+      ],
+      "mcp_notes": [
+        "MCP tools are local Harn tools; prefer the text tool contract unless a probe proves native calls work for the installed model."
+      ],
+      "local_setup_notes": [
+        "Run `harn models install devstral-small-2` or `harn models install qwen3.6-coding`, then verify with `harn provider-ready ollama --model <model>`."
+      ]
+    },
+    {
+      "id": "openai",
+      "display_name": "OpenAI",
+      "catalog_provider": "openai",
+      "endpoint_style": "OpenAI chat completions / Responses-compatible routes",
+      "classification": "hosted",
+      "auth_env": [
+        "OPENAI_API_KEY"
+      ],
+      "recommended": {
+        "selector": "mid",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "display_name": "GPT-4o Mini",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"openai\"",
+          "model = \"mid\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [
+        "OpenAI-family routes default to native tool calls and native JSON structured output when the model row supports tools.",
+        "Reasoning models use developer-role instructions and reasoning-summary transcript projection where the capability row declares it."
+      ],
+      "caveats": [
+        "Use explicit reasoning effort only on reasoning rows; non-reasoning chat models should keep thinking disabled."
+      ],
+      "mcp_notes": [
+        "Hosted MCP behavior is normalized through Harn tool definitions; provider-side hosted tools remain a separate provider feature."
+      ],
+      "local_setup_notes": []
+    },
+    {
+      "id": "openrouter",
+      "display_name": "Openrouter",
+      "catalog_provider": "openrouter",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "OPENROUTER_API_KEY"
+      ],
+      "recommended": {
+        "selector": "openrouter:google/gemini-2.5-flash",
+        "provider": "openrouter",
+        "model": "google/gemini-2.5-flash",
+        "display_name": "Gemini 2.5 Flash (via OpenRouter)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"openrouter\"",
+          "model = \"google/gemini-2.5-flash\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "effort",
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "tgi",
+      "display_name": "Tgi",
+      "catalog_provider": "tgi",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "local",
+      "auth_env": [],
+      "recommended": {
+        "selector": "tgi",
+        "provider": "tgi",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"tgi\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "local_zero_cost"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "together",
+      "display_name": "Together",
+      "catalog_provider": "together",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "TOGETHER_AI_API_KEY"
+      ],
+      "recommended": {
+        "selector": "together:Qwen/Qwen3-Coder-Next-FP8",
+        "provider": "together",
+        "model": "Qwen/Qwen3-Coder-Next-FP8",
+        "display_name": "Qwen3 Coder Next FP8 (Together, dedicated)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"together\"",
+          "model = \"Qwen/Qwen3-Coder-Next-FP8\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"delimited\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "vertex",
+      "display_name": "Vertex",
+      "catalog_provider": "vertex",
+      "endpoint_style": "Gemini generateContent",
+      "classification": "hosted",
+      "auth_env": [
+        "VERTEX_AI_ACCESS_TOKEN",
+        "GOOGLE_OAUTH_ACCESS_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS"
+      ],
+      "recommended": {
+        "selector": "vertex:gemini-*",
+        "provider": "vertex",
+        "model": "gemini-*",
+        "display_name": null,
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"vertex\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "vllm",
+      "display_name": "Vllm",
+      "catalog_provider": "vllm",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "local",
+      "auth_env": [],
+      "recommended": {
+        "selector": "vllm",
+        "provider": "vllm",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"vllm\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "local_zero_cost"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    }
+  ]
+}

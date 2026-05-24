@@ -1480,6 +1480,16 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn openrouter_mistral_routes_use_native_tools() {
+        reset();
+        let caps = lookup("openrouter", "mistralai/mistral-small-2603");
+        assert!(caps.native_tools);
+        assert!(caps.text_tool_wire_format_supported);
+        assert_eq!(caps.structured_output.as_deref(), Some("native"));
+        assert_eq!(caps.structured_output_mode, "native_json");
+    }
+
+    #[test]
     fn dashscope_and_llamacpp_resolve_capabilities() {
         reset();
         // New sibling providers should fall through to `openai` for

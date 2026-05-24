@@ -47,6 +47,11 @@ condensed series summaries instead of full per-patch history.
 - **Provider matrix lifecycle command.** Added `harn providers matrix` so the
   capability matrix docs can be regenerated and checked through the same
   provider command group that owns catalog refresh, validation, and export.
+- **Generated provider support recommendations (#2198).** Added
+  `harn providers support`, `docs/src/provider-support.md`, and
+  `docs/provider-support.json` so catalog metadata, capability rules,
+  curated provider caveats, and optional coding-agent benchmark summaries
+  produce one checkable recommendation surface for docs and downstream apps.
 
 - **Safer starter agent defaults.** The `harn new --template agent` starter now
   uses scoped read-only `agent_host_tools`, the standard `audit_agent` preset,
