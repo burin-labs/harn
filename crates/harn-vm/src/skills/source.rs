@@ -138,6 +138,46 @@ pub struct SkillManifestRef {
     pub unknown_fields: Vec<String>,
 }
 
+const COMMAND_FRONTMATTER_FIELDS: &[&str] = &["hooks", "command", "run"];
+
+/// Remove frontmatter fields that downstream hosts may execute as
+/// commands when the registry entry carries failed provenance.
+pub fn strip_untrusted_command_frontmatter(
+    entry: &mut BTreeMap<String, crate::value::VmValue>,
+) -> bool {
+    if !has_failed_provenance(entry) {
+        return false;
+    }
+    let mut stripped = false;
+    for key in COMMAND_FRONTMATTER_FIELDS {
+        stripped |= entry.remove(*key).is_some();
+    }
+    stripped
+}
+
+fn has_failed_provenance(entry: &BTreeMap<String, crate::value::VmValue>) -> bool {
+    let Some(provenance) = entry
+        .get("provenance")
+        .and_then(crate::value::VmValue::as_dict)
+    else {
+        return false;
+    };
+    let signed = matches!(
+        provenance.get("signed"),
+        Some(crate::value::VmValue::Bool(true))
+    );
+    let trusted = matches!(
+        provenance.get("trusted"),
+        Some(crate::value::VmValue::Bool(true))
+    );
+    let verified_status = match provenance.get("status") {
+        Some(crate::value::VmValue::String(status)) => &**status == "verified",
+        Some(_) => false,
+        None => signed && trusted,
+    };
+    !(signed && trusted && verified_status)
+}
+
 /// Filesystem source — walks one root directory looking for
 /// `SKILL.md` files two levels deep (`<root>/<name>/SKILL.md`) or a
 /// single flat file (`<root>/SKILL.md` when `<root>` itself is the
