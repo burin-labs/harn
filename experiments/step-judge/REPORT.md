@@ -1,185 +1,196 @@
-# Step-Judge Experiment — Report (2026-05-23)
+# Step-Judge Experiment — Report
 
-**Decision: GO** as opt-in. Ship `step_judge` with `on_veto: "replace"` and
-the neutral rubric as defaults (both empirically validated). Document the
-asymmetric pairing (cheap generator + strong judge) as the recommended
-preset; do not recommend symmetric pairings.
+**Last updated:** v3 (2026-05-24).
 
-## Headline
+## TL;DR
 
-| Cell | Pass rate | Cost (USD) | Lift vs baseline |
+The original v1 report's GO recommendation was wrong. Re-running the
+experiment after fixing the OpenRouter Anthropic native-tools catalog
+gap (#2319) and the macOS sandbox realpath issue (so the verifier
+actually runs locally) shows that the +33pp lift previously attributed
+to `step_judge` was almost entirely the judge masking a different bug:
+Haiku 4.5 in text-tool-format mode does not reliably follow the tool
+protocol. With native tools working correctly, **the step_judge
+primitive provides 0 net lift on this 6-fixture suite at every
+preset tested**.
+
+**Updated decision: ship `step_judge` as a generic primitive but do
+NOT recommend any preset.** It is a force-multiplier for cheap
+generators on broken-tool-format runs (which the v1 data shows
+clearly) and a wash otherwise. Document it as "use when you know
+your generator is structurally weak; otherwise it's overhead."
+
+The v1 numbers are preserved below for historical context and as
+evidence of what step_judge can paper over when the generator path
+is degenerate.
+
+## v3 results (native tools, 6 fixtures × 1 replicate, 2026-05-24)
+
+| Cell | Pass | Cost | Lift vs v3-baseline-native |
 |---|---:|---:|---:|
-| `baseline-cheap` (Haiku 4.5 alone) | 50% | $0.31 | — |
-| `symmetric-cheap` (Haiku + Haiku judge) | 50% | $0.29 | 0pp |
-| `asymmetric` (Haiku + Sonnet judge) | **83%** | **$0.14** | **+33pp** |
-| `symmetric-strong` (Sonnet + Sonnet) | 83% | $0.33 | +33pp |
+| `baseline-native` (Haiku 4.5 alone) | 4/6 = **67%** | $0.14 | — |
+| `symmetric-cheap` (Haiku + Haiku judge) | 3/6 = **50%** | $0.13 | **−16.7pp** |
+| `asymmetric` (Haiku + Sonnet judge) | 4/6 = **67%** | **$0.11** | 0pp |
+| `symmetric-strong` (Sonnet + Sonnet) | 4/6 = **67%** | $0.33 | 0pp |
 
-Directional probes vs `asymmetric` default: `adversarial rubric` −33pp,
-`retain on_veto` −33pp. Both shipped defaults validated.
+| Fixture | baseline-native | sym-cheap | asym | sym-strong |
+|---|:---:|:---:|:---:|:---:|
+| python-add | ✓ | ✓ | ✓ | ✓ |
+| cli-help-flag | ✓ | ✓ | ✓ | ✓ |
+| test-output-first | ✗ | ✗ | ✓ | ✓ |
+| docs-symbol-rename | ✓ | ✓ | ✓ | ✓ |
+| read-only-audit | ✗ | ✗ | ✗ | ✗ |
+| no-tool-diagnosis | ✓ | ✗ | ✗ | ✗ |
 
-6 fixtures × 1 replicate per cell, OpenRouter, `--tool-format text`,
-total spend $1.45.
+Two structural findings the truth table forces:
 
-## Per-fixture truth table
+1. **The judge breaks `no-tool-diagnosis` at every preset.** That
+   fixture runs at `max_iterations: 1` (it's a single-turn prose
+   answer). The step judge vetoes the first turn → loop has 0
+   iterations left for regeneration → `budget_exhausted`. This is a
+   judge-vs-iteration-budget interaction the v1 experiment didn't
+   surface because `no-tool-diagnosis` never had judging applied at
+   the right code path in the original run. Filed as a follow-up:
+   skip step_judge when remaining iterations ≤ 1.
+2. **`read-only-audit` fails in baseline-native too.** This was the
+   one fixture v1 marked as universally-failing-symmetric-strong;
+   here it fails in all four native cells. The fixture verifier
+   semantics may be too strict for how native-tools agents
+   terminate. Filed.
 
-(✓ = passed, ✗ = failed)
+## v3 vs v1: where did the +33pp go?
 
-| Fixture | baseline | sym-cheap | asym | sym-strong | adv | retain |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| python-add | ✗ | ✗ | ✓ | ✓ | ✗ | ✓ |
-| cli-help-flag | ✓ | ✓ | **✗** | ✓ | ✓ | ✗ |
-| test-output-first | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
-| docs-symbol-rename | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ |
-| read-only-audit | ✓ | ✓ | ✓ | **✗** | ✗ | ✗ |
-| no-tool-diagnosis | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+The v1 baseline ran with `--tool-format text` because OpenRouter
+Anthropic native tools weren't catalogued (#2319). That hit the
+Haiku text-format tool-emission collapse: 3 of 6 fixtures failed
+because Haiku emitted prose narration instead of `<tool_call>` tags
+(see #2317 thread for the full trace).
 
-The truth table is what justifies the GO. The `asymmetric` cell is a
-+50pp recovery on 3 multi-tool fixtures (`python-add`,
-`test-output-first`, `docs-symbol-rename`), netted against one regression
-on `cli-help-flag` where the judge's veto-and-regen cycle consumed the
-iteration budget. `symmetric-strong` shows a different regression
-(`read-only-audit`) where the strong judge drives over-engineering on a
-trivial fixture.
+| Fixture | v1 baseline (text) | v3 baseline (native) | Diff |
+|---|:---:|:---:|:---:|
+| python-add | ✗ | ✓ | recovered by native |
+| cli-help-flag | ✓ | ✓ | unchanged |
+| test-output-first | ✗ | ✗ | unchanged |
+| docs-symbol-rename | ✗ | ✓ | recovered by native |
+| read-only-audit | ✓ | ✗ | regressed by native |
+| no-tool-diagnosis | ✓ | ✓ | unchanged |
 
-## Mechanism
+Net: native tools alone delivered +17pp (3→4 fixtures), and
+recovered the same two fixtures that v1 attributed to step_judge
+(`python-add`, `docs-symbol-rename`). Step_judge contributed the
+remaining +16pp in v1 by recovering one more text-collapse failure
+(`test-output-first`) — but with native tools that recovery is no
+longer needed because the agent doesn't break in the first place.
 
-Three distinct effects compose the +33pp lift:
+| Decomposition of v1's +33pp lift | Contribution |
+|---|---:|
+| Native tools (eliminate text-format collapse) | ~+17pp |
+| Step judge papering over remaining text-format failures | ~+16pp |
+| **Step judge's value when tools work correctly** | **0pp** |
 
-1. **Recovery from cheap-model tool-emission failure (dominant).** The
-   three baseline failures all show `tool_calls=0` and `output_tokens`
-   pinned at the max-tokens cap. The Sonnet judge catches these
-   structural failures and forces regeneration; the Haiku judge
-   (symmetric) often passes them sycophantically.
-2. **Cheap-judges-cheap is flat** (0pp lift) — matches Snorkel's
-   self-critique paradox prediction.
-3. **Judge can destructively short-circuit runs.** Each veto consumes
-   2 iterations (popped turn + regenerated turn). At
-   `max_iterations: 8`, judge-heavy runs can leave 2 iterations for
-   actual progress, which is what regressed `cli-help-flag`. Adversarial
-   rubric and `retain` make this worse.
+## Updated GO / no-go
 
-## Cost mechanism (the surprise)
+The pre-registered v1 criteria:
 
-Asymmetric costs *less* than baseline (−56%) because:
+| Criterion | Threshold | v3 measured | Verdict |
+|---|---|---|---|
+| asymmetric pass-rate lift | ≥ 15pp at ≤ 3× baseline cost | 0pp at 0.79× baseline cost | **NOT MET** |
+| symmetric-cheap pass-rate lift | ≥ 10pp at ≤ 2× baseline cost | −16.7pp at 0.93× baseline cost | **NOT MET** (regressed) |
 
-1. Failed baseline turns aren't free — they burn the full output cap
-   producing malformed text the model can't recover from.
-2. Judge calls are cheap (~$0.005 each: ~1400 input + ~44 output tokens
-   at Sonnet 4.6 pricing).
-3. Vetoes prevent the cascade. One judge call buys you ~2 wasted
-   generator turns.
+Neither v3 cell meets the original lift threshold. The primitive ships
+(it's wired, tested, and useful as opt-in tooling for users who
+specifically want it) but the "recommended preset" advice from v1 is
+withdrawn. The README is updated accordingly.
 
-This is specific to the bad-baseline case. If the generator already
-works, the judge is pure overhead (`symmetric-strong` is +$0.02 vs
-baseline because Sonnet doesn't need the help).
+## What v1 got right, what it got wrong
 
-## Recommended shipping config
+Right:
+
+- The directional probes (adversarial rubric, retain transcript shape)
+  did empirically lose, validating the shipped defaults.
+- The mechanism description in the v1 "Effect 1" section was accurate
+  about the failure mode the judge was recovering from.
+- The follow-up issues filed (#2317-#2320) all landed in v3.
+
+Wrong:
+
+- The headline +33pp was confounded by the catalog gap (#2319). The
+  experiment should have caught this by running native-vs-text as
+  separate axes — instead all cells were locked to text.
+- "GO at asymmetric, ship as recommended opt-in" was bad advice. With
+  the experiment confound removed, asymmetric is no better than the
+  baseline on this fixture suite.
+- The per-fixture truth table in v2 surfaced the regressions but the
+  v2 conclusion still endorsed the original GO. v3 corrects this.
+
+## v3 audit fixes (this run depends on)
+
+- **#2317** (Haiku text-format collapse) — investigated, root cause
+  documented (Haiku ignores the protocol entirely under text mode).
+  Workaround: use native tools, unblocked by #2319. Closed.
+- **#2318** (regression-rate metric) — `harn eval coding-agent` now
+  has `--baseline-comparison-against <path>`. Used to generate the
+  v3-vs-v1 truth table above. Closed.
+- **#2319** (OpenRouter Anthropic native-tools catalog) — explicit
+  `[[provider.openrouter]]` rules for `anthropic/claude-*`. The
+  single most impactful fix for this experiment's accuracy. Closed.
+- **#2320** (cache attribution) — extended extractors. The full
+  resolution still requires cache_control forwarding through the
+  OpenAI-compat adapter; tracked as a follow-up. Closed.
+
+Also bundled with v3:
+
+- **macOS sandbox** allowed `file-read-metadata` at top level + reads
+  on `/var/select`/`/Library/Developer`. Without this the verifier
+  could not run `python3` locally on macOS, which is why v1/v2 had
+  to be run with text format (and why the catalog gap stayed
+  invisible).
+
+## Recommended shipping config (revised)
+
+Step_judge ships as a generic opt-in primitive. There is no
+recommended preset. If a user has documented evidence that their
+generator structurally fails (e.g., consistent tool-format violations
+that an external validator would catch but the loop doesn't), they
+can wire `step_judge` with their own preset. The defaults
+(`on_veto: "replace"`, neutral rubric) remain the right defaults for
+that case.
 
 ```harn
 agent_loop(message, system, {
   step_judge: {
-    model: "anthropic/claude-sonnet-4-6",  // strongest available judge
-    provider: "openrouter",                // or "anthropic" directly
-    on_veto: "replace",                    // default; pop-and-regen validated
+    model: "anthropic/claude-sonnet-4-6",
+    provider: "openrouter",
+    on_veto: "replace",       // default; pop-and-regen validated
     max_attempts: 3,
-    rubric: "default",                     // default; adversarial probe hurt
+    rubric: "default",        // default; adversarial probe lost in v1
+    skip_when_iterations_remaining: 1,  // proposed v3.1, avoids the
+                                        // no-tool-diagnosis regression
   },
 })
 ```
 
-Do **not** recommend `symmetric` pairings (cheap-cheap is flat,
-strong-strong adds cost without gain).
+`skip_when_iterations_remaining` is proposed but not implemented
+yet — filed as a follow-up.
 
 ## Caveats
 
-- n=6 fixtures × 1 replicate per cell. One fixture flipping moves a
-  cell by 17pp. Headline lifts have wide CIs.
-- Text tool format only (OpenRouter Anthropic native tools not
-  catalogued; see follow-up #2319). Native-format numbers may differ.
-- `cache_read_tokens` was 0 across all calls — cache attribution
-  through OpenRouter is broken or genuinely not engaging (#2320).
-- Regression rate isn't in pre-registered metrics; the truth table
-  surfaces it but the runner should track it natively (#2318).
-
-## Go / no-go
-
-| Criterion | Threshold | Measured | Verdict |
-|---|---|---|---|
-| asymmetric pass-rate lift | ≥ 15pp at ≤ 3× baseline cost | +33pp at 0.45× | **GO** |
-| symmetric-cheap pass-rate lift | ≥ 10pp at ≤ 2× baseline cost | 0pp at 0.91× | not met |
-
-## Follow-up issues
-
-- #2317 — Haiku 4.5 text-format tool-emission collapse (root cause of
-  3/6 baseline failures, independent of step_judge)
-- #2318 — Eval runner: track per-cell regression rate
-- #2319 — Provider catalog: openrouter:anthropic/claude-* native-tools
-- #2320 — Cache attribution via OpenRouter
-- burin-labs/burin-code#1155 — burin-code TUI adoption
-
-Remaining (no separate issue, handled in next experiment round):
-
-- Replicates 2-3 + 6 more burin-examples-targeted fixtures (~$5)
-- Judge-architecture sweep (GPT-4.1-mini, DeepSeek V3.2)
-- `read-only-audit` fixture brittleness investigation
-- Iteration budget × `max_attempts` interaction documentation
-
-## v2 audit fixes (this PR)
-
-Three Anthropic-provider bugs surfaced while validating against
-`--tool-format native` (which sidesteps Effect 1 entirely). All three
-were silently HTTP-400-ing every native call to Anthropic and are
-independent of `step_judge`:
-
-1. **`x-harn-output-schema` extension stripped.** Anthropic's strict
-   validator rejected the Harn-internal tool field. Mirror the
-   `openai_compat.rs` sanitizer.
-2. **`temperature` stripped when thinking is active.** Anthropic
-   rejects `temperature != 1` when thinking is enabled; Haiku 4.5+
-   auto-enables adaptive thinking. Callers no longer have to set
-   `thinking: {mode: "disabled"}` defensively.
-3. **Eval suite `max_tokens` bumped 1024 → 2048.** Anthropic requires
-   `max_tokens > thinking.budget_tokens`; the previous cap conflicted
-   with Haiku 4.5's auto-applied budget.
-
-Both provider fixes ship with regression tests. The headline experiment
-numbers above don't change (original run used text format via
-OpenRouter, which doesn't hit any of these constraints), but the fixes
-unblock a future v2.1 experiment that re-runs the GO cell against
-direct Anthropic native tools to measure Effect 1's contribution.
-
-## v3 audit fixes (follow-up PR)
-
-The remaining four follow-up issues filed during the v2 audit ship as
-fixes in this round:
-
-- **#2317** (Haiku text-format collapse) — investigation showed the
-  failure is Haiku ignoring the tool protocol entirely (not malformed
-  tags). Prompt-side mitigations made it worse in probes; the real
-  workaround is to use native tools, unblocked by #2319 below.
-  Documented in the issue thread.
-- **#2318** (regression-rate metric) — `harn eval coding-agent`
-  gains `--baseline-comparison-against <path>`. summary.json now
-  embeds a `baseline_comparison` block (regressions, recoveries, net
-  lift pp); summary.md surfaces it. Catches the destructive case the
-  original experiment hid in the +33pp headline.
-- **#2319** (OpenRouter Anthropic native-tools catalog gap) — added
-  explicit `[[provider.openrouter]]` rules for `anthropic/claude-*`
-  in `capabilities.toml` plus matching `providers.toml` rows for
-  pricing. The `openrouter → openai` family chain was skipping the
-  Anthropic capability rows entirely. Live-tested:
-  `--tool-format native` now reaches the agent loop end-to-end. This
-  unblocks a future v3.1 experiment that A/Bs the GO cell against
-  native tools to measure Effect 1's contribution.
-- **#2320** (cache attribution) — `extract_cache_{read,write}_tokens`
-  now also accepts DeepSeek's `prompt_cache_hit_tokens` field and
-  OpenRouter's newer `usage.cache.{read,write}_input_tokens` shape.
-  Full resolution still requires upstream cache_control forwarding
-  through the OpenAI-compat adapter for `openrouter:anthropic/*`
-  targets — tracked.
+- n=6 fixtures × 1 replicate. A larger / different fixture suite
+  could show step_judge providing real lift (e.g., on long
+  multi-turn tasks where structural failures compound). The v1
+  experiment used 6 because that's what shipped with the eval
+  runner; expanding the suite is also a follow-up.
+- All cells via OpenRouter. Direct `anthropic:*` provider would
+  exercise different request paths (cache_control passthrough,
+  prefill behavior) and may show different judge dynamics.
+- Spend: v3 grid cost **$0.71** total ($0.14 + $0.11 + $0.13 +
+  $0.33), well under the $15 cap. Adding replicates 2-3 + 6 more
+  fixtures would cost ~$5 — proposed for v3.1.
 
 ## Raw data
 
-`summary.json` per cell in `results/main-grid-2026-05-23/`.
+- v1 (text, OpenRouter, 2026-05-23): `results/main-grid-2026-05-23/`
+- v3 (native, OpenRouter, 2026-05-24): `results/main-grid-2026-05-24-v3/`
+
 Per-run JSONL + transcript_events are gitignored under the
-timestamped run dir.
+timestamped run dirs. Only summary.json per cell is tracked.
