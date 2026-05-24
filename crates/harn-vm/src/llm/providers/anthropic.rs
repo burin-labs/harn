@@ -241,7 +241,15 @@ impl AnthropicProvider {
         // Claude Opus 4.7+ rejects non-default sampling parameters with
         // HTTP 400. We strip them transparently and warn once per model
         // so pipeline authors don't have to special-case each release.
-        let strip_sampling = model_rejects_sampling_params(&opts.model);
+        //
+        // Anthropic also rejects `temperature != 1` when thinking is
+        // active (adaptive, effort, or enabled): "temperature may only
+        // be set to 1 when thinking is enabled". Strip sampling params
+        // in that case too so callers can default to temperature=0 for
+        // determinism without having to know which models silently
+        // auto-enable thinking.
+        let thinking_active = !matches!(opts.thinking, ThinkingConfig::Disabled);
+        let strip_sampling = model_rejects_sampling_params(&opts.model) || thinking_active;
         let any_sampling_supplied =
             opts.temperature.is_some() || opts.top_p.is_some() || opts.top_k.is_some();
         if strip_sampling && any_sampling_supplied {
@@ -263,7 +271,11 @@ impl AnthropicProvider {
         }
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
-                body["tools"] = serde_json::json!(tools);
+                let sanitized: Vec<serde_json::Value> = tools
+                    .iter()
+                    .map(sanitize_anthropic_tool_for_request)
+                    .collect();
+                body["tools"] = serde_json::json!(sanitized);
             }
         }
         if let Some(ref tc) = opts.tool_choice {
@@ -327,6 +339,22 @@ impl AnthropicProvider {
         )
         .await
     }
+}
+
+/// Strip Harn-internal extensions that Anthropic's strict request validator
+/// rejects with HTTP 400 (`Extra inputs are not permitted`). Mirrors the
+/// equivalent helper in `openai_compat.rs`. Anthropic's native-tools shape
+/// keeps tool fields at the root (no `function` wrapper), so we strip
+/// only at that level.
+fn sanitize_anthropic_tool_for_request(tool: &serde_json::Value) -> serde_json::Value {
+    let mut tool = tool.clone();
+    if let Some(object) = tool.as_object_mut() {
+        object.remove("x-harn-output-schema");
+        object.remove("defer_loading");
+        object.remove("namespace");
+        object.remove("namespaces");
+    }
+    tool
 }
 
 fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Value) {
@@ -459,6 +487,51 @@ mod tests {
         let provider = AnthropicProvider;
         assert!(provider.supports_defer_loading("claude-opus-4-7"));
         assert!(!provider.supports_defer_loading("claude-opus-3-5"));
+    }
+
+    #[test]
+    fn temperature_stripped_when_thinking_active() {
+        // Anthropic rejects HTTP 400 if `temperature != 1` when thinking is
+        // active. Strip the temperature transparently so callers can default
+        // to temperature=0 for determinism without having to know which
+        // models silently auto-enable thinking.
+        let mut payload = base_payload();
+        payload.temperature = Some(0.0);
+        payload.thinking = ThinkingConfig::Adaptive;
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert!(
+            body.get("temperature").is_none(),
+            "temperature must be stripped when thinking is active to avoid HTTP 400"
+        );
+        // Sanity: temperature is preserved when thinking is disabled.
+        let mut payload2 = base_payload();
+        payload2.temperature = Some(0.0);
+        payload2.thinking = ThinkingConfig::Disabled;
+        let body2 = AnthropicProvider::build_request_body(&payload2);
+        assert_eq!(body2["temperature"], serde_json::json!(0.0));
+    }
+
+    #[test]
+    fn native_tools_strip_harn_internal_extensions() {
+        let mut payload = base_payload();
+        payload.native_tools = Some(vec![serde_json::json!({
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {"type": "object"},
+            "x-harn-output-schema": {"type": "object"},
+            "defer_loading": true,
+            "namespace": "fs",
+        })]);
+        let body = AnthropicProvider::build_request_body(&payload);
+        let sent = body["tools"][0].as_object().expect("tool object");
+        assert!(
+            !sent.contains_key("x-harn-output-schema"),
+            "Anthropic rejects unknown tool fields with HTTP 400; the x-harn-output-schema \
+             extension must be stripped before sending"
+        );
+        assert!(!sent.contains_key("defer_loading"));
+        assert!(!sent.contains_key("namespace"));
+        assert!(sent.contains_key("input_schema"));
     }
 
     #[test]
