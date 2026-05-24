@@ -2,17 +2,17 @@
 //! parameter of `main`.
 //!
 //! `Harness` is the Harn-language analog of an explicit-capability handle: a
-//! single value the runtime hands to a script's `main` so that stdio, clock,
-//! filesystem, environment, randomness, network, process, crypto, system, and LLM
-//! catalog access become surface in the type system instead of ambient
-//! globals. Each sub-handle (`stdio`, `clock`, `fs`, `env`, `random`, `net`,
-//! `process`, `crypto`, `system`, `llm`) is a distinct named type that anchors the
-//! surface for its capability slice.
+//! single value the runtime hands to a script's `main` so that stdio,
+//! terminal, clock, filesystem, environment, randomness, network, process,
+//! crypto, system, and LLM catalog access become surface in the type system
+//! instead of ambient globals. Each sub-handle (`stdio`, `term`, `clock`, `fs`,
+//! `env`, `random`, `net`, `process`, `crypto`, `system`, `llm`) is a distinct
+//! named type that anchors the surface for its capability slice.
 //!
 //! This module defines:
-//!   * The runtime [`Harness`] value (and its sub-handle wrappers).
-//!   * [`Harness::real`], the production constructor that wraps the concrete
-//!     host state used by the sub-handle method dispatchers.
+//!   * The runtime [`Harness`] value and its sub-handle wrappers.
+//!   * [`Harness::real`], the production constructor that installs the backing
+//!     state used by concrete sub-handle methods.
 //!   * [`VmHarness`], the compact `VmValue` payload that carries the same
 //!     state through the bytecode VM and distinguishes the root handle from
 //!     its sub-handles via [`HarnessKind`].
@@ -35,6 +35,7 @@ use time::OffsetDateTime;
 pub enum HarnessKind {
     Root,
     Stdio,
+    Term,
     Clock,
     Fs,
     Env,
@@ -54,6 +55,7 @@ impl HarnessKind {
         match self {
             HarnessKind::Root => "Harness",
             HarnessKind::Stdio => "HarnessStdio",
+            HarnessKind::Term => "HarnessTerm",
             HarnessKind::Clock => "HarnessClock",
             HarnessKind::Fs => "HarnessFs",
             HarnessKind::Env => "HarnessEnv",
@@ -72,6 +74,7 @@ impl HarnessKind {
         match self {
             HarnessKind::Root => None,
             HarnessKind::Stdio => Some("stdio"),
+            HarnessKind::Term => Some("term"),
             HarnessKind::Clock => Some("clock"),
             HarnessKind::Fs => Some("fs"),
             HarnessKind::Env => Some("env"),
@@ -88,6 +91,7 @@ impl HarnessKind {
     pub fn from_field_name(name: &str) -> Option<Self> {
         match name {
             "stdio" => Some(HarnessKind::Stdio),
+            "term" => Some(HarnessKind::Term),
             "clock" => Some(HarnessKind::Clock),
             "fs" => Some(HarnessKind::Fs),
             "env" => Some(HarnessKind::Env),
@@ -104,6 +108,7 @@ impl HarnessKind {
     /// All sub-handle kinds, in the canonical field order.
     pub const SUB_HANDLES: &'static [HarnessKind] = &[
         HarnessKind::Stdio,
+        HarnessKind::Term,
         HarnessKind::Clock,
         HarnessKind::Fs,
         HarnessKind::Env,
@@ -119,6 +124,7 @@ impl HarnessKind {
     pub const ALL: &'static [HarnessKind] = &[
         HarnessKind::Root,
         HarnessKind::Stdio,
+        HarnessKind::Term,
         HarnessKind::Clock,
         HarnessKind::Fs,
         HarnessKind::Env,
@@ -585,6 +591,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.term`.
+    pub fn term(&self) -> HarnessTerm {
+        HarnessTerm {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Field access for `harness.clock`.
     pub fn clock(&self) -> HarnessClock {
         HarnessClock {
@@ -681,6 +694,12 @@ pub struct HarnessStdio {
     inner: Arc<HarnessInner>,
 }
 
+/// term sub-handle: `width`, `height`, `read_password`.
+#[derive(Debug, Clone)]
+pub struct HarnessTerm {
+    inner: Arc<HarnessInner>,
+}
+
 /// clock sub-handle: `now`, `monotonic_now`, `sleep`.
 #[derive(Debug, Clone)]
 pub struct HarnessClock {
@@ -760,6 +779,7 @@ macro_rules! sub_handle_inner {
 }
 sub_handle_inner!(
     HarnessStdio,
+    HarnessTerm,
     HarnessFs,
     HarnessEnv,
     HarnessRandom,
@@ -779,7 +799,7 @@ impl HarnessClock {
 
 /// Compact `VmValue` payload for a `Harness` or any of its sub-handles.
 ///
-/// All variants share one `Arc<HarnessInner>`; `kind` discriminates the
+/// All handle variants share one `Arc<HarnessInner>`; `kind` discriminates the
 /// surface the VM exposes for property access and method dispatch.
 #[derive(Clone)]
 pub struct VmHarness {
@@ -955,6 +975,7 @@ mod tests {
         let harness = Harness::null();
         for source in [
             r#"fn main(harness: Harness) { harness.stdio.println("blocked") }"#,
+            r#"fn main(harness: Harness) { harness.term.width() }"#,
             r#"fn main(harness: Harness) { harness.clock.now_ms() }"#,
             r#"fn main(harness: Harness) { harness.fs.read_text("/x") }"#,
             r#"fn main(harness: Harness) { harness.env.get("KEY") }"#,
@@ -981,6 +1002,7 @@ mod tests {
             observed,
             vec![
                 (HarnessKind::Stdio, "println"),
+                (HarnessKind::Term, "width"),
                 (HarnessKind::Clock, "now_ms"),
                 (HarnessKind::Fs, "read_text"),
                 (HarnessKind::Env, "get"),
@@ -993,7 +1015,7 @@ mod tests {
             ]
         );
         assert_eq!(events[0].args, vec!["blocked"]);
-        assert_eq!(events[2].args, vec!["/x"]);
+        assert_eq!(events[3].args, vec!["/x"]);
     }
 
     #[test]
@@ -1011,6 +1033,8 @@ mod tests {
 fn main(harness: Harness) {
   harness.stdio.print("partial ")
   harness.stdio.println("line")
+  __io_println(harness.term.width())
+  __io_println(harness.term.height())
   __io_println(harness.clock.now_ms())
   harness.clock.sleep_ms(250)
   __io_println(harness.clock.now_ms())
@@ -1031,7 +1055,7 @@ fn main(harness: Harness) {
         assert_eq!(harness.captured_stdio(), "partial line\n");
         assert_eq!(
             output,
-            "1700000000000\n1700000000250\n250\nvalue\ndata\nfalse\n42\nbody\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\ntrue\n"
+            "80\n24\n1700000000000\n1700000000250\n250\nvalue\ndata\nfalse\n42\nbody\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\ntrue\n"
         );
         let observed: Vec<_> = harness
             .calls()
@@ -1043,6 +1067,8 @@ fn main(harness: Harness) {
             vec![
                 (HarnessKind::Stdio, "print".to_string()),
                 (HarnessKind::Stdio, "println".to_string()),
+                (HarnessKind::Term, "width".to_string()),
+                (HarnessKind::Term, "height".to_string()),
                 (HarnessKind::Clock, "now_ms".to_string()),
                 (HarnessKind::Clock, "sleep_ms".to_string()),
                 (HarnessKind::Clock, "now_ms".to_string()),
@@ -1171,6 +1197,32 @@ fn main(harness: Harness) {
         // All stdio writes route to the mock capture buffer; vm.output stays empty.
         assert_eq!(output, "");
         assert_eq!(harness.captured_stdio(), "first\nanswer: second\neof\n");
+    }
+
+    #[test]
+    fn mock_harness_replays_password_input_without_stdout_echo() {
+        let harness = Harness::mock().stdin_line("secret").build();
+        let output = run_harness_source(
+            r#"
+fn main(harness: Harness) {
+  __io_println(harness.term.read_password("password: "))
+}
+"#,
+            harness.clone(),
+        )
+        .expect("stdin replay succeeds");
+
+        assert_eq!(output, "secret\n");
+        assert_eq!(harness.captured_stdio(), "");
+        assert_eq!(harness.captured_stderr(), "password: ");
+        assert_eq!(
+            harness.calls(),
+            vec![HarnessCall {
+                sub_handle: HarnessKind::Term,
+                method: "read_password".to_string(),
+                args: vec!["password: ".to_string()],
+            }]
+        );
     }
 
     #[test]

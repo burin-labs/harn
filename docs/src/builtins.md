@@ -578,8 +578,8 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute shell command inside a specific directory |
 | `harness.process.spawn_captured(opts)` | opts: dict | dict | Run an external command synchronously through the `Harness` process capability. `opts` is `{cmd, args?, cwd?, env?, stdin?, timeout_ms?}` and supports feeding a stdin payload plus a per-call timeout. Returns `{exit_code, stdout, stderr, duration_ms, success, timed_out}`. On timeout the child is killed, `exit_code = -1`, `success = false`, and `timed_out = true` |
 | `spawn_captured(opts)` | opts: dict | dict | Legacy alias for `harness.process.spawn_captured(opts)` when no `Harness` handle is available |
-| `term_width()` | none | int | Current terminal column count. Reads `COLUMNS` env first (so harnesses can pin a value), falls back to the platform window size, then to `80` |
-| `term_height()` | none | int | Current terminal row count. Reads `LINES` env first, falls back to the platform window size, then to `24` |
+| `term_width()` | none | int | Current terminal column count. Alias for the canonical `harness.term.width()` surface; reads `COLUMNS` env first, falls back to the platform window size, then to `80` |
+| `term_height()` | none | int | Current terminal row count. Alias for the canonical `harness.term.height()` surface; reads `LINES` env first, falls back to the platform window size, then to `24` |
 | `exit(code)` | code: int (default 0) | never | Terminate the process |
 | `username()` | none | string | Current OS username |
 | `hostname()` | none | string | Machine hostname |
@@ -1381,9 +1381,12 @@ examples.
 Ambient stdio helpers were removed. Use `harness.stdio.print`,
 `harness.stdio.println`, `harness.stdio.eprint`,
 `harness.stdio.eprintln`, `harness.stdio.read_line`, and
-`harness.stdio.prompt` from code that already has a `Harness` handle. For
-structured interactive input outside a harness entrypoint, import
-`read_line`, `read_password`, `is_tty`, and `write_stderr` from `std/io`.
+`harness.stdio.prompt` from code that already has a `Harness` handle. Use
+`harness.term.width()`, `harness.term.height()`, and
+`harness.term.read_password(prompt?)` for terminal dimensions and no-echo
+password input. For structured interactive input outside a harness entrypoint,
+import `read_line`, `read_password`, `is_tty`, and `write_stderr` from
+`std/io`.
 
 ## Host interop
 

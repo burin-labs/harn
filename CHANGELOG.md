@@ -42,6 +42,12 @@ condensed series summaries instead of full per-patch history.
   over strings or bytes. `sha256_hex(...)` remains as a compatibility alias,
   and `harn graph --json` now surfaces `harness.crypto.sha256` in
   `host_calls`.
+- **Harness terminal capability sub-handle (#2339).** Added
+  `harness.term.width()`, `harness.term.height()`, and
+  `harness.term.read_password(prompt?)` so terminal dimensions and no-echo
+  password reads are available through the typed harness surface. The existing
+  `term_width()` and `term_height()` free builtins now share the same
+  implementation and remain aliases for compatibility.
 
 ## v0.8.35
 

@@ -411,6 +411,7 @@ fn harness_method_effect(node: &SNode) -> Option<EffectRecord> {
             (EffectKind::Stdio, EffectScope::Observe)
         }
         ("stdio", "read_line" | "prompt") => (EffectKind::Stdio, EffectScope::Read),
+        ("term", "width" | "height" | "read_password") => (EffectKind::Stdio, EffectScope::Read),
         ("clock", _) => return None,
         ("env", "set" | "unset") => (
             EffectKind::Hostcall {
@@ -960,6 +961,19 @@ mod tests {
                 .any(|effect| matches!(effect.kind, EffectKind::Fs)
                     && effect.scope == EffectScope::Write),
             "expected Fs write effect, got {effects:?}"
+        );
+    }
+
+    #[test]
+    fn harness_term_read_password_yields_stdio_read_effect() {
+        let source = r#"fn main(harness: Harness) { harness.term.read_password("password: ") }"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect.kind, EffectKind::Stdio)
+                    && effect.scope == EffectScope::Read),
+            "expected Stdio read effect, got {effects:?}"
         );
     }
 

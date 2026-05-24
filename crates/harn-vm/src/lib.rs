@@ -77,6 +77,7 @@ pub mod step_runtime;
 pub mod store;
 pub(crate) mod synchronization;
 pub mod tenant;
+pub(crate) mod term;
 pub mod testbench;
 pub mod tool_annotations;
 pub mod tool_call_cancellations;
@@ -147,7 +148,7 @@ pub use corrections::{
 pub use harness::{
     DenyEvent, Harness, HarnessCall, HarnessClock, HarnessCrypto, HarnessEnv, HarnessFs,
     HarnessKind, HarnessLlm, HarnessNet, HarnessProcess, HarnessRandom, HarnessStdio,
-    HarnessSystem, MockAwareClock, MockHarnessBuilder, VmHarness,
+    HarnessSystem, HarnessTerm, MockAwareClock, MockHarnessBuilder, VmHarness,
 };
 pub use harness_net::{
     bypass_enabled as net_policy_bypass_enabled, NetMatcher, NetPolicy, NetPolicyAudit,

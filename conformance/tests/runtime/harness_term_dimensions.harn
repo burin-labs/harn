@@ -1,0 +1,11 @@
+fn main(harness: Harness) {
+  harness.stdio.println(harness.term.width() > 0)
+  harness.stdio.println(harness.term.height() > 0)
+  mock_stdin("s3cr3t\n")
+  capture_stderr_start()
+  let password = harness.term.read_password("password: ")
+  let prompt = capture_stderr_take()
+  harness.stdio.println(password == "s3cr3t")
+  harness.stdio.println(prompt == "password: ")
+  unmock_stdin()
+}

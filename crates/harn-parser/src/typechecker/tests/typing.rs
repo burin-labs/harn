@@ -1614,6 +1614,42 @@ pipeline t(task) {
 }
 
 #[test]
+fn test_harness_term_methods_infer_concrete_types() {
+    let errs = errors(
+        r#"
+fn main(harness: Harness) {
+    let width: int = harness.term.width()
+    let height: int = harness.term.height()
+    let password: string = harness.term.read_password("password: ")
+}
+"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+
+    let bad_errs = errors(
+        r#"
+fn main(harness: Harness) {
+    let width: string = harness.term.width()
+    let password: int = harness.term.read_password("password: ")
+}
+"#,
+    );
+    assert_eq!(bad_errs.len(), 2, "expected two errors: {bad_errs:?}");
+    assert!(
+        bad_errs
+            .iter()
+            .any(|error| error.contains("expected string") && error.contains("found int")),
+        "expected width mismatch, got: {bad_errs:?}"
+    );
+    assert!(
+        bad_errs
+            .iter()
+            .any(|error| error.contains("expected int") && error.contains("found string")),
+        "expected password mismatch, got: {bad_errs:?}"
+    );
+}
+
+#[test]
 fn test_generic_alias_distribution_preserves_non_union_arg() {
     // Non-union arguments still substitute plainly: `ActionContainer<int>`
     // expands to `{ action: int, process_action: fn(int) -> nil }` with no

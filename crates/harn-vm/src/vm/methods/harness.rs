@@ -77,6 +77,7 @@ impl crate::vm::Vm {
         match handle.kind() {
             HarnessKind::Root => self.call_harness_root_method(handle, method, args).await,
             HarnessKind::Stdio => self.call_harness_stdio_method(handle, method, args),
+            HarnessKind::Term => self.call_harness_term_method(handle, method, args),
             HarnessKind::Clock => self.call_harness_clock_method(handle, method, args).await,
             HarnessKind::System => self.call_harness_system_method(handle, method, args),
             HarnessKind::Fs => self.call_harness_fs_method(handle, method, args).await,
@@ -415,6 +416,28 @@ impl crate::vm::Vm {
         }
     }
 
+    fn call_harness_term_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        match method {
+            "width" => Ok(VmValue::Int(crate::term::width() as i64)),
+            "height" => Ok(VmValue::Int(crate::term::height() as i64)),
+            "read_password" => {
+                let prompt = optional_string_arg(args, 0, "HarnessTerm.read_password")?;
+                if args.len() > 1 {
+                    return Err(VmError::TypeError(
+                        "HarnessTerm.read_password expects at most one prompt argument".to_string(),
+                    ));
+                }
+                crate::stdlib::io::read_password_legacy_value(prompt)
+            }
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
     async fn call_harness_clock_method(
         &mut self,
         handle: &VmHarness,
@@ -667,6 +690,30 @@ impl crate::vm::Vm {
                     let msg = args.first().map(|a| a.display()).unwrap_or_default();
                     state.push_stdio(&msg);
                     Ok(mock_read_line_value(state, &[]))
+                }
+                _ => Err(method_unsupported(handle, method)),
+            },
+            HarnessKind::Term => match method {
+                "width" => Ok(VmValue::Int(
+                    mock_term_dimension(state.env_get("COLUMNS"), 80) as i64,
+                )),
+                "height" => Ok(VmValue::Int(
+                    mock_term_dimension(state.env_get("LINES"), 24) as i64,
+                )),
+                "read_password" => {
+                    let prompt = optional_string_arg(args, 0, "HarnessTerm.read_password")?;
+                    if args.len() > 1 {
+                        return Err(VmError::TypeError(
+                            "HarnessTerm.read_password expects at most one prompt argument"
+                                .to_string(),
+                        ));
+                    }
+                    if !prompt.is_empty() {
+                        state.push_stderr(prompt);
+                    }
+                    state.pop_stdin_line().map(vm_string).ok_or_else(|| {
+                        VmError::Runtime("HarnessTerm.read_password: stdin reached EOF".to_string())
+                    })
                 }
                 _ => Err(method_unsupported(handle, method)),
             },
@@ -1479,6 +1526,26 @@ fn string_arg<'a>(args: &'a [VmValue], index: usize, callee: &str) -> Result<&'a
             index + 1
         ))),
     }
+}
+
+fn optional_string_arg<'a>(
+    args: &'a [VmValue],
+    index: usize,
+    callee: &str,
+) -> Result<&'a str, VmError> {
+    match args.get(index) {
+        None | Some(VmValue::Nil) => Ok(""),
+        Some(VmValue::String(value)) => Ok(value.as_ref()),
+        Some(other) => Err(VmError::TypeError(format!(
+            "{callee} expects string argument {}, got {}",
+            index + 1,
+            other.type_name()
+        ))),
+    }
+}
+
+fn mock_term_dimension(raw: Option<&str>, fallback: usize) -> usize {
+    crate::term::dimension_from_env(raw).unwrap_or(fallback)
 }
 
 /// Mock variant of `harness.stdio.read_line` / `prompt`. When called with

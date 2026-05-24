@@ -203,10 +203,13 @@ fn main(harness: Harness) {
   let digest = harness.crypto.sha256(body)
   harness.fs.mkdtemp("harn-graph-")
   harness.net.get("https://example.test/data")
+  let columns = harness.term.width()
+  harness.term.read_password("password: ")
   harness.llm.catalog()
   harness.llm.providers()
   harness.stdio.println(body)
   harness.stdio.println(digest)
+  harness.stdio.println(columns)
 }
 "#,
     )
@@ -246,6 +249,14 @@ fn main(harness: Harness) {
         cap_strings.contains(&"llm.catalog"),
         "expected harness.llm.* to produce llm.catalog capability, got: {cap_strings:?}"
     );
+    assert!(
+        cap_strings.contains(&"terminal.dimensions"),
+        "expected harness.term.width to produce terminal.dimensions capability, got: {cap_strings:?}"
+    );
+    assert!(
+        cap_strings.contains(&"terminal.read_password"),
+        "expected harness.term.read_password to produce terminal.read_password capability, got: {cap_strings:?}"
+    );
     let effects = main["effects"].as_array().expect("effects array");
     let effect_strings: Vec<&str> = effects.iter().filter_map(|v| v.as_str()).collect();
     assert!(
@@ -259,6 +270,14 @@ fn main(harness: Harness) {
             && host_call_strings.contains(&"harness.llm.providers")
             && host_call_strings.contains(&"harness.crypto.sha256"),
         "expected harness.llm.* and harness.crypto.sha256 host calls, got: {host_call_strings:?}"
+    );
+    assert!(
+        host_call_strings.contains(&"harness.term.width"),
+        "expected harness.term.width host call, got: {host_call_strings:?}"
+    );
+    assert!(
+        host_call_strings.contains(&"harness.term.read_password"),
+        "expected harness.term.read_password host call, got: {host_call_strings:?}"
     );
 }
 

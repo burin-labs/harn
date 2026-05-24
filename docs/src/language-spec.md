@@ -2328,6 +2328,19 @@ registries (suspended subagents, partial handoffs, in-flight LLM
 calls, pool pending tasks) and from event-log records (queued
 trigger inbox + worker queue items).
 
+Capability sub-handles are exposed by field access on the harness:
+
+| Field | Type | Primary methods |
+|---|---|---|
+| `harness.stdio` | `HarnessStdio` | `print`, `println`, `eprint`, `eprintln`, `read_line`, `prompt` |
+| `harness.term` | `HarnessTerm` | `width`, `height`, `read_password` |
+| `harness.clock` | `HarnessClock` | `now_ms`, `timestamp`, `monotonic_ms`, `elapsed`, `sleep_ms` |
+| `harness.fs` | `HarnessFs` | `read_text`, `write_text`, `append_text`, `exists`, `list_dir` |
+| `harness.env` | `HarnessEnv` | `get`, `set`, `unset`, `list` |
+| `harness.random` | `HarnessRandom` | `gen_u64`, `uuid`, `bytes` |
+| `harness.net` | `HarnessNet` | `get`, `post` |
+| `harness.system` | `HarnessSystem` | `platform`, `arch`, `cpu`, `memory`, `cwd`, `pid` |
+
 Write-side actions:
 
 | Method | Effect |

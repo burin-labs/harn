@@ -375,16 +375,15 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     // first (so test harnesses can pin a value), falls back to the
     // platform `ioctl` size, and finally defaults to 80x24 when neither
     // is available (e.g. when stdout is not a TTY). These are the
-    // free-builtin landing sites for the deferred `harness.term.*`
-    // sub-handles (see #2297). `std/tui` already exposes
-    // `__tui_terminal_width` for its renderer; these builtins give
-    // ported subcommands a stable, non-prefixed name they can call
-    // without importing the tui module.
+    // free-builtin aliases for `harness.term.width()` /
+    // `harness.term.height()`. `std/tui` already exposes
+    // `__tui_terminal_width` for its renderer; these aliases keep
+    // ported subcommands working without importing the tui module.
     vm.register_builtin("term_width", |_args, _out| {
-        Ok(VmValue::Int(read_term_dimension("COLUMNS", true) as i64))
+        Ok(VmValue::Int(crate::term::width() as i64))
     });
     vm.register_builtin("term_height", |_args, _out| {
-        Ok(VmValue::Int(read_term_dimension("LINES", false) as i64))
+        Ok(VmValue::Int(crate::term::height() as i64))
     });
 }
 
@@ -581,45 +580,6 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
     result.insert("success".to_string(), VmValue::Bool(success));
     result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
     Ok(VmValue::Dict(Rc::new(result)))
-}
-
-const DEFAULT_TERM_WIDTH: usize = 80;
-const DEFAULT_TERM_HEIGHT: usize = 24;
-
-fn read_term_dimension(env_var: &str, is_width: bool) -> usize {
-    if let Ok(raw) = std::env::var(env_var) {
-        if let Ok(parsed) = raw.trim().parse::<usize>() {
-            if parsed > 0 {
-                return parsed;
-            }
-        }
-    }
-    platform_term_dimensions()
-        .map(|(w, h)| if is_width { w } else { h })
-        .unwrap_or(if is_width {
-            DEFAULT_TERM_WIDTH
-        } else {
-            DEFAULT_TERM_HEIGHT
-        })
-}
-
-#[cfg(unix)]
-fn platform_term_dimensions() -> Option<(usize, usize)> {
-    let mut winsize = std::mem::MaybeUninit::<libc::winsize>::zeroed();
-    let rc = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, winsize.as_mut_ptr()) };
-    if rc != 0 {
-        return None;
-    }
-    let winsize = unsafe { winsize.assume_init() };
-    if winsize.ws_col == 0 && winsize.ws_row == 0 {
-        return None;
-    }
-    Some((winsize.ws_col as usize, winsize.ws_row as usize))
-}
-
-#[cfg(not(unix))]
-fn platform_term_dimensions() -> Option<(usize, usize)> {
-    None
 }
 
 /// Find the project root by walking up from a base directory looking for harn.toml.
