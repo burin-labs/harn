@@ -238,6 +238,9 @@ in `crates/harn-vm/src/orchestration/playground/manifest.rs`.
   `harness.stdio.eprint(s)` / `harness.stdio.eprintln(s)` for stderr,
   and `harness.stdio.read_line()` / `harness.stdio.prompt(msg?)` for
   interactive input.
+- Terminal capability calls also route through `Harness`: use
+  `harness.term.width()` / `harness.term.height()` for dimensions and
+  `harness.term.read_password(prompt?)` for no-echo password input.
 - `read_stdin()` slurps the rest of stdin to a `string` and returns `nil`
   at EOF.
 - `is_stdin_tty()`, `is_stdout_tty()`, `is_stderr_tty()` — `bool`,

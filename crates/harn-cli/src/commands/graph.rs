@@ -74,13 +74,9 @@ pub(crate) struct GraphEdge {
 /// `HARN_CLI_IMPL=rust` escape hatch keeps the legacy direct render
 /// path for the parity-snapshot harness (#2299) until the C1 ratchet
 /// (#2314) deletes it.
-///
-/// The module-graph extraction itself (collect_harn_targets +
-/// build_module_graph + IR walk) stays in Rust — porting it would
-/// require a new `harness.modules.compile_view` host capability the
-/// W11 spec calls out as future scope. On extraction failure the shim
-/// renders the same error envelope / stderr line the legacy path
-/// emits so behavior is identical regardless of the dispatch mode.
+/// The module-graph extraction itself stays in Rust until Harn exposes a
+/// `harness.modules.compile_view` host capability. Extraction failures render
+/// the same error envelope / stderr line in both modes.
 pub(crate) async fn run(args: GraphArgs) -> i32 {
     let report = match analyze_graph(&args.root, args.module.as_deref()) {
         Ok(report) => report,
@@ -295,6 +291,8 @@ fn direct_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         "apply_edit" => {
             out.insert("workspace.apply_edit".to_string());
         }
+        "term_width" | "term_height" => out.extend(["terminal.dimensions".to_string()]),
+        "read_password" => out.extend(["terminal.read_password".to_string()]),
         "http_get"
         | "http_post"
         | "http_put"
@@ -365,6 +363,7 @@ fn direct_effects(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
             "worker.dispatch" => "worker.dispatch".to_string(),
             "human.approval" => "human.approval".to_string(),
             "template.render" => "template.render".to_string(),
+            "terminal.dimensions" | "terminal.read_password" => "terminal.read".to_string(),
             other if other.starts_with("connector.") => "connector.call".to_string(),
             other => other.to_string(),
         })

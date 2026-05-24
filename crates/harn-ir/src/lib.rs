@@ -2020,7 +2020,7 @@ fn harness_sub_handle_for(object: &SNode, method: &str) -> Option<(&'static str,
 }
 
 const HARNESS_SUB_HANDLES: &[&str] = &[
-    "stdio", "clock", "fs", "env", "random", "net", "process", "crypto", "system", "llm",
+    "stdio", "term", "clock", "fs", "env", "random", "net", "process", "crypto", "system", "llm",
 ];
 
 fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
@@ -2551,6 +2551,33 @@ fn main(harness: Harness) {
         assert!(
             calls.iter().any(|name| name == "http_get"),
             "expected harness.net.get to lower to ambient http_get, got: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn harness_term_method_calls_are_attributed_to_terminal_builtins() {
+        let report = analyze(
+            r#"
+fn main(harness: Harness) {
+  harness.term.width()
+  harness.term.height()
+  harness.term.read_password("password: ")
+}
+"#,
+        );
+
+        let calls = handler_call_names(&report);
+        assert!(
+            calls.iter().any(|name| name == "term_width"),
+            "expected harness.term.width to lower to ambient term_width, got: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|name| name == "term_height"),
+            "expected harness.term.height to lower to ambient term_height, got: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|name| name == "read_password"),
+            "expected harness.term.read_password to lower to read_password, got: {calls:?}"
         );
     }
 

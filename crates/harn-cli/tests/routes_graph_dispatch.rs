@@ -367,6 +367,7 @@ fn main(harness: Harness) {
   let body = harness.fs.read_text("README.md")
   harness.fs.mkdtemp("harn-graph-")
   harness.net.get("https://example.test/data")
+  harness.term.width()
   harness.stdio.println(body)
 }
 "#,

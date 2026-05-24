@@ -14,6 +14,15 @@ pub fn harness_stdio_ambient(method: &str) -> Option<&'static str> {
     }
 }
 
+pub fn harness_term_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "width" => Some("term_width"),
+        "height" => Some("term_height"),
+        "read_password" => Some("read_password"),
+        _ => None,
+    }
+}
+
 pub fn harness_clock_ambient(method: &str) -> Option<&'static str> {
     match method {
         "now_ms" => Some("now_ms"),
@@ -118,6 +127,7 @@ pub fn harness_llm_ambient(method: &str) -> Option<&'static str> {
 pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'static str> {
     match sub_handle {
         "stdio" => harness_stdio_ambient(method),
+        "term" => harness_term_ambient(method),
         "clock" => harness_clock_ambient(method),
         "fs" => harness_fs_ambient(method),
         "env" => harness_env_ambient(method),
@@ -134,6 +144,7 @@ pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'st
 pub fn harness_type_sub_handle(type_name: &str) -> Option<&'static str> {
     match type_name {
         "HarnessStdio" => Some("stdio"),
+        "HarnessTerm" => Some("term"),
         "HarnessClock" => Some("clock"),
         "HarnessFs" => Some("fs"),
         "HarnessEnv" => Some("env"),

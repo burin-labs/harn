@@ -911,6 +911,32 @@ pub(crate) fn prompt_user_value(args: &[VmValue], out: &mut String) -> Result<Vm
     }
 }
 
+pub(crate) fn read_password_legacy_value(prompt: &str) -> Result<VmValue, VmError> {
+    let options = ReadLineOptions {
+        prompt: prompt.to_string(),
+        trim: false,
+        echo: false,
+        ..ReadLineOptions::default()
+    };
+    match read_line_from_mock_or_real(&options) {
+        ReadLineOutcome::Ok(line) => Ok(VmValue::String(Rc::from(line))),
+        ReadLineOutcome::Eof => Err(VmError::Runtime(
+            "HarnessTerm.read_password: stdin reached EOF".to_string(),
+        )),
+        #[cfg(unix)]
+        ReadLineOutcome::Timeout => Err(VmError::Runtime(
+            "HarnessTerm.read_password: stdin read timed out".to_string(),
+        )),
+        #[cfg(unix)]
+        ReadLineOutcome::Interrupt => Err(VmError::Runtime(
+            "HarnessTerm.read_password: stdin read was interrupted".to_string(),
+        )),
+        ReadLineOutcome::Error(error) => Err(VmError::Runtime(format!(
+            "HarnessTerm.read_password: {error}"
+        ))),
+    }
+}
+
 fn log_debug_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     vm_write_log("debug", 0, args, out);
     Ok(VmValue::Nil)
