@@ -366,7 +366,7 @@ fn direct_call_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         | "websocket_server" => {
             capabilities.insert("network.http".to_string());
         }
-        "exec" | "exec_at" | "shell" | "shell_at" => {
+        "exec" | "exec_at" | "shell" | "shell_at" | "spawn_captured" => {
             capabilities.insert("process.exec".to_string());
         }
         "llm_call"

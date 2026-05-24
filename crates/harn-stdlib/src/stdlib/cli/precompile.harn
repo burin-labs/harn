@@ -93,7 +93,7 @@ fn __ensure_parent(harness: Harness, path: string) {
   }
 }
 
-fn __spawn_precompile(bin: string, source_path: string, per_file_out: string) -> dict {
+fn __spawn_precompile(harness: Harness, bin: string, source_path: string, per_file_out: string) -> dict {
   // Always force the child onto the Rust path: this script IS the .harn
   // dispatch target, so leaving HARN_CLI_IMPL unset would re-enter us
   // and spin forever. HARN_CLI_IMPL=rust short-circuits the dispatch
@@ -108,7 +108,7 @@ fn __spawn_precompile(bin: string, source_path: string, per_file_out: string) ->
     args = args.push(per_file_out)
   }
   let env = {HARN_CLI_IMPL: "rust"}
-  return spawn_captured({cmd: bin, args: args, env: env})
+  return harness.process.spawn_captured({cmd: bin, args: args, env: env})
 }
 
 fn __render_failure(source: string, child: dict) -> string {
@@ -174,7 +174,7 @@ fn main(harness: Harness) {
       __ensure_parent(harness, dest)
       path_parent(dest)
     }
-    let child = __spawn_precompile(bin, source, per_file_out)
+    let child = __spawn_precompile(harness, bin, source, per_file_out)
     let exit_code = child["exit_code"] ?? -1
     if exit_code == 0 {
       compiled = compiled + 1

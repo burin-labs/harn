@@ -24,6 +24,11 @@ condensed series summaries instead of full per-patch history.
   `xdg_cache_home(app_name)`. The pure-Harn helpers honor absolute XDG
   env vars, ignore relative XDG values, validate app-name segments, use
   macOS Library fallbacks, and leave directory creation to callers.
+- **`harness.process.spawn_captured` (#2338).** Added a `process`
+  sub-handle to `Harness` so Harn-native CLI scripts can run synchronous
+  subprocess captures through the explicit capability surface. The existing
+  `spawn_captured(opts)` builtin now shares the same implementation as the
+  harness method.
 
 ## v0.8.35
 

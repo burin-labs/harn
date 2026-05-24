@@ -368,226 +368,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(paths)))
     });
 
-    // `spawn_captured(opts)` runs an external command synchronously and
-    // returns its captured output. Unlike `exec(...)` (which is variadic
-    // positional and inherits the parent's stdin), this builtin takes a
-    // structured options dict and supports feeding a stdin payload,
-    // overriding the cwd/env, and bounding execution time:
-    //
-    //   spawn_captured({
-    //     cmd: "git",
-    //     args: ["log", "--oneline", "-n", "5"],
-    //     cwd: "/path/to/repo",       // optional
-    //     env: {KEY: "value"},        // optional, merged onto inherited env
-    //     stdin: "payload",           // optional string or bytes
-    //     timeout_ms: 5000,           // optional, kills child on expiry
-    //   })
-    //
-    // Returns `{exit_code: int, stdout: string, stderr: string,
-    // duration_ms: int, success: bool, timed_out: bool}`. When the
-    // process times out, `exit_code` is -1, `success` is false, and
-    // `timed_out` is true. This is the free-builtin landing site for
-    // the deferred `harness.process.spawn_captured` sub-handle
-    // (see #2297).
-    vm.register_builtin("spawn_captured", |args, _out| {
-        let opts = match args.first() {
-            Some(VmValue::Dict(opts)) => opts.clone(),
-            _ => {
-                return Err(VmError::Runtime(
-                    "spawn_captured: options dict is required".to_string(),
-                ));
-            }
-        };
-        let cmd = match opts.get("cmd").map(|v| v.display()).unwrap_or_default() {
-            s if s.is_empty() => {
-                return Err(VmError::Runtime(
-                    "spawn_captured: opts.cmd is required".to_string(),
-                ));
-            }
-            s => s,
-        };
-        let cmd_args: Vec<String> = match opts.get("args") {
-            Some(VmValue::List(items)) => items.iter().map(|v| v.display()).collect(),
-            None | Some(VmValue::Nil) => Vec::new(),
-            Some(other) => {
-                return Err(VmError::Runtime(format!(
-                    "spawn_captured: opts.args must be a list of strings, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        let cwd = opts
-            .get("cwd")
-            .map(|v| v.display())
-            .filter(|s| !s.is_empty());
-        let env_overrides: Vec<(String, String)> = match opts.get("env") {
-            Some(VmValue::Dict(env)) => env.iter().map(|(k, v)| (k.clone(), v.display())).collect(),
-            None | Some(VmValue::Nil) => Vec::new(),
-            Some(other) => {
-                return Err(VmError::Runtime(format!(
-                    "spawn_captured: opts.env must be a dict, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        let stdin_bytes: Option<Vec<u8>> = match opts.get("stdin") {
-            Some(VmValue::Bytes(bytes)) => Some(bytes.as_slice().to_vec()),
-            Some(VmValue::String(s)) => Some(s.as_bytes().to_vec()),
-            None | Some(VmValue::Nil) => None,
-            Some(other) => {
-                return Err(VmError::Runtime(format!(
-                    "spawn_captured: opts.stdin must be string or bytes, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        let timeout = opts
-            .get("timeout_ms")
-            .and_then(|v| v.as_int())
-            .filter(|n| *n > 0)
-            .map(|n| Duration::from_millis(n as u64));
-
-        let mut command = std::process::Command::new(&cmd);
-        command.args(&cmd_args);
-        if let Some(cwd) = cwd.as_ref() {
-            command.current_dir(cwd);
-        }
-        for (key, value) in &env_overrides {
-            command.env(key, value);
-        }
-        command.stdout(Stdio::piped()).stderr(Stdio::piped());
-        if stdin_bytes.is_some() {
-            command.stdin(Stdio::piped());
-        } else {
-            command.stdin(Stdio::null());
-        }
-
-        let started = Instant::now();
-        let mut child = command.spawn().map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "spawn_captured: failed to spawn '{cmd}': {error}"
-            ))))
-        })?;
-
-        if let (Some(payload), Some(mut stdin)) = (stdin_bytes, child.stdin.take()) {
-            // Best-effort write; if the child closes stdin early we still
-            // surface stdout/stderr/exit_code rather than failing outright.
-            let _ = stdin.write_all(&payload);
-        }
-
-        let (output, timed_out) = match timeout {
-            None => match child.wait_with_output() {
-                Ok(output) => (output, false),
-                Err(error) => {
-                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "spawn_captured: wait failed: {error}"
-                    )))));
-                }
-            },
-            Some(limit) => {
-                // Poll via a small `try_wait` loop instead of pulling in
-                // a full async runtime. This keeps the builtin
-                // dependency-free and matches the synchronous shape that
-                // ported `.harn` scripts expect.
-                let deadline = started + limit;
-                let mut timed_out = false;
-                loop {
-                    match child.try_wait() {
-                        Ok(Some(_)) => break,
-                        Ok(None) => {
-                            if Instant::now() >= deadline {
-                                let _ = child.kill();
-                                let _ = child.wait();
-                                timed_out = true;
-                                break;
-                            }
-                            std::thread::sleep(Duration::from_millis(10));
-                        }
-                        Err(error) => {
-                            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                                "spawn_captured: poll failed: {error}"
-                            )))));
-                        }
-                    }
-                }
-                if timed_out {
-                    // Drain pipes via channels so a slow stderr reader
-                    // doesn't block forever after we've killed the child.
-                    let stdout_handle = child.stdout.take();
-                    let stderr_handle = child.stderr.take();
-                    let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>();
-                    let (tx_err, rx_err) = mpsc::channel::<Vec<u8>>();
-                    if let Some(mut s) = stdout_handle {
-                        std::thread::spawn(move || {
-                            use std::io::Read as _;
-                            let mut buf = Vec::new();
-                            let _ = s.read_to_end(&mut buf);
-                            let _ = tx_out.send(buf);
-                        });
-                    }
-                    if let Some(mut s) = stderr_handle {
-                        std::thread::spawn(move || {
-                            use std::io::Read as _;
-                            let mut buf = Vec::new();
-                            let _ = s.read_to_end(&mut buf);
-                            let _ = tx_err.send(buf);
-                        });
-                    }
-                    let stdout = rx_out
-                        .recv_timeout(Duration::from_millis(100))
-                        .unwrap_or_default();
-                    let stderr = rx_err
-                        .recv_timeout(Duration::from_millis(100))
-                        .unwrap_or_default();
-                    (
-                        std::process::Output {
-                            status: std::process::ExitStatus::default(),
-                            stdout,
-                            stderr,
-                        },
-                        true,
-                    )
-                } else {
-                    // The child has already exited; wait_with_output
-                    // reaps + drains the pipes in one call.
-                    match child.wait_with_output() {
-                        Ok(output) => (output, false),
-                        Err(error) => {
-                            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                                "spawn_captured: wait failed: {error}"
-                            )))));
-                        }
-                    }
-                }
-            }
-        };
-
-        let duration_ms = started.elapsed().as_millis() as i64;
-        let exit_code = if timed_out {
-            -1
-        } else {
-            output.status.code().unwrap_or(-1) as i64
-        };
-        let success = if timed_out {
-            false
-        } else {
-            output.status.success()
-        };
-        let mut result = BTreeMap::new();
-        result.insert("exit_code".to_string(), VmValue::Int(exit_code));
-        result.insert(
-            "stdout".to_string(),
-            VmValue::String(Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())),
-        );
-        result.insert(
-            "stderr".to_string(),
-            VmValue::String(Rc::from(String::from_utf8_lossy(&output.stderr).as_ref())),
-        );
-        result.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
-        result.insert("success".to_string(), VmValue::Bool(success));
-        result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
-        Ok(VmValue::Dict(Rc::new(result)))
-    });
+    vm.register_builtin("spawn_captured", |args, _out| spawn_captured_value(args));
 
     // `term_width()` / `term_height()` return the current terminal
     // dimensions in columns and rows. Reads `COLUMNS` / `LINES` env vars
@@ -605,6 +386,201 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     vm.register_builtin("term_height", |_args, _out| {
         Ok(VmValue::Int(read_term_dimension("LINES", false) as i64))
     });
+}
+
+/// Run an external command synchronously and return captured output.
+///
+/// Shared by the legacy free builtin and `harness.process.spawn_captured` so
+/// subprocess capture has one implementation and one result shape.
+pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError> {
+    let opts = match args.first() {
+        Some(VmValue::Dict(opts)) => opts.clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "spawn_captured: options dict is required".to_string(),
+            ));
+        }
+    };
+    let cmd = match opts.get("cmd").map(|v| v.display()).unwrap_or_default() {
+        s if s.is_empty() => {
+            return Err(VmError::Runtime(
+                "spawn_captured: opts.cmd is required".to_string(),
+            ));
+        }
+        s => s,
+    };
+    let cmd_args: Vec<String> = match opts.get("args") {
+        Some(VmValue::List(items)) => items.iter().map(|v| v.display()).collect(),
+        None | Some(VmValue::Nil) => Vec::new(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "spawn_captured: opts.args must be a list of strings, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let cwd = opts
+        .get("cwd")
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty());
+    let env_overrides: Vec<(String, String)> = match opts.get("env") {
+        Some(VmValue::Dict(env)) => env.iter().map(|(k, v)| (k.clone(), v.display())).collect(),
+        None | Some(VmValue::Nil) => Vec::new(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "spawn_captured: opts.env must be a dict, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let stdin_bytes: Option<Vec<u8>> = match opts.get("stdin") {
+        Some(VmValue::Bytes(bytes)) => Some(bytes.as_slice().to_vec()),
+        Some(VmValue::String(s)) => Some(s.as_bytes().to_vec()),
+        None | Some(VmValue::Nil) => None,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "spawn_captured: opts.stdin must be string or bytes, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let timeout = opts
+        .get("timeout_ms")
+        .and_then(|v| v.as_int())
+        .filter(|n| *n > 0)
+        .map(|n| Duration::from_millis(n as u64));
+
+    let mut command = std::process::Command::new(&cmd);
+    command.args(&cmd_args);
+    if let Some(cwd) = cwd.as_ref() {
+        command.current_dir(cwd);
+    }
+    for (key, value) in &env_overrides {
+        command.env(key, value);
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if stdin_bytes.is_some() {
+        command.stdin(Stdio::piped());
+    } else {
+        command.stdin(Stdio::null());
+    }
+
+    let started = Instant::now();
+    let mut child = command.spawn().map_err(|error| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "spawn_captured: failed to spawn '{cmd}': {error}"
+        ))))
+    })?;
+
+    if let (Some(payload), Some(mut stdin)) = (stdin_bytes, child.stdin.take()) {
+        // Children may close stdin early while still producing useful output.
+        let _ = stdin.write_all(&payload);
+    }
+
+    let (output, timed_out) = match timeout {
+        None => match child.wait_with_output() {
+            Ok(output) => (output, false),
+            Err(error) => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "spawn_captured: wait failed: {error}"
+                )))));
+            }
+        },
+        Some(limit) => {
+            let deadline = started + limit;
+            let mut timed_out = false;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) => {
+                        if Instant::now() >= deadline {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            timed_out = true;
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => {
+                        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                            "spawn_captured: poll failed: {error}"
+                        )))));
+                    }
+                }
+            }
+            if timed_out {
+                let stdout_handle = child.stdout.take();
+                let stderr_handle = child.stderr.take();
+                let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>();
+                let (tx_err, rx_err) = mpsc::channel::<Vec<u8>>();
+                if let Some(mut s) = stdout_handle {
+                    std::thread::spawn(move || {
+                        use std::io::Read as _;
+                        let mut buf = Vec::new();
+                        let _ = s.read_to_end(&mut buf);
+                        let _ = tx_out.send(buf);
+                    });
+                }
+                if let Some(mut s) = stderr_handle {
+                    std::thread::spawn(move || {
+                        use std::io::Read as _;
+                        let mut buf = Vec::new();
+                        let _ = s.read_to_end(&mut buf);
+                        let _ = tx_err.send(buf);
+                    });
+                }
+                let stdout = rx_out
+                    .recv_timeout(Duration::from_millis(100))
+                    .unwrap_or_default();
+                let stderr = rx_err
+                    .recv_timeout(Duration::from_millis(100))
+                    .unwrap_or_default();
+                (
+                    std::process::Output {
+                        status: std::process::ExitStatus::default(),
+                        stdout,
+                        stderr,
+                    },
+                    true,
+                )
+            } else {
+                match child.wait_with_output() {
+                    Ok(output) => (output, false),
+                    Err(error) => {
+                        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                            "spawn_captured: wait failed: {error}"
+                        )))));
+                    }
+                }
+            }
+        }
+    };
+
+    let duration_ms = started.elapsed().as_millis() as i64;
+    let exit_code = if timed_out {
+        -1
+    } else {
+        output.status.code().unwrap_or(-1) as i64
+    };
+    let success = if timed_out {
+        false
+    } else {
+        output.status.success()
+    };
+    let mut result = BTreeMap::new();
+    result.insert("exit_code".to_string(), VmValue::Int(exit_code));
+    result.insert(
+        "stdout".to_string(),
+        VmValue::String(Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())),
+    );
+    result.insert(
+        "stderr".to_string(),
+        VmValue::String(Rc::from(String::from_utf8_lossy(&output.stderr).as_ref())),
+    );
+    result.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
+    result.insert("success".to_string(), VmValue::Bool(success));
+    result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
+    Ok(VmValue::Dict(Rc::new(result)))
 }
 
 const DEFAULT_TERM_WIDTH: usize = 80;

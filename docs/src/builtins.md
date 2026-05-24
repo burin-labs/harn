@@ -576,7 +576,8 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute external command inside a specific directory |
 | `shell(cmd)` | cmd: string | dict | Execute command via shell. Returns stdout/stderr plus status metadata and `success` |
 | `shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute shell command inside a specific directory |
-| `spawn_captured(opts)` | opts: dict | dict | Run an external command synchronously with structured options. Unlike `exec(...)` this takes a dict of `{cmd, args?, cwd?, env?, stdin?, timeout_ms?}` and supports feeding a stdin payload plus a per-call timeout. Returns `{exit_code, stdout, stderr, duration_ms, success, timed_out}`. On timeout the child is killed, `exit_code = -1`, `success = false`, and `timed_out = true` |
+| `harness.process.spawn_captured(opts)` | opts: dict | dict | Run an external command synchronously through the `Harness` process capability. `opts` is `{cmd, args?, cwd?, env?, stdin?, timeout_ms?}` and supports feeding a stdin payload plus a per-call timeout. Returns `{exit_code, stdout, stderr, duration_ms, success, timed_out}`. On timeout the child is killed, `exit_code = -1`, `success = false`, and `timed_out = true` |
+| `spawn_captured(opts)` | opts: dict | dict | Legacy alias for `harness.process.spawn_captured(opts)` when no `Harness` handle is available |
 | `term_width()` | none | int | Current terminal column count. Reads `COLUMNS` env first (so harnesses can pin a value), falls back to the platform window size, then to `80` |
 | `term_height()` | none | int | Current terminal row count. Reads `LINES` env first, falls back to the platform window size, then to `24` |
 | `exit(code)` | code: int (default 0) | never | Terminate the process |

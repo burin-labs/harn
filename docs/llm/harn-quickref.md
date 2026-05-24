@@ -279,6 +279,9 @@ menu, and honors `mock_stdin` under `prefer_external: "none"`.
 Use `std/command` for script-side harness commands. It runs through the same
 host command substrate as model-facing tools, but returns deterministic Harn
 records for retries, artifacts, tails, classification, and recovery hints.
+Use `harness.process.spawn_captured({cmd, args?, cwd?, env?, stdin?, timeout_ms?})`
+when you only need one synchronous subprocess capture record:
+`{exit_code, stdout, stderr, duration_ms, success, timed_out}`.
 
 ```harn,ignore
 import { command_json, command_json_step, command_try } from "std/command"

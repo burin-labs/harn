@@ -81,6 +81,13 @@ pub fn harness_net_ambient(method: &str) -> Option<&'static str> {
     }
 }
 
+pub fn harness_process_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "spawn_captured" => Some("spawn_captured"),
+        _ => None,
+    }
+}
+
 pub fn harness_system_ambient(method: &str) -> Option<&'static str> {
     match method {
         "platform" => Some("system_platform"),
@@ -101,6 +108,7 @@ pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'st
         "env" => harness_env_ambient(method),
         "random" => harness_random_ambient(method),
         "net" => harness_net_ambient(method),
+        "process" => harness_process_ambient(method),
         "system" => harness_system_ambient(method),
         _ => None,
     }

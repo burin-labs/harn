@@ -366,11 +366,12 @@ the directory.
 When a port discovers a gap in the `harness.*` namespace — something
 the Rust handler does that no `.harn` script can — the answer is a new
 builtin via the G4 pattern ([#2297][g4]). G4 landed a first round of
-free builtins (`sha256_hex`, `spawn_captured`, `term_width`,
+free builtins (`sha256_hex`, `term_width`,
 `term_height`, `mkdtemp`, `glob`, `llm_catalog`,
 `llm_provider_status`) that today live as top-level functions so the
 ports could move. Directory policy that can be expressed from env vars
-belongs in `std/cli/paths` instead of a host capability. The long-term
+belongs in `std/cli/paths` instead of a host capability. `spawn_captured`
+has since moved to `harness.process.spawn_captured`. The long-term
 direction promotes each remaining free builtin to its
 `harness.X.Y` sub-handle through follow-up issues
 [#2337][f7]-[#2340][f10] and [#2342][f12]. Add new capabilities the same way:

@@ -3,13 +3,13 @@
 //!
 //! `Harness` is the Harn-language analog of an explicit-capability handle: a
 //! single value the runtime hands to a script's `main` so that stdio, clock,
-//! filesystem, environment, randomness, and network access become surface in
+//! filesystem, environment, randomness, network, process, and system access become surface in
 //! the type system instead of ambient globals. Each sub-handle (`stdio`,
-//! `clock`, `fs`, `env`, `random`, `net`) is a distinct named type that
+//! `clock`, `fs`, `env`, `random`, `net`, `process`, `system`) is a distinct named type that
 //! anchors the surface for its capability slice.
 //!
 //! This module defines:
-//!   * The runtime [`Harness`] value (and six sub-handle wrappers).
+//!   * The runtime [`Harness`] value (and its sub-handle wrappers).
 //!   * [`Harness::real`], the production constructor that wraps wall-clock
 //!     time, `tokio::fs`, `std::env`, `rand::thread_rng`, and `reqwest`. The
 //!     downstream migration tickets (E4.2-E4.4) populate the per-handle
@@ -30,7 +30,7 @@ use async_trait::async_trait;
 use harn_clock::{Clock, PausedClock, RealClock};
 use time::OffsetDateTime;
 
-/// Seven capability slices exposed by a [`Harness`].
+/// Capability slices exposed by a [`Harness`].
 ///
 /// `Root` is the parent handle; the others are the typed sub-handles users
 /// reach through field access (`harness.stdio`, `harness.clock`, ...).
@@ -43,6 +43,7 @@ pub enum HarnessKind {
     Env,
     Random,
     Net,
+    Process,
     System,
 }
 
@@ -59,6 +60,7 @@ impl HarnessKind {
             HarnessKind::Env => "HarnessEnv",
             HarnessKind::Random => "HarnessRandom",
             HarnessKind::Net => "HarnessNet",
+            HarnessKind::Process => "HarnessProcess",
             HarnessKind::System => "HarnessSystem",
         }
     }
@@ -74,6 +76,7 @@ impl HarnessKind {
             HarnessKind::Env => Some("env"),
             HarnessKind::Random => Some("random"),
             HarnessKind::Net => Some("net"),
+            HarnessKind::Process => Some("process"),
             HarnessKind::System => Some("system"),
         }
     }
@@ -87,12 +90,13 @@ impl HarnessKind {
             "env" => Some(HarnessKind::Env),
             "random" => Some(HarnessKind::Random),
             "net" => Some(HarnessKind::Net),
+            "process" => Some(HarnessKind::Process),
             "system" => Some(HarnessKind::System),
             _ => None,
         }
     }
 
-    /// All seven sub-handle kinds, in the canonical field order.
+    /// All sub-handle kinds, in the canonical field order.
     pub const SUB_HANDLES: &'static [HarnessKind] = &[
         HarnessKind::Stdio,
         HarnessKind::Clock,
@@ -100,6 +104,7 @@ impl HarnessKind {
         HarnessKind::Env,
         HarnessKind::Random,
         HarnessKind::Net,
+        HarnessKind::Process,
         HarnessKind::System,
     ];
 
@@ -112,6 +117,7 @@ impl HarnessKind {
         HarnessKind::Env,
         HarnessKind::Random,
         HarnessKind::Net,
+        HarnessKind::Process,
         HarnessKind::System,
     ];
 }
@@ -605,6 +611,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.process`.
+    pub fn process(&self) -> HarnessProcess {
+        HarnessProcess {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Field access for `harness.system`.
     pub fn system(&self) -> HarnessSystem {
         HarnessSystem {
@@ -682,6 +695,12 @@ pub struct HarnessNet {
     inner: Arc<HarnessInner>,
 }
 
+/// process sub-handle: `spawn_captured`.
+#[derive(Debug, Clone)]
+pub struct HarnessProcess {
+    inner: Arc<HarnessInner>,
+}
+
 /// system sub-handle: `cpu`, `memory`, `gpus`, `temperature`, `platform`,
 /// `processes`. Read-only host introspection — no side effects on the host
 /// system. Gated by the harness handle so scripts running under
@@ -710,6 +729,7 @@ sub_handle_inner!(
     HarnessEnv,
     HarnessRandom,
     HarnessNet,
+    HarnessProcess,
     HarnessSystem,
 );
 
@@ -722,7 +742,7 @@ impl HarnessClock {
 
 /// Compact `VmValue` payload for a `Harness` or any of its sub-handles.
 ///
-/// All seven variants share one `Arc<HarnessInner>`; `kind` discriminates the
+/// All variants share one `Arc<HarnessInner>`; `kind` discriminates the
 /// surface the VM exposes for property access and method dispatch.
 #[derive(Clone)]
 pub struct VmHarness {
@@ -903,6 +923,7 @@ mod tests {
             r#"fn main(harness: Harness) { harness.env.get("KEY") }"#,
             r#"fn main(harness: Harness) { harness.random.gen_u64() }"#,
             r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#,
+            r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf", args: ["x"]}) }"#,
             r#"fn main(harness: Harness) { harness.system.cpu() }"#,
         ] {
             let error = run_harness_source(source, harness.clone()).expect_err("call denied");
@@ -926,6 +947,7 @@ mod tests {
                 (HarnessKind::Env, "get"),
                 (HarnessKind::Random, "gen_u64"),
                 (HarnessKind::Net, "get"),
+                (HarnessKind::Process, "spawn_captured"),
                 (HarnessKind::System, "cpu"),
             ]
         );
@@ -1028,6 +1050,10 @@ fn main(harness: Harness) {
             (
                 r#"fn main(harness: Harness) { harness.net.get("https://missing.test") }"#,
                 "MockHarness has no net_get response for https://missing.test",
+            ),
+            (
+                r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf", args: ["x"]}) }"#,
+                "MockHarness has no process spawn response",
             ),
         ];
 
