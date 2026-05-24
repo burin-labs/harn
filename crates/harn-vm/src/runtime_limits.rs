@@ -37,6 +37,12 @@ pub struct RuntimeLimits {
     pub max_agent_sessions: usize,
     /// Maximum directory descent for project fingerprint discovery.
     pub max_project_fingerprint_depth: usize,
+    /// Maximum nested runtime shape-spec validation depth.
+    pub max_shape_validation_depth: usize,
+    /// Maximum nested YAML depth walked while extracting project enrichment hints.
+    pub max_project_enrich_yaml_depth: usize,
+    /// Maximum nested prompt-template AST/expression depth.
+    pub max_template_ast_depth: usize,
     /// Maximum collection items the compiler may materialize while folding constants.
     pub max_constant_folded_collection_items: usize,
     /// Maximum string bytes the compiler may materialize while folding constants.
@@ -67,6 +73,9 @@ impl RuntimeLimits {
         default_event_log_queue_depth: 128,
         max_agent_sessions: 128,
         max_project_fingerprint_depth: 4,
+        max_shape_validation_depth: 64,
+        max_project_enrich_yaml_depth: 128,
+        max_template_ast_depth: 128,
         max_constant_folded_collection_items: 4_096,
         max_constant_folded_string_bytes: 64 * 1024,
         max_nested_execution_depth: 8,
@@ -91,6 +100,9 @@ impl RuntimeLimits {
             "default_event_log_queue_depth" => self.default_event_log_queue_depth,
             "max_agent_sessions" => self.max_agent_sessions,
             "max_project_fingerprint_depth" => self.max_project_fingerprint_depth,
+            "max_shape_validation_depth" => self.max_shape_validation_depth,
+            "max_project_enrich_yaml_depth" => self.max_project_enrich_yaml_depth,
+            "max_template_ast_depth" => self.max_template_ast_depth,
             "max_constant_folded_collection_items" => self.max_constant_folded_collection_items,
             "max_constant_folded_string_bytes" => self.max_constant_folded_string_bytes,
             "max_nested_execution_depth" => self.max_nested_execution_depth,
@@ -231,6 +243,24 @@ pub const RUNTIME_LIMIT_DESCRIPTIONS: &[RuntimeLimitDescription] = &[
         protects: "bounds project fingerprint discovery in large or adversarial directory trees",
     },
     RuntimeLimitDescription {
+        name: "max_shape_validation_depth",
+        user_visible: true,
+        host_configurable: false,
+        protects: "bounds runtime shape validation for nested dicts and structs",
+    },
+    RuntimeLimitDescription {
+        name: "max_project_enrich_yaml_depth",
+        user_visible: false,
+        host_configurable: false,
+        protects: "bounds project enrichment traversal of nested hook YAML",
+    },
+    RuntimeLimitDescription {
+        name: "max_template_ast_depth",
+        user_visible: true,
+        host_configurable: false,
+        protects: "bounds nested prompt-template control structures and expressions",
+    },
+    RuntimeLimitDescription {
         name: "max_constant_folded_collection_items",
         user_visible: false,
         host_configurable: false,
@@ -288,6 +318,9 @@ mod tests {
         assert_eq!(limits.default_event_log_queue_depth, 128);
         assert_eq!(limits.max_agent_sessions, 128);
         assert_eq!(limits.max_project_fingerprint_depth, 4);
+        assert_eq!(limits.max_shape_validation_depth, 64);
+        assert_eq!(limits.max_project_enrich_yaml_depth, 128);
+        assert_eq!(limits.max_template_ast_depth, 128);
         assert_eq!(limits.max_constant_folded_collection_items, 4_096);
         assert_eq!(limits.max_constant_folded_string_bytes, 64 * 1024);
         assert_eq!(limits.max_nested_execution_depth, 8);
@@ -320,6 +353,9 @@ mod tests {
                 "default_event_log_queue_depth",
                 "max_agent_sessions",
                 "max_project_fingerprint_depth",
+                "max_shape_validation_depth",
+                "max_project_enrich_yaml_depth",
+                "max_template_ast_depth",
                 "max_constant_folded_collection_items",
                 "max_constant_folded_string_bytes",
                 "max_nested_execution_depth",

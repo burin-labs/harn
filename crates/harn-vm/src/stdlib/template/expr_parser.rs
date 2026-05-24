@@ -1,5 +1,8 @@
 use super::ast::{BinOp, Expr, PathSeg, UnOp};
 use super::error::TemplateError;
+use crate::runtime_limits::RuntimeLimits;
+
+const TEMPLATE_EXPR_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_template_ast_depth;
 
 pub(super) fn parse_expr(src: &str, line: usize, col: usize) -> Result<Expr, TemplateError> {
     let tokens = tokenize_expr(src, line, col)?;
@@ -9,7 +12,7 @@ pub(super) fn parse_expr(src: &str, line: usize, col: usize) -> Result<Expr, Tem
         line,
         col,
     };
-    let e = p.parse_filter()?;
+    let e = p.parse_filter(0)?;
     if p.pos < tokens.len() {
         return Err(TemplateError::new(
             line,
@@ -254,8 +257,19 @@ impl<'a> ExprParser<'a> {
         TemplateError::new(self.line, self.col, m)
     }
 
-    fn parse_filter(&mut self) -> Result<Expr, TemplateError> {
-        let mut left = self.parse_or()?;
+    fn check_depth(&self, depth: usize) -> Result<(), TemplateError> {
+        if depth > TEMPLATE_EXPR_MAX_DEPTH {
+            Err(self.err(format!(
+                "template expression depth exceeded ({TEMPLATE_EXPR_MAX_DEPTH} levels)"
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn parse_filter(&mut self, depth: usize) -> Result<Expr, TemplateError> {
+        self.check_depth(depth)?;
+        let mut left = self.parse_or(depth)?;
         while self.eat(&EToken::Pipe) {
             let name = match self.peek() {
                 Some(EToken::Ident(n)) => n.clone(),
@@ -265,7 +279,7 @@ impl<'a> ExprParser<'a> {
             let mut args = Vec::new();
             if self.eat(&EToken::Colon) {
                 loop {
-                    let a = self.parse_or()?;
+                    let a = self.parse_or(depth + 1)?;
                     args.push(a);
                     if !self.eat(&EToken::Comma) {
                         break;
@@ -277,34 +291,38 @@ impl<'a> ExprParser<'a> {
         Ok(left)
     }
 
-    fn parse_or(&mut self) -> Result<Expr, TemplateError> {
-        let mut left = self.parse_and()?;
+    fn parse_or(&mut self, depth: usize) -> Result<Expr, TemplateError> {
+        self.check_depth(depth)?;
+        let mut left = self.parse_and(depth)?;
         while self.eat(&EToken::OrKw) {
-            let right = self.parse_and()?;
+            let right = self.parse_and(depth)?;
             left = Expr::Binary(BinOp::Or, Box::new(left), Box::new(right));
         }
         Ok(left)
     }
 
-    fn parse_and(&mut self) -> Result<Expr, TemplateError> {
-        let mut left = self.parse_not()?;
+    fn parse_and(&mut self, depth: usize) -> Result<Expr, TemplateError> {
+        self.check_depth(depth)?;
+        let mut left = self.parse_not(depth)?;
         while self.eat(&EToken::AndKw) {
-            let right = self.parse_not()?;
+            let right = self.parse_not(depth)?;
             left = Expr::Binary(BinOp::And, Box::new(left), Box::new(right));
         }
         Ok(left)
     }
 
-    fn parse_not(&mut self) -> Result<Expr, TemplateError> {
+    fn parse_not(&mut self, depth: usize) -> Result<Expr, TemplateError> {
+        self.check_depth(depth)?;
         if self.eat(&EToken::Bang) || self.eat(&EToken::NotKw) {
-            let inner = self.parse_not()?;
+            let inner = self.parse_not(depth + 1)?;
             return Ok(Expr::Unary(UnOp::Not, Box::new(inner)));
         }
-        self.parse_cmp()
+        self.parse_cmp(depth)
     }
 
-    fn parse_cmp(&mut self) -> Result<Expr, TemplateError> {
-        let left = self.parse_unary()?;
+    fn parse_cmp(&mut self, depth: usize) -> Result<Expr, TemplateError> {
+        self.check_depth(depth)?;
+        let left = self.parse_unary(depth)?;
         let op = match self.peek() {
             Some(EToken::EqEq) => Some(BinOp::Eq),
             Some(EToken::BangEq) => Some(BinOp::Neq),
@@ -316,17 +334,19 @@ impl<'a> ExprParser<'a> {
         };
         if let Some(op) = op {
             self.pos += 1;
-            let right = self.parse_unary()?;
+            let right = self.parse_unary(depth)?;
             return Ok(Expr::Binary(op, Box::new(left), Box::new(right)));
         }
         Ok(left)
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, TemplateError> {
-        self.parse_primary()
+    fn parse_unary(&mut self, depth: usize) -> Result<Expr, TemplateError> {
+        self.check_depth(depth)?;
+        self.parse_primary(depth)
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, TemplateError> {
+    fn parse_primary(&mut self, depth: usize) -> Result<Expr, TemplateError> {
+        self.check_depth(depth)?;
         let tok = self
             .peek()
             .cloned()
@@ -340,7 +360,7 @@ impl<'a> ExprParser<'a> {
             EToken::Float(f) => Expr::Float(f),
             EToken::Str(s) => Expr::Str(s),
             EToken::LParen => {
-                let e = self.parse_or()?;
+                let e = self.parse_or(depth + 1)?;
                 if !self.eat(&EToken::RParen) {
                     return Err(self.err("expected `)`"));
                 }
@@ -348,7 +368,7 @@ impl<'a> ExprParser<'a> {
             }
             EToken::Ident(name) => self.parse_path(name)?,
             EToken::Bang | EToken::NotKw => {
-                let inner = self.parse_primary()?;
+                let inner = self.parse_primary(depth + 1)?;
                 Expr::Unary(UnOp::Not, Box::new(inner))
             }
             other => return Err(self.err(format!("unexpected token `{:?}`", other))),

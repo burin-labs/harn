@@ -8,6 +8,7 @@ use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
+use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::json_to_vm_value;
 use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
@@ -33,6 +34,7 @@ const MAX_SOURCE_FILES: usize = 8;
 const MAX_FILE_CHARS: usize = 4_000;
 const MAX_TOTAL_CONTEXT_CHARS: usize = 24_000;
 const DEFAULT_BUDGET_TOKENS: i64 = 4_000;
+const PROJECT_ENRICH_YAML_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_project_enrich_yaml_depth;
 
 #[derive(Debug, Clone)]
 struct ProjectEnrichOptions {
@@ -381,6 +383,8 @@ struct HookEvidence {
     providers: Vec<String>,
     files: Vec<String>,
     stages: BTreeMap<String, Vec<String>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -686,6 +690,7 @@ fn collect_hook_evidence(root: &Path) -> HookEvidence {
     let mut providers = Vec::new();
     let mut files = Vec::new();
     let mut stages = BTreeMap::new();
+    let mut warnings = Vec::new();
 
     let githooks_dir = root.join(".githooks");
     if let Ok(entries) = std::fs::read_dir(&githooks_dir) {
@@ -734,7 +739,9 @@ fn collect_hook_evidence(root: &Path) -> HookEvidence {
         push_unique_string(&mut providers, "lefthook".to_string());
         push_unique_string(&mut files, relative_posix(root, &lefthook_path));
         if let Ok(content) = std::fs::read_to_string(&lefthook_path) {
-            collect_lefthook_hooks(&content, &mut stages);
+            if let Err(error) = collect_lefthook_hooks(&content, &mut stages) {
+                warnings.push(format!("lefthook.yml: {error}"));
+            }
         }
     }
 
@@ -780,6 +787,7 @@ fn collect_hook_evidence(root: &Path) -> HookEvidence {
         providers,
         files,
         stages,
+        warnings,
     }
 }
 
@@ -848,12 +856,15 @@ fn collect_pre_commit_hooks(content: &str, stages: &mut BTreeMap<String, Vec<Str
     }
 }
 
-fn collect_lefthook_hooks(content: &str, stages: &mut BTreeMap<String, Vec<String>>) {
+fn collect_lefthook_hooks(
+    content: &str,
+    stages: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), String> {
     let Ok(parsed) = serde_yaml::from_str::<YamlValue>(content) else {
-        return;
+        return Ok(());
     };
     let Some(root) = parsed.as_mapping() else {
-        return;
+        return Ok(());
     };
     for (stage, value) in root {
         let Some(stage_name) = stage.as_str() else {
@@ -864,40 +875,59 @@ fn collect_lefthook_hooks(content: &str, stages: &mut BTreeMap<String, Vec<Strin
         }
         collect_nested_run_commands(value, &mut |command| {
             push_stage_command(stages, stage_name, command);
-        });
+        })?;
     }
+    Ok(())
 }
 
-fn collect_nested_run_commands(value: &YamlValue, sink: &mut dyn FnMut(String)) {
-    match value {
-        YamlValue::Mapping(mapping) => {
-            if let Some(run) = mapping
-                .get(YamlValue::String("run".to_string()))
-                .and_then(YamlValue::as_str)
-            {
-                for command in shell_commands(run) {
-                    sink(command);
+fn collect_nested_run_commands(
+    value: &YamlValue,
+    sink: &mut dyn FnMut(String),
+) -> Result<(), String> {
+    let mut stack = vec![(value, 0usize)];
+    while let Some((value, depth)) = stack.pop() {
+        if depth > PROJECT_ENRICH_YAML_MAX_DEPTH {
+            return Err(format!(
+                "YAML traversal depth exceeded ({} levels)",
+                PROJECT_ENRICH_YAML_MAX_DEPTH
+            ));
+        }
+
+        match value {
+            YamlValue::Mapping(mapping) => {
+                if let Some(run) = mapping
+                    .get(YamlValue::String("run".to_string()))
+                    .and_then(YamlValue::as_str)
+                {
+                    for command in shell_commands(run) {
+                        sink(command);
+                    }
+                }
+                let mut entries = mapping.iter().collect::<Vec<_>>();
+                entries.sort_by(|(left, _), (right, _)| {
+                    left.as_str()
+                        .unwrap_or_default()
+                        .cmp(right.as_str().unwrap_or_default())
+                });
+                for (key, child) in entries.into_iter().rev() {
+                    let Some(key) = key.as_str() else {
+                        continue;
+                    };
+                    if key == "run" {
+                        continue;
+                    }
+                    stack.push((child, depth + 1));
                 }
             }
-            let mut entries = mapping.iter().collect::<Vec<_>>();
-            entries.sort_by_key(|(key, _)| key.as_str().unwrap_or_default().to_string());
-            for (key, child) in entries {
-                let Some(key) = key.as_str() else {
-                    continue;
-                };
-                if key == "run" {
-                    continue;
+            YamlValue::Sequence(items) => {
+                for item in items.iter().rev() {
+                    stack.push((item, depth + 1));
                 }
-                collect_nested_run_commands(child, sink);
             }
+            _ => {}
         }
-        YamlValue::Sequence(items) => {
-            for item in items {
-                collect_nested_run_commands(item, sink);
-            }
-        }
-        _ => {}
     }
+    Ok(())
 }
 
 fn collect_package_manifest_evidence(
@@ -1833,6 +1863,49 @@ exit 1
         assert_eq!(estimate_tokens(""), 0);
         assert_eq!(estimate_tokens("abcd"), 1);
         assert_eq!(estimate_tokens("abcde"), 2);
+    }
+
+    #[test]
+    fn lefthook_run_collection_preserves_sorted_depth_first_order() {
+        let value: YamlValue = serde_yaml::from_str(
+            r#"
+commands:
+  z:
+    run: echo z
+  a:
+    run: echo a
+  list:
+    - run: echo list
+"#,
+        )
+        .expect("yaml");
+        let mut commands = Vec::new();
+
+        collect_nested_run_commands(&value, &mut |command| commands.push(command))
+            .expect("collect commands");
+
+        assert_eq!(commands, vec!["echo a", "echo list", "echo z"]);
+    }
+
+    #[test]
+    fn lefthook_run_collection_reports_yaml_depth_limit() {
+        let mut run = serde_yaml::Mapping::new();
+        run.insert(
+            YamlValue::String("run".to_string()),
+            YamlValue::String("echo too-deep".to_string()),
+        );
+        let mut value = YamlValue::Mapping(run);
+        for _ in 0..=PROJECT_ENRICH_YAML_MAX_DEPTH {
+            value = YamlValue::Sequence(vec![value]);
+        }
+
+        let mut commands = Vec::new();
+        let err = collect_nested_run_commands(&value, &mut |command| commands.push(command))
+            .expect_err("depth limit");
+
+        assert!(commands.is_empty());
+        assert!(err.contains("YAML traversal depth exceeded"));
+        assert!(err.contains(&format!("({PROJECT_ENRICH_YAML_MAX_DEPTH} levels)")));
     }
 
     #[test]

@@ -327,7 +327,9 @@ impl Parser {
                     self.skip_newlines();
                     let mut args = Vec::new();
                     while !self.check(&TokenKind::RParen) {
-                        args.push(self.parse_attribute_value()?);
+                        args.push(self.with_nesting("attribute argument", |parser| {
+                            parser.parse_attribute_value()
+                        })?);
                         self.skip_newlines();
                         if self.check(&TokenKind::Comma) {
                             self.advance();
@@ -356,7 +358,9 @@ impl Parser {
                 self.skip_newlines();
                 let mut items = Vec::new();
                 while !self.check(&TokenKind::RBracket) {
-                    items.push(self.parse_attribute_value()?);
+                    items.push(self.with_nesting("attribute list item", |parser| {
+                        parser.parse_attribute_value()
+                    })?);
                     self.skip_newlines();
                     if self.check(&TokenKind::Comma) {
                         self.advance();
@@ -398,7 +402,9 @@ impl Parser {
                     };
                     self.consume(&TokenKind::Colon, ":")?;
                     self.skip_newlines();
-                    let value = self.parse_attribute_value()?;
+                    let value = self.with_nesting("attribute dict value", |parser| {
+                        parser.parse_attribute_value()
+                    })?;
                     entries.push(DictEntry { key, value });
                     self.skip_newlines();
                     if self.check(&TokenKind::Comma) {

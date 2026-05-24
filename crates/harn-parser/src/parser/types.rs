@@ -5,6 +5,13 @@ use super::error::ParserError;
 use super::state::Parser;
 
 impl Parser {
+    pub(super) fn parse_nested_type_expr(
+        &mut self,
+        context: &'static str,
+    ) -> Result<TypeExpr, ParserError> {
+        self.with_nesting(context, |parser| parser.parse_type_expr())
+    }
+
     /// Parse a comma-separated list of type parameters until `>`.
     ///
     /// Each parameter may be prefixed with a variance marker:
@@ -34,7 +41,7 @@ impl Parser {
             return Err(self.error("type argument"));
         }
         while !self.is_at_end() && !self.check(&TokenKind::Gt) {
-            args.push(self.parse_type_expr()?);
+            args.push(self.parse_nested_type_expr("type argument")?);
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
                 self.advance();
@@ -176,7 +183,7 @@ impl Parser {
         }
         if self.check(&TokenKind::LBracket) {
             self.advance();
-            let inner = self.parse_type_expr()?;
+            let inner = self.parse_nested_type_expr("list type")?;
             self.consume(&TokenKind::RBracket, "]")?;
             return Ok(TypeExpr::List(Box::new(inner)));
         }
@@ -218,7 +225,7 @@ impl Parser {
             let mut params = Vec::new();
             self.skip_newlines();
             while !self.is_at_end() && !self.check(&TokenKind::RParen) {
-                params.push(self.parse_type_expr()?);
+                params.push(self.parse_nested_type_expr("function parameter type")?);
                 self.skip_newlines();
                 if self.check(&TokenKind::Comma) {
                     self.advance();
@@ -227,7 +234,7 @@ impl Parser {
             }
             self.consume(&TokenKind::RParen, ")")?;
             self.consume(&TokenKind::Arrow, "->")?;
-            let return_type = self.parse_type_expr()?;
+            let return_type = self.parse_nested_type_expr("function return type")?;
             return Ok(TypeExpr::FnType {
                 params,
                 return_type: Box::new(return_type),
@@ -282,7 +289,7 @@ impl Parser {
                 false
             };
             self.consume(&TokenKind::Colon, ":")?;
-            let type_expr = self.parse_type_expr()?;
+            let type_expr = self.parse_nested_type_expr("shape field type")?;
             fields.push(ShapeField {
                 name,
                 type_expr,

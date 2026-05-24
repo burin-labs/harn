@@ -7,6 +7,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const SHAPE_SPEC_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_shape_spec_cache_entries;
+const SHAPE_VALIDATION_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_shape_validation_depth;
 
 thread_local! {
     static SHAPE_SPEC_CACHE: RefCell<HashMap<String, Rc<ParsedShapeSpec>>> =
@@ -231,6 +232,15 @@ fn assert_parsed_shape_fields(
     param_name: &str,
     spec: &ParsedShapeSpec,
 ) -> Result<VmValue, VmError> {
+    assert_parsed_shape_fields_at_depth(fields, param_name, spec, 0)
+}
+
+fn assert_parsed_shape_fields_at_depth(
+    fields: &BTreeMap<String, VmValue>,
+    param_name: &str,
+    spec: &ParsedShapeSpec,
+    depth: usize,
+) -> Result<VmValue, VmError> {
     for field in &spec.fields {
         match fields.get(field.name.as_str()) {
             None => {
@@ -258,7 +268,7 @@ fn assert_parsed_shape_fields(
                 }
             }
             Some(val) => {
-                assert_shape_field_value(val, param_name, field)?;
+                assert_shape_field_value(val, param_name, field, depth)?;
             }
         }
     }
@@ -269,6 +279,7 @@ fn assert_shape_field_value(
     val: &VmValue,
     param_name: &str,
     field: &ParsedShapeField,
+    depth: usize,
 ) -> Result<(), VmError> {
     match &field.kind {
         ShapeFieldType::Nested(nested) => {
@@ -289,8 +300,15 @@ fn assert_shape_field_value(
                 }
             };
             let nested_param = format!("{}.{}", param_name, field.name);
-            assert_parsed_shape_fields(nested_fields, &nested_param, nested)?;
+            if depth >= SHAPE_VALIDATION_MAX_DEPTH {
+                return Err(shape_depth_error(&nested_param));
+            }
+            assert_parsed_shape_fields_at_depth(nested_fields, &nested_param, nested, depth + 1)?;
             Ok(())
+        }
+        ShapeFieldType::DepthExceeded => {
+            let nested_param = format!("{}.{}", param_name, field.name);
+            Err(shape_depth_error(&nested_param))
         }
         ShapeFieldType::Union(types) => {
             let actual_type = val.type_name();
@@ -317,6 +335,13 @@ fn assert_shape_field_value(
             Ok(())
         }
     }
+}
+
+fn shape_depth_error(param_name: &str) -> VmError {
+    VmError::TypeError(format!(
+        "parameter '{}': shape validation depth exceeded ({} levels)",
+        param_name, SHAPE_VALIDATION_MAX_DEPTH
+    ))
 }
 
 /// Render the "available fields: …" tail used in missing-field errors.
@@ -349,6 +374,7 @@ enum ShapeFieldType {
     Scalar(String),
     Union(Vec<String>),
     Nested(Rc<ParsedShapeSpec>),
+    DepthExceeded,
 }
 
 fn cached_shape_spec(spec: &str) -> Rc<ParsedShapeSpec> {
@@ -369,6 +395,10 @@ fn cached_shape_spec(spec: &str) -> Rc<ParsedShapeSpec> {
 
 /// Parse a shape spec string into reusable runtime validation metadata.
 fn parse_shape_spec(spec: &str) -> ParsedShapeSpec {
+    parse_shape_spec_at_depth(spec, 0)
+}
+
+fn parse_shape_spec_at_depth(spec: &str, depth: usize) -> ParsedShapeSpec {
     let mut fields = Vec::new();
     let chars: Vec<char> = spec.chars().collect();
     let len = chars.len();
@@ -415,10 +445,11 @@ fn parse_shape_spec(spec: &str) -> ParsedShapeSpec {
                     brace_depth += 1;
                     i += 1;
                 }
-                '}' => {
+                '}' if brace_depth > 0 => {
                     brace_depth -= 1;
                     i += 1;
                 }
+                '}' => break,
                 ',' if brace_depth == 0 => break,
                 _ => {
                     i += 1;
@@ -434,7 +465,7 @@ fn parse_shape_spec(spec: &str) -> ParsedShapeSpec {
         if !field_name.is_empty() && !type_label.is_empty() {
             fields.push(ParsedShapeField {
                 name: field_name,
-                kind: parse_shape_field_type(&type_label),
+                kind: parse_shape_field_type(&type_label, depth),
                 type_label,
                 optional,
             });
@@ -448,10 +479,13 @@ fn parse_shape_spec(spec: &str) -> ParsedShapeSpec {
     ParsedShapeSpec { fields }
 }
 
-fn parse_shape_field_type(type_label: &str) -> ShapeFieldType {
+fn parse_shape_field_type(type_label: &str, depth: usize) -> ShapeFieldType {
     if type_label.starts_with('{') && type_label.ends_with('}') {
+        if depth >= SHAPE_VALIDATION_MAX_DEPTH {
+            return ShapeFieldType::DepthExceeded;
+        }
         let inner_spec = &type_label[1..type_label.len() - 1];
-        return ShapeFieldType::Nested(Rc::new(parse_shape_spec(inner_spec)));
+        return ShapeFieldType::Nested(Rc::new(parse_shape_spec_at_depth(inner_spec, depth + 1)));
     }
 
     if type_label.contains('|') {
@@ -493,5 +527,42 @@ mod tests {
         ]);
 
         assert_parsed_shape_fields(&fields, "payload", &spec).unwrap();
+    }
+
+    fn nested_shape_spec(depth: usize) -> String {
+        let mut spec = "leaf: int".to_string();
+        for _ in 0..depth {
+            spec = format!("child: {{{spec}}}");
+        }
+        spec
+    }
+
+    fn nested_fields(depth: usize) -> BTreeMap<String, VmValue> {
+        let mut fields = BTreeMap::from([("leaf".to_string(), VmValue::Int(1))]);
+        for _ in 0..depth {
+            fields = BTreeMap::from([("child".to_string(), VmValue::Dict(Rc::new(fields)))]);
+        }
+        fields
+    }
+
+    #[test]
+    fn shape_validation_allows_normal_nested_specs() {
+        let fields = nested_fields(3);
+        let spec = nested_shape_spec(3);
+
+        assert!(assert_shape_fields(&fields, "payload", &spec).is_ok());
+    }
+
+    #[test]
+    fn shape_validation_reports_depth_limit_with_field_path() {
+        let depth = SHAPE_VALIDATION_MAX_DEPTH + 1;
+        let fields = nested_fields(depth);
+        let spec = nested_shape_spec(depth);
+
+        let err = assert_shape_fields(&fields, "payload", &spec).expect_err("depth limit");
+        let message = err.to_string();
+        assert!(message.contains("shape validation depth exceeded"));
+        assert!(message.contains(&format!("({SHAPE_VALIDATION_MAX_DEPTH} levels)")));
+        assert!(message.contains("payload.child"));
     }
 }
