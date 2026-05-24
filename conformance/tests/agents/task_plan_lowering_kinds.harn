@@ -1,0 +1,80 @@
+import { task_plan_compile } from "std/agent/task_plan"
+
+pipeline main() {
+  let plan = {
+    schema_version: "1",
+    objective: "Exercise every IR node kind once",
+    entry: "discover",
+    nodes: {
+      discover: {kind: "read_fact", prompt: "fact", tools: ["read"]},
+      search: {kind: "search", prompt: "find", tools: ["grep"]},
+      pack: {kind: "context_pack", prompt: "pack context"},
+      loop: {
+        kind: "agent_loop",
+        prompt: "implement",
+        agent_loop: {max_iterations: 4, done_sentinel: "DONE"},
+        tools: ["edit"],
+        effects: ["writes_files"],
+      },
+      worker: {kind: "sub_agent", sub_agent: {worker_name: "doc-writer", preset: "writer", task_label: "draft"}},
+      fan: {
+        kind: "workflow_map",
+        prompt: "summarise each file",
+        map: {item_artifact_kind: "file", max_concurrency: 2},
+      },
+      gate: {kind: "human_gate", human_gate: {approval_id: "ship_approval", skippable: false}},
+      run_tests: {kind: "deterministic_command", command: {tool: "cargo", args: ["test", "-p", "auth"]}},
+      compact_now: {kind: "compact", compact: {threshold_tokens: 4000, preserve_recent: 6}},
+      sync: {kind: "join"},
+      check: {kind: "verify", verify: {command: "cargo test -p auth", expect_status: 0}},
+    },
+    edges: [
+      {from: "discover", to: "search"},
+      {from: "search", to: "pack"},
+      {from: "pack", to: "loop"},
+      {from: "loop", to: "worker"},
+      {from: "loop", to: "fan"},
+      {from: "fan", to: "sync"},
+      {from: "worker", to: "sync"},
+      {from: "sync", to: "gate"},
+      {from: "gate", to: "run_tests"},
+      {from: "run_tests", to: "compact_now"},
+      {from: "compact_now", to: "check"},
+    ],
+    capabilities: {tools: ["read", "edit", "grep", "run"], side_effect_level: "runs_commands"},
+  }
+  let compiled = task_plan_compile(plan)
+  __io_println(compiled.ok)
+  let g = compiled.workflow
+  __io_println(g.nodes.discover.kind)
+  __io_println(g.nodes.search.kind)
+  __io_println(g.nodes.pack.kind)
+  __io_println(g.nodes.loop.kind)
+  __io_println(g.nodes.loop.mode)
+  __io_println(g.nodes.loop.done_sentinel)
+  __io_println(g.nodes.worker.kind)
+  __io_println(g.nodes.worker.metadata.worker_name)
+  __io_println(g.nodes.fan.kind)
+  __io_println(g.nodes.fan.map_policy.item_artifact_kind)
+  __io_println(g.nodes.fan.map_policy.max_concurrent)
+  __io_println(g.nodes.gate.kind)
+  __io_println(g.nodes.gate.mode)
+  __io_println(g.nodes.gate.metadata.human_gate)
+  __io_println(g.nodes.gate.metadata.approval_id)
+  __io_println(g.nodes.run_tests.kind)
+  __io_println(g.nodes.run_tests.mode)
+  __io_println(g.nodes.run_tests.metadata.command_tool)
+  __io_println(g.nodes.compact_now.kind)
+  __io_println(g.nodes.compact_now.auto_compact.token_threshold)
+  __io_println(g.nodes.compact_now.metadata.compact_preserve_recent)
+  __io_println(g.nodes.sync.kind)
+  __io_println(g.nodes.check.kind)
+  // Lowering preserves the IR kind in metadata so consumers can recover
+  // the higher-level intent.
+  __io_println(g.nodes.discover.metadata.task_plan_kind)
+  __io_println(g.nodes.fan.metadata.task_plan_kind)
+  __io_println(g.nodes.check.metadata.task_plan_kind)
+  // The lowered graph still passes workflow_validate.
+  let validation = workflow_validate(g)
+  __io_println(validation.valid)
+}

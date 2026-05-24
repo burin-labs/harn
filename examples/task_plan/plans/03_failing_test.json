@@ -1,0 +1,37 @@
+{
+  "schema_version": "1",
+  "objective": "Diagnose and fix a specific failing unit test",
+  "entry": "reproduce",
+  "nodes": {
+    "reproduce": {
+      "kind": "deterministic_command",
+      "purpose": "Capture the failing output",
+      "command": {"tool": "run", "args": ["cargo", "test", "-p", "service", "--", "--exact", "service::tests::failing"]}
+    },
+    "diagnose": {
+      "kind": "agent_loop",
+      "purpose": "Locate the root cause",
+      "prompt": "Read the failing test, the SUT, and recent git blame on the touched code. Identify the smallest fix and explain why the test fails today.",
+      "tools": ["read", "grep", "run"],
+      "agent_loop": {"max_iterations": 8, "done_sentinel": "ROOT_CAUSE"}
+    },
+    "fix": {
+      "kind": "agent_loop",
+      "purpose": "Apply the smallest viable fix",
+      "prompt": "Apply the diagnosis. Keep the diff small. Update the test only if its expectation was wrong; otherwise change the SUT.",
+      "tools": ["edit", "run"],
+      "effects": ["writes_files"],
+      "agent_loop": {"max_iterations": 8, "done_sentinel": "DONE"}
+    },
+    "verify": {
+      "kind": "verify",
+      "verify": {"command": "cargo test -p service", "expect_status": 0}
+    }
+  },
+  "edges": [
+    {"from": "reproduce", "to": "diagnose"},
+    {"from": "diagnose", "to": "fix"},
+    {"from": "fix", "to": "verify"}
+  ],
+  "capabilities": {"tools": ["read", "edit", "grep", "run"], "side_effect_level": "writes_files"}
+}

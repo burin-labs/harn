@@ -1,0 +1,873 @@
+// @harn-entrypoint-category agent.task_plan
+//
+// std/agent/task_plan — typed task-plan IR validator and compiler.
+//
+// The IR is a JSON-shaped graph that a planner (model or human) can author
+// without depending on the lower-level workflow_graph internals. The compiler
+// lowers a validated plan into a WorkflowGraph that `workflow_validate`,
+// `workflow_inspect`, and `workflow_execute` already understand, so there is
+// no parallel runtime.
+//
+// Lowering rules (IR kind → WorkflowGraph node.kind):
+//   read_fact, search, context_pack, agent_loop, compact → "stage"
+//   sub_agent  → "subagent"
+//   workflow_map → "map"
+//   verify     → "verify"
+//   human_gate → "stage"  + metadata.human_gate=true (mode "manual")
+//   deterministic_command → "stage" + mode "command"
+//   join       → "join"
+//
+// The IR is intentionally narrow: only the fields planners actually compose.
+// Anything the lowered WorkflowGraph supports — retry, escalation, custom
+// branch semantics — is reachable through node.lowering_overrides when an
+// authoring agent needs to drop down a level.
+import "std/schema"
+
+const TASK_PLAN_SCHEMA_VERSION: string = "1"
+
+/**
+ * task_plan_schema_version.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: task_plan_schema_version()
+ */
+pub fn task_plan_schema_version() {
+  return TASK_PLAN_SCHEMA_VERSION
+}
+
+const __TASK_PLAN_NODE_KINDS: list<string> = [
+  "read_fact",
+  "search",
+  "context_pack",
+  "agent_loop",
+  "sub_agent",
+  "workflow_map",
+  "verify",
+  "human_gate",
+  "deterministic_command",
+  "join",
+  "compact",
+]
+
+const __TASK_PLAN_WRITE_KINDS = ["agent_loop", "sub_agent", "deterministic_command", "workflow_map"]
+
+const __TASK_PLAN_DEFAULT_BUDGETS = {max_nodes: 32, max_depth: 8, max_tool_calls: 128, max_model_calls: 64, max_steps: 32}
+
+fn __task_plan_optional_dict(fields) {
+  return schema_field(schema_object(fields, {additional_properties: schema_any()}), false)
+}
+
+fn __task_plan_node_schema() {
+  return schema_object(
+    {
+      id: schema_field(schema_string(), false),
+      kind: schema_enum(__TASK_PLAN_NODE_KINDS),
+      purpose: schema_field(schema_string(), false),
+      prompt: schema_field(schema_string(), false),
+      system: schema_field(schema_string(), false),
+      tools: schema_field(schema_list(schema_string()), false),
+      effects: schema_field(schema_list(schema_string()), false),
+      model: __task_plan_optional_dict(
+        {
+          provider: schema_field(schema_string(), false),
+          model: schema_field(schema_string(), false),
+          tier: schema_field(schema_string(), false),
+          temperature: schema_field(schema_float(), false),
+          max_tokens: schema_field(schema_int(), false),
+        },
+      ),
+      agent_loop: __task_plan_optional_dict(
+        {
+          max_iterations: schema_field(schema_int(), false),
+          done_sentinel: schema_field(schema_string(), false),
+          stop_after_successful_tools: schema_field(schema_list(schema_string()), false),
+        },
+      ),
+      sub_agent: __task_plan_optional_dict(
+        {
+          worker_name: schema_field(schema_string(), false),
+          preset: schema_field(schema_string(), false),
+          task_label: schema_field(schema_string(), false),
+        },
+      ),
+      verify: __task_plan_optional_dict(
+        {
+          command: schema_field(schema_string(), false),
+          expect_status: schema_field(schema_int(), false),
+          expect_text: schema_field(schema_string(), false),
+          assert_text: schema_field(schema_string(), false),
+        },
+      ),
+      map: __task_plan_optional_dict(
+        {
+          items: schema_field(schema_list(schema_any()), false),
+          item_artifact_kind: schema_field(schema_string(), false),
+          max_concurrency: schema_field(schema_int(), false),
+        },
+      ),
+      human_gate: __task_plan_optional_dict(
+        {
+          prompt: schema_field(schema_string(), false),
+          approval_id: schema_field(schema_string(), false),
+          skippable: schema_field(schema_bool(), false),
+        },
+      ),
+      command: __task_plan_optional_dict({tool: schema_string(), args: schema_field(schema_any(), false)}),
+      compact: __task_plan_optional_dict(
+        {
+          threshold_tokens: schema_field(schema_int(), false),
+          preserve_recent: schema_field(schema_int(), false),
+        },
+      ),
+      metadata: schema_field(schema_dict(schema_any()), false),
+      lowering_overrides: schema_field(schema_dict(schema_any()), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __task_plan_edge_schema() {
+  return schema_object(
+    {
+      from: schema_string(),
+      to: schema_string(),
+      branch: schema_field(schema_string(), false),
+      label: schema_field(schema_string(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __task_plan_unknown_schema() {
+  return schema_object(
+    {
+      id: schema_string(),
+      question: schema_field(schema_string(), false),
+      resolved_by_node: schema_field(schema_string(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * task_plan_schema.
+ *
+ * Returns the canonical schema (a `std/schema` dict) that
+ * `schema_check`/`schema_parse` can apply to a JSON task-plan IR.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: task_plan_schema()
+ */
+pub fn task_plan_schema() {
+  return schema_object(
+    {
+      schema_version: schema_string(),
+      objective: schema_string(),
+      entry: schema_field(schema_string(), false),
+      nodes: schema_dict(__task_plan_node_schema()),
+      edges: schema_field(schema_list(__task_plan_edge_schema()), false),
+      budgets: __task_plan_optional_dict(
+        {
+          max_nodes: schema_field(schema_int(), false),
+          max_depth: schema_field(schema_int(), false),
+          max_tool_calls: schema_field(schema_int(), false),
+          max_model_calls: schema_field(schema_int(), false),
+          max_steps: schema_field(schema_int(), false),
+        },
+      ),
+      capabilities: __task_plan_optional_dict(
+        {
+          tools: schema_field(schema_list(schema_string()), false),
+          side_effect_level: schema_field(schema_string(), false),
+          workspace_roots: schema_field(schema_list(schema_string()), false),
+          recursion_limit: schema_field(schema_int(), false),
+        },
+      ),
+      verification: __task_plan_optional_dict(
+        {
+          primary: schema_field(schema_string(), false),
+          required_paths: schema_field(schema_list(schema_string()), false),
+          required_text: schema_field(schema_list(schema_string()), false),
+        },
+      ),
+      unknowns: schema_field(schema_list(__task_plan_unknown_schema()), false),
+      transcript_policy: __task_plan_optional_dict(
+        {
+          visibility: schema_field(schema_string(), false),
+          redact_secrets: schema_field(schema_bool(), false),
+        },
+      ),
+      compaction_policy: __task_plan_optional_dict(
+        {
+          threshold_tokens: schema_field(schema_int(), false),
+          preserve_recent: schema_field(schema_int(), false),
+          strategy: schema_field(schema_string(), false),
+        },
+      ),
+      promotion_policy: __task_plan_optional_dict(
+        {
+          shadow_runs_required: schema_field(schema_int(), false),
+          human_review_required: schema_field(schema_bool(), false),
+          min_pass_rate: schema_field(schema_float(), false),
+        },
+      ),
+      metadata: schema_field(schema_dict(schema_any()), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __task_plan_push_error(report, code, path, message) {
+  return report + {errors: report.errors + [{code: code, path: path, message: message}]}
+}
+
+fn __task_plan_push_warning(report, code, path, message) {
+  return report + {warnings: report.warnings + [{code: code, path: path, message: message}]}
+}
+
+fn __task_plan_blank_report(plan) {
+  return {
+    valid: true,
+    schema_version: plan?.schema_version,
+    errors: [],
+    warnings: [],
+    graph_stats: {},
+    capability_summary: {},
+    budget_summary: {},
+    promotion_summary: {},
+  }
+}
+
+fn __task_plan_collect_node_ids(plan) {
+  var ids = []
+  let nodes = plan?.nodes ?? {}
+  for entry in nodes {
+    ids = ids + [entry.key]
+  }
+  return ids
+}
+
+fn __task_plan_validate_structure(plan, report) {
+  var out = report
+  let nodes = plan?.nodes ?? {}
+  let edges = plan?.edges ?? []
+  let node_ids = __task_plan_collect_node_ids(plan)
+  if len(node_ids) == 0 {
+    out = __task_plan_push_error(out, "no_nodes", "nodes", "plan has no nodes")
+    return out
+  }
+  let entry = plan?.entry
+  if entry == nil || entry == "" {
+    out = __task_plan_push_error(out, "entry_missing", "entry", "plan.entry is required")
+  } else if !contains(node_ids, entry) {
+    out = __task_plan_push_error(
+      out,
+      "entry_not_found",
+      "entry",
+      "entry node `" + entry + "` is not declared in nodes",
+    )
+  }
+  for node_id in node_ids {
+    let node = nodes[node_id]
+    let declared_id = node?.id
+    if declared_id != nil && declared_id != "" && declared_id != node_id {
+      out = __task_plan_push_error(
+        out,
+        "node_id_mismatch",
+        "nodes." + node_id + ".id",
+        "node.id `" + to_string(declared_id) + "` does not match dict key `" + node_id + "`",
+      )
+    }
+    if !contains(__TASK_PLAN_NODE_KINDS, node?.kind) {
+      out = __task_plan_push_error(
+        out,
+        "unknown_kind",
+        "nodes." + node_id + ".kind",
+        "unknown task-plan node kind `" + to_string(node?.kind) + "`",
+      )
+    }
+  }
+  for edge in edges {
+    if edge?.from == nil || !contains(node_ids, edge.from) {
+      out = __task_plan_push_error(
+        out,
+        "edge_from_unknown",
+        "edges",
+        "edge.from references unknown node `" + to_string(edge?.from) + "`",
+      )
+    }
+    if edge?.to == nil || !contains(node_ids, edge.to) {
+      out = __task_plan_push_error(
+        out,
+        "edge_to_unknown",
+        "edges",
+        "edge.to references unknown node `" + to_string(edge?.to) + "`",
+      )
+    }
+  }
+  return out
+}
+
+fn __task_plan_validate_kind_fields(plan, report) {
+  var out = report
+  let nodes = plan?.nodes ?? {}
+  for entry in nodes {
+    let node_id = entry.key
+    let node = entry.value
+    let path = "nodes." + node_id
+    let kind = node?.kind
+    if kind == "agent_loop" && (node?.prompt == nil || node.prompt == "") {
+      out = __task_plan_push_error(
+        out,
+        "agent_loop_missing_prompt",
+        path + ".prompt",
+        "agent_loop node requires a non-empty prompt",
+      )
+    }
+    if kind == "verify" && node?.verify == nil {
+      out = __task_plan_push_warning(
+        out,
+        "verify_no_contract",
+        path + ".verify",
+        "verify node has no verification contract (command/expect_status/assert_text)",
+      )
+    }
+    if kind == "sub_agent" && (node?.sub_agent == nil || node.sub_agent?.worker_name == nil) {
+      out = __task_plan_push_error(
+        out,
+        "sub_agent_missing_worker",
+        path + ".sub_agent.worker_name",
+        "sub_agent node requires sub_agent.worker_name",
+      )
+    }
+    if kind == "deterministic_command" && (node?.command == nil || node.command?.tool == nil) {
+      out = __task_plan_push_error(
+        out,
+        "command_missing_tool",
+        path + ".command.tool",
+        "deterministic_command node requires command.tool",
+      )
+    }
+    if kind == "human_gate" && (node?.human_gate == nil || node.human_gate?.approval_id == nil) {
+      out = __task_plan_push_error(
+        out,
+        "human_gate_missing_approval",
+        path + ".human_gate.approval_id",
+        "human_gate node requires human_gate.approval_id",
+      )
+    }
+    if kind == "workflow_map"
+      && (node?.map == nil
+      || (node.map?.items == nil && node.map?.item_artifact_kind == nil)) {
+      out = __task_plan_push_error(
+        out,
+        "map_missing_inputs",
+        path + ".map",
+        "workflow_map node requires map.items or map.item_artifact_kind",
+      )
+    }
+  }
+  return out
+}
+
+fn __task_plan_write_kinds_in_use(plan) {
+  let nodes = plan?.nodes ?? {}
+  var seen = []
+  for entry in nodes {
+    let kind = entry.value?.kind
+    if contains(__TASK_PLAN_WRITE_KINDS, kind) && !contains(seen, kind) {
+      seen = seen + [kind]
+    }
+  }
+  return seen
+}
+
+fn __task_plan_validate_budgets(plan, report) {
+  var out = report
+  let merged = __TASK_PLAN_DEFAULT_BUDGETS + plan?.budgets ?? {}
+  let node_count = len(__task_plan_collect_node_ids(plan))
+  if node_count > merged.max_nodes {
+    out = __task_plan_push_error(
+      out,
+      "budget_max_nodes",
+      "budgets.max_nodes",
+      "plan has "
+        + to_string(node_count)
+        + " nodes which exceeds budget "
+        + to_string(merged.max_nodes),
+    )
+  }
+  let write_kinds_seen = __task_plan_write_kinds_in_use(plan)
+  let caps = plan?.capabilities ?? {}
+  let cap_tools = caps?.tools ?? []
+  let allow_writes = contains(cap_tools, "edit")
+    || contains(cap_tools, "run")
+    || caps?.side_effect_level == "writes_files"
+    || caps?.side_effect_level == "runs_commands"
+  if len(write_kinds_seen) > 0 && !allow_writes {
+    out = __task_plan_push_warning(
+      out,
+      "writes_without_capability",
+      "capabilities.tools",
+      "plan declares write-capable node kinds ("
+        + write_kinds_seen.join(", ")
+        + ") but capabilities.tools does not list `edit` or `run` and side_effect_level is not `writes_files`/`runs_commands`",
+    )
+  }
+  return out + {budget_summary: merged + {node_count: node_count, write_kinds: write_kinds_seen}}
+}
+
+fn __task_plan_validate_promotion(plan, report) {
+  var out = report
+  let promotion = plan?.promotion_policy ?? {}
+  if promotion?.shadow_runs_required != nil && promotion.shadow_runs_required < 0 {
+    out = __task_plan_push_error(
+      out,
+      "promotion_negative_shadow_runs",
+      "promotion_policy.shadow_runs_required",
+      "promotion_policy.shadow_runs_required must be non-negative",
+    )
+  }
+  if promotion?.min_pass_rate != nil
+    && (promotion.min_pass_rate < 0.0 || promotion.min_pass_rate > 1.0) {
+    out = __task_plan_push_error(
+      out,
+      "promotion_invalid_pass_rate",
+      "promotion_policy.min_pass_rate",
+      "promotion_policy.min_pass_rate must be in [0.0, 1.0]",
+    )
+  }
+  return out + {promotion_summary: promotion}
+}
+
+fn __task_plan_reachability(plan) {
+  let nodes = plan?.nodes ?? {}
+  let edges = plan?.edges ?? []
+  let node_ids = __task_plan_collect_node_ids(plan)
+  let entry = plan?.entry
+  if entry == nil || !contains(node_ids, entry) {
+    return {reachable: [], unreachable: node_ids}
+  }
+  var seen = [entry]
+  var stack = [entry]
+  while len(stack) > 0 {
+    let current = stack[len(stack) - 1]
+    stack = stack.slice(0, len(stack) - 1)
+    for edge in edges {
+      if edge?.from == current && edge?.to != nil && !contains(seen, edge.to) {
+        seen = seen + [edge.to]
+        stack = stack + [edge.to]
+      }
+    }
+  }
+  var unreachable = []
+  for id in node_ids {
+    if !contains(seen, id) {
+      unreachable = unreachable + [id]
+    }
+  }
+  return {reachable: seen, unreachable: unreachable}
+}
+
+fn __task_plan_validate_reachability(plan, report) {
+  var out = report
+  let reach = __task_plan_reachability(plan)
+  for id in reach.unreachable {
+    out = __task_plan_push_warning(out, "node_unreachable", "nodes." + id, "node is unreachable from entry")
+  }
+  return out
+    + {
+    graph_stats: {
+      node_count: len(__task_plan_collect_node_ids(plan)),
+      edge_count: len(plan?.edges ?? []),
+      reachable_count: len(reach.reachable),
+    },
+  }
+}
+
+fn __task_plan_finalize(report) {
+  return report + {valid: len(report.errors) == 0}
+}
+
+/**
+ * task_plan_validate.
+ *
+ * Validates a typed task-plan IR. Always returns a report with `valid`,
+ * `errors`, `warnings`, and summary blocks — never throws. Callers can
+ * still `schema_check(plan, task_plan_schema())` first when they want to
+ * fail fast on coarse shape errors.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: task_plan_validate(plan)
+ */
+pub fn task_plan_validate(plan) {
+  if type_of(plan) != "dict" {
+    return {
+      valid: false,
+      schema_version: nil,
+      errors: [{code: "not_a_dict", path: "", message: "task plan must be a dict"}],
+      warnings: [],
+      graph_stats: {},
+      capability_summary: {},
+      budget_summary: {},
+      promotion_summary: {},
+    }
+  }
+  let shape = schema_check(plan, task_plan_schema())
+  var report = __task_plan_blank_report(plan)
+  if is_err(shape) {
+    let err = unwrap_err(shape)
+    for entry in err.errors ?? [] {
+      report = __task_plan_push_error(report, "shape", entry?.path ?? "", entry?.message ?? to_string(entry))
+    }
+    return __task_plan_finalize(report)
+  }
+  if plan?.schema_version != TASK_PLAN_SCHEMA_VERSION {
+    report = __task_plan_push_error(
+      report,
+      "schema_version_mismatch",
+      "schema_version",
+      "expected schema_version `"
+        + TASK_PLAN_SCHEMA_VERSION
+        + "`, got `"
+        + to_string(plan?.schema_version)
+        + "`",
+    )
+  }
+  report = __task_plan_validate_structure(plan, report)
+  report = __task_plan_validate_kind_fields(plan, report)
+  report = __task_plan_validate_budgets(plan, report)
+  report = __task_plan_validate_promotion(plan, report)
+  report = __task_plan_validate_reachability(plan, report)
+  report = report + {capability_summary: plan?.capabilities ?? {}}
+  return __task_plan_finalize(report)
+}
+
+fn __task_plan_workflow_kind(ir_kind) {
+  if ir_kind == "sub_agent" {
+    return "subagent"
+  } else if ir_kind == "workflow_map" {
+    return "map"
+  } else if ir_kind == "join" {
+    return "join"
+  } else if ir_kind == "verify" {
+    return "verify"
+  }
+  return "stage"
+}
+
+fn __task_plan_workflow_mode(node) {
+  let kind = node?.kind
+  if kind == "human_gate" {
+    return "manual"
+  } else if kind == "deterministic_command" {
+    return "command"
+  } else if kind == "compact" {
+    return "compact"
+  } else if kind == "agent_loop" {
+    return "agent"
+  } else if kind == "join" {
+    return nil
+  }
+  return "llm"
+}
+
+fn __task_plan_model_policy(node) {
+  let model = node?.model ?? {}
+  var policy = {}
+  if model?.provider != nil {
+    policy = policy + {provider: model.provider}
+  }
+  if model?.model != nil {
+    policy = policy + {model: model.model}
+  }
+  if model?.tier != nil {
+    policy = policy + {model_tier: model.tier}
+  }
+  if model?.temperature != nil {
+    policy = policy + {temperature: model.temperature}
+  }
+  if model?.max_tokens != nil {
+    policy = policy + {max_tokens: model.max_tokens}
+  }
+  return policy
+}
+
+fn __task_plan_capability_policy(node) {
+  let tools = node?.tools ?? []
+  let effects = node?.effects ?? []
+  var policy = {}
+  if len(tools) > 0 {
+    policy = policy + {tools: tools}
+  }
+  if len(effects) > 0 {
+    policy = policy + {side_effect_level: effects[0]}
+  }
+  return policy
+}
+
+fn __task_plan_kind_metadata(node) {
+  let kind = node?.kind
+  if kind == "agent_loop" && node?.agent_loop != nil {
+    return {agent_loop: node.agent_loop}
+  }
+  if kind == "sub_agent" && node?.sub_agent != nil {
+    return {
+      worker_name: node.sub_agent?.worker_name,
+      worker_preset: node.sub_agent?.preset,
+      worker_task_label: node.sub_agent?.task_label,
+    }
+  }
+  if kind == "human_gate" && node?.human_gate != nil {
+    return {
+      human_gate: true,
+      approval_id: node.human_gate?.approval_id,
+      approval_prompt: node.human_gate?.prompt,
+      approval_skippable: node.human_gate?.skippable ?? false,
+    }
+  }
+  if kind == "deterministic_command" && node?.command != nil {
+    return {command_tool: node.command?.tool, command_args: node.command?.args}
+  }
+  if kind == "compact" && node?.compact?.preserve_recent != nil {
+    return {compact_preserve_recent: node.compact.preserve_recent}
+  }
+  return {}
+}
+
+fn __task_plan_map_policy(node) {
+  let map = node?.map ?? {}
+  var policy = {}
+  if map?.items != nil {
+    policy = policy + {items: map.items}
+  }
+  if map?.item_artifact_kind != nil {
+    policy = policy + {item_artifact_kind: map.item_artifact_kind}
+  }
+  if map?.max_concurrency != nil {
+    policy = policy + {max_concurrent: map.max_concurrency}
+  }
+  return policy
+}
+
+fn __task_plan_compact_policy(node) {
+  var policy = {enabled: true}
+  if node?.compact?.threshold_tokens != nil {
+    policy = policy + {token_threshold: node.compact.threshold_tokens}
+  }
+  return policy
+}
+
+fn __task_plan_kind_fields(node) {
+  let kind = node?.kind
+  if kind == "verify" && node?.verify != nil {
+    return {verify: node.verify}
+  }
+  if kind == "agent_loop" && node?.agent_loop?.done_sentinel != nil {
+    return {done_sentinel: node.agent_loop.done_sentinel}
+  }
+  if kind == "workflow_map" && node?.map != nil {
+    return {map_policy: __task_plan_map_policy(node)}
+  }
+  if kind == "compact" && node?.compact != nil {
+    return {auto_compact: __task_plan_compact_policy(node)}
+  }
+  return {}
+}
+
+fn __task_plan_compile_node(node_id, node) {
+  let mode = __task_plan_workflow_mode(node)
+  let model_policy = __task_plan_model_policy(node)
+  let capability_policy = __task_plan_capability_policy(node)
+  let base_meta = {task_plan_kind: node?.kind, task_plan_purpose: node?.purpose ?? ""}
+    + node?.metadata ?? {}
+    + __task_plan_kind_metadata(node)
+  var workflow_node = {id: node_id, kind: __task_plan_workflow_kind(node?.kind), metadata: base_meta}
+  if mode != nil {
+    workflow_node = workflow_node + {mode: mode}
+  }
+  if node?.prompt != nil {
+    workflow_node = workflow_node + {prompt: node.prompt}
+  }
+  if node?.system != nil {
+    workflow_node = workflow_node + {system: node.system}
+  }
+  if len(model_policy) > 0 {
+    workflow_node = workflow_node + {model_policy: model_policy}
+  }
+  if len(capability_policy) > 0 {
+    workflow_node = workflow_node + {capability_policy: capability_policy}
+  }
+  if node?.tools != nil && len(node.tools) > 0 {
+    workflow_node = workflow_node + {tools: node.tools}
+  }
+  workflow_node = workflow_node + __task_plan_kind_fields(node)
+  return workflow_node + node?.lowering_overrides ?? {}
+}
+
+fn __task_plan_compile_nodes(plan) {
+  var compiled = {}
+  for entry in plan?.nodes ?? {} {
+    compiled = compiled + {[entry.key]: __task_plan_compile_node(entry.key, entry.value)}
+  }
+  return compiled
+}
+
+fn __task_plan_compile_edges(plan) {
+  var edges = []
+  for edge in plan?.edges ?? [] {
+    var compiled = {from: edge.from, to: edge.to}
+    if edge?.branch != nil {
+      compiled = compiled + {branch: edge.branch}
+    }
+    if edge?.label != nil {
+      compiled = compiled + {label: edge.label}
+    }
+    edges = edges + [compiled]
+  }
+  return edges
+}
+
+fn __task_plan_compile_workflow_capability(plan) {
+  let caps = plan?.capabilities ?? {}
+  var policy = {}
+  if caps?.tools != nil {
+    policy = policy + {tools: caps.tools}
+  }
+  if caps?.side_effect_level != nil {
+    policy = policy + {side_effect_level: caps.side_effect_level}
+  }
+  if caps?.workspace_roots != nil {
+    policy = policy + {workspace_roots: caps.workspace_roots}
+  }
+  if caps?.recursion_limit != nil {
+    policy = policy + {recursion_limit: caps.recursion_limit}
+  }
+  return policy
+}
+
+fn __task_plan_metadata(plan, validation) {
+  return {
+    task_plan: {
+      schema_version: plan?.schema_version,
+      objective: plan?.objective,
+      verification: plan?.verification ?? {},
+      unknowns: plan?.unknowns ?? [],
+      transcript_policy: plan?.transcript_policy ?? {},
+      compaction_policy: plan?.compaction_policy ?? {},
+      promotion_policy: plan?.promotion_policy ?? {},
+      budgets: validation?.budget_summary ?? {},
+      validation: {valid: validation?.valid, errors: validation?.errors ?? [], warnings: validation?.warnings ?? []},
+    },
+  }
+    + plan?.metadata ?? {}
+}
+
+/**
+ * task_plan_compile.
+ *
+ * Validates a task-plan IR and lowers it into a `workflow_graph` dict that
+ * the existing workflow runtime can normalize, validate, and execute.
+ *
+ * Returns `{ok: true, workflow, validation}` on success and
+ * `{ok: false, validation}` if validation fails. The caller is responsible
+ * for deciding whether to drop, retry, or escalate the plan; the compiler
+ * itself never throws.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: task_plan_compile(plan)
+ */
+pub fn task_plan_compile(plan) {
+  let validation = task_plan_validate(plan)
+  if !validation.valid {
+    return {ok: false, validation: validation}
+  }
+  let nodes = __task_plan_compile_nodes(plan)
+  let edges = __task_plan_compile_edges(plan)
+  let capability_policy = __task_plan_compile_workflow_capability(plan)
+  var input = {
+    name: plan?.objective ?? "task_plan",
+    entry: plan?.entry,
+    nodes: nodes,
+    edges: edges,
+    metadata: __task_plan_metadata(plan, validation),
+  }
+  if len(capability_policy) > 0 {
+    input = input + {capability_policy: capability_policy}
+  }
+  let graph = workflow_graph(input)
+  return {ok: true, workflow: graph, validation: validation}
+}
+
+/**
+ * task_plan_render_mermaid.
+ *
+ * Render a task-plan IR as a Mermaid `flowchart` for human review. The
+ * rendering is deterministic and intentionally minimal — node shape encodes
+ * the IR kind, edge labels encode branches. Use the workflow-bundle
+ * mermaid renderer for full execution-time graphs; this one is for
+ * IR-level review.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: task_plan_render_mermaid(plan)
+ */
+pub fn task_plan_render_mermaid(plan) {
+  var lines = ["flowchart TD"]
+  for entry in plan?.nodes ?? {} {
+    let node_id = entry.key
+    let node = entry.value
+    let kind = node?.kind ?? "stage"
+    let label = node?.purpose ?? node_id
+    let shape_open = if kind == "verify" {
+      "{{"
+    } else if kind == "human_gate" {
+      "(("
+    } else if kind == "join" {
+      "(["
+    } else if kind == "deterministic_command" {
+      "[/"
+    } else {
+      "["
+    }
+    let shape_close = if kind == "verify" {
+      "}}"
+    } else if kind == "human_gate" {
+      "))"
+    } else if kind == "join" {
+      "])"
+    } else if kind == "deterministic_command" {
+      "/]"
+    } else {
+      "]"
+    }
+    lines = lines
+      + [
+      "  " + node_id + shape_open + "\"" + node_id + ": " + kind + "\\n" + label + "\""
+        + shape_close,
+    ]
+  }
+  for edge in plan?.edges ?? [] {
+    let arrow = if edge?.branch == nil {
+      " --> "
+    } else {
+      " -- " + edge.branch + " --> "
+    }
+    lines = lines + ["  " + edge.from + arrow + edge.to]
+  }
+  return lines.join("\n")
+}

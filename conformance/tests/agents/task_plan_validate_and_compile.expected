@@ -1,0 +1,15 @@
+true
+0
+3
+3
+32
+true
+discover
+stage
+agent
+verify
+cargo test -p auth
+agent_loop
+Add rate limiter around existing auth middleware
+writes_files
+true
