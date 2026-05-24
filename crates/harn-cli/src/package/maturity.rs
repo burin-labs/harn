@@ -629,13 +629,7 @@ fn resolve_remote_branch_head(entry: &LockEntry) -> Result<Option<String>, Packa
 }
 
 fn git_ls_remote_ref(url: &str, refname: &str) -> Result<Option<String>, PackageError> {
-    let output = process::Command::new("git")
-        .args(["ls-remote", url, refname])
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
-        .map_err(|error| format!("failed to run `git ls-remote`: {error}"))?;
+    let output = git_output(["ls-remote", url, refname], None)?;
     if !output.status.success() {
         return Err(format!(
             "git ls-remote {url} {refname} failed: {}",
