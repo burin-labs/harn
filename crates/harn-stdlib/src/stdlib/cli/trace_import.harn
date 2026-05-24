@@ -1,0 +1,202 @@
+/**
+ * `harn trace import` ported to .harn — see harn#2303 (W3).
+ *
+ * Converts a generic JSONL trace into a replayable `--llm-mock`
+ * fixture. Each input record carries at minimum a `prompt`; output
+ * records carry `text` + optional `tool_calls` / `model` / `provider` /
+ * `input_tokens` / `output_tokens`.
+ *
+ * Inputs (from the dispatch shim in crates/harn-cli/src/commands/trace.rs):
+ *   HARN_TRACE_FILE   — source JSONL path
+ *   HARN_TRACE_ID     — optional trace-id filter
+ *   HARN_TRACE_OUTPUT — output path
+ */
+fn __optional_string(obj, key) {
+  let v = obj[key]
+  if type_of(v) == "string" {
+    return v
+  }
+  return nil
+}
+
+fn __optional_int(obj, key) {
+  let v = obj[key]
+  if type_of(v) == "int" {
+    return v
+  }
+  return nil
+}
+
+fn __coerce_tool_calls(value) -> list {
+  if value == nil {
+    return []
+  }
+  if type_of(value) != "list" {
+    throw "tool_calls must be an array"
+  }
+  var out = []
+  var idx = 0
+  for item in value {
+    if type_of(item) != "dict" {
+      throw "tool_calls[" + to_string(idx) + "] must be an object"
+    }
+    let name = __optional_string(item, "name")
+    if name == nil {
+      throw "tool_calls[" + to_string(idx) + "] is missing `name`"
+    }
+    let args = item["arguments"] ?? item["args"] ?? {}
+    out = out.push({name: name, args: args})
+    idx = idx + 1
+  }
+  return out
+}
+
+fn __response_object(value) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __response_text(value) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  if type_of(value) == "dict" {
+    let text = __optional_string(value, "text")
+    if text != nil {
+      return text
+    }
+    let content = __optional_string(value, "content")
+    if content != nil {
+      return content
+    }
+    return ""
+  }
+  if value == nil {
+    return ""
+  }
+  throw "unsupported `response`; expected string or object"
+}
+
+fn __record_to_fixture(value, line_no) -> string {
+  if type_of(value) != "dict" {
+    throw "trace line " + to_string(line_no) + " must be a JSON object"
+  }
+  if value["prompt"] == nil {
+    throw "trace line " + to_string(line_no) + " is missing `prompt`"
+  }
+  let response = value["response"] ?? nil
+  let response_obj = __response_object(response)
+  let top_tool_calls = __coerce_tool_calls(value["tool_calls"])
+  let resp_tool_calls = __coerce_tool_calls(response_obj["tool_calls"])
+  let tool_calls = if len(top_tool_calls) > 0 {
+    top_tool_calls
+  } else {
+    resp_tool_calls
+  }
+  let text = __response_text(response)
+  var fixture = {}
+  if text != "" {
+    fixture = fixture + {text: text}
+  }
+  if len(tool_calls) > 0 {
+    fixture = fixture + {tool_calls: tool_calls}
+  }
+  let model = __optional_string(value, "model")
+    ?? __optional_string(response_obj, "model")
+    ?? "imported-trace"
+  fixture = fixture + {model: model}
+  let provider = __optional_string(value, "provider")
+    ?? __optional_string(response_obj, "provider")
+  if provider != nil {
+    fixture = fixture + {provider: provider}
+  }
+  let input_tokens = __optional_int(value, "input_tokens")
+    ?? __optional_int(response_obj, "input_tokens")
+  if input_tokens != nil {
+    fixture = fixture + {input_tokens: input_tokens}
+  }
+  let output_tokens = __optional_int(value, "output_tokens")
+    ?? __optional_int(response_obj, "output_tokens")
+  if output_tokens != nil {
+    fixture = fixture + {output_tokens: output_tokens}
+  }
+  return json_stringify(fixture)
+}
+
+fn __convert_jsonl(content: string, trace_id: string) -> list<string> {
+  var fixtures = []
+  let lines = split(content, "\n")
+  var line_no = 0
+  for raw in lines {
+    line_no = line_no + 1
+    let line = trim(raw)
+    if line == "" {
+      continue
+    }
+    let value = try {
+      json_parse(line)
+    } catch (e) {
+      throw "invalid JSON in trace line " + to_string(line_no) + ": " + to_string(e)
+    }
+    if trace_id != "" {
+      let actual = if type_of(value) == "dict" {
+        __optional_string(value, "trace_id")
+      } else {
+        nil
+      }
+      if actual != trace_id {
+        continue
+      }
+    }
+    fixtures = fixtures.push(__record_to_fixture(value, line_no))
+  }
+  if trace_id != "" && len(fixtures) == 0 {
+    throw "trace filter matched no records"
+  }
+  return fixtures
+}
+
+fn main(harness: Harness) {
+  let trace_file = harness.env.get_or("HARN_TRACE_FILE", "")
+  let output = harness.env.get_or("HARN_TRACE_OUTPUT", "")
+  let trace_id = harness.env.get_or("HARN_TRACE_ID", "")
+  if trace_file == "" || output == "" {
+    harness.stdio.eprintln("trace import: HARN_TRACE_FILE and HARN_TRACE_OUTPUT must be set")
+    exit(2)
+  }
+  let content = try {
+    harness.fs.read_text(trace_file)
+  } catch (e) {
+    harness.stdio.eprintln("failed to read " + trace_file + ": " + to_string(e))
+    exit(1)
+  }
+  let fixtures = try {
+    __convert_jsonl(content, trace_id)
+  } catch (e) {
+    harness.stdio.eprintln(to_string(e))
+    exit(1)
+  }
+  let body = if len(fixtures) == 0 {
+    ""
+  } else {
+    join(fixtures, "\n") + "\n"
+  }
+  let parent = dirname(output)
+  if parent != "" && !harness.fs.exists(parent) {
+    try {
+      harness.fs.mkdir(parent)
+    } catch (e) {
+      harness.stdio.eprintln("failed to create " + parent + ": " + to_string(e))
+      exit(1)
+    }
+  }
+  try {
+    harness.fs.write_text(output, body)
+  } catch (e) {
+    harness.stdio.eprintln("failed to write " + output + ": " + to_string(e))
+    exit(1)
+  }
+  harness.stdio.println(output)
+}
