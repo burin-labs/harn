@@ -445,6 +445,25 @@ fn transcript_tokens_used(transcript: &VmValue) -> i64 {
         .unwrap_or(0)
 }
 
+fn nested_budget_denial_error(result: &serde_json::Value) -> Option<VmValue> {
+    if result.get("stop_reason").and_then(|value| value.as_str())
+        != Some("nested_execution_budget_exhausted")
+    {
+        return None;
+    }
+    let error = result
+        .get("error")
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "category": "budget_exceeded",
+                "message": "nested execution budget exhausted",
+            })
+        });
+    Some(crate::stdlib::json_to_vm_value(&error))
+}
+
 #[derive(Clone, Debug)]
 struct JsonCandidate {
     text: String,
@@ -759,7 +778,36 @@ pub(super) async fn execute_sub_agent(
         .get("token_budget")
         .and_then(|value| value.as_int())
         .unwrap_or(-1);
-    let budget_exceeded = budget_limit >= 0 && tokens_used >= budget_limit;
+    let nested_budget_error = nested_budget_denial_error(&result);
+    let budget_exceeded =
+        (budget_limit >= 0 && tokens_used >= budget_limit) || nested_budget_error.is_some();
+
+    if let Some(error_value) = nested_budget_error {
+        append_parent_sub_agent_event(
+            spec.parent_session_id.as_deref(),
+            sub_agent_result_event(
+                &spec,
+                false,
+                &summary,
+                evidence_added,
+                true,
+                Some(crate::llm::vm_value_to_json(&error_value)),
+            ),
+        );
+        return Ok(SubAgentExecutionResult {
+            payload: crate::llm::vm_value_to_json(&wrap_sub_agent_error(
+                summary,
+                artifacts,
+                evidence_added,
+                tokens_used,
+                true,
+                &spec.session_id,
+                error_value,
+                Some(transcript.clone()),
+            )),
+            transcript,
+        });
+    }
 
     let mut envelope = sub_agent_base_envelope(
         summary.clone(),
@@ -876,6 +924,23 @@ pub(super) async fn execute_sub_agent(
 mod tests {
     use super::*;
     use crate::llm::mock::{push_llm_mock, reset_llm_mock_state, LlmMock};
+
+    struct ExecutionPolicyGuard;
+
+    impl Drop for ExecutionPolicyGuard {
+        fn drop(&mut self) {
+            crate::orchestration::clear_execution_policy_stacks();
+        }
+    }
+
+    fn push_recursion_policy(limit: usize) -> ExecutionPolicyGuard {
+        crate::orchestration::clear_execution_policy_stacks();
+        crate::orchestration::push_execution_policy(CapabilityPolicy {
+            recursion_limit: Some(limit),
+            ..CapabilityPolicy::default()
+        });
+        ExecutionPolicyGuard
+    }
 
     fn assistant_message(text: &str) -> VmValue {
         VmValue::Dict(Rc::new(BTreeMap::from([
@@ -1062,6 +1127,90 @@ mod tests {
             .collect();
         assert!(event_kinds.iter().any(|kind| kind == "sub_agent_start"));
         assert!(event_kinds.iter().any(|kind| kind == "sub_agent_result"));
+
+        reset_llm_mock_state();
+        crate::agent_sessions::reset_session_store();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn execute_sub_agent_propagates_nested_budget_denial() {
+        crate::agent_sessions::reset_session_store();
+        reset_llm_mock_state();
+        let _policy = push_recursion_policy(0);
+        let parent = crate::agent_sessions::open_or_create(Some("parent-budget".into()));
+        let mut options = BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+            ("model".to_string(), VmValue::String(Rc::from("mock"))),
+            ("max_iterations".to_string(), VmValue::Int(1)),
+        ]);
+        annotate_nested_execution_options(
+            &mut options,
+            NestedExecutionKind::SubAgentRun,
+            "budgeted-worker",
+        );
+
+        let spec = SubAgentRunSpec {
+            name: "budgeted-worker".to_string(),
+            task: "inspect the repo".to_string(),
+            system: None,
+            options,
+            returns_schema: None,
+            session_id: "child-budget".to_string(),
+            parent_session_id: Some(parent.clone()),
+            reminder_propagation: Vec::new(),
+        };
+
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
+        let result = execute_sub_agent(spec).await.unwrap();
+
+        assert_eq!(result.payload["ok"].as_bool(), Some(false));
+        assert_eq!(result.payload["budget_exceeded"].as_bool(), Some(true));
+        assert_eq!(
+            result.payload["error"]["category"].as_str(),
+            Some("budget_exceeded")
+        );
+        assert!(
+            result.payload["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("sub_agent_run")),
+            "{:?}",
+            result.payload
+        );
+        assert!(result
+            .payload
+            .get("transcript")
+            .and_then(|transcript| transcript.get("events"))
+            .and_then(|events| events.as_array())
+            .is_some_and(|events| events
+                .iter()
+                .any(|event| event["kind"] == "nested_execution_budget_denied")));
+
+        let parent_events = crate::agent_sessions::snapshot(&parent)
+            .and_then(|value| value.as_dict().cloned())
+            .and_then(|dict| dict.get("events").cloned())
+            .and_then(|value| match value {
+                VmValue::List(list) => Some((*list).clone()),
+                _ => None,
+            })
+            .expect("parent events");
+        let result_event = parent_events
+            .iter()
+            .filter_map(|event| event.as_dict())
+            .find(|dict| {
+                dict.get("kind").map(VmValue::display).as_deref() == Some("sub_agent_result")
+            })
+            .expect("sub_agent_result event");
+        let metadata = result_event
+            .get("metadata")
+            .and_then(|value| value.as_dict())
+            .expect("event metadata");
+        assert!(matches!(metadata.get("ok"), Some(VmValue::Bool(false))));
+        assert!(matches!(
+            metadata.get("budget_exceeded"),
+            Some(VmValue::Bool(true))
+        ));
 
         reset_llm_mock_state();
         crate::agent_sessions::reset_session_store();

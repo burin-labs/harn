@@ -609,7 +609,40 @@ fn include_cycle_detected() {
     let src = fs::read_to_string(&a).unwrap();
     let r = render_template_result(&src, None, Some(dir.path()), Some(&a));
     assert!(r.is_err());
-    assert!(r.unwrap_err().kind.contains("circular include"));
+    let kind = r.unwrap_err().kind;
+    assert!(kind.contains("circular include"));
+    assert!(kind.contains("a.prompt"), "{kind}");
+    assert!(kind.contains("b.prompt"), "{kind}");
+    assert!(kind.contains('→'), "{kind}");
+}
+
+#[test]
+fn include_depth_limit_reports_runtime_ceiling() {
+    use crate::runtime_limits::RuntimeLimits;
+    use std::fs;
+
+    let dir = tempdir();
+    let limit = RuntimeLimits::DEFAULT.max_template_include_depth;
+    for index in 0..=limit + 1 {
+        let path = dir.path().join(format!("{index}.prompt"));
+        let body = if index == limit + 1 {
+            "leaf".to_string()
+        } else {
+            format!(r#"{{{{ include "{}.prompt" }}}}"#, index + 1)
+        };
+        fs::write(path, body).unwrap();
+    }
+
+    let parent = dir.path().join("0.prompt");
+    let src = fs::read_to_string(&parent).unwrap();
+    let err = render_template_result(&src, None, Some(dir.path()), Some(&parent))
+        .expect_err("include chain should exceed the template include ceiling");
+    assert!(
+        err.kind
+            .contains(&format!("include depth exceeded ({limit} levels)")),
+        "{}",
+        err.kind
+    );
 }
 
 #[test]
