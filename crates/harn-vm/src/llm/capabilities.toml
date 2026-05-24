@@ -150,6 +150,7 @@ files_api_supported = true
 model_match = "claude-haiku-*"
 version_min = [4, 7]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -173,6 +174,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "claude-opus-*"
 version_min = [4, 7]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -197,6 +199,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "claude-sonnet-*"
 version_min = [4, 7]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -221,6 +224,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "claude-haiku-*"
 version_min = [4, 5]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -245,6 +249,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "claude-opus-*"
 version_min = [4, 6]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -269,6 +274,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "claude-opus-*"
 version_min = [4, 0]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -293,6 +299,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "claude-sonnet-*"
 version_min = [4, 6]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -317,6 +324,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "claude-sonnet-*"
 version_min = [4, 0]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -341,6 +349,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-haiku-*"
 version_min = [4, 7]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -364,6 +373,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-opus-*"
 version_min = [4, 7]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -388,6 +398,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-sonnet-*"
 version_min = [4, 7]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -411,6 +422,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-haiku-*"
 version_min = [4, 5]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -434,6 +446,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-opus-*"
 version_min = [4, 6]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -458,6 +471,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-opus-*"
 version_min = [4, 0]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -481,6 +495,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-sonnet-*"
 version_min = [4, 6]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -504,6 +519,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-sonnet-*"
 version_min = [4, 0]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["bm25", "regex"]
 max_tools = 10000
@@ -528,6 +544,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.anthropic]]
 model_match = "claude-*"
 native_tools = true
+preferred_tool_format = "native"
 prompt_caching = true
 vision = true
 audio_supported = true
@@ -555,6 +572,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.openai]]
 model_match = "gpt-4o*"
 native_tools = true
+preferred_tool_format = "native"
 vision = true
 audio_supported = true
 structured_output = "native"
@@ -570,6 +588,7 @@ thinking_block_style = "none"
 [[provider.openai]]
 model_match = "gpt-4.1*"
 native_tools = true
+preferred_tool_format = "native"
 vision_supported = true
 structured_output = "native"
 prefers_xml_scaffolding = false
@@ -585,6 +604,7 @@ thinking_block_style = "none"
 model_match = "gpt-*"
 version_min = [5, 4]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["hosted", "client"]
 responses_api = true
@@ -611,6 +631,7 @@ thinking_block_style = "reasoning_summary"
 model_match = "gpt-*"
 version_min = [5, 1]
 native_tools = true
+preferred_tool_format = "native"
 vision_supported = true
 structured_output = "native"
 thinking_modes = ["effort"]
@@ -628,6 +649,7 @@ thinking_block_style = "reasoning_summary"
 model_match = "gpt-*"
 version_min = [5, 0]
 native_tools = true
+preferred_tool_format = "native"
 vision_supported = true
 structured_output = "native"
 thinking_modes = ["effort"]
@@ -644,6 +666,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "gpt-*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -657,6 +680,7 @@ thinking_block_style = "none"
 [[provider.openai]]
 model_match = "o1*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
@@ -672,6 +696,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "o3*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
@@ -687,6 +712,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "o4*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["effort"]
 vision_supported = true
@@ -704,6 +730,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/gpt-4o*"
 native_tools = true
+preferred_tool_format = "native"
 vision = true
 audio_supported = true
 structured_output = "native"
@@ -719,6 +746,7 @@ thinking_block_style = "none"
 [[provider.openai]]
 model_match = "openai/gpt-4.1*"
 native_tools = true
+preferred_tool_format = "native"
 vision_supported = true
 structured_output = "native"
 prefers_xml_scaffolding = false
@@ -733,6 +761,7 @@ thinking_block_style = "none"
 model_match = "openai/gpt-*"
 version_min = [5, 4]
 native_tools = true
+preferred_tool_format = "native"
 defer_loading = true
 tool_search = ["hosted", "client"]
 responses_api = true
@@ -759,6 +788,7 @@ thinking_block_style = "reasoning_summary"
 model_match = "openai/gpt-*"
 version_min = [5, 1]
 native_tools = true
+preferred_tool_format = "native"
 json_schema = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
@@ -775,6 +805,7 @@ thinking_block_style = "reasoning_summary"
 model_match = "openai/gpt-*"
 version_min = [5, 0]
 native_tools = true
+preferred_tool_format = "native"
 json_schema = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
@@ -789,6 +820,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/gpt-*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -801,6 +833,7 @@ thinking_block_style = "none"
 [[provider.openai]]
 model_match = "openai/o1*"
 native_tools = true
+preferred_tool_format = "native"
 json_schema = "native"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
@@ -816,6 +849,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/o3*"
 native_tools = true
+preferred_tool_format = "native"
 json_schema = "native"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
@@ -831,6 +865,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/o4*"
 native_tools = true
+preferred_tool_format = "native"
 json_schema = "native"
 thinking_modes = ["effort"]
 vision_supported = true
@@ -911,6 +946,7 @@ thinking_block_style = "none"
 [[provider.ollama]]
 model_match = "qwen3.6*"
 native_tools = false
+preferred_tool_format = "text"
 structured_output = "format_kw"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -931,6 +967,7 @@ thinking_block_style = "inline"
 [[provider.ollama]]
 model_match = "qwen3*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "format_kw"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -955,6 +992,7 @@ thinking_block_style = "inline"
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
 native_tools = false
+preferred_tool_format = "text"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -975,6 +1013,7 @@ thinking_block_style = "inline"
 [[provider.llamacpp]]
 model_match = "*qwen3*"
 native_tools = false
+preferred_tool_format = "text"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -994,6 +1033,7 @@ thinking_block_style = "inline"
 [[provider.llamacpp]]
 model_match = "*devstral-small-2*"
 native_tools = false
+preferred_tool_format = "text"
 structured_output = "native"
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1010,6 +1050,7 @@ thinking_block_style = "none"
 [[provider.ollama]]
 model_match = "devstral-small-2*"
 native_tools = false
+preferred_tool_format = "text"
 structured_output = "format_kw"
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -1029,6 +1070,7 @@ thinking_block_style = "none"
 [[provider.local]]
 model_match = "*qwen3.6*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -1049,6 +1091,7 @@ thinking_block_style = "inline"
 [[provider.local]]
 model_match = "*qwen3*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -1086,6 +1129,7 @@ thinking_block_style = "inline"
 [[provider.mlx]]
 model_match = "*qwen3.6*"
 native_tools = true
+preferred_tool_format = "native"
 vision = true
 structured_output = "native"
 thinking_modes = ["enabled"]
@@ -1107,6 +1151,7 @@ thinking_block_style = "inline"
 [[provider.mlx]]
 model_match = "*qwen3*"
 native_tools = true
+preferred_tool_format = "native"
 vision = true
 structured_output = "native"
 thinking_modes = ["enabled"]
@@ -1136,6 +1181,7 @@ thinking_block_style = "inline"
 [[provider.dashscope]]
 model_match = "qwen3.6*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -1156,6 +1202,7 @@ thinking_block_style = "inline"
 [[provider.dashscope]]
 model_match = "qwen*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
@@ -1174,6 +1221,7 @@ thinking_block_style = "inline"
 [[provider.fireworks]]
 model_match = "*qwen3.6*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -1196,6 +1244,7 @@ thinking_block_style = "inline"
 [[provider.fireworks]]
 model_match = "*qwen3p6*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -1216,6 +1265,7 @@ thinking_block_style = "inline"
 [[provider.fireworks]]
 model_match = "*qwen*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
@@ -1271,6 +1321,7 @@ thinking_block_style = "inline"
 model_match = "anthropic/claude-haiku-*"
 version_min = [4, 5]
 native_tools = true
+preferred_tool_format = "native"
 prompt_caching = true
 structured_output = "tool_use"
 thinking_modes = ["enabled"]
@@ -1287,6 +1338,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-sonnet-*"
 version_min = [4, 6]
 native_tools = true
+preferred_tool_format = "native"
 prompt_caching = true
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
@@ -1303,6 +1355,7 @@ thinking_block_style = "thinking_blocks"
 model_match = "anthropic/claude-opus-*"
 version_min = [4, 6]
 native_tools = true
+preferred_tool_format = "native"
 prompt_caching = true
 structured_output = "tool_use"
 thinking_modes = ["adaptive"]
@@ -1318,6 +1371,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 reasoning_none_supported = true
@@ -1358,6 +1412,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "qwen/*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 reasoning_none_supported = true
@@ -1380,6 +1435,7 @@ thinking_block_style = "inline"
 [[provider.huggingface]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -1400,6 +1456,7 @@ thinking_block_style = "inline"
 [[provider.huggingface]]
 model_match = "qwen/qwen3-coder*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1416,6 +1473,7 @@ thinking_block_style = "none"
 [[provider.huggingface]]
 model_match = "qwen/*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
@@ -1434,6 +1492,7 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -1454,6 +1513,7 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "qwen/qwen3-coder*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1470,6 +1530,7 @@ thinking_block_style = "none"
 [[provider.together]]
 model_match = "qwen/*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
@@ -1496,6 +1557,7 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "deepseek-ai/deepseek-v3*"
 native_tools = true
+preferred_tool_format = "native"
 thinking_modes = ["enabled"]
 prompt_caching = true
 structured_output = "native"
@@ -1512,6 +1574,7 @@ thinking_block_style = "inline"
 [[provider.huggingface]]
 model_match = "deepseek-ai/deepseek-v3*"
 native_tools = true
+preferred_tool_format = "native"
 thinking_modes = ["enabled"]
 prompt_caching = true
 structured_output = "native"
@@ -1528,6 +1591,7 @@ thinking_block_style = "inline"
 [[provider.openrouter]]
 model_match = "deepseek/deepseek-v4*"
 native_tools = true
+preferred_tool_format = "native"
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 structured_output = "native"
@@ -1565,6 +1629,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openrouter]]
 model_match = "deepseek/deepseek-v3*"
 native_tools = true
+preferred_tool_format = "native"
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 structured_output = "native"
@@ -1582,6 +1647,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openrouter]]
 model_match = "mistralai/mistral*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -1596,6 +1662,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "mistralai/devstral*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -1607,6 +1674,22 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
 
+[[provider.openrouter]]
+model_match = "moonshotai/kimi-k2*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+server_parser = "none"
+honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # ---------- Google Gemini + Gemma 4 (via OpenRouter) -------------------------
 #
 # Gemini 2.5 exposes thinking budgets through OpenRouter's `reasoning`
@@ -1616,6 +1699,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "google/gemini-2.5*"
 native_tools = true
+preferred_tool_format = "native"
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 vision_supported = true
@@ -1634,6 +1718,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.gemini]]
 model_match = "gemini-2.5*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
 vision_supported = true
@@ -1651,6 +1736,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.gemini]]
 model_match = "models/gemini-2.5*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
 vision_supported = true
@@ -1668,6 +1754,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.gemini]]
 model_match = "gemini-*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 vision_supported = true
 audio_supported = true
@@ -1684,6 +1771,7 @@ thinking_block_style = "none"
 [[provider.gemini]]
 model_match = "models/gemini-*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 vision_supported = true
 audio_supported = true
@@ -1700,6 +1788,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "google/gemma-4*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 top_k_supported = true
 prefers_xml_scaffolding = false
@@ -1718,6 +1807,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "meta-llama/llama-4*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 top_k_supported = true
 prefers_xml_scaffolding = false
@@ -1731,6 +1821,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "meta-llama/llama-3*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -1765,6 +1856,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.together]]
 model_match = "deepseek-ai/deepseek-v4*"
 native_tools = true
+preferred_tool_format = "native"
 thinking_modes = ["enabled", "effort"]
 reasoning_effort_supported = true
 prompt_caching = true
@@ -1782,6 +1874,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.together]]
 model_match = "moonshotai/kimi-k2*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 honors_chat_template_kwargs = false
@@ -1796,6 +1889,7 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "zai-org/glm-5*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 honors_chat_template_kwargs = false
@@ -1810,6 +1904,7 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "google/gemma-4*"
 native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 honors_chat_template_kwargs = false
@@ -1824,6 +1919,50 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "moonshotai/*"
 native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# ---------- Cerebras ----------------------------------------------------------
+
+[[provider.cerebras]]
+model_match = "gpt-oss-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.cerebras]]
+model_match = "llama-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.cerebras]]
+model_match = "qwen-*"
+native_tools = true
+preferred_tool_format = "native"
 structured_output = "native"
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -1846,6 +1985,7 @@ thinking_block_style = "none"
 [[provider.bedrock]]
 model_match = "anthropic.claude-*"
 native_tools = true
+preferred_tool_format = "native"
 message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
 recommended_endpoint = "/model/{model}/converse"
@@ -1861,6 +2001,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.bedrock]]
 model_match = "*claude*"
 native_tools = true
+preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
@@ -1874,6 +2015,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.bedrock]]
 model_match = "*"
 native_tools = true
+preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
@@ -1890,6 +2032,7 @@ thinking_block_style = "none"
 [[provider.azure_openai]]
 model_match = "gpt-*"
 native_tools = true
+preferred_tool_format = "native"
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
@@ -1903,6 +2046,7 @@ thinking_block_style = "none"
 [[provider.azure_openai]]
 model_match = "o1*"
 native_tools = true
+preferred_tool_format = "native"
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
@@ -1916,6 +2060,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.azure_openai]]
 model_match = "o3*"
 native_tools = true
+preferred_tool_format = "native"
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
@@ -1929,6 +2074,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.azure_openai]]
 model_match = "o4*"
 native_tools = true
+preferred_tool_format = "native"
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
@@ -1945,6 +2091,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.vertex]]
 model_match = "gemini-*"
 native_tools = true
+preferred_tool_format = "native"
 recommended_endpoint = "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false

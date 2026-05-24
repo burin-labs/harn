@@ -1,8 +1,39 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Args};
+use clap::{ArgAction, Args, Subcommand};
 
 use super::util::{llm_model_completion_parser, llm_provider_completion_parser};
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderArgs {
+    #[command(subcommand)]
+    pub command: ProviderCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ProviderCommand {
+    /// Inspect provider/model capability metadata.
+    Capabilities(ProviderCapabilitiesArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderCapabilitiesArgs {
+    #[command(subcommand)]
+    pub command: ProviderCapabilitiesCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ProviderCapabilitiesCommand {
+    /// Audit catalogued priced chat models for explicit tool capability fields.
+    Audit(ProviderCapabilitiesAuditArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderCapabilitiesAuditArgs {
+    /// Emit the structured audit report as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
 
 #[derive(Debug, Args)]
 pub(crate) struct ModelInfoArgs {

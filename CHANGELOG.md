@@ -33,6 +33,10 @@ condensed series summaries instead of full per-patch history.
   `harness.llm.providers()` as the canonical read-only model/provider catalog
   surface. The legacy `llm_catalog()` and `llm_provider_status()` builtins
   remain aliases for scripts that do not receive a `Harness` parameter.
+- **Provider tool-capability coverage audit (#2362).** Added
+  `harn provider capabilities audit` plus a VM unit gate that fails when a
+  priced catalog model lacks explicit `native_tools` and
+  `preferred_tool_format` coverage in the capability rules.
 
 ## v0.8.35
 

@@ -19,7 +19,7 @@
 //! boolean gates that used to live alongside them are now data.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,7 @@ use super::providers::openai_compat::gpt_generation;
 
 /// Shipped default rules. Compiled into the binary at build time.
 const BUILTIN_TOML: &str = include_str!("capabilities.toml");
+const BUILTIN_PROVIDERS_TOML: &str = include_str!("providers.toml");
 
 /// Parsed on-disk capabilities schema. Public so harn-cli can
 /// construct one directly when wiring harn.toml overrides.
@@ -536,6 +537,61 @@ pub struct ProviderCapabilityMatrixRow {
     pub source: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ToolCapabilityAuditReport {
+    pub audited_models: usize,
+    pub gaps: Vec<ToolCapabilityAuditGap>,
+}
+
+impl ToolCapabilityAuditReport {
+    pub fn ok(&self) -> bool {
+        self.gaps.is_empty()
+    }
+
+    pub fn render_human(&self) -> String {
+        if self.gaps.is_empty() {
+            return format!(
+                "provider capability audit OK: {} priced chat models have explicit native_tools and preferred_tool_format rules",
+                self.audited_models
+            );
+        }
+
+        let mut out = format!(
+            "provider capability audit found {} catalog gaps among {} priced chat models:",
+            self.gaps.len(),
+            self.audited_models
+        );
+        for gap in &self.gaps {
+            let matched = match (&gap.rule_provider, &gap.rule_model_match) {
+                (Some(provider), Some(model_match)) => {
+                    format!("provider.{provider} model_match=\"{model_match}\"")
+                }
+                _ => "no matching rule".to_string(),
+            };
+            out.push_str(&format!(
+                "\n- {}:{} ({matched}) missing {}; suggest native_tools = {}, preferred_tool_format = \"{}\"",
+                gap.provider,
+                gap.model,
+                gap.missing_fields.join(", "),
+                gap.suggested_native_tools,
+                gap.suggested_preferred_tool_format,
+            ));
+        }
+        out
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ToolCapabilityAuditGap {
+    pub provider: String,
+    pub model: String,
+    pub rule_provider: Option<String>,
+    pub rule_model_match: Option<String>,
+    pub missing_fields: Vec<String>,
+    pub suggested_native_tools: bool,
+    pub suggested_preferred_tool_format: String,
+}
+
 thread_local! {
     /// Per-thread user overrides installed by the CLI at startup. Kept
     /// thread-local (not process-static) to match the rest of the VM
@@ -631,6 +687,187 @@ pub fn matrix_rows() -> Vec<ProviderCapabilityMatrixRow> {
     }
     push_matrix_rows(&mut rows, builtin(), "builtin");
     rows
+}
+
+/// Audit the currently effective provider/model catalog against the currently
+/// effective capability rules. This is the user-facing path used by the CLI
+/// when authors are adding provider catalog or capability override rows.
+pub fn audit_catalogued_chat_model_tool_capabilities() -> ToolCapabilityAuditReport {
+    let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    audit_tool_capability_coverage(
+        crate::llm_config::model_catalog_entries(),
+        builtin(),
+        user.as_ref(),
+    )
+}
+
+/// Audit the built-in catalog only. The CI test uses this path so external
+/// provider config cannot hide a gap in the shipped TOML assets.
+pub fn audit_builtin_catalogued_chat_model_tool_capabilities() -> ToolCapabilityAuditReport {
+    let catalog = crate::llm_config::parse_config_toml(BUILTIN_PROVIDERS_TOML)
+        .expect("providers.toml must parse at build time");
+    audit_tool_capability_coverage(catalog.models, builtin(), None)
+}
+
+fn audit_tool_capability_coverage<I>(
+    models: I,
+    builtin: &CapabilitiesFile,
+    user: Option<&CapabilitiesFile>,
+) -> ToolCapabilityAuditReport
+where
+    I: IntoIterator<Item = (String, crate::llm_config::ModelDef)>,
+{
+    let mut gaps = Vec::new();
+    let mut audited_models = 0;
+
+    for (model_id, model) in models {
+        if model.pricing.is_none() {
+            continue;
+        }
+        audited_models += 1;
+        let matched = first_matching_rule(user, builtin, &model.provider, &model_id);
+        let mut missing_fields = Vec::new();
+        match matched.as_ref().map(|matched| matched.rule) {
+            Some(rule) => {
+                if rule.native_tools.is_none() {
+                    missing_fields.push("native_tools".to_string());
+                }
+                if rule.preferred_tool_format.is_none() {
+                    missing_fields.push("preferred_tool_format".to_string());
+                }
+            }
+            None => {
+                missing_fields.push("native_tools".to_string());
+                missing_fields.push("preferred_tool_format".to_string());
+            }
+        }
+        if missing_fields.is_empty() {
+            continue;
+        }
+
+        let (suggested_native_tools, suggested_preferred_tool_format) =
+            suggested_tool_capability_defaults(
+                &model.provider,
+                &model_id,
+                &model,
+                matched.as_ref(),
+            );
+        gaps.push(ToolCapabilityAuditGap {
+            provider: model.provider,
+            model: model_id,
+            rule_provider: matched.as_ref().map(|matched| matched.provider.clone()),
+            rule_model_match: matched.map(|matched| matched.rule.model_match.clone()),
+            missing_fields,
+            suggested_native_tools,
+            suggested_preferred_tool_format,
+        });
+    }
+
+    gaps.sort_by(|left, right| {
+        left.provider
+            .cmp(&right.provider)
+            .then_with(|| left.model.cmp(&right.model))
+    });
+    ToolCapabilityAuditReport {
+        audited_models,
+        gaps,
+    }
+}
+
+struct MatchedCapabilityRule<'a> {
+    provider: String,
+    rule: &'a ProviderRule,
+}
+
+fn first_matching_rule<'a>(
+    user: Option<&'a CapabilitiesFile>,
+    builtin: &'a CapabilitiesFile,
+    provider: &str,
+    model: &str,
+) -> Option<MatchedCapabilityRule<'a>> {
+    let mut current = provider.to_string();
+    let mut visited = HashSet::new();
+    while visited.insert(current.clone()) {
+        if let Some(rule) = user
+            .and_then(|file| first_matching_rule_in_file(file, &current, model))
+            .or_else(|| first_matching_rule_in_file(builtin, &current, model))
+        {
+            return Some(MatchedCapabilityRule {
+                provider: current,
+                rule,
+            });
+        }
+        let next = user
+            .and_then(|file| file.provider_family.get(&current))
+            .or_else(|| builtin.provider_family.get(&current))
+            .cloned();
+        current = next?;
+    }
+    None
+}
+
+fn first_matching_rule_in_file<'a>(
+    file: &'a CapabilitiesFile,
+    provider: &str,
+    model: &str,
+) -> Option<&'a ProviderRule> {
+    file.provider
+        .get(provider)?
+        .iter()
+        .find(|rule| rule_matches(rule, model))
+}
+
+fn suggested_tool_capability_defaults(
+    provider: &str,
+    model_id: &str,
+    model: &crate::llm_config::ModelDef,
+    matched: Option<&MatchedCapabilityRule<'_>>,
+) -> (bool, String) {
+    if let Some(rule) = matched.map(|matched| matched.rule) {
+        let native_tools =
+            rule.native_tools
+                .unwrap_or_else(|| match rule.preferred_tool_format.as_deref() {
+                    Some("native") => true,
+                    Some("text") => false,
+                    _ => suggested_native_tools(provider, model_id, model),
+                });
+        let preferred_tool_format = rule
+            .preferred_tool_format
+            .clone()
+            .unwrap_or_else(|| tool_format_for_native(native_tools));
+        return (native_tools, preferred_tool_format);
+    }
+
+    let native_tools = suggested_native_tools(provider, model_id, model);
+    (native_tools, tool_format_for_native(native_tools))
+}
+
+fn suggested_native_tools(
+    provider: &str,
+    model_id: &str,
+    model: &crate::llm_config::ModelDef,
+) -> bool {
+    if provider == "anthropic" || model_id.contains("claude") {
+        return true;
+    }
+    if matches!(
+        provider,
+        "openai" | "gemini" | "cerebras" | "bedrock" | "azure_openai" | "vertex"
+    ) {
+        return true;
+    }
+    model
+        .capabilities
+        .iter()
+        .any(|capability| capability == "tools")
+}
+
+fn tool_format_for_native(native_tools: bool) -> String {
+    if native_tools {
+        "native".to_string()
+    } else {
+        "text".to_string()
+    }
 }
 
 fn push_matrix_rows(
@@ -1076,6 +1313,61 @@ mod tests {
 
     fn reset() {
         clear_user_overrides();
+    }
+
+    #[test]
+    fn every_catalogued_chat_model_has_explicit_tool_capabilities() {
+        reset();
+        let report = audit_builtin_catalogued_chat_model_tool_capabilities();
+        assert!(report.ok(), "{}", report.render_human());
+    }
+
+    #[test]
+    fn tool_capability_audit_reports_suggested_defaults() {
+        reset();
+        let capabilities: CapabilitiesFile = toml::from_str(
+            r#"
+[[provider.acme]]
+model_match = "acme-good-*"
+preferred_tool_format = "native"
+"#,
+        )
+        .unwrap();
+        let report = audit_tool_capability_coverage(
+            vec![(
+                "acme-good-1".to_string(),
+                crate::llm_config::ModelDef {
+                    name: "Acme Good".to_string(),
+                    provider: "acme".to_string(),
+                    context_window: 128_000,
+                    runtime_context_window: None,
+                    stream_timeout: None,
+                    capabilities: Vec::new(),
+                    pricing: Some(crate::llm_config::ModelPricing {
+                        input_per_mtok: 1.0,
+                        output_per_mtok: 2.0,
+                        cache_read_per_mtok: None,
+                        cache_write_per_mtok: None,
+                    }),
+                    deprecated: false,
+                    deprecation_note: None,
+                    quality_tags: Vec::new(),
+                    availability: crate::llm_config::ModelAvailability::Serverless,
+                },
+            )],
+            &capabilities,
+            None,
+        );
+
+        assert!(!report.ok());
+        assert_eq!(report.audited_models, 1);
+        assert_eq!(report.gaps.len(), 1);
+        assert_eq!(report.gaps[0].missing_fields, ["native_tools"]);
+        assert!(report.gaps[0].suggested_native_tools);
+        assert_eq!(report.gaps[0].suggested_preferred_tool_format, "native");
+        assert!(report.render_human().contains(
+            "acme:acme-good-1 (provider.acme model_match=\"acme-good-*\") missing native_tools; suggest native_tools = true, preferred_tool_format = \"native\""
+        ));
     }
 
     #[test]

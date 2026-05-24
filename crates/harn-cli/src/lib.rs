@@ -956,6 +956,7 @@ async fn async_main() {
                 }
             }
         },
+        Command::Provider(args) => commands::provider_capabilities::run_or_exit(args),
         Command::Try(args) => commands::try_cmd::run(args).await,
         Command::Quickstart(args) => {
             if let Err(error) = commands::quickstart::run_quickstart(&args).await {

@@ -195,7 +195,10 @@
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
-        "reasoning_knobs": [],
+        "reasoning_knobs": [
+          "effort",
+          "reasoning_effort"
+        ],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "high"
       },
