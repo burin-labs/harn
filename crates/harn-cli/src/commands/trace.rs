@@ -4,14 +4,41 @@ use std::path::Path;
 use serde_json::{json, Map, Value};
 
 use crate::cli::{TraceArgs, TraceCommand, TraceImportArgs};
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 
 pub(crate) async fn handle(args: TraceArgs) -> Result<(), String> {
     match args.command {
-        TraceCommand::Import(import) => run_import(import),
+        TraceCommand::Import(import) => run_import(import).await,
     }
 }
 
-fn run_import(args: TraceImportArgs) -> Result<(), String> {
+async fn run_import(args: TraceImportArgs) -> Result<(), String> {
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        return run_import_rust(args);
+    }
+    let _file = ScopedEnvVar::set("HARN_TRACE_FILE", &args.trace_file);
+    let _out = ScopedEnvVar::set("HARN_TRACE_OUTPUT", &args.output);
+    let _id_guard = args
+        .trace_id
+        .as_deref()
+        .map(|id| ScopedEnvVar::set("HARN_TRACE_ID", id));
+    let exit = dispatch::dispatch_to_embedded_script(
+        "trace_import",
+        Vec::new(),
+        /* json_mode */ false,
+    )
+    .await;
+    if exit != 0 {
+        return Err(format!("trace import exited with code {exit}"));
+    }
+    Ok(())
+}
+
+/// Legacy Rust path, kept behind `HARN_CLI_IMPL=rust` for the parity
+/// harness (#2299). The C1 ratchet (#2314) removes this once the
+/// `.harn` impl is the default everywhere.
+fn run_import_rust(args: TraceImportArgs) -> Result<(), String> {
     let content = fs::read_to_string(&args.trace_file)
         .map_err(|error| format!("failed to read {}: {error}", args.trace_file))?;
     let lines = convert_trace_jsonl(&content, args.trace_id.as_deref())?;
