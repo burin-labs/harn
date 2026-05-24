@@ -340,6 +340,34 @@ pub(crate) const AGENT_SESSION_SEED_OPTS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("provider", TY_STRING),
 ]);
 
+/// Input shape for `agent_session_open` `opts.workspace_anchor` and
+/// `agent_session_set_workspace_anchor`. `anchored_at` defaults to now()
+/// when omitted; `additional_roots` defaults to empty. `additional_roots`
+/// element shape is enforced by the runtime
+/// (`crate::workspace_anchor::parse_mounted_root_value`) — keeping the
+/// type-level slot as `list` keeps the parser-side check lenient enough
+/// to accept gradual call sites without losing runtime safety.
+pub(crate) const WORKSPACE_ANCHOR_INPUT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("primary", TY_STRING),
+    ShapeFieldDescriptor::optional("additional_roots", TY_LIST),
+    ShapeFieldDescriptor::optional("anchored_at", TY_STRING),
+]);
+
+/// Snapshot shape returned by `agent_session_workspace_anchor`.
+pub(crate) const WORKSPACE_ANCHOR_SNAPSHOT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("primary", TY_STRING),
+    ShapeFieldDescriptor::new("additional_roots", TY_LIST),
+    ShapeFieldDescriptor::new("anchored_at", TY_STRING),
+]);
+
+pub(crate) const WORKSPACE_ANCHOR_OR_NIL: Ty = Ty::Union(&[WORKSPACE_ANCHOR_SNAPSHOT, TY_NIL]);
+
+/// `agent_session_open(id?, opts?)` opts argument shape.
+pub(crate) const AGENT_SESSION_OPEN_OPTS: Ty = Ty::Shape(&[ShapeFieldDescriptor::optional(
+    "workspace_anchor",
+    WORKSPACE_ANCHOR_INPUT,
+)]);
+
 /// `agent_session_compact` `opts?` argument.
 pub(crate) const COMPACTION_POLICY: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("instructions", TY_STRING),
@@ -648,6 +676,9 @@ pub(crate) const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("branched_at_event_index", Ty::Union(&[TY_INT, TY_NIL])),
     ShapeFieldDescriptor::new("system_prompt", TY_STRING_OR_NIL),
     ShapeFieldDescriptor::new("tool_format", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("pinned_model", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("pinned_reasoning_policy", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("workspace_anchor", WORKSPACE_ANCHOR_OR_NIL),
     ShapeFieldDescriptor::optional("summary", TY_STRING),
     ShapeFieldDescriptor::optional("metadata", TY_DICT),
     ShapeFieldDescriptor::optional("state", TY_STRING),

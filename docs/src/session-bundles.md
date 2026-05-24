@@ -30,9 +30,10 @@ harn session export .harn-runs/<run>/run.json --replay-only --out run.replay.bun
 The default mode is **sanitized**. It walks the whole bundle with the
 runtime redaction policy and records every replacement in
 `redaction.entries`. Bundle export also treats local path fields such
-as `persisted_path`, `project_root`, `source_root`, and `run_path` as
-share-sensitive. This is the right mode for support tickets, PR
-attachments, issue reproductions, and any hosted share link.
+as `persisted_path`, `primary` (the workspace anchor path), `run_path`,
+and `snapshot_path` as share-sensitive. This is the right mode for
+support tickets, PR attachments, issue reproductions, and any hosted
+share link.
 
 `--local` preserves the raw run record content. It is useful for
 workstation-to-workstation debugging inside the same trust boundary.
@@ -93,6 +94,32 @@ The runtime unit tests validate and import these checked fixtures, while
 the negative tests cover missing required fields, future schema versions,
 and unsafe secret markers.
 
+## Workspace anchor
+
+When the session that produced the run was opened with a typed
+`WorkspaceAnchor` (via `agent_session_open(id?, opts: {workspace_anchor:
+{primary, additional_roots?, anchored_at?}})` or
+`agent_session_set_workspace_anchor`), the anchor rides through transcript
+metadata into `bundle.workspace`:
+
+```json
+"workspace": {
+  "primary": "/workspace/example",
+  "additional_roots": [
+    {"path": "/workspace/lib", "mount_mode": "read_only",
+     "mounted_at": "2026-05-23T00:00:00Z"}
+  ],
+  "anchored_at": "2026-05-23T00:00:00Z",
+  "policy": "safe_identity_only"
+}
+```
+
+`additional_roots[*].mount_mode` is one of `read_only` (default),
+`extend`, or `sandboxed`. In sanitized and replay-only modes the
+`primary` and `additional_roots[*].path` values are share-sensitive and
+redacted to `[redacted]`. Sessions that never set an anchor omit the
+`workspace` section entirely.
+
 ## Migration
 
 Before session bundles, the closest export story was "attach the raw
@@ -102,3 +129,10 @@ New callers should export a session bundle instead of sharing raw
 `.harn-runs/*` directories. Existing run records remain the source of
 truth; migration is a direct cutover at the boundary where a run leaves
 the local machine.
+
+The workspace anchor moved from soft `RunRecord.metadata.{workspace_id,
+project_root, workspace_root}` keys to a typed `SessionState`
+field in v0.8.35 (#2215). Hosts populating the old keys must move to
+`agent_session_open(..., {workspace_anchor: ...})` or
+`agent_session_set_workspace_anchor(...)` — the legacy read path is
+gone.

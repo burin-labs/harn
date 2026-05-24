@@ -26,6 +26,7 @@ use std::time::Instant;
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::VmValue;
+use crate::workspace_anchor::{WorkspaceAnchor, WORKSPACE_ANCHOR_METADATA_KEY};
 
 /// Default cap on concurrent sessions per VM thread. Beyond this the
 /// least-recently-accessed session is evicted on the next `open`.
@@ -139,6 +140,12 @@ pub struct SessionState {
     /// the route's native thinking shape. Exposed over ACP as
     /// `session/set_config_option(configId="thought_level")`.
     pub pinned_reasoning_policy: Option<String>,
+    /// Typed workspace anchor for the session. Primary path plus any
+    /// additional mounted roots; consumed by permission matchers, the
+    /// bundle exporter, and host-side cross-project handoff flows
+    /// (epic #2208). `None` until a host opens the session with one or
+    /// the ACP `reanchor` / `add_root` primitives populate it.
+    pub workspace_anchor: Option<WorkspaceAnchor>,
     pub transcript_budget_policy: SessionTranscriptBudgetPolicy,
     pub last_transcript_budget_action: Option<serde_json::Value>,
 }
@@ -161,6 +168,7 @@ impl SessionState {
             system_prompt: None,
             pinned_model: None,
             pinned_reasoning_policy: None,
+            workspace_anchor: None,
             transcript_budget_policy: default_transcript_budget_policy(),
             last_transcript_budget_action: None,
         }
@@ -608,6 +616,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         src_system_prompt,
         src_pinned_model,
         src_pinned_reasoning_policy,
+        src_workspace_anchor,
         src_transcript_budget_policy,
         src_last_transcript_budget_action,
         dst,
@@ -623,6 +632,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             src.system_prompt.clone(),
             src.pinned_model.clone(),
             src.pinned_reasoning_policy.clone(),
+            src.workspace_anchor.clone(),
             src.transcript_budget_policy.clone(),
             src.last_transcript_budget_action.clone(),
             dst,
@@ -638,6 +648,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.system_prompt = src_system_prompt;
             state.pinned_model = src_pinned_model;
             state.pinned_reasoning_policy = src_pinned_reasoning_policy;
+            state.workspace_anchor = src_workspace_anchor;
             state.transcript_budget_policy = src_transcript_budget_policy;
             state.last_transcript_budget_action = src_last_transcript_budget_action;
             state.last_accessed = Instant::now();
@@ -1925,6 +1936,31 @@ pub fn pinned_reasoning_policy(id: &str) -> Option<String> {
     })
 }
 
+/// Set (or clear, with `None`) the typed workspace anchor on a session.
+/// Returns `Ok(true)` when the value actually changed so callers can
+/// decide whether to broadcast `AnchorChanged` notifications.
+pub fn set_workspace_anchor(id: &str, anchor: Option<WorkspaceAnchor>) -> Result<bool, String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let changed = state.workspace_anchor != anchor;
+        state.workspace_anchor = anchor;
+        state.last_accessed = Instant::now();
+        Ok(changed)
+    })
+}
+
+/// Read the session's typed workspace anchor, if any.
+pub fn workspace_anchor(id: &str) -> Option<WorkspaceAnchor> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .and_then(|state| state.workspace_anchor.clone())
+    })
+}
+
 fn empty_transcript(id: &str) -> VmValue {
     use crate::llm::helpers::new_transcript_with;
     new_transcript_with(Some(id.to_string()), Vec::new(), None, None)
@@ -2002,6 +2038,14 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
                 system_prompt,
             )),
         );
+    }
+    if let Some(anchor) = state.workspace_anchor.as_ref() {
+        metadata.insert(
+            WORKSPACE_ANCHOR_METADATA_KEY.to_string(),
+            anchor.to_vm_value(),
+        );
+    } else {
+        metadata.remove(WORKSPACE_ANCHOR_METADATA_KEY);
     }
     if let Some(last_action) = state.last_transcript_budget_action.as_ref() {
         let usage = transcript_usage(
@@ -2097,6 +2141,14 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .pinned_reasoning_policy
             .as_ref()
             .map(|policy| VmValue::String(Rc::from(policy.clone())))
+            .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "workspace_anchor".to_string(),
+        state
+            .workspace_anchor
+            .as_ref()
+            .map(WorkspaceAnchor::to_vm_value)
             .unwrap_or(VmValue::Nil),
     );
     VmValue::Dict(Rc::new(next))

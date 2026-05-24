@@ -26,9 +26,13 @@ pub fn register_agent_session_builtins(vm: &mut Vm) {
 
 const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("agent_session_open", agent_session_open_builtin)
-        .signature("agent_session_open(id?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Open or create a first-class agent session."),
+        .signature("agent_session_open(id?, opts?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
+        .doc(
+            "Open or create a first-class agent session. `opts` may carry a typed \
+             `workspace_anchor: {primary, additional_roots?, anchored_at?}` to pin the \
+             session's workspace at open time.",
+        ),
     SyncBuiltin::new("agent_session_exists", agent_session_exists_builtin)
         .signature("agent_session_exists(id)")
         .arity(VmBuiltinArity::Exact(1))
@@ -63,6 +67,27 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     .signature("agent_session_system_prompt(id)")
     .arity(VmBuiltinArity::Exact(1))
     .doc("Return the session-level system prompt recorded for an agent session."),
+    SyncBuiltin::new(
+        "agent_session_workspace_anchor",
+        agent_session_workspace_anchor_builtin,
+    )
+    .signature("agent_session_workspace_anchor(id)")
+    .arity(VmBuiltinArity::Exact(1))
+    .doc(
+        "Return the typed workspace anchor for an agent session, or nil when none \
+         is pinned.",
+    ),
+    SyncBuiltin::new(
+        "agent_session_set_workspace_anchor",
+        agent_session_set_workspace_anchor_builtin,
+    )
+    .signature("agent_session_set_workspace_anchor(id, anchor)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc(
+        "Set or clear the typed workspace anchor for an agent session. Pass nil to \
+         clear; pass `{primary, additional_roots?, anchored_at?}` to set. Returns \
+         true when the value changed.",
+    ),
     SyncBuiltin::new(
         "agent_session_claim_tool_format",
         agent_session_claim_tool_format_builtin,
@@ -316,10 +341,74 @@ fn close_status_arg(args: &[VmValue]) -> Result<(String, String, serde_json::Val
     }
 }
 
+const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor"];
+
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
+    let opts = match args.get(1) {
+        None | Some(VmValue::Nil) => BTreeMap::new(),
+        Some(VmValue::Dict(opts)) => opts.as_ref().clone(),
+        _ => return Err(err("agent_session_open: `opts` must be a dict or nil")),
+    };
+    for key in opts.keys() {
+        if !AGENT_SESSION_OPEN_OPT_KEYS.contains(&key.as_str()) {
+            let expected = AGENT_SESSION_OPEN_OPT_KEYS.join(", ");
+            return Err(err(format!(
+                "agent_session_open: unknown option key '{key}' (expected one of: {expected})"
+            )));
+        }
+    }
+    let anchor = match opts.get("workspace_anchor") {
+        None | Some(VmValue::Nil) => None,
+        Some(value) => Some(
+            crate::workspace_anchor::parse_anchor_dict(value)
+                .map_err(|message| err(format!("agent_session_open: {message}")))?,
+        ),
+    };
     let resolved = agent_sessions::open_or_create(id);
+    if let Some(anchor) = anchor {
+        agent_sessions::set_workspace_anchor(&resolved, Some(anchor))
+            .map_err(|message| err(format!("agent_session_open: {message}")))?;
+    }
     Ok(VmValue::String(Rc::from(resolved)))
+}
+
+fn agent_session_workspace_anchor_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_workspace_anchor", "id")?;
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_workspace_anchor: unknown session id '{id}'"
+        )));
+    }
+    Ok(agent_sessions::workspace_anchor(&id)
+        .as_ref()
+        .map(crate::workspace_anchor::WorkspaceAnchor::to_vm_value)
+        .unwrap_or(VmValue::Nil))
+}
+
+fn agent_session_set_workspace_anchor_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_set_workspace_anchor", "id")?;
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_set_workspace_anchor: unknown session id '{id}'"
+        )));
+    }
+    let anchor = match args.get(1) {
+        None | Some(VmValue::Nil) => None,
+        Some(value) => Some(
+            crate::workspace_anchor::parse_anchor_dict(value)
+                .map_err(|message| err(format!("agent_session_set_workspace_anchor: {message}")))?,
+        ),
+    };
+    let changed = agent_sessions::set_workspace_anchor(&id, anchor)
+        .map_err(|message| err(format!("agent_session_set_workspace_anchor: {message}")))?;
+    Ok(VmValue::Bool(changed))
 }
 
 fn agent_session_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
