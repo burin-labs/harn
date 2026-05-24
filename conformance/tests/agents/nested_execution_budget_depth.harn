@@ -1,0 +1,68 @@
+fn delegated_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "delegate",
+    "Start a nested child agent.",
+    {
+      handler: { _args ->
+        let child = sub_agent_run(
+          "Nested child should be rejected by the remaining recursion budget.",
+          {provider: "mock", max_iterations: 1},
+        )
+        require !child?.ok, "nested sub-agent must fail closed"
+        require child?.budget_exceeded, "nested sub-agent should report budget exhaustion"
+        require child.error?.category == "budget_exceeded", "nested sub-agent should classify the denial"
+        require contains(child.error?.message ?? "", "sub_agent_run"), "nested sub-agent denial should name the guarded descent"
+        require contains(json_stringify(child?.transcript ?? {}), "nested_execution_budget_denied"), "nested sub-agent transcript should record the denial"
+        return "denied"
+      },
+      parameters: {},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock({tool_calls: [{id: "delegate_1", name: "delegate", arguments: {}}]})
+  let parent = agent_loop(
+    "Ask the tool to delegate.",
+    nil,
+    {
+      provider: "mock",
+      tools: delegated_tools(),
+      allowed_tools: ["delegate"],
+      tool_format: "native",
+      max_iterations: 1,
+      policy: {recursion_limit: 0},
+    },
+  )
+  __io_println(contains(parent?.tools?.successful ?? [], "delegate"))
+  __io_println(len(parent?.tools?.rejected ?? []) == 0)
+  let flow = workflow_graph(
+    {
+      name: "budgeted_workflow",
+      entry: "act",
+      capability_policy: {recursion_limit: 0},
+      nodes: {
+        act: {
+          kind: "stage",
+          mode: "agent",
+          model_policy: {provider: "mock"},
+          output_contract: {output_kinds: ["summary"]},
+        },
+      },
+      edges: [],
+    },
+  )
+  let workflow = workflow_execute("Nested workflow stage should be rejected.", flow, [], {max_steps: 1})
+  let stage = workflow?.run?.stages[0]
+  let artifact = stage?.artifacts[0]?.data
+  __io_println(stage?.status == "failed")
+  __io_println(stage?.outcome == "blocked")
+  __io_println(stage?.branch == "failed")
+  __io_println(artifact?.stop_reason == "nested_execution_budget_exhausted")
+  __io_println(artifact?.error?.category == "budget_exceeded")
+  __io_println(contains(artifact?.error?.message ?? "", "workflow_stage: act"))
+}

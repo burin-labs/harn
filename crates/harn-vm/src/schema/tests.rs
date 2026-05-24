@@ -56,6 +56,25 @@ fn deep_items_schema(depth: usize) -> VmValue {
     schema
 }
 
+fn deep_ref_chain_schema(depth: usize) -> VmValue {
+    let mut definitions = BTreeMap::new();
+    for index in 0..depth {
+        let schema = if index + 1 == depth {
+            make_vm_dict(vec![("type", s("string"))])
+        } else {
+            make_vm_dict(vec![(
+                "$ref",
+                s(&format!("#/definitions/Node{}", index + 1)),
+            )])
+        };
+        definitions.insert(format!("Node{index}"), schema);
+    }
+    make_vm_dict(vec![
+        ("$ref", s("#/definitions/Node0")),
+        ("definitions", VmValue::Dict(Rc::new(definitions))),
+    ])
+}
+
 fn deep_node_value(depth: usize) -> VmValue {
     let mut value = s("ok");
     for _ in 0..depth {
@@ -152,6 +171,12 @@ fn many_refs_are_rejected_at_expansion_limit() {
     ]);
 
     assert_schema_error_contains(&schema, "schema $ref expansion limit exceeded (256)");
+}
+
+#[test]
+fn deep_ref_chain_is_rejected_at_depth_limit() {
+    let schema = deep_ref_chain_schema(DEFAULT_SCHEMA_MAX_DEPTH + 2);
+    assert_schema_error_contains(&schema, "schema depth exceeded (128)");
 }
 
 #[test]

@@ -14,6 +14,8 @@ mod scope;
 mod state;
 
 #[cfg(test)]
+mod depth_regression_tests;
+#[cfg(test)]
 mod tests_debug;
 #[cfg(test)]
 mod tests_runtime;
