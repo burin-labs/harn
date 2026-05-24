@@ -1,0 +1,13 @@
+import { parse, parser } from "std/cli/argparse"
+
+fn main(harness: Harness) {
+  let spec = parser({name: "demo", args: [{name: "model", kind: "flag", short: "-m", long: "--model"}]})
+  let a = parse(spec, ["-m", "claude-opus"])
+  let b = parse(spec, ["--model", "claude-haiku"])
+  let c = parse(spec, ["--model=claude-sonnet"])
+  let d = parse(spec, ["-mclaude-inline"])
+  harness.stdio.println(a.ok.model)
+  harness.stdio.println(b.ok.model)
+  harness.stdio.println(c.ok.model)
+  harness.stdio.println(d.ok.model)
+}

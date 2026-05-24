@@ -1,0 +1,18 @@
+import { parser, render_help } from "std/cli/argparse"
+
+fn main(harness: Harness) {
+  let spec = parser(
+    {
+      name: "demo",
+      about: "Show what argparse's --help renders like.",
+      args: [
+        {name: "input", kind: "positional", required: true, help: "Input file path"},
+        {name: "output", kind: "positional", required: false, help: "Optional output path"},
+        {name: "model", kind: "flag", short: "-m", long: "--model", value_name: "ID", help: "Model id"},
+        {name: "json", kind: "switch", long: "--json", help: "Emit JSON envelope"},
+      ],
+      examples: ["demo foo.txt", "demo --json foo.txt out.txt"],
+    },
+  )
+  harness.stdio.println(render_help(spec))
+}

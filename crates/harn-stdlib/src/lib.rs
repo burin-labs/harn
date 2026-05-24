@@ -206,6 +206,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_cli.harn"),
     },
     StdlibSource {
+        module: "cli/argparse",
+        source: include_str!("stdlib/cli/argparse.harn"),
+    },
+    StdlibSource {
         module: "gha",
         source: include_str!("stdlib/stdlib_gha.harn"),
     },

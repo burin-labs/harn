@@ -1,0 +1,11 @@
+import { parse, parser } from "std/cli/argparse"
+
+fn main(harness: Harness) {
+  let spec = parser({name: "demo", args: [{name: "input", kind: "positional"}]})
+  let r = parse(spec, [])
+  let err = r.err
+  if err != nil {
+    harness.stdio.println(err.kind)
+    harness.stdio.println(err.arg)
+  }
+}

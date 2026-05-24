@@ -1,0 +1,17 @@
+Show what argparse's --help renders like.
+
+USAGE:
+  demo [OPTIONS] <input> [output]
+
+ARGS:
+  <input>                        Input file path
+  [output]                       Optional output path
+
+OPTIONS:
+  -m, --model <ID>               Model id
+      --json                     Emit JSON envelope
+  -h, --help                     Print help
+
+EXAMPLES:
+  demo foo.txt
+  demo --json foo.txt out.txt
