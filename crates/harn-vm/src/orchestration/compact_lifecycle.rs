@@ -85,11 +85,17 @@ impl CompactMode {
         }
     }
 
-    /// `ResumeDigest` is a transcript-only extraction used to derive a
-    /// summary string for cold-resume; it never produces a real
-    /// compaction lifecycle event.
+    /// Session-level `PreCompact` / `PostCompact` hooks fire only for
+    /// modes that operate against an owning agent session. The other
+    /// modes are utility wrappers around raw message lists or worker
+    /// transcripts — their callers (e.g. the `.harn` agent loop)
+    /// orchestrate the session-level hook firing separately, so the
+    /// lifecycle path here must stay silent to avoid double-dispatch.
     pub fn fires_hooks(self) -> bool {
-        !matches!(self, CompactMode::ResumeDigest)
+        match self {
+            CompactMode::Manual | CompactMode::Host | CompactMode::Auto => true,
+            CompactMode::Workflow | CompactMode::Worker | CompactMode::ResumeDigest => false,
+        }
     }
 }
 
@@ -955,12 +961,16 @@ mod tests {
     }
 
     #[test]
-    fn compact_mode_resume_digest_skips_hooks() {
-        assert!(!CompactMode::ResumeDigest.fires_hooks());
+    fn fires_hooks_only_for_session_owning_modes() {
+        // Session-aware entry points fire hooks.
         assert!(CompactMode::Manual.fires_hooks());
-        assert!(CompactMode::Auto.fires_hooks());
         assert!(CompactMode::Host.fires_hooks());
-        assert!(CompactMode::Workflow.fires_hooks());
-        assert!(CompactMode::Worker.fires_hooks());
+        assert!(CompactMode::Auto.fires_hooks());
+        // Utility paths stay silent so callers (`.harn` agent loop,
+        // worker resume) can orchestrate session-level hooks
+        // themselves without double-dispatch.
+        assert!(!CompactMode::Workflow.fires_hooks());
+        assert!(!CompactMode::Worker.fires_hooks());
+        assert!(!CompactMode::ResumeDigest.fires_hooks());
     }
 }
