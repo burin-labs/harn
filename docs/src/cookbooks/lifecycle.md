@@ -1,20 +1,19 @@
 # Pipeline lifecycle cookbook
 
-Five end-to-end patterns for the callback-first pipeline lifecycle
-(epic #1853). Each recipe is a complete, copy-paste starting point.
-For the surface reference see [Pipeline lifecycle](../pipeline-lifecycle.md);
-for the per-preset stdlib reference see
+End-to-end patterns for the callback-first pipeline lifecycle. Each
+recipe is a self-contained, copy-paste starting point. For the surface
+reference see [Pipeline lifecycle](../pipeline-lifecycle.md); for the
+per-preset stdlib reference see
 [Pipeline lifecycle presets](../stdlib/lifecycle.md); for the
 LLM-friendly quickref see the "Pipeline lifecycle" section in
 `docs/llm/harn-quickref.md`.
 
 The recipes use `harn,ignore` fences because they wire up full
-multi-pipeline topologies (producer pipeline, drain pipeline, trigger
-handlers, host integration glue). Each fragment type-checks; the
-orchestration loop assumes a host that runs the constituent pipelines
-(such as `harn orchestrator`).
+multi-pipeline topologies (producer, drain, trigger handlers, host glue).
+Each fragment type-checks; the orchestration loop assumes a host that
+runs the constituent pipelines, such as `harn orchestrator`.
 
-## 1. Nightly settlement handoff
+## Nightly settlement handoff
 
 A live ingest pipeline triages events synchronously up to a watermark,
 then hands deferred work off to a separate nightly settlement
@@ -73,7 +72,7 @@ chain, and on_finish policy. A failure mid-settle does not unwind the
 live ingest run, and a `pre_finish` block on the nightly pipeline
 holds finish open until the per-item drain completes.
 
-## 2. Audit every drain decision to a custom store
+## Audit every drain decision to a custom store
 
 A regulated team needs every disposition the settlement-agent loop
 makes to land in an external audit store (Splunk, BigQuery, S3), not
@@ -127,7 +126,7 @@ Why `with_telemetry` outside the drain: the wrapper emits
 a stable span name, so the external store sees a paired pair of
 records bracketing the per-item entries.
 
-## 3. Long-paused agent with resume-continuity reminder
+## Long-paused agent with resume-continuity reminder
 
 A research agent self-parks via `agent_await_resumption` and may
 sleep for hours. When it resumes, two things must happen exactly
@@ -179,7 +178,7 @@ suspend snapshot, so a cold-restore (`harn run --resume <path>`)
 reconstitutes the same wake conditions instead of re-evaluating the
 shape at resume time.
 
-## 4. Hook-based supervision — deny suspend during business hours
+## Hook-based supervision: deny suspend during business hours
 
 A SaaS team wants to prevent any agent from self-parking between 9 AM
 and 5 PM local time (so the on-call rotation can intervene with full
@@ -228,7 +227,7 @@ Why the dedupe key: if the agent retries the suspend three times in
 one turn, the dedupe collapses the reminder to one entry rather than
 stacking three identical bodies.
 
-## 5. Replay-deterministic test harness for a multi-suspend pipeline
+## Replay-deterministic test harness for a multi-suspend pipeline
 
 A pipeline suspends a worker, waits for an external event, resumes,
 suspends again, and finally drains. The conformance fixture needs to

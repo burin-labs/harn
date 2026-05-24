@@ -1,16 +1,16 @@
 # Channel cookbook
 
-Five end-to-end patterns for agent channels (#1870). Each recipe is a
-complete, copy-paste starting point. For the surface reference see
+End-to-end patterns for agent channels. Each recipe is a self-contained,
+copy-paste starting point. For the surface reference see
 [Agent channels](../agent-channels.md); for the LLM-friendly quickref
 see the "Durable agent channels" section in `docs/llm/harn-quickref.md`.
 
-The recipes use `harn,ignore` fences because they show full
-multi-agent topologies (publisher pipeline + subscriber pipeline). Each
-fragment type-checks; the orchestration loop assumes a host that runs
-both pipelines (such as `harn orchestrator`).
+The recipes use `harn,ignore` fences because they wire up full
+multi-pipeline topologies (publisher + subscriber). Each fragment
+type-checks; the orchestration loop assumes a host that runs both
+pipelines, such as `harn orchestrator`.
 
-## 1. Release handshake
+## Release handshake
 
 One agent waits for another's emit before proceeding. The PR agent
 emits `pr.merged` on each merge; a release agent batches three of them
@@ -83,7 +83,7 @@ Why a signed receipt: the replay oracle verifies the same three SHAs
 fire the same release across two runs of the same pipeline. See
 [CH-07 replay receipts](../agent-channels.md#observability).
 
-## 2. Periodic check-in via tool-call counting
+## Periodic check-in via tool-call counting
 
 Inject a reflection prompt into a running agent loop every 30 tool
 calls. The agent emits `tool_call.completed` on each tool use (via a
@@ -140,7 +140,7 @@ Why `dedupe_key`: if the agent stalls mid-reflection and 30 more tools
 are dispatched, the next reminder replaces (rather than stacks on) the
 pending one.
 
-## 3. Multi-agent feedback loop
+## Multi-agent feedback loop
 
 A planner agent drafts a plan; reviewer agents critique it; the
 planner subscribes to the critiques and revises. Channels make this a
@@ -211,7 +211,7 @@ running* in `agent_loop`. Spawning a new task would lose its
 transcript; injecting a reminder lets it incorporate the critique on
 the next turn.
 
-## 4. Pipeline progress dashboard
+## Pipeline progress dashboard
 
 Every step in every pipeline emits `pipeline.step.completed`; a
 monitoring agent tenant-wide subscribes and maintains a live
@@ -271,7 +271,7 @@ dispatcher's retry policy, DLQ routing, and replay receipts. If the
 dashboard handler throws, the channel emit still lands cleanly on
 `lifecycle.channel.audit`; the failed match goes to `trigger.dlq`.
 
-## 5. Cross-pipeline coordination via drain handoff
+## Cross-pipeline coordination via drain handoff
 
 Pipeline A processes work synchronously up to a watermark, then drains
 deferred items by emitting a channel event. A nightly settlement
