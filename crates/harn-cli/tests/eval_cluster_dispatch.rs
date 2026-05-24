@@ -28,7 +28,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use harn_cli::dispatch::run_embedded_script;
