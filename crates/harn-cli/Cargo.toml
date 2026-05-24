@@ -92,6 +92,22 @@ which = "8"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Build-time dependencies for the AOT bytecode embedding step (G7 / harn#2300).
+# `build.rs` reuses the runtime compiler + cache-artifact encoder to emit a
+# `.harnbc` for every script in `harn_stdlib::STDLIB_CLI_SCRIPTS`; the
+# resulting bytes are embedded via `include_bytes!` and made discoverable
+# through `harn_cli::cli_bytecode::find_cli_script_bytecode`. Both crates are
+# downstream of `harn-cli` only via runtime deps, so no cycle is introduced.
+#
+# Feature flags here mirror the runtime `[dependencies]` `harn-vm` entry on
+# purpose: resolver=2 isolates build- and runtime-dep feature sets, and a
+# divergent set would compile `harn-vm` twice with different cfgs. Keeping
+# the lists in sync lets Cargo dedupe and keeps clippy diagnostics aligned
+# across the two compile units.
+[build-dependencies]
+harn-vm = { path = "../harn-vm", version = "0.8", features = ["otel", "testbench-wasi"] }
+harn-stdlib = { path = "../harn-stdlib", version = "0.8" }
+
 [features]
 default = ["hostlib"]
 # Wire `harn-hostlib`'s code-intelligence and tool builtins into the ACP

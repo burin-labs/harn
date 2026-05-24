@@ -250,6 +250,14 @@ enum ApprovalResolution {
     Denied(HitlHostResponse),
 }
 
+// `Completed` carries the full `WaitpointRecord`, which dominates the
+// enum's size — boxing it would force every match arm to indirect even
+// though the enum is dropped within nanoseconds of being constructed
+// (it's a local return type for the waitpoint poll loop, never stored).
+// Surfaced by the host-target compile of `harn-vm` introduced when
+// `harn-cli`'s build script gained `harn-vm` as a build-dep for the
+// AOT bytecode embedding pass (G7 / harn#2300).
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 enum WaitpointOutcome {
     Completed(WaitpointRecord),
