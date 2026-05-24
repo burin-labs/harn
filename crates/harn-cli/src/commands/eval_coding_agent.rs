@@ -44,6 +44,9 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 
 use crate::cli::EvalCodingAgentArgs;
+use crate::commands::eval_coding_agent_preset::{
+    resolve_step_judge_json, resolve_structural_validator_json,
+};
 use crate::commands::eval_model_selector::{
     resolve_selector, selector_is_local, selector_label, ModelSelector,
 };
@@ -815,6 +818,10 @@ fn script_argv(
         argv.push("--override-reason".to_string());
         argv.push(reason.to_string());
     }
+    if let Some(json) = resolve_structural_validator_json(args) {
+        argv.push("--structural-validator-json".to_string());
+        argv.push(json);
+    }
     argv
 }
 
@@ -823,80 +830,6 @@ fn tool_format_override_warning_line(stderr: &str) -> Option<&str> {
         .lines()
         .map(str::trim)
         .find(|line| line.starts_with(TOOL_FORMAT_OVERRIDE_WARNING_PREFIX))
-}
-
-/// Translate the `--step-judge <preset>` CLI flag into a JSON object the
-/// inner `coding_agent_suite.harn` script feeds to `agent_loop({step_judge: ...})`.
-/// Returns `None` for `None` / `"none"` / empty.
-///
-/// Preset semantics (designed for the step-judge experiment in
-/// experiments/step-judge/):
-/// - `symmetric-cheap`: judge = generator model (cheap-judges-cheap)
-/// - `asymmetric`: judge = `anthropic/claude-sonnet-4-6` via OpenRouter
-/// - `symmetric-strong`: judge = generator model (caller expected to
-///   pass --model anthropic/claude-sonnet-4-6 to make this meaningful)
-/// - `custom:<json>`: literal JSON dict passed through verbatim
-fn resolve_step_judge_json(args: &EvalCodingAgentArgs, selector: &ModelSelector) -> Option<String> {
-    let raw = args.step_judge.as_deref()?.trim();
-    if raw.is_empty() || raw.eq_ignore_ascii_case("none") {
-        return None;
-    }
-    let mut obj = serde_json::Map::new();
-    if let Some(rest) = raw.strip_prefix("custom:") {
-        match serde_json::from_str::<JsonValue>(rest) {
-            Ok(JsonValue::Object(map)) => obj.extend(map),
-            _ => {
-                // Fall through to error-style emission so the eval reports
-                // a config error rather than silently disabling the judge.
-                obj.insert(
-                    "model".to_string(),
-                    JsonValue::String("__invalid_custom_step_judge__".to_string()),
-                );
-            }
-        }
-    } else {
-        match raw {
-            "symmetric-cheap" | "symmetric-strong" => {
-                obj.insert(
-                    "model".to_string(),
-                    JsonValue::String(selector.model.clone()),
-                );
-                obj.insert(
-                    "provider".to_string(),
-                    JsonValue::String(selector.provider.clone()),
-                );
-            }
-            "asymmetric" => {
-                obj.insert(
-                    "model".to_string(),
-                    JsonValue::String("anthropic/claude-sonnet-4-6".to_string()),
-                );
-                obj.insert(
-                    "provider".to_string(),
-                    JsonValue::String("openrouter".to_string()),
-                );
-            }
-            _other => {
-                obj.insert(
-                    "model".to_string(),
-                    JsonValue::String("__unknown_step_judge_preset__".to_string()),
-                );
-            }
-        }
-    }
-    if let Some(on_veto) = args.step_judge_on_veto.as_deref() {
-        obj.insert(
-            "on_veto".to_string(),
-            JsonValue::String(on_veto.to_string()),
-        );
-    }
-    if args.step_judge_adversarial {
-        obj.insert(
-            "rubric".to_string(),
-            JsonValue::String("adversarial".to_string()),
-        );
-    }
-    Some(JsonValue::Object(obj).to_string())
 }
 
 fn error_report(

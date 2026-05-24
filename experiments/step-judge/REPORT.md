@@ -1,6 +1,6 @@
 # Step-Judge Experiment — Report
 
-**Last updated:** v3 (2026-05-24).
+**Last updated:** v3 + validator ablation (2026-05-24).
 
 ## TL;DR
 
@@ -19,6 +19,15 @@ NOT recommend any preset.** It is a force-multiplier for cheap
 generators on broken-tool-format runs (which the v1 data shows
 clearly) and a wash otherwise. Document it as "use when you know
 your generator is structurally weak; otherwise it's overhead."
+
+Follow-up ablation with the 4-rule structural validator wired on by
+default in the coding-agent suite, and `step_judge` forced off,
+does not change that recommendation. Averaged across the three
+Haiku text-mode samples, the validator recovers only about **one
+third** of the remaining +16.7pp text-format lift that v1 had
+credited to `step_judge`, and it does so via a different fixture
+mix (recovering `read-only-audit` / `no-tool-diagnosis` while
+regressing `cli-help-flag`).
 
 The v1 numbers are preserved below for historical context and as
 evidence of what step_judge can paper over when the generator path
@@ -87,6 +96,55 @@ longer needed because the agent doesn't break in the first place.
 | Native tools (eliminate text-format collapse) | ~+17pp |
 | Step judge papering over remaining text-format failures | ~+16pp |
 | **Step judge's value when tools work correctly** | **0pp** |
+
+## Validator-vs-judge ablation
+
+We reran the text-format grid with `--step-judge off
+--structural-validator on`, using the 4-rule suite default
+validator and `--baseline-comparison-against` to diff each cell
+against its paired v3 native summary.
+
+Because forcing `step_judge` off collapses `baseline-cheap`,
+`symmetric-cheap`, and `asymmetric` to the same Haiku 4.5
+generator config, those three cells should be read as replicate
+samples of one condition rather than distinct strategies.
+
+| Cell | Pass | Cost | Delta vs paired v3 native | Key regressions | Key recoveries |
+|---|---:|---:|---:|---|---|
+| `baseline-cheap` | 4/6 = **67%** | $0.07 | 0pp | `cli-help-flag` | `read-only-audit` |
+| `symmetric-cheap` | 2/6 = **33%** | $0.05 | **−16.7pp** | `cli-help-flag`, `docs-symbol-rename`, `python-add` | `no-tool-diagnosis`, `read-only-audit` |
+| `asymmetric` | 4/6 = **67%** | $0.05 | 0pp | `cli-help-flag`, `test-output-first` | `no-tool-diagnosis`, `read-only-audit` |
+| `symmetric-strong` | 2/6 = **33%** | $0.11 | **−33.3pp** | `cli-help-flag`, `docs-symbol-rename`, `python-add`, `test-output-first` | `no-tool-diagnosis`, `read-only-audit` |
+
+Truth table across the three equivalent Haiku samples:
+
+| Fixture | v1 baseline (text) | validator-on Haiku text (3 samples) | v3 baseline (native) |
+|---|:---:|:---:|:---:|
+| python-add | ✗ | 2/3 | ✓ |
+| cli-help-flag | ✓ | 0/3 | ✓ |
+| test-output-first | ✗ | 0/3 | ✗ |
+| docs-symbol-rename | ✗ | 2/3 | ✓ |
+| read-only-audit | ✓ | 3/3 | ✗ |
+| no-tool-diagnosis | ✓ | 3/3 | ✓ |
+
+Three conclusions fall out of that table:
+
+1. **The validator does real structural cleanup work.** It
+   consistently recovers the two prose-only fixtures
+   (`read-only-audit`, `no-tool-diagnosis`) that are most exposed to
+   text-format protocol drift.
+2. **It does not recover the v1 judge win.** `test-output-first`
+   stayed 0/3, and `cli-help-flag` regressed in all three Haiku
+   samples. So the validator is not a drop-in replacement for the
+   old judge-on-text behavior.
+3. **The pass-rate lift is too small and too noisy.** Averaging the
+   three Haiku samples gives **10/18 = 55.6%** at an average cost of
+   **$0.0569** per 6-fixture run. Against the v1 baseline text pass
+   rate (**3/6 = 50%**), that is only **+5.6pp**. The report's
+   "remaining step_judge effect" after native tools was **+16.7pp**,
+   so the validator captures about **33%** of that lift, well below
+   the **80%** threshold for changing the recommended shipping
+   config.
 
 ## Updated GO / no-go
 
@@ -186,11 +244,16 @@ yet — filed as a follow-up.
 - Spend: v3 grid cost **$0.71** total ($0.14 + $0.11 + $0.13 +
   $0.33), well under the $15 cap. Adding replicates 2-3 + 6 more
   fixtures would cost ~$5 — proposed for v3.1.
+- The validator ablation cost **$0.28** total
+  ($0.07 + $0.05 + $0.05 + $0.11). Cheap, but still not strong
+  enough evidence to revise the shipping recommendation.
 
 ## Raw data
 
 - v1 (text, OpenRouter, 2026-05-23): `results/main-grid-2026-05-23/`
 - v3 (native, OpenRouter, 2026-05-24): `results/main-grid-2026-05-24-v3/`
+- v3 validator ablation (text, judge off, 2026-05-24):
+  `results/main-grid-2026-05-24-v3-validator/`
 
 Per-run JSONL + transcript_events are gitignored under the
 timestamped run dirs. Only summary.json per cell is tracked.

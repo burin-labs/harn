@@ -56,6 +56,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         step_judge: None,
         step_judge_on_veto: None,
         step_judge_adversarial: false,
+        structural_validator: None,
         run_label: String::new(),
         override_reason: None,
         baseline_comparison_against: None,

@@ -122,7 +122,7 @@ pub struct EvalCodingAgentArgs {
     /// Accepts a preset name (`symmetric-cheap`, `asymmetric`,
     /// `symmetric-strong`) which expands to a known {model, provider}
     /// pair, or `custom:<json>` for a literal JSON object passed verbatim
-    /// to `agent_loop({step_judge: ...})`. Omit (or pass `none`) to disable.
+    /// to `agent_loop({step_judge: ...})`. Omit (or pass `none` / `off`) to disable.
     /// For matrix sweeps across presets, the step-judge experiment driver
     /// at experiments/step-judge/run.sh invokes the eval runner once per
     /// preset and aggregates.
@@ -138,6 +138,12 @@ pub struct EvalCodingAgentArgs {
     /// Free-form reason attached when forcing a tool format against catalog guidance.
     #[arg(long = "override-reason")]
     pub override_reason: Option<String>,
+    /// Structural-validator config applied to every run in this invocation.
+    /// Omit to use the suite default (currently the 4-rule validator).
+    /// Accepts `on` / `default`, `off` / `none`, or `custom:<json>` for a
+    /// literal JSON object passed to `with_structural_validator(...)`.
+    #[arg(long = "structural-validator")]
+    pub structural_validator: Option<String>,
     /// Free-form label persisted in summary.json for grouping repeat runs
     /// (e.g. "replicate-1", "probe-judge-arch-gpt"). Defaults to empty.
     #[arg(long = "run-label", default_value = "")]

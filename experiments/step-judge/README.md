@@ -78,6 +78,15 @@ Requires OpenRouter API key in env (or `~/projects/burin-code/.env`).
 
 # Just one cell (for debugging)
 ./experiments/step-judge/run.sh --cell asymmetric --replicates 1
+
+# Validator-vs-judge ablation against the pinned v3 native summaries
+./experiments/step-judge/run.sh \
+  --replicates 1 \
+  --no-probes \
+  --step-judge off \
+  --structural-validator on \
+  --baseline-results-dir experiments/step-judge/results/main-grid-2026-05-24-v3 \
+  --output-dir experiments/step-judge/results/main-grid-2026-05-24-v3-validator
 ```
 
 Outputs land under `experiments/step-judge/results/<timestamp>/`,
@@ -86,7 +95,8 @@ with one subdir per cell × replicate and an aggregated `REPORT.md`.
 ## Files
 
 - `run.sh` — bash driver that invokes `harn eval coding-agent` once
-  per cell × replicate, with the right `--step-judge`, `--model`, and
+  per cell × replicate, with the right `--step-judge`,
+  `--structural-validator`, `--tool-format`, `--model`, and
   `--run-label` flags.
 - `aggregate.harn` — reads each invocation's `summary.json`, groups
   by cell + replicate, computes pass-rate lift vs baseline, writes
