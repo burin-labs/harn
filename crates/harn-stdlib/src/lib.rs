@@ -806,6 +806,10 @@ pub struct StdlibCliScript {
 
 pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
     StdlibCliScript {
+        name: "doctor",
+        source: include_str!("stdlib/cli/doctor.harn"),
+    },
+    StdlibCliScript {
         name: "echo",
         source: include_str!("stdlib/cli/echo.harn"),
     },

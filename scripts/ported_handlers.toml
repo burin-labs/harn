@@ -66,3 +66,7 @@ max_loc = 805
 [[handler]]
 path = "crates/harn-cli/src/commands/graph.rs"
 max_loc = 690
+
+[[handler]]
+path = "crates/harn-cli/src/commands/doctor.rs"
+max_loc = 2446

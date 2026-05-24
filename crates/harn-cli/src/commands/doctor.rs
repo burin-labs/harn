@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,8 +12,30 @@ use harn_vm::secrets::{
 };
 use serde::Serialize;
 
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::package;
+
+/// Env var the embedded `cli/doctor` script reads to pick up the raw
+/// `DoctorReport` payload (renderable shape — no envelope wrapper).
+/// Kept separate from [`DOCTOR_REPORT_ENVELOPE_ENV`] so the script can
+/// inspect typed fields (status, label, summary counts) without
+/// re-walking through `data` lookups.
+const DOCTOR_REPORT_ENV: &str = "HARN_DOCTOR_REPORT_JSON";
+
+/// Env var carrying the pre-serialized `JsonEnvelope<DoctorReport>`
+/// for the `--json` path. Harn's `json_stringify_pretty` would
+/// alphabetise the envelope keys (`data`, `error`, `ok`,
+/// `schemaVersion`, `warnings`) which would break downstream
+/// consumers that expect the legacy serde declaration order. Hand
+/// the script the canonical bytes so it can echo them verbatim.
+const DOCTOR_REPORT_ENVELOPE_ENV: &str = "HARN_DOCTOR_REPORT_ENVELOPE_JSON";
+
+/// Serialises the dispatch path so concurrent in-process callers
+/// don't race on the global env vars the shim sets. Same pattern as
+/// the other partial-port commands (W5/W7/W9/W10).
+static DISPATCH_DOCTOR_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum DoctorStatus {
@@ -67,6 +90,19 @@ pub(crate) struct DoctorOptions {
 }
 
 pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        run_legacy(opts).await;
+        return;
+    }
+    let exit_code = run_dispatch(opts).await;
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+}
+
+/// Legacy direct-render path. Kept verbatim for the parity-snapshot
+/// harness (#2299) until the C1 ratchet (#2314) lands.
+async fn run_legacy(opts: DoctorOptions) {
     let report = build_report(&opts).await;
     let failed = report.summary.blocking > 0;
 
@@ -79,6 +115,40 @@ pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
     if failed {
         std::process::exit(1);
     }
+}
+
+/// `.harn` dispatch path (W12 — see harn#2312). The Rust shim still
+/// runs every probe (toolchain, providers, MCP, manifest health,
+/// hardware, capabilities) because each one reaches into a different
+/// VM/host facility that script-land can't drive yet. The shim
+/// assembles the structured [`DoctorReport`], serialises it to JSON,
+/// and dispatches to `cli/doctor.harn` for formatting. The script
+/// owns the human-readable section layout and the JSON envelope
+/// pass-through.
+async fn run_dispatch(opts: DoctorOptions) -> i32 {
+    let report = build_report(&opts).await;
+    let report_json = match serde_json::to_string(&report) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise doctor report: {error}");
+            return 1;
+        }
+    };
+    // Pre-render the envelope here so the script can echo the bytes
+    // verbatim — Harn's `json_stringify_pretty` would re-order keys.
+    let envelope_json = to_string_pretty(&report.clone().into_envelope());
+
+    let _guard = DISPATCH_DOCTOR_LOCK.lock().await;
+    let _report_guard = ScopedEnvVar::set(DOCTOR_REPORT_ENV, &report_json);
+    let _envelope_guard = ScopedEnvVar::set(DOCTOR_REPORT_ENVELOPE_ENV, &envelope_json);
+    let outcome = dispatch::run_embedded_script("doctor", Vec::new(), opts.json).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if !outcome.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+    outcome.exit_code
 }
 
 async fn build_report(opts: &DoctorOptions) -> DoctorReport {
