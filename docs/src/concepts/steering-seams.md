@@ -106,14 +106,38 @@ still works for backward compatibility, but `register_checkpoint_hook` covers
 every seam in one call and exposes the `dispatch_skipped` signal that
 turn-level hooks never see.
 
+## Mid-tool preemption
+
+Steering at iteration boundaries handles "stop before the next tool fires."
+For the case where a tool is *already in flight* and the host wants to abort
+*that* call — e.g. one click cancels a runaway `git push --force` without
+losing the rest of the session — Harn ships
+`cancel_in_flight_tool_call(session_id, call_id, opts?)` and the matching
+ACP method `session/cancel_tool_call`. Both share a per-call cancellation
+registry keyed by `(session_id, call_id)`:
+
+```harn
+cancel_in_flight_tool_call(
+  "sess_abc",
+  "call_42",
+  {reason: "user clicked stop", inject_reminder: true, timeout_ms: 5000},
+)
+// → {status: "cancelled" | "already_cancelled" | "not_found" | "timeout",
+//    call_id: "call_42", tool: "git_push", reason: "user clicked stop"}
+```
+
+The cancelled call returns to the loop shaped as
+`status: "cancelled"` — distinct from `status: "error"` — so the model can
+distinguish "the host stopped me" from "the tool failed." Tools written
+against tokio's drop semantics unwind immediately; tools that hold
+non-droppable resources (a `spawn_blocking` thread, an external process
+without `kill_on_drop`) can additionally observe the cancellation handle
+via the registry and shut down cooperatively.
+
 ## What's still out of scope
 
 These were called out as separate issues in #2211 and are not yet shipped:
 
-- **Mid-tool preemption.** Once a tool is dispatching, there is still no
-  cancellation token. A long-running tool that started before the checkpoint
-  fired will run to completion. Tracked at
-  [#2213](https://github.com/burin-labs/harn/issues/2213).
 - **Bridge-level dedupe-key collapsing.** Multiple `interrupt_immediate`
   injections with the same `dedupe_key` are drained as separate transcript
   events instead of collapsing.

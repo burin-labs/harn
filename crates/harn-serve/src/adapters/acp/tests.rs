@@ -232,6 +232,140 @@ async fn session_remind_rejects_user_message_payload() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn session_cancel_tool_call_returns_not_found_when_no_call_in_flight() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/cancel_tool_call",
+            "params": {
+                "sessionId": session_id,
+                "toolCallId": "call_unknown",
+                "reason": "user clicked stop",
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["result"]["status"], "not_found");
+    assert_eq!(response["result"]["callId"], "call_unknown");
+    assert!(response["result"]["tool"].is_null());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_cancel_tool_call_targets_registered_call() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    // Pretend a tool call is in flight by registering one directly.
+    let (_handle, _guard) =
+        harn_vm::tool_call_cancellations::register(session_id.clone(), "call_42", "git_push")
+            .expect("registered");
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/cancel_tool_call",
+            "params": {
+                "sessionId": session_id,
+                "toolCallId": "call_42",
+                "reason": "user clicked stop",
+                "injectReminder": false,
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["result"]["status"], "cancelled");
+    assert_eq!(response["result"]["callId"], "call_42");
+    assert_eq!(response["result"]["tool"], "git_push");
+
+    // A second cancel must report `already_cancelled` so the host can
+    // suppress redundant retries.
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/cancel_tool_call",
+            "params": {
+                "sessionId": session_id,
+                "toolCallId": "call_42",
+                "reason": "still stopping",
+                "injectReminder": false,
+            },
+        }))
+        .await;
+    let second = recv_json(&mut rx).await;
+    assert_eq!(second["result"]["status"], "already_cancelled");
+    assert_eq!(second["result"]["tool"], "git_push");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_cancel_tool_call_rejects_missing_tool_call_id() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/cancel_tool_call",
+            "params": {
+                "sessionId": session_id,
+                "reason": "no id supplied",
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["error"]["code"], -32602);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("toolCallId"));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn session_inject_accepts_with_message_id_and_delivers_same_id() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
@@ -959,6 +1093,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
             "list": {},
             "resume": {},
             "restoreToolCall": {},
+            "cancelToolCall": {},
         })
     );
     assert!(

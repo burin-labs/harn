@@ -383,6 +383,13 @@ pub(crate) const AGENT_SESSION_COMPACT_OPTS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("temperature", TY_FLOAT),
 ]);
 
+/// `cancel_in_flight_tool_call` `opts?` argument.
+pub(crate) const CANCEL_IN_FLIGHT_TOOL_CALL_OPTS: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::optional("reason", TY_STRING),
+    ShapeFieldDescriptor::optional("inject_reminder", TY_BOOL),
+    ShapeFieldDescriptor::optional("timeout_ms", TY_INT),
+]);
+
 // ---------------------------------------------------------------------------
 // LLM option bags
 // ---------------------------------------------------------------------------

@@ -552,6 +552,7 @@ The ACP server supports these JSON-RPC methods:
 | `session/revoke_inject` | Revoke a pending injected user message before delivery |
 | `session/replace_inject` | Replace pending injected content without changing its queue position |
 | `session/cancel` | Cancel the currently running prompt |
+| `session/cancel_tool_call` | Cancel one in-flight tool call without tearing down the session |
 | `session/truncate` | Truncate the session transcript to a requested prefix |
 | `session/close` | Close a session and cancel any active prompt |
 | `session/stop` | Deprecated alias for `session/close` |
@@ -905,6 +906,17 @@ Runtime behavior:
 - `session/remind`: queues a typed system reminder instead of a user-role
   message. Malformed reminder payloads are rejected with `HARN-RMD-002`.
   `session/inject` never creates reminders.
+- `session/cancel_tool_call`: abort one in-flight tool call (e.g. user
+  clicked stop on a runaway `git push --force`) without closing the
+  session. Params: `sessionId`, `toolCallId`, optional `reason`
+  (surfaced to the model), and optional `injectReminder: bool = true`
+  (queues a system reminder so the model knows it was stopped by the
+  host). The response shape is
+  `{status: "cancelled" | "already_cancelled" | "not_found", callId, tool}`.
+  The cancelled call returns to the loop as a `status: "cancelled"`
+  tool_result so the model can distinguish "the host stopped me" from
+  "the tool errored." Pairs with the in-VM `cancel_in_flight_tool_call`
+  Harn builtin — both surfaces share the registry.
 - Worker lifecycle updates are emitted as structured `session/update` payloads with
   worker id/name, status, lineage metadata, artifact counts, transcript presence,
   snapshot path, execution metadata, child run ids/paths, lifecycle summaries,

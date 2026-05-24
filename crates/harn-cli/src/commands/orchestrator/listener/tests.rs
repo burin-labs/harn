@@ -465,6 +465,7 @@ async fn acp_websocket_requires_configured_bearer_auth() {
             "list": {},
             "resume": {},
             "restoreToolCall": {},
+            "cancelToolCall": {},
         })
     );
     assert!(
