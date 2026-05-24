@@ -58,8 +58,8 @@ use crate::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunProfileOptions, RunSandboxOptions,
 };
 use crate::commands::tool_mode_parity::{
-    self, ToolModeParityObservation, TOOL_MODE_PARITY_FIXTURE_SUITE,
-    TOOL_MODE_PARITY_OVERLAY_FILENAME,
+    self, ToolModeParityFixtureInput, ToolModeParityPairSummary, TOOL_MODE_PARITY_DIRECTORY,
+    TOOL_MODE_PARITY_FIXTURE_SUITE, TOOL_MODE_PARITY_OVERLAY_FILENAME,
 };
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
@@ -223,6 +223,10 @@ struct FormatComparison {
     text_status: Option<String>,
     native_passed: Option<bool>,
     text_passed: Option<bool>,
+    native_tool_call_count: Option<usize>,
+    text_tool_call_count: Option<usize>,
+    native_rejected_tool_call_count: Option<usize>,
+    text_rejected_tool_call_count: Option<usize>,
     verifier_match: Option<bool>,
     tool_sequence_match: Option<bool>,
     rejected_tool_call_delta_text_minus_native: Option<i64>,
@@ -286,6 +290,7 @@ struct EvalSummary {
     rollups: EvalRollups,
     runs: Vec<RunReport>,
     comparisons: Vec<FormatComparison>,
+    parity_by_pair: Vec<ToolModeParityPairSummary>,
     followups: Vec<FollowupSuggestion>,
     /// Step-judge preset applied to all runs in this invocation, if any.
     /// Used by the experiment driver (experiments/step-judge/run.sh) to
@@ -1118,13 +1123,14 @@ fn build_summary(
     let total_cost_usd = runs.iter().map(|run| run.cost_usd).sum();
     let rollups = build_rollups(&runs);
     let comparisons = compare_formats(&runs);
+    let parity_by_pair = build_parity_by_pair(&comparisons);
     let diverged_comparisons = comparisons
         .iter()
         .filter(|comparison| !comparison.divergence_reasons.is_empty())
         .count();
     let followups = suggest_followups(&runs, &comparisons);
     EvalSummary {
-        schema_version: 2,
+        schema_version: 3,
         fixture_ids: fixtures
             .iter()
             .map(|fixture| fixture.id.to_string())
@@ -1151,6 +1157,7 @@ fn build_summary(
         rollups,
         runs,
         comparisons,
+        parity_by_pair,
         followups,
         step_judge_preset,
         run_label,
@@ -1397,6 +1404,10 @@ fn compare_formats(runs: &[RunReport]) -> Vec<FormatComparison> {
             text_status: text.map(|run| run.status.clone()),
             native_passed: native.map(|run| run.passed),
             text_passed: text.map(|run| run.passed),
+            native_tool_call_count: native.map(|run| run.tool_calls),
+            text_tool_call_count: text.map(|run| run.tool_calls),
+            native_rejected_tool_call_count: native.map(|run| run.rejected_tool_calls),
+            text_rejected_tool_call_count: text.map(|run| run.rejected_tool_calls),
             verifier_match: pair
                 .map(|(native, text)| native.verification_success == text.verification_success),
             tool_sequence_match: pair
@@ -1423,6 +1434,35 @@ fn compare_formats(runs: &[RunReport]) -> Vec<FormatComparison> {
         });
     }
     out
+}
+
+fn build_parity_by_pair(comparisons: &[FormatComparison]) -> Vec<ToolModeParityPairSummary> {
+    let fixture_inputs = comparisons
+        .iter()
+        .filter_map(parity_fixture_input)
+        .collect::<Vec<_>>();
+    let fixture_reports = tool_mode_parity::build_fixture_reports(&fixture_inputs);
+    tool_mode_parity::build_pair_summaries(&fixture_reports)
+}
+
+fn parity_fixture_input(comparison: &FormatComparison) -> Option<ToolModeParityFixtureInput> {
+    Some(ToolModeParityFixtureInput {
+        provider: comparison.selector.provider.clone(),
+        model: comparison.selector.model.clone(),
+        fixture_id: comparison.fixture_id.clone(),
+        native_verdict: comparison.native_status.clone()?,
+        text_verdict: comparison.text_status.clone()?,
+        native_passed: comparison.native_passed?,
+        text_passed: comparison.text_passed?,
+        agreement: comparison.equivalent?,
+        verifier_agreement: comparison.verifier_match?,
+        native_tool_call_count: comparison.native_tool_call_count?,
+        text_tool_call_count: comparison.text_tool_call_count?,
+        native_rejected_tool_call_count: comparison.native_rejected_tool_call_count?,
+        text_rejected_tool_call_count: comparison.text_rejected_tool_call_count?,
+        native_evidence_path: comparison.native_evidence_path.clone()?,
+        text_evidence_path: comparison.text_evidence_path.clone()?,
+    })
 }
 
 fn suggest_followups(
@@ -1528,22 +1568,25 @@ fn write_json_artifacts(output_dir: &Path, summary: &EvalSummary) -> Result<(), 
         .now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(|error| format!("failed to format parity overlay timestamp: {error}"))?;
-    let observations = summary
-        .runs
-        .iter()
-        .map(|run| ToolModeParityObservation {
-            provider: run.selector.provider.clone(),
-            model: run.selector.model.clone(),
-            fixture_id: run.fixture_id.clone(),
-            run_id: run.run_id.clone(),
-            tool_format: run.tool_format.clone(),
-            passed: run.passed,
-            skipped: run.skipped,
-            verification_success: run.verification_success,
-        })
-        .collect::<Vec<_>>();
+    let parity_dir = output_dir.join(TOOL_MODE_PARITY_DIRECTORY);
+    let parity_reports = tool_mode_parity::build_fixture_reports(
+        &summary
+            .comparisons
+            .iter()
+            .filter_map(parity_fixture_input)
+            .collect::<Vec<_>>(),
+    );
+    for report in &parity_reports {
+        let path = parity_dir
+            .join(sanitize_id(&format!(
+                "{}__{}:{}",
+                report.fixture_id, report.provider, report.model
+            )))
+            .join("parity.json");
+        tool_mode_parity::write_fixture_report(&path, report)?;
+    }
     let overlay = tool_mode_parity::build_overlay(
-        &observations,
+        &summary.parity_by_pair,
         &generated_at,
         TOOL_MODE_PARITY_FIXTURE_SUITE,
         output_dir,
@@ -1557,10 +1600,11 @@ fn write_json_artifacts(output_dir: &Path, summary: &EvalSummary) -> Result<(), 
 
 fn announce_output_paths(output_dir: &Path) {
     eprintln!(
-        "wrote {}, {}, {}, {}, {}, and {}",
+        "wrote {}, {}, {}, {}, {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_run.jsonl").display(),
         output_dir.join("local_readiness.json").display(),
+        output_dir.join(TOOL_MODE_PARITY_DIRECTORY).display(),
         output_dir.join(TOOL_MODE_PARITY_OVERLAY_FILENAME).display(),
         output_dir.join("summary.md").display(),
         output_dir.join("followups.md").display()
@@ -1797,6 +1841,30 @@ fn render_markdown(summary: &EvalSummary) -> String {
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "-".to_string()),
                 comparison_evidence_links(comparison)
+            ));
+        }
+    }
+    if !summary.parity_by_pair.is_empty() {
+        out.push_str("\n## Parity report — native vs text\n\n");
+        out.push_str("| selector | sample | native pass | text pass | agreement | verifier divergence | native_only | text_only | both_pass | both_fail |\n");
+        out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+        for pair in &summary.parity_by_pair {
+            out.push_str(&format!(
+                "| `{}` | {} | {:.1}% | {:.1}% | {:.1}% | {:.1}% | {} | {} | {} | {} |\n",
+                selector_label(&ModelSelector {
+                    selector: format!("{}:{}", pair.provider, pair.model),
+                    provider: pair.provider.clone(),
+                    model: pair.model.clone(),
+                }),
+                pair.sample_size,
+                pair.native.pass_rate * 100.0,
+                pair.text.pass_rate * 100.0,
+                pair.agreement_rate * 100.0,
+                pair.verifier_divergence_rate * 100.0,
+                pair.divergence_counts.native_only_pass,
+                pair.divergence_counts.text_only_pass,
+                pair.divergence_counts.both_pass,
+                pair.divergence_counts.both_fail,
             ));
         }
     }

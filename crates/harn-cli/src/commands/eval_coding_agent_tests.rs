@@ -37,7 +37,7 @@ fn markdown_escapes_model_table_pipes() {
         model: "a|b".to_string(),
     };
     let summary = EvalSummary {
-        schema_version: 2,
+        schema_version: 3,
         fixture_ids: vec!["python-add".to_string()],
         fixtures: vec![FixtureReport {
             id: "python-add".to_string(),
@@ -102,6 +102,7 @@ fn markdown_escapes_model_table_pipes() {
             local_cleanup: None,
         }],
         comparisons: Vec::new(),
+        parity_by_pair: Vec::new(),
         followups: Vec::new(),
         step_judge_preset: None,
         run_label: String::new(),
@@ -119,7 +120,7 @@ fn write_json_artifacts_emits_tool_mode_parity_overlay() {
         model: "qwen/qwen3-coder".to_string(),
     };
     let summary = EvalSummary {
-        schema_version: 2,
+        schema_version: 3,
         fixture_ids: vec!["python-add".to_string()],
         fixtures: vec![FixtureReport {
             id: "python-add".to_string(),
@@ -210,7 +211,68 @@ fn write_json_artifacts_emits_tool_mode_parity_overlay() {
                 local_cleanup: None,
             },
         ],
-        comparisons: Vec::new(),
+        comparisons: vec![FormatComparison {
+            fixture_id: "python-add".to_string(),
+            selector: ModelSelector {
+                selector: "openrouter:qwen/qwen3-coder".to_string(),
+                provider: "openrouter".to_string(),
+                model: "qwen/qwen3-coder".to_string(),
+            },
+            native_run_id: Some("native".to_string()),
+            text_run_id: Some("text".to_string()),
+            native_evidence_path: Some("out/native/transcript_events.jsonl".to_string()),
+            text_evidence_path: Some("out/text/transcript_events.jsonl".to_string()),
+            native_status: Some("failed".to_string()),
+            text_status: Some("passed".to_string()),
+            native_passed: Some(false),
+            text_passed: Some(true),
+            native_tool_call_count: Some(0),
+            text_tool_call_count: Some(0),
+            native_rejected_tool_call_count: Some(0),
+            text_rejected_tool_call_count: Some(0),
+            verifier_match: Some(false),
+            tool_sequence_match: Some(true),
+            rejected_tool_call_delta_text_minus_native: Some(0),
+            token_delta_text_minus_native: Some(0),
+            iteration_delta_text_minus_native: Some(0),
+            equivalent: Some(false),
+            divergence_reasons: vec!["pass result differs: native=false text=true".to_string()],
+            evidence_paths: vec![
+                "out/native/transcript_events.jsonl".to_string(),
+                "out/text/transcript_events.jsonl".to_string(),
+            ],
+        }],
+        parity_by_pair: vec![ToolModeParityPairSummary {
+            provider: "openrouter".to_string(),
+            model: "qwen/qwen3-coder".to_string(),
+            sample_size: 1,
+            agreement_rate: 0.0,
+            verifier_divergence_rate: 1.0,
+            native: tool_mode_parity::ToolModeParityFormatStats {
+                total_runs: 1,
+                passed_runs: 0,
+                unique_fixtures: 1,
+                replicate_count: 1,
+                pass_rate: 0.0,
+            },
+            text: tool_mode_parity::ToolModeParityFormatStats {
+                total_runs: 1,
+                passed_runs: 1,
+                unique_fixtures: 1,
+                replicate_count: 1,
+                pass_rate: 1.0,
+            },
+            divergence_counts: tool_mode_parity::ToolModeParityDivergenceCounts {
+                native_only_pass: 0,
+                text_only_pass: 1,
+                both_pass: 0,
+                both_fail: 0,
+            },
+            evidence_paths: vec![
+                "out/native/transcript_events.jsonl".to_string(),
+                "out/text/transcript_events.jsonl".to_string(),
+            ],
+        }],
         followups: Vec::new(),
         step_judge_preset: None,
         run_label: String::new(),
@@ -227,6 +289,12 @@ fn write_json_artifacts_emits_tool_mode_parity_overlay() {
     assert_eq!(overlay.fixture_suite, TOOL_MODE_PARITY_FIXTURE_SUITE);
     assert_eq!(overlay.rows.len(), 1);
     assert_eq!(overlay.rows[0].preferred_tool_format, "text");
+    assert!(temp
+        .path()
+        .join(TOOL_MODE_PARITY_DIRECTORY)
+        .join("python-add__openrouter_qwen_qwen3-coder")
+        .join("parity.json")
+        .exists());
 }
 
 #[test]

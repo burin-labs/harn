@@ -14,6 +14,9 @@ use harn_cli::commands::run::{
 };
 use harn_cli::tests::common::env_lock;
 
+const PARITY_DIRECTORY: &str = "parity";
+const PARITY_OVERLAY_FILENAME: &str = "tool_mode_parity_overlay.toml";
+
 fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
 where
     F: FnOnce() -> Fut + Send + 'static,
@@ -71,7 +74,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     let summary_raw = fs::read_to_string(output.join("summary.json")).expect("summary exists");
     let summary: serde_json::Value =
         serde_json::from_str(&summary_raw).expect("summary parses as JSON");
-    assert_eq!(summary["schema_version"], 2);
+    assert_eq!(summary["schema_version"], 3);
     assert_eq!(summary["fixture_ids"].as_array().map(Vec::len), Some(6));
     assert_eq!(summary["total_runs"], 12);
     assert_eq!(summary["passed_runs"], 12);
@@ -111,6 +114,15 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
             .as_array()
             .is_some_and(|paths| paths.len() == 2));
     }
+    let parity_by_pair = summary["parity_by_pair"]
+        .as_array()
+        .expect("parity_by_pair should be an array");
+    assert_eq!(parity_by_pair.len(), 1);
+    assert_eq!(parity_by_pair[0]["sample_size"], 6);
+    assert_eq!(parity_by_pair[0]["native"]["pass_rate"], 1.0);
+    assert_eq!(parity_by_pair[0]["text"]["pass_rate"], 1.0);
+    assert_eq!(parity_by_pair[0]["agreement_rate"], 1.0);
+    assert_eq!(parity_by_pair[0]["verifier_divergence_rate"], 0.0);
     assert_eq!(
         summary
             .pointer("/rollups/by_fixture")
@@ -174,8 +186,29 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     assert!(output
         .join("no-tool-diagnosis__mock_mock__native/transcript_events.jsonl")
         .exists());
+    assert!(output
+        .join(PARITY_DIRECTORY)
+        .join("python-add__mock_mock")
+        .join("parity.json")
+        .exists());
+    let parity_raw = fs::read_to_string(
+        output
+            .join(PARITY_DIRECTORY)
+            .join("python-add__mock_mock")
+            .join("parity.json"),
+    )
+    .expect("parity report exists");
+    let parity: serde_json::Value = serde_json::from_str(&parity_raw).expect("parity parses");
+    assert_eq!(parity["native_verdict"], "passed");
+    assert_eq!(parity["text_verdict"], "passed");
+    assert_eq!(parity["agreement"], true);
+    assert_eq!(parity["divergence_class"], "both_pass");
+    assert!(output.join(PARITY_OVERLAY_FILENAME).exists());
     assert!(output.join("summary.md").exists());
     assert!(output.join("followups.md").exists());
+    let summary_md =
+        fs::read_to_string(output.join("summary.md")).expect("summary markdown exists");
+    assert!(summary_md.contains("Parity report — native vs text"));
 }
 
 #[test]
