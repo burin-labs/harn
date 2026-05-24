@@ -4,6 +4,7 @@ use std::fs;
 use std::time::Duration;
 
 use base64::Engine;
+use hmac::{Hmac, KeyInit, Mac};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
 use serde_json::json;
@@ -155,7 +156,10 @@ fn canonical_authorization(
     body: &[u8],
 ) -> String {
     let signed = canonical_request_message(method, path, &timestamp.to_string(), body);
-    let signature = hmac_sha256(secret.as_bytes(), signed.as_bytes());
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(signed.as_bytes());
+    let signature = mac.finalize().into_bytes();
     format!(
         "{} timestamp={},signature={}",
         harn_vm::connectors::DEFAULT_CANONICAL_HMAC_SCHEME,
@@ -179,32 +183,23 @@ fn canonical_request_message(method: &str, path: &str, timestamp: &str, body: &[
     )
 }
 
-fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
-    const BLOCK_SIZE: usize = 64;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let mut key = if secret.len() > BLOCK_SIZE {
-        Sha256::digest(secret).to_vec()
-    } else {
-        secret.to_vec()
-    };
-    key.resize(BLOCK_SIZE, 0);
+    #[test]
+    fn canonical_authorization_matches_hmac_sha256_vector() {
+        let authorization = canonical_authorization(
+            "shared-secret",
+            "POST",
+            "/admin/reload",
+            1_700_000_000,
+            br#"{"source":"cli"}"#,
+        );
 
-    let mut inner_pad = vec![0x36; BLOCK_SIZE];
-    let mut outer_pad = vec![0x5c; BLOCK_SIZE];
-    for (pad, key_byte) in inner_pad.iter_mut().zip(key.iter()) {
-        *pad ^= *key_byte;
+        assert_eq!(
+            authorization,
+            "HMAC-SHA256 timestamp=1700000000,signature=T+24RdJUvyIi81K07TCWx+E8hGNnTnBozRW+jzUacPg="
+        );
     }
-    for (pad, key_byte) in outer_pad.iter_mut().zip(key.iter()) {
-        *pad ^= *key_byte;
-    }
-
-    let mut inner = Sha256::new();
-    inner.update(&inner_pad);
-    inner.update(data);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(&outer_pad);
-    outer.update(inner_digest);
-    outer.finalize().to_vec()
 }

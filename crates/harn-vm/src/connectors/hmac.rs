@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -1156,64 +1157,15 @@ fn sha256_hex(data: &[u8]) -> String {
 }
 
 pub(crate) fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {
-    const BLOCK_SIZE: usize = 64;
-
-    let mut key = if secret.len() > BLOCK_SIZE {
-        Sha256::digest(secret).to_vec()
-    } else {
-        secret.to_vec()
-    };
-    key.resize(BLOCK_SIZE, 0);
-
-    let mut inner_pad = vec![0x36; BLOCK_SIZE];
-    let mut outer_pad = vec![0x5c; BLOCK_SIZE];
-    for (slot, key_byte) in inner_pad.iter_mut().zip(&key) {
-        *slot ^= key_byte;
-    }
-    for (slot, key_byte) in outer_pad.iter_mut().zip(&key) {
-        *slot ^= key_byte;
-    }
-
-    let mut inner = Sha256::new();
-    inner.update(&inner_pad);
-    inner.update(data);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(&outer_pad);
-    outer.update(inner_digest);
-    outer.finalize().to_vec()
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("HMAC accepts any key length");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
 }
 
 pub(crate) fn hmac_sha1(secret: &[u8], data: &[u8]) -> Vec<u8> {
-    use sha1::{Digest, Sha1};
-    const BLOCK_SIZE: usize = 64;
-
-    let mut key = if secret.len() > BLOCK_SIZE {
-        Sha1::digest(secret).to_vec()
-    } else {
-        secret.to_vec()
-    };
-    key.resize(BLOCK_SIZE, 0);
-
-    let mut inner_pad = vec![0x36; BLOCK_SIZE];
-    let mut outer_pad = vec![0x5c; BLOCK_SIZE];
-    for (slot, key_byte) in inner_pad.iter_mut().zip(&key) {
-        *slot ^= key_byte;
-    }
-    for (slot, key_byte) in outer_pad.iter_mut().zip(&key) {
-        *slot ^= key_byte;
-    }
-
-    let mut inner = Sha1::new();
-    inner.update(&inner_pad);
-    inner.update(data);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha1::new();
-    outer.update(&outer_pad);
-    outer.update(inner_digest);
-    outer.finalize().to_vec()
+    let mut mac = Hmac::<sha1::Sha1>::new_from_slice(secret).expect("HMAC accepts any key length");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
 }
 
 pub(crate) fn secure_eq(expected: &[u8], provided: &[u8]) -> bool {
@@ -1307,6 +1259,36 @@ mod tests {
     ) -> Vec<(u64, crate::event_log::LogEvent)> {
         let topic = Topic::new(SIGNATURE_VERIFY_AUDIT_TOPIC).unwrap();
         log.read_range(&topic, None, 32).await.unwrap()
+    }
+
+    #[test]
+    fn hmac_sha256_matches_rfc4231_vectors() {
+        assert_eq!(
+            hex::encode(hmac_sha256(&[0x0b; 20], b"Hi There")),
+            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+        );
+        assert_eq!(
+            hex::encode(hmac_sha256(
+                &[0xaa; 131],
+                b"Test Using Larger Than Block-Size Key - Hash Key First",
+            )),
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+        );
+    }
+
+    #[test]
+    fn hmac_sha1_matches_rfc2202_vectors() {
+        assert_eq!(
+            hex::encode(hmac_sha1(&[0x0b; 20], b"Hi There")),
+            "b617318655057264e28bc0b6fb378c8ef146be00"
+        );
+        assert_eq!(
+            hex::encode(hmac_sha1(
+                &[0xaa; 80],
+                b"Test Using Larger Than Block-Size Key - Hash Key First",
+            )),
+            "aa4ae5e15272d00e95705637ce8a3b55ed402112"
+        );
     }
 
     #[tokio::test]
