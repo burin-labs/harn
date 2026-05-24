@@ -486,7 +486,7 @@ async fn async_main() {
             }
         }
         Command::Explain(args) => {
-            let code = commands::explain::run_explain(&args);
+            let code = commands::explain::run_explain(&args).await;
             if code != 0 {
                 process::exit(code);
             }
