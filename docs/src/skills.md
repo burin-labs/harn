@@ -103,7 +103,7 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 | `paths` | list of glob | Files the skill expects to touch. |
 | `context` | string | `"fork"` runs in an isolated subcontext. |
 | `agent` | string | Sub-agent that owns the skill. |
-| `hooks` | map or list | Shell commands for lifecycle events. |
+| `hooks` | map or list | Shell commands for lifecycle events. Filesystem skills only surface hooks when their detached provenance verifies as trusted. |
 | `model` | string | Preferred model alias. |
 | `effort` | string | `low` / `medium` / `high`. |
 | `require-signature` | bool | Require a valid detached signature before runtime `load_skill(...)` may promote the skill body. |

@@ -112,6 +112,12 @@ condensed series summaries instead of full per-patch history.
 
 ### Changed
 
+- **Skill hook frontmatter now requires trusted provenance (#2265).**
+  Filesystem-backed skills whose detached signature chain is missing,
+  tampered, untrusted, or missing endorsements still keep their compact
+  catalog metadata and lazy-loadable body by default, but Harn strips
+  command-bearing frontmatter (`hooks`, `command`, `run`) from both the
+  startup registry and lazy hydration path unless provenance verifies.
 - **Schema traversal hardening (#2202).** Runtime schema canonicalization,
   JSON Schema/OpenAPI export, validation, runtime parameter assertions,
   sub-agent return-schema validation, and JSON-stream schema setup now share

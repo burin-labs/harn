@@ -189,7 +189,11 @@ When enforcement is active:
   `untrusted_signer`, or `missing_endorsement`
 
 Unsigned skills still load by default unless one of those policies is
-enabled.
+enabled. Command-bearing frontmatter is stricter: filesystem-backed
+skills only surface `hooks`, `command`, or `run` fields when the
+attached provenance verifies as trusted. Untrusted, unsigned, or
+tampered skills keep their metadata and lazy-loadable body, but those
+frontmatter command fields are omitted from the runtime registry.
 
 ## Trust records and OpenTrustGraph
 
