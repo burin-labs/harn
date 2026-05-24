@@ -70,6 +70,23 @@ fn __tool_mw_is_callable(value) -> bool {
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
+fn __tool_mw_layer_call(layer) {
+  if __tool_mw_is_callable(layer) {
+    return layer
+  }
+  if type_of(layer) == "dict" && __tool_mw_is_callable(layer?.caller) {
+    return layer.caller
+  }
+  throw "tool middleware layer must be callable or expose `caller`; got " + type_of(layer)
+}
+
+fn __tool_mw_layer_empty_turn(layer) {
+  if type_of(layer) == "dict" && __tool_mw_is_callable(layer?.on_empty_turn) {
+    return layer.on_empty_turn
+  }
+  return nil
+}
+
 fn __tool_mw_dict(value) -> dict {
   if type_of(value) == "dict" {
     return value
@@ -373,8 +390,17 @@ pub fn default_tool_caller() {
  * `next` to reach `b`, and so on. If the list is empty, returns a
  * passthrough caller.
  *
- * Each wrapper has signature `fn(call, next) -> result_dict`. To
- * short-circuit (skip the rest of the stack), return without calling
+ * Each wrapper is either:
+ *
+ *   - `fn(call, next) -> result_dict`, or
+ *   - `{caller: fn(call, next) -> result_dict, on_empty_turn?: fn(turn, next) -> verdict_dict}`
+ *
+ * `on_empty_turn` is an optional sibling hook for "assistant emitted no
+ * tool calls this turn" validation. It does not replace the normal
+ * dispatch caller; it only runs from `agent_loop` on the zero-tool-call
+ * path before any tool batch exists.
+ *
+ * To short-circuit (skip the rest of the stack), return without calling
  * `next`. To mutate args, call `next(call + {tool_args: new_args})`.
  *
  * @effects: []
@@ -388,17 +414,39 @@ pub fn compose_tool_callers(wrappers) {
   if len(list) == 0 {
     return default_tool_caller()
   }
-  return { call, next ->
+  let call_chain = { call, next ->
     var built = next
     var i = len(list) - 1
     while i >= 0 {
-      let layer = list[i]
+      let layer = __tool_mw_layer_call(list[i])
       let prev = built
       built = { c -> __safe_call_caller(layer, c, prev) }
       i = i - 1
     }
     return built(call)
   }
+  var empty_layers = []
+  for layer in list {
+    let hook = __tool_mw_layer_empty_turn(layer)
+    if hook != nil {
+      empty_layers = empty_layers.push(hook)
+    }
+  }
+  if len(empty_layers) == 0 {
+    return call_chain
+  }
+  let empty_chain = { turn, next ->
+    var built = next
+    var i = len(empty_layers) - 1
+    while i >= 0 {
+      let layer = empty_layers[i]
+      let prev = built
+      built = { c -> layer(c, prev) }
+      i = i - 1
+    }
+    return built(turn)
+  }
+  return {caller: call_chain, on_empty_turn: empty_chain}
 }
 
 // -------------------------------------------------------------------------------------------------

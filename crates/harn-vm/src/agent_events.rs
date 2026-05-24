@@ -486,6 +486,23 @@ pub enum AgentEvent {
         provider: String,
         model: String,
     },
+    /// Deterministic assistant-turn validation emitted before tool
+    /// dispatch. Unlike [`StepJudgeDecision`], this event carries no
+    /// LLM-judge cost because the decision is computed from the parsed
+    /// assistant turn plus the active tool/policy surface.
+    StructuralValidatorDecision {
+        session_id: String,
+        iteration: usize,
+        rule: String,
+        diagnostic: String,
+        recommended_action: String,
+        on_failure: String,
+        vetoed: bool,
+        tool_count: usize,
+        has_done_marker: bool,
+        has_write_capability: bool,
+        side_effect_level: String,
+    },
     TypedCheckpoint {
         session_id: String,
         checkpoint: serde_json::Value,
@@ -839,6 +856,7 @@ impl AgentEvent {
             | Self::SessionClosed { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
             | Self::StepJudgeDecision { session_id, .. }
+            | Self::StructuralValidatorDecision { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }

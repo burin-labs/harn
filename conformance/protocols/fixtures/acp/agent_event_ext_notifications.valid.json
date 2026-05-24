@@ -272,6 +272,24 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "diagnostic": "This assistant turn made no tool call even though write-capable tools are available.",
+        "hasDoneMarker": false,
+        "hasWriteCapability": true,
+        "iteration": 1,
+        "kind": "structural_validator_decision",
+        "onFailure": "regenerate_with_feedback",
+        "recommendedAction": "Regenerate with a concrete write-capable tool call before claiming progress.",
+        "rule": "non_empty_when_writes_expected",
+        "sessionId": "session-1",
+        "sideEffectLevel": "workspace_write",
+        "toolCount": 0,
+        "vetoed": true
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
         "kind": "budget_exhausted",
         "maxIterations": 8,
         "sessionId": "session-1"

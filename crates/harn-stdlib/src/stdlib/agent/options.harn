@@ -370,8 +370,19 @@ fn __validate_tool_caller(value) {
   if value == nil {
     return
   }
-  if type_of(value) != "closure" {
-    throw "agent_loop: `tool_caller` must be a closure or nil; got " + type_of(value)
+  let kind = type_of(value)
+  if kind == "closure" {
+    return
+  }
+  if kind != "dict" {
+    throw "agent_loop: `tool_caller` must be a closure, middleware dict, or nil; got " + kind
+  }
+  if type_of(value?.caller) != "closure" {
+    throw "agent_loop: `tool_caller.caller` must be a closure"
+  }
+  let empty_turn = value?.on_empty_turn
+  if empty_turn != nil && type_of(empty_turn) != "closure" {
+    throw "agent_loop: `tool_caller.on_empty_turn` must be a closure or nil; got " + type_of(empty_turn)
   }
 }
 

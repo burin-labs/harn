@@ -433,6 +433,19 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             kind: "protocol_violation".to_string(),
             content: "missed required tool call; reissuing".to_string(),
         },
+        AgentEvent::StructuralValidatorDecision {
+            session_id: "session-1".to_string(),
+            iteration: 1,
+            rule: "non_empty_when_writes_expected".to_string(),
+            diagnostic: "This assistant turn made no tool call even though write-capable tools are available.".to_string(),
+            recommended_action: "Regenerate with a concrete write-capable tool call before claiming progress.".to_string(),
+            on_failure: "regenerate_with_feedback".to_string(),
+            vetoed: true,
+            tool_count: 0,
+            has_done_marker: false,
+            has_write_capability: true,
+            side_effect_level: "workspace_write".to_string(),
+        },
         AgentEvent::BudgetExhausted {
             session_id: "session-1".to_string(),
             max_iterations: 8,
@@ -547,6 +560,32 @@ async fn step_judge_decision_agent_event_marks_skipped_reason() {
     assert_eq!(params["skipped"], true);
     assert_eq!(params["reason"], "low_iteration_budget");
     assert_eq!(params["vetoed"], false);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn structural_validator_agent_event_uses_camel_case_fields() {
+    let actual = collect_notifications(vec![AgentEvent::StructuralValidatorDecision {
+        session_id: "session-1".to_string(),
+        iteration: 2,
+        rule: "non_empty_when_writes_expected".to_string(),
+        diagnostic: "missing tool call".to_string(),
+        recommended_action: "call write_file".to_string(),
+        on_failure: "regenerate_with_feedback".to_string(),
+        vetoed: true,
+        tool_count: 0,
+        has_done_marker: false,
+        has_write_capability: true,
+        side_effect_level: "workspace_write".to_string(),
+    }])
+    .await;
+
+    let params = &actual[0]["params"];
+    assert_eq!(params["kind"], "structural_validator_decision");
+    assert_eq!(params["recommendedAction"], "call write_file");
+    assert_eq!(params["onFailure"], "regenerate_with_feedback");
+    assert_eq!(params["toolCount"], 0);
+    assert_eq!(params["hasWriteCapability"], true);
+    assert_eq!(params["sideEffectLevel"], "workspace_write");
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -306,6 +306,12 @@ Options: `max_ms` (required, non-negative int), `per_tool`
 runs the wrappers right-to-left: the leftmost wrapper is the
 outermost. This mirrors `compose` in `std/llm/handlers`.
 
+Wrappers may be either plain callables (`fn(call, next) -> result`) or
+dicts with `{caller, on_empty_turn}`. `on_empty_turn` is an optional
+assistant-turn hook for the "the model emitted zero tool calls this
+turn" seam. `agent_loop` uses it before dispatch when no tool batch
+exists.
+
 ```harn,ignore
 let caller = compose_tool_callers([
   with_audit_log({sink: "both", redact: ["token", "content"]}),
@@ -313,6 +319,17 @@ let caller = compose_tool_callers([
   with_redaction(redactor),
   with_required_reason({schema_required: false}).caller,
 ])
+```
+
+`with_structural_validator(...)` uses the dict shape so one opt-in
+surface covers both normal tool batches and zero-tool-call validation:
+
+```harn,ignore
+import { compose_tool_callers } from "std/llm/tool_middleware"
+import { with_structural_validator } from "std/llm/structural_validator"
+
+let caller = compose_tool_callers([with_structural_validator({})])
+agent_loop(task, system, {tools: registry, tool_caller: caller})
 ```
 
 ## Captain recipe — full governance stack

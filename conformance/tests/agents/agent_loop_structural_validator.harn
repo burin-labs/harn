@@ -1,0 +1,105 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_session_messages } from "std/agent/state"
+import { with_structural_validator } from "std/llm/structural_validator"
+import { compose_tool_callers } from "std/llm/tool_middleware"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn write_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note to disk",
+    {
+      handler: { args -> return "wrote " + to_string(args?.path ?? "") },
+      parameters: {
+        type: "object",
+        properties: {path: {type: "string"}, text: {type: "string"}},
+        required: ["path", "text"],
+      },
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn tool_message_count(session_id) {
+  var count = 0
+  for message in agent_session_messages(session_id) {
+    if message?.role == "tool" && message?.name == "write_note" {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+pipeline default() {
+  let caller = compose_tool_callers([with_structural_validator({})])
+  llm_mock_clear()
+  llm_mock({text: "I updated the note already."})
+  llm_mock(
+    {
+      text: "",
+      tool_calls: [{id: "write-1", name: "write_note", arguments: {path: "/tmp/sv-note.txt", text: "hi"}}],
+    },
+  )
+  llm_mock({text: "##DONE##"})
+  let session = "structural-validator-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "Update the note, then finish.",
+      nil,
+      {
+        provider: "mock",
+        tools: write_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_judge: nil,
+        done_sentinel: "##DONE##",
+        max_iterations: 5,
+        session_id: session,
+        tool_caller: caller,
+      },
+    ) },
+  )
+  let decisions = events_of(captured.events, "structural_validator_decision")
+  let calls = llm_mock_calls()
+  let regen_messages = json_stringify(calls[1].messages)
+  __io_println(captured.result.status)
+  __io_println(len(decisions) == 1)
+  __io_println(decisions[0].rule)
+  __io_println(decisions[0].has_write_capability)
+  __io_println(captured.result.llm.iterations)
+  __io_println(regen_messages.contains("made no tool call"))
+  __io_println(!regen_messages.contains("I updated the note already."))
+  __io_println(tool_message_count(session))
+  let raise_caller = compose_tool_callers([with_structural_validator({on_failure: "raise"})])
+  llm_mock_clear()
+  llm_mock({text: "Done without touching the workspace."})
+  let raised = try {
+    agent_loop(
+      "Write the note or fail.",
+      nil,
+      {
+        provider: "mock",
+        tools: write_tools(),
+        tool_format: "native",
+        max_iterations: 2,
+        session_id: "structural-validator-raise-" + uuid(),
+        tool_caller: raise_caller,
+      },
+    )
+  }
+  __io_println(is_err(raised))
+  if is_err(raised) {
+    __io_println(unwrap_err(raised).contains("made no tool call"))
+  } else {
+    __io_println(false)
+  }
+  __io_println(len(llm_mock_calls()) == 1)
+}

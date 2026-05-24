@@ -56,6 +56,7 @@ import {
 } from "std/agent/workers"
 import { omit } from "std/json"
 import { llm_call_options } from "std/llm/options"
+import { structural_validator_empty_turn } from "std/llm/structural_validator"
 
 fn __default_invoke_llm(message, turn_system, llm_opts) {
   let result = try {
@@ -286,6 +287,36 @@ fn __default_invoke_tool(envelope, original_call, tools, options) {
   return agent_dispatch_tool_call(next_call, tools, options)
 }
 
+fn __tool_caller_resolve_call(caller) {
+  if caller == nil {
+    return nil
+  }
+  let kind = type_of(caller)
+  if kind == "function" || kind == "closure" || kind == "fn" {
+    return caller
+  }
+  if kind == "dict" {
+    let inner = caller?.caller
+    let inner_kind = type_of(inner)
+    if inner_kind == "function" || inner_kind == "closure" || inner_kind == "fn" {
+      return inner
+    }
+  }
+  return nil
+}
+
+fn __tool_caller_empty_turn_hook(caller) {
+  if type_of(caller) != "dict" {
+    return nil
+  }
+  let hook = caller?.on_empty_turn
+  let kind = type_of(hook)
+  if kind == "function" || kind == "closure" || kind == "fn" {
+    return hook
+  }
+  return nil
+}
+
 fn __validate_tool_caller_result(r) {
   if type_of(r) != "dict" {
     throw "agent_loop: tool_caller must return a dict; got " + type_of(r)
@@ -330,7 +361,7 @@ fn __middleware_exception_result(envelope, err) {
 }
 
 fn __invoke_tool(call, tools, options) {
-  let caller = options?._tool_caller
+  let caller = __tool_caller_resolve_call(options?._tool_caller)
   if caller == nil {
     return agent_dispatch_tool_call(call, tools, options)
   }
@@ -355,6 +386,50 @@ fn __invoke_tool(call, tools, options) {
   __validate_tool_caller_result(r)
   __maybe_emit_tool_audit(envelope.turn.session_id, envelope, r?.audit, r?.receipt)
   return r
+}
+
+fn __agent_loop_run_empty_turn_validator(
+  session_id,
+  tool_calls,
+  raw_text,
+  visible_text,
+  parsed,
+  llm_result,
+  turn_opts,
+) {
+  let hook = __tool_caller_empty_turn_hook(turn_opts?._tool_caller)
+  if hook == nil || len(tool_calls) > 0 {
+    return {vetoed: false}
+  }
+  let sentinel = turn_opts?.done_sentinel
+  let parsed_done_marker = parsed?.done_marker ?? ""
+  let has_done_marker = if sentinel == nil {
+    false
+  } else if parsed_done_marker != "" {
+    contains(parsed_done_marker, sentinel)
+  } else {
+    contains(raw_text, sentinel)
+  }
+  let assistant_turn = {
+    raw_text: raw_text,
+    visible_text: visible_text,
+    tool_calls: tool_calls,
+    has_done_marker: has_done_marker,
+    done_marker: parsed_done_marker,
+    llm_result: llm_result,
+  }
+  let workspace_policy = structural_validator_empty_turn(turn_opts?.policy, turn_opts?.tools)
+  return hook(
+    {
+      session_id: session_id,
+      iteration: turn_opts?._turn_iteration ?? 0,
+      assistant_turn: assistant_turn,
+      workspace_policy: workspace_policy,
+      tools: turn_opts?.tools,
+      policy: turn_opts?.policy,
+    },
+    { _turn -> return {vetoed: false} },
+  )
 }
 
 fn __maybe_emit_tool_audit(session_id, envelope, audit, receipt = nil) {
@@ -671,7 +746,7 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _max_concurrent_tools: cap,
     _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
   }
-  let caller = turn_opts?._tool_caller
+  let caller = __tool_caller_resolve_call(turn_opts?._tool_caller)
   let raw_dispatch = if caller == nil {
     agent_dispatch_tool_batch(tool_calls, tools, dispatch_options)
   } else {
@@ -1223,6 +1298,44 @@ fn __agent_loop_run(message, session, initial_opts) {
         stop_reason = "suspended"
         break
       }
+      let structural_verdict = __agent_loop_run_empty_turn_validator(
+        session.session_id,
+        tool_calls,
+        raw_text,
+        visible_text,
+        parsed,
+        llm_result,
+        turn_opts
+          + {_turn_iteration: turn_index + 1, _tool_caller: turn_opts?._tool_caller ?? opts?._tool_caller},
+      )
+      if structural_verdict.vetoed {
+        let on_failure = structural_verdict?.on_failure ?? "regenerate_with_feedback"
+        if on_failure == "raise" {
+          throw structural_verdict?.error
+            ?? structural_verdict?.diagnostic
+            ?? "structural validator rejected assistant turn"
+        }
+        agent_session_pop_last_assistant(session.session_id)
+        let feedback = structural_verdict?.feedback ?? structural_verdict?.diagnostic
+        if feedback != nil {
+          agent_session_inject_feedback(session.session_id, "structural_validator", feedback)
+        }
+        agent_emit_event(
+          session.session_id,
+          "turn_end",
+          {
+            iteration: turn_index + 1,
+            turn_info: __turn_info_payload(llm_result, 0, visible_text)
+              + {
+              dispatch_skipped: true,
+              skip_reason: "structural_validator_revise",
+              rule: structural_verdict?.rule ?? "",
+              on_failure: on_failure,
+            },
+          },
+        )
+        continue
+      }
       let stall_judge_due = agent_stall_done_judge_due(turn_opts, done_judge_invocations, turn_index + 1)
       let stall_observation = agent_stall_observe_tool_calls(
         session.session_id,
@@ -1332,7 +1445,8 @@ fn __agent_loop_run(message, session, initial_opts) {
       let dispatched = __dispatch_tool_calls(
         session.session_id,
         tool_calls,
-        turn_opts + {_turn_iteration: turn_index + 1, _tool_caller: opts?._tool_caller},
+        turn_opts
+          + {_turn_iteration: turn_index + 1, _tool_caller: turn_opts?._tool_caller ?? opts?._tool_caller},
       )
       let dispatch = dispatched.dispatch
       audit_background_tasks = __spawn_audit_flushes(audit_background_tasks, dispatched.audit_flushes)

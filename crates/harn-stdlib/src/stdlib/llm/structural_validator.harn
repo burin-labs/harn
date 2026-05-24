@@ -1,0 +1,220 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/structural_validator - deterministic pre-dispatch checks for
+// assistant turns that should have made concrete tool progress.
+//
+// SV-1 keeps the surface deliberately small:
+//
+//   - one rule: `non_empty_when_writes_expected`
+//   - one enforcement shape: reject before tool dispatch, emit a typed
+//     event, then either pop+regen with feedback or raise
+//
+// The module still uses the tool-middleware composition seam so later
+// rules can share one opt-in surface.
+import { agent_emit_event } from "std/agent/state"
+
+fn __sv_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __sv_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __sv_string_list(value) -> list {
+  var out = []
+  for item in __sv_list(value) {
+    if item != nil {
+      out = out.push(to_string(item))
+    }
+  }
+  return out
+}
+
+fn __sv_tool_entries(tools) {
+  if type_of(tools?.tools) == "list" {
+    return tools.tools
+  }
+  if type_of(tools) == "list" {
+    return tools
+  }
+  return []
+}
+
+fn __sv_annotations(entry) {
+  if type_of(entry?.annotations) == "dict" {
+    return entry.annotations
+  }
+  if type_of(entry?.function?.annotations) == "dict" {
+    return entry.function.annotations
+  }
+  return {}
+}
+
+fn __sv_tool_kind(entry) -> string {
+  return lowercase(to_string(__sv_annotations(entry)?.kind ?? ""))
+}
+
+fn __sv_tool_side_effect_level(entry) -> string {
+  let annotations = __sv_annotations(entry)
+  return lowercase(
+    to_string(
+      annotations?.side_effect_level
+        ?? annotations?.sideEffectLevel
+        ?? "",
+    ),
+  )
+}
+
+fn __sv_tool_name(entry) -> string {
+  return lowercase(to_string(entry?.name ?? ""))
+}
+
+fn __sv_tool_is_write_capable(entry) -> bool {
+  let side_effect_level = __sv_tool_side_effect_level(entry)
+  if side_effect_level != "" && side_effect_level != "none" && side_effect_level != "read_only" {
+    return true
+  }
+  let kind = __sv_tool_kind(entry)
+  if contains(["edit", "delete", "move", "execute"], kind) {
+    return true
+  }
+  let name = __sv_tool_name(entry)
+  return starts_with(name, "write")
+    || starts_with(name, "edit")
+    || starts_with(name, "delete")
+    || starts_with(name, "move")
+    || starts_with(name, "run_")
+    || starts_with(name, "apply_")
+}
+
+pub fn structural_validator_empty_turn(policy = nil, tools = nil) {
+  let side_effect_level = lowercase(to_string(policy?.side_effect_level ?? ""))
+  if side_effect_level == "none" || side_effect_level == "read_only" {
+    return {has_write_capability: false, side_effect_level: side_effect_level}
+  }
+  for entry in __sv_tool_entries(tools) {
+    if __sv_tool_is_write_capable(entry) {
+      return {
+        has_write_capability: true,
+        side_effect_level: if side_effect_level == "" {
+          "workspace_write"
+        } else {
+          side_effect_level
+        },
+      }
+    }
+  }
+  return {has_write_capability: false, side_effect_level: side_effect_level}
+}
+
+fn __sv_validate_opts(opts) {
+  let cfg = __sv_dict(opts)
+  let on_failure = to_string(cfg?.on_failure ?? "regenerate_with_feedback")
+  if on_failure != "regenerate_with_feedback" && on_failure != "raise" {
+    throw "with_structural_validator: `on_failure` must be `regenerate_with_feedback` or `raise`; got "
+      + on_failure
+  }
+  let rules = __sv_string_list(cfg?.rules)
+  if len(rules) == 0 {
+    return cfg + {rules: ["non_empty_when_writes_expected"], on_failure: on_failure}
+  }
+  return cfg + {rules: rules, on_failure: on_failure}
+}
+
+fn __sv_feedback(rule, diagnostic, recommended_action) {
+  return {
+    rule: rule,
+    diagnostic: diagnostic,
+    recommended_action: recommended_action,
+    message: diagnostic + " " + recommended_action,
+  }
+}
+
+fn __sv_emit_decision(turn, workspace_policy, verdict) {
+  agent_emit_event(
+    turn.session_id,
+    "structural_validator_decision",
+    {
+      iteration: turn.iteration,
+      rule: verdict.rule,
+      diagnostic: verdict.diagnostic,
+      recommended_action: verdict.recommended_action,
+      on_failure: verdict.on_failure,
+      vetoed: verdict.vetoed,
+      tool_count: len(turn?.assistant_turn?.tool_calls ?? []),
+      has_done_marker: turn?.assistant_turn?.has_done_marker ?? false,
+      has_write_capability: workspace_policy?.has_write_capability ?? false,
+      side_effect_level: workspace_policy?.side_effect_level ?? "",
+    },
+  )
+}
+
+fn __sv_reject(turn, workspace_policy, rule, diagnostic, recommended_action, on_failure) {
+  let verdict = {
+    vetoed: true,
+    rule: rule,
+    diagnostic: diagnostic,
+    recommended_action: recommended_action,
+    on_failure: on_failure,
+    feedback: __sv_feedback(rule, diagnostic, recommended_action),
+    error: diagnostic,
+  }
+  __sv_emit_decision(turn, workspace_policy, verdict)
+  return verdict
+}
+
+fn __sv_validate_empty_turn(cfg, turn) {
+  let workspace_policy = turn?.workspace_policy ?? {}
+  let assistant_turn = turn?.assistant_turn ?? {}
+  let rules = cfg.rules
+  if contains(rules, "non_empty_when_writes_expected")
+    && workspace_policy?.has_write_capability ?? false
+    && len(assistant_turn?.tool_calls ?? []) == 0
+    && !(assistant_turn?.has_done_marker ?? false) {
+    return __sv_reject(
+      turn,
+      workspace_policy,
+      "non_empty_when_writes_expected",
+      "This assistant turn made no tool call even though write-capable tools are available.",
+      "Regenerate with a concrete write-capable tool call before claiming progress.",
+      cfg.on_failure,
+    )
+  }
+  return {vetoed: false}
+}
+
+/**
+ * with_structural_validator(opts) -> {caller, on_empty_turn}
+ *
+ * Compose the returned `caller` through `compose_tool_callers([ ... ])`.
+ * The paired `on_empty_turn` hook lets the validator inspect assistant
+ * turns that produced zero tool calls before dispatch. SV-1's execution
+ * path is intentionally passive for non-empty tool batches; later rules
+ * can extend the caller side without changing the opt-in surface.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: with_structural_validator(opts)
+ */
+pub fn with_structural_validator(opts = nil) {
+  let cfg = __sv_validate_opts(opts)
+  return {
+    caller: { call, next -> return next(call) },
+    on_empty_turn: { turn, next ->
+      let verdict = __sv_validate_empty_turn(cfg, turn)
+      if verdict.vetoed {
+        return verdict
+      }
+      return next(turn)
+    },
+  }
+}
