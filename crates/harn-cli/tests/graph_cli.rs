@@ -202,6 +202,8 @@ fn main(harness: Harness) {
   let body = harness.fs.read_text("README.md")
   harness.fs.mkdtemp("harn-graph-")
   harness.net.get("https://example.test/data")
+  harness.llm.catalog()
+  harness.llm.providers()
   harness.stdio.println(body)
 }
 "#,
@@ -237,6 +239,23 @@ fn main(harness: Harness) {
     assert!(
         cap_strings.contains(&"network.http"),
         "expected harness.net.get to produce network.http capability, got: {cap_strings:?}"
+    );
+    assert!(
+        cap_strings.contains(&"llm.catalog"),
+        "expected harness.llm.* to produce llm.catalog capability, got: {cap_strings:?}"
+    );
+    let effects = main["effects"].as_array().expect("effects array");
+    let effect_strings: Vec<&str> = effects.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        effect_strings.contains(&"llm.catalog"),
+        "expected harness.llm.* to produce llm.catalog effect, got: {effect_strings:?}"
+    );
+    let host_calls = main["host_calls"].as_array().expect("host_calls array");
+    let host_call_strings: Vec<&str> = host_calls.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        host_call_strings.contains(&"harness.llm.catalog")
+            && host_call_strings.contains(&"harness.llm.providers"),
+        "expected harness.llm.* host calls, got: {host_call_strings:?}"
     );
 }
 

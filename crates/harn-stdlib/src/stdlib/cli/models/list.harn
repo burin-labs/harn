@@ -5,9 +5,9 @@
  * `crates/harn-cli/src/commands/models/list.rs` detects installed Ollama
  * models out-of-process (sandboxed scripts can't run `ollama list`
  * directly) and hands off the discovered model ids plus the parsed
- * filter args as env vars. The catalog itself comes from the
- * `llm_catalog()` free builtin landed in G4 (#2297 / #2343), so the
- * script owns the entire filter + render pipeline end-to-end.
+ * filter args as env vars. The catalog itself comes from the read-only
+ * `harness.llm.catalog()` handle, so the script owns the entire filtering
+ * and rendering pipeline end-to-end.
  *
  * Inputs (from the dispatch shim):
  *   HARN_MODELS_LIST_PROVIDER       — optional provider filter ("" = all).
@@ -253,7 +253,7 @@ fn __render_envelope(groups: dict) -> string {
 }
 
 fn main(harness: Harness) -> int {
-  let catalog = llm_catalog()
+  let catalog = harness.llm.catalog()
   let provider_filter = harness.env.get_or("HARN_MODELS_LIST_PROVIDER", "")
   let installed_only = harness.env.get_or("HARN_MODELS_LIST_INSTALLED_ONLY", "0") == "1"
   let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"

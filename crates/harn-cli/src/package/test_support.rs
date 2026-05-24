@@ -78,9 +78,18 @@ pub(crate) fn test_git_command(repo: &Path) -> process::Command {
             "tag.gpgSign=false",
             "-c",
             "core.hooksPath=/dev/null",
+            "-c",
+            "core.editor=true",
         ])
         .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_CONFIG_GLOBAL", repo.join(".gitconfig-test"))
+        .env("GIT_CONFIG_SYSTEM", repo.join(".gitconfig-system-test"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_SEQUENCE_EDITOR", "true")
+        .env("GIT_MERGE_AUTOEDIT", "no")
+        .env("GIT_PAGER", "cat")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")

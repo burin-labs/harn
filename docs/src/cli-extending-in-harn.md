@@ -371,10 +371,12 @@ free builtins (`sha256_hex`, `term_width`,
 `llm_provider_status`) that today live as top-level functions so the
 ports could move. Directory policy that can be expressed from env vars
 belongs in `std/cli/paths` instead of a host capability. `spawn_captured`
-has since moved to `harness.process.spawn_captured`. The long-term
-direction promotes each remaining free builtin to its
-`harness.X.Y` sub-handle through follow-up issues
-[#2337][f7]-[#2340][f10] and [#2342][f12]. Add new capabilities the same way:
+has since moved to `harness.process.spawn_captured`, and the LLM catalog
+helpers have moved to `harness.llm.catalog()` and
+`harness.llm.providers()`. Prefer the canonical `harness.X.Y` sub-handle
+when the script receives a `Harness` parameter; top-level helpers remain
+aliases for scripts that run outside that shape. Add new capabilities the
+same way:
 
 1. Register the builtin in `crates/harn-vm/src/stdlib/<area>.rs` with
    `register_builtin` and the matching `Harness` accessor.
@@ -430,6 +432,3 @@ per-call allocation off the hot path.
 [c1-ratchet]: https://github.com/burin-labs/harn/issues/2314
 [g4]: https://github.com/burin-labs/harn/issues/2297
 [g5]: https://github.com/burin-labs/harn/issues/2298
-[f7]: https://github.com/burin-labs/harn/issues/2337
-[f10]: https://github.com/burin-labs/harn/issues/2340
-[f12]: https://github.com/burin-labs/harn/issues/2342

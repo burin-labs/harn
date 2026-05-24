@@ -29,6 +29,10 @@ condensed series summaries instead of full per-patch history.
   subprocess captures through the explicit capability surface. The existing
   `spawn_captured(opts)` builtin now shares the same implementation as the
   harness method.
+- **LLM catalog harness handle (#2342).** Added `harness.llm.catalog()` and
+  `harness.llm.providers()` as the canonical read-only model/provider catalog
+  surface. The legacy `llm_catalog()` and `llm_provider_status()` builtins
+  remain aliases for scripts that do not receive a `Harness` parameter.
 
 ## v0.8.35
 

@@ -1,8 +1,7 @@
-// Free-builtin landing site for the deferred `harness.llm.providers`
-// sub-handle (see #2297). Verifies the per-provider status list shape.
-// Doesn't pin specific provider names (the catalog evolves) — just
-// asserts that every entry carries the documented fields with valid
-// types.
+// Free-builtin alias for `harness.llm.providers()`. Verifies the
+// per-provider status list shape. Doesn't pin specific provider names
+// (the catalog evolves) — just asserts that every entry carries the
+// documented fields with valid types.
 let entries = llm_provider_status()
 
 __io_println(len(entries) > 0)

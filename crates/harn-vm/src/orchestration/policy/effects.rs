@@ -8,11 +8,9 @@
 //!
 //! Computation at spawn time walks the child's entrypoint module via the
 //! same capability analysis `harn graph --json` uses (issue HARN-#1758),
-//! plus a recursive AST walker that lifts harness sub-handle method calls
-//! (`harness.net.get(...)`, `harness.fs.write_file(...)`, ...) into the
-//! same effect shape. The two extraction paths feed one canonicalization
-//! step so downstream consumers see a single deduped, deterministically
-//! ordered list.
+//! plus a conservative AST walker for harness calls embedded in inline spawn
+//! configs. The two extraction paths feed one canonicalization step so
+//! downstream consumers see a single deduped, deterministically ordered list.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -104,10 +102,9 @@ impl EffectRecord {
 /// Compute the effect set for a child agent's entrypoint module.
 ///
 /// Parses `source`, walks the resulting AST via the same `harn_ir`
-/// capability analyzer that backs `harn graph --json`, and also lifts
-/// harness sub-handle method calls (`harness.net.get(...)`, etc.) into
-/// the same effect shape. The result is deterministically ordered and
-/// deduplicated.
+/// capability analyzer that backs `harn graph --json`, and supplements it with
+/// a direct walk for harness calls in inline spawn configs. The result is
+/// deterministically ordered and deduplicated.
 ///
 /// When `ceiling` is provided, the result is clamped to it: an effect
 /// is dropped if the ceiling's `capabilities` map is non-empty and does
@@ -138,8 +135,9 @@ pub fn compute_handoff_effects(
         }
     }
 
-    // Keep harness sub-handle effects visible even for policy callers
-    // that work from raw ASTs rather than the lowered IR call surface.
+    // Spawn preflight also wraps object-literal configs and inline closures
+    // where the IR handler pass cannot always attribute harness calls. Keep
+    // this broad direct pass so parent/child effect checks stay conservative.
     for node in &program {
         walk_for_harness_effects(node, &mut collected);
     }
@@ -189,7 +187,7 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         "print" | "println" | "eprint" | "eprintln" | "write_stdout" | "write_stderr"
         | "__io_print" | "__io_println" | "__io_eprint" | "__io_eprintln" | "__io_write_stdout"
         | "__io_write_stderr" => Some(EffectRecord::new(EffectKind::Stdio, EffectScope::Observe)),
-        "read_stdin" | "__io_read_line" => {
+        "read_line" | "read_stdin" | "prompt_user" | "__io_read_line" => {
             Some(EffectRecord::new(EffectKind::Stdio, EffectScope::Read))
         }
 
@@ -263,6 +261,13 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
                 model: None,
             },
             EffectScope::Write,
+        )),
+        "llm_catalog" | "llm_provider_status" => Some(EffectRecord::new(
+            EffectKind::Llm {
+                provider: None,
+                model: None,
+            },
+            EffectScope::Read,
         )),
 
         // spawn / worker dispatch
@@ -442,6 +447,14 @@ fn harness_method_effect(node: &SNode) -> Option<EffectRecord> {
         // policies still block them, but they don't produce a typed
         // effect record for child grant enforcement.
         ("system", _) => return None,
+        ("llm", "catalog" | "providers") => (
+            EffectKind::Llm {
+                provider: None,
+                model: None,
+            },
+            EffectScope::Read,
+        ),
+        ("llm", _) => return None,
         _ => return None,
     };
     Some(EffectRecord::new(kind, scope))
@@ -708,6 +721,7 @@ fn effect_capability_op(effect: &EffectRecord) -> (&'static str, &'static str) {
         (EffectKind::Fs, EffectScope::Mutate) => ("workspace", "apply_edit"),
         (EffectKind::Fs, EffectScope::Observe) => ("workspace", "exists"),
         (EffectKind::Net, _) => ("network", "http"),
+        (EffectKind::Llm { .. }, EffectScope::Read) => ("llm", "catalog"),
         (EffectKind::Llm { .. }, _) => ("llm", "call"),
         (EffectKind::Tool { .. }, _) => ("host", "tool_call"),
         (EffectKind::Hostcall { .. }, _) => ("connector", "call"),
@@ -722,6 +736,7 @@ fn side_effect_level_for(effect: &EffectRecord) -> &'static str {
         (EffectKind::Fs, EffectScope::Read | EffectScope::Observe) => "read_only",
         (EffectKind::Fs, _) => "workspace_write",
         (EffectKind::Net, _) => "network",
+        (EffectKind::Llm { .. }, EffectScope::Read) => "read_only",
         (EffectKind::Llm { .. }, _) => "network",
         (EffectKind::Tool { .. }, _) => "workspace_write",
         (EffectKind::Hostcall { name }, _) if name.starts_with("process.") => "process_exec",
@@ -961,6 +976,19 @@ mod tests {
     }
 
     #[test]
+    fn harness_stdio_read_line_yields_stdio_read_effect() {
+        let source = r#"fn main(harness: Harness) { harness.stdio.read_line() }"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect.kind, EffectKind::Stdio)
+                    && effect.scope == EffectScope::Read),
+            "expected Stdio read effect, got {effects:?}"
+        );
+    }
+
+    #[test]
     fn llm_call_emits_llm_effect_with_provider_and_model() {
         let source = r#"fn main() {
             llm_call("summarize", { provider: "anthropic", model: "claude-3-5-sonnet" })
@@ -975,6 +1003,22 @@ mod tests {
         };
         assert_eq!(provider.as_deref(), Some("anthropic"));
         assert_eq!(model.as_deref(), Some("claude-3-5-sonnet"));
+    }
+
+    #[test]
+    fn harness_llm_catalog_yields_read_effect() {
+        let source = r#"fn main(harness: Harness) {
+            harness.llm.catalog()
+            harness.llm.providers()
+        }"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect.kind, EffectKind::Llm { .. })
+                    && effect.scope == EffectScope::Read),
+            "expected LLM read effect, got {effects:?}"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Method dispatch for the `Harness` capability handle and its
 //! sub-handles. Every sub-handle (`stdio`, `clock`, `fs`, `env`,
-//! `random`, `net`, `process`, `system`) is wired end-to-end in real,
-//! mock, and null modes;
+//! `random`, `net`, `process`, `system`, `llm`) is wired end-to-end in
+//! real, mock, and null modes;
 //! sandbox / egress rejections raised inside a sub-handle method are
 //! tagged with the `HARN-CAP-201` diagnostic code so callers can
 //! attribute the error to the active capability profile rather than an
@@ -84,6 +84,7 @@ impl crate::vm::Vm {
             HarnessKind::Random => self.call_harness_random_method(handle, method, args),
             HarnessKind::Net => self.call_harness_net_method(handle, method, args).await,
             HarnessKind::Process => self.call_harness_process_method(handle, method, args),
+            HarnessKind::Llm => self.call_harness_llm_method(handle, method),
         }
     }
 
@@ -250,6 +251,18 @@ impl crate::vm::Vm {
             _ => return Err(method_unsupported(handle, method)),
         };
         Ok(crate::stdlib::json_to_vm_value(&json))
+    }
+
+    fn call_harness_llm_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+    ) -> Result<VmValue, VmError> {
+        match method {
+            "catalog" => Ok(crate::llm::config_builtins::llm_catalog_value()),
+            "providers" => Ok(crate::llm::config_builtins::llm_provider_status_value()),
+            _ => Err(method_unsupported(handle, method)),
+        }
     }
 
     async fn call_harness_root_method(
@@ -779,6 +792,7 @@ impl crate::vm::Vm {
                 };
                 Ok(crate::stdlib::json_to_vm_value(&json))
             }
+            HarnessKind::Llm => self.call_harness_llm_method(handle, method),
         }
     }
 }

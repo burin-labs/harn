@@ -587,17 +587,10 @@ impl TypeChecker {
                         .as_ref()
                         .is_some_and(|ty| self.type_may_include_nil(ty, scope));
                 let result = |ty| Self::optional_method_result_type(ty, include_optional_nil);
-                if let Some(ambient) =
-                    obj_type
-                        .as_ref()
-                        .and_then(|ty| match self.resolve_alias(ty, scope) {
-                            TypeExpr::Named(name) if name == "HarnessFs" => {
-                                crate::harness_methods::harness_fs_ambient(method)
-                            }
-                            _ => None,
-                        })
+                if let Some(ty) =
+                    self.harness_method_result_type(obj_type.as_ref(), method.as_str(), scope)
                 {
-                    return builtin_return_type(ambient).map(result);
+                    return Some(result(ty));
                 }
                 // Iter<T> receiver: combinators preserve or transform T; sinks
                 // materialize. This must come before the shared-method match
@@ -900,6 +893,7 @@ impl TypeChecker {
                 "net" => Some(TypeExpr::Named("HarnessNet".into())),
                 "process" => Some(TypeExpr::Named("HarnessProcess".into())),
                 "system" => Some(TypeExpr::Named("HarnessSystem".into())),
+                "llm" => Some(TypeExpr::Named("HarnessLlm".into())),
                 _ if optional => Some(TypeExpr::Named("nil".into())),
                 _ => None,
             },
@@ -1223,6 +1217,24 @@ impl TypeChecker {
             simplify_union(vec![ty, TypeExpr::Named("nil".into())])
         } else {
             ty
+        }
+    }
+
+    fn harness_method_result_type(
+        &self,
+        receiver: Option<&TypeExpr>,
+        method: &str,
+        scope: &TypeScope,
+    ) -> InferredType {
+        let receiver = receiver?;
+        match self.resolve_alias(receiver, scope) {
+            TypeExpr::Named(name) => {
+                let sub_handle = crate::harness_methods::harness_type_sub_handle(name.as_str())?;
+                let ambient =
+                    crate::harness_methods::harness_sub_handle_ambient(sub_handle, method)?;
+                builtin_return_type(ambient)
+            }
+            _ => None,
         }
     }
 

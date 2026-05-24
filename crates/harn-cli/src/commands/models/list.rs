@@ -4,11 +4,11 @@
 //!
 //! The filter + render pipeline lives in
 //! `crates/harn-stdlib/src/stdlib/cli/models/list.harn`. The catalog
-//! itself comes from the `llm_catalog()` free builtin landed in G4
-//! (#2297 / #2343), so the script owns the entire data-shape
-//! transformation end-to-end. The Rust shim's only contribution is
-//! detecting installed Ollama models out-of-process (sandboxed scripts
-//! can't run `ollama list`) and threading the parsed `--provider` /
+//! itself comes from the read-only `harness.llm.catalog()` handle, so the
+//! script owns the entire data-shape transformation end-to-end. The Rust
+//! shim's only contribution is detecting installed Ollama models
+//! out-of-process (sandboxed scripts can't run `ollama list`) and threading
+//! the parsed `--provider` /
 //! `--installed-only` flags through env vars.
 //!
 //! `HARN_CLI_IMPL=rust` keeps the legacy direct path for the

@@ -1049,6 +1049,31 @@ fn test_harness_fs_method_arg_type_mismatch() {
 }
 
 #[test]
+fn test_harness_llm_method_return_type_inference() {
+    let errs = errors(
+        r#"fn main(harness: Harness) {
+  let catalog: list = harness.llm.catalog()
+  let providers: list = harness.llm.providers()
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_harness_llm_method_arg_type_mismatch() {
+    let warns = warnings(
+        r#"fn main(harness: Harness) {
+  harness.llm.catalog("extra")
+}"#,
+    );
+    assert_eq!(warns.len(), 1, "expected one warning, got: {warns:?}");
+    assert!(
+        warns[0].contains("Builtin function 'harness.llm.catalog' expects 0 arguments, got 1"),
+        "{warns:?}"
+    );
+}
+
+#[test]
 fn test_len_accepts_nil_like_runtime() {
     let errs = errors(r#"pipeline t(task) { let n: int = len(nil) }"#);
     assert!(errs.is_empty(), "got errors: {errs:?}");

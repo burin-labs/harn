@@ -1679,12 +1679,14 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` / `thinking_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `reasoning_effort` |
 | `llm_rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool | Set (`{rpm: N}`), query, or clear (`{rpm: 0}`) per-provider rate limit |
 | `llm_providers()` | — | list | List all configured provider names |
-| `llm_provider_status()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"`. Used by `harn providers` and `harn doctor` to render a single combined table |
+| `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"` |
+| `llm_provider_status()` | — | list | Free-builtin alias for `harness.llm.providers()`, available to scripts that do not receive a `Harness` parameter |
 | `llm_available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
 | `llm_known_models()` | — | list | List configured model alias names |
 | `llm_qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
 | `llm_provider_catalog()` | — | dict | Return the loaded provider/model catalog: providers, aliases, model metadata, pricing, QC defaults, and availability |
-| `llm_catalog()` | — | list | Return the full configured model catalog as a list of dicts: `[{id, name, provider, context_window, runtime_context_window, capabilities, quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`. Read-only view used by `harn models list` / `harn models recommend` |
+| `harness.llm.catalog()` | — | list | Return the full configured model catalog as a list of dicts: `[{id, name, provider, context_window, runtime_context_window, capabilities, quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`. Read-only view used by `harn models list` / `harn models recommend` |
+| `llm_catalog()` | — | list | Free-builtin alias for `harness.llm.catalog()`, available to scripts that do not receive a `Harness` parameter |
 | `llm_config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
 | `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | float | Estimate USD cost from catalog pricing, falling back to embedded pricing |
 | `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |

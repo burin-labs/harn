@@ -14,10 +14,11 @@ non-`Harness` type annotation, extra parameters, or a default value) fails
 this check before bytecode is emitted, so the runtime never tries to bind a
 mismatched signature.
 
-The `Harness` value gives the script typed access to its six capability
+The `Harness` value gives the script typed access to its capability
 slices via field access (`harness.stdio`, `harness.clock`, `harness.fs`,
-`harness.env`, `harness.random`, `harness.net`). Threading the handle through
-`main` replaces every ambient stdio/clock/fs/env/random/net global.
+`harness.env`, `harness.random`, `harness.net`, `harness.system`,
+`harness.llm`). Threading the handle through `main` makes host access explicit
+instead of relying on ambient globals and free builtins.
 
 ## How to fix
 

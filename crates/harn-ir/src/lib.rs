@@ -2020,7 +2020,7 @@ fn harness_sub_handle_for(object: &SNode, method: &str) -> Option<(&'static str,
 }
 
 const HARNESS_SUB_HANDLES: &[&str] = &[
-    "stdio", "clock", "fs", "env", "random", "net", "process", "system",
+    "stdio", "clock", "fs", "env", "random", "net", "process", "system", "llm",
 ];
 
 fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
@@ -2568,6 +2568,28 @@ fn main(harness: Harness) {
         assert!(
             calls.iter().any(|name| name == "spawn_captured"),
             "expected harness.process.spawn_captured to lower to ambient spawn_captured, got: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn harness_llm_method_calls_are_attributed_to_llm_catalog_builtins() {
+        let report = analyze(
+            r#"
+fn main(harness: Harness) {
+  harness.llm.catalog()
+  harness.llm.providers()
+}
+"#,
+        );
+
+        let calls = handler_call_names(&report);
+        assert!(
+            calls.iter().any(|name| name == "llm_catalog"),
+            "expected harness.llm.catalog to lower to llm_catalog, got: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|name| name == "llm_provider_status"),
+            "expected harness.llm.providers to lower to llm_provider_status, got: {calls:?}"
         );
     }
 
