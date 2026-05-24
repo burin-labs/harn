@@ -355,7 +355,10 @@ fn __run_structural_validator(
   llm_result,
   tool_calls,
   parsed,
+  llm_opts,
   turn_opts,
+  prior_successful_tools,
+  prior_rejected_tools,
   attempts,
 ) {
   if caller == nil {
@@ -373,9 +376,14 @@ fn __run_structural_validator(
       assistant_text: llm_result?.visible_text ?? llm_result?.text ?? "",
       raw_text: llm_result?.raw_text ?? llm_result?.text ?? "",
       parsed_done_marker: parsed?.done_marker ?? "",
+      tool_parse_errors: parsed?.tool_parse_errors ?? [],
+      protocol_violations: parsed?.protocol_violations ?? [],
       output_tokens: llm_result?.output_tokens ?? 0,
+      max_output_tokens: llm_opts?.max_tokens ?? turn_opts?.max_tokens ?? 0,
       provider: llm_result?.provider ?? "",
       model: llm_result?.model ?? "",
+      prior_successful_tools: prior_successful_tools,
+      prior_rejected_tools: prior_rejected_tools,
     },
     call_id: "structural-validator-turn-" + to_string(turn_opts?._turn_iteration ?? 0),
     declared_executor: "harn",
@@ -1328,7 +1336,10 @@ fn __agent_loop_run(message, session, initial_opts) {
         normalized + {raw_text: raw_text},
         tool_calls,
         parsed,
+        llm_opts,
         turn_opts,
+        successful_tools_seen,
+        rejected_tools_seen,
         structural_validator_attempts,
       )
       if structural_verdict.vetoed {
