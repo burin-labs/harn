@@ -1,8 +1,5 @@
 # HARN-ORC-008 — statement cannot be reached
 
-**Category:** Orchestration (ORC)  
-**Variant:** `Code::UnreachableCode` (unreachable code)
-
 ## What it means
 
 An orchestration construct — agent / workflow / pipeline / tool definition, or a
@@ -10,14 +7,6 @@ An orchestration construct — agent / workflow / pipeline / tool definition, or
 constructs carry runtime semantics that depend on a small set of well-formed
 shapes.
 
-Specifically: statement cannot be reached.
-
 ## How to fix
 
 - Re-read the orchestration construct's spec section and align the arity / type / structure.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.

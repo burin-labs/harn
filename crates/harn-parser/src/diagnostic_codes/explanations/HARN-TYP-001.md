@@ -1,8 +1,5 @@
 # HARN-TYP-001 — expected and actual types are incompatible
 
-**Category:** Type checker (TYP)
-**Variant:** `Code::TypeMismatch`
-
 ## What it means
 
 Harn's type checker compared the inferred ("actual") type of an expression
@@ -20,17 +17,3 @@ into one of the more specific TYP codes (assignment, argument, return, etc.).
   conversion exists.
 - If the mismatch is between a concrete type and an optional, use
   `?`-chaining or supply a default with `??`.
-
-## See also
-
-- HARN-TYP-004 — return-type mismatch.
-- HARN-TYP-005 — assignment-type mismatch.
-- HARN-TYP-006 — argument-type mismatch.
-- HARN-TYP-007 — let-binding initializer type mismatch.
-- HARN-TYP-009 — struct-field type mismatch.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.

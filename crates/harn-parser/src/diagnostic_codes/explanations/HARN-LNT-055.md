@@ -1,8 +1,5 @@
 # HARN-LNT-055 — ambient env builtin replaced by `harness.env.*`
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientEnvBuiltin` (ambient env builtin)
-
 ## What it means
 
 The lint fires on calls to the ambient `env` and `env_or` builtins.
@@ -23,9 +20,3 @@ while the migration is in flight, but every new call site should use
   `harn fix --apply --safety surface-changing --harness-threading thread-params`.
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.

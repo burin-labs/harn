@@ -1,7 +1,5 @@
 # HARN-RMD-006
 
-**Variant:** `Code::ReminderProviderMalformedSpec`
-
 A reminder provider closure returned a value that could not be parsed as a
 `ReminderSpec`. Provider closures may return `nil`, a reminder spec, an effect
 such as `{reminder: {...}}`, or a list of those effects.

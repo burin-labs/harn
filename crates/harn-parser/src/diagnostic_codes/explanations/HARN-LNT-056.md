@@ -1,8 +1,5 @@
 # HARN-LNT-056 — ambient random builtin replaced by `harness.random.*`
 
-**Category:** Lint (LNT)  
-**Variant:** `Code::LintAmbientRandomBuiltin` (ambient random builtin)
-
 ## What it means
 
 The lint fires on calls to the ambient `random`, `random_int`,
@@ -26,9 +23,3 @@ through the `Rng.*` surface for tests that need deterministic output.
   `harn fix --apply --safety surface-changing --harness-threading thread-params`.
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not
-change without a deprecation cycle. Cross-language tooling and IDE
-integrations can dispatch on it directly.

@@ -1,8 +1,5 @@
 # HARN-MET-001 — expression is not permitted in a const initializer
 
-**Category:** Meta (MET)
-**Variant:** `Code::ConstEvalDisallowedExpression`
-
 ## What it means
 
 A `const` binding's right-hand side must be a pure expression that can be
@@ -43,6 +40,5 @@ let _ = [X, Y, NS, COUNT]
 
 ## Stability
 
-This code is stable. Adding additional pure builtins to the const-eval
-allowlist remains backwards-compatible — newly permitted expressions
-simply stop being rejected.
+Adding pure builtins to the const-eval allowlist is backwards-compatible —
+newly permitted expressions stop being rejected.

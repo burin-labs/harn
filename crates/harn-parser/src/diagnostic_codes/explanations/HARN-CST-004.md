@@ -1,8 +1,5 @@
 # HARN-CST-004 — const initializer raised a runtime error during evaluation
 
-**Category:** Const-eval sandbox (CST)
-**Variant:** `Code::ConstEvalRuntimeError`
-
 ## What it means
 
 The expression was syntactically eligible for compile-time evaluation,
@@ -23,7 +20,3 @@ const BAD = "a" + 1
 - Inspect the offending operand and supply a valid value.
 - If the expression depends on a value that is only known at runtime,
   use `let` instead of `const`.
-
-## Stability
-
-This code is stable.

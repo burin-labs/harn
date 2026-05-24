@@ -24,10 +24,10 @@ local-qwen3.6-gguf` and `harn models install local-qwen3.6-27b` print concrete
 llama.cpp / MLX download, launch, context-window, endpoint, and
 `provider-ready` verification commands.
 
-For model-specific feature support, see the generated
-[provider capability matrix](../provider-matrix.md). For provider-family
-recommendations, endpoint notes, and downstream JSON support data, see
-[provider support recommendations](../provider-support.md).
+Related references: the generated [provider capability
+matrix](../provider-matrix.md) for per-model feature support, and
+[provider support recommendations](../provider-support.md) for
+family-level guidance, endpoint notes, and downstream JSON support data.
 
 | Provider | Environment variable | Default model |
 |---|---|---|
@@ -81,9 +81,8 @@ failures, then call the Harn readiness probe again.
 
 ### `harn local` runtime lifecycle
 
-For interactive local-model setups, `harn local` wraps the assorted
-provider CLIs (`ollama`, `llama-server`, `mlx_lm.server`) behind one
-stable surface:
+For interactive local-model setups, `harn local` unifies the per-provider
+CLIs (`ollama`, `llama-server`, `mlx_lm.server`) under one surface:
 
 ```bash
 # Survey every local provider, with served models and loaded-model
@@ -112,10 +111,10 @@ wider context window than a low-RAM Linux box. Override either by
 passing the flag explicitly. State lives under
 `<state_root>/local/` (`HARN_STATE_DIR` honored).
 
-Harn also carries local runtime risk profiles for hybrid-cache families such
-as Qwen3.6 and Gemma4. The profile table records preferred runtimes, required
-probes, known cache/parser risks, and workarounds for Ollama, llama.cpp, and
-MLX. `harn local switch` refuses experimental or quarantined combinations
+Harn maintains local runtime risk profiles for hybrid-cache families
+(Qwen3.6, Gemma4). The profile table records preferred runtimes,
+required probes, known cache/parser risks, and workarounds for Ollama,
+llama.cpp, and MLX. `harn local switch` refuses experimental or quarantined combinations
 unless the required probes are supplied with `--probe-result` /
 `--passed-probe` or the user passes `--force`.
 
@@ -196,11 +195,10 @@ locally mediate each remote call.
 
 ### Capability matrix + `harn.toml` overrides
 
-The provider support table above is **not** hard-coded: it's the output
-of a shipped data file (`crates/harn-vm/src/llm/capabilities.toml`)
-matched against the `(provider, model)` pair at call time. Scripts
-can query the effective capability surface without carrying
-vendor-specific knowledge:
+The provider support table is generated from
+`crates/harn-vm/src/llm/capabilities.toml` and matched against the
+`(provider, model)` pair at call time. Scripts can query the effective
+capability surface without carrying vendor-specific knowledge:
 
 ```harn
 let caps = provider_capabilities("anthropic", "claude-opus-4-7")

@@ -1,8 +1,5 @@
 # HARN-NAM-101 — `main` entrypoint must take a single `harness: Harness` parameter
 
-**Category:** Name resolution (NAM)
-**Variant:** `Code::InvalidMainSignature` (invalid `main` signature)
-
 ## What it means
 
 When a Harn program declares a top-level `fn main`, the runtime auto-invokes
@@ -44,9 +41,3 @@ fn main(_harness: Harness) {
 
 If the function does not need to be the entrypoint, rename it (e.g. `helper`,
 `run_once`) so the convention does not apply.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.

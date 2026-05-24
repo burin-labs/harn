@@ -1,7 +1,5 @@
 # HARN-RMD-007
 
-**Variant:** `Code::ReminderProviderBloat`
-
 An `agent_loop` enables more than eight distinct reminder providers. Many
 providers can inject overlapping ambient context and increase prompt size.
 

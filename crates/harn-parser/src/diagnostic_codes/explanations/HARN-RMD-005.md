@@ -1,7 +1,5 @@
 # HARN-RMD-005
 
-**Variant:** `Code::ReminderUnknownPropagate`
-
 A reminder specified an unsupported `propagate` value. Reminder propagation must
 be one of `all`, `session`, or `none`.
 

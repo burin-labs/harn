@@ -1,8 +1,5 @@
 # HARN-OWN-003 — owned value escapes its valid scope
 
-**Category:** Ownership / mutability (OWN)
-**Variant:** `Code::OwnershipEscape` (ownership escape)
-
 ## What it means
 
 A binding annotated with `owned<T>` carries sole ownership of a drop-able
@@ -50,9 +47,3 @@ fn open_log() -> channel {
 
 - **Drop the value explicitly** with `drop(x)` if you need to release earlier
   than the enclosing block would close it.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.

@@ -1,8 +1,5 @@
 # HARN-LNT-053 — ambient stdio builtin replaced by `harness.stdio.*`
 
-**Category:** Lint (LNT)
-**Variant:** `Code::LintAmbientStdioBuiltin` (ambient stdio builtin)
-
 ## What it means
 
 The lint fires on calls to `print`, `println`, `eprint`, `eprintln`,
@@ -27,9 +24,3 @@ code should use `harness.stdio.print`, `harness.stdio.println`,
   `harn fix --apply --safety surface-changing --harness-threading thread-params`.
   `harn fix --plan --json` reports which signatures would change and whether
   cross-module callers must be updated.
-
-## Stability
-
-This code is stable. Its identifier, category, and meaning will not change
-without a deprecation cycle. Cross-language tooling and IDE integrations can
-dispatch on it directly.

@@ -51,12 +51,10 @@ error, `mcp_call` throws.
 
 ### Experimental file inputs
 
-MCP file inputs are still draft protocol work. Harn implements the current
-leading draft, [SEP-2356][mcp-file-sep], behind an explicit runtime opt-in:
-tool schemas mark file fields with `x-mcp-file`, and clients pass the selected
-file inline as an RFC 2397 `data:` URI. This is not the older multipart
-upload-endpoint proposal; upstream closed that path in favor of the smaller
-schema annotation.
+Harn implements [SEP-2356][mcp-file-sep] (the leading draft, not the older
+multipart upload proposal upstream closed) behind an explicit runtime
+opt-in: tool schemas mark file fields with `x-mcp-file`, and clients pass
+the selected file inline as an RFC 2397 `data:` URI.
 
 ```harn
 harn.mcp.configure({
@@ -76,10 +74,11 @@ let result = mcp_call(client, "describe_image", {image: image})
 log(result)
 ```
 
-`harn.mcp.upload_file(...)` reads a local file, enforces the normal Harn
-filesystem policy, validates optional `accept` / `max_size` hints, and returns
-`data:<media-type>;base64,...`. Harn redacts `data:` URI payloads from replay
-keys and server-side diagnostics; scripts should still avoid printing them.
+`harn.mcp.upload_file(...)` reads a local file under Harn's filesystem
+policy, validates optional `accept` / `max_size` hints, and returns
+`data:<media-type>;base64,...`. Harn redacts `data:` URI payloads from
+replay keys and server-side diagnostics; scripts should still avoid
+printing them.
 
 When Harn serves an MCP tool, use `harn.mcp.file_input(...)` in a
 `tool_define` parameter schema. The MCP server validates incoming `data:` URIs
@@ -234,10 +233,10 @@ for s in status {
 
 ### Server cards (MCP v2.1)
 
-A Server Card is a small JSON document that advertises a server's
-identity, capabilities, and tool catalog **without requiring a
-connection**. Harn consumes cards for discoverability and can publish
-its own when running as an MCP server.
+A Server Card is a JSON document that advertises a server's identity,
+capabilities, and tool catalog without requiring a connection. Harn
+consumes cards for discoverability and can publish its own when running
+as an MCP server.
 
 Declare a card source in `harn.toml`:
 
@@ -269,9 +268,9 @@ for t in card.tools {
 let card = mcp_server_card("./agents/my-agent-card.json")
 ```
 
-Cards are cached in-process with a 5-minute TTL — repeated calls are
-free. Skill matchers can factor card metadata into scoring without
-paying connection cost.
+Cards are cached in-process with a 5-minute TTL, so repeated calls skip
+the remote fetch. Skill matchers can factor card metadata into scoring
+without paying connection cost.
 
 ### Skill-scoped MCP binding
 
@@ -587,8 +586,8 @@ the session's configured working directory, so they operate on the same durable
 `.harn/workflows/<workflowId>/state.json` tree that the in-language builtins
 use.
 
-During `initialize`, Harn keeps the public `agentCapabilities` object aligned
-with upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`,
+During `initialize`, Harn mirrors the public `agentCapabilities` object from
+upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`,
 `session.inject`, and the canonical `sessionCapabilities.close` and
 `sessionCapabilities.list` flags are advertised in their upstream locations.
 Harn advertises `session.inject.modes = ["queue", "steer"]` and

@@ -1,7 +1,5 @@
 # HARN-RMD-001
 
-**Variant:** `Code::ReminderUnknownOption` (reminder lifecycle option key is not recognized)
-
 Reminder lifecycle option tables reject unknown keys so reminder shape stays stable across
 transcript transforms, hooks, and bridge integrations.
 
