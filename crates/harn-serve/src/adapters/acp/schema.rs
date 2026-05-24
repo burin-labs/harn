@@ -64,6 +64,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "loop_stuck",
     "progress_reported",
     "session_closed",
+    "structural_validator_decision",
     "step_judge_decision",
     "tool_call_audit",
     "typed_checkpoint",

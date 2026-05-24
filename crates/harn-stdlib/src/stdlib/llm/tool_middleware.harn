@@ -1082,7 +1082,9 @@ pub fn with_idempotency(key_fn, opts = nil) {
  *
  * Caps the TOTAL number of tool calls processed by this caller. Once
  * `max_calls` is hit, further calls short-circuit with
- * `rate_limited`. Per-tool granularity is achievable by composing
+ * `rate_limited`. The permit is reserved with a single atomic op so
+ * `max_calls: 1` still admits the first call reliably under
+ * concurrency. Per-tool granularity is achievable by composing
  * multiple instances under a `with_dispatch_filter` (future helper).
  *
  * Options:
@@ -1104,8 +1106,9 @@ pub fn with_rate_limit(opts) {
   let counter = atomic(0)
   let message = to_string(cfg?.message ?? "rate limit exceeded")
   return { call, next ->
-    let count = atomic_get(counter)
+    let count = atomic_add(counter, 1)
     if count >= cap {
+      let _ = atomic_add(counter, -1)
       return __tool_mw_short_circuit(
         call,
         "rate_limited",
@@ -1116,7 +1119,6 @@ pub fn with_rate_limit(opts) {
         },
       )
     }
-    let _ = atomic_add(counter, 1)
     let result = next(call)
     return __tool_mw_attach_audit(
       result,
