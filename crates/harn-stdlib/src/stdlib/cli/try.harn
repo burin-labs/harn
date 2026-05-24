@@ -1,0 +1,26 @@
+/**
+ * `harn try "<prompt>"` ported to .harn — see harn#2302 (W2).
+ *
+ * Zero-config agent_loop convenience wrapper. The legacy Rust handler
+ * synthesized this exact script into a temp file and shelled out
+ * through `execute_run`; this port collapses that round-trip by
+ * embedding the script directly.
+ *
+ * Inputs (from the dispatch shim in crates/harn-cli/src/commands/try_cmd.rs):
+ *   argv[0]            — prompt text
+ *   HARN_TRY_MAX_ITERS — max agent_loop iterations (default 5)
+ */
+fn main(harness: Harness) {
+  if len(argv) < 1 {
+    harness.stdio.eprintln("try: prompt is required")
+    exit(2)
+  }
+  let prompt = argv[0]
+  let max_iters = to_int(harness.env.get_or("HARN_TRY_MAX_ITERS", "5")) ?? 5
+  // No `tools` option: the registered-tool contract requires schemas,
+  // not bare identifiers, and `harn try` is meant to be a zero-config
+  // smoke test. Users wanting tool-augmented loops should use `harn
+  // run` with a script that builds the options explicitly.
+  let result = agent_loop(prompt, nil, {max_iterations: max_iters, llm_retries: 2})
+  harness.stdio.println(result.text)
+}
