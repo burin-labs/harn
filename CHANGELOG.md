@@ -226,6 +226,14 @@ condensed series summaries instead of full per-patch history.
   `TranscriptProjected` agent event surfaced over ACP as the
   `transcript_projected` session update so Burin Code and other hosts can
   render raw vs. projected side-by-side.
+- **Internal: trimmed CLI dependencies after self-host epic (#2293).**
+  Audited every direct dependency in `crates/harn-cli/Cargo.toml` against
+  the post-port handler tree (G1-G6, W1-W12 ports + W13 partial). All
+  current deps remain in use — legacy Rust handler paths kept behind
+  `HARN_CLI_IMPL=rust` for the parity-test contract still exercise them,
+  per the C1 ratchet. No dependency drops shipped in this pass; rerun the
+  audit after C1's follow-up promotes the `.harn` implementations to
+  default-everywhere and the legacy Rust paths can be deleted.
 
 ### Fixed
 
