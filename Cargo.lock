@@ -2152,6 +2152,7 @@ dependencies = [
  "harn-parser",
  "harn-serve",
  "harn-skills",
+ "harn-stdlib",
  "harn-vm",
  "hmac 0.13.0",
  "include_dir",

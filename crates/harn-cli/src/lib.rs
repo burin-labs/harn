@@ -4,6 +4,8 @@ pub mod acp;
 pub mod cli;
 pub mod commands;
 pub mod config;
+#[doc(hidden)]
+pub mod dispatch;
 pub mod env_guard;
 pub mod format;
 pub mod json_envelope;
