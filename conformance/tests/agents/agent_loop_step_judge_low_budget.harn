@@ -1,0 +1,37 @@
+import { agent_capture_events } from "std/agent/events"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "<user_response>safe answer</user_response>\n<done>##DONE##</done>"})
+  llm_mock(
+    {text: "{\"verdict\":\"revise\",\"reasoning\":\"force a regression\",\"critique\":\"try again\"}"},
+  )
+  let session = "step-judge-low-budget-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "Answer once.",
+      nil,
+      {
+        provider: "mock",
+        loop_until_done: true,
+        max_iterations: 1,
+        session_id: session,
+        step_judge: {provider: "mock", on_veto: "replace"},
+      },
+    ) },
+  )
+  let decisions = events_of(captured.events, "step_judge_decision")
+  require len(decisions) == 1, "low-budget step_judge skip should emit one decision event"
+  __io_println(captured.result.status)
+  __io_println(captured.result.visible_text)
+  __io_println(len(llm_mock_calls()))
+  __io_println(len(decisions))
+  __io_println(decisions[0].skipped)
+  __io_println(decisions[0].reason)
+  __io_println(decisions[0].vetoed)
+}

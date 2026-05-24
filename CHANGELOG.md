@@ -6,6 +6,17 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Fixed
+
+- **Step judges now skip when regeneration budget is exhausted (#2369).**
+  `agent_loop(..., {step_judge: ...})` now defaults
+  `skip_when_iterations_remaining` to `1`, so single-turn and final-turn
+  loops do not spend their last turn on a veto that cannot be regenerated.
+  The skip is emitted as a `step_judge_decision` event with `skipped: true`
+  and `reason: "low_iteration_budget"`.
+
 ## v0.8.35
 
 ### Added

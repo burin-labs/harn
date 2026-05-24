@@ -464,6 +464,8 @@ pub enum AgentEvent {
     /// `on_veto` carries the configured remediation shape
     /// (`"replace"` or `"retain"`); `cost_usd` is best-effort from the
     /// stdlib economics estimator and may be 0 when pricing is unknown.
+    /// `skipped` marks configured short-circuits that did not call the
+    /// judge model.
     StepJudgeDecision {
         session_id: String,
         iteration: usize,
@@ -473,6 +475,10 @@ pub enum AgentEvent {
         confidence: f64,
         judge_duration_ms: u64,
         vetoed: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        skipped: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
         on_veto: String,
         input_tokens: u64,
         output_tokens: u64,
