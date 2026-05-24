@@ -344,8 +344,8 @@ fn run_eval_context(
 }
 
 fn run_tool_calls_regression(
-    current: &PathBuf,
-    against: &PathBuf,
+    current: &std::path::Path,
+    against: &std::path::Path,
     extra_env: &[(&str, &str)],
 ) -> SubprocessOutcome {
     run_harn(
