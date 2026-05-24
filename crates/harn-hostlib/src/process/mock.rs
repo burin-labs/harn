@@ -214,9 +214,7 @@ impl MockHandleController {
             });
         }
         drop(exit);
-        self.state.exit_cv.notify_all();
-        self.state.stdout_cv.notify_all();
-        self.state.stderr_cv.notify_all();
+        self.state.notify_exit_and_pipes();
     }
 
     /// Returns true if [`MockKiller::kill`] has been invoked since spawn.
@@ -310,9 +308,23 @@ impl MockState {
             outcome.killed = true;
         }
         drop(exit);
+        self.notify_exit_and_pipes();
+    }
+
+    fn notify_exit_and_pipes(&self) {
         self.exit_cv.notify_all();
-        self.stdout_cv.notify_all();
-        self.stderr_cv.notify_all();
+
+        // Pipe readers wait on the pipe mutex but also observe `exit`. Take
+        // the pipe locks before notifying so an exit cannot be signaled in the
+        // gap between a reader's exit check and its condvar wait.
+        {
+            let _stdout = self.stdout.lock().unwrap();
+            self.stdout_cv.notify_all();
+        }
+        {
+            let _stderr = self.stderr.lock().unwrap();
+            self.stderr_cv.notify_all();
+        }
     }
 }
 
