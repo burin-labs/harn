@@ -39,6 +39,8 @@ note = "Pure render of the embedded version string. W1 (#2297)."
 cold_ms = 250
 note = "Clap help render only — no LLM dispatch. W2 placeholder."
 
-[commands."trace import"]
-cold_ms = 250
-note = "Empty-input JSONL transform. W3 (#2303 merged 2026-05-23)."
+# [commands."trace import"]  — disabled in the bench until the runner
+# stops handing the script `/tmp` paths. The ported `.harn` impl
+# respects the workspace_roots sandbox; W3's command itself works in
+# real use, this is purely a benchmark-harness issue. See
+# scripts/_bench_cli_cold_start.py for the rationale and re-enable plan.
