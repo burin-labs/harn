@@ -85,8 +85,12 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
          (allow process*)\n\
          (allow sysctl-read)\n\
          (allow mach-lookup)\n\
+         (allow file-read-metadata)\n\
          (allow file-read-data (literal \"/\"))\n\
-         (allow file-write* (subpath \"/dev\"))\n",
+         (allow file-write* (subpath \"/dev\"))\n\
+         (allow file-read* (subpath \"/private/var/select\"))\n\
+         (allow file-read* (subpath \"/var/select\"))\n\
+         (allow file-read* (subpath \"/Library/Developer\"))\n",
     );
     for root in system_read_roots() {
         profile.push_str(&format!(
