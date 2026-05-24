@@ -1,0 +1,306 @@
+/**
+ * `harn doctor` rendering layer ported to .harn — see harn#2312 (W12).
+ *
+ * **Pragmatic partial port.** The actual probes (toolchain, providers,
+ * MCP, file permissions, manifest health, capability matrix, hardware
+ * snapshot, ollama, target probes) stay in Rust because each one
+ * reaches into a different VM/host facility (subprocess execution,
+ * `harn_vm::llm`, `notify::recommended_watcher`, `runtime_paths`,
+ * trigger registry snapshots, …) and is a multi-file refactor on its
+ * own. The Rust shim runs every check, assembles the structured
+ * `DoctorReport`, serialises it to JSON, and hands it across the
+ * dispatch wedge for formatting.
+ *
+ * What this script owns: the human-readable report layout (sections,
+ * pad widths, status uppercasing, suggested-fix indenting) and the
+ * pass-through of the JSON envelope. That's the surface a user reads
+ * or pipes into another tool, so it's the surface we want under .harn.
+ *
+ * Inputs (from the dispatch shim in
+ * crates/harn-cli/src/commands/doctor.rs):
+ *   HARN_DOCTOR_REPORT_JSON          — JSON-serialised `DoctorReport`
+ *     (see the struct in doctor.rs for the canonical shape).
+ *   HARN_DOCTOR_REPORT_ENVELOPE_JSON — JSON-serialised
+ *     `JsonEnvelope<DoctorReport>` — used verbatim for `--json` so the
+ *     byte stream matches the legacy `serde_json::to_string_pretty`
+ *     output (declaration-order field layout, `null` for absent
+ *     fields). Harn's `json_stringify_pretty` would alphabetise the
+ *     keys, which would break downstream JSON consumers that expect
+ *     the declared shape.
+ *   HARN_OUTPUT_JSON                 — "1" for the JSON envelope, else
+ *                                       human-readable text.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_int(value, fallback: int) -> int {
+  if type_of(value) == "int" {
+    return value
+  }
+  return fallback
+}
+
+/**
+ * Uppercase an ASCII status string (`ok` → `OK`, `warn` → `WARN`,
+ * etc). Harn's stdlib doesn't expose `to_uppercase` as a free
+ * builtin, so do the four cases by hand — there are only ever four
+ * status values.
+ */
+fn __status_upper(status: string) -> string {
+  if status == "ok" {
+    return "OK"
+  }
+  if status == "warn" {
+    return "WARN"
+  }
+  if status == "fail" {
+    return "FAIL"
+  }
+  if status == "skip" {
+    return "SKIP"
+  }
+  return status
+}
+
+/**
+ * Render the `checks:` section. Layout matches the legacy Rust impl:
+ *   `{status:>4}  {label:<24} {detail}`
+ * where status is uppercased, padded to width 4 with a leading space,
+ * and label is left-justified to width 24. Failing/warning checks
+ * also emit indented `fix:`, `docs:`, and `blocks:` lines beneath
+ * their primary row.
+ */
+fn __render_checks_section(checks: list) -> string {
+  var out = ""
+  for raw_check in checks {
+    let check = __safe_dict(raw_check)
+    let status = __safe_string(check["status"], "")
+    let label = __safe_string(check["label"], "")
+    let detail = __safe_string(check["detail"], "")
+    let status_upper = __status_upper(status)
+    let status_padded = str_pad(status_upper, 4, " ", "left")
+    let label_padded = str_pad(label, 24, " ", "right")
+    out = out + status_padded + "  " + label_padded + " " + detail + "\n"
+    if status != "ok" && status != "skip" {
+      let fix = check["fix_command"]
+      if type_of(fix) == "string" && fix != "" {
+        out = out + "       fix: " + fix + "\n"
+      }
+      let docs = check["docs_url"]
+      if type_of(docs) == "string" && docs != "" {
+        out = out + "       docs: " + docs + "\n"
+      }
+      let blocks = __safe_list(check["blocks"])
+      if len(blocks) > 0 {
+        out = out + "       blocks: " + join(blocks, ", ") + "\n"
+      }
+    }
+  }
+  return out
+}
+
+fn __render_targets_section(targets: list) -> string {
+  var out = "--- Targets ---\n"
+  for raw_target in targets {
+    let target = __safe_dict(raw_target)
+    let triple = __safe_string(target["triple"], "")
+    let triple_padded = str_pad(triple, 32, " ", "right")
+    let installed = if __safe_bool(target["installed"], false) {
+      "installed"
+    } else {
+      "missing"
+    }
+    let buildable_raw = target["buildable"]
+    let buildable = if buildable_raw == nil {
+      "not probed"
+    } else if __safe_bool(buildable_raw, false) {
+      "buildable"
+    } else {
+      "not buildable"
+    }
+    out = out + "  " + triple_padded + " " + installed + ", " + buildable + "\n"
+    let reasons = __safe_list(target["reasons"])
+    for reason in reasons {
+      if type_of(reason) == "string" {
+        out = out + "       " + reason + "\n"
+      }
+    }
+  }
+  return out
+}
+
+fn __render_providers_section(providers: list) -> string {
+  var out = "--- Providers ---\n"
+  for raw_provider in providers {
+    let provider = __safe_dict(raw_provider)
+    let name = __safe_string(provider["name"], "")
+    let name_padded = str_pad(name, 24, " ", "right")
+    let configured = if __safe_bool(provider["configured"], false) {
+      "configured"
+    } else {
+      "no credentials"
+    }
+    let probed = __safe_bool(provider["probed"], false)
+    let reachable_raw = provider["reachable"]
+    let latency_raw = provider["latency_ms"]
+    let reachable = if !probed {
+      "not probed"
+    } else if reachable_raw == nil {
+      "probed"
+    } else if __safe_bool(reachable_raw, false) {
+      if latency_raw == nil {
+        "reachable"
+      } else {
+        "reachable (" + to_string(latency_raw) + "ms)"
+      }
+    } else {
+      "unreachable"
+    }
+    out = out + "  " + name_padded + " " + configured + ", " + reachable + "\n"
+    let errors = __safe_list(provider["errors"])
+    for error in errors {
+      if type_of(error) == "string" {
+        out = out + "       " + error + "\n"
+      }
+    }
+  }
+  return out
+}
+
+fn __render_capabilities_section(capabilities: list) -> string {
+  var out = "--- Stdlib capabilities ---\n"
+  for raw_capability in capabilities {
+    let capability = __safe_dict(raw_capability)
+    let name = __safe_string(capability["name"], "")
+    let name_padded = str_pad(name, 24, " ", "right")
+    let profiles = __safe_list(capability["available_in_sandbox_profile"])
+    out = out + "  " + name_padded + " sandbox: " + join(profiles, ", ") + "\n"
+  }
+  return out
+}
+
+fn __render_summary_section(summary: dict) -> string {
+  var out = "--- Summary ---\n"
+  let ok_count = __safe_int(summary["ok"], 0)
+  let warn_count = __safe_int(summary["warning"], 0)
+  let fail_count = __safe_int(summary["blocking"], 0)
+  let skip_count = __safe_int(summary["skip"], 0)
+  out = out + "OK=" + to_string(ok_count)
+    + " WARN="
+    + to_string(warn_count)
+    + " FAIL="
+    + to_string(fail_count)
+    + " SKIP="
+    + to_string(skip_count)
+    + "\n"
+  let blocked = __safe_list(summary["blocked_flows"])
+  if len(blocked) > 0 {
+    out = out + "blocked: " + join(blocked, ", ") + "\n"
+  }
+  return out
+}
+
+/**
+ * Render the full human-readable report. Layout follows the legacy
+ * Rust impl byte-for-byte:
+ *   `Harn doctor\n`
+ *   `\n`
+ *   <checks>...
+ *   `\n`
+ *   `--- Targets ---\n` ...
+ *   `\n`
+ *   `--- Providers ---\n` ...
+ *   `\n`
+ *   `--- Stdlib capabilities ---\n` ...
+ *   `\n`
+ *   `--- Summary ---\n` ...
+ *   `\n`
+ *   `--- Next step ---\n`
+ *   <next_step>
+ */
+fn __render_human(report: dict) -> string {
+  var out = "Harn doctor\n\n"
+  out = out + __render_checks_section(__safe_list(report["checks"]))
+  out = out + "\n"
+  out = out + __render_targets_section(__safe_list(report["targets"]))
+  out = out + "\n"
+  out = out + __render_providers_section(__safe_list(report["providers"]))
+  out = out + "\n"
+  out = out + __render_capabilities_section(__safe_list(report["capabilities"]))
+  out = out + "\n"
+  out = out + __render_summary_section(__safe_dict(report["summary"]))
+  out = out + "\n"
+  out = out + "--- Next step ---\n"
+  out = out + __safe_string(report["next_step"], "")
+  return out
+}
+
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_DOCTOR_REPORT_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_DOCTOR_REPORT_JSON not set by dispatch shim")
+    return 70
+  }
+  let report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse doctor report: " + to_string(e))
+    return 70
+  }
+  if type_of(report) != "dict" {
+    harness.stdio.eprintln("internal error: doctor report must be a JSON object")
+    return 70
+  }
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    // Use the pre-serialised envelope from the Rust shim verbatim so
+    // the byte stream matches the legacy `serde_json::to_string_pretty`
+    // output (declaration-order field layout). Re-serialising via
+    // `json_stringify_pretty` here would alphabetise the keys.
+    let envelope_raw = harness.env.get_or("HARN_DOCTOR_REPORT_ENVELOPE_JSON", "")
+    if envelope_raw == "" {
+      harness.stdio
+        .eprintln("internal error: HARN_DOCTOR_REPORT_ENVELOPE_JSON not set by dispatch shim")
+      return 70
+    }
+    harness.stdio.println(envelope_raw)
+  } else {
+    // The legacy renderer ends with a single `println!("{next_step}")`
+    // so the buffer ends with one trailing newline. `__render_human`
+    // does not add that newline itself; let `harness.stdio.println`
+    // add exactly one to match.
+    harness.stdio.println(__render_human(report))
+  }
+  let summary = __safe_dict(report["summary"])
+  let blocking = __safe_int(summary["blocking"], 0)
+  if blocking > 0 {
+    return 1
+  }
+  return 0
+}
