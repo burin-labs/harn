@@ -3,6 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::http::{HeaderMap, HeaderValue};
+use harn_vm::mcp_auth::{
+    bearer_challenge_value, protected_resource_metadata_path, split_scope_value,
+    BearerChallengeError,
+};
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use serde::Deserialize;
@@ -177,32 +181,22 @@ impl OAuthResourceServer {
         mcp_path: &str,
         error: Option<OAuthChallengeError>,
     ) -> HeaderValue {
-        let mut parts = vec![format!(
-            "resource_metadata=\"{}\"",
-            quote_value(&self.resource_metadata_url(headers, mcp_path))
-        )];
-        if !self.config.scopes.is_empty() {
-            parts.push(format!(
-                "scope=\"{}\"",
-                quote_value(&self.config.scopes.join(" "))
-            ));
-        }
-        if let Some(error) = error {
-            let (code, description) = match error {
-                OAuthChallengeError::InvalidToken(description) => ("invalid_token", description),
-                OAuthChallengeError::InsufficientScope => (
-                    "insufficient_scope",
-                    "Token does not include the required MCP scope".to_string(),
-                ),
-            };
-            parts.insert(0, format!("error=\"{}\"", quote_value(code)));
-            parts.push(format!(
-                "error_description=\"{}\"",
-                quote_value(&description)
-            ));
-        }
-        HeaderValue::from_str(&format!("Bearer {}", parts.join(", ")))
-            .unwrap_or_else(|_| HeaderValue::from_static("Bearer"))
+        let error = error.as_ref().map(|error| match error {
+            OAuthChallengeError::InvalidToken(description) => BearerChallengeError {
+                code: "invalid_token",
+                description: Some(description.as_str()),
+            },
+            OAuthChallengeError::InsufficientScope => BearerChallengeError {
+                code: "insufficient_scope",
+                description: Some("Token does not include the required MCP scope"),
+            },
+        });
+        HeaderValue::from_str(&bearer_challenge_value(
+            &self.resource_metadata_url(headers, mcp_path),
+            &self.config.scopes,
+            error,
+        ))
+        .unwrap_or_else(|_| HeaderValue::from_static("Bearer"))
     }
 
     pub(crate) async fn validate_bearer(
@@ -277,7 +271,7 @@ impl OAuthResourceServer {
         if let Some(resource) = response.resource {
             audiences.extend(resource.into_vec());
         }
-        let mut scopes = parse_scope_string(response.scope.as_deref());
+        let mut scopes = split_scope_value(response.scope.as_deref());
         if let Some(scp) = response.scp {
             scopes.extend(scp.into_vec());
         }
@@ -402,15 +396,6 @@ pub(crate) enum OAuthChallengeError {
     InsufficientScope,
 }
 
-pub(crate) fn protected_resource_metadata_path(mcp_path: &str) -> String {
-    let mcp_path = normalize_path(mcp_path);
-    if mcp_path == "/" {
-        "/.well-known/oauth-protected-resource".to_string()
-    } else {
-        format!("/.well-known/oauth-protected-resource{mcp_path}")
-    }
-}
-
 fn token_claims_from_json(value: JsonValue) -> TokenClaims {
     let issuer = value
         .get("iss")
@@ -418,7 +403,7 @@ fn token_claims_from_json(value: JsonValue) -> TokenClaims {
         .map(ToString::to_string);
     let mut audiences = json_strings(value.get("aud"));
     audiences.extend(json_strings(value.get("resource")));
-    let mut scopes = parse_scope_string(value.get("scope").and_then(JsonValue::as_str));
+    let mut scopes = split_scope_value(value.get("scope").and_then(JsonValue::as_str));
     scopes.extend(json_strings(value.get("scp")));
     TokenClaims {
         issuer,
@@ -506,23 +491,9 @@ fn split_scope_env(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn parse_scope_string(value: Option<&str>) -> Vec<String> {
-    value
-        .unwrap_or_default()
-        .split_whitespace()
-        .map(str::trim)
-        .filter(|segment| !segment.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
 fn env_nonempty(name: &str) -> Option<String> {
     std::env::var(name)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-fn quote_value(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
 }

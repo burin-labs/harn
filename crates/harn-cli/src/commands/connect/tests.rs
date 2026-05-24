@@ -507,7 +507,7 @@ fn spawn_generic_mcp_oauth_server() -> (String, thread::JoinHandle<()>) {
     let base_url = format!("http://127.0.0.1:{port}");
     let server_base_url = base_url.clone();
     let handle = thread::spawn(move || {
-        for _ in 0..3 {
+        for _ in 0..4 {
             let (mut stream, _) = listener.accept().expect("oauth request");
             let request = read_http_request(&mut stream);
             let path = request
@@ -515,21 +515,31 @@ fn spawn_generic_mcp_oauth_server() -> (String, thread::JoinHandle<()>) {
                 .next()
                 .and_then(|line| line.split_whitespace().nth(1))
                 .unwrap_or("/");
-            if path.starts_with("/.well-known/oauth-protected-resource/mcp/notion") {
+            if path.starts_with("/mcp/notion") {
+                write_response(
+                    &mut stream,
+                    &format!(
+                        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer resource_metadata=\"{server_base_url}/.well-known/oauth-protected-resource/mcp/notion\", scope=\"mcp.read\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    ),
+                );
+            } else if path.starts_with("/.well-known/oauth-protected-resource/mcp/notion") {
                 write_json_response(
                     &mut stream,
-                    &format!(r#"{{"authorization_servers":["{server_base_url}/oauth"]}}"#),
+                    &format!(
+                        r#"{{"authorization_servers":["{server_base_url}/oauth"],"scopes_supported":["mcp.read"]}}"#
+                    ),
                 );
             } else if path.starts_with("/.well-known/oauth-authorization-server/oauth") {
                 write_json_response(
                     &mut stream,
                     &format!(
-                        r#"{{"authorization_endpoint":"{server_base_url}/oauth/authorize","token_endpoint":"{server_base_url}/oauth/token","registration_endpoint":"{server_base_url}/oauth/register","code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["none","client_secret_post"]}}"#
+                        r#"{{"issuer":"{server_base_url}/oauth","authorization_endpoint":"{server_base_url}/oauth/authorize","token_endpoint":"{server_base_url}/oauth/token","registration_endpoint":"{server_base_url}/oauth/register","code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["none","client_secret_post"]}}"#
                     ),
                 );
             } else if path.starts_with("/oauth/register") {
                 assert!(request.contains("http://127.0.0.1:49152/oauth/callback"));
                 assert!(request.contains("mcp.read"));
+                assert!(request.contains("\"application_type\":\"native\""));
                 write_json_response(
                     &mut stream,
                     r#"{"client_id":"dynamic-client","token_endpoint_auth_method":"none"}"#,

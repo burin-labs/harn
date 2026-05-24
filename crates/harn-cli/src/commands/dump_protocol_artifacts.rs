@@ -124,6 +124,13 @@ const MCP_RESULT_TYPES: &[&str] = &["complete", "input_required"];
 const MCP_INPUT_REQUIRED_RESULT_TYPE: &str = "input_required";
 const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: i32 = -32004;
 const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE: &str = "Unsupported protocol version";
+const MCP_OAUTH_CLIENT_REGISTRATION_MODES: &[&str] = &[
+    "pre_registered",
+    "client_id_metadata_document",
+    "dynamic_client_registration",
+    "manual",
+];
+const MCP_OAUTH_APPLICATION_TYPES: &[&str] = &["native", "web"];
 const MCP_LOGGING_LEVELS: &[&str] = &[
     "debug",
     "info",
@@ -366,6 +373,8 @@ fn generate_manifest() -> Result<String, String> {
                 "code": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE,
                 "message": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE,
             },
+            "oauthClientRegistrationModes": MCP_OAUTH_CLIENT_REGISTRATION_MODES,
+            "oauthApplicationTypes": MCP_OAUTH_APPLICATION_TYPES,
             "loggingLevels": MCP_LOGGING_LEVELS,
         },
         "receipts": {
@@ -598,6 +607,16 @@ fn generate_typescript() -> String {
         "MCP_LOGGING_LEVELS",
         MCP_LOGGING_LEVELS,
         "MCPLoggingLevel",
+    ));
+    out.push_str(&ts_array(
+        "MCP_OAUTH_CLIENT_REGISTRATION_MODES",
+        MCP_OAUTH_CLIENT_REGISTRATION_MODES,
+        "MCPOAuthClientRegistrationMode",
+    ));
+    out.push_str(&ts_array(
+        "MCP_OAUTH_APPLICATION_TYPES",
+        MCP_OAUTH_APPLICATION_TYPES,
+        "MCPOAuthApplicationType",
     ));
 
     out.push_str(
@@ -951,6 +970,53 @@ export interface MCPPrompt {
   arguments?: ACPObject[]
 }
 
+export interface MCPOAuthProtectedResourceMetadata {
+  resource?: string
+  authorization_servers: string[]
+  scopes_supported?: string[]
+  bearer_methods_supported?: string[]
+  [key: string]: ACPValue | undefined
+}
+
+export interface MCPOAuthAuthorizationServerMetadata {
+  issuer: string
+  authorization_endpoint: string
+  token_endpoint: string
+  registration_endpoint?: string
+  token_endpoint_auth_methods_supported?: string[]
+  code_challenge_methods_supported?: string[]
+  scopes_supported?: string[]
+  client_id_metadata_document_supported?: boolean
+  authorization_response_iss_parameter_supported?: boolean
+  [key: string]: ACPValue | undefined
+}
+
+export interface MCPOAuthWwwAuthenticateChallenge {
+  scheme: string
+  params: Record<string, string>
+}
+
+export interface MCPOAuthDiscoveryResult {
+  protectedResourceMetadataUrl: string
+  protectedResourceMetadata: MCPOAuthProtectedResourceMetadata
+  authorizationServerIssuer: string
+  authorizationServerMetadataUrl: string
+  authorizationServerMetadataKind: "oauth_authorization_server" | "openid_configuration"
+  authorizationServerMetadata: MCPOAuthAuthorizationServerMetadata
+  challenge?: MCPOAuthWwwAuthenticateChallenge
+  scopes: string[]
+}
+
+export interface MCPOAuthDynamicClientRegistrationRequest {
+  client_name: string
+  redirect_uris: string[]
+  grant_types: string[]
+  response_types: string[]
+  token_endpoint_auth_method: string
+  application_type: MCPOAuthApplicationType
+  scope?: string
+}
+
 export function isRequest(msg: ACPMessage): msg is ACPRequest {
   return "id" in msg && "method" in msg
 }
@@ -1025,6 +1091,14 @@ fn generate_swift() -> String {
     out.push_str(&swift_string_array(
         "mcpCacheResultFields",
         MCP_CACHE_RESULT_FIELDS,
+    ));
+    out.push_str(&swift_string_array(
+        "mcpOAuthClientRegistrationModes",
+        MCP_OAUTH_CLIENT_REGISTRATION_MODES,
+    ));
+    out.push_str(&swift_string_array(
+        "mcpOAuthApplicationTypes",
+        MCP_OAUTH_APPLICATION_TYPES,
     ));
     out.push_str(&swift_string_array(
         "acpSessionUpdateExtensions",
@@ -1115,6 +1189,14 @@ fn generate_swift() -> String {
     out.push_str(&swift_enum(
         "HarnMCPLoggingLevel",
         &strs_to_strings(MCP_LOGGING_LEVELS),
+    ));
+    out.push_str(&swift_enum(
+        "HarnMCPOAuthClientRegistrationMode",
+        &strs_to_strings(MCP_OAUTH_CLIENT_REGISTRATION_MODES),
+    ));
+    out.push_str(&swift_enum(
+        "HarnMCPOAuthApplicationType",
+        &strs_to_strings(MCP_OAUTH_APPLICATION_TYPES),
     ));
 
     out.push_str(
@@ -1861,6 +1943,80 @@ public struct HarnMCPPrompt: Codable, Sendable, Equatable {
     public var title: String?
     public var description: String?
     public var arguments: [HarnACPObject]?
+}
+
+public struct HarnMCPOAuthProtectedResourceMetadata: Codable, Sendable, Equatable {
+    public var resource: String?
+    public var authorizationServers: [String]
+    public var scopesSupported: [String]?
+    public var bearerMethodsSupported: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case resource
+        case authorizationServers = "authorization_servers"
+        case scopesSupported = "scopes_supported"
+        case bearerMethodsSupported = "bearer_methods_supported"
+    }
+}
+
+public struct HarnMCPOAuthAuthorizationServerMetadata: Codable, Sendable, Equatable {
+    public var issuer: String
+    public var authorizationEndpoint: String
+    public var tokenEndpoint: String
+    public var registrationEndpoint: String?
+    public var tokenEndpointAuthMethodsSupported: [String]?
+    public var codeChallengeMethodsSupported: [String]?
+    public var scopesSupported: [String]?
+    public var clientIdMetadataDocumentSupported: Bool?
+    public var authorizationResponseIssParameterSupported: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case issuer
+        case authorizationEndpoint = "authorization_endpoint"
+        case tokenEndpoint = "token_endpoint"
+        case registrationEndpoint = "registration_endpoint"
+        case tokenEndpointAuthMethodsSupported = "token_endpoint_auth_methods_supported"
+        case codeChallengeMethodsSupported = "code_challenge_methods_supported"
+        case scopesSupported = "scopes_supported"
+        case clientIdMetadataDocumentSupported = "client_id_metadata_document_supported"
+        case authorizationResponseIssParameterSupported = "authorization_response_iss_parameter_supported"
+    }
+}
+
+public struct HarnMCPOAuthWwwAuthenticateChallenge: Codable, Sendable, Equatable {
+    public var scheme: String
+    public var params: [String: String]
+}
+
+public struct HarnMCPOAuthDiscoveryResult: Codable, Sendable, Equatable {
+    public var protectedResourceMetadataUrl: String
+    public var protectedResourceMetadata: HarnMCPOAuthProtectedResourceMetadata
+    public var authorizationServerIssuer: String
+    public var authorizationServerMetadataUrl: String
+    public var authorizationServerMetadataKind: String
+    public var authorizationServerMetadata: HarnMCPOAuthAuthorizationServerMetadata
+    public var challenge: HarnMCPOAuthWwwAuthenticateChallenge?
+    public var scopes: [String]
+}
+
+public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, Equatable {
+    public var clientName: String
+    public var redirectUris: [String]
+    public var grantTypes: [String]
+    public var responseTypes: [String]
+    public var tokenEndpointAuthMethod: String
+    public var applicationType: HarnMCPOAuthApplicationType
+    public var scope: String?
+
+    enum CodingKeys: String, CodingKey {
+        case clientName = "client_name"
+        case redirectUris = "redirect_uris"
+        case grantTypes = "grant_types"
+        case responseTypes = "response_types"
+        case tokenEndpointAuthMethod = "token_endpoint_auth_method"
+        case applicationType = "application_type"
+        case scope
+    }
 }
 "#,
     );
@@ -3619,6 +3775,9 @@ mod tests {
         assert!(ts.contains("export interface MCPRequestMeta"));
         assert!(ts.contains("export interface MCPDiscoverResult"));
         assert!(ts.contains("export interface MCPInputRequiredResult"));
+        assert!(ts.contains("export interface MCPOAuthDiscoveryResult"));
+        assert!(ts.contains("MCP_OAUTH_CLIENT_REGISTRATION_MODES"));
+        assert!(ts.contains("application_type: MCPOAuthApplicationType"));
         assert!(ts.contains("MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR"));
         assert!(ts.contains("server/discover"));
         assert!(ts.contains("io.modelcontextprotocol/protocolVersion"));
@@ -3640,6 +3799,9 @@ mod tests {
         assert!(swift.contains("public struct HarnMCPRequestMeta"));
         assert!(swift.contains("public struct HarnMCPDiscoverResult"));
         assert!(swift.contains("public struct HarnMCPInputRequiredResult"));
+        assert!(swift.contains("public struct HarnMCPOAuthDiscoveryResult"));
+        assert!(swift.contains("public enum HarnMCPOAuthClientRegistrationMode"));
+        assert!(swift.contains("case applicationType = \"application_type\""));
         assert!(swift.contains("HarnMCPUnsupportedProtocolVersionError"));
         assert!(
             swift.contains("case protocolVersion = \"io.modelcontextprotocol/protocolVersion\"")

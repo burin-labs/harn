@@ -1,5 +1,11 @@
 use base64::Engine;
-use serde::Deserialize;
+use harn_vm::mcp_auth::{
+    determine_token_endpoint_auth_method, discover_mcp_oauth, dynamic_client_registration_body,
+    ensure_pkce_s256_supported, select_client_registration_mode,
+    validate_authorization_response_issuer, validate_issuer_binding,
+    validate_token_endpoint_auth_method, OAuthClientRegistrationMode,
+    OAuthClientRegistrationOptions,
+};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use url::Url;
@@ -7,14 +13,14 @@ use url::Url;
 use crate::cli::{ConnectGenericArgs, ConnectLinearArgs, ConnectOAuthArgs};
 use crate::package::{self, ProviderOAuthManifest};
 
-use super::callback::{bind_loopback_listener, wait_for_oauth_code};
+use super::callback::{bind_loopback_listener, wait_for_oauth_response};
 use super::store::{
     connector_token_summary, current_unix_timestamp, format_expiry, load_connector_token,
     save_connector_token,
 };
 use super::{
-    DynamicClientRegistrationResponse, OAuthConnectRequest, OAuthProtectedResource,
-    OAuthProviderDefaults, OAuthServerMetadata, StoredConnectorToken, TokenResponse,
+    DynamicClientRegistrationResponse, OAuthConnectRequest, OAuthProviderDefaults,
+    OAuthServerMetadata, StoredConnectorToken, TokenResponse,
 };
 
 pub(super) async fn run_connect_named_oauth(
@@ -209,6 +215,9 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
     };
     if let Some(discovery) = discovery.as_ref() {
         ensure_pkce_support(&discovery.metadata)?;
+        if request.scopes.is_none() && !discovery.scopes.is_empty() {
+            request.scopes = Some(discovery.scopes.join(" "));
+        }
     }
 
     let authorization_endpoint = request
@@ -262,7 +271,10 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
         println!("Open this URL manually:\n{auth_url}");
     }
 
-    let code = wait_for_oauth_code(listener, &redirect_uri, &state)?;
+    let callback = wait_for_oauth_response(listener, &redirect_uri, &state)?;
+    if let Some(discovery) = discovery.as_ref() {
+        validate_authorization_response_issuer(&discovery.metadata, callback.issuer.as_deref())?;
+    }
     let token = exchange_authorization_code(
         &token_endpoint,
         AuthorizationCodeExchange {
@@ -272,7 +284,7 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
             redirect_uri: &redirect_uri,
             resource: &request.resource,
             scopes: request.scopes.as_deref(),
-            code: &code,
+            code: &callback.code,
             code_verifier: &code_verifier,
         },
     )
@@ -289,6 +301,7 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
         client_id,
         client_secret,
         token_endpoint_auth_method: token_auth_method,
+        issuer: discovery.as_ref().map(|discovery| discovery.issuer.clone()),
         resource: request.resource.clone(),
         scopes: request.scopes.clone(),
         connected_at_unix: current_unix_timestamp(),
@@ -324,6 +337,26 @@ pub(super) async fn resolve_oauth_client(
     discovery: Option<&OAuthDiscoveryResult>,
     registration_endpoint: Option<&str>,
 ) -> Result<(String, Option<String>, String), String> {
+    let registration_mode = discovery
+        .map(|discovery| {
+            select_client_registration_mode(
+                &discovery.metadata,
+                OAuthClientRegistrationOptions {
+                    client_id: request.client_id.as_deref(),
+                    client_secret: request.client_secret.as_deref(),
+                    client_id_metadata_document_url: request.client_id.as_deref(),
+                },
+            )
+        })
+        .unwrap_or_else(|| {
+            if request.client_id.is_some() {
+                OAuthClientRegistrationMode::PreRegistered
+            } else if registration_endpoint.is_some() {
+                OAuthClientRegistrationMode::DynamicClientRegistration
+            } else {
+                OAuthClientRegistrationMode::Manual
+            }
+        });
     if let Some(client_id) = request.client_id.clone() {
         let token_auth_method = request
             .token_auth_method
@@ -345,6 +378,11 @@ pub(super) async fn resolve_oauth_client(
         return Ok((client_id, request.client_secret.clone(), token_auth_method));
     }
 
+    if registration_mode != OAuthClientRegistrationMode::DynamicClientRegistration {
+        return Err(
+            "No client_id available. Supply --client-id, use a Client ID Metadata Document URL as --client-id when supported, or use a server that supports dynamic client registration.".to_string()
+        );
+    }
     let registration_endpoint = registration_endpoint.ok_or_else(|| {
         "No client_id available. Supply --client-id or use a server that supports dynamic client registration.".to_string()
     })?;
@@ -375,9 +413,15 @@ pub(super) async fn run_connect_refresh(
     let refresh_token = stored.refresh_token.clone().ok_or_else(|| {
         format!("stored connector token for {provider_name} does not include a refresh token")
     })?;
+    let mut token_endpoint = stored.token_endpoint.clone();
+    if let Some(stored_issuer) = stored.issuer.as_deref() {
+        let discovery = discover_oauth_server(&stored.resource).await?;
+        validate_issuer_binding(stored_issuer, &discovery.issuer)?;
+        token_endpoint = discovery.metadata.token_endpoint;
+    }
     let refreshed = request_token(
         &reqwest::Client::new(),
-        &stored.token_endpoint,
+        &token_endpoint,
         &stored.token_endpoint_auth_method,
         &stored.client_id,
         stored.client_secret.as_deref(),
@@ -394,6 +438,7 @@ pub(super) async fn run_connect_refresh(
     stored.expires_at_unix = refreshed
         .expires_in
         .map(|seconds| current_unix_timestamp().saturating_add(seconds));
+    stored.token_endpoint = token_endpoint;
     stored.last_used_at_unix = Some(current_unix_timestamp());
     save_connector_token(&stored).await?;
 
@@ -410,112 +455,19 @@ pub(super) async fn run_connect_refresh(
 }
 
 pub(super) async fn discover_oauth_server(resource: &str) -> Result<OAuthDiscoveryResult, String> {
-    let resource_url =
-        Url::parse(resource).map_err(|error| format!("Invalid resource URL: {error}"))?;
-    let resource_metadata =
-        fetch_first_json::<OAuthProtectedResource>(&protected_resource_candidates(&resource_url))
-            .await?
-            .ok_or_else(|| "OAuth protected resource metadata not found".to_string())?;
-    let auth_server_url = resource_metadata
-        .authorization_servers
-        .first()
-        .cloned()
-        .ok_or_else(|| {
-            "OAuth protected resource metadata did not advertise an authorization server"
-                .to_string()
-        })?;
-    let auth_server = Url::parse(&auth_server_url).map_err(|error| {
-        format!("Invalid authorization server URL '{auth_server_url}': {error}")
-    })?;
-    let metadata =
-        fetch_first_json::<OAuthServerMetadata>(&authorization_server_candidates(&auth_server))
-            .await?
-            .ok_or_else(|| "Authorization server metadata not found".to_string())?;
-    Ok(OAuthDiscoveryResult { metadata })
-}
-
-pub(super) fn protected_resource_candidates(resource_url: &Url) -> Vec<Url> {
-    let mut urls = Vec::new();
-    let path = resource_url
-        .path()
-        .trim_start_matches('/')
-        .trim_end_matches('/');
-    if !path.is_empty() {
-        let mut url = resource_url.clone();
-        url.set_path(&format!("/.well-known/oauth-protected-resource/{path}"));
-        url.set_query(None);
-        url.set_fragment(None);
-        urls.push(url);
-    }
-    let mut root = resource_url.clone();
-    root.set_path("/.well-known/oauth-protected-resource");
-    root.set_query(None);
-    root.set_fragment(None);
-    urls.push(root);
-    urls
-}
-
-pub(super) fn authorization_server_candidates(auth_server_url: &Url) -> Vec<Url> {
-    let mut urls = Vec::new();
-    let path = auth_server_url.path().trim_end_matches('/');
-    if !path.is_empty() && path != "/" {
-        let trimmed = path.trim_start_matches('/');
-        let mut oauth = auth_server_url.clone();
-        oauth.set_path(&format!(
-            "/.well-known/oauth-authorization-server/{trimmed}"
-        ));
-        oauth.set_query(None);
-        oauth.set_fragment(None);
-        urls.push(oauth);
-
-        let mut oidc = auth_server_url.clone();
-        oidc.set_path(&format!("/.well-known/openid-configuration/{trimmed}"));
-        oidc.set_query(None);
-        oidc.set_fragment(None);
-        urls.push(oidc);
-    }
-
-    let mut oauth = auth_server_url.clone();
-    oauth.set_path("/.well-known/oauth-authorization-server");
-    oauth.set_query(None);
-    oauth.set_fragment(None);
-    urls.push(oauth);
-
-    let mut oidc = auth_server_url.clone();
-    oidc.set_path("/.well-known/openid-configuration");
-    oidc.set_query(None);
-    oidc.set_fragment(None);
-    urls.push(oidc);
-    urls
-}
-
-pub(super) async fn fetch_first_json<T: for<'de> Deserialize<'de>>(
-    candidates: &[Url],
-) -> Result<Option<T>, String> {
     let client = reqwest::Client::new();
-    for candidate in candidates {
-        let response = match client.get(candidate.clone()).send().await {
-            Ok(response) => response,
-            Err(_) => continue,
-        };
-        if !response.status().is_success() {
-            continue;
-        }
-        let parsed = response
-            .json::<T>()
-            .await
-            .map_err(|error| format!("Failed to parse {}: {error}", candidate))?;
-        return Ok(Some(parsed));
-    }
-    Ok(None)
+    let discovery = discover_mcp_oauth(&client, resource)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(OAuthDiscoveryResult {
+        metadata: discovery.authorization_server_metadata,
+        issuer: discovery.authorization_server_issuer,
+        scopes: discovery.scopes,
+    })
 }
 
 pub(super) fn ensure_pkce_support(metadata: &OAuthServerMetadata) -> Result<(), String> {
-    let methods = &metadata.code_challenge_methods_supported;
-    if methods.is_empty() || methods.iter().any(|method| method == "S256") {
-        return Ok(());
-    }
-    Err("Authorization server does not advertise PKCE S256 support".to_string())
+    ensure_pkce_s256_supported(metadata)
 }
 
 pub(super) async fn dynamic_client_registration(
@@ -524,16 +476,7 @@ pub(super) async fn dynamic_client_registration(
     scopes: Option<&str>,
 ) -> Result<DynamicClientRegistrationResponse, String> {
     let client = reqwest::Client::new();
-    let mut body = serde_json::json!({
-        "client_name": "Harn CLI",
-        "redirect_uris": [redirect_uri],
-        "grant_types": ["authorization_code", "refresh_token"],
-        "response_types": ["code"],
-        "token_endpoint_auth_method": "none",
-    });
-    if let Some(scopes) = scopes {
-        body["scope"] = serde_json::json!(scopes);
-    }
+    let body = dynamic_client_registration_body("Harn CLI", [redirect_uri], scopes);
     let response = client
         .post(registration_endpoint)
         .json(&body)
@@ -557,33 +500,11 @@ pub(super) fn determine_token_auth_method(
     metadata: &OAuthServerMetadata,
     client_secret: Option<&String>,
 ) -> Result<String, String> {
-    let methods = &metadata.token_endpoint_auth_methods_supported;
-    if client_secret.is_some() {
-        if methods.is_empty() || methods.iter().any(|method| method == "client_secret_post") {
-            return Ok("client_secret_post".to_string());
-        }
-        if methods.iter().any(|method| method == "client_secret_basic") {
-            return Ok("client_secret_basic".to_string());
-        }
-        return Err(
-            "Authorization server does not support client_secret_post or client_secret_basic"
-                .to_string(),
-        );
-    }
-
-    if methods.is_empty() || methods.iter().any(|method| method == "none") {
-        return Ok("none".to_string());
-    }
-    Err("Authorization server requires client authentication. Supply --client-secret or configure a registered client.".to_string())
+    determine_token_endpoint_auth_method(metadata, client_secret.map(String::as_str))
 }
 
 pub(super) fn validate_token_auth_method(method: &str) -> Result<(), String> {
-    match method {
-        "none" | "client_secret_post" | "client_secret_basic" => Ok(()),
-        other => Err(format!(
-            "unsupported token auth method '{other}'; expected none, client_secret_post, or client_secret_basic"
-        )),
-    }
+    validate_token_endpoint_auth_method(method)
 }
 
 pub(super) fn build_authorization_url(
@@ -714,4 +635,6 @@ pub(super) fn random_hex(bytes: usize) -> String {
 
 pub(super) struct OAuthDiscoveryResult {
     pub(super) metadata: OAuthServerMetadata,
+    pub(super) issuer: String,
+    pub(super) scopes: Vec<String>,
 }

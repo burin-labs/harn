@@ -85,6 +85,11 @@ harn mcp serve \
 
 ## Auth
 
+MCP OAuth applies only to HTTP transports. Local stdio servers are launched by
+the client process and should receive credentials through the launch
+environment or client-specific secret configuration, not through HTTP
+`WWW-Authenticate`, protected-resource metadata, or bearer-token refresh.
+
 For HTTP transports, prefer OAuth resource-server mode. Set
 `HARN_MCP_OAUTH_AUTHORIZATION_SERVERS` to a comma-separated list of issuer URLs
 and configure exactly how the MCP server validates bearer tokens:
@@ -106,8 +111,9 @@ Recommended production settings:
   for the MCP control plane
 
 When OAuth mode is configured, unauthenticated HTTP requests return `401` with
-`WWW-Authenticate: Bearer resource_metadata="..."`, and the server publishes
-RFC 9728 protected resource metadata at both:
+`WWW-Authenticate: Bearer resource_metadata="..."`. The challenge includes
+`scope="..."` when `HARN_MCP_OAUTH_SCOPES` is set. The server publishes RFC
+9728 protected resource metadata at both:
 
 - `/.well-known/oauth-protected-resource`
 - `/.well-known/oauth-protected-resource/<mcp-path>`
@@ -115,8 +121,8 @@ RFC 9728 protected resource metadata at both:
 The metadata includes `authorization_servers`, the canonical `resource`, and
 `scopes_supported` when scopes are configured. Access tokens must be sent on
 every HTTP request as `Authorization: Bearer <token>`. Tokens are rejected when
-they are inactive, expired, issued for a different audience/resource, or missing
-required scopes.
+they are inactive, expired, issued for a different audience/resource or issuer,
+or missing required scopes.
 
 `HARN_ORCHESTRATOR_API_KEYS` remains available as a legacy compatibility mode.
 Set it to a comma-separated key list to require API keys.
@@ -126,9 +132,8 @@ HTTP clients can authenticate with either:
 - `Authorization: Bearer <key>`
 - `x-api-key: <key>`
 
-Stdio clients, and legacy HTTP clients that do not yet send an Authorization
-header, can authenticate during `initialize` using a deprecated Harn extension
-field:
+Legacy clients that do not yet send an Authorization header can authenticate
+during `initialize` using a deprecated Harn extension field:
 
 ```json
 {

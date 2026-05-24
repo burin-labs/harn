@@ -316,6 +316,20 @@ export const MCP_LOGGING_LEVELS = [
 ] as const
 export type MCPLoggingLevel = (typeof MCP_LOGGING_LEVELS)[number]
 
+export const MCP_OAUTH_CLIENT_REGISTRATION_MODES = [
+  "pre_registered",
+  "client_id_metadata_document",
+  "dynamic_client_registration",
+  "manual",
+] as const
+export type MCPOAuthClientRegistrationMode = (typeof MCP_OAUTH_CLIENT_REGISTRATION_MODES)[number]
+
+export const MCP_OAUTH_APPLICATION_TYPES = [
+  "native",
+  "web",
+] as const
+export type MCPOAuthApplicationType = (typeof MCP_OAUTH_APPLICATION_TYPES)[number]
+
 
 export type ACPObject = { [key: string]: ACPValue }
 export type ACPValue = null | boolean | number | string | ACPValue[] | ACPObject
@@ -664,6 +678,53 @@ export interface MCPPrompt {
   title?: string
   description?: string
   arguments?: ACPObject[]
+}
+
+export interface MCPOAuthProtectedResourceMetadata {
+  resource?: string
+  authorization_servers: string[]
+  scopes_supported?: string[]
+  bearer_methods_supported?: string[]
+  [key: string]: ACPValue | undefined
+}
+
+export interface MCPOAuthAuthorizationServerMetadata {
+  issuer: string
+  authorization_endpoint: string
+  token_endpoint: string
+  registration_endpoint?: string
+  token_endpoint_auth_methods_supported?: string[]
+  code_challenge_methods_supported?: string[]
+  scopes_supported?: string[]
+  client_id_metadata_document_supported?: boolean
+  authorization_response_iss_parameter_supported?: boolean
+  [key: string]: ACPValue | undefined
+}
+
+export interface MCPOAuthWwwAuthenticateChallenge {
+  scheme: string
+  params: Record<string, string>
+}
+
+export interface MCPOAuthDiscoveryResult {
+  protectedResourceMetadataUrl: string
+  protectedResourceMetadata: MCPOAuthProtectedResourceMetadata
+  authorizationServerIssuer: string
+  authorizationServerMetadataUrl: string
+  authorizationServerMetadataKind: "oauth_authorization_server" | "openid_configuration"
+  authorizationServerMetadata: MCPOAuthAuthorizationServerMetadata
+  challenge?: MCPOAuthWwwAuthenticateChallenge
+  scopes: string[]
+}
+
+export interface MCPOAuthDynamicClientRegistrationRequest {
+  client_name: string
+  redirect_uris: string[]
+  grant_types: string[]
+  response_types: string[]
+  token_endpoint_auth_method: string
+  application_type: MCPOAuthApplicationType
+  scope?: string
 }
 
 export function isRequest(msg: ACPMessage): msg is ACPRequest {

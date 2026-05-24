@@ -1007,6 +1007,11 @@ standalone CLI reuse. Treat that as durable delegated access:
 
 - prefer the narrowest scopes the server supports
 - treat configured `client_secret` values as secrets
+- expect HTTP MCP servers to publish RFC 9728 protected-resource metadata and
+  OAuth/OIDC authorization-server metadata; Harn validates issuer binding before
+  storing or refreshing tokens
+- use local environment variables or client-managed secrets for stdio MCP
+  servers; the HTTP OAuth discovery flow does not apply to local stdio launches
 - review remote MCP capabilities before wiring them into autonomous workflows
 
 ### Safer write defaults

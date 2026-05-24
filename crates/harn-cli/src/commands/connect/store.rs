@@ -300,6 +300,7 @@ pub(super) fn connector_token_summary(token: &StoredConnectorToken) -> JsonValue
         "connected_at_unix": token.connected_at_unix,
         "last_used_at_unix": token.last_used_at_unix,
         "resource": token.resource,
+        "issuer": token.issuer,
     })
 }
 
