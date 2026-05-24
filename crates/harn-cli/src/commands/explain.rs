@@ -5,7 +5,15 @@ use serde::Serialize;
 
 use crate::cli::{CatalogFormat, ExplainArgs};
 use crate::commands::diagnostics_catalog;
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
+
+/// Env var the embedded `cli/explain` script reads to find the
+/// pre-serialized diagnostic entry. The dispatch shim does the
+/// `Code::from_str` lookup in Rust (rather than exposing the diagnostic
+/// registry as a new VM builtin) and hands the result off as JSON.
+const EXPLAIN_ENTRY_ENV: &str = "HARN_EXPLAIN_ENTRY_JSON";
 
 /// JSON envelope returned by `harn explain <CODE> --json`. Stable shape —
 /// downstream tooling (LSPs, IDEs, hosted error pages, agents) can dispatch
@@ -35,7 +43,14 @@ struct RepairEnvelope<'a> {
     summary: &'a str,
 }
 
-pub(crate) fn run_explain(args: &ExplainArgs) -> i32 {
+/// Run `harn explain`. Dispatches the single-code render path to the
+/// embedded `cli/explain.harn` script (see harn#2304 / W4) by default.
+/// `--catalog`, `--invariant`, and `HARN_CLI_IMPL=rust` keep the legacy
+/// Rust handlers — the first two by design (see the script docstring;
+/// catalog is a codegen tool, invariant is the legacy control-flow path
+/// explainer that is explicitly out of scope), the third for the
+/// parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
+pub(crate) async fn run_explain(args: &ExplainArgs) -> i32 {
     if args.catalog {
         return run_catalog(args.format);
     }
@@ -66,10 +81,75 @@ pub(crate) fn run_explain(args: &ExplainArgs) -> i32 {
         }
     };
 
-    if args.json {
-        print_code_json(code)
-    } else {
-        print_code_text(code)
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        return if args.json {
+            print_code_json(code)
+        } else {
+            print_code_text(code)
+        };
+    }
+
+    run_explain_dispatch(code, args.json).await
+}
+
+/// Run the embedded `cli/explain.harn` script for the single-code render
+/// path. The shim pre-serialises the diagnostic entry as JSON and
+/// forwards it via [`EXPLAIN_ENTRY_ENV`] — the script just parses and
+/// renders, so the diagnostic registry stays the Rust side's single
+/// source of truth without needing a new VM builtin.
+async fn run_explain_dispatch(code: Code, json: bool) -> i32 {
+    let payload = build_entry_payload(code);
+    let entry_json = match serde_json::to_string(&payload) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("failed to serialise diagnostic entry: {error}");
+            return 1;
+        }
+    };
+    let _entry = ScopedEnvVar::set(EXPLAIN_ENTRY_ENV, &entry_json);
+    dispatch::dispatch_to_embedded_script("explain", Vec::new(), json).await
+}
+
+/// Per-entry payload the `.harn` script renders. Kept structurally
+/// distinct from [`ExplainEnvelope`] so the wire format the script sees
+/// can evolve independently of the user-visible JSON envelope.
+#[derive(Debug, Serialize)]
+struct EntryPayload<'a> {
+    code: &'a str,
+    category: &'a str,
+    summary: &'a str,
+    explanation: &'a str,
+    repair: Option<RepairEnvelope<'a>>,
+    related: Vec<RelatedEntry<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct RelatedEntry<'a> {
+    code: &'a str,
+    summary: &'a str,
+}
+
+fn build_entry_payload(code: Code) -> EntryPayload<'static> {
+    let repair = code.repair_template().map(|template| RepairEnvelope {
+        id: template.id,
+        safety: template.safety.as_str(),
+        summary: template.summary,
+    });
+    let related = code
+        .related()
+        .iter()
+        .map(|other| RelatedEntry {
+            code: other.as_str(),
+            summary: other.summary(),
+        })
+        .collect();
+    EntryPayload {
+        code: code.as_str(),
+        category: code.category().as_str(),
+        summary: code.summary(),
+        explanation: code.explanation(),
+        repair,
+        related,
     }
 }
 
@@ -219,15 +299,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn explain_code_text_succeeds_for_registered_code() {
-        let code = run_explain(&args_for_code("HARN-TYP-014", false));
+    #[tokio::test]
+    async fn explain_code_text_succeeds_for_registered_code() {
+        let code = run_explain(&args_for_code("HARN-TYP-014", false)).await;
         assert_eq!(code, 0);
     }
 
-    #[test]
-    fn explain_code_fails_for_unknown_code() {
-        let code = run_explain(&args_for_code("HARN-ZZZ-999", false));
+    #[tokio::test]
+    async fn explain_code_fails_for_unknown_code() {
+        let code = run_explain(&args_for_code("HARN-ZZZ-999", false)).await;
         assert_eq!(code, 2);
     }
 
@@ -307,8 +387,8 @@ mod tests {
         assert_eq!(value["repairs"], serde_json::json!([]));
     }
 
-    #[test]
-    fn explain_returns_zero_for_configured_violation() {
+    #[tokio::test]
+    async fn explain_returns_zero_for_configured_violation() {
         let dir = unique_temp_dir("harn-explain");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("main.harn");
@@ -330,14 +410,15 @@ fn handler() {
             catalog: false,
             format: CatalogFormat::Markdown,
             json: false,
-        });
+        })
+        .await;
 
         assert_eq!(code, 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn explain_returns_nonzero_for_missing_handler() {
+    #[tokio::test]
+    async fn explain_returns_nonzero_for_missing_handler() {
         let dir = unique_temp_dir("harn-explain-missing");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("main.harn");
@@ -358,14 +439,15 @@ fn handler() {
             catalog: false,
             format: CatalogFormat::Markdown,
             json: false,
-        });
+        })
+        .await;
 
         assert_eq!(code, 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn explain_catalog_json_succeeds() {
+    #[tokio::test]
+    async fn explain_catalog_json_succeeds() {
         let code = run_explain(&ExplainArgs {
             target: None,
             file: None,
@@ -373,12 +455,13 @@ fn handler() {
             catalog: true,
             format: CatalogFormat::Json,
             json: false,
-        });
+        })
+        .await;
         assert_eq!(code, 0);
     }
 
-    #[test]
-    fn explain_catalog_markdown_succeeds() {
+    #[tokio::test]
+    async fn explain_catalog_markdown_succeeds() {
         let code = run_explain(&ExplainArgs {
             target: None,
             file: None,
@@ -386,7 +469,8 @@ fn handler() {
             catalog: true,
             format: CatalogFormat::Markdown,
             json: false,
-        });
+        })
+        .await;
         assert_eq!(code, 0);
     }
 }
