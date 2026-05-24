@@ -3647,10 +3647,71 @@ fn swift_case_name(value: &str) -> String {
         "unknown".to_string()
     } else if out.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
         format!("_{}", out)
+    } else if SWIFT_RESERVED_KEYWORDS.contains(&out.as_str()) {
+        format!("`{}`", out)
     } else {
         out
     }
 }
+
+/// Swift reserved keywords that cannot appear as bare identifiers in a `case`
+/// declaration. Wire values like `private` / `public` (e.g. on
+/// `HarnMCPCacheScope`) camelCase down to themselves, so without escaping they
+/// land in the generated Swift as `case private = "private"`, which fails to
+/// compile.
+const SWIFT_RESERVED_KEYWORDS: &[&str] = &[
+    "associatedtype",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "continue",
+    "default",
+    "defer",
+    "deinit",
+    "do",
+    "else",
+    "enum",
+    "extension",
+    "fallthrough",
+    "false",
+    "fileprivate",
+    "for",
+    "func",
+    "guard",
+    "if",
+    "import",
+    "in",
+    "init",
+    "inout",
+    "internal",
+    "is",
+    "let",
+    "nil",
+    "open",
+    "operator",
+    "private",
+    "protocol",
+    "public",
+    "repeat",
+    "return",
+    "rethrows",
+    "self",
+    "Self",
+    "static",
+    "struct",
+    "subscript",
+    "super",
+    "switch",
+    "throw",
+    "throws",
+    "true",
+    "try",
+    "typealias",
+    "var",
+    "where",
+    "while",
+];
 
 fn all_acp_session_updates() -> Vec<String> {
     unique_ordered(
@@ -3837,6 +3898,36 @@ mod tests {
         assert!(ts.contains("HARN_WORKER_STATUSES"));
         assert!(ts.contains("export interface ToolCallReceipt"));
         assert!(ts.contains("HARN_TOOL_CALL_RECEIPT_STATUSES"));
+    }
+
+    #[test]
+    fn swift_case_name_escapes_reserved_keywords() {
+        // Bare `case private = ...` / `case public = ...` won't compile in
+        // Swift — both are reserved keywords. The wire vocabulary uses these
+        // (e.g. MCPCacheScope) so the emitter has to backtick them.
+        assert_eq!(swift_case_name("private"), "`private`");
+        assert_eq!(swift_case_name("public"), "`public`");
+        assert_eq!(swift_case_name("class"), "`class`");
+        // Non-keyword identifiers should pass through unchanged.
+        assert_eq!(swift_case_name("application_type"), "applicationType");
+        assert_eq!(swift_case_name("session/close"), "sessionClose");
+        // CamelCased compounds that happen to start with a keyword fragment
+        // (e.g. "private_room" -> "privateRoom") are valid identifiers and
+        // must not be escaped.
+        assert_eq!(swift_case_name("private_room"), "privateRoom");
+        // The full emitted Swift artifact should contain the escaped form for
+        // any enum whose wire value lands on a reserved keyword.
+        let swift = generate_swift();
+        assert!(
+            !swift.contains("case private = "),
+            "Swift artifact contains unescaped `case private = ...`"
+        );
+        assert!(
+            !swift.contains("case public = "),
+            "Swift artifact contains unescaped `case public = ...`"
+        );
+        assert!(swift.contains("case `private` = \"private\""));
+        assert!(swift.contains("case `public` = \"public\""));
     }
 
     #[test]
