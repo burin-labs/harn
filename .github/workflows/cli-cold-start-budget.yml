@@ -1,0 +1,76 @@
+# Cold-start budget gate for ported CLI subcommands. Tracks epic
+# #2293 (G5 = #2298).
+#
+# IMPORTANT: this workflow is NOT yet wired into the required-status
+# set in `ci.yml`'s `CI status` job. We are deliberately keeping it
+# advisory until at least one ported command has its baseline committed
+# (W1 #2297 will be the trigger to promote it). Until then it runs and
+# reports a result but a red run does not block the merge queue.
+#
+# See perf/cli/README.md for the methodology and per-command budgets.
+
+name: CLI cold-start budget
+
+on:
+  pull_request:
+    paths:
+      - 'crates/harn-cli/src/cli/**'
+      - 'crates/harn-cli/src/dispatch.rs'
+      - 'crates/harn-stdlib/src/stdlib/cli/**'
+      - 'crates/harn-stdlib/src/lib.rs'
+      - 'crates/harn-vm/src/bytecode_cache.rs'
+      - 'perf/cli/**'
+      - 'scripts/bench_cli_cold_start.sh'
+      - 'scripts/_bench_cli_cold_start.py'
+      - '.github/workflows/cli-cold-start-budget.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  # Match ci.yml so warnings don't slip in via a path that only this
+  # workflow exercises.
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  cold-start-budget:
+    name: Cold-start budget
+    # Bench is wall-clock sensitive, so a fixed-class runner is the
+    # right long-term home. For now we stay on ubuntu-latest so the
+    # workflow lights up for everyone without depending on the
+    # self-hosted macOS pool being available. Once W1 lands its
+    # baseline (#2297) we move this to `[self-hosted, macos, m5pro]`
+    # to match the fleet documented in the epic.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        # sccache is a build-cache optimization, not a build requirement.
+        continue-on-error: true
+      - name: Configure Cargo to use sccache
+        if: env.SCCACHE_PATH != ''
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          shared-key: cli-cold-start-budget
+          cache-bin: false
+      - name: Build release harn
+        run: cargo build --release --bin harn
+      - name: Run cold-start bench
+        # `--no-build` because we already built above; `--iterations` is
+        # intentionally lower on CI than the local default (20) because
+        # the ubuntu-latest noise floor makes a tighter loop misleading.
+        # We will bump this back up when we move to the self-hosted
+        # macOS pool.
+        run: ./scripts/bench_cli_cold_start.sh --no-build --iterations 10

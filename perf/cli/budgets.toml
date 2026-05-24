@@ -1,0 +1,44 @@
+# Per-subcommand cold-start budgets, in milliseconds.
+#
+# A "cold start" run is timed with `HARN_BYTECODE_CACHE=0` and a fresh
+# `HARN_CACHE_DIR` between every measurement so each invocation pays the
+# full dispatch + parse + typecheck + compile cost. Each port PR
+# (W1-W13 under epic #2293) is expected to record its own pre-port and
+# post-port number here and tighten the budget as the `.harn` impl
+# stabilizes.
+#
+# The default of 250 ms is intentionally generous. The G5 gate is
+# meant to catch *new* regressions on already-ported commands, not to
+# block ports from landing while their handler is still warming up.
+# Lower these per-command as each W ticket lands its parity snapshot
+# (see perf/cli/README.md).
+#
+# Schema:
+#
+#   [commands.<name>]
+#   cold_ms      = <budget in ms>           # required
+#   regression_x = <ratio over baseline>    # optional, defaults to 1.25
+#   note         = "<short rationale>"      # optional
+#
+# `<name>` is the bench key used by scripts/bench_cli_cold_start.sh.
+# It does not have to match a clap subcommand 1:1 because some entries
+# benchmark a specific flag combination (e.g. `try --help`).
+
+[defaults]
+cold_ms = 250
+# Fail CI when the median cold start exceeds budget *or* exceeds the
+# baseline-on-main median by this factor, whichever is tighter. The
+# 1.25x ratio comes from epic #2293 / G5 (#2298).
+regression_x = 1.25
+
+[commands.version]
+cold_ms = 200
+note = "Pure render of the embedded version string. W1 (#2297)."
+
+[commands."try --help"]
+cold_ms = 250
+note = "Clap help render only — no LLM dispatch. W2 placeholder."
+
+[commands."trace import"]
+cold_ms = 250
+note = "Empty-input JSONL transform. W3 (#2303 merged 2026-05-23)."
