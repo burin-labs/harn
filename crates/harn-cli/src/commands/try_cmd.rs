@@ -1,34 +1,56 @@
-//! `harn try "<prompt>"` — minimal agent_loop convenience wrapper.
+//! `harn try "<prompt>"` — dispatches to the embedded
+//! `cli/try.harn` script (see harn#2302 / W2). The shim is
+//! intentionally tiny because all the agent_loop wiring lives in
+//! the .harn impl now.
 //!
-//! Internally synthesizes a one-line Harn script and routes through the
-//! existing run pipeline. Uses the `llm_retries` agent_loop option
-//! directly because the synthesized script is meant to stay readable as
-//! a single line; users who want composable middleware should write a
-//! script with `with_retry(default_llm_caller(), {...})` from
-//! `std/llm/handlers` instead.
-
-use std::collections::HashSet;
-use std::fs;
+//! `HARN_CLI_IMPL=rust` is reserved for the parity-snapshot harness
+//! to keep both impls comparable until the harn impl is the default
+//! everywhere (see C1 ratchet, #2314).
 
 use harn_vm::llm_config;
 
 use crate::cli::TryArgs;
-use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 
 pub(crate) async fn run(args: TryArgs) {
-    let mock_active = std::env::var("HARN_LLM_PROVIDER")
-        .map(|v| v == "mock")
-        .unwrap_or(false);
-    if !mock_active && llm_config::available_provider_names().is_empty() {
+    if !mock_provider_active() && llm_config::available_provider_names().is_empty() {
         eprintln!("{}", crate::commands::doctor::no_credentials_hint());
         std::process::exit(1);
     }
 
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        run_via_legacy_synth(args).await;
+        return;
+    }
+
+    let _max = ScopedEnvVar::set("HARN_TRY_MAX_ITERS", &args.max_iterations.to_string());
+    let exit =
+        dispatch::dispatch_to_embedded_script("try", vec![args.prompt], /* json_mode */ false)
+            .await;
+    if exit != 0 {
+        std::process::exit(exit);
+    }
+}
+
+fn mock_provider_active() -> bool {
+    std::env::var("HARN_LLM_PROVIDER")
+        .map(|v| v == "mock")
+        .unwrap_or(false)
+}
+
+/// Legacy synth-into-tempfile-then-`execute_run` path, retained so the
+/// parity-snapshot harness can pin the new dispatch against it. The
+/// C1 ratchet (#2314) removes this once the .harn impl is the
+/// production default everywhere.
+async fn run_via_legacy_synth(args: TryArgs) {
+    use std::collections::HashSet;
+    use std::fs;
+
+    use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
+
     let escaped = escape_for_harn_string(&args.prompt);
     let max_iters = args.max_iterations;
-    // No `tools` option: the registered-tool contract requires schemas,
-    // not bare identifiers, and `harn try` is meant to be a zero-config
-    // smoke test. Users can drop into `harn run` for tool-augmented loops.
     let script = format!(
         "let result = agent_loop(\"{escaped}\", nil, {{\n    max_iterations: {max_iters},\n    llm_retries: 2\n}})\n__io_println(result.text)\n"
     );

@@ -800,10 +800,20 @@ pub struct StdlibCliScript {
     pub source: &'static str,
 }
 
-pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[StdlibCliScript {
-    name: "echo",
-    source: include_str!("stdlib/cli/echo.harn"),
-}];
+pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
+    StdlibCliScript {
+        name: "echo",
+        source: include_str!("stdlib/cli/echo.harn"),
+    },
+    StdlibCliScript {
+        name: "try",
+        source: include_str!("stdlib/cli/try.harn"),
+    },
+    StdlibCliScript {
+        name: "version",
+        source: include_str!("stdlib/cli/version.harn"),
+    },
+];
 
 pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
     STDLIB_SOURCES
