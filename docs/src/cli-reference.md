@@ -2,6 +2,11 @@
 
 All commands available in the `harn` CLI.
 
+To add a new subcommand or port an existing one off Rust, see
+[Extending the CLI in `.harn`](./cli-extending-in-harn.md). For the
+machine-readable side of `--json` modes, see the
+[`harn --json` contract](./cli-json-contract.md).
+
 ## harn run
 
 Execute a `.harn` file.

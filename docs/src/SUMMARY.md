@@ -188,6 +188,7 @@
 
 - [CLI reference](./cli-reference.md)
 - [CLI `--json` contract](./cli-json-contract.md)
+- [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
 - [`std/cli/argparse`](./cli-argparse-reference.md)
 - [`std/cli/render`](./cli-render-reference.md)
 - [Builtin functions](./builtins.md)
