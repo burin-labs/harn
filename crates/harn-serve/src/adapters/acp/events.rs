@@ -1137,6 +1137,27 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 self.emit_agent_event_ext("capability_gap", session_id, payload);
             }
+            AgentEvent::ToolFormatOverride {
+                session_id,
+                provider,
+                model,
+                requested_format,
+                recommended_format,
+                catalog_parity,
+                override_reason,
+            } => {
+                let mut payload = serde_json::json!({
+                    "provider": provider,
+                    "model": model,
+                    "requestedFormat": requested_format,
+                    "recommendedFormat": recommended_format,
+                    "catalogParity": catalog_parity,
+                });
+                if let Some(reason) = override_reason {
+                    payload["overrideReason"] = serde_json::Value::String(reason.clone());
+                }
+                self.emit_agent_event_ext("tool_format_override", session_id, payload);
+            }
             AgentEvent::ToolCallAudit {
                 session_id,
                 tool_call_id,

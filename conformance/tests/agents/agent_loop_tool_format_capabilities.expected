@@ -9,3 +9,23 @@ testcatalog
 uncatalogued-model
 preferred_tool_format
 text
+format=text
+1
+testcatalog
+catalogued-native
+text
+native
+interchangeable
+true
+format=native
+1
+native
+text
+native_unreliable
+true
+format=native
+1
+native
+text
+native_unreliable
+cross-check native parser drift

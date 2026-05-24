@@ -4,6 +4,7 @@
 // differences are visible without turning this command into a full coding
 // benchmark.
 import { agent_host_tools } from "std/agent/host_tools"
+import { agent_first_tool_format_override_warning_text } from "std/agent/options"
 import { audit_agent, repair_agent, summary_agent } from "std/agent/presets"
 import { parse_args } from "std/cli"
 import { command_run } from "std/command"
@@ -803,6 +804,7 @@ fn __run_fixture_agent(
   tools,
   max_iterations: int,
   step_judge_config,
+  override_reason = nil,
 ) {
   let done_sentinel = if tool_format == "text" {
     "##DONE##"
@@ -823,6 +825,9 @@ fn __run_fixture_agent(
   }
   if step_judge_config != nil {
     options = options + {step_judge: step_judge_config}
+  }
+  if override_reason != nil && trim(to_string(override_reason)) != "" {
+    options = options + {tool_format_override_reason: trim(to_string(override_reason))}
   }
   if fixture == "read-only-audit" {
     return audit_agent(task, options)
@@ -918,6 +923,7 @@ fn main(harness: Harness) {
       {kind: "option", name: "python", flags: ["--python"], default: "python3"},
       {kind: "flag", name: "seed_mock", flags: ["--seed-mock"]},
       {kind: "option", name: "step_judge_json", flags: ["--step-judge-json"], default: ""},
+      {kind: "option", name: "override_reason", flags: ["--override-reason"], default: ""},
     ],
   )
   if len(args._errors) > 0 {
@@ -945,7 +951,12 @@ fn main(harness: Harness) {
     __fixture_tools(harness, root, args.python, args.fixture),
     args.max_iterations,
     step_judge_config,
+    args.override_reason,
   )
+  let override_warning = agent_first_tool_format_override_warning_text(transcript_events(result?.transcript))
+  if override_warning != nil {
+    __io_eprintln(override_warning)
+  }
   let duration_ms = harness.clock.now_ms() - started_ms
   let verify = __verify_fixture(harness, root, args.fixture, args.python, result)
   let summary = __summary(

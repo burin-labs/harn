@@ -1361,6 +1361,7 @@ async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             | "tool_search_result"
             | "typed_checkpoint"
             | "agent_loop_stall_warning"
+            | "tool_format_override"
             | "tool_call_audit"
             | "loop_checkpoint"
     ) {
@@ -1571,6 +1572,15 @@ fn build_agent_event(
             fallback_tool_format: get_string("fallback_tool_format"),
             requested_tool_format: get_opt_string("requested_tool_format"),
             message: get_string("message"),
+        }),
+        "tool_format_override" => Ok(AgentEvent::ToolFormatOverride {
+            session_id: session_id.to_string(),
+            provider: get_string("provider"),
+            model: get_string("model"),
+            requested_format: get_string("requested_format"),
+            recommended_format: get_string("recommended_format"),
+            catalog_parity: get_string("catalog_parity"),
+            override_reason: get_opt_string("override_reason"),
         }),
         "tool_call_audit" => {
             let receipt = payload_obj

@@ -13,18 +13,33 @@ use crate::cli::TryArgs;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
+#[path = "try_cmd_legacy.rs"]
+mod legacy;
+
 pub(crate) async fn run(args: TryArgs) {
     if !mock_provider_active() && llm_config::available_provider_names().is_empty() {
         eprintln!("{}", crate::commands::doctor::no_credentials_hint());
         std::process::exit(1);
     }
 
+    let resolved = resolve_try_model();
+
     if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        run_via_legacy_synth(args).await;
+        legacy::run(args, &resolved.provider, &resolved.model).await;
         return;
     }
 
     let _max = ScopedEnvVar::set("HARN_TRY_MAX_ITERS", &args.max_iterations.to_string());
+    let _provider = ScopedEnvVar::set("HARN_TRY_PROVIDER", &resolved.provider);
+    let _model = ScopedEnvVar::set("HARN_TRY_MODEL", &resolved.model);
+    let _tool_format = args
+        .tool_format
+        .as_deref()
+        .map(|value| ScopedEnvVar::set("HARN_TRY_TOOL_FORMAT", value));
+    let _override_reason = args
+        .override_reason
+        .as_deref()
+        .map(|value| ScopedEnvVar::set("HARN_TRY_OVERRIDE_REASON", value));
     let exit =
         dispatch::dispatch_to_embedded_script("try", vec![args.prompt], /* json_mode */ false)
             .await;
@@ -39,69 +54,32 @@ fn mock_provider_active() -> bool {
         .unwrap_or(false)
 }
 
-/// Legacy synth-into-tempfile-then-`execute_run` path, retained so the
-/// parity-snapshot harness can pin the new dispatch against it. The
-/// C1 ratchet (#2314) removes this once the .harn impl is the
-/// production default everywhere.
-async fn run_via_legacy_synth(args: TryArgs) {
-    use std::collections::HashSet;
-    use std::fs;
-
-    use crate::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
-
-    let escaped = escape_for_harn_string(&args.prompt);
-    let max_iters = args.max_iterations;
-    let script = format!(
-        "let result = agent_loop(\"{escaped}\", nil, {{\n    max_iterations: {max_iters},\n    llm_retries: 2\n}})\n__io_println(result.text)\n"
-    );
-
-    let tmp = match tempfile::Builder::new()
-        .prefix("harn-try-")
-        .suffix(".harn")
-        .tempfile()
-    {
-        Ok(t) => t,
-        Err(error) => {
-            eprintln!("failed to create temp file: {error}");
-            std::process::exit(1);
-        }
-    };
-    let path = tmp.path().to_path_buf();
-    let wrapped = format!("pipeline main(task) {{\n{script}}}\n");
-    if let Err(error) = fs::write(&path, &wrapped) {
-        eprintln!("failed to write temp file: {error}");
-        std::process::exit(1);
-    }
-
-    let outcome: RunOutcome = execute_run(
-        &path.to_string_lossy(),
-        false,
-        HashSet::new(),
-        Vec::new(),
-        Vec::new(),
-        CliLlmMockMode::Off,
-        None,
-        RunProfileOptions::default(),
-    )
-    .await;
-
-    if !outcome.stderr.is_empty() {
-        eprint!("{}", outcome.stderr);
-    }
-    if !outcome.stdout.is_empty() {
-        print!("{}", outcome.stdout);
-    }
-
-    drop(tmp);
-    if outcome.exit_code != 0 {
-        std::process::exit(outcome.exit_code);
-    }
+struct ResolvedTryModel {
+    provider: String,
+    model: String,
 }
 
-fn escape_for_harn_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
+fn resolve_try_model() -> ResolvedTryModel {
+    if let Ok(provider) = std::env::var("HARN_LLM_PROVIDER") {
+        let provider = provider.trim().to_string();
+        if !provider.is_empty() && !provider.eq_ignore_ascii_case("auto") {
+            let model = std::env::var("HARN_LLM_MODEL")
+                .ok()
+                .map(|raw| harn_vm::llm_config::resolve_model(&raw).0)
+                .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider(&provider));
+            return ResolvedTryModel { provider, model };
+        }
+    }
+
+    if let Ok(raw_model) = std::env::var("HARN_LLM_MODEL") {
+        let resolved = harn_vm::llm_config::resolve_model_info(&raw_model);
+        return ResolvedTryModel {
+            provider: resolved.provider,
+            model: resolved.id,
+        };
+    }
+
+    let provider = harn_vm::llm_config::default_provider();
+    let model = harn_vm::llm_config::default_model_for_provider(&provider);
+    ResolvedTryModel { provider, model }
 }

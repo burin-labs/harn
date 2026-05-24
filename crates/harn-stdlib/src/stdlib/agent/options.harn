@@ -121,6 +121,141 @@ fn __valid_tool_format(value) {
   return nil
 }
 
+fn __optional_text(value) {
+  if value == nil {
+    return nil
+  }
+  let text = trim(to_string(value))
+  if text == "" {
+    return nil
+  }
+  return text
+}
+
+fn __catalog_parity(value) {
+  let text = __optional_text(value)
+  if text == nil {
+    return "unknown"
+  }
+  return lowercase(text)
+}
+
+fn __parity_recommended_tool_format(parity) {
+  if parity == "native_unreliable" || parity == "text_only" {
+    return "text"
+  }
+  if parity == "text_unreliable" || parity == "native_only" {
+    return "native"
+  }
+  return nil
+}
+
+fn __parity_conflicts_with_requested(parity, requested) {
+  if parity == "native_unreliable" {
+    return requested == "native"
+  }
+  if parity == "text_unreliable" {
+    return requested == "text"
+  }
+  if parity == "native_only" {
+    return requested == "text"
+  }
+  if parity == "text_only" {
+    return requested == "native"
+  }
+  return false
+}
+
+fn __tool_format_override_event(pair, requested, preferred, parity, override_reason) {
+  if pair == nil {
+    return nil
+  }
+  let requested_format = __valid_tool_format(requested)
+  if requested_format == nil {
+    return nil
+  }
+  let catalog_parity = __catalog_parity(parity)
+  let recommended = preferred ?? __parity_recommended_tool_format(catalog_parity)
+  if recommended == nil {
+    return nil
+  }
+  let conflicts_with_recommendation = requested_format != recommended
+  let conflicts_with_parity = __parity_conflicts_with_requested(catalog_parity, requested_format)
+  if !conflicts_with_recommendation && !conflicts_with_parity {
+    return nil
+  }
+  let event = {
+    provider: pair.provider,
+    model: pair.model,
+    requested_format: requested_format,
+    recommended_format: recommended,
+    catalog_parity: catalog_parity,
+  }
+  if override_reason != nil {
+    return event + {override_reason: override_reason}
+  }
+  return event
+}
+
+/**
+ * Render one `tool_format_override` event as the CLI's single-line warning.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_tool_format_override_warning_text(event)
+ */
+pub fn agent_tool_format_override_warning_text(event) {
+  if event == nil {
+    return nil
+  }
+  let payload = event?.metadata ?? event
+  let provider = payload?.provider ?? "unknown"
+  let model = payload?.model ?? "unknown"
+  let requested = payload?.requested_format ?? "unknown"
+  let recommended = payload?.recommended_format ?? "unknown"
+  let parity = payload?.catalog_parity ?? "unknown"
+  let override_reason = trim(to_string(payload?.override_reason ?? ""))
+  let needs_reason = (parity == "native_unreliable" && requested == "native")
+    || (parity == "text_unreliable" && requested == "text")
+  var line = "warning: tool_format override: "
+    + provider
+    + ":"
+    + model
+    + " requested "
+    + requested
+    + " over recommended "
+    + recommended
+    + " (parity: "
+    + parity
+    + ")"
+  if override_reason != "" {
+    line = line + "; reason: " + override_reason
+  } else if needs_reason {
+    line = line + "; missing --override-reason while forcing the catalog-marked unreliable side"
+  }
+  return line
+}
+
+/**
+ * Render the first `tool_format_override` event in an event list, if present.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_first_tool_format_override_warning_text(events)
+ */
+pub fn agent_first_tool_format_override_warning_text(events) {
+  for event in events {
+    if event?.kind == "tool_format_override" || event?.type == "tool_format_override" {
+      return agent_tool_format_override_warning_text(event)
+    }
+  }
+  return nil
+}
+
 fn __capability_gap_event(pair, requested, fallback) {
   return {
     level: "warning",
@@ -148,7 +283,31 @@ pub fn agent_tool_format_resolution(options = nil) {
   let opts = options ?? {}
   let explicit = __explicit_tool_format(opts)
   if explicit != nil {
-    return {tool_format: explicit, source: "explicit", capability_gap_event: nil}
+    let pair = __tool_format_pair(opts)
+    var preferred = nil
+    var parity = nil
+    if pair != nil {
+      let caps = try {
+        provider_capabilities(pair.provider, pair.model)
+      }
+      if !is_err(caps) {
+        let resolved_caps = unwrap(caps)
+        preferred = __valid_tool_format(resolved_caps?.preferred_tool_format)
+        parity = resolved_caps?.tool_mode_parity
+      }
+    }
+    return {
+      tool_format: explicit,
+      source: "explicit",
+      capability_gap_event: nil,
+      tool_format_override_event: __tool_format_override_event(
+        pair,
+        explicit,
+        preferred,
+        parity,
+        __optional_text(opts?.tool_format_override_reason),
+      ),
+    }
   }
   let pair = __tool_format_pair(opts)
   if pair != nil {
@@ -164,6 +323,7 @@ pub fn agent_tool_format_resolution(options = nil) {
           provider: pair.provider,
           model: pair.model,
           capability_gap_event: nil,
+          tool_format_override_event: nil,
         }
       }
     }
@@ -174,12 +334,18 @@ pub fn agent_tool_format_resolution(options = nil) {
       provider: pair.provider,
       model: pair.model,
       capability_gap_event: __capability_gap_event(pair, opts?.tool_format, fallback),
+      tool_format_override_event: nil,
     }
   }
   if __has_key(opts, "tool_format") {
-    return {tool_format: __fallback_tool_format(), source: "fallback", capability_gap_event: nil}
+    return {
+      tool_format: __fallback_tool_format(),
+      source: "fallback",
+      capability_gap_event: nil,
+      tool_format_override_event: nil,
+    }
   }
-  return {tool_format: nil, source: "unresolved", capability_gap_event: nil}
+  return {tool_format: nil, source: "unresolved", capability_gap_event: nil, tool_format_override_event: nil}
 }
 
 /**
@@ -509,6 +675,9 @@ fn __with_resolved_tool_format(opts, resolution) {
   var next = opts + {tool_format: resolution.tool_format}
   if resolution?.capability_gap_event != nil {
     next = next + {_tool_format_capability_gap: resolution.capability_gap_event}
+  }
+  if resolution?.tool_format_override_event != nil {
+    next = next + {_tool_format_override: resolution.tool_format_override_event}
   }
   return next
 }

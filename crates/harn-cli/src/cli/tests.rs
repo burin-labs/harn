@@ -1957,13 +1957,28 @@ fn test_parses_playground_args() {
 
 #[test]
 fn test_parses_try_command() {
-    let cli = Cli::parse_from(["harn", "try", "hi", "--max-iterations", "7"]);
+    let cli = Cli::parse_from([
+        "harn",
+        "try",
+        "hi",
+        "--max-iterations",
+        "7",
+        "--tool-format",
+        "text",
+        "--override-reason",
+        "compare native drift",
+    ]);
 
     let Command::Try(args) = cli.command.unwrap() else {
         panic!("expected try command");
     };
     assert_eq!(args.prompt, "hi");
     assert_eq!(args.max_iterations, 7);
+    assert_eq!(args.tool_format.as_deref(), Some("text"));
+    assert_eq!(
+        args.override_reason.as_deref(),
+        Some("compare native drift")
+    );
 }
 
 #[test]

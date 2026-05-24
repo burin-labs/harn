@@ -734,6 +734,19 @@ pub enum AgentEvent {
         requested_tool_format: Option<String>,
         message: String,
     },
+    /// Emitted when a caller explicitly forces a tool format that
+    /// differs from the capability catalog's recommendation or known
+    /// native/text parity guidance.
+    ToolFormatOverride {
+        session_id: String,
+        provider: String,
+        model: String,
+        requested_format: String,
+        recommended_format: String,
+        catalog_parity: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        override_reason: Option<String>,
+    },
     /// Emitted when a `tool_caller` middleware (see std/llm/tool_middleware)
     /// attaches structured audit metadata to a tool call — typically a
     /// user-facing `summary`, a `description`, an ACP-style `kind`, an MCP
@@ -880,6 +893,7 @@ impl AgentEvent {
             | Self::LoopControlDecision { session_id, .. }
             | Self::AgentLoopStallWarning { session_id, .. }
             | Self::CapabilityGap { session_id, .. }
+            | Self::ToolFormatOverride { session_id, .. }
             | Self::ToolCallAudit { session_id, .. }
             | Self::CacheHit { session_id, .. }
             | Self::CacheMiss { session_id, .. }

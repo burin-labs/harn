@@ -1271,6 +1271,10 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // `agent_loop` also uses this field for `tool_format: "auto"`; if a concrete
 // provider/model pair has no recommendation, it falls back to text tools and
 // emits a `capability_gap` warning event.
+// An explicit `tool_format` that disagrees with `preferred_tool_format` or
+// chooses the catalog-marked unreliable side emits a `tool_format_override`
+// transcript event. Pass `tool_format_override_reason` when you intentionally
+// force `native_unreliable` or `text_unreliable` routes.
 
 if "bm25" in caps.tool_search {
   // opt into progressive disclosure

@@ -245,7 +245,10 @@ tool mode for that provider/model route. Rows that do not set it infer
 `text_tool_wire_format_supported = true` for runtimes where Harn's text-tool
 contract is the reliable tool path, and can mark `tool_mode_parity` /
 `tool_mode_parity_notes` when native and text modes are known not to be
-interchangeable. Model-catalog display tags are derived from this matrix too;
+interchangeable. If a caller explicitly forces a conflicting `tool_format`,
+the agent loop emits a `tool_format_override` transcript event; pass
+`tool_format_override_reason` when intentionally forcing a catalog-marked
+unreliable side. Model-catalog display tags are derived from this matrix too;
 legacy `models.*.capabilities` entries are parsed for backwards compatibility
 but do not override runtime capability resolution.
 
