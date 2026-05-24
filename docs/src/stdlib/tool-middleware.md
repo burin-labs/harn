@@ -307,10 +307,11 @@ runs the wrappers right-to-left: the leftmost wrapper is the
 outermost. This mirrors `compose` in `std/llm/handlers`.
 
 Wrappers may be either plain callables (`fn(call, next) -> result`) or
-dicts with `{caller, on_empty_turn}`. `on_empty_turn` is an optional
-assistant-turn hook for the "the model emitted zero tool calls this
-turn" seam. `agent_loop` uses it before dispatch when no tool batch
-exists.
+dicts with `{caller, before_dispatch?, on_empty_turn?}`.
+`before_dispatch` is an optional whole-turn hook that runs before any
+tool dispatch. `on_empty_turn` remains available for the narrower
+"the model emitted zero tool calls this turn" seam and is only used
+when `before_dispatch` is absent.
 
 ```harn,ignore
 let caller = compose_tool_callers([
@@ -322,7 +323,8 @@ let caller = compose_tool_callers([
 ```
 
 `with_structural_validator(...)` uses the dict shape so one opt-in
-surface covers both normal tool batches and zero-tool-call validation:
+surface can reject malformed tool-call turns before dispatch and still
+handle the zero-tool-call validation cases:
 
 ```harn,ignore
 import { compose_tool_callers } from "std/llm/tool_middleware"

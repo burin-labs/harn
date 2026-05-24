@@ -87,6 +87,13 @@ fn __tool_mw_layer_empty_turn(layer) {
   return nil
 }
 
+fn __tool_mw_layer_before_dispatch(layer) {
+  if type_of(layer) == "dict" && __tool_mw_is_callable(layer?.before_dispatch) {
+    return layer.before_dispatch
+  }
+  return nil
+}
+
 fn __tool_mw_dict(value) -> dict {
   if type_of(value) == "dict" {
     return value
@@ -393,12 +400,18 @@ pub fn default_tool_caller() {
  * Each wrapper is either:
  *
  *   - `fn(call, next) -> result_dict`, or
- *   - `{caller: fn(call, next) -> result_dict, on_empty_turn?: fn(turn, next) -> verdict_dict}`
+ *   - `{
+ *        caller: fn(call, next) -> result_dict,
+ *        before_dispatch?: fn(turn, next) -> verdict_dict,
+ *        on_empty_turn?: fn(turn, next) -> verdict_dict,
+ *      }`
  *
- * `on_empty_turn` is an optional sibling hook for "assistant emitted no
- * tool calls this turn" validation. It does not replace the normal
- * dispatch caller; it only runs from `agent_loop` on the zero-tool-call
- * path before any tool batch exists.
+ * `before_dispatch` is an optional sibling hook for whole-turn validation
+ * before any tool dispatch begins. It receives the parsed assistant turn,
+ * tool-call list, protocol diagnostics, and turn-level usage/budget hints.
+ * `on_empty_turn` remains available for wrappers that only care about the
+ * zero-tool-call seam; `agent_loop` falls back to it only when
+ * `before_dispatch` is absent.
  *
  * To short-circuit (skip the rest of the stack), return without calling
  * `next`. To mutate args, call `next(call + {tool_args: new_args})`.
@@ -426,27 +439,58 @@ pub fn compose_tool_callers(wrappers) {
     return built(call)
   }
   var empty_layers = []
+  var before_dispatch_layers = []
   for layer in list {
+    let before_dispatch = __tool_mw_layer_before_dispatch(layer)
+    if before_dispatch != nil {
+      before_dispatch_layers = before_dispatch_layers.push(before_dispatch)
+    }
     let hook = __tool_mw_layer_empty_turn(layer)
     if hook != nil {
       empty_layers = empty_layers.push(hook)
     }
   }
-  if len(empty_layers) == 0 {
+  if len(empty_layers) == 0 && len(before_dispatch_layers) == 0 {
     return call_chain
   }
-  let empty_chain = { turn, next ->
-    var built = next
-    var i = len(empty_layers) - 1
-    while i >= 0 {
-      let layer = empty_layers[i]
-      let prev = built
-      built = { c -> layer(c, prev) }
-      i = i - 1
+  let before_dispatch_chain = if len(before_dispatch_layers) == 0 {
+    nil
+  } else {
+    { turn, next ->
+      var built = next
+      var i = len(before_dispatch_layers) - 1
+      while i >= 0 {
+        let layer = before_dispatch_layers[i]
+        let prev = built
+        built = { c -> layer(c, prev) }
+        i = i - 1
+      }
+      return built(turn)
     }
-    return built(turn)
   }
-  return {caller: call_chain, on_empty_turn: empty_chain}
+  let empty_chain = if len(empty_layers) == 0 {
+    nil
+  } else {
+    { turn, next ->
+      var built = next
+      var i = len(empty_layers) - 1
+      while i >= 0 {
+        let layer = empty_layers[i]
+        let prev = built
+        built = { c -> layer(c, prev) }
+        i = i - 1
+      }
+      return built(turn)
+    }
+  }
+  var middleware = {caller: call_chain}
+  if before_dispatch_chain != nil {
+    middleware = middleware + {before_dispatch: before_dispatch_chain}
+  }
+  if empty_chain != nil {
+    middleware = middleware + {on_empty_turn: empty_chain}
+  }
+  return middleware
 }
 
 // -------------------------------------------------------------------------------------------------

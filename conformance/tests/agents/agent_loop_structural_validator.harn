@@ -7,6 +7,14 @@ fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
 }
 
+fn structural_decisions(events) {
+  return events_of(events, "structural_validator_decision")
+}
+
+fn decisions_for_rule(events, rule) {
+  return structural_decisions(events).filter({ event -> event.rule == rule })
+}
+
 fn write_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -37,8 +45,23 @@ fn tool_message_count(session_id) {
   return count
 }
 
+fn base_opts(session_id, caller, extra = nil) {
+  let base = {
+    provider: "mock",
+    tools: write_tools(),
+    tool_format: "native",
+    max_iterations: 5,
+    session_id: session_id,
+    tool_caller: caller,
+  }
+  if type_of(extra) == "dict" {
+    return base + extra
+  }
+  return base
+}
+
 pipeline default() {
-  let caller = compose_tool_callers([with_structural_validator({})])
+  let sv1_caller = compose_tool_callers([with_structural_validator({})])
   llm_mock_clear()
   llm_mock({text: "I updated the note already."})
   llm_mock(
@@ -47,37 +70,25 @@ pipeline default() {
       tool_calls: [{id: "write-1", name: "write_note", arguments: {path: "/tmp/sv-note.txt", text: "hi"}}],
     },
   )
-  llm_mock({text: "##DONE##"})
-  let session = "structural-validator-" + uuid()
-  let captured = agent_capture_events(
-    session,
+  llm_mock({text: "<done>##DONE##</done>"})
+  let sv1_session = "structural-validator-sv1-" + uuid()
+  let sv1 = agent_capture_events(
+    sv1_session,
     fn() { return agent_loop(
       "Update the note, then finish.",
       nil,
-      {
-        provider: "mock",
-        tools: write_tools(),
-        tool_format: "native",
-        loop_until_done: true,
-        done_judge: nil,
-        done_sentinel: "##DONE##",
-        max_iterations: 5,
-        session_id: session,
-        tool_caller: caller,
-      },
+      base_opts(sv1_session, sv1_caller, {loop_until_done: true, done_sentinel: "##DONE##"}),
     ) },
   )
-  let decisions = events_of(captured.events, "structural_validator_decision")
-  let calls = llm_mock_calls()
-  let regen_messages = json_stringify(calls[1].messages)
-  __io_println(captured.result.status)
-  __io_println(len(decisions) == 1)
-  __io_println(decisions[0].rule)
-  __io_println(decisions[0].has_write_capability)
-  __io_println(captured.result.llm.iterations)
-  __io_println(regen_messages.contains("made no tool call"))
-  __io_println(!regen_messages.contains("I updated the note already."))
-  __io_println(tool_message_count(session))
+  let sv1_decisions = decisions_for_rule(sv1.events, "non_empty_when_writes_expected")
+  let sv1_calls = llm_mock_calls()
+  let sv1_regen_messages = json_stringify(sv1_calls[1].messages)
+  __io_println("sv1.status=" + sv1.result.status)
+  __io_println("sv1.decisions=" + to_string(len(sv1_decisions)))
+  __io_println("sv1.vetoed=" + to_string(sv1_decisions[0].vetoed))
+  __io_println("sv1.iterations=" + to_string(sv1.result.llm.iterations))
+  __io_println("sv1.feedback=" + to_string(sv1_regen_messages.contains("made no tool call")))
+  __io_println("sv1.tool_messages=" + to_string(tool_message_count(sv1_session)))
   let raise_caller = compose_tool_callers([with_structural_validator({on_failure: "raise"})])
   llm_mock_clear()
   llm_mock({text: "Done without touching the workspace."})
@@ -85,21 +96,162 @@ pipeline default() {
     agent_loop(
       "Write the note or fail.",
       nil,
-      {
-        provider: "mock",
-        tools: write_tools(),
-        tool_format: "native",
-        max_iterations: 2,
-        session_id: "structural-validator-raise-" + uuid(),
-        tool_caller: raise_caller,
-      },
+      base_opts("structural-validator-raise-" + uuid(), raise_caller, {max_iterations: 2}),
     )
   }
-  __io_println(is_err(raised))
+  let raise_calls = llm_mock_calls()
+  __io_println("raise.err=" + to_string(is_err(raised)))
   if is_err(raised) {
-    __io_println(unwrap_err(raised).contains("made no tool call"))
+    __io_println("raise.message=" + to_string(unwrap_err(raised).contains("made no tool call")))
   } else {
-    __io_println(false)
+    __io_println("raise.message=false")
   }
-  __io_println(len(llm_mock_calls()) == 1)
+  __io_println("raise.calls=" + to_string(len(raise_calls)))
+  let phantom_caller = compose_tool_callers([with_structural_validator({rules: ["no_phantom_completion"]})])
+  llm_mock_clear()
+  llm_mock({text: "I finished updating the note."})
+  llm_mock(
+    {
+      text: "",
+      tool_calls: [{id: "write-2", name: "write_note", arguments: {path: "/tmp/sv-note-2.txt", text: "hi"}}],
+    },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let phantom_session = "structural-validator-phantom-" + uuid()
+  let phantom = agent_capture_events(
+    phantom_session,
+    fn() { return agent_loop(
+      "Update the note, then finish.",
+      nil,
+      base_opts(phantom_session, phantom_caller, {loop_until_done: true, done_sentinel: "##DONE##"}),
+    ) },
+  )
+  let phantom_decisions = decisions_for_rule(phantom.events, "no_phantom_completion")
+  __io_println("phantom.decisions=" + to_string(len(phantom_decisions)))
+  __io_println("phantom.vetoed=" + to_string(phantom_decisions[0].vetoed))
+  __io_println("phantom.iterations=" + to_string(phantom.result.llm.iterations))
+  __io_println("phantom.tool_messages=" + to_string(tool_message_count(phantom_session)))
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "",
+      tool_calls: [{id: "write-3", name: "write_note", arguments: {path: "/tmp/sv-note-3.txt", text: "hi"}}],
+    },
+  )
+  llm_mock({text: "I finished updating the note."})
+  let phantom_ok_session = "structural-validator-phantom-ok-" + uuid()
+  let phantom_ok = agent_capture_events(
+    phantom_ok_session,
+    fn() { return agent_loop("Update the note, then finish.", nil, base_opts(phantom_ok_session, phantom_caller)) },
+  )
+  let phantom_ok_decisions = decisions_for_rule(phantom_ok.events, "no_phantom_completion")
+  __io_println("phantom_ok.status=" + phantom_ok.result.status)
+  __io_println("phantom_ok.decisions=" + to_string(len(phantom_ok_decisions)))
+  __io_println("phantom_ok.iterations=" + to_string(phantom_ok.result.llm.iterations))
+  let well_formed_caller = compose_tool_callers([with_structural_validator({rules: ["tool_calls_well_formed"]})])
+  llm_mock_clear()
+  llm_mock({text: "write_note({ path: \"/tmp/sv-note-4.txt\", text: \"hi\" })"})
+  llm_mock(
+    {
+      text: "",
+      tool_calls: [{id: "write-4", name: "write_note", arguments: {path: "/tmp/sv-note-4.txt", text: "hi"}}],
+    },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let wf_session = "structural-validator-well-formed-" + uuid()
+  let wf = agent_capture_events(
+    wf_session,
+    fn() { return agent_loop(
+      "Update the note, then finish.",
+      nil,
+      base_opts(wf_session, well_formed_caller, {loop_until_done: true, done_sentinel: "##DONE##"}),
+    ) },
+  )
+  let wf_decisions = decisions_for_rule(wf.events, "tool_calls_well_formed")
+  __io_println("well_formed.decisions=" + to_string(len(wf_decisions)))
+  __io_println("well_formed.vetoed=" + to_string(wf_decisions[0].vetoed))
+  __io_println("well_formed.tool_messages=" + to_string(tool_message_count(wf_session)))
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "",
+      tool_calls: [{id: "write-5", name: "write_note", arguments: {path: "/tmp/sv-note-5.txt", text: "hi"}}],
+    },
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let wf_ok_session = "structural-validator-well-formed-ok-" + uuid()
+  let wf_ok = agent_capture_events(
+    wf_ok_session,
+    fn() { return agent_loop(
+      "Update the note, then finish.",
+      nil,
+      base_opts(wf_ok_session, well_formed_caller, {loop_until_done: true, done_sentinel: "##DONE##"}),
+    ) },
+  )
+  let wf_ok_decisions = decisions_for_rule(wf_ok.events, "tool_calls_well_formed")
+  __io_println("well_formed_ok.status=" + wf_ok.result.status)
+  __io_println("well_formed_ok.decisions=" + to_string(len(wf_ok_decisions)))
+  __io_println("well_formed_ok.iterations=" + to_string(wf_ok.result.llm.iterations))
+  let cap_caller = compose_tool_callers([with_structural_validator({rules: ["output_token_cap_with_zero_calls"]})])
+  llm_mock_clear()
+  llm_mock({text: "Still narrating.", output_tokens: 95})
+  llm_mock(
+    {
+      text: "",
+      tool_calls: [{id: "write-6", name: "write_note", arguments: {path: "/tmp/sv-note-6.txt", text: "hi"}}],
+    },
+  )
+  llm_mock({text: "##DONE##"})
+  let cap_session = "structural-validator-cap-" + uuid()
+  let cap = agent_capture_events(
+    cap_session,
+    fn() { return agent_loop(
+      "Update the note, then finish.",
+      nil,
+      base_opts(
+        cap_session,
+        cap_caller,
+        {loop_until_done: true, done_sentinel: "##DONE##", max_output_tokens: 100},
+      ),
+    ) },
+  )
+  let cap_decisions = decisions_for_rule(cap.events, "output_token_cap_with_zero_calls")
+  __io_println("cap.decisions=" + to_string(len(cap_decisions)))
+  __io_println("cap.vetoed=" + to_string(cap_decisions[0].vetoed))
+  __io_println("cap.iterations=" + to_string(cap.result.llm.iterations))
+  llm_mock_clear()
+  llm_mock({text: "Short note.", output_tokens: 40})
+  let cap_ok_session = "structural-validator-cap-ok-" + uuid()
+  let cap_ok = agent_capture_events(
+    cap_ok_session,
+    fn() { return agent_loop(
+      "Update the note, then finish.",
+      nil,
+      base_opts(cap_ok_session, cap_caller, {max_output_tokens: 100}),
+    ) },
+  )
+  let cap_ok_decisions = decisions_for_rule(cap_ok.events, "output_token_cap_with_zero_calls")
+  __io_println("cap_ok.status=" + cap_ok.result.status)
+  __io_println("cap_ok.decisions=" + to_string(len(cap_ok_decisions)))
+  __io_println("cap_ok.iterations=" + to_string(cap_ok.result.llm.iterations))
+  let warn_caller = compose_tool_callers(
+    [with_structural_validator({rules: [{name: "non_empty_when_writes_expected", warn_only: true}]})],
+  )
+  llm_mock_clear()
+  llm_mock({text: "I updated the note already."})
+  let warn_session = "structural-validator-warn-" + uuid()
+  let warn = agent_capture_events(
+    warn_session,
+    fn() { return agent_loop(
+      "Update the note, then finish.",
+      nil,
+      base_opts(warn_session, warn_caller, {max_iterations: 1}),
+    ) },
+  )
+  let warn_decisions = decisions_for_rule(warn.events, "non_empty_when_writes_expected")
+  __io_println("warn.status=" + warn.result.status)
+  __io_println("warn.decisions=" + to_string(len(warn_decisions)))
+  __io_println("warn.vetoed=" + to_string(warn_decisions[0].vetoed))
+  __io_println("warn.on_failure=" + to_string(warn_decisions[0].on_failure))
+  __io_println("warn.iterations=" + to_string(warn.result.llm.iterations))
 }

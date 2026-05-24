@@ -317,6 +317,18 @@ fn __tool_caller_empty_turn_hook(caller) {
   return nil
 }
 
+fn __tool_caller_before_dispatch_hook(caller) {
+  if type_of(caller) != "dict" {
+    return nil
+  }
+  let hook = caller?.before_dispatch
+  let kind = type_of(hook)
+  if kind == "function" || kind == "closure" || kind == "fn" {
+    return hook
+  }
+  return nil
+}
+
 fn __validate_tool_caller_result(r) {
   if type_of(r) != "dict" {
     throw "agent_loop: tool_caller must return a dict; got " + type_of(r)
@@ -388,7 +400,7 @@ fn __invoke_tool(call, tools, options) {
   return r
 }
 
-fn __agent_loop_run_empty_turn_validator(
+fn __agent_loop_run_pre_dispatch_validator(
   session_id,
   tool_calls,
   raw_text,
@@ -397,8 +409,9 @@ fn __agent_loop_run_empty_turn_validator(
   llm_result,
   turn_opts,
 ) {
+  let before_dispatch = __tool_caller_before_dispatch_hook(turn_opts?._tool_caller)
   let hook = __tool_caller_empty_turn_hook(turn_opts?._tool_caller)
-  if hook == nil || len(tool_calls) > 0 {
+  if before_dispatch == nil && (hook == nil || len(tool_calls) > 0) {
     return {vetoed: false}
   }
   let sentinel = turn_opts?.done_sentinel
@@ -416,20 +429,32 @@ fn __agent_loop_run_empty_turn_validator(
     tool_calls: tool_calls,
     has_done_marker: has_done_marker,
     done_marker: parsed_done_marker,
+    parse_errors: parsed?.tool_parse_errors ?? parsed?.errors ?? [],
+    parse_violations: parsed?.protocol_violations ?? parsed?.violations ?? [],
+    output_tokens: llm_result?.llm?.output_tokens ?? llm_result?.output_tokens ?? 0,
+    input_tokens: llm_result?.llm?.input_tokens ?? llm_result?.input_tokens ?? 0,
     llm_result: llm_result,
   }
   let workspace_policy = structural_validator_empty_turn(turn_opts?.policy, turn_opts?.tools)
-  return hook(
-    {
-      session_id: session_id,
-      iteration: turn_opts?._turn_iteration ?? 0,
-      assistant_turn: assistant_turn,
-      workspace_policy: workspace_policy,
-      tools: turn_opts?.tools,
-      policy: turn_opts?.policy,
-    },
-    { _turn -> return {vetoed: false} },
-  )
+  let turn = {
+    session_id: session_id,
+    iteration: turn_opts?._turn_iteration ?? 0,
+    assistant_turn: assistant_turn,
+    workspace_policy: workspace_policy,
+    tools: turn_opts?.tools,
+    policy: turn_opts?.policy,
+    session_successful_tools: turn_opts?._session_successful_tools ?? [],
+    session_rejected_tools: turn_opts?._session_rejected_tools ?? [],
+    max_output_tokens: turn_opts?.max_output_tokens
+      ?? turn_opts?.llm_options?.max_output_tokens
+      ?? turn_opts?.max_tokens
+      ?? turn_opts?.llm_options?.max_tokens
+      ?? 0,
+  }
+  if before_dispatch != nil {
+    return before_dispatch(turn, { _turn -> return {vetoed: false} })
+  }
+  return hook(turn, { _turn -> return {vetoed: false} })
 }
 
 fn __maybe_emit_tool_audit(session_id, envelope, audit, receipt = nil) {
@@ -1298,7 +1323,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         stop_reason = "suspended"
         break
       }
-      let structural_verdict = __agent_loop_run_empty_turn_validator(
+      let structural_verdict = __agent_loop_run_pre_dispatch_validator(
         session.session_id,
         tool_calls,
         raw_text,
@@ -1306,7 +1331,12 @@ fn __agent_loop_run(message, session, initial_opts) {
         parsed,
         llm_result,
         turn_opts
-          + {_turn_iteration: turn_index + 1, _tool_caller: turn_opts?._tool_caller ?? opts?._tool_caller},
+          + {
+          _turn_iteration: turn_index + 1,
+          _tool_caller: turn_opts?._tool_caller ?? opts?._tool_caller,
+          _session_successful_tools: successful_tools_seen,
+          _session_rejected_tools: rejected_tools_seen,
+        },
       )
       if structural_verdict.vetoed {
         let on_failure = structural_verdict?.on_failure ?? "regenerate_with_feedback"

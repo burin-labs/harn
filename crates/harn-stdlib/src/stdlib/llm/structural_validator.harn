@@ -3,14 +3,16 @@
 // std/llm/structural_validator - deterministic pre-dispatch checks for
 // assistant turns that should have made concrete tool progress.
 //
-// SV-1 keeps the surface deliberately small:
+// SV-2 expands the initial zero-tool-call validator into a general
+// whole-turn structural pass:
 //
-//   - one rule: `non_empty_when_writes_expected`
-//   - one enforcement shape: reject before tool dispatch, emit a typed
-//     event, then either pop+regen with feedback or raise
+//   - `non_empty_when_writes_expected`
+//   - `no_phantom_completion`
+//   - `tool_calls_well_formed`
+//   - `output_token_cap_with_zero_calls`
 //
-// The module still uses the tool-middleware composition seam so later
-// rules can share one opt-in surface.
+// The module still uses the tool-middleware composition seam so callers can
+// opt in without new host glue.
 import { agent_emit_event } from "std/agent/state"
 
 fn __sv_dict(value) -> dict {
@@ -73,7 +75,7 @@ fn __sv_tool_side_effect_level(entry) -> string {
 }
 
 fn __sv_tool_name(entry) -> string {
-  return lowercase(to_string(entry?.name ?? ""))
+  return lowercase(to_string(entry?.name ?? entry?.function?.name ?? ""))
 }
 
 fn __sv_tool_is_write_capable(entry) -> bool {
@@ -94,6 +96,31 @@ fn __sv_tool_is_write_capable(entry) -> bool {
     || starts_with(name, "apply_")
 }
 
+fn __sv_write_tool_names(tools) {
+  var names = []
+  for entry in __sv_tool_entries(tools) {
+    if __sv_tool_is_write_capable(entry) {
+      let name = __sv_tool_name(entry)
+      if name != "" && !contains(names, name) {
+        names = names.push(name)
+      }
+    }
+  }
+  return names
+}
+
+/**
+ * structural_validator_empty_turn(policy?, tools?) -> dict
+ *
+ * Computes the write-capability policy the structural validator uses
+ * for zero-tool-call and pre-dispatch rules.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: structural_validator_empty_turn({side_effect_level: "workspace_write"}, tool_registry())
+ */
 pub fn structural_validator_empty_turn(policy = nil, tools = nil) {
   let side_effect_level = lowercase(to_string(policy?.side_effect_level ?? ""))
   if side_effect_level == "none" || side_effect_level == "read_only" {
@@ -114,6 +141,58 @@ pub fn structural_validator_empty_turn(policy = nil, tools = nil) {
   return {has_write_capability: false, side_effect_level: side_effect_level}
 }
 
+/**
+ * structural_validator_catalog(locale?) -> dict
+ *
+ * Locale-keyed structural-validation hints. SV-2 uses the catalog for
+ * completion-claim patterns so the phrases are data, not inline control
+ * flow. Unknown locales fall back to English.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: structural_validator_catalog("en")
+ */
+pub fn structural_validator_catalog(locale = nil) {
+  let resolved = lowercase(trim(to_string(locale ?? "en")))
+  let english = {
+    locale: "en",
+    completion_claim_patterns: [
+      "(?i)\\b(i (have )?(fixed|updated|implemented|resolved|finished|completed))\\b",
+      "(?i)\\b(done|completed|finished|resolved|successful(?:ly)?)\\b",
+    ],
+    output_token_cap_ratio: 0.95,
+  }
+  if resolved == "" || resolved == "en" {
+    return english
+  }
+  return english + {requested_locale: resolved}
+}
+
+fn __sv_normalize_rules(value, global_warn_only = false) {
+  var out = []
+  for item in __sv_list(value) {
+    if item == nil {
+      continue
+    }
+    if type_of(item) == "dict" {
+      let name = to_string(item?.name ?? item?.rule ?? "")
+      if name == "" {
+        continue
+      }
+      out = out
+        .push({name: name, warn_only: item?.warn_only ?? global_warn_only})
+      continue
+    }
+    let name = to_string(item)
+    if name != "" {
+      out = out.push({name: name, warn_only: global_warn_only})
+    }
+  }
+  return out
+}
+
 fn __sv_validate_opts(opts) {
   let cfg = __sv_dict(opts)
   let on_failure = to_string(cfg?.on_failure ?? "regenerate_with_feedback")
@@ -121,11 +200,25 @@ fn __sv_validate_opts(opts) {
     throw "with_structural_validator: `on_failure` must be `regenerate_with_feedback` or `raise`; got "
       + on_failure
   }
-  let rules = __sv_string_list(cfg?.rules)
-  if len(rules) == 0 {
-    return cfg + {rules: ["non_empty_when_writes_expected"], on_failure: on_failure}
+  let locale = lowercase(trim(to_string(cfg?.locale ?? "en")))
+  let rules = __sv_normalize_rules(cfg?.rules, cfg?.warn_only ?? false)
+  let completion_claim_patterns = __sv_string_list(cfg?.completion_claim_patterns)
+  let normalized_rules = if len(rules) == 0 {
+    [{name: "non_empty_when_writes_expected", warn_only: cfg?.warn_only ?? false}]
+  } else {
+    rules
   }
-  return cfg + {rules: rules, on_failure: on_failure}
+  return cfg
+    + {
+    locale: if locale == "" {
+      "en"
+    } else {
+      locale
+    },
+    rules: normalized_rules,
+    on_failure: on_failure,
+    completion_claim_patterns: completion_claim_patterns,
+  }
 }
 
 fn __sv_feedback(rule, diagnostic, recommended_action) {
@@ -156,48 +249,219 @@ fn __sv_emit_decision(turn, workspace_policy, verdict) {
   )
 }
 
-fn __sv_reject(turn, workspace_policy, rule, diagnostic, recommended_action, on_failure) {
+fn __sv_warn_or_reject(turn, workspace_policy, rule_cfg, diagnostic, recommended_action, on_failure) {
+  let warn_only = rule_cfg?.warn_only ?? false
   let verdict = {
-    vetoed: true,
-    rule: rule,
+    vetoed: !warn_only,
+    rule: rule_cfg.name,
     diagnostic: diagnostic,
     recommended_action: recommended_action,
-    on_failure: on_failure,
-    feedback: __sv_feedback(rule, diagnostic, recommended_action),
+    on_failure: if warn_only {
+      "warn_only"
+    } else {
+      on_failure
+    },
+    feedback: __sv_feedback(rule_cfg.name, diagnostic, recommended_action),
     error: diagnostic,
   }
   __sv_emit_decision(turn, workspace_policy, verdict)
   return verdict
 }
 
-fn __sv_validate_empty_turn(cfg, turn) {
-  let workspace_policy = turn?.workspace_policy ?? {}
+fn __sv_protocol_issues(assistant_turn) {
+  var issues = []
+  for err in __sv_list(assistant_turn?.parse_errors) {
+    if err != nil {
+      issues = issues.push(to_string(err))
+    }
+  }
+  for violation in __sv_list(assistant_turn?.parse_violations) {
+    if violation != nil {
+      issues = issues.push(to_string(violation))
+    }
+  }
+  return issues
+}
+
+fn __sv_issue_excerpt(issues) {
+  let total = len(issues)
+  if total == 0 {
+    return ""
+  }
+  if total == 1 {
+    return issues[0]
+  }
+  if total == 2 {
+    return issues[0] + " | " + issues[1]
+  }
+  return issues[0] + " | " + issues[1] + " | +" + to_string(total - 2) + " more"
+}
+
+fn __sv_completion_claim_patterns(cfg) {
+  let catalog = structural_validator_catalog(cfg?.locale ?? "en")
+  let patterns = __sv_string_list(catalog?.completion_claim_patterns)
+  let overrides = __sv_string_list(cfg?.completion_claim_patterns)
+  if len(overrides) == 0 {
+    return patterns
+  }
+  var out = patterns
+  for pattern in overrides {
+    out = out.push(pattern)
+  }
+  return out
+}
+
+fn __sv_completion_claimed(text, patterns) -> bool {
+  let body = trim(to_string(text ?? ""))
+  if body == "" {
+    return false
+  }
+  for pattern in patterns {
+    let matches = regex_match(pattern, body) ?? []
+    if len(matches) > 0 {
+      return true
+    }
+  }
+  return false
+}
+
+fn __sv_prior_write_tool_call_count(turn, tools) {
+  let write_tools = __sv_write_tool_names(tools)
+  if len(write_tools) == 0 {
+    return 0
+  }
+  var count = 0
+  for name_raw in turn?.session_successful_tools ?? [] {
+    let name = lowercase(to_string(name_raw))
+    if contains(write_tools, name) {
+      count = count + 1
+    }
+  }
+  for name_raw in turn?.session_rejected_tools ?? [] {
+    let name = lowercase(to_string(name_raw))
+    if contains(write_tools, name) {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __sv_rule_non_empty_when_writes_expected(turn, workspace_policy) {
   let assistant_turn = turn?.assistant_turn ?? {}
-  let rules = cfg.rules
-  if contains(rules, "non_empty_when_writes_expected")
-    && workspace_policy?.has_write_capability ?? false
-    && len(assistant_turn?.tool_calls ?? []) == 0
-    && !(assistant_turn?.has_done_marker ?? false) {
-    return __sv_reject(
+  if !(workspace_policy?.has_write_capability ?? false) {
+    return nil
+  }
+  if len(assistant_turn?.tool_calls ?? []) > 0 || assistant_turn?.has_done_marker ?? false {
+    return nil
+  }
+  return {
+    diagnostic: "This assistant turn made no tool call even though write-capable tools are available.",
+    recommended_action: "Regenerate with a concrete write-capable tool call before claiming progress.",
+  }
+}
+
+fn __sv_rule_no_phantom_completion(turn, workspace_policy, cfg) {
+  let assistant_turn = turn?.assistant_turn ?? {}
+  if !(workspace_policy?.has_write_capability ?? false) {
+    return nil
+  }
+  if len(assistant_turn?.tool_calls ?? []) > 0 || assistant_turn?.has_done_marker ?? false {
+    return nil
+  }
+  if !__sv_completion_claimed(
+    assistant_turn?.visible_text ?? assistant_turn?.raw_text ?? "",
+    __sv_completion_claim_patterns(cfg),
+  ) {
+    return nil
+  }
+  let prior_writes = __sv_prior_write_tool_call_count(turn, turn?.tools)
+  if prior_writes > 0 {
+    return nil
+  }
+  return {
+    diagnostic: "This assistant turn claims completion before any write-capable tool call has been attempted in this session.",
+    recommended_action: "Call a write-capable tool before claiming completion.",
+  }
+}
+
+fn __sv_rule_tool_calls_well_formed(turn) {
+  let issues = __sv_protocol_issues(turn?.assistant_turn)
+  if len(issues) == 0 {
+    return nil
+  }
+  return {
+    diagnostic: "This assistant turn emitted malformed tool-call output: " + __sv_issue_excerpt(issues),
+    recommended_action: "Reissue the tool call using the canonical tool-call format and arguments that satisfy the bound schema.",
+  }
+}
+
+fn __sv_rule_output_token_cap_with_zero_calls(turn, workspace_policy, cfg) {
+  let assistant_turn = turn?.assistant_turn ?? {}
+  if !(workspace_policy?.has_write_capability ?? false) {
+    return nil
+  }
+  if len(assistant_turn?.tool_calls ?? []) > 0 || assistant_turn?.has_done_marker ?? false {
+    return nil
+  }
+  let output_tokens = to_int(assistant_turn?.output_tokens ?? 0) ?? 0
+  let max_output_tokens = to_int(turn?.max_output_tokens ?? 0) ?? 0
+  if output_tokens <= 0 || max_output_tokens <= 0 {
+    return nil
+  }
+  let ratio = structural_validator_catalog(cfg?.locale ?? "en")?.output_token_cap_ratio ?? 0.95
+  let threshold = to_int(ratio * 100.0) ?? 95
+  if output_tokens * 100 < max_output_tokens * threshold {
+    return nil
+  }
+  return {
+    diagnostic: "This assistant turn used " + to_string(output_tokens)
+      + " output tokens against a "
+      + to_string(max_output_tokens)
+      + "-token cap without emitting any tool call, which matches the known prose-loop failure fingerprint.",
+    recommended_action: "Stop narrating and emit the next concrete tool call immediately.",
+  }
+}
+
+fn __sv_validate_turn(cfg, turn) {
+  let workspace_policy = turn?.workspace_policy ?? {}
+  for rule_cfg in cfg.rules {
+    let name = to_string(rule_cfg?.name ?? "")
+    let result = if name == "non_empty_when_writes_expected" {
+      __sv_rule_non_empty_when_writes_expected(turn, workspace_policy)
+    } else if name == "no_phantom_completion" {
+      __sv_rule_no_phantom_completion(turn, workspace_policy, cfg)
+    } else if name == "tool_calls_well_formed" {
+      __sv_rule_tool_calls_well_formed(turn)
+    } else if name == "output_token_cap_with_zero_calls" {
+      __sv_rule_output_token_cap_with_zero_calls(turn, workspace_policy, cfg)
+    } else {
+      nil
+    }
+    if result == nil {
+      continue
+    }
+    let verdict = __sv_warn_or_reject(
       turn,
       workspace_policy,
-      "non_empty_when_writes_expected",
-      "This assistant turn made no tool call even though write-capable tools are available.",
-      "Regenerate with a concrete write-capable tool call before claiming progress.",
+      rule_cfg,
+      result.diagnostic,
+      result.recommended_action,
       cfg.on_failure,
     )
+    if verdict.vetoed {
+      return verdict
+    }
   }
   return {vetoed: false}
 }
 
 /**
- * with_structural_validator(opts) -> {caller, on_empty_turn}
+ * with_structural_validator(opts) -> {caller, before_dispatch}
  *
  * Compose the returned `caller` through `compose_tool_callers([ ... ])`.
- * The paired `on_empty_turn` hook lets the validator inspect assistant
- * turns that produced zero tool calls before dispatch. SV-1's execution
- * path is intentionally passive for non-empty tool batches; later rules
- * can extend the caller side without changing the opt-in surface.
+ * The paired `before_dispatch` hook inspects the parsed assistant turn
+ * before any tool dispatch begins. `rules` accepts strings or dicts
+ * like `{name: "tool_calls_well_formed", warn_only: true}`.
  *
  * @effects: []
  * @allocation: heap
@@ -207,14 +471,12 @@ fn __sv_validate_empty_turn(cfg, turn) {
  */
 pub fn with_structural_validator(opts = nil) {
   let cfg = __sv_validate_opts(opts)
-  return {
-    caller: { call, next -> return next(call) },
-    on_empty_turn: { turn, next ->
-      let verdict = __sv_validate_empty_turn(cfg, turn)
-      if verdict.vetoed {
-        return verdict
-      }
-      return next(turn)
-    },
+  let before_dispatch = { turn, next ->
+    let verdict = __sv_validate_turn(cfg, turn)
+    if verdict.vetoed {
+      return verdict
+    }
+    return next(turn)
   }
+  return {caller: { call, next -> return next(call) }, before_dispatch: before_dispatch}
 }

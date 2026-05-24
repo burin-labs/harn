@@ -380,6 +380,11 @@ fn __validate_tool_caller(value) {
   if type_of(value?.caller) != "closure" {
     throw "agent_loop: `tool_caller.caller` must be a closure"
   }
+  let before_dispatch = value?.before_dispatch
+  if before_dispatch != nil && type_of(before_dispatch) != "closure" {
+    throw "agent_loop: `tool_caller.before_dispatch` must be a closure or nil; got "
+      + type_of(before_dispatch)
+  }
   let empty_turn = value?.on_empty_turn
   if empty_turn != nil && type_of(empty_turn) != "closure" {
     throw "agent_loop: `tool_caller.on_empty_turn` must be a closure or nil; got " + type_of(empty_turn)
