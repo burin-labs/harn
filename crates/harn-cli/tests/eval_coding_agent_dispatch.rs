@@ -39,7 +39,7 @@ use std::path::Path;
 use std::process::Command;
 
 #[test]
-fn summary_md_is_byte_identical_between_impls() {
+fn summary_md_is_byte_identical_between_impls_after_normalizing_metrics() {
     // Use a single shared output dir for both impls. The aggregated
     // report bakes the output_dir + per-run transcript paths into the
     // rendered tables, so reusing the same dir keeps those strings
@@ -49,13 +49,15 @@ fn summary_md_is_byte_identical_between_impls() {
     let shared_out = dir.path().join("bench");
 
     let harn = run_eval_coding_agent(&shared_out, false, &[]);
-    assert_eq!(harn.exit_code, 1, "harn stderr={}", harn.stderr);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     let harn_md = fs::read_to_string(shared_out.join("summary.md")).expect("harn summary.md");
 
     let rust = run_eval_coding_agent(&shared_out, false, &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 1, "rust stderr={}", rust.stderr);
+    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
     let rust_md = fs::read_to_string(shared_out.join("summary.md")).expect("rust summary.md");
 
+    let harn_md = normalize_summary_markdown_metrics(&harn_md);
+    let rust_md = normalize_summary_markdown_metrics(&rust_md);
     assert_eq!(
         harn_md, rust_md,
         "summary.md diverged\n--- rust ---\n{}\n--- harn ---\n{}",
@@ -69,11 +71,11 @@ fn followups_md_is_byte_identical_between_impls() {
     let shared_out = dir.path().join("bench");
 
     let harn = run_eval_coding_agent(&shared_out, false, &[]);
-    assert_eq!(harn.exit_code, 1, "harn stderr={}", harn.stderr);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     let harn_md = fs::read_to_string(shared_out.join("followups.md")).expect("harn followups.md");
 
     let rust = run_eval_coding_agent(&shared_out, false, &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 1, "rust stderr={}", rust.stderr);
+    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
     let rust_md = fs::read_to_string(shared_out.join("followups.md")).expect("rust followups.md");
 
     assert_eq!(
@@ -106,11 +108,10 @@ fn json_stdout_is_structurally_identical_between_impls() {
     // parsed shapes match — assert structural equality, not byte
     // identity, for the JSON path.
     //
-    // We normalise `elapsed_ms` to 0 across both runs because the
-    // matrix executor measures wall-clock per cell and the two
-    // subprocess invocations naturally produce different millisecond
-    // counts; everything else in the report is deterministic when the
-    // output dir is reused.
+    // We normalise volatile execution metrics across both runs because
+    // the matrix executor measures wall-clock per cell and fresh agent
+    // session ids can perturb token estimates by a token or two. The
+    // fields owned by the renderer remain structurally compared.
     let dir = tempfile::tempdir().expect("tempdir");
     let shared_out = dir.path().join("bench");
 
@@ -121,8 +122,8 @@ fn json_stdout_is_structurally_identical_between_impls() {
         serde_json::from_str(&harn.stdout).expect("harn --json stdout parses");
     let mut rust_value: serde_json::Value =
         serde_json::from_str(&rust.stdout).expect("rust --json stdout parses");
-    zero_timing_fields(&mut harn_value);
-    zero_timing_fields(&mut rust_value);
+    zero_volatile_metrics(&mut harn_value);
+    zero_volatile_metrics(&mut rust_value);
     assert_eq!(
         rust_value, harn_value,
         "--json stdout diverged structurally"
@@ -168,37 +169,63 @@ fn summary_json_artifact_keeps_serde_struct_field_order_across_impls() {
         serde_json::from_str(&harn_json).expect("harn summary.json parses");
     let mut rust_value: serde_json::Value =
         serde_json::from_str(&rust_json).expect("rust summary.json parses");
-    zero_timing_fields(&mut harn_value);
-    zero_timing_fields(&mut rust_value);
+    zero_volatile_metrics(&mut harn_value);
+    zero_volatile_metrics(&mut rust_value);
     assert_eq!(harn_value, rust_value, "summary.json diverged structurally");
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
-/// Walk a `serde_json::Value` tree and zero any `elapsed_ms` /
-/// `duration_ms` fields so two invocations of the same coding-agent
-/// matrix produce structurally equal reports. The matrix executor
-/// measures wall-clock per cell and the two subprocess runs naturally
-/// produce different millisecond counts — every other field in the
-/// rendered report is deterministic once the output dir is reused.
-fn zero_timing_fields(value: &mut serde_json::Value) {
+/// Walk a `serde_json::Value` tree and zero volatile metrics so two
+/// invocations of the same coding-agent matrix produce structurally
+/// equal reports. The renderer parity tests compare presentation-owned
+/// fields; wall-clock timings and token estimates belong to execution.
+fn zero_volatile_metrics(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
             for (key, child) in map.iter_mut() {
-                if key == "elapsed_ms" || key == "duration_ms" {
+                if matches!(
+                    key.as_str(),
+                    "elapsed_ms"
+                        | "duration_ms"
+                        | "input_tokens"
+                        | "output_tokens"
+                        | "token_delta_text_minus_native"
+                ) {
                     *child = serde_json::Value::Number(serde_json::Number::from(0));
                 } else {
-                    zero_timing_fields(child);
+                    zero_volatile_metrics(child);
                 }
             }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                zero_timing_fields(item);
+                zero_volatile_metrics(item);
             }
         }
         _ => {}
     }
+}
+
+fn normalize_summary_markdown_metrics(markdown: &str) -> String {
+    let mut out = String::new();
+    for line in markdown.lines() {
+        if line.starts_with("| `") {
+            let mut cells = line.split('|').collect::<Vec<_>>();
+            match cells.len() {
+                // Runs table: normalize the `tokens` column.
+                15 => cells[10] = " <tokens> ",
+                // Native/Text Comparison table: normalize `token delta`.
+                13 => cells[9] = " <token-delta> ",
+                _ => {}
+            }
+            out.push_str(&cells.join("|"));
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
 }
 
 struct ProcessOutcome {
@@ -208,10 +235,8 @@ struct ProcessOutcome {
 }
 
 /// Invoke `harn eval coding-agent` in mock-only matrix mode. The mock
-/// provider has no LLM credentials and the in-process driver may
-/// either pass (CI w/ python3 + the embedded coding_agent_suite.harn
-/// driver round-tripping) or fail with infra_error rows. Either way
-/// the rendered outputs must match across impls.
+/// provider has no LLM credentials, so this should pass without network
+/// or provider setup; the rendered outputs must match across impls.
 fn run_eval_coding_agent(output: &Path, json: bool, extra_env: &[(&str, &str)]) -> ProcessOutcome {
     let mut argv = vec![
         "eval".to_string(),

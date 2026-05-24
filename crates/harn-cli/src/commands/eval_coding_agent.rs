@@ -51,7 +51,9 @@ use crate::commands::local::runtime::{
     local_provider_ids, ollama_unload_model, snapshot_provider, LocalProviderSnapshot,
 };
 use crate::commands::local_readiness;
-use crate::commands::run::{execute_run, CliLlmMockMode, RunProfileOptions};
+use crate::commands::run::{
+    execute_run_with_sandbox_options, CliLlmMockMode, RunProfileOptions, RunSandboxOptions,
+};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
@@ -521,7 +523,7 @@ async fn run_matrix_entry(
     let argv = script_argv(args, fixture, &selector, &tool_format, &run_dir);
     let clock = RealClock::new();
     let started_ms = clock.monotonic_ms();
-    let outcome = execute_run(
+    let outcome = execute_run_with_sandbox_options(
         &script_path.to_string_lossy(),
         false,
         HashSet::new(),
@@ -530,6 +532,7 @@ async fn run_matrix_entry(
         CliLlmMockMode::Off,
         None,
         RunProfileOptions::default(),
+        RunSandboxOptions::default().with_workspace_root(run_dir.clone()),
     )
     .await;
     let elapsed_ms = clock

@@ -2,10 +2,16 @@
 
 //! In-process coverage for `harn eval coding-agent`.
 
+use std::collections::HashSet;
 use std::fs;
+use std::path::PathBuf;
 use std::thread;
 
 use harn_cli::cli::EvalCodingAgentArgs;
+use harn_cli::commands::run::{
+    execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
+    RunSandboxOptions,
+};
 use harn_cli::tests::common::env_lock;
 
 fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
@@ -168,4 +174,35 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         .exists());
     assert!(output.join("summary.md").exists());
     assert!(output.join("followups.md").exists());
+}
+
+#[test]
+fn read_only_audit_verifier_accepts_repeated_read_file_calls() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = manifest_dir.join("tests/fixtures/read_only_audit_verifier.harn");
+    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
+        let _env_guard = env_lock::lock_env().lock().await;
+        harn_vm::reset_thread_local_state();
+        execute_run_with_sandbox_options(
+            &fixture.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+            RunSandboxOptions::default().with_workspace_root(manifest_dir),
+        )
+        .await
+    });
+    assert_eq!(
+        outcome.exit_code, 0,
+        "fixture failed\nstdout={}\nstderr={}",
+        outcome.stdout, outcome.stderr
+    );
+    assert_eq!(
+        outcome.stdout,
+        "repeated_reads=true\nno_read=false\nedit_attempt=false\nparent_path=false\nchanged_readme=false\n"
+    );
 }
