@@ -1,0 +1,297 @@
+/**
+ * `harn models list` ported to .harn — see harn#2309 (W9).
+ *
+ * The Rust dispatch shim in
+ * `crates/harn-cli/src/commands/models/list.rs` detects installed Ollama
+ * models out-of-process (sandboxed scripts can't run `ollama list`
+ * directly) and hands off the discovered model ids plus the parsed
+ * filter args as env vars. The catalog itself comes from the
+ * `llm_catalog()` free builtin landed in G4 (#2297 / #2343), so the
+ * script owns the entire filter + render pipeline end-to-end.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_LIST_PROVIDER       — optional provider filter ("" = all).
+ *   HARN_MODELS_LIST_INSTALLED_ONLY — "1" iff `--installed-only`.
+ *   HARN_MODELS_INSTALLED_OLLAMA    — JSON list<string> of installed
+ *                                     Ollama model ids (may be empty).
+ *   HARN_OUTPUT_JSON                — "1" for the JSON envelope, else
+ *                                     human-readable table.
+ */
+fn __dict_get_list(d: dict, key: string) -> list {
+  let v = d[key]
+  if type_of(v) == "list" {
+    return v
+  }
+  return []
+}
+
+fn __dict_get_string(d: dict, key: string, fallback: string) -> string {
+  let v = d[key]
+  if type_of(v) == "string" {
+    return v
+  }
+  return fallback
+}
+
+fn __dict_get_bool(d: dict, key: string, fallback: bool) -> bool {
+  let v = d[key]
+  if type_of(v) == "bool" {
+    return v
+  }
+  return fallback
+}
+
+/**
+ * Build a set-like dict from a list of strings for O(1) membership.
+ * Harn lists don't expose `contains`, so the alternative is a linear
+ * scan per lookup — fine at today's catalog sizes, but the dict avoids
+ * a quadratic blowup if the catalog grows.
+ */
+fn __string_set(items: list) -> dict {
+  var out = {}
+  for item in items {
+    if type_of(item) == "string" {
+      out = out + {[item]: true}
+    }
+  }
+  return out
+}
+
+/**
+ * Group catalog entries by provider, dropping anything the filters
+ * exclude. Returns a dict whose keys are provider names and whose
+ * values are lists of `{id, capabilities, installed}` dicts.
+ *
+ * `installed` is only meaningful for ollama (and follows the legacy
+ * Rust impl's gating). The downstream renderers decide whether to
+ * surface the flag.
+ */
+fn __group_by_provider(
+  catalog: list,
+  provider_filter: string,
+  installed_only: bool,
+  installed_ollama: dict,
+) -> dict {
+  var groups = {}
+  for entry in catalog {
+    if type_of(entry) != "dict" {
+      continue
+    }
+    let provider = __dict_get_string(entry, "provider", "")
+    let id = __dict_get_string(entry, "id", "")
+    if provider == "" || id == "" {
+      continue
+    }
+    if provider_filter != "" && provider != provider_filter {
+      continue
+    }
+    let installed = provider == "ollama" && installed_ollama[id] ?? false
+    if installed_only && !installed {
+      continue
+    }
+    let capabilities = __dict_get_list(entry, "capabilities")
+    let item = {id: id, capabilities: capabilities, installed: installed}
+    let prior = if groups[provider] == nil {
+      []
+    } else {
+      groups[provider]
+    }
+    groups = groups + {[provider]: prior.push(item)}
+  }
+  return groups
+}
+
+/**
+ * Synthesize installed Ollama models the catalog hasn't listed yet —
+ * matches the legacy Rust impl's "list whatever the user has pulled,
+ * even if we haven't curated metadata for it" behavior.
+ */
+fn __augment_with_unknown_ollama(groups: dict, provider_filter: string, installed_ollama_list: list) -> dict {
+  let show_ollama = provider_filter == "" || provider_filter == "ollama"
+  if !show_ollama {
+    return groups
+  }
+  let existing = if groups["ollama"] == nil {
+    []
+  } else {
+    groups["ollama"]
+  }
+  var known_ids = {}
+  for item in existing {
+    if type_of(item) == "dict" {
+      let id = __dict_get_string(item, "id", "")
+      if id != "" {
+        known_ids = known_ids + {[id]: true}
+      }
+    }
+  }
+  var augmented = existing
+  for id in installed_ollama_list {
+    if type_of(id) != "string" {
+      continue
+    }
+    if known_ids[id] ?? false {
+      continue
+    }
+    augmented = augmented.push({id: id, capabilities: ["local"], installed: true})
+  }
+  if len(augmented) == 0 {
+    return groups
+  }
+  return groups + {ollama: augmented}
+}
+
+/**
+ * Sort a list of strings lexicographically with an insertion sort.
+ * Tiny lists (~tens of provider names; hundreds of model ids per
+ * provider) keep this cheap and avoids depending on a comparator
+ * the stdlib doesn't expose to scripts yet.
+ */
+fn __sorted_strings(items: list) -> list {
+  var out = []
+  for item in items {
+    var idx = 0
+    while idx < len(out) && out[idx] < item {
+      idx = idx + 1
+    }
+    let head = out[0:idx]
+    let tail = out[idx:len(out)]
+    out = head.push(item) + tail
+  }
+  return out
+}
+
+fn __sort_models_by_id(models: list) -> list {
+  var out = []
+  for model in models {
+    let id = if type_of(model) == "dict" {
+      __dict_get_string(model, "id", "")
+    } else {
+      ""
+    }
+    var idx = 0
+    while idx < len(out) {
+      let other_id = if type_of(out[idx]) == "dict" {
+        __dict_get_string(out[idx], "id", "")
+      } else {
+        ""
+      }
+      if other_id >= id {
+        break
+      }
+      idx = idx + 1
+    }
+    let head = out[0:idx]
+    let tail = out[idx:len(out)]
+    out = head.push(model) + tail
+  }
+  return out
+}
+
+/**
+ * Render the human-readable table. The legacy Rust impl iterates a
+ * BTreeMap (so providers are in lexicographic order) and for each
+ * provider prints its name, then each model with its tags / installed
+ * marker, then a blank line. Keep that shape byte-for-byte.
+ */
+fn __render_human(groups: dict) -> string {
+  let provider_names = __sorted_strings(keys(groups))
+  if len(provider_names) == 0 {
+    return "(no models match)\n"
+  }
+  var out = ""
+  for provider in provider_names {
+    out = out + provider + "\n"
+    let models = __sort_models_by_id(groups[provider])
+    for model in models {
+      let id = __dict_get_string(model, "id", "")
+      let installed = __dict_get_bool(model, "installed", false)
+      let suffix = if installed {
+        " [installed]"
+      } else {
+        ""
+      }
+      let tags = __dict_get_list(model, "capabilities")
+      let tag_text = if len(tags) == 0 {
+        ""
+      } else {
+        "  (" + join(tags, ", ") + ")"
+      }
+      out = out + "  " + id + suffix + tag_text + "\n"
+    }
+    out = out + "\n"
+  }
+  return out
+}
+
+/**
+ * Build the JSON envelope. The legacy Rust impl emits
+ * `{"providers": [{"name": ..., "models": [{"id", "tags", ["installed"]}]}]}`,
+ * with `installed` only present for ollama entries. Provider order is
+ * lexicographic (Rust uses a BTreeMap); model order within each
+ * provider preserves catalog order.
+ */
+fn __render_envelope(groups: dict) -> string {
+  let provider_names = __sorted_strings(keys(groups))
+  var provider_list = []
+  for name in provider_names {
+    let models = groups[name]
+    var rendered = []
+    for model in models {
+      let id = __dict_get_string(model, "id", "")
+      let tags = __dict_get_list(model, "capabilities")
+      let entry = if name == "ollama" {
+        {id: id, tags: tags, installed: __dict_get_bool(model, "installed", false)}
+      } else {
+        {id: id, tags: tags}
+      }
+      rendered = rendered.push(entry)
+    }
+    provider_list = provider_list.push({name: name, models: rendered})
+  }
+  return json_stringify_pretty({providers: provider_list})
+}
+
+fn main(harness: Harness) -> int {
+  let catalog = llm_catalog()
+  let provider_filter = harness.env.get_or("HARN_MODELS_LIST_PROVIDER", "")
+  let installed_only = harness.env.get_or("HARN_MODELS_LIST_INSTALLED_ONLY", "0") == "1"
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  let installed_raw = harness.env.get_or("HARN_MODELS_INSTALLED_OLLAMA", "[]")
+  let installed_ollama_list = try {
+    json_parse(installed_raw)
+  } catch (e) {
+    harness.stdio
+      .eprintln("internal error: failed to parse HARN_MODELS_INSTALLED_OLLAMA: " + to_string(e))
+    return 70
+  }
+  if type_of(installed_ollama_list) != "list" {
+    harness.stdio.eprintln("internal error: HARN_MODELS_INSTALLED_OLLAMA must be a JSON list")
+    return 70
+  }
+  let installed_ollama_set = __string_set(installed_ollama_list)
+  let grouped = __group_by_provider(catalog, provider_filter, installed_only, installed_ollama_set)
+  // The legacy impl runs the synthesis pass unconditionally — the
+  // synthesised entries are themselves installed, so they pass
+  // `--installed-only` too. Run the same pass here regardless of the
+  // flag; the dedup inside `__augment_with_unknown_ollama` keeps it
+  // idempotent.
+  let augmented = __augment_with_unknown_ollama(grouped, provider_filter, installed_ollama_list)
+  if json_mode {
+    harness.stdio.println(__render_envelope(augmented))
+    return 0
+  }
+  let text = __render_human(augmented)
+  // The legacy renderer always ends with a blank line (a trailing
+  // `println!()`) when it printed any provider; `(no models match)` is
+  // emitted by a single `println!` with no blank line after it. Strip
+  // the final newline so `harness.stdio.println` can re-add exactly
+  // one and the bytes match the Rust path.
+  let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+    text[0:len(text) - 1]
+  } else {
+    text
+  }
+  harness.stdio.println(trimmed)
+  return 0
+}
