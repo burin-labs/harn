@@ -1,0 +1,48 @@
+import { task_plan_compile, task_plan_validate } from "std/agent/task_plan"
+
+pipeline main() {
+  let plan = {
+    schema_version: "1",
+    objective: "Add rate limiter around existing auth middleware",
+    entry: "discover",
+    nodes: {
+      discover: {
+        kind: "read_fact",
+        purpose: "Map auth middleware",
+        prompt: "List functions in middleware/auth/*",
+        tools: ["read", "grep"],
+      },
+      implement: {
+        kind: "agent_loop",
+        purpose: "Add rate limiter",
+        prompt: "Wire a token-bucket limiter around the auth middleware",
+        tools: ["read", "edit"],
+        effects: ["writes_files"],
+        agent_loop: {max_iterations: 6, done_sentinel: "DONE"},
+      },
+      verify: {kind: "verify", verify: {command: "cargo test -p auth", expect_status: 0}},
+    },
+    edges: [{from: "discover", to: "implement"}, {from: "implement", to: "verify"}],
+    capabilities: {tools: ["read", "edit", "grep"], side_effect_level: "writes_files"},
+    verification: {primary: "verify"},
+    promotion_policy: {shadow_runs_required: 3, human_review_required: true},
+  }
+  let report = task_plan_validate(plan)
+  __io_println(report.valid)
+  __io_println(len(report.errors))
+  __io_println(report.graph_stats.node_count)
+  __io_println(report.graph_stats.reachable_count)
+  __io_println(report.budget_summary.max_nodes)
+  let compiled = task_plan_compile(plan)
+  __io_println(compiled.ok)
+  __io_println(compiled.workflow.entry)
+  __io_println(compiled.workflow.nodes.implement.kind)
+  __io_println(compiled.workflow.nodes.implement.mode)
+  __io_println(compiled.workflow.nodes.verify.kind)
+  __io_println(compiled.workflow.nodes.verify.verify.command)
+  __io_println(compiled.workflow.nodes.implement.metadata.task_plan_kind)
+  __io_println(compiled.workflow.metadata.task_plan.objective)
+  __io_println(compiled.workflow.capability_policy.side_effect_level)
+  let wf_report = workflow_validate(compiled.workflow)
+  __io_println(wf_report.valid)
+}

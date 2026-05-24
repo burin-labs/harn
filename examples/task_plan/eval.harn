@@ -1,0 +1,88 @@
+// examples/task_plan/eval.harn
+//
+// Static eval driver for the typed task-plan IR (burin-labs/harn#2196).
+// Loads every fixture in examples/task_plan/plans/*.json, runs
+// `task_plan_validate` + `task_plan_compile`, and emits one JSONL record
+// per plan describing the graph stats, validation outcome, and the lowered
+// WorkflowGraph's own validate report.
+//
+// The driver is intentionally LLM-free: it captures everything the IR layer
+// produces deterministically. The full three-strategy comparison from
+// #2196 (baseline agent_loop vs. Burin first-order plan vs. typed-IR
+// lowered workflow) layers on top of this once a model budget is
+// allocated — see docs/src/task-plan-ir.md for the methodology.
+//
+// Usage:
+//   harn run examples/task_plan/eval.harn -- --plans=examples/task_plan/plans
+//   harn run examples/task_plan/eval.harn -- --plans=examples/task_plan/plans --out=runs/eval.jsonl
+import { task_plan_compile, task_plan_validate } from "std/agent/task_plan"
+
+fn parse_arg(args, prefix) {
+  for arg in args ?? [] {
+    if starts_with(arg, prefix) {
+      return substring(arg, len(prefix))
+    }
+  }
+  return nil
+}
+
+fn collect_plan_files(harness, dir) {
+  var paths = []
+  for name in harness.fs.list_dir(dir) {
+    if ends_with(name, ".json") {
+      paths = paths + [path_join(dir, name)]
+    }
+  }
+  return paths
+}
+
+fn record_for(harness, plan_path) {
+  let plan = json_parse(harness.fs.read_text(plan_path))
+  let report = task_plan_validate(plan)
+  let compiled = task_plan_compile(plan)
+  let wf_report = if compiled.ok {
+    workflow_validate(compiled.workflow)
+  } else {
+    {valid: false, errors: [], warnings: []}
+  }
+  return {
+    fixture: basename(plan_path),
+    objective: plan?.objective,
+    validation: {
+      valid: report.valid,
+      error_count: len(report.errors),
+      warning_count: len(report.warnings),
+      graph_stats: report.graph_stats,
+      budget_summary: report.budget_summary,
+    },
+    compile: {ok: compiled.ok},
+    workflow_validation: {
+      valid: wf_report?.valid ?? false,
+      error_count: len(wf_report?.errors ?? []),
+      warning_count: len(wf_report?.warnings ?? []),
+    },
+  }
+}
+
+fn main(harness: Harness) -> int {
+  let plans_dir = parse_arg(argv, "--plans=") ?? "examples/task_plan/plans"
+  let out_path = parse_arg(argv, "--out=")
+  let plan_files = collect_plan_files(harness, plans_dir)
+  var records = []
+  for plan_path in plan_files {
+    records = records + [record_for(harness, plan_path)]
+  }
+  var lines = []
+  for record in records {
+    lines = lines + [json_stringify(record)]
+  }
+  let body = lines.join("\n") + "\n"
+  if out_path == nil || out_path == "" {
+    harness.stdio.print(body)
+  } else {
+    harness.fs.write_text(out_path, body)
+    harness.stdio
+      .println("wrote " + to_string(len(records)) + " records to " + out_path)
+  }
+  return 0
+}
