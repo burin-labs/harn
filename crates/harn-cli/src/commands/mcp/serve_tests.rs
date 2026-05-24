@@ -1694,3 +1694,382 @@ async fn legacy_sse_routes_are_marked_deprecated() {
         Some("true")
     );
 }
+
+fn rc_meta() -> JsonValue {
+    json!({
+        mcp_protocol::RC_META_KEY_PROTOCOL_VERSION: mcp_protocol::DRAFT_PROTOCOL_VERSION,
+        mcp_protocol::RC_META_KEY_CLIENT_INFO: {"name": "rc-client", "version": "1.0"},
+        mcp_protocol::RC_META_KEY_CLIENT_CAPABILITIES: {},
+    })
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn server_discover_returns_capabilities_and_skips_initialize() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = McpOrchestratorService::new_local(args.local.clone()).unwrap();
+    let mut session = ConnectionState::default();
+    let response = service
+        .handle_request(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": mcp_protocol::METHOD_SERVER_DISCOVER,
+                "params": {}
+            }),
+        )
+        .await;
+    assert_eq!(
+        response["result"]["resultType"],
+        json!(mcp_protocol::RESULT_TYPE_COMPLETE)
+    );
+    assert_eq!(
+        response["result"]["protocolVersion"],
+        json!(mcp_protocol::DRAFT_PROTOCOL_VERSION)
+    );
+    let supported = response["result"]["supportedVersions"]
+        .as_array()
+        .expect("supportedVersions array");
+    assert!(supported
+        .iter()
+        .any(|v| v == &json!(mcp_protocol::DRAFT_PROTOCOL_VERSION)));
+    assert!(supported.iter().any(|v| v == &json!(MCP_PROTOCOL_VERSION)));
+    assert_eq!(
+        response["result"]["capabilities"]["tools"]["listChanged"],
+        json!(true)
+    );
+    assert!(session.initialized);
+    assert!(session.authenticated);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn rc_tools_list_returns_result_type_and_cache_hint_without_initialize() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = McpOrchestratorService::new_local(args.local.clone()).unwrap();
+    // No prior initialize: a Modern client should still be able to call
+    // tools/list with `_meta` metadata.
+    let mut session = ConnectionState::default();
+    let response = service
+        .handle_request(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": { "_meta": rc_meta() }
+            }),
+        )
+        .await;
+    assert_eq!(
+        response["result"]["resultType"],
+        json!(mcp_protocol::RESULT_TYPE_COMPLETE)
+    );
+    assert_eq!(
+        response["result"]["ttlMs"],
+        json!(mcp_protocol::DEFAULT_LIST_CACHE_TTL_MS)
+    );
+    assert_eq!(
+        response["result"]["cacheScope"],
+        json!(mcp_protocol::DEFAULT_LIST_CACHE_SCOPE)
+    );
+    assert!(response["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .any(|tool| tool["name"] == json!("harn.trigger.list")));
+    assert!(session.initialized);
+    assert_eq!(session.protocol_mode, mcp_protocol::McpProtocolMode::Modern);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn rc_request_with_unsupported_protocol_version_returns_minus_32004() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = McpOrchestratorService::new_local(args.local.clone()).unwrap();
+    let mut session = ConnectionState::default();
+    let response = service
+        .handle_request(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/list",
+                "params": {
+                    "_meta": {
+                        mcp_protocol::RC_META_KEY_PROTOCOL_VERSION: "2099-01-01"
+                    }
+                }
+            }),
+        )
+        .await;
+    assert_eq!(
+        response["error"]["code"],
+        json!(mcp_protocol::UNSUPPORTED_PROTOCOL_VERSION_CODE)
+    );
+    let supported = response["error"]["data"]["supported"]
+        .as_array()
+        .expect("supported array");
+    assert!(supported
+        .iter()
+        .any(|v| v == &json!(mcp_protocol::DRAFT_PROTOCOL_VERSION)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn legacy_initialize_still_negotiates_stable_protocol_version() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = McpOrchestratorService::new_local(args.local.clone()).unwrap();
+    let mut session = ConnectionState::default();
+    let response = service
+        .handle_request(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": { "name": "legacy", "version": "1.0" }
+                }
+            }),
+        )
+        .await;
+    assert_eq!(response["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
+    // Legacy responses must remain free of RC envelope fields so the
+    // existing 2025-11-25 wire shape stays byte-stable.
+    assert!(response["result"].get("resultType").is_none());
+    assert!(response["result"].get("ttlMs").is_none());
+    assert_eq!(session.protocol_mode, mcp_protocol::McpProtocolMode::Legacy);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn http_rc_request_returns_no_session_id_and_negotiates_draft_version() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
+    let router = http_router_for_service(
+        service.clone(),
+        "/mcp".to_string(),
+        "/sse".to_string(),
+        "/messages".to_string(),
+    );
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("accept", "application/json")
+                .header("content-type", "application/json")
+                .header(MCP_PROTOCOL_HEADER, mcp_protocol::DRAFT_PROTOCOL_VERSION)
+                .header(mcp_protocol::RC_HEADER_METHOD, "tools/list")
+                .body(Body::from(
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/list",
+                        "params": { "_meta": rc_meta() }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(MCP_PROTOCOL_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(mcp_protocol::DRAFT_PROTOCOL_VERSION),
+        "RC responses must echo the negotiated draft version"
+    );
+    assert!(
+        response.headers().get(MCP_SESSION_HEADER).is_none(),
+        "RC responses must not emit MCP-Session-Id"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: JsonValue = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        body["result"]["resultType"],
+        json!(mcp_protocol::RESULT_TYPE_COMPLETE)
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn http_rc_request_rejects_method_header_mismatch() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
+    let router = http_router_for_service(
+        service.clone(),
+        "/mcp".to_string(),
+        "/sse".to_string(),
+        "/messages".to_string(),
+    );
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("accept", "application/json")
+                .header("content-type", "application/json")
+                .header(MCP_PROTOCOL_HEADER, mcp_protocol::DRAFT_PROTOCOL_VERSION)
+                .header(mcp_protocol::RC_HEADER_METHOD, "tools/list")
+                .body(Body::from(
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": { "name": "harn.trigger.list", "_meta": rc_meta() }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: JsonValue = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["error"]["code"], json!(-32600));
+    assert_eq!(body["error"]["data"]["headerValue"], "tools/list");
+    assert_eq!(body["error"]["data"]["bodyMethod"], "tools/call");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn rc_http_get_stream_works_without_session_id() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
+    let router = http_router_for_service(
+        service.clone(),
+        "/mcp".to_string(),
+        "/sse".to_string(),
+        "/messages".to_string(),
+    );
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/mcp")
+                .header("accept", "text/event-stream")
+                .header(MCP_PROTOCOL_HEADER, mcp_protocol::DRAFT_PROTOCOL_VERSION)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(MCP_PROTOCOL_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(mcp_protocol::DRAFT_PROTOCOL_VERSION)
+    );
+    assert!(response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream")));
+
+    let mut stream = response.into_body().into_data_stream();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+        .await
+        .expect("timed out waiting for SSE prime event")
+        .expect("SSE stream ended")
+        .expect("SSE body error");
+    service.notify_manifest_reloaded();
+    let mut buffer = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !buffer.contains("notifications/tools/list_changed") {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "RC GET stream did not receive list_changed notification; body={buffer}"
+        );
+        let chunk = tokio::time::timeout(remaining, stream.next())
+            .await
+            .expect("timed out waiting for SSE notification")
+            .expect("SSE stream ended")
+            .expect("SSE body error");
+        buffer.push_str(std::str::from_utf8(&chunk).unwrap());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn legacy_initialize_http_path_still_returns_session_id() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
+    let router = http_router_for_service(
+        service.clone(),
+        "/mcp".to_string(),
+        "/sse".to_string(),
+        "/messages".to_string(),
+    );
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("accept", "application/json")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": MCP_PROTOCOL_VERSION,
+                            "capabilities": {},
+                            "clientInfo": { "name": "legacy-http", "version": "1.0" }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(MCP_PROTOCOL_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(MCP_PROTOCOL_VERSION)
+    );
+    assert!(
+        response.headers().get(MCP_SESSION_HEADER).is_some(),
+        "legacy initialize must mint a session id"
+    );
+}

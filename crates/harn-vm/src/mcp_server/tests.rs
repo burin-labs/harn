@@ -583,6 +583,208 @@ async fn server_tool_call_rejects_task_augmentation() {
     );
 }
 
+fn rc_metadata_params(rest: serde_json::Value) -> serde_json::Value {
+    let mut object = match rest {
+        serde_json::Value::Object(map) => map,
+        serde_json::Value::Null => serde_json::Map::new(),
+        other => serde_json::Map::from_iter([("value".to_string(), other)]),
+    };
+    object.insert(
+        "_meta".to_string(),
+        serde_json::json!({
+            crate::mcp_protocol::RC_META_KEY_PROTOCOL_VERSION:
+                crate::mcp_protocol::DRAFT_PROTOCOL_VERSION,
+            crate::mcp_protocol::RC_META_KEY_CLIENT_INFO: {"name": "rc-client", "version": "1.0"},
+            crate::mcp_protocol::RC_META_KEY_CLIENT_CAPABILITIES: {},
+        }),
+    );
+    serde_json::Value::Object(object)
+}
+
+#[tokio::test]
+async fn server_discover_returns_capabilities_and_supported_versions() {
+    let server = McpServer::new(
+        "rc-test".to_string(),
+        Vec::new(),
+        vec![McpResourceDef {
+            uri: "docs://readme".to_string(),
+            name: "README".to_string(),
+            title: None,
+            description: None,
+            mime_type: Some("text/plain".to_string()),
+            text: "hello".to_string(),
+        }],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                crate::mcp_protocol::METHOD_SERVER_DISCOVER,
+                serde_json::json!({}),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        response["result"]["resultType"],
+        serde_json::json!(crate::mcp_protocol::RESULT_TYPE_COMPLETE)
+    );
+    assert_eq!(
+        response["result"]["protocolVersion"],
+        serde_json::json!(crate::mcp_protocol::DRAFT_PROTOCOL_VERSION)
+    );
+    let supported = response["result"]["supportedVersions"]
+        .as_array()
+        .expect("supportedVersions");
+    assert!(supported
+        .iter()
+        .any(|v| v == &serde_json::json!(crate::mcp_protocol::DRAFT_PROTOCOL_VERSION)));
+    assert!(supported
+        .iter()
+        .any(|v| v == &serde_json::json!(crate::mcp_protocol::PROTOCOL_VERSION)));
+    assert_eq!(
+        response["result"]["capabilities"]["resources"]["subscribe"],
+        serde_json::json!(true)
+    );
+    assert_eq!(response["result"]["serverInfo"]["name"], "rc-test");
+}
+
+#[tokio::test]
+async fn server_rejects_request_with_unsupported_protocol_version_metadata() {
+    let server = McpServer::new(
+        "rc-test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                7,
+                "tools/list",
+                serde_json::json!({
+                    "_meta": {
+                        crate::mcp_protocol::RC_META_KEY_PROTOCOL_VERSION: "2099-01-01"
+                    }
+                }),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        response["error"]["code"],
+        serde_json::json!(crate::mcp_protocol::UNSUPPORTED_PROTOCOL_VERSION_CODE)
+    );
+    let supported = response["error"]["data"]["supported"]
+        .as_array()
+        .expect("supported array");
+    assert!(supported
+        .iter()
+        .any(|v| v == &serde_json::json!(crate::mcp_protocol::DRAFT_PROTOCOL_VERSION)));
+}
+
+#[tokio::test]
+async fn server_modern_tools_list_emits_result_type_and_cache_hint() {
+    let server = McpServer::new(
+        "rc-test".to_string(),
+        Vec::new(),
+        vec![McpResourceDef {
+            uri: "docs://readme".to_string(),
+            name: "README".to_string(),
+            title: None,
+            description: None,
+            mime_type: Some("text/plain".to_string()),
+            text: "hello".to_string(),
+        }],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+
+    let modern = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "resources/list",
+                rc_metadata_params(serde_json::json!({})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("modern response");
+    assert_eq!(
+        modern["result"]["resultType"],
+        serde_json::json!(crate::mcp_protocol::RESULT_TYPE_COMPLETE)
+    );
+    assert_eq!(
+        modern["result"]["cacheScope"],
+        serde_json::json!(crate::mcp_protocol::DEFAULT_LIST_CACHE_SCOPE)
+    );
+    assert_eq!(
+        modern["result"]["ttlMs"],
+        serde_json::json!(crate::mcp_protocol::DEFAULT_LIST_CACHE_TTL_MS)
+    );
+
+    let legacy = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(2, "resources/list", serde_json::json!({})),
+            &mut vm,
+        )
+        .await
+        .expect("legacy response");
+    assert!(
+        legacy["result"].get("resultType").is_none(),
+        "legacy clients must not see resultType: {legacy}"
+    );
+    assert!(legacy["result"].get("ttlMs").is_none());
+    assert!(legacy["result"].get("cacheScope").is_none());
+}
+
+#[tokio::test]
+async fn server_modern_resources_read_emits_cache_hint() {
+    let server = McpServer::new(
+        "rc-test".to_string(),
+        Vec::new(),
+        vec![McpResourceDef {
+            uri: "docs://readme".to_string(),
+            name: "README".to_string(),
+            title: None,
+            description: None,
+            mime_type: Some("text/plain".to_string()),
+            text: "hello".to_string(),
+        }],
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "resources/read",
+                rc_metadata_params(serde_json::json!({"uri": "docs://readme"})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        response["result"]["resultType"],
+        serde_json::json!(crate::mcp_protocol::RESULT_TYPE_COMPLETE)
+    );
+    assert_eq!(
+        response["result"]["ttlMs"],
+        serde_json::json!(crate::mcp_protocol::DEFAULT_READ_CACHE_TTL_MS)
+    );
+}
+
 #[tokio::test]
 async fn server_task_endpoints_are_protocol_shaped_without_inline_tasks() {
     let server = McpServer::new(

@@ -19,15 +19,13 @@ use crate::stdlib::json_to_vm_value;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-/// MCP protocol version we negotiate by default.
-const PROTOCOL_VERSION: &str = "2025-11-25";
-const DRAFT_PROTOCOL_VERSION: &str = "DRAFT-2026-v1";
-const UNSUPPORTED_PROTOCOL_VERSION_CODE: i64 = -32004;
-const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
-const CLIENT_INFO_META_KEY: &str = "io.modelcontextprotocol/clientInfo";
-const CLIENT_CAPABILITIES_META_KEY: &str = "io.modelcontextprotocol/clientCapabilities";
+use crate::mcp_protocol::{
+    DRAFT_PROTOCOL_VERSION, PROTOCOL_VERSION, RC_META_KEY_CLIENT_CAPABILITIES,
+    RC_META_KEY_CLIENT_INFO, RC_META_KEY_PROTOCOL_VERSION, RESULT_TYPE_INPUT_REQUIRED,
+    UNSUPPORTED_PROTOCOL_VERSION_CODE,
+};
+
 const X_MCP_HEADER: &str = "x-mcp-header";
-const INPUT_REQUIRED_RESULT_TYPE: &str = "input_required";
 const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = 8;
 
 /// Default timeout for MCP requests (60 seconds).
@@ -1518,12 +1516,12 @@ fn request_params_for_protocol(
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
     meta.insert(
-        PROTOCOL_VERSION_META_KEY.to_string(),
+        RC_META_KEY_PROTOCOL_VERSION.to_string(),
         serde_json::Value::String(protocol_version.to_string()),
     );
-    meta.insert(CLIENT_INFO_META_KEY.to_string(), client_info());
+    meta.insert(RC_META_KEY_CLIENT_INFO.to_string(), client_info());
     meta.insert(
-        CLIENT_CAPABILITIES_META_KEY.to_string(),
+        RC_META_KEY_CLIENT_CAPABILITIES.to_string(),
         modern_client_capabilities(),
     );
     object.insert("_meta".to_string(), serde_json::Value::Object(meta));
@@ -1869,7 +1867,7 @@ pub(crate) async fn call_mcp_tool(
         .await?;
     for _ in 0..MCP_INPUT_REQUIRED_MAX_ROUNDS {
         if result.get("resultType").and_then(|value| value.as_str())
-            != Some(INPUT_REQUIRED_RESULT_TYPE)
+            != Some(RESULT_TYPE_INPUT_REQUIRED)
         {
             break;
         }
@@ -1888,7 +1886,7 @@ pub(crate) async fn call_mcp_tool(
             )
             .await?;
     }
-    if result.get("resultType").and_then(|value| value.as_str()) == Some(INPUT_REQUIRED_RESULT_TYPE)
+    if result.get("resultType").and_then(|value| value.as_str()) == Some(RESULT_TYPE_INPUT_REQUIRED)
     {
         return Err(VmError::Runtime(format!(
             "MCP tool '{tool_name}' still required input after {MCP_INPUT_REQUIRED_MAX_ROUNDS} rounds"
@@ -2959,15 +2957,15 @@ llm_mock_clear()
         assert!(!request.headers.contains_key("mcp-session-id"));
         let meta = &request.body["params"]["_meta"];
         assert_eq!(
-            meta[PROTOCOL_VERSION_META_KEY],
+            meta[RC_META_KEY_PROTOCOL_VERSION],
             serde_json::json!(DRAFT_PROTOCOL_VERSION)
         );
         assert_eq!(
-            meta[CLIENT_INFO_META_KEY]["name"],
+            meta[RC_META_KEY_CLIENT_INFO]["name"],
             serde_json::json!("harn")
         );
         assert_eq!(
-            meta[CLIENT_CAPABILITIES_META_KEY]["roots"],
+            meta[RC_META_KEY_CLIENT_CAPABILITIES]["roots"],
             serde_json::json!({})
         );
     }
