@@ -1,0 +1,23 @@
+import { xdg_cache_home, xdg_config_home, xdg_data_home } from "std/cli/paths"
+import { normalize } from "std/path"
+
+fn main(_harness: Harness) {
+  let config_expected = if platform() == "darwin" {
+    "/home/alice/Library/Application Support/harn"
+  } else {
+    "/home/alice/.config/harn"
+  }
+  let data_expected = if platform() == "darwin" {
+    "/home/alice/Library/Application Support/harn"
+  } else {
+    "/home/alice/.local/share/harn"
+  }
+  let cache_expected = if platform() == "darwin" {
+    "/home/alice/Library/Caches/harn"
+  } else {
+    "/home/alice/.cache/harn"
+  }
+  __io_println(normalize(xdg_config_home("harn")) == config_expected)
+  __io_println(normalize(xdg_data_home("harn")) == data_expected)
+  __io_println(normalize(xdg_cache_home("harn")) == cache_expected)
+}

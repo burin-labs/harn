@@ -1,0 +1,8 @@
+import { xdg_cache_home, xdg_config_home, xdg_data_home } from "std/cli/paths"
+import { normalize } from "std/path"
+
+fn main(_harness: Harness) {
+  __io_println(normalize(xdg_config_home("harn")) == "/xdg/config/harn")
+  __io_println(normalize(xdg_data_home("harn")) == "/xdg/data/harn")
+  __io_println(normalize(xdg_cache_home("harn")) == "/xdg/cache/harn")
+}
