@@ -263,6 +263,7 @@ fn body_snippet(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::http::framing::{http_content_length_from_header_lines, TEST_HTTP_MAX_BODY_BYTES};
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
@@ -349,17 +350,23 @@ mod tests {
         let Some((headers, body)) = request.split_once("\r\n\r\n") else {
             return false;
         };
-        let content_length = headers
-            .lines()
-            .find_map(|line| line.strip_prefix("content-length: "))
-            .or_else(|| {
-                headers
-                    .lines()
-                    .find_map(|line| line.strip_prefix("Content-Length: "))
-            })
-            .and_then(|value| value.trim().parse::<usize>().ok())
-            .unwrap_or(0);
+        let content_length = match http_content_length_from_header_lines(
+            headers.lines(),
+            TEST_HTTP_MAX_BODY_BYTES,
+        ) {
+            Ok(content_length) => content_length,
+            Err(_) => return true,
+        };
         body.len() >= content_length
+    }
+
+    #[test]
+    fn request_complete_stops_on_oversized_content_length() {
+        let request = format!(
+            "POST /probe HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            TEST_HTTP_MAX_BODY_BYTES + 1
+        );
+        assert!(request_complete(&request));
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -2546,6 +2546,7 @@ fn register_harn_mcp_namespace(vm: &mut Vm) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::framing::{http_content_length_from_headers, TEST_HTTP_MAX_BODY_BYTES};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc;
@@ -3341,14 +3342,13 @@ llm_mock_clear()
                 headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
             }
         }
-        let content_length = headers
-            .get("content-length")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
+        let content_length = http_content_length_from_headers(&headers, TEST_HTTP_MAX_BODY_BYTES)?;
         let mut body = buffer[header_end + 4..].to_vec();
+        let mut chunk = [0_u8; 8192];
         while body.len() < content_length {
-            let mut chunk = vec![0; content_length - body.len()];
-            let bytes = stream.read(&mut chunk).await?;
+            let remaining = content_length - body.len();
+            let read_len = remaining.min(chunk.len());
+            let bytes = stream.read(&mut chunk[..read_len]).await?;
             if bytes == 0 {
                 break;
             }
@@ -3356,6 +3356,29 @@ llm_mock_clear()
         }
         body.truncate(content_length);
         Ok((request_line, headers, body))
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_http_request_rejects_oversized_content_length() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let client = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(addr).await.expect("connect");
+            let request = format!(
+                "POST /mcp HTTP/1.1\r\ncontent-length: {}\r\n\r\n",
+                TEST_HTTP_MAX_BODY_BYTES + 1
+            );
+            stream.write_all(request.as_bytes()).await.expect("write");
+        });
+
+        let (mut stream, _) = listener.accept().await.expect("accept");
+        let error = read_http_request(&mut stream)
+            .await
+            .expect_err("oversized content length should be rejected");
+        assert!(error.to_string().contains("exceeds limit"));
+        client.await.expect("client task");
     }
 
     async fn write_http_json(

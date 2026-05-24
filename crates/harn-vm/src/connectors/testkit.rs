@@ -13,6 +13,9 @@ use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+pub use crate::http::framing::{
+    http_content_length_from_header_lines, HttpContentLengthLimitError, TEST_HTTP_MAX_BODY_BYTES,
+};
 pub use crate::http::{HttpMockCallSnapshot, HttpMockResponse};
 pub use crate::triggers::test_util::clock::{
     active_mock_clock, install_override as install_clock_override, instant_now, now_ms, now_utc,

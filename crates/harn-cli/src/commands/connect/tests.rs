@@ -9,6 +9,9 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
+use harn_vm::connectors::testkit::{
+    http_content_length_from_header_lines, TEST_HTTP_MAX_BODY_BYTES,
+};
 use harn_vm::secrets::SecretId;
 use url::Url;
 
@@ -556,15 +559,13 @@ fn read_http_request(stream: &mut TcpStream) -> String {
         buffer.extend_from_slice(&chunk[..read]);
         let text = String::from_utf8_lossy(&buffer);
         if let Some((headers, body)) = text.split_once("\r\n\r\n") {
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().ok())
-                        .flatten()
-                })
-                .unwrap_or(0);
+            let content_length = match http_content_length_from_header_lines(
+                headers.lines(),
+                TEST_HTTP_MAX_BODY_BYTES,
+            ) {
+                Ok(content_length) => content_length,
+                Err(_) => break,
+            };
             if body.len() >= content_length {
                 break;
             }

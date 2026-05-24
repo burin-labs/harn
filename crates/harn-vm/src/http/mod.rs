@@ -6,6 +6,7 @@ use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
 mod client;
+pub(crate) mod framing;
 mod mock;
 mod streaming;
 #[cfg(test)]

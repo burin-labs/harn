@@ -22,6 +22,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+use crate::http::framing::{http_content_length_from_headers, TEST_HTTP_MAX_BODY_BYTES};
+
 #[allow(unused_imports)]
 pub(crate) use crate::triggers::test_util::clock::MockClock;
 
@@ -290,11 +292,13 @@ async fn read_request(stream: &mut TcpStream) -> Option<FakeHttpRequest> {
         }
     }
 
-    let content_length = headers
-        .get("content-length")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    while buffer.len() < header_end + content_length {
+    let content_length = match http_content_length_from_headers(&headers, TEST_HTTP_MAX_BODY_BYTES)
+    {
+        Ok(content_length) => content_length,
+        Err(_) => return None,
+    };
+    let body_end = header_end.checked_add(content_length)?;
+    while buffer.len() < body_end {
         let n = match stream.read(&mut temp).await {
             Ok(n) => n,
             Err(_) => return None,
@@ -304,8 +308,7 @@ async fn read_request(stream: &mut TcpStream) -> Option<FakeHttpRequest> {
         }
         buffer.extend_from_slice(&temp[..n]);
     }
-    let body =
-        String::from_utf8_lossy(&buffer[header_end..header_end + content_length]).to_string();
+    let body = String::from_utf8_lossy(&buffer[header_end..body_end]).to_string();
 
     Some(FakeHttpRequest {
         method,
@@ -412,6 +415,26 @@ mod tests {
         assert!(body_a.contains("\"index\":0"));
         assert_eq!(status_b, 429);
         assert!(body_b.contains("\"index\":1"));
+    }
+
+    #[tokio::test]
+    async fn oversized_content_length_is_dropped_without_capture() {
+        let server =
+            FakeHttpServer::start_with_capacity("oversized-body", 1, |_index, _addr, _request| {
+                FakeHttpResponse::text(200, "unexpected")
+            })
+            .await;
+        let mut stream = TcpStream::connect(server.addr()).await.expect("connect");
+        let request = format!(
+            "POST /oversized HTTP/1.1\r\ncontent-length: {}\r\n\r\n",
+            TEST_HTTP_MAX_BODY_BYTES + 1
+        );
+        stream.write_all(request.as_bytes()).await.expect("write");
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.expect("read eof");
+
+        assert!(response.is_empty());
+        assert!(server.requests().is_empty());
     }
 
     #[tokio::test]
