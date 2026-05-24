@@ -412,6 +412,9 @@ Imports starting with `std/` load embedded stdlib modules:
   helpers (agent_progress, agent_progress_tool)
 - `import "std/agent/fact"` — typed fact envelopes over durable memory
   (store_fact, recall_facts, invalidate_facts)
+- `import "std/agent/probe"` — probe-first verification primitive: run a
+  snippet (eval/typecheck) and record the outcome as an Observation fact
+  (probe, probe_eval, probe_typecheck)
 - `import "std/memory"` — append-only durable memory helpers
   (memory_store, memory_recall, memory_summarize, memory_forget)
 - `import "std/trust"` — TrustGraph query and policy helpers
@@ -5328,6 +5331,40 @@ Provides typed `harn.fact.v1` assertions on top of `std/memory`. A fact contains
 | `store_fact(input, options?)` | Store the fact as `MemoryRecord.value`, using the fact id as the memory record id |
 | `recall_facts(query, kind?, min_confidence?, scope?)` | Recall normalized facts and filter by kind/confidence; `scope` may be a scope string or an options dict with normal memory options |
 | `invalidate_facts(predicate, scope?)` | Append memory tombstones; predicates accept exact `fact_...` ids or dicts with `id`, `key`, `kind`, `claim`, `query`, `tag`, `tags`, `evidence_ref`, or `evidence` |
+
+### std/agent/probe module
+
+```harn
+import { probe, probe_eval, probe_typecheck } from "std/agent/probe"
+```
+
+Provides a probe-first verification primitive: instead of asserting a
+claim about runtime behavior, run a small snippet, capture the outcome
+deterministically, and auto-record it as a `harn.fact.v1` Observation
+backed by `std/agent/fact`. Probes return a `harn.probe.v1` envelope
+with `kind`, `outcome` (`pass` / `fail` / `unknown`), `observed` summary,
+`evidence` (trace id, snippet, command, stdout/stderr/exit_code,
+duration_ms), `fact_id` of the auto-stored observation, and the
+round-tripped `expected` and `asserted_at`. MVP supports `eval` and
+`typecheck`; `test` and `inspect` are reserved and currently return an
+`unknown`-outcome envelope so callers can wire them in deterministically.
+
+| Function | Notes |
+|---|---|
+| `probe(kind, body, options?)` | Run a snippet (`eval` or `typecheck` today; `test`/`inspect` reserved) and capture the outcome. `options.expected` enables a hard match (string for stdout, int for typecheck error count); without it, outcome derives from exit code or error count. |
+| `probe_eval(body, options?)` | Convenience for `probe("eval", ...)`. Runs `body` as a shell command by default; `options.lang = "harn"` writes the body to a temp file and runs `harn run <path>`. |
+| `probe_typecheck(body, options?)` | Convenience for `probe("typecheck", ...)`. Writes the fragment to a temp file and runs `harn check <path> --json`, parsing the summary for error and warning counts. |
+
+Unless `options.store_fact = false`, every probe writes an Observation
+with `confidence = 0.9` for observed `pass`/`fail` and `0.4` for
+`unknown`, `provenance.source = "probe"`, and
+`provenance.probe_kind = "<kind>"`. Pass `options.scope`,
+`options.namespace`, or `options.root` to override the fact-store
+location, and `options.harn_binary` to point at a specific Harn CLI
+build for `typecheck` (and `harn`-lang `eval`) probes.
+
+Validation failures throw with `HARN-PROBE-NNN` diagnostic codes:
+`001` (options), `002` (kind), `003` (lang), `004` (body).
 
 ### std/postgres module
 

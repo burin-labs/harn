@@ -83,7 +83,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/edit`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
-`std/agent/fact`,
+`std/agent/fact`, `std/agent/probe`,
 `std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
 `std/review`, `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
@@ -1308,6 +1308,20 @@ Typed fact envelopes over `std/memory` for cross-session assertions:
 | `store_fact(input, options?)` | Store a typed fact as `MemoryRecord.value`; `options.namespace` or `options.scope` selects the memory namespace |
 | `recall_facts(query, kind?, min_confidence?, scope?)` | Recall facts by memory query, kind, and minimum confidence |
 | `invalidate_facts(predicate, scope?)` | Append memory tombstones for matching facts by id, key, kind, claim/query, tags, or evidence |
+
+### std/agent/probe
+
+Run a small snippet and persist the verified outcome as a `harn.fact.v1`
+Observation so future sessions recall the answer instead of re-guessing.
+MVP supports `eval` (shell or `harn run`) and `typecheck` (`harn check
+--json`); `test` and `inspect` are reserved and currently return an
+`unknown` outcome.
+
+| Function | Description |
+|---|---|
+| `probe(kind, body, options?)` | Run a snippet of the given kind, capture stdout/stderr/exit code, and auto-record the outcome as an Observation fact |
+| `probe_eval(body, options?)` | Convenience for `probe("eval", ...)` — shell by default, `options.lang = "harn"` runs the body via `harn run` |
+| `probe_typecheck(body, options?)` | Convenience for `probe("typecheck", ...)` — writes the fragment to a temp file and invokes `harn check --json` |
 
 ### std/handoffs
 

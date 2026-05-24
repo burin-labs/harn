@@ -116,6 +116,32 @@ tombstones; predicates accept an exact `fact_...` id string or a dict with
 kind-scoped tags such as `fact:claim:evidence:file_range:README.md:1-3`.
 Validation failures include `HARN-FACT-NNN` codes.
 
+## Probe-first verification
+
+`std/agent/probe` layers a probe primitive on top of `std/agent/fact`:
+run a small snippet, capture the outcome deterministically, and
+auto-record it as an Observation so future sessions recall the verified
+answer instead of re-guessing.
+
+```harn
+import { probe_eval, probe_typecheck } from "std/agent/probe"
+
+let helper = probe_eval("git diff --quiet HEAD -- crates/harn-stdlib", {expected: 0})
+let tc = probe_typecheck(
+  "pipeline summary() { let x: int = len([1, 2, 3]) __io_println(x) }\n",
+  {expected: 0},
+)
+```
+
+Every probe returns a `harn.probe.v1` envelope (`kind`, `outcome`,
+`observed`, `evidence`, `fact_id`) and, unless `options.store_fact =
+false`, writes a `harn.fact.v1` Observation with
+`provenance.source = "probe"` and `provenance.probe_kind = "<kind>"`. Recall
+those observations with `recall_facts(query, "Observation", 0.0, scope)`
+to surface prior probe outcomes before re-running. See
+[`std/agent/probe` in the language spec](language-spec.md#stdagentprobe-module)
+for the full surface area and `HARN-PROBE-NNN` diagnostics.
+
 ## Vector and hybrid backends
 
 `memory_open(namespace, options)` writes an append-only configuration event
