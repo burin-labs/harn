@@ -229,6 +229,7 @@ async fn async_main() {
             let json_options = args
                 .json
                 .then_some(commands::run::RunJsonOptions { quiet: args.quiet });
+            let summary_options = commands::run::run_summary_options_from_args(&args);
             let harnpack_options = commands::run::harnpack::HarnpackRunOptions {
                 allow_unsigned: args.allow_unsigned,
                 dry_run_verify: args.dry_run_verify,
@@ -246,6 +247,7 @@ async fn async_main() {
                     profile_options,
                     sandbox_options.clone(),
                     json_options,
+                    summary_options,
                 )
                 .await;
                 return;
@@ -280,6 +282,7 @@ async fn async_main() {
                             profile_options.clone(),
                             sandbox_options.clone(),
                             json_options.clone(),
+                            summary_options.clone(),
                             harnpack_options.clone(),
                         )
                         .await;
@@ -301,6 +304,7 @@ async fn async_main() {
                             profile_options,
                             sandbox_options,
                             json_options,
+                            summary_options,
                             harnpack_options,
                         )
                         .await

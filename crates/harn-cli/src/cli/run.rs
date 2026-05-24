@@ -1,4 +1,5 @@
 use clap::Args;
+use std::path::PathBuf;
 
 use super::ProfileArgs;
 
@@ -92,6 +93,27 @@ pub(crate) struct RunArgs {
     /// events still flow.
     #[arg(long = "quiet", action = clap::ArgAction::SetTrue, requires = "json")]
     pub quiet: bool,
+    /// Emit one terminal run-summary JSON object as a single NDJSON line.
+    /// Defaults to stderr; use --summary-file or --summary-fd to keep the
+    /// summary separate from the script's own stderr.
+    #[arg(long = "emit-summary-json", action = clap::ArgAction::SetTrue)]
+    pub emit_summary_json: bool,
+    /// Write --emit-summary-json output to this file instead of stderr.
+    #[arg(
+        long = "summary-file",
+        value_name = "PATH",
+        requires = "emit_summary_json",
+        conflicts_with = "summary_fd"
+    )]
+    pub summary_file: Option<PathBuf>,
+    /// Write --emit-summary-json output to this already-open file descriptor.
+    #[arg(
+        long = "summary-fd",
+        value_name = "FD",
+        requires = "emit_summary_json",
+        conflicts_with = "summary_file"
+    )]
+    pub summary_fd: Option<i32>,
     /// Path to the .harn file to execute.
     pub file: Option<String>,
     /// Positional arguments passed to the pipeline as the global `argv`

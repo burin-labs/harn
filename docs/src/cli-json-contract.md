@@ -54,6 +54,12 @@ per line) rather than a single document. Today this set is `harn run
 --json` and `harn dev --watch --json`. Each line still carries
 `schemaVersion`; consumers can `jq -c` over the stream.
 
+`harn run --emit-summary-json` is intentionally separate from this
+envelope stream. It emits one raw NDJSON object to stderr by default
+or to `--summary-file` / `--summary-fd` when supplied, so wrappers can
+read aggregate metrics without changing the `harn run --json` stdout
+contract.
+
 ## Supported commands
 
 These commands accept `--json` and emit a stable, schema-versioned
@@ -70,6 +76,7 @@ versions.
 | `harn parse --json`            | Tagged Harn AST with byte spans                          |
 | `harn tokens --json`           | Lexer token stream with source lexemes                   |
 | `harn run --json`              | Streaming NDJSON event log (stdout/stderr/tool/result)   |
+| `harn run --emit-summary-json` | One terminal raw NDJSON summary object on stderr/file/fd  |
 | `harn replay --json`           | Per-stage replay summary + embedded fixture verdict      |
 | `harn test conformance --json` | Conformance results with xfail accounting                |
 | `harn graph --json`            | Static module graph: symbols, imports, capabilities      |
@@ -150,6 +157,43 @@ plus the embedded replay-fixture verdict. `ok: false` with
 `error.code: "replay_fixture_failed"` indicates the fixture did not
 pass; the same envelope still includes the full `data` payload so
 callers can diff.
+
+### `harn run --emit-summary-json`
+
+The post-run summary is a raw NDJSON line, not a `JsonEnvelope`, because
+it is an auxiliary sink rather than the command's primary stdout JSON
+mode. `--summary-file <path>` overwrites the file with the one-line
+summary; `--summary-fd <fd>` writes the same line to an already-open
+Unix file descriptor.
+
+```json
+{
+  "schema_version": 1,
+  "event": "run_summary",
+  "wall_time_ms": 1234,
+  "exit_code": 0,
+  "llm": {
+    "call_count": 2,
+    "input_tokens": 1024,
+    "output_tokens": 256,
+    "time_ms": 480,
+    "cost_usd": 0.0042
+  },
+  "profile": {
+    "total_wall_ms": 1234,
+    "by_kind": [],
+    "residual_ms": 12,
+    "top_llm_calls": [],
+    "top_tool_calls": [],
+    "steps": []
+  }
+}
+```
+
+`profile` is omitted unless `--profile` or `--profile-json` is active.
+The LLM counters are enabled by the summary flag itself, so callers do
+not need to add `--trace` to receive `llm.call_count`, token totals,
+LLM time, and accumulated cost.
 
 ## Compatibility
 
