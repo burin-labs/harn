@@ -1658,8 +1658,15 @@ log(cleared.removed_count)
   resumed turn. It names the suspend turn, reason, resume cause, and
   optional resume input; when `continue_transcript: false`, it also
   carries the pre-suspend digest.
+- `project_facts` on `session_start` and `on_budget_threshold`
+  (`ttl_turns: 1`). Recalls typed `harn.fact.v1` records from the active
+  project namespace, filters by `min_confidence` (default 0.5) and
+  optional `kind_filter`, and renders the top `max_facts` (default 5)
+  as a `<system-reminder>` block so a fresh session boots with
+  project context already in scope.
 - `idle_nudge`, `tool_output_truncated`, and `resume_continuity` use
-  `propagate: "none"`; `post_compact_recap` uses `propagate: "session"`.
+  `propagate: "none"`; `post_compact_recap` and `project_facts` use
+  `propagate: "session"`.
 
 Opt out per loop:
 

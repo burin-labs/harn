@@ -40,7 +40,7 @@ mod lifecycle_receipts;
 mod logging;
 pub mod long_running;
 mod math;
-mod memory;
+pub(crate) mod memory;
 mod monitors;
 mod multipart;
 mod net_policy;

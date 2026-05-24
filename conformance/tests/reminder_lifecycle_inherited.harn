@@ -33,9 +33,16 @@ pipeline main() {
   )
   let stream = event_log
     .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
-  let injected = stream.next().value
-  let inherited = stream.next().value
-  let fired = stream.next().value
+  fn next_reminder_event(source) {
+    var event = source.next().value
+    while event != nil && event.kind == "transcript.reminder.provider_evaluated" {
+      event = source.next().value
+    }
+    return event
+  }
+  let injected = next_reminder_event(stream)
+  let inherited = next_reminder_event(stream)
+  let fired = next_reminder_event(stream)
   __io_println(injected.kind)
   __io_println(injected.payload.reminder_id)
   __io_println(inherited.kind)

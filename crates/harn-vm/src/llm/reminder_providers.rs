@@ -17,12 +17,22 @@ const IDLE_NUDGE_ID: &str = "idle_nudge";
 const TOOL_OUTPUT_TRUNCATED_ID: &str = "tool_output_truncated";
 const POST_COMPACT_RECAP_ID: &str = "post_compact_recap";
 const RESUME_CONTINUITY_ID: &str = "resume_continuity";
+const PROJECT_FACTS_ID: &str = "project_facts";
 
 const TOKEN_PRESSURE_EVENTS: &[HookEvent] = &[HookEvent::OnBudgetThreshold];
 const IDLE_NUDGE_EVENTS: &[HookEvent] = &[HookEvent::SessionIdle];
 const TOOL_OUTPUT_TRUNCATED_EVENTS: &[HookEvent] = &[HookEvent::PostToolUse];
 const POST_COMPACT_RECAP_EVENTS: &[HookEvent] = &[HookEvent::PostCompact];
 const RESUME_CONTINUITY_EVENTS: &[HookEvent] = &[HookEvent::WorkerResumed];
+const PROJECT_FACTS_EVENTS: &[HookEvent] = &[HookEvent::SessionStart, HookEvent::OnBudgetThreshold];
+
+const PROJECT_FACTS_DEFAULT_NAMESPACE: &str = "project/facts";
+const PROJECT_FACTS_DEFAULT_MAX: i64 = 5;
+const PROJECT_FACTS_HARD_MAX: i64 = 25;
+const PROJECT_FACTS_DEFAULT_MIN_CONFIDENCE: f64 = 0.5;
+const PROJECT_FACTS_RECALL_MULTIPLIER: usize = 4;
+const PROJECT_FACTS_DEFAULT_QUERY: &str = "project decisions constraints architecture";
+const PROJECT_FACTS_REFRESH_RATIO: f64 = 0.70;
 
 /// Context passed to reminder providers.
 #[derive(Clone, Debug)]
@@ -56,6 +66,7 @@ struct IdleNudgeProvider;
 struct ToolOutputTruncatedProvider;
 struct PostCompactRecapProvider;
 struct ResumeContinuityProvider;
+struct ProjectFactsProvider;
 
 impl ReminderProvider for TokenPressureProvider {
     fn id(&self) -> &'static str {
@@ -265,6 +276,78 @@ impl ReminderProvider for ResumeContinuityProvider {
     }
 }
 
+impl ReminderProvider for ProjectFactsProvider {
+    fn id(&self) -> &'static str {
+        PROJECT_FACTS_ID
+    }
+
+    fn subscribes_to(&self) -> &'static [HookEvent] {
+        PROJECT_FACTS_EVENTS
+    }
+
+    fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
+        let config = provider_config_json(ctx, PROJECT_FACTS_ID);
+        let max_facts = provider_facts_max(config);
+        if max_facts == 0 {
+            return None;
+        }
+        // OnBudgetThreshold ticks once per LLM call, so only refresh when the
+        // session is actually under pressure (default 70% of the window).
+        // SessionStart always fires; the dedupe_key collapses any later
+        // refreshes into the freshest fact body.
+        if ctx.event == HookEvent::OnBudgetThreshold && !under_budget_pressure(ctx, config) {
+            return None;
+        }
+        let min_confidence = provider_facts_min_confidence(config);
+        let kind_filter = provider_facts_kind_filter(config);
+        let namespace = provider_facts_namespace(config);
+        let root =
+            crate::stdlib::memory::resolve_memory_root(provider_facts_root(config).as_deref());
+        let query = provider_facts_relevance_query(ctx, config);
+        let recall_limit =
+            (max_facts.saturating_mul(PROJECT_FACTS_RECALL_MULTIPLIER)).max(max_facts);
+        let recalled = match crate::stdlib::memory::lexical_recall_fact_values(
+            &root,
+            &namespace,
+            &query,
+            recall_limit,
+        ) {
+            Ok(records) => records,
+            Err(_) => return None,
+        };
+        let mut filtered = Vec::with_capacity(max_facts);
+        for value in recalled {
+            if let Some(rendered) = format_fact_line(&value, min_confidence, &kind_filter) {
+                filtered.push(rendered);
+                if filtered.len() >= max_facts {
+                    break;
+                }
+            }
+        }
+        if filtered.is_empty() {
+            return None;
+        }
+        let header = format!(
+            "Project facts recalled from `{namespace}` (top {count}, min confidence {min:.2}):",
+            count = filtered.len(),
+            min = min_confidence,
+        );
+        let mut body = header;
+        for line in &filtered {
+            body.push('\n');
+            body.push_str(line);
+        }
+        let mut reminder = provider_reminder(body, PROJECT_FACTS_ID, ctx);
+        reminder.tags = vec![PROJECT_FACTS_ID.to_string()];
+        reminder.dedupe_key = Some(PROJECT_FACTS_ID.to_string());
+        reminder.ttl_turns = Some(1);
+        reminder.preserve_on_compact = false;
+        reminder.propagate = ReminderPropagate::Session;
+        reminder.role_hint = ReminderRoleHint::System;
+        Some(reminder)
+    }
+}
+
 pub fn parse_provider_event(name: &str) -> Result<HookEvent, String> {
     match name.trim() {
         "PostToolUse" | "post_tool_use" => Ok(HookEvent::PostToolUse),
@@ -366,13 +449,14 @@ pub async fn evaluate_and_inject(
     }))
 }
 
-fn canonical_providers() -> [&'static dyn ReminderProvider; 5] {
+fn canonical_providers() -> [&'static dyn ReminderProvider; 6] {
     [
         &TokenPressureProvider,
         &IdleNudgeProvider,
         &ToolOutputTruncatedProvider,
         &PostCompactRecapProvider,
         &ResumeContinuityProvider,
+        &ProjectFactsProvider,
     ]
 }
 
@@ -439,13 +523,14 @@ fn enabled_provider_ids(
     enabled
 }
 
-fn canonical_provider_ids() -> [&'static str; 5] {
+fn canonical_provider_ids() -> [&'static str; 6] {
     [
         TOKEN_PRESSURE_ID,
         IDLE_NUDGE_ID,
         TOOL_OUTPUT_TRUNCATED_ID,
         POST_COMPACT_RECAP_ID,
         RESUME_CONTINUITY_ID,
+        PROJECT_FACTS_ID,
     ]
 }
 
@@ -673,4 +758,312 @@ pub(crate) fn options_map_to_json(options: &BTreeMap<String, VmValue>) -> JsonVa
             .map(|(key, value)| (key.clone(), crate::llm::helpers::vm_value_to_json(value)))
             .collect(),
     )
+}
+
+fn provider_facts_max(config: Option<&JsonValue>) -> usize {
+    let raw = config
+        .and_then(|cfg| json_i64(cfg, "max_facts"))
+        .or_else(|| config.and_then(|cfg| json_i64(cfg, "limit")))
+        .unwrap_or(PROJECT_FACTS_DEFAULT_MAX);
+    raw.clamp(0, PROJECT_FACTS_HARD_MAX) as usize
+}
+
+fn provider_facts_min_confidence(config: Option<&JsonValue>) -> f64 {
+    config
+        .and_then(|cfg| cfg.get("min_confidence"))
+        .and_then(JsonValue::as_f64)
+        .filter(|value| value.is_finite())
+        .map(|value| value.clamp(0.0, 1.0))
+        .unwrap_or(PROJECT_FACTS_DEFAULT_MIN_CONFIDENCE)
+}
+
+fn provider_facts_namespace(config: Option<&JsonValue>) -> String {
+    if let Some(namespace) = config
+        .and_then(|cfg| json_str(cfg, "namespace"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return namespace;
+    }
+    match config
+        .and_then(|cfg| json_str(cfg, "scope"))
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("workspace") => "workspace/facts".to_string(),
+        Some("user") => "user/facts".to_string(),
+        _ => PROJECT_FACTS_DEFAULT_NAMESPACE.to_string(),
+    }
+}
+
+fn provider_facts_root(config: Option<&JsonValue>) -> Option<String> {
+    config
+        .and_then(|cfg| json_str(cfg, "root"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn provider_facts_kind_filter(config: Option<&JsonValue>) -> Vec<String> {
+    let Some(raw) = config.and_then(|cfg| cfg.get("kind_filter").or_else(|| cfg.get("kinds")))
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    match raw {
+        JsonValue::String(value) => {
+            push_kind_filter(&mut out, value);
+        }
+        JsonValue::Array(items) => {
+            for item in items {
+                if let Some(value) = item.as_str() {
+                    push_kind_filter(&mut out, value);
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+fn push_kind_filter(out: &mut Vec<String>, raw: &str) {
+    let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+    if !normalized.is_empty() && !out.iter().any(|existing| existing == &normalized) {
+        out.push(normalized);
+    }
+}
+
+fn provider_facts_relevance_query(ctx: &ProviderContext, config: Option<&JsonValue>) -> String {
+    if let Some(query) = config
+        .and_then(|cfg| json_str(cfg, "relevance_query"))
+        .or_else(|| config.and_then(|cfg| json_str(cfg, "query")))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return query;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(task) = json_str(&ctx.payload, "task")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        parts.push(task);
+    }
+    if let Some(project) = json_path_str(&ctx.payload, &["session", "project_name"])
+        .or_else(|| json_path_str(&ctx.payload, &["project", "name"]))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        parts.push(project);
+    }
+    if parts.is_empty() {
+        PROJECT_FACTS_DEFAULT_QUERY.to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
+fn format_fact_line(value: &JsonValue, min_confidence: f64, kinds: &[String]) -> Option<String> {
+    let claim = value.get("claim").and_then(JsonValue::as_str)?.trim();
+    if claim.is_empty() {
+        return None;
+    }
+    let kind = value
+        .get("kind")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("claim");
+    if !kinds.is_empty() && !kinds.iter().any(|allowed| allowed == kind) {
+        return None;
+    }
+    let confidence = value
+        .get("confidence")
+        .and_then(JsonValue::as_f64)
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0);
+    if confidence < min_confidence {
+        return None;
+    }
+    let evidence_ref = value
+        .get("evidence")
+        .and_then(JsonValue::as_array)
+        .and_then(|items| items.iter().find_map(format_evidence_ref));
+    let claim = clean_inline_text(claim.to_string());
+    let mut line = format!("- [{kind} · confidence {confidence:.2}] {claim}");
+    if let Some(reference) = evidence_ref {
+        line.push_str(" (evidence: ");
+        line.push_str(&reference);
+        line.push(')');
+    }
+    Some(line)
+}
+
+fn format_evidence_ref(item: &JsonValue) -> Option<String> {
+    let kind = item.get("kind").and_then(JsonValue::as_str)?;
+    let reference = item.get("ref").and_then(JsonValue::as_str)?.trim();
+    if reference.is_empty() {
+        return None;
+    }
+    Some(format!("{kind}:{reference}"))
+}
+
+fn under_budget_pressure(ctx: &ProviderContext, config: Option<&JsonValue>) -> bool {
+    let ratio = config
+        .and_then(|cfg| cfg.get("refresh_ratio"))
+        .and_then(JsonValue::as_f64)
+        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+        .unwrap_or(PROJECT_FACTS_REFRESH_RATIO);
+    let Some(tokens_used) = json_i64(&ctx.payload, "tokens_used") else {
+        return false;
+    };
+    let Some(window) = token_pressure_context_window(ctx) else {
+        return false;
+    };
+    if window <= 0 {
+        return false;
+    }
+    tokens_used as f64 / window as f64 >= ratio
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn ctx(event: HookEvent, payload: JsonValue, options: JsonValue) -> ProviderContext {
+        ProviderContext {
+            event,
+            session_id: "session-1".to_string(),
+            payload,
+            options,
+        }
+    }
+
+    #[test]
+    fn project_facts_max_clamps_to_hard_cap() {
+        assert_eq!(provider_facts_max(Some(&json!({"max_facts": 7}))), 7);
+        assert_eq!(provider_facts_max(Some(&json!({"max_facts": 1000}))), 25);
+        assert_eq!(provider_facts_max(Some(&json!({"max_facts": -3}))), 0);
+        assert_eq!(provider_facts_max(None), 5);
+    }
+
+    #[test]
+    fn project_facts_namespace_respects_scope_aliases() {
+        assert_eq!(
+            provider_facts_namespace(Some(&json!({"scope": "workspace"}))),
+            "workspace/facts"
+        );
+        assert_eq!(
+            provider_facts_namespace(Some(&json!({"scope": "USER"}))),
+            "user/facts"
+        );
+        assert_eq!(
+            provider_facts_namespace(Some(&json!({"namespace": "custom/facts"}))),
+            "custom/facts"
+        );
+        assert_eq!(provider_facts_namespace(None), "project/facts");
+    }
+
+    #[test]
+    fn project_facts_kind_filter_normalizes_inputs() {
+        assert_eq!(
+            provider_facts_kind_filter(Some(
+                &json!({"kind_filter": ["Decision", "decision", "Constraint"]})
+            )),
+            vec!["decision", "constraint"]
+        );
+        assert_eq!(
+            provider_facts_kind_filter(Some(&json!({"kinds": "hypothesis"}))),
+            vec!["hypothesis"]
+        );
+        assert!(provider_facts_kind_filter(None).is_empty());
+    }
+
+    #[test]
+    fn relevance_query_falls_back_to_task_then_default() {
+        let ctx_task = ctx(
+            HookEvent::SessionStart,
+            json!({"task": "wire up the new provider"}),
+            JsonValue::Null,
+        );
+        assert_eq!(
+            provider_facts_relevance_query(&ctx_task, None),
+            "wire up the new provider"
+        );
+
+        let ctx_empty = ctx(HookEvent::SessionStart, json!({}), JsonValue::Null);
+        assert_eq!(
+            provider_facts_relevance_query(&ctx_empty, None),
+            PROJECT_FACTS_DEFAULT_QUERY
+        );
+
+        let ctx_query = ctx(HookEvent::SessionStart, json!({}), JsonValue::Null);
+        assert_eq!(
+            provider_facts_relevance_query(
+                &ctx_query,
+                Some(&json!({"relevance_query": "architecture"}))
+            ),
+            "architecture"
+        );
+    }
+
+    #[test]
+    fn format_fact_line_renders_canonical_shape() {
+        let value = json!({
+            "schema": "harn.fact.v1",
+            "kind": "decision",
+            "claim": "Wire the memory recall sync helper.",
+            "confidence": 0.83,
+            "evidence": [{"kind": "file_range", "ref": "memory.rs:441"}],
+        });
+        let line = format_fact_line(&value, 0.5, &[]).expect("line renders");
+        assert_eq!(
+            line,
+            "- [decision · confidence 0.83] Wire the memory recall sync helper. \
+             (evidence: file_range:memory.rs:441)"
+        );
+    }
+
+    #[test]
+    fn format_fact_line_filters_low_confidence_and_kind_mismatch() {
+        let value = json!({
+            "kind": "hypothesis",
+            "claim": "Speculative.",
+            "confidence": 0.3,
+        });
+        assert!(format_fact_line(&value, 0.5, &[]).is_none());
+        let value_ok = json!({
+            "kind": "hypothesis",
+            "claim": "Speculative.",
+            "confidence": 0.6,
+        });
+        assert!(format_fact_line(&value_ok, 0.5, &["decision".to_string()]).is_none());
+        assert!(format_fact_line(&value_ok, 0.5, &["hypothesis".to_string()]).is_some());
+    }
+
+    #[test]
+    fn under_budget_pressure_threshold_gate() {
+        let payload = json!({"tokens_used": 75, "context_window": 100});
+        let high = ctx(
+            HookEvent::OnBudgetThreshold,
+            payload.clone(),
+            JsonValue::Null,
+        );
+        assert!(under_budget_pressure(&high, None));
+
+        let payload_low = json!({"tokens_used": 50, "context_window": 100});
+        let low = ctx(HookEvent::OnBudgetThreshold, payload_low, JsonValue::Null);
+        assert!(!under_budget_pressure(&low, None));
+
+        let payload_missing = json!({"tokens_used": 50});
+        let missing = ctx(
+            HookEvent::OnBudgetThreshold,
+            payload_missing,
+            JsonValue::Null,
+        );
+        assert!(!under_budget_pressure(&missing, None));
+
+        let custom_ratio = json!({"refresh_ratio": 0.9});
+        let payload_mid = json!({"tokens_used": 80, "context_window": 100});
+        let mid = ctx(HookEvent::OnBudgetThreshold, payload_mid, JsonValue::Null);
+        assert!(!under_budget_pressure(&mid, Some(&custom_ratio)));
+    }
 }

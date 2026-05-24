@@ -403,10 +403,7 @@ fn option_bool(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option
 }
 
 fn memory_root(options: Option<&BTreeMap<String, VmValue>>) -> PathBuf {
-    option_string(options, "root")
-        .or_else(|| std::env::var("HARN_MEMORY_ROOT").ok())
-        .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
-        .unwrap_or_else(|| crate::stdlib::process::runtime_root_base().join(".harn/memory"))
+    resolve_memory_root(option_string(options, "root").as_deref())
 }
 
 fn parse_tags(value: Option<&VmValue>, fn_name: &str) -> Result<Vec<String>, VmError> {
@@ -435,6 +432,74 @@ fn parse_tags(value: Option<&VmValue>, fn_name: &str) -> Result<Vec<String>, VmE
 
 fn namespace_dir(root: &Path, namespace: &str) -> Result<PathBuf, VmError> {
     Ok(root.join(normalize_relative_component(namespace, "memory namespace")?))
+}
+
+/// Synchronous, BM25-blended recall over a namespace, returning the stored
+/// record `value` payloads for records whose schema is the canonical
+/// `harn.fact.v1`. Records that BM25 cannot score against the query are
+/// retained and ranked by recency, so callers always get up to `limit`
+/// facts when any exist. Reminder providers call this from their sync
+/// `evaluate` impls without straddling the runtime.
+pub(crate) fn lexical_recall_fact_values(
+    root: &Path,
+    namespace: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<JsonValue>, VmError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let records = active_records(root, namespace)?;
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+    let fact_records: Vec<(usize, MemoryRecord)> = records
+        .into_iter()
+        .filter(|(_, record)| {
+            record.value.get("schema").and_then(JsonValue::as_str) == Some("harn.fact.v1")
+        })
+        .collect();
+    if fact_records.is_empty() {
+        return Ok(Vec::new());
+    }
+    let scored: BTreeMap<String, f64> = score_bm25(fact_records.clone(), query)
+        .into_iter()
+        .map(|item| (item.record.id.clone(), item.score))
+        .collect();
+    let mut ranked: Vec<ScoredRecord> = fact_records
+        .into_iter()
+        .map(|(sequence, record)| ScoredRecord {
+            score: scored.get(&record.id).copied().unwrap_or(0.0),
+            sequence,
+            record,
+        })
+        .collect();
+    ranked.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| newest_first(left, right))
+    });
+    Ok(ranked
+        .into_iter()
+        .take(limit)
+        .map(|item| item.record.value)
+        .collect())
+}
+
+/// Resolve a memory root from an optional explicit path, falling back to
+/// `HARN_MEMORY_ROOT` and finally the project-local `.harn/memory`. Shared
+/// with reminder providers so they pick up the same default the Harn-side
+/// `memory_store` / `memory_recall` builtins use.
+pub(crate) fn resolve_memory_root(explicit: Option<&str>) -> PathBuf {
+    explicit
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| std::env::var("HARN_MEMORY_ROOT").ok())
+        .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
+        .unwrap_or_else(|| crate::stdlib::process::runtime_root_base().join(".harn/memory"))
 }
 
 fn event_log_path(root: &Path, namespace: &str) -> Result<PathBuf, VmError> {
