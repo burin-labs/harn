@@ -1252,7 +1252,7 @@ async fn resume_digest_from_transcript(
         .iter()
         .map(crate::llm::helpers::vm_value_to_json)
         .collect::<Vec<_>>();
-    let config = crate::orchestration::AutoCompactConfig {
+    let mut config = crate::orchestration::AutoCompactConfig {
         token_threshold: 0,
         keep_last: 0,
         compact_strategy: crate::orchestration::CompactStrategy::Truncate,
@@ -1262,12 +1262,22 @@ async fn resume_digest_from_transcript(
         .to_string(),
         ..Default::default()
     };
-    Ok(
-        crate::orchestration::auto_compact_messages(&mut json_messages, &config, None)
-            .await?
-            .map(|summary| summary.trim().to_string())
-            .filter(|summary| !summary.is_empty()),
+    // `ResumeDigest` mode skips hook dispatch and AgentEvent emission so
+    // cold-resume digest extraction stays observably equivalent to the
+    // pre-lifecycle direct `auto_compact_messages` call site.
+    let lifecycle = crate::orchestration::CompactLifecycle::new(
+        crate::orchestration::CompactMode::ResumeDigest,
+    );
+    let outcome = crate::orchestration::run_compaction_lifecycle(
+        &mut json_messages,
+        &mut config,
+        None,
+        lifecycle,
     )
+    .await?;
+    Ok(outcome
+        .map(|outcome| outcome.summary.trim().to_string())
+        .filter(|summary| !summary.is_empty()))
 }
 
 fn apply_resume_transcript_policy(
