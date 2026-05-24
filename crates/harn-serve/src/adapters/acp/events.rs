@@ -1084,6 +1084,29 @@ impl AgentEventSink for AcpAgentEventSink {
             } => {
                 self.emit_agent_event_ext("agent_loop_stall_warning", session_id, warning.clone());
             }
+            AgentEvent::CapabilityGap {
+                session_id,
+                level,
+                capability,
+                provider,
+                model,
+                fallback_tool_format,
+                requested_tool_format,
+                message,
+            } => {
+                let mut payload = serde_json::json!({
+                    "level": level,
+                    "capability": capability,
+                    "provider": provider,
+                    "model": model,
+                    "fallbackToolFormat": fallback_tool_format,
+                    "message": message,
+                });
+                if let Some(requested) = requested_tool_format {
+                    payload["requestedToolFormat"] = serde_json::Value::String(requested.clone());
+                }
+                self.emit_agent_event_ext("capability_gap", session_id, payload);
+            }
             AgentEvent::ToolCallAudit {
                 session_id,
                 tool_call_id,

@@ -1265,6 +1265,9 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // Inspect `native_tools` or `text_tool_wire_format_supported` directly when
 // you need to distinguish. Presets use `preferred_tool_format` when it is
 // present, so known native/text divergences stay data-driven.
+// `agent_loop` also uses this field for `tool_format: "auto"`; if a concrete
+// provider/model pair has no recommendation, it falls back to text tools and
+// emits a `capability_gap` warning event.
 
 if "bm25" in caps.tool_search {
   // opt into progressive disclosure

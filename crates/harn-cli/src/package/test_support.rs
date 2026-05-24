@@ -69,10 +69,22 @@ pub(crate) fn run_git(repo: &Path, args: &[&str]) -> String {
 pub(crate) fn test_git_command(repo: &Path) -> process::Command {
     let mut command = process::Command::new("git");
     command
+        // Package tests create disposable repos. Keep ambient developer Git
+        // policy from invoking hooks or signing prompts inside nextest workers.
+        .args([
+            "-c",
+            "commit.gpgSign=false",
+            "-c",
+            "tag.gpgSign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ])
         .current_dir(repo)
+        .env("GIT_TERMINAL_PROMPT", "0")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE");
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_ASKPASS");
     command
 }
 

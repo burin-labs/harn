@@ -1,0 +1,89 @@
+import { agent_capture_events } from "std/agent/events"
+
+fn sample_tools() {
+  let tools = tool_registry()
+  return tool_define(
+    tools,
+    "noop",
+    "Return a deterministic result",
+    {
+      handler: { _args -> return "ok" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+fn format_echo_caller() {
+  return { call ->
+    let format = to_string(call?.opts?.tool_format ?? "")
+    return {
+      ok: true,
+      value: {
+        text: "format=" + format,
+        provider: call?.opts?.provider ?? "",
+        model: call?.opts?.model ?? "",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+}
+
+fn run_format(options) {
+  let result = agent_loop(
+    "Report the selected format.",
+    nil,
+    options
+      + {tools: sample_tools(), llm_caller: format_echo_caller(), max_iterations: 1, done_judge: false},
+  )
+  return result.text
+}
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+pipeline default() {
+  provider_capabilities_install(
+    """
+[[provider.testcatalog]]
+model_match = "catalogued-*"
+native_tools = true
+preferred_tool_format = "native"
+""",
+  )
+  defer {
+    provider_capabilities_clear()
+  }
+  let preferred_session = "tool-format-preferred-" + uuid()
+  let preferred = agent_capture_events(
+    preferred_session,
+    fn() { return run_format({provider: "testcatalog", model: "catalogued-native", session_id: preferred_session}) },
+  )
+  __io_println(preferred.result)
+  __io_println(len(events_of(preferred.events, "capability_gap")))
+  let auto_session = "tool-format-auto-" + uuid()
+  let auto = agent_capture_events(
+    auto_session,
+    fn() { return run_format(
+      {provider: "testcatalog", model: "catalogued-native", session_id: auto_session, tool_format: "auto"},
+    ) },
+  )
+  __io_println(auto.result)
+  __io_println(len(events_of(auto.events, "capability_gap")))
+  let fallback_session = "tool-format-fallback-" + uuid()
+  let fallback = agent_capture_events(
+    fallback_session,
+    fn() { return run_format({provider: "testcatalog", model: "uncatalogued-model", session_id: fallback_session}) },
+  )
+  let gaps = events_of(fallback.events, "capability_gap")
+  __io_println(fallback.result)
+  __io_println(len(gaps))
+  __io_println(gaps[0].level)
+  __io_println(gaps[0].provider)
+  __io_println(gaps[0].model)
+  __io_println(gaps[0].capability)
+  __io_println(gaps[0].fallback_tool_format)
+}

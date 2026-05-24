@@ -1,3 +1,4 @@
+import { agent_tool_format } from "std/agent/options"
 import { loop_until_done_system_prompt, render_agent_prompt_id } from "std/agent/prompts"
 import { agent_session_messages, agent_session_project_turn } from "std/agent/state"
 
@@ -10,21 +11,7 @@ fn __agent_done_sentinel(opts) {
 }
 
 fn __agent_tool_format(opts) {
-  if opts?.tool_format != nil {
-    return opts.tool_format
-  }
-  if opts?.model != nil {
-    let resolved = try {
-      llm_resolve_model(opts.model)
-    }
-    if !is_err(resolved) {
-      let info = unwrap(resolved)
-      if info?.tool_format != nil {
-        return info.tool_format
-      }
-    }
-  }
-  return "text"
+  return agent_tool_format(opts)
 }
 
 fn __agent_has_tools(opts) {

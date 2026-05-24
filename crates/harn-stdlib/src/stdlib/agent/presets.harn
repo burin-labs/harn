@@ -11,6 +11,7 @@
 // re-deriving the knobs at every call site. All defaults remain
 // caller-overridable.
 import { agent_loop } from "std/agent/loop"
+import { agent_tool_format_resolution } from "std/agent/options"
 import { compose, default_llm_caller, with_logging, with_routing } from "std/llm/handlers"
 import {
   compose_tool_callers,
@@ -235,52 +236,18 @@ fn __tool_using_defaults(kind) {
   }
 }
 
-/**
- * Resolve `tool_format` from the model capability matrix before downstream
- * stdlib helpers decide whether to use native tools or text-tool prompts.
- */
-fn __preset_default_tool_format(opts) {
-  if opts?.tool_format != nil {
-    return opts.tool_format
-  }
-  let model = opts?.model
-  if model == nil || model == "" {
-    return nil
-  }
-  // When the caller explicitly named a provider, consult the capability
-  // matrix directly. `llm_resolve_model` infers provider from the model id
-  // and would misclassify provider-specific identifiers like
-  // `qwen3.6:35b-a3b-coding-nvfp4` (Ollama) by defaulting them to the
-  // global default provider.
-  if opts?.provider != nil && opts.provider != "auto" && opts.provider != "" {
-    let caps = provider_capabilities(opts.provider, model)
-    if caps?.native_tools ?? false {
-      return "native"
-    }
-    return "text"
-  }
-  let resolved = try {
-    llm_resolve_model(model)
-  }
-  if is_err(resolved) {
-    return nil
-  }
-  let info = unwrap(resolved)
-  if info?.tool_format != nil {
-    return info.tool_format
-  }
-  return nil
-}
-
 fn __apply_tool_format(opts, kind) {
   if kind == "summary" || kind == "verify" {
     return opts
   }
-  let resolved = __preset_default_tool_format(opts)
-  if resolved == nil {
+  let resolved = agent_tool_format_resolution(opts)
+  if resolved?.tool_format == nil {
     return opts
   }
-  return opts + {tool_format: resolved}
+  if resolved?.capability_gap_event != nil {
+    return opts
+  }
+  return opts + {tool_format: resolved.tool_format}
 }
 
 fn __kind_defaults(kind, opts) {

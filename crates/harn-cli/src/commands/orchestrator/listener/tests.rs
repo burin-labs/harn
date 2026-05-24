@@ -950,7 +950,7 @@ async fn webhook_ingest_saturation_returns_retry_after() {
         ListenerRuntimeEnv::for_test().with_ingest_backpressure(IngestBackpressureConfig {
             global_capacity: 100,
             per_source_capacity: 1,
-            refill_per_sec: 1,
+            refill_per_sec: 0,
         }),
     )
     .await

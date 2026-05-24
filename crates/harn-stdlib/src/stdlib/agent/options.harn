@@ -52,17 +52,151 @@ fn __client_tool_search_requested(value) {
   return type_of(value) == "dict" && value?.mode == "client"
 }
 
-fn __model_tool_format(opts) {
-  if opts?.model == nil {
+fn __fallback_tool_format() {
+  return "text"
+}
+
+fn __tool_format_auto(value) {
+  if value == nil {
+    return true
+  }
+  let text = lowercase(trim(to_string(value)))
+  return text == "" || text == "auto"
+}
+
+fn __explicit_tool_format(opts) {
+  if !__has_key(opts, "tool_format") || __tool_format_auto(opts?.tool_format) {
     return nil
   }
+  return lowercase(trim(to_string(opts.tool_format)))
+}
+
+fn __explicit_provider(opts) {
+  let provider = trim(to_string(opts?.provider ?? ""))
+  if provider == "" || lowercase(provider) == "auto" {
+    return nil
+  }
+  return provider
+}
+
+fn __resolved_model_id(model) {
   let resolved = try {
-    llm_resolve_model(opts.model)
+    llm_resolve_model(model)
+  }
+  if is_err(resolved) {
+    return to_string(model)
+  }
+  return unwrap(resolved)?.id ?? to_string(model)
+}
+
+fn __tool_format_pair(opts) {
+  let raw_model = opts?.model
+  if raw_model == nil || trim(to_string(raw_model)) == "" {
+    return nil
+  }
+  let provider = __explicit_provider(opts)
+  if provider != nil {
+    return {provider: provider, model: __resolved_model_id(raw_model)}
+  }
+  let resolved = try {
+    llm_resolve_model(raw_model)
   }
   if is_err(resolved) {
     return nil
   }
-  return unwrap(resolved)?.tool_format
+  let info = unwrap(resolved)
+  let inferred_provider = trim(to_string(info?.provider ?? ""))
+  let model = trim(to_string(info?.id ?? ""))
+  if inferred_provider == "" || model == "" {
+    return nil
+  }
+  return {provider: inferred_provider, model: model}
+}
+
+fn __valid_tool_format(value) {
+  let format = lowercase(trim(to_string(value ?? "")))
+  if format == "native" || format == "text" {
+    return format
+  }
+  return nil
+}
+
+fn __capability_gap_event(pair, requested, fallback) {
+  return {
+    level: "warning",
+    capability: "preferred_tool_format",
+    provider: pair.provider,
+    model: pair.model,
+    requested_tool_format: requested,
+    fallback_tool_format: fallback,
+    message: "No preferred_tool_format recommendation for provider/model; using fallback tool_format.",
+  }
+}
+
+/**
+ * Resolve the effective agent tool format without mutating the caller's
+ * options. `tool_format: "auto"` is intentionally treated the same as an
+ * omitted value.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_tool_format_resolution(options)
+ */
+pub fn agent_tool_format_resolution(options = nil) {
+  let opts = options ?? {}
+  let explicit = __explicit_tool_format(opts)
+  if explicit != nil {
+    return {tool_format: explicit, source: "explicit", capability_gap_event: nil}
+  }
+  let pair = __tool_format_pair(opts)
+  if pair != nil {
+    let caps = try {
+      provider_capabilities(pair.provider, pair.model)
+    }
+    if !is_err(caps) {
+      let preferred = __valid_tool_format(unwrap(caps)?.preferred_tool_format)
+      if preferred != nil {
+        return {
+          tool_format: preferred,
+          source: "capabilities",
+          provider: pair.provider,
+          model: pair.model,
+          capability_gap_event: nil,
+        }
+      }
+    }
+    let fallback = __fallback_tool_format()
+    return {
+      tool_format: fallback,
+      source: "fallback",
+      provider: pair.provider,
+      model: pair.model,
+      capability_gap_event: __capability_gap_event(pair, opts?.tool_format, fallback),
+    }
+  }
+  if __has_key(opts, "tool_format") {
+    return {tool_format: __fallback_tool_format(), source: "fallback", capability_gap_event: nil}
+  }
+  return {tool_format: nil, source: "unresolved", capability_gap_event: nil}
+}
+
+/**
+ * Return the concrete tool format a prompt-building helper should use.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_tool_format(options)
+ */
+pub fn agent_tool_format(options = nil) {
+  let resolved = agent_tool_format_resolution(options)
+  if resolved?.tool_format != nil {
+    return resolved.tool_format
+  }
+  return __fallback_tool_format()
 }
 
 fn __native_tools_complete_naturally(opts) {
@@ -356,6 +490,17 @@ fn __normalize_reminder_provider_options(opts) {
   return opts
 }
 
+fn __with_resolved_tool_format(opts, resolution) {
+  if resolution?.tool_format == nil {
+    return opts
+  }
+  var next = opts + {tool_format: resolution.tool_format}
+  if resolution?.capability_gap_event != nil {
+    next = next + {_tool_format_capability_gap: resolution.capability_gap_event}
+  }
+  return next
+}
+
 fn __normalize_iteration_budget(opts) {
   let raw = opts?.iteration_budget
   let legacy = opts?.max_iterations
@@ -481,15 +626,13 @@ pub fn agent_loop_options(options = nil) {
   let profile = opts?.profile ?? "tool_using"
   let defaults = __profile_defaults(profile)
   opts = defaults + opts
-  if !__has_key(opts, "tool_format") && opts?.tools != nil {
-    let model_tool_format = __model_tool_format(opts)
-    if model_tool_format != nil {
-      opts = opts + {tool_format: model_tool_format}
-    }
+  let tool_format_resolution = agent_tool_format_resolution(opts)
+  if __has_key(opts, "tool_format") || opts?.tools != nil {
+    opts = __with_resolved_tool_format(opts, tool_format_resolution)
   }
   if !__has_key(opts, "tool_format")
     && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
-    opts = opts + {tool_format: "text"}
+    opts = opts + {tool_format: __fallback_tool_format()}
   }
   if opts?.loop_until_done ?? false && !__has_key(opts, "done_sentinel") {
     opts = opts

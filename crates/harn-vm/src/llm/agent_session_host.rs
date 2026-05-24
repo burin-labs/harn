@@ -1543,6 +1543,16 @@ fn build_agent_event(
             session_id: session_id.to_string(),
             warning: payload.clone(),
         }),
+        "capability_gap" => Ok(AgentEvent::CapabilityGap {
+            session_id: session_id.to_string(),
+            level: get_string("level"),
+            capability: get_string("capability"),
+            provider: get_string("provider"),
+            model: get_string("model"),
+            fallback_tool_format: get_string("fallback_tool_format"),
+            requested_tool_format: get_opt_string("requested_tool_format"),
+            message: get_string("message"),
+        }),
         "tool_call_audit" => {
             let receipt = payload_obj
                 .and_then(|m| m.get("receipt"))

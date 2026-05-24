@@ -370,6 +370,8 @@ struct IngestBackpressure {
 pub(crate) struct IngestBackpressureConfig {
     pub(crate) global_capacity: u32,
     pub(crate) per_source_capacity: u32,
+    /// Refill rate for admitted webhook tokens. A value of zero disables
+    /// automatic refill for fixed-window drains.
     pub(crate) refill_per_sec: u32,
 }
 
@@ -390,7 +392,7 @@ impl IngestBackpressure {
         let config = IngestBackpressureConfig {
             global_capacity: config.global_capacity.max(1),
             per_source_capacity: config.per_source_capacity.max(1),
-            refill_per_sec: config.refill_per_sec.max(1),
+            refill_per_sec: config.refill_per_sec,
         };
         let now = Instant::now();
         Self {
@@ -484,9 +486,11 @@ impl IngestBucket {
     }
 
     fn refill(&mut self, capacity: u32, refill_per_sec: u32, now: Instant) {
+        if refill_per_sec == 0 {
+            return;
+        }
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
-        self.tokens =
-            (self.tokens + elapsed * refill_per_sec.max(1) as f64).min(capacity.max(1) as f64);
+        self.tokens = (self.tokens + elapsed * refill_per_sec as f64).min(capacity.max(1) as f64);
         self.last_refill = now;
     }
 
@@ -494,7 +498,10 @@ impl IngestBucket {
         if self.tokens >= 1.0 {
             return Duration::ZERO;
         }
-        Duration::from_secs_f64(((1.0 - self.tokens) / refill_per_sec.max(1) as f64).max(0.001))
+        if refill_per_sec == 0 {
+            return Duration::from_secs(1);
+        }
+        Duration::from_secs_f64(((1.0 - self.tokens) / refill_per_sec as f64).max(0.001))
     }
 }
 
