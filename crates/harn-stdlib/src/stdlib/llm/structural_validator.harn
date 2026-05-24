@@ -48,23 +48,122 @@ fn __sv_positive_int(value, default_value, name) -> int {
   return parsed
 }
 
+fn __sv_bool(value, default_value, name) -> bool {
+  if value == nil {
+    return default_value
+  }
+  if type_of(value) != "bool" {
+    throw "with_structural_validator: `" + name + "` must be bool; got " + type_of(value)
+  }
+  return value
+}
+
+fn __sv_string_list(value) -> list {
+  var out = []
+  for item in __sv_list(value) {
+    let text = trim(__sv_string(item))
+    if text != "" {
+      out = out.push(text)
+    }
+  }
+  return out
+}
+
+fn __sv_default_no_phantom_completion_catalog() {
+  return {
+    en: [
+      "i fixed",
+      "fixed the",
+      "updated the",
+      "implemented the",
+      "i implemented",
+      "i completed",
+      "completed the",
+      "successfully",
+      "all set",
+      "done",
+    ],
+  }
+}
+
+fn __sv_merge_catalog_locale(base, override_items) {
+  var merged = []
+  for item in __sv_string_list(base) + __sv_string_list(override_items) {
+    let normalized = lowercase(item)
+    if normalized != "" && !contains(merged, normalized) {
+      merged = merged.push(normalized)
+    }
+  }
+  return merged
+}
+
+fn __sv_normalize_no_phantom_completion_catalog(value) {
+  let defaults = __sv_default_no_phantom_completion_catalog()
+  if value == nil {
+    return defaults
+  }
+  let raw = __sv_dict(value)
+  if len(raw.keys()) == 0 && type_of(value) != "dict" {
+    throw "with_structural_validator: `no_phantom_completion_catalog` must be a dict"
+  }
+  var out = defaults
+  for locale in raw.keys() {
+    out = out + {[locale]: __sv_merge_catalog_locale(out?[locale] ?? [], raw[locale])}
+  }
+  return out
+}
+
+fn __sv_locale(value) -> string {
+  let locale = trim(__sv_string(value))
+  if locale == "" {
+    return "en"
+  }
+  return locale
+}
+
+fn __sv_rule_names() {
+  return [
+    "non_empty_when_writes_expected",
+    "no_phantom_completion",
+    "tool_calls_well_formed",
+    "output_token_cap_with_zero_calls",
+  ]
+}
+
+fn __sv_normalize_rule_entry(value) {
+  if type_of(value) == "string" {
+    let name = trim(__sv_string(value))
+    if name == "" {
+      throw "with_structural_validator: rule names must be non-empty strings"
+    }
+    return {name: name, warn_only: false}
+  }
+  let entry = __sv_dict(value)
+  let name = trim(__sv_string(entry?.name ?? entry?.rule))
+  if name == "" {
+    throw "with_structural_validator: rule entries need `name`"
+  }
+  return {name: name, warn_only: __sv_bool(entry?.warn_only, false, "rules[].warn_only")}
+}
+
 fn __sv_normalize_rules(value) {
   if value == nil {
-    return ["non_empty_when_writes_expected"]
+    return [__sv_normalize_rule_entry("non_empty_when_writes_expected")]
   }
   let raw = __sv_list(value)
   if len(raw) == 0 {
-    return ["non_empty_when_writes_expected"]
+    return [__sv_normalize_rule_entry("non_empty_when_writes_expected")]
   }
   var rules = []
   for item in raw {
-    let name = trim(__sv_string(item))
-    if name != "" && !contains(rules, name) {
-      rules = rules.push(name)
+    let entry = __sv_normalize_rule_entry(item)
+    let name = entry.name
+    if !contains(rules.map({ rule -> rule.name }), name) {
+      rules = rules.push(entry)
     }
   }
   if len(rules) == 0 {
-    return ["non_empty_when_writes_expected"]
+    return [__sv_normalize_rule_entry("non_empty_when_writes_expected")]
   }
   return rules
 }
@@ -78,14 +177,16 @@ fn __sv_validate_opts(opts) {
   }
   let rules = __sv_normalize_rules(cfg?.rules)
   for rule in rules {
-    if rule != "non_empty_when_writes_expected" {
-      throw "with_structural_validator: unknown rule `" + rule + "`"
+    if !contains(__sv_rule_names(), rule.name) {
+      throw "with_structural_validator: unknown rule `" + rule.name + "`"
     }
   }
   return {
     on_failure: on_failure,
     max_attempts: __sv_positive_int(cfg?.max_attempts, 3, "max_attempts"),
     rules: rules,
+    locale: __sv_locale(cfg?.locale),
+    no_phantom_completion_catalog: __sv_normalize_no_phantom_completion_catalog(cfg?.no_phantom_completion_catalog),
   }
 }
 
@@ -134,6 +235,52 @@ fn __sv_done_marker_present(payload) -> bool {
   return trim(__sv_string(payload?.parsed_done_marker)) != ""
 }
 
+fn __sv_registry_tool_entry(registry, name) {
+  let tools = __sv_dict(registry)
+  let entries = __sv_list(tools?.tools)
+  for entry in entries {
+    if __sv_string(entry?.name) == name {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn __sv_any_prior_write_tools(payload) -> bool {
+  let tools = payload?.tools
+  let prior = __sv_string_list(payload?.prior_successful_tools)
+    + __sv_string_list(payload?.prior_rejected_tools)
+  for name in prior {
+    let entry = __sv_registry_tool_entry(tools, name)
+    if entry != nil && __sv_tool_entry_has_write_capability(entry) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __sv_no_phantom_completion_phrases(cfg, rule_cfg) {
+  let locale = __sv_locale(rule_cfg?.locale ?? cfg?.locale)
+  let catalog = __sv_dict(cfg?.no_phantom_completion_catalog)
+  let phrases = __sv_string_list(catalog?[locale] ?? catalog?.en ?? [])
+  return __sv_merge_catalog_locale([], phrases)
+}
+
+fn __sv_claims_completion(payload, cfg, rule_cfg) -> bool {
+  let text = lowercase(
+    trim(__sv_string(payload?.assistant_text ?? payload?.raw_text ?? payload?.visible_text ?? "")),
+  )
+  if text == "" {
+    return false
+  }
+  for phrase in __sv_no_phantom_completion_phrases(cfg, rule_cfg) {
+    if phrase != "" && text.contains(phrase) {
+      return true
+    }
+  }
+  return false
+}
+
 fn __sv_non_empty_when_writes_expected(payload) {
   if !__sv_workspace_has_write_capability(payload) {
     return nil
@@ -151,13 +298,82 @@ fn __sv_non_empty_when_writes_expected(payload) {
   }
 }
 
+fn __sv_no_phantom_completion(payload, cfg, rule_cfg) {
+  if !__sv_workspace_has_write_capability(payload) {
+    return nil
+  }
+  if len(__sv_list(payload?.tool_calls)) > 0 {
+    return nil
+  }
+  if __sv_any_prior_write_tools(payload) {
+    return nil
+  }
+  if !__sv_claims_completion(payload, cfg, rule_cfg) {
+    return nil
+  }
+  return {
+    rule: "no_phantom_completion",
+    diagnostic: "Assistant claimed completion before any write-capable tool call occurred in this session.",
+    recommended_action: "Call the concrete write or edit tool that performs the work before claiming the task is complete.",
+  }
+}
+
+fn __sv_join_messages(values) -> string {
+  return join(__sv_string_list(values), "; ")
+}
+
+fn __sv_tool_calls_well_formed(payload) {
+  let parse_errors = __sv_string_list(payload?.tool_parse_errors)
+  let protocol_violations = __sv_string_list(payload?.protocol_violations)
+  if len(parse_errors) == 0 && len(protocol_violations) == 0 {
+    return nil
+  }
+  let details = __sv_join_messages(protocol_violations + parse_errors)
+  return {
+    rule: "tool_calls_well_formed",
+    diagnostic: "Assistant emitted malformed tool calls: " + details,
+    recommended_action: "Emit only well-formed tool calls that match the bound tool schemas and Harn tool-call protocol.",
+  }
+}
+
+fn __sv_output_token_cap_with_zero_calls(payload) {
+  if !__sv_workspace_has_write_capability(payload) {
+    return nil
+  }
+  if len(__sv_list(payload?.tool_calls)) > 0 {
+    return nil
+  }
+  let max_output_tokens = to_int(payload?.max_output_tokens) ?? 0
+  if max_output_tokens <= 0 {
+    return nil
+  }
+  let output_tokens = to_int(payload?.output_tokens) ?? 0
+  if output_tokens * 100 < max_output_tokens * 95 {
+    return nil
+  }
+  return {
+    rule: "output_token_cap_with_zero_calls",
+    diagnostic: "Assistant used nearly the full output-token budget without emitting any tool calls.",
+    recommended_action: "The model appears stuck in a prose loop. Emit the next tool call directly or shorten the narration and try again.",
+  }
+}
+
 fn __sv_feedback_payload(verdict) {
   return json_stringify(
     {rule: verdict.rule, diagnostic: verdict.diagnostic, recommended_action: verdict.recommended_action},
   )
 }
 
-fn __sv_emit_decision(session_id, iteration, cfg, verdict, attempts, skipped = false, reason = nil) {
+fn __sv_emit_decision(
+  session_id,
+  iteration,
+  cfg,
+  verdict,
+  attempts,
+  vetoed = true,
+  skipped = false,
+  reason = nil,
+) {
   agent_emit_event(
     session_id,
     "structural_validator_decision",
@@ -166,7 +382,7 @@ fn __sv_emit_decision(session_id, iteration, cfg, verdict, attempts, skipped = f
       rule: verdict?.rule ?? "",
       diagnostic: verdict?.diagnostic ?? "",
       recommended_action: verdict?.recommended_action ?? "",
-      vetoed: verdict != nil,
+      vetoed: vetoed,
       skipped: skipped,
       reason: reason,
       on_failure: cfg.on_failure,
@@ -176,14 +392,20 @@ fn __sv_emit_decision(session_id, iteration, cfg, verdict, attempts, skipped = f
   )
 }
 
-fn __sv_pass_result(call, configured, skipped = false, reason = nil) {
+fn __sv_pass_result(call, configured, skipped = false, reason = nil, extra = nil) {
+  let result = {configured: configured, vetoed: false, skipped: skipped, reason: reason}
+  let merged = if type_of(extra) == "dict" {
+    result + extra
+  } else {
+    result
+  }
   return {
     ok: true,
     status: "ok",
     tool_name: call.tool_name,
     tool_call_id: call.call_id,
     arguments: call.tool_args,
-    result: {configured: configured, vetoed: false, skipped: skipped, reason: reason},
+    result: merged,
     rendered_result: "",
     observation: "",
     error: nil,
@@ -217,22 +439,50 @@ fn __sv_veto_result(call, cfg, verdict) {
   }
 }
 
+fn __sv_rule_verdict(payload, cfg, rule_cfg) {
+  let rule = __sv_string(rule_cfg?.name)
+  if rule == "non_empty_when_writes_expected" {
+    return __sv_non_empty_when_writes_expected(payload)
+  }
+  if rule == "no_phantom_completion" {
+    return __sv_no_phantom_completion(payload, cfg, rule_cfg)
+  }
+  if rule == "tool_calls_well_formed" {
+    return __sv_tool_calls_well_formed(payload)
+  }
+  if rule == "output_token_cap_with_zero_calls" {
+    return __sv_output_token_cap_with_zero_calls(payload)
+  }
+  return nil
+}
+
 fn __sv_handle_turn(call, cfg) {
   let payload = __sv_dict(call?.tool_args)
   let session_id = __sv_string(payload?.session_id ?? call?.turn?.session_id)
   let iteration = to_int(payload?.iteration ?? call?.turn?.iteration) ?? 0
   let attempts = to_int(payload?.attempts) ?? 0
   if attempts >= cfg.max_attempts {
-    __sv_emit_decision(session_id, iteration, cfg, nil, attempts, true, "max_attempts_reached")
+    __sv_emit_decision(session_id, iteration, cfg, nil, attempts, false, true, "max_attempts_reached")
     return __sv_pass_result(call, true, true, "max_attempts_reached")
   }
-  for rule in cfg.rules {
-    let verdict = if rule == "non_empty_when_writes_expected" {
-      __sv_non_empty_when_writes_expected(payload)
-    } else {
-      nil
-    }
+  for rule_cfg in cfg.rules {
+    let verdict = __sv_rule_verdict(payload, cfg, rule_cfg)
     if verdict != nil {
+      if rule_cfg?.warn_only ?? false {
+        __sv_emit_decision(session_id, iteration, cfg, verdict, attempts, false, false, "warn_only")
+        return __sv_pass_result(
+          call,
+          true,
+          false,
+          "warn_only",
+          {
+            warned: true,
+            rule: verdict.rule,
+            diagnostic: verdict.diagnostic,
+            recommended_action: verdict.recommended_action,
+          },
+        )
+      }
       __sv_emit_decision(session_id, iteration, cfg, verdict, attempts)
       return __sv_veto_result(call, cfg, verdict)
     }
@@ -244,12 +494,15 @@ fn __sv_handle_turn(call, cfg) {
  * with_structural_validator(opts) -> caller
  *
  * Deterministic pre-dispatch turn validator. The current landable rule
- * is `non_empty_when_writes_expected`.
+ * set covers deterministic tool-use and completion-shape checks.
  *
  * Options:
  *   on_failure:  "regenerate_with_feedback" | "raise"
  *   max_attempts: int > 0 (default 3)
- *   rules: ["non_empty_when_writes_expected"]
+ *   locale: string (default "en")
+ *   no_phantom_completion_catalog: {locale: [phrase, ...]}
+ *   rules: ["non_empty_when_writes_expected", ...]
+ *          or [{name: "tool_calls_well_formed", warn_only: true}]
  *
  * @effects: [host]
  * @allocation: heap
