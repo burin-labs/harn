@@ -782,10 +782,38 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
     },
 ];
 
+/// Embedded `.harn` script that backs a CLI subcommand. Looked up by
+/// the `harn-cli` dispatch wedge (see harn#2293 epic and harn#2294 G1)
+/// so subcommands can ship in Harn instead of Rust.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StdlibCliScript {
+    /// Lookup name. For nested scripts this is the path under
+    /// `stdlib/cli/` without the `.harn` extension (e.g. `"eval/prompt"`
+    /// for `stdlib/cli/eval/prompt.harn`).
+    pub name: &'static str,
+    /// Embedded source. Run via the existing `harn run` codepath by the
+    /// dispatch wedge.
+    pub source: &'static str,
+}
+
+pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[StdlibCliScript {
+    name: "echo",
+    source: include_str!("stdlib/cli/echo.harn"),
+}];
+
 pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
     STDLIB_SOURCES
         .iter()
         .find_map(|entry| (entry.module == module).then_some(entry.source))
+}
+
+/// Find an embedded CLI subcommand script by name. Returns the embedded
+/// source string when present, or `None` if no script with that name is
+/// registered in [`STDLIB_CLI_SCRIPTS`].
+pub fn find_cli_script(name: &str) -> Option<&'static str> {
+    STDLIB_CLI_SCRIPTS
+        .iter()
+        .find_map(|entry| (entry.name == name).then_some(entry.source))
 }
 
 pub fn get_stdlib_prompt_asset(path: &str) -> Option<&'static str> {
@@ -996,8 +1024,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        entrypoint_modules, get_stdlib_prompt_asset, get_stdlib_source,
-        public_functions_for_module, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
+        entrypoint_modules, find_cli_script, get_stdlib_prompt_asset, get_stdlib_source,
+        public_functions_for_module, STDLIB_CLI_SCRIPTS, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
     };
 
     #[test]
@@ -1009,6 +1037,31 @@ mod tests {
                 entry.module
             );
         }
+    }
+
+    #[test]
+    fn cli_scripts_are_non_empty_and_uniquely_named() {
+        let mut seen = BTreeSet::new();
+        for entry in STDLIB_CLI_SCRIPTS {
+            assert!(
+                !entry.source.trim().is_empty(),
+                "cli/{} should have non-empty source",
+                entry.name
+            );
+            assert!(
+                seen.insert(entry.name),
+                "cli/{} is registered more than once in STDLIB_CLI_SCRIPTS",
+                entry.name
+            );
+        }
+    }
+
+    #[test]
+    fn find_cli_script_round_trips() {
+        for entry in STDLIB_CLI_SCRIPTS {
+            assert_eq!(find_cli_script(entry.name), Some(entry.source));
+        }
+        assert!(find_cli_script("not-a-real-script").is_none());
     }
 
     #[test]
