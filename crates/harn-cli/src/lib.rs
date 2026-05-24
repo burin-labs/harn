@@ -1019,7 +1019,7 @@ async fn async_main() {
             }
         }
         Command::Graph(args) => {
-            let code = commands::graph::run(args);
+            let code = commands::graph::run(args).await;
             if code != 0 {
                 process::exit(code);
             }

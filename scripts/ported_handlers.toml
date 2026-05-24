@@ -58,3 +58,11 @@ max_loc = 500
 [[handler]]
 path = "crates/harn-cli/src/commands/models/test.rs"
 max_loc = 150
+
+[[handler]]
+path = "crates/harn-cli/src/commands/routes.rs"
+max_loc = 805
+
+[[handler]]
+path = "crates/harn-cli/src/commands/graph.rs"
+max_loc = 690
