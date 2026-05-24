@@ -1017,6 +1017,20 @@ fn test_builtin_return_type_inference() {
 }
 
 #[test]
+fn test_harness_crypto_sha256_type_inference() {
+    let errs = errors(
+        r#"fn main(harness: Harness) {
+  let crypto: HarnessCrypto = harness.crypto
+  let digest: string = crypto.sha256("")
+  let wrong: int = harness.crypto.sha256("hello")
+}"#,
+    );
+    assert_eq!(errs.len(), 1, "expected one mismatch, got: {errs:?}");
+    assert!(errs[0].contains("expected int"), "{errs:?}");
+    assert!(errs[0].contains("found string"), "{errs:?}");
+}
+
+#[test]
 fn test_builtin_arg_type_mismatch() {
     let errs = errors(r#"pipeline t(task) { len(42) }"#);
     assert_eq!(errs.len(), 1);

@@ -88,6 +88,13 @@ pub fn harness_process_ambient(method: &str) -> Option<&'static str> {
     }
 }
 
+pub fn harness_crypto_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "sha256" => Some("sha256_hex"),
+        _ => None,
+    }
+}
+
 pub fn harness_system_ambient(method: &str) -> Option<&'static str> {
     match method {
         "platform" => Some("system_platform"),
@@ -117,6 +124,7 @@ pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'st
         "random" => harness_random_ambient(method),
         "net" => harness_net_ambient(method),
         "process" => harness_process_ambient(method),
+        "crypto" => harness_crypto_ambient(method),
         "system" => harness_system_ambient(method),
         "llm" => harness_llm_ambient(method),
         _ => None,
@@ -132,6 +140,7 @@ pub fn harness_type_sub_handle(type_name: &str) -> Option<&'static str> {
         "HarnessRandom" => Some("random"),
         "HarnessNet" => Some("net"),
         "HarnessProcess" => Some("process"),
+        "HarnessCrypto" => Some("crypto"),
         "HarnessSystem" => Some("system"),
         "HarnessLlm" => Some("llm"),
         _ => None,

@@ -37,6 +37,11 @@ condensed series summaries instead of full per-patch history.
   `harn provider capabilities audit` plus a VM unit gate that fails when a
   priced catalog model lacks explicit `native_tools` and
   `preferred_tool_format` coverage in the capability rules.
+- **`harness.crypto.sha256(...)` host capability (#2337).** Added the
+  `harness.crypto` sub-handle with `sha256(value)` for lowercase SHA-256 hex
+  over strings or bytes. `sha256_hex(...)` remains as a compatibility alias,
+  and `harn graph --json` now surfaces `harness.crypto.sha256` in
+  `host_calls`.
 
 ## v0.8.35
 

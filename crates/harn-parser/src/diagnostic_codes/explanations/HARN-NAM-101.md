@@ -16,8 +16,9 @@ mismatched signature.
 
 The `Harness` value gives the script typed access to its capability
 slices via field access (`harness.stdio`, `harness.clock`, `harness.fs`,
-`harness.env`, `harness.random`, `harness.net`, `harness.system`,
-`harness.llm`). Threading the handle through `main` makes host access explicit
+`harness.env`, `harness.random`, `harness.net`, `harness.process`,
+`harness.crypto`, `harness.system`, `harness.llm`). Threading the handle
+through `main` makes host access explicit
 instead of relying on ambient globals and free builtins.
 
 ## How to fix

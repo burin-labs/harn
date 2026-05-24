@@ -3,10 +3,10 @@
 //!
 //! `Harness` is the Harn-language analog of an explicit-capability handle: a
 //! single value the runtime hands to a script's `main` so that stdio, clock,
-//! filesystem, environment, randomness, network, process, system, and LLM
+//! filesystem, environment, randomness, network, process, crypto, system, and LLM
 //! catalog access become surface in the type system instead of ambient
 //! globals. Each sub-handle (`stdio`, `clock`, `fs`, `env`, `random`, `net`,
-//! `process`, `system`, `llm`) is a distinct named type that anchors the
+//! `process`, `crypto`, `system`, `llm`) is a distinct named type that anchors the
 //! surface for its capability slice.
 //!
 //! This module defines:
@@ -41,6 +41,7 @@ pub enum HarnessKind {
     Random,
     Net,
     Process,
+    Crypto,
     System,
     Llm,
 }
@@ -59,6 +60,7 @@ impl HarnessKind {
             HarnessKind::Random => "HarnessRandom",
             HarnessKind::Net => "HarnessNet",
             HarnessKind::Process => "HarnessProcess",
+            HarnessKind::Crypto => "HarnessCrypto",
             HarnessKind::System => "HarnessSystem",
             HarnessKind::Llm => "HarnessLlm",
         }
@@ -76,6 +78,7 @@ impl HarnessKind {
             HarnessKind::Random => Some("random"),
             HarnessKind::Net => Some("net"),
             HarnessKind::Process => Some("process"),
+            HarnessKind::Crypto => Some("crypto"),
             HarnessKind::System => Some("system"),
             HarnessKind::Llm => Some("llm"),
         }
@@ -91,6 +94,7 @@ impl HarnessKind {
             "random" => Some(HarnessKind::Random),
             "net" => Some(HarnessKind::Net),
             "process" => Some(HarnessKind::Process),
+            "crypto" => Some(HarnessKind::Crypto),
             "system" => Some(HarnessKind::System),
             "llm" => Some(HarnessKind::Llm),
             _ => None,
@@ -106,6 +110,7 @@ impl HarnessKind {
         HarnessKind::Random,
         HarnessKind::Net,
         HarnessKind::Process,
+        HarnessKind::Crypto,
         HarnessKind::System,
         HarnessKind::Llm,
     ];
@@ -120,6 +125,7 @@ impl HarnessKind {
         HarnessKind::Random,
         HarnessKind::Net,
         HarnessKind::Process,
+        HarnessKind::Crypto,
         HarnessKind::System,
         HarnessKind::Llm,
     ];
@@ -621,6 +627,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.crypto`.
+    pub fn crypto(&self) -> HarnessCrypto {
+        HarnessCrypto {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Field access for `harness.system`.
     pub fn system(&self) -> HarnessSystem {
         HarnessSystem {
@@ -711,6 +724,12 @@ pub struct HarnessProcess {
     inner: Arc<HarnessInner>,
 }
 
+/// crypto sub-handle: deterministic digest helpers such as `sha256`.
+#[derive(Debug, Clone)]
+pub struct HarnessCrypto {
+    inner: Arc<HarnessInner>,
+}
+
 /// system sub-handle: `cpu`, `memory`, `gpus`, `temperature`, `platform`,
 /// `processes`. Read-only host introspection — no side effects on the host
 /// system. Gated by the harness handle so scripts running under
@@ -746,6 +765,7 @@ sub_handle_inner!(
     HarnessRandom,
     HarnessNet,
     HarnessProcess,
+    HarnessCrypto,
     HarnessSystem,
     HarnessLlm,
 );
@@ -941,6 +961,7 @@ mod tests {
             r#"fn main(harness: Harness) { harness.random.gen_u64() }"#,
             r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#,
             r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf", args: ["x"]}) }"#,
+            r#"fn main(harness: Harness) { harness.crypto.sha256("") }"#,
             r#"fn main(harness: Harness) { harness.system.cpu() }"#,
             r#"fn main(harness: Harness) { harness.llm.catalog() }"#,
         ] {
@@ -966,6 +987,7 @@ mod tests {
                 (HarnessKind::Random, "gen_u64"),
                 (HarnessKind::Net, "get"),
                 (HarnessKind::Process, "spawn_captured"),
+                (HarnessKind::Crypto, "sha256"),
                 (HarnessKind::System, "cpu"),
                 (HarnessKind::Llm, "catalog"),
             ]
@@ -998,6 +1020,7 @@ fn main(harness: Harness) {
   __io_println(harness.fs.exists("/missing"))
   __io_println(harness.random.gen_u64())
   __io_println(harness.net.get("https://example.test"))
+  __io_println(harness.crypto.sha256(""))
   __io_println(len(harness.llm.catalog()) > 0)
 }
 "#,
@@ -1008,7 +1031,7 @@ fn main(harness: Harness) {
         assert_eq!(harness.captured_stdio(), "partial line\n");
         assert_eq!(
             output,
-            "1700000000000\n1700000000250\n250\nvalue\ndata\nfalse\n42\nbody\ntrue\n"
+            "1700000000000\n1700000000250\n250\nvalue\ndata\nfalse\n42\nbody\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\ntrue\n"
         );
         let observed: Vec<_> = harness
             .calls()
@@ -1029,6 +1052,7 @@ fn main(harness: Harness) {
                 (HarnessKind::Fs, "exists".to_string()),
                 (HarnessKind::Random, "gen_u64".to_string()),
                 (HarnessKind::Net, "get".to_string()),
+                (HarnessKind::Crypto, "sha256".to_string()),
                 (HarnessKind::Llm, "catalog".to_string()),
             ]
         );

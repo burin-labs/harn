@@ -68,14 +68,16 @@ pub(crate) fn run_git(repo: &Path, args: &[&str]) -> String {
 
 pub(crate) fn test_git_command(repo: &Path) -> process::Command {
     let mut command = process::Command::new("git");
+    // Keep disposable package repos independent of developer Git policy that can
+    // make simple test commands invoke hooks, signing prompts, or editors.
     command
-        // Package tests create disposable repos. Keep ambient developer Git
-        // policy from invoking hooks or signing prompts inside nextest workers.
         .args([
             "-c",
             "commit.gpgSign=false",
             "-c",
             "tag.gpgSign=false",
+            "-c",
+            "tag.forceSignAnnotated=false",
             "-c",
             "core.hooksPath=/dev/null",
             "-c",
@@ -93,7 +95,10 @@ pub(crate) fn test_git_command(repo: &Path) -> process::Command {
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_ASKPASS");
+        .env_remove("GIT_ASKPASS")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_SEQUENCE_EDITOR", "true");
     command
 }
 
