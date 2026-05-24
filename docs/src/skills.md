@@ -106,7 +106,7 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 | `hooks` | map or list | Shell commands for lifecycle events. Filesystem skills only surface hooks when their detached provenance verifies as trusted. |
 | `model` | string | Preferred model alias. |
 | `effort` | string | `low` / `medium` / `high`. |
-| `require-signature` | bool | Require a valid detached signature before runtime `load_skill(...)` may promote the skill body. |
+| `require-signature` | bool | Require a valid detached signature before the skill is admitted to the startup registry or promoted by `load_skill(...)`. |
 | `trusted-signers` | list of string | Optional signer fingerprint allowlist layered on top of the trusted registry. |
 | `shell` | string | Shell to run the body under when `context` is shell-ish. |
 | `argument-hint` | string | UI hint for `$ARGUMENTS`. |
@@ -275,6 +275,11 @@ name = "acme/ops"
 - `signer_registry_url` points at a flat directory or URL prefix that
   serves `<fingerprint>.pub` signer files for skill signature
   verification.
+- Skills that declare `require_signature = true` are omitted from the
+  startup registry unless their detached signature chain verifies.
+- User and system layer skills are also omitted when they carry a failed
+  provenance check; unsigned entries can still load, but executable hook
+  frontmatter is only surfaced for verified skills.
 - `[[skill.source]]` entries of type `git` expect their materialized
   checkout to live under `.harn/packages/<name>/skills/` — run
   `harn install` to populate it.
