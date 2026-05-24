@@ -329,6 +329,20 @@
     "jsonrpc": "2.0",
     "method": "_harn/agentEvent",
     "params": {
+      "catalogParity": "native_unreliable",
+      "kind": "tool_format_override",
+      "model": "qwen/qwen3-coder",
+      "overrideReason": "cross-check provider regression",
+      "provider": "openrouter",
+      "recommendedFormat": "text",
+      "requestedFormat": "native",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
       "audit": {
         "consent": "not_required",
         "summary": "Read project context"

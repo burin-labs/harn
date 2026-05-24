@@ -280,3 +280,40 @@ fn run_harn(argv: &[String], extra_env: &[(&str, &str)]) -> ProcessOutcome {
         exit_code: output.status.code().unwrap_or(-1),
     }
 }
+
+#[test]
+fn eval_coding_agent_surfaces_tool_format_override_warning() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = tmp.path().join("bench");
+    let argv = vec![
+        "eval".to_string(),
+        "coding-agent".to_string(),
+        "--fixture".to_string(),
+        "no-tool-diagnosis".to_string(),
+        "--model".to_string(),
+        "mock:claude-opus-4-7".to_string(),
+        "--tool-format".to_string(),
+        "text".to_string(),
+        "--max-runs".to_string(),
+        "1".to_string(),
+        "--max-iterations".to_string(),
+        "1".to_string(),
+        "--override-reason".to_string(),
+        "compare text trace".to_string(),
+        "--output".to_string(),
+        output.display().to_string(),
+    ];
+    let outcome = run_harn(&argv, &[]);
+    assert_eq!(
+        outcome.exit_code, 0,
+        "eval failed\nstdout={}\nstderr={}",
+        outcome.stdout, outcome.stderr
+    );
+    assert!(
+        outcome.stderr.contains(
+            "warning: tool_format override: mock:claude-opus-4-7 requested text over recommended native"
+        ),
+        "stderr should surface the override warning; got:\n{}",
+        outcome.stderr
+    );
+}

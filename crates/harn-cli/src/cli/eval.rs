@@ -135,6 +135,9 @@ pub struct EvalCodingAgentArgs {
     /// Use the adversarial rubric variant.
     #[arg(long = "step-judge-adversarial")]
     pub step_judge_adversarial: bool,
+    /// Free-form reason attached when forcing a tool format against catalog guidance.
+    #[arg(long = "override-reason")]
+    pub override_reason: Option<String>,
     /// Free-form label persisted in summary.json for grouping repeat runs
     /// (e.g. "replicate-1", "probe-judge-arch-gpt"). Defaults to empty.
     #[arg(long = "run-label", default_value = "")]

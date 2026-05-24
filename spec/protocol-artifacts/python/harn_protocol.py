@@ -217,6 +217,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "structural_validator_decision",
     "step_judge_decision",
     "tool_call_audit",
+    "tool_format_override",
     "typed_checkpoint",
     "turn_end",
     "turn_start",

@@ -51,6 +51,26 @@ fn main() {
     println!("cargo:rerun-if-changed=portal-dist");
 }
 
+fn emit_rerun_if_changed_recursive(path: &Path) {
+    println!("cargo:rerun-if-changed={}", path.display());
+
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    let mut children: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect();
+    children.sort();
+
+    for child in children {
+        if child.is_dir() {
+            emit_rerun_if_changed_recursive(&child);
+        } else {
+            println!("cargo:rerun-if-changed={}", child.display());
+        }
+    }
+}
+
 /// Self-heal `core.hooksPath` to `.githooks` when building inside the
 /// Harn working tree. Without this, contributors who set up the repo
 /// before `make install-hooks` existed (or whose config drifted to the
@@ -144,7 +164,7 @@ fn emit_cli_script_bytecode() {
         .join("src")
         .join("stdlib")
         .join("cli");
-    println!("cargo:rerun-if-changed={}", cli_scripts_dir.display());
+    emit_rerun_if_changed_recursive(&cli_scripts_dir);
     // Watch the stdlib lib.rs too because that's where script registration
     // lives — adding/removing entries from STDLIB_CLI_SCRIPTS must rerun
     // this build script even if no `.harn` file changed.

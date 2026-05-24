@@ -57,6 +57,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         step_judge_on_veto: None,
         step_judge_adversarial: false,
         run_label: String::new(),
+        override_reason: None,
         baseline_comparison_against: None,
     };
 
@@ -204,5 +205,66 @@ fn read_only_audit_verifier_accepts_repeated_read_file_calls() {
     assert_eq!(
         outcome.stdout,
         "repeated_reads=true\nno_read=false\nedit_attempt=false\nparent_path=false\nchanged_readme=false\n"
+    );
+}
+
+#[test]
+fn coding_agent_suite_records_tool_format_override_transcript_event() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let suite = manifest_dir.join("assets/evals/coding_agent_suite.harn");
+    let output_dir = workspace.join("out");
+    let output_dir_for_run = output_dir.clone();
+    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
+        let _env_guard = env_lock::lock_env().lock().await;
+        harn_vm::reset_thread_local_state();
+        execute_run_with_sandbox_options(
+            &suite.to_string_lossy(),
+            false,
+            HashSet::new(),
+            vec![
+                "--fixture".to_string(),
+                "read-only-audit".to_string(),
+                "--output-dir".to_string(),
+                output_dir_for_run.display().to_string(),
+                "--provider".to_string(),
+                "mock".to_string(),
+                "--model".to_string(),
+                "claude-opus-4-7".to_string(),
+                "--tool-format".to_string(),
+                "text".to_string(),
+                "--override-reason".to_string(),
+                "compare text trace".to_string(),
+                "--python".to_string(),
+                "python3".to_string(),
+                "--seed-mock".to_string(),
+            ],
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+            RunSandboxOptions::default().with_workspace_root(workspace),
+        )
+        .await
+    });
+    assert_eq!(
+        outcome.exit_code, 0,
+        "suite failed\nstdout={}\nstderr={}",
+        outcome.stdout, outcome.stderr
+    );
+    let transcript = fs::read_to_string(output_dir.join("transcript_events.jsonl"))
+        .expect("transcript events exist");
+    assert!(
+        transcript.contains("\"kind\":\"tool_format_override\""),
+        "transcript should record the override event; got:\n{}",
+        transcript
+    );
+    assert!(
+        transcript.contains("\"recommended_format\":\"native\""),
+        "transcript should preserve the catalog recommendation; got:\n{}",
+        transcript
     );
 }
