@@ -1,0 +1,44 @@
+# LOC ratchet config consumed by scripts/check_ported_handler_loc.harn.
+#
+# Each `[[handler]]` entry caps the maximum line count for a CLI subcommand
+# handler that has been (fully or partially) ported off Rust onto the
+# self-hosted `.harn` cli/* stack. The intent is to catch *new* growth in
+# the legacy Rust path — not to force a cleanup of the existing baseline.
+# Budgets are deliberately set to the current LOC + a small slack (≈5
+# lines) so a no-op refactor doesn't trip the gate but a real regression
+# does.
+#
+# When a port advances and shrinks the Rust handler, drop the budget to
+# the new current+5 in the same PR. When a new handler joins the ratcheted
+# set (a fresh W ticket landing), append a new `[[handler]]` block with
+# its current+5 budget; do not retroactively tighten existing entries.
+#
+# Tracks epic #2293 (subticket #2314 = C1).
+
+[[handler]]
+path = "crates/harn-cli/src/commands/try_cmd.rs"
+max_loc = 112
+
+[[handler]]
+path = "crates/harn-cli/src/commands/trace.rs"
+max_loc = 226
+
+[[handler]]
+path = "crates/harn-cli/src/commands/explain.rs"
+max_loc = 481
+
+[[handler]]
+path = "crates/harn-cli/src/commands/init.rs"
+max_loc = 946
+
+[[handler]]
+path = "crates/harn-cli/src/commands/tool.rs"
+max_loc = 350
+
+[[handler]]
+path = "crates/harn-cli/src/commands/eval_prompt.rs"
+max_loc = 1201
+
+[[handler]]
+path = "crates/harn-cli/src/lib.rs"
+max_loc = 3120
