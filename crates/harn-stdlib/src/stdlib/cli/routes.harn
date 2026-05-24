@@ -1,0 +1,320 @@
+/**
+ * `harn routes` ported to .harn — see harn#2311 (W11).
+ *
+ * **Pragmatic partial port.** The trigger inventory extraction lives in
+ * `crates/harn-cli/src/commands/routes.rs` — it walks `harn.toml`,
+ * resolves trigger handler URIs against the on-disk manifest cache,
+ * parses each handler module, and runs the IR analyser to derive
+ * capabilities / vendor lock / framework-overhead tokens. None of that
+ * is reachable from script-land today without a new
+ * `harness.modules.compile_view(path)` host capability the W11 ticket
+ * spec calls out as future scope.
+ *
+ * What this script owns: the **rendering layer** — the human-readable
+ * text table and the `JsonEnvelope`-shaped `--json` payload. The Rust
+ * shim pre-builds a `RoutesReport` and serialises it as JSON into
+ * `HARN_ROUTES_VIEW_JSON` so the script just parses + formats.
+ *
+ * Inputs (from the dispatch shim in crates/harn-cli/src/commands/routes.rs):
+ *   HARN_ROUTES_VIEW_JSON — serialised `RoutesReport` with shape:
+ *     {
+ *       "triggers": [{
+ *         "id": "...",
+ *         "kind": "...",
+ *         "provider": "...",
+ *         "path": "..." | absent,
+ *         "module": "...",
+ *         "handler": "...",
+ *         "events": ["..."] | absent (empty Vec is skipped),
+ *         "requires_capabilities": ["..."],
+ *         "budgets": {...},
+ *         "vendor_locked": bool,
+ *         "framework_overhead_tokens": int,
+ *       }, ...]
+ *     }
+ *   HARN_OUTPUT_JSON      — "1" iff the host saw `--json`, else
+ *                           human-readable text.
+ *
+ * Error envelopes for the inventory-extraction step stay in the Rust
+ * shim — building them on the .harn side would require re-implementing
+ * the trigger/manifest/IR analyser. The shim only dispatches when the
+ * extraction succeeded; failures take the legacy direct render path.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_int(value, fallback: int) -> int {
+  if type_of(value) == "int" {
+    return value
+  }
+  return fallback
+}
+
+/**
+ * Truncate `value` to at most `width` Unicode scalars. Mirrors the
+ * legacy Rust `truncate(&str, width)` — strings ≤ width pass through
+ * unchanged, strings > width get an ASCII ellipsis suffix that fits
+ * inside the column, and widths ≤ 3 collapse to a row of dots.
+ */
+fn __truncate(value: string, width: int) -> string {
+  if len(value) <= width {
+    return value
+  }
+  if width <= 3 {
+    var dots = ""
+    var i = 0
+    while i < width {
+      dots = dots + "."
+      i = i + 1
+    }
+    return dots
+  }
+  return value[0:width - 3] + "..."
+}
+
+/**
+ * Right-pad `value` with spaces so the total displayed width is
+ * `width`. Matches Rust's `{:<width}` formatter for ASCII inputs (the
+ * legacy renderer uses no wide chars in its column headers / payload
+ * fields, so the byte/char-count equivalence holds).
+ */
+fn __pad_right(value: string, width: int) -> string {
+  let count = len(value)
+  if count >= width {
+    return value
+  }
+  var pad = ""
+  var i = 0
+  while i < width - count {
+    pad = pad + " "
+    i = i + 1
+  }
+  return value + pad
+}
+
+/**
+ * Left-pad `value` with spaces so the total displayed width is
+ * `width`. Matches Rust's `{:>width}` formatter.
+ */
+fn __pad_left(value: string, width: int) -> string {
+  let count = len(value)
+  if count >= width {
+    return value
+  }
+  var pad = ""
+  var i = 0
+  while i < width - count {
+    pad = pad + " "
+    i = i + 1
+  }
+  return pad + value
+}
+
+/**
+ * Join a list of strings with `sep`. Mirrors `join(items, sep)` for
+ * homogeneous string lists; non-string entries are coerced via
+ * `to_string`.
+ */
+fn __join(items: list, sep: string) -> string {
+  var out = ""
+  var first = true
+  for item in items {
+    let part = if type_of(item) == "string" {
+      item
+    } else {
+      to_string(item)
+    }
+    if first {
+      out = part
+      first = false
+    } else {
+      out = out + sep + part
+    }
+  }
+  return out
+}
+
+/**
+ * Render the human-readable table. Mirrors `print_text_report` in
+ * `crates/harn-cli/src/commands/routes.rs` byte-for-byte (column
+ * widths and ordering).
+ */
+fn __render_text(report: dict) -> string {
+  var out = __pad_right("id", 28)
+    + " "
+    + __pad_right("kind", 10)
+    + " "
+    + __pad_right("provider", 12)
+    + " "
+    + __pad_right("path", 24)
+    + " "
+    + __pad_right("module", 22)
+    + " "
+    + __pad_right("handler", 18)
+    + " "
+    + __pad_right("vendor", 7)
+    + " "
+    + __pad_left("fw_tokens", 8)
+    + "  capabilities\n"
+  let triggers = __safe_list(report["triggers"])
+  for trigger in triggers {
+    let t = __safe_dict(trigger)
+    let caps = __safe_list(t["requires_capabilities"])
+    let capabilities = if len(caps) == 0 {
+      "-"
+    } else {
+      __join(caps, ",")
+    }
+    let path_value = if type_of(t["path"]) == "string" {
+      t["path"]
+    } else {
+      "-"
+    }
+    let vendor_locked = __safe_bool(t["vendor_locked"], false)
+    let vendor = if vendor_locked {
+      "yes"
+    } else {
+      "no"
+    }
+    let fw_tokens = __safe_int(t["framework_overhead_tokens"], 0)
+    out = out
+      + __pad_right(__truncate(__safe_string(t["id"], ""), 28), 28)
+      + " "
+      + __pad_right(__safe_string(t["kind"], ""), 10)
+      + " "
+      + __pad_right(__truncate(__safe_string(t["provider"], ""), 12), 12)
+      + " "
+      + __pad_right(__truncate(path_value, 24), 24)
+      + " "
+      + __pad_right(__truncate(__safe_string(t["module"], ""), 22), 22)
+      + " "
+      + __pad_right(__truncate(__safe_string(t["handler"], ""), 18), 18)
+      + " "
+      + __pad_right(vendor, 7)
+      + " "
+      + __pad_left(to_string(fw_tokens), 8)
+      + "  "
+      + capabilities
+      + "\n"
+  }
+  return out
+}
+
+/**
+ * Build the JSON envelope for `--json`. Matches
+ * `JsonEnvelope::ok(ROUTES_SCHEMA_VERSION, report)` in the legacy
+ * Rust path. Harn's `json_stringify_pretty` sorts keys alphabetically,
+ * so the wire byte order differs from serde's struct-field order — the
+ * parity test parses both into serde_json::Value and compares.
+ *
+ * The `triggers[].path`, `triggers[].events`, and various
+ * `budgets.*` keys are absent (not null) on the Rust side when their
+ * `Option`/empty `Vec` source values would be skipped by serde
+ * (`skip_serializing_if`). Re-stripping them here keeps structural
+ * parity with the legacy envelope.
+ */
+fn __strip_absent(report: dict) -> dict {
+  let triggers = __safe_list(report["triggers"])
+  var cleaned = []
+  for trigger in triggers {
+    let t = __safe_dict(trigger)
+    var entry = {
+      id: __safe_string(t["id"], ""),
+      kind: __safe_string(t["kind"], ""),
+      provider: __safe_string(t["provider"], ""),
+      module: __safe_string(t["module"], ""),
+      handler: __safe_string(t["handler"], ""),
+      requires_capabilities: __safe_list(t["requires_capabilities"]),
+      budgets: __strip_budgets(__safe_dict(t["budgets"])),
+      vendor_locked: __safe_bool(t["vendor_locked"], false),
+      framework_overhead_tokens: __safe_int(t["framework_overhead_tokens"], 0),
+    }
+    if type_of(t["path"]) == "string" {
+      entry = entry + {path: t["path"]}
+    }
+    let events = __safe_list(t["events"])
+    if len(events) > 0 {
+      entry = entry + {events: events}
+    }
+    cleaned = cleaned.push(entry)
+  }
+  return {triggers: cleaned}
+}
+
+fn __strip_budgets(budgets: dict) -> dict {
+  var out = {}
+  for key in keys(budgets) {
+    let value = budgets[key]
+    if value != nil {
+      out = out + {[key]: value}
+    }
+  }
+  return out
+}
+
+fn __render_envelope(report: dict) -> string {
+  let cleaned = __strip_absent(report)
+  let envelope = {schemaVersion: 1, ok: true, data: cleaned, error: nil, warnings: []}
+  return json_stringify_pretty(envelope)
+}
+
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_ROUTES_VIEW_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_ROUTES_VIEW_JSON not set by dispatch shim")
+    return 70
+  }
+  let report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio
+      .eprintln("internal error: failed to parse HARN_ROUTES_VIEW_JSON: " + to_string(e))
+    return 70
+  }
+  if type_of(report) != "dict" {
+    harness.stdio.eprintln("internal error: HARN_ROUTES_VIEW_JSON must be a JSON object")
+    return 70
+  }
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    harness.stdio.println(__render_envelope(report))
+    return 0
+  }
+  // Strip the trailing newline so `println` re-adds exactly one — the
+  // legacy `print_text_report` ends every row with `println!()` which
+  // emits `\n`, so the total stream ends with one terminating `\n`.
+  let text = __render_text(report)
+  let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+    text[0:len(text) - 1]
+  } else {
+    text
+  }
+  harness.stdio.println(trimmed)
+  return 0
+}

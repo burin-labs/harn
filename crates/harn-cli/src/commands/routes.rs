@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use harn_ir::{CallClassification, Capability, LiteralValue, NodeSemantics};
@@ -7,6 +8,8 @@ use harn_parser::{Node, SNode};
 use serde::Serialize;
 
 use crate::cli::RoutesArgs;
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 use crate::package::{
     self, parse_duration_millis, parse_local_trigger_ref, parse_trigger_handler_uri,
@@ -15,6 +18,17 @@ use crate::package::{
 };
 
 const ROUTES_SCHEMA_VERSION: u32 = 1;
+
+/// Env var the embedded `cli/routes.harn` script reads to pick up the
+/// pre-serialised inventory the Rust shim derived from the on-disk
+/// manifest cache and IR analyser. Renaming requires updating both the
+/// shim and the script in lockstep.
+const ROUTES_VIEW_ENV: &str = "HARN_ROUTES_VIEW_JSON";
+
+/// Serialises the dispatch path so concurrent in-process callers don't
+/// race on the global env vars the shim sets. Matches the lock pattern
+/// in `commands/models/list.rs`.
+static DISPATCH_ROUTES_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RoutesReport {
@@ -74,17 +88,21 @@ struct LocalRouteAnalysis {
     framework_overhead_tokens: u64,
 }
 
+/// Run `harn routes`. Dispatches the render to the embedded
+/// `cli/routes.harn` script (see W11 / harn#2311) by default; the
+/// `HARN_CLI_IMPL=rust` escape hatch keeps the legacy direct render path
+/// for the parity-snapshot harness (#2299) until the C1 ratchet (#2314)
+/// deletes it.
+///
+/// The inventory extraction itself (manifest cache + IR analyser) stays
+/// in Rust — porting it would require a new `harness.modules.compile_view`
+/// host capability the W11 spec calls out as future scope. On
+/// extraction failure, the shim renders the same error envelope /
+/// stderr line the legacy path emits so behavior is identical
+/// regardless of the dispatch mode.
 pub(crate) async fn run(args: RoutesArgs) -> i32 {
-    match analyze_routes(&args.root).await {
-        Ok(report) => {
-            if args.json {
-                let envelope = JsonEnvelope::ok(ROUTES_SCHEMA_VERSION, report);
-                println!("{}", to_string_pretty(&envelope));
-            } else {
-                print_text_report(&report);
-            }
-            0
-        }
+    let report = match analyze_routes(&args.root).await {
+        Ok(report) => report,
         Err(error) => {
             if args.json {
                 let envelope: JsonEnvelope<RoutesReport> =
@@ -93,9 +111,44 @@ pub(crate) async fn run(args: RoutesArgs) -> i32 {
             } else {
                 eprintln!("error: {error}");
             }
-            1
+            return 1;
         }
+    };
+
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        return run_legacy_render(&report, args.json);
     }
+    run_dispatch(&report, args.json).await
+}
+
+fn run_legacy_render(report: &RoutesReport, json: bool) -> i32 {
+    if json {
+        let envelope = JsonEnvelope::ok(ROUTES_SCHEMA_VERSION, report.clone());
+        println!("{}", to_string_pretty(&envelope));
+    } else {
+        print_text_report(report);
+    }
+    0
+}
+
+async fn run_dispatch(report: &RoutesReport, json: bool) -> i32 {
+    let view_json = match serde_json::to_string(report) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("internal error: failed to serialise routes view: {error}");
+            return 1;
+        }
+    };
+    let _guard = DISPATCH_ROUTES_LOCK.lock().await;
+    let _view = ScopedEnvVar::set(ROUTES_VIEW_ENV, &view_json);
+    let outcome = dispatch::run_embedded_script("routes", Vec::new(), json).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if !outcome.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+    outcome.exit_code
 }
 
 async fn analyze_routes(root: &Path) -> Result<RoutesReport, String> {
