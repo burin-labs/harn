@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value as YamlValue;
+use serde_yml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
@@ -514,7 +514,7 @@ fn collect_workflow_evidence(
         scan.combined_text.push_str(&content);
 
         let rel_path = relative_posix(root, &path);
-        let parsed = match serde_yaml::from_str::<YamlValue>(&content) {
+        let parsed = match serde_yml::from_str::<YamlValue>(&content) {
             Ok(value) => value,
             Err(_) => continue,
         };
@@ -545,7 +545,7 @@ fn collect_workflow_evidence(
 }
 
 fn collect_workflow_jobs(
-    jobs: &serde_yaml::Mapping,
+    jobs: &serde_yml::Mapping,
     workflow_name: &str,
     required_checks: Option<&BTreeSet<String>>,
 ) -> Vec<WorkflowJobEvidence> {
@@ -792,7 +792,7 @@ fn collect_hook_evidence(root: &Path) -> HookEvidence {
 }
 
 fn collect_pre_commit_hooks(content: &str, stages: &mut BTreeMap<String, Vec<String>>) {
-    let Ok(parsed) = serde_yaml::from_str::<YamlValue>(content) else {
+    let Ok(parsed) = serde_yml::from_str::<YamlValue>(content) else {
         return;
     };
     let default_stages = parsed
@@ -860,7 +860,7 @@ fn collect_lefthook_hooks(
     content: &str,
     stages: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<(), String> {
-    let Ok(parsed) = serde_yaml::from_str::<YamlValue>(content) else {
+    let Ok(parsed) = serde_yml::from_str::<YamlValue>(content) else {
         return Ok(());
     };
     let Some(root) = parsed.as_mapping() else {
@@ -1867,7 +1867,7 @@ exit 1
 
     #[test]
     fn lefthook_run_collection_preserves_sorted_depth_first_order() {
-        let value: YamlValue = serde_yaml::from_str(
+        let value: YamlValue = serde_yml::from_str(
             r#"
 commands:
   z:
@@ -1889,7 +1889,7 @@ commands:
 
     #[test]
     fn lefthook_run_collection_reports_yaml_depth_limit() {
-        let mut run = serde_yaml::Mapping::new();
+        let mut run = serde_yml::Mapping::new();
         run.insert(
             YamlValue::String("run".to_string()),
             YamlValue::String("echo too-deep".to_string()),
