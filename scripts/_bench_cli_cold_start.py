@@ -84,20 +84,15 @@ TRACKED_COMMANDS: list[dict[str, object]] = [
         "args": ["try", "--help"],
         "needs_trace_input": False,
     },
-    {
-        "key": "trace import",
-        # The actual file paths are templated in at runtime so we can
-        # point them at the per-run temp dir.
-        "args": [
-            "trace",
-            "import",
-            "--trace-file",
-            "{trace_input}",
-            "--output",
-            "{trace_output}",
-        ],
-        "needs_trace_input": True,
-    },
+    # `trace import` is temporarily disabled in the bench because the
+    # ported `.harn` impl honours the workspace_roots sandbox, which
+    # rejects the `/tmp` paths the bench creates with
+    # `tempfile.TemporaryDirectory`. Re-enable once the bench moves its
+    # scratch dir under the repo root (then sandbox accepts it). See
+    # the W13 PR (#2351) for the `dispatch_to_embedded_script_no_sandbox`
+    # primitive that ports needing user-supplied paths can use; trace
+    # import doesn't qualify since its inputs are user data, not just
+    # bench temp files.
 ]
 
 
