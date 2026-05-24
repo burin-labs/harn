@@ -1,0 +1,725 @@
+{
+  "schema_version": 2,
+  "fixture_ids": [
+    "python-add",
+    "cli-help-flag",
+    "test-output-first",
+    "docs-symbol-rename",
+    "read-only-audit",
+    "no-tool-diagnosis"
+  ],
+  "fixtures": [
+    {
+      "id": "python-add",
+      "name": "Python add repair",
+      "tool_sequence": "multi-tool",
+      "description": "One-file Python bug fix verified by unittest output."
+    },
+    {
+      "id": "cli-help-flag",
+      "name": "CLI help flag",
+      "tool_sequence": "multi-tool",
+      "description": "Add a tiny CLI flag, update help-facing docs, and verify behavior."
+    },
+    {
+      "id": "test-output-first",
+      "name": "Test-output-first repair",
+      "tool_sequence": "multi-tool",
+      "description": "Run a failing test first, then edit the implementation and re-run it."
+    },
+    {
+      "id": "docs-symbol-rename",
+      "name": "Docs symbol rename",
+      "tool_sequence": "multi-tool",
+      "description": "Update docs and an example after a symbol rename without touching implementation."
+    },
+    {
+      "id": "read-only-audit",
+      "name": "Read-only audit",
+      "tool_sequence": "one-tool",
+      "description": "Inspect a file and report that no edits are needed."
+    },
+    {
+      "id": "no-tool-diagnosis",
+      "name": "No-tool diagnosis",
+      "tool_sequence": "no-tool",
+      "description": "Answer from prompt-only context without any tools."
+    }
+  ],
+  "output_dir": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native",
+  "models": [
+    {
+      "selector": "openrouter:anthropic/claude-haiku-4-5",
+      "provider": "openrouter",
+      "model": "anthropic/claude-haiku-4-5"
+    }
+  ],
+  "tool_formats": [
+    "native"
+  ],
+  "env_keys_loaded": [
+    {
+      "key": "HUGGINGFACE_API_KEY",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "OPENROUTER_API_KEY",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "LANGFUSE_SECRET_KEY",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "LANGFUSE_PUBLIC_KEY",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "LANGFUSE_BASE_URL",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "LOCAL_LLM_BASE_URL",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "TOGETHER_AI_API_KEY",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "TOGETHER_AI_BASE_URL",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "NVIDIA_API_KEY",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "NVIDIA_BASE_URL",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    },
+    {
+      "key": "CEREBRAS_API_KEY",
+      "source": "/Users/ksinder/projects/burin-code/.env"
+    }
+  ],
+  "total_runs": 6,
+  "passed_runs": 4,
+  "failed_runs": 2,
+  "skipped_runs": 0,
+  "diverged_comparisons": 0,
+  "total_cost_usd": 0.109999,
+  "rollups": {
+    "by_fixture": [
+      {
+        "key": "cli-help-flag",
+        "total_runs": 1,
+        "passed_runs": 1,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.028791
+      },
+      {
+        "key": "docs-symbol-rename",
+        "total_runs": 1,
+        "passed_runs": 1,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.029746
+      },
+      {
+        "key": "no-tool-diagnosis",
+        "total_runs": 1,
+        "passed_runs": 0,
+        "failed_runs": 1,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.0
+      },
+      {
+        "key": "python-add",
+        "total_runs": 1,
+        "passed_runs": 1,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.022022
+      },
+      {
+        "key": "read-only-audit",
+        "total_runs": 1,
+        "passed_runs": 0,
+        "failed_runs": 1,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.007252000000000001
+      },
+      {
+        "key": "test-output-first",
+        "total_runs": 1,
+        "passed_runs": 1,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.022188000000000003
+      }
+    ],
+    "by_provider": [
+      {
+        "key": "openrouter",
+        "total_runs": 6,
+        "passed_runs": 4,
+        "failed_runs": 2,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.109999
+      }
+    ],
+    "by_model": [
+      {
+        "key": "anthropic/claude-haiku-4-5",
+        "total_runs": 6,
+        "passed_runs": 4,
+        "failed_runs": 2,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.109999
+      }
+    ],
+    "by_tool_format": [
+      {
+        "key": "native",
+        "total_runs": 6,
+        "passed_runs": 4,
+        "failed_runs": 2,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.109999
+      }
+    ],
+    "by_tool_sequence": [
+      {
+        "key": "multi-tool",
+        "total_runs": 4,
+        "passed_runs": 4,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.102747
+      },
+      {
+        "key": "no-tool",
+        "total_runs": 1,
+        "passed_runs": 0,
+        "failed_runs": 1,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.0
+      },
+      {
+        "key": "one-tool",
+        "total_runs": 1,
+        "passed_runs": 0,
+        "failed_runs": 1,
+        "skipped_runs": 0,
+        "total_cost_usd": 0.007252000000000001
+      }
+    ]
+  },
+  "runs": [
+    {
+      "run_id": "python-add__openrouter_anthropic_claude-haiku-4-5__native",
+      "fixture_id": "python-add",
+      "fixture_name": "Python add repair",
+      "fixture_tool_sequence": "multi-tool",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "tool_format": "native",
+      "status": "passed",
+      "passed": true,
+      "skipped": false,
+      "output_dir": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/python-add__openrouter_anthropic_claude-haiku-4-5__native",
+      "transcript_events_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/python-add__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "workspace_root": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/python-add__openrouter_anthropic_claude-haiku-4-5__native/workspace",
+      "elapsed_ms": 26460,
+      "duration_ms": 26218,
+      "iterations": 9,
+      "input_tokens": 18502,
+      "output_tokens": 704,
+      "cost_usd": 0.022022,
+      "pricing_known": true,
+      "tool_calls": 10,
+      "rejected_tool_calls": 0,
+      "tool_sequence": [
+        "list_directory",
+        "list_directory",
+        "list_directory",
+        "list_directory",
+        "list_directory",
+        "read_file",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "run_command"
+      ],
+      "successful_tools": [
+        "list_directory",
+        "list_directory",
+        "read_file",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "run_command"
+      ],
+      "transcript_event_count": 55,
+      "verification_success": true,
+      "harn_exit_code": 0,
+      "local_cleanup": null
+    },
+    {
+      "run_id": "cli-help-flag__openrouter_anthropic_claude-haiku-4-5__native",
+      "fixture_id": "cli-help-flag",
+      "fixture_name": "CLI help flag",
+      "fixture_tool_sequence": "multi-tool",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "tool_format": "native",
+      "status": "passed",
+      "passed": true,
+      "skipped": false,
+      "output_dir": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__native",
+      "transcript_events_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "workspace_root": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__native/workspace",
+      "elapsed_ms": 24443,
+      "duration_ms": 24311,
+      "iterations": 10,
+      "input_tokens": 23436,
+      "output_tokens": 1071,
+      "cost_usd": 0.028791,
+      "pricing_known": true,
+      "tool_calls": 12,
+      "rejected_tool_calls": 1,
+      "tool_sequence": [
+        "list_directory",
+        "list_directory",
+        "list_directory",
+        "list_directory",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "replace_in_file",
+        "run_command",
+        "run_command",
+        "run_command",
+        "run_command"
+      ],
+      "successful_tools": [
+        "list_directory",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "replace_in_file",
+        "run_command",
+        "run_command",
+        "run_command"
+      ],
+      "transcript_event_count": 64,
+      "verification_success": true,
+      "harn_exit_code": 0,
+      "local_cleanup": null
+    },
+    {
+      "run_id": "test-output-first__openrouter_anthropic_claude-haiku-4-5__native",
+      "fixture_id": "test-output-first",
+      "fixture_name": "Test-output-first repair",
+      "fixture_tool_sequence": "multi-tool",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "tool_format": "native",
+      "status": "passed",
+      "passed": true,
+      "skipped": false,
+      "output_dir": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/test-output-first__openrouter_anthropic_claude-haiku-4-5__native",
+      "transcript_events_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/test-output-first__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "workspace_root": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/test-output-first__openrouter_anthropic_claude-haiku-4-5__native/workspace",
+      "elapsed_ms": 39295,
+      "duration_ms": 39221,
+      "iterations": 8,
+      "input_tokens": 17568,
+      "output_tokens": 924,
+      "cost_usd": 0.022188000000000003,
+      "pricing_known": true,
+      "tool_calls": 8,
+      "rejected_tool_calls": 0,
+      "tool_sequence": [
+        "run_command",
+        "list_directory",
+        "run_command",
+        "run_command",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "run_command"
+      ],
+      "successful_tools": [
+        "run_command",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "run_command"
+      ],
+      "transcript_event_count": 46,
+      "verification_success": true,
+      "harn_exit_code": 0,
+      "local_cleanup": null
+    },
+    {
+      "run_id": "docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__native",
+      "fixture_id": "docs-symbol-rename",
+      "fixture_name": "Docs symbol rename",
+      "fixture_tool_sequence": "multi-tool",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "tool_format": "native",
+      "status": "passed",
+      "passed": true,
+      "skipped": false,
+      "output_dir": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__native",
+      "transcript_events_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "workspace_root": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__native/workspace",
+      "elapsed_ms": 25100,
+      "duration_ms": 25051,
+      "iterations": 10,
+      "input_tokens": 24896,
+      "output_tokens": 970,
+      "cost_usd": 0.029746,
+      "pricing_known": true,
+      "tool_calls": 13,
+      "rejected_tool_calls": 1,
+      "tool_sequence": [
+        "list_directory",
+        "list_directory",
+        "list_directory",
+        "list_directory",
+        "read_file",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "replace_in_file",
+        "run_command",
+        "run_command",
+        "read_file",
+        "read_file"
+      ],
+      "successful_tools": [
+        "list_directory",
+        "read_file",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "replace_in_file",
+        "run_command",
+        "read_file",
+        "read_file"
+      ],
+      "transcript_event_count": 65,
+      "verification_success": true,
+      "harn_exit_code": 0,
+      "local_cleanup": null
+    },
+    {
+      "run_id": "read-only-audit__openrouter_anthropic_claude-haiku-4-5__native",
+      "fixture_id": "read-only-audit",
+      "fixture_name": "Read-only audit",
+      "fixture_tool_sequence": "one-tool",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "tool_format": "native",
+      "status": "failed",
+      "passed": false,
+      "skipped": false,
+      "output_dir": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/read-only-audit__openrouter_anthropic_claude-haiku-4-5__native",
+      "transcript_events_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/read-only-audit__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "workspace_root": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/read-only-audit__openrouter_anthropic_claude-haiku-4-5__native/workspace",
+      "elapsed_ms": 22688,
+      "duration_ms": 22674,
+      "iterations": 5,
+      "input_tokens": 3007,
+      "output_tokens": 849,
+      "cost_usd": 0.007252000000000001,
+      "pricing_known": true,
+      "tool_calls": 3,
+      "rejected_tool_calls": 0,
+      "tool_sequence": [
+        "read_file",
+        "read_file",
+        "read_file"
+      ],
+      "successful_tools": [
+        "read_file"
+      ],
+      "transcript_event_count": 21,
+      "verification_success": false,
+      "harn_exit_code": 1,
+      "error": "failed",
+      "local_cleanup": null
+    },
+    {
+      "run_id": "no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__native",
+      "fixture_id": "no-tool-diagnosis",
+      "fixture_name": "No-tool diagnosis",
+      "fixture_tool_sequence": "no-tool",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "tool_format": "native",
+      "status": "failed",
+      "passed": false,
+      "skipped": false,
+      "output_dir": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__native",
+      "transcript_events_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "workspace_root": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__native/workspace",
+      "elapsed_ms": 4063,
+      "duration_ms": 4049,
+      "iterations": 1,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_usd": 0.0,
+      "pricing_known": true,
+      "tool_calls": 0,
+      "rejected_tool_calls": 0,
+      "tool_sequence": [],
+      "successful_tools": [],
+      "transcript_event_count": 4,
+      "verification_success": false,
+      "harn_exit_code": 1,
+      "error": "failed",
+      "local_cleanup": null
+    }
+  ],
+  "comparisons": [
+    {
+      "fixture_id": "cli-help-flag",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "native_run_id": "cli-help-flag__openrouter_anthropic_claude-haiku-4-5__native",
+      "text_run_id": null,
+      "native_evidence_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "text_evidence_path": null,
+      "native_status": "passed",
+      "text_status": null,
+      "native_passed": true,
+      "text_passed": null,
+      "verifier_match": null,
+      "tool_sequence_match": null,
+      "rejected_tool_call_delta_text_minus_native": null,
+      "token_delta_text_minus_native": null,
+      "iteration_delta_text_minus_native": null,
+      "equivalent": null,
+      "divergence_reasons": [],
+      "evidence_paths": [
+        "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl"
+      ]
+    },
+    {
+      "fixture_id": "docs-symbol-rename",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "native_run_id": "docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__native",
+      "text_run_id": null,
+      "native_evidence_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "text_evidence_path": null,
+      "native_status": "passed",
+      "text_status": null,
+      "native_passed": true,
+      "text_passed": null,
+      "verifier_match": null,
+      "tool_sequence_match": null,
+      "rejected_tool_call_delta_text_minus_native": null,
+      "token_delta_text_minus_native": null,
+      "iteration_delta_text_minus_native": null,
+      "equivalent": null,
+      "divergence_reasons": [],
+      "evidence_paths": [
+        "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl"
+      ]
+    },
+    {
+      "fixture_id": "no-tool-diagnosis",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "native_run_id": "no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__native",
+      "text_run_id": null,
+      "native_evidence_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "text_evidence_path": null,
+      "native_status": "failed",
+      "text_status": null,
+      "native_passed": false,
+      "text_passed": null,
+      "verifier_match": null,
+      "tool_sequence_match": null,
+      "rejected_tool_call_delta_text_minus_native": null,
+      "token_delta_text_minus_native": null,
+      "iteration_delta_text_minus_native": null,
+      "equivalent": null,
+      "divergence_reasons": [],
+      "evidence_paths": [
+        "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl"
+      ]
+    },
+    {
+      "fixture_id": "python-add",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "native_run_id": "python-add__openrouter_anthropic_claude-haiku-4-5__native",
+      "text_run_id": null,
+      "native_evidence_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/python-add__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "text_evidence_path": null,
+      "native_status": "passed",
+      "text_status": null,
+      "native_passed": true,
+      "text_passed": null,
+      "verifier_match": null,
+      "tool_sequence_match": null,
+      "rejected_tool_call_delta_text_minus_native": null,
+      "token_delta_text_minus_native": null,
+      "iteration_delta_text_minus_native": null,
+      "equivalent": null,
+      "divergence_reasons": [],
+      "evidence_paths": [
+        "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/python-add__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl"
+      ]
+    },
+    {
+      "fixture_id": "read-only-audit",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "native_run_id": "read-only-audit__openrouter_anthropic_claude-haiku-4-5__native",
+      "text_run_id": null,
+      "native_evidence_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/read-only-audit__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "text_evidence_path": null,
+      "native_status": "failed",
+      "text_status": null,
+      "native_passed": false,
+      "text_passed": null,
+      "verifier_match": null,
+      "tool_sequence_match": null,
+      "rejected_tool_call_delta_text_minus_native": null,
+      "token_delta_text_minus_native": null,
+      "iteration_delta_text_minus_native": null,
+      "equivalent": null,
+      "divergence_reasons": [],
+      "evidence_paths": [
+        "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/read-only-audit__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl"
+      ]
+    },
+    {
+      "fixture_id": "test-output-first",
+      "selector": {
+        "selector": "openrouter:anthropic/claude-haiku-4-5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-4-5"
+      },
+      "native_run_id": "test-output-first__openrouter_anthropic_claude-haiku-4-5__native",
+      "text_run_id": null,
+      "native_evidence_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/test-output-first__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl",
+      "text_evidence_path": null,
+      "native_status": "passed",
+      "text_status": null,
+      "native_passed": true,
+      "text_passed": null,
+      "verifier_match": null,
+      "tool_sequence_match": null,
+      "rejected_tool_call_delta_text_minus_native": null,
+      "token_delta_text_minus_native": null,
+      "iteration_delta_text_minus_native": null,
+      "equivalent": null,
+      "divergence_reasons": [],
+      "evidence_paths": [
+        "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/asymmetric-native/test-output-first__openrouter_anthropic_claude-haiku-4-5__native/transcript_events.jsonl"
+      ]
+    }
+  ],
+  "followups": [
+    {
+      "title": "Normalize coding-agent fixture failures across provider presets",
+      "body": "One or more fixture/provider/tool-format runs failed. Inspect the run directories and decide whether the gap belongs in provider adapters, preset prompting, transcript handling, or host-tool ergonomics.",
+      "labels": [
+        "eval",
+        "providers"
+      ],
+      "run_ids": [
+        "read-only-audit__openrouter_anthropic_claude-haiku-4-5__native",
+        "no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__native"
+      ]
+    },
+    {
+      "title": "Abstract rejected tool-call recovery in agent transcripts",
+      "body": "Some runs recovered after rejected tool calls. Add runtime support or preset guidance so harness authors can distinguish recoverable provider/tool-shape noise from user-relevant transcript events.",
+      "labels": [
+        "agents",
+        "transcripts"
+      ],
+      "run_ids": [
+        "cli-help-flag__openrouter_anthropic_claude-haiku-4-5__native",
+        "docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__native"
+      ]
+    }
+  ],
+  "step_judge_preset": "asymmetric",
+  "run_label": "v3-asymmetric-native",
+  "baseline_comparison": {
+    "baseline_label": "v3-baseline-native",
+    "baseline_path": "/Users/ksinder/projects/harn/.claude/worktrees/step-judge/experiments/step-judge/results/v3-main-grid/baseline-native/summary.json",
+    "regressions": [
+      {
+        "fixture_id": "no-tool-diagnosis",
+        "baseline_status": "passed",
+        "cell_status": "failed"
+      }
+    ],
+    "recoveries": [
+      {
+        "fixture_id": "test-output-first",
+        "baseline_status": "failed",
+        "cell_status": "passed"
+      }
+    ],
+    "unchanged_passes": [
+      "cli-help-flag",
+      "docs-symbol-rename",
+      "python-add"
+    ],
+    "unchanged_failures": [
+      "read-only-audit"
+    ],
+    "missing_in_baseline": [],
+    "missing_in_cell": [],
+    "regressions_count": 1,
+    "recoveries_count": 1,
+    "net_lift_pp": 0.0
+  }
+}
