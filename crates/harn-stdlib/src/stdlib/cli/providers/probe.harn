@@ -1,0 +1,171 @@
+/**
+ * `harn provider-probe` ported to .harn — see harn#2310 (W10).
+ *
+ * **Pragmatic partial port.** The legacy Rust impl combines provider
+ * readiness (`/v1/models` or equivalent), Ollama `/api/ps` runtime
+ * state, and `local_runtime_profile_report`. None of those reach
+ * across the script sandbox today — the HTTP probes run with Rust
+ * timeouts/headers that aren't reachable from script-land, and the
+ * runtime profile reads OS process info. The Rust shim runs the
+ * aggregation, captures a single JSON envelope, and hands it here for
+ * rendering.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_PROVIDER_PROBE_PAYLOAD_JSON — JSON envelope matching the
+ *     legacy `ProviderProbe` shape:
+ *       {
+ *         "provider": string,
+ *         "base_url": string?,
+ *         "readiness": {
+ *           "ok": bool,
+ *           "message": string,
+ *           ...
+ *         },
+ *         "runtime_profile"?: { ... },     // local providers only
+ *         "loaded_models"?: [              // ollama only
+ *           {
+ *             "name": string,
+ *             "size_bytes"?: int,
+ *             "size_vram_bytes"?: int,
+ *             "context_length"?: int,
+ *             "expires_at"?: string,
+ *           }, ...
+ *         ],
+ *       }
+ *   HARN_OUTPUT_JSON — "1" for the JSON envelope (default at the
+ *     handler level), else the human readiness summary.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+/** Mirror the legacy `fmt_bytes`: `Some(n) → "{n}B"`, `None → "-"`. */
+fn __fmt_bytes(value) -> string {
+  if type_of(value) == "int" {
+    return to_string(value) + "B"
+  }
+  return "-"
+}
+
+/** Mirror the legacy `fmt_u64`: `Some(n) → "{n}"`, `None → "-"`. */
+fn __fmt_u64(value) -> string {
+  if type_of(value) == "int" {
+    return to_string(value)
+  }
+  return "-"
+}
+
+fn __render_loaded_lines(models: list) -> string {
+  if len(models) == 0 {
+    return ""
+  }
+  var out = "loaded:\n"
+  for model in models {
+    if type_of(model) != "dict" {
+      continue
+    }
+    let name = __safe_string(model["name"], "")
+    let size = __fmt_bytes(model["size_bytes"])
+    let vram = __fmt_bytes(model["size_vram_bytes"])
+    let ctx = __fmt_u64(model["context_length"])
+    let expires = __safe_string(model["expires_at"], "-")
+    out = out + "  - " + name
+      + " (size="
+      + size
+      + " vram="
+      + vram
+      + " ctx="
+      + ctx
+      + " expires="
+      + expires
+      + ")\n"
+  }
+  return out
+}
+
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_PROVIDER_PROBE_PAYLOAD_JSON not set by dispatch shim")
+    return 70
+  }
+  // JSON-mode and human-mode need different things. JSON mode forwards
+  // the raw bytes (and we additionally read a pre-pretty-printed
+  // variant so we don't lose serde's float fidelity through Harn's
+  // `json_parse`/`json_stringify` round-trip). Human mode parses to
+  // pull `readiness.message` and `loaded_models[]`.
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    let pretty = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_PRETTY", raw)
+    harness.stdio.println(pretty)
+    // The legacy impl checks `readiness.ok` only after the print to
+    // decide the exit code; parse the raw bytes to find it. (Floats
+    // are not in the field we touch, so the round-trip is safe here.)
+    let parsed_ok = try {
+      json_parse(raw)
+    } catch (_) {
+      nil
+    }
+    if type_of(parsed_ok) == "dict" {
+      let readiness = __safe_dict(parsed_ok["readiness"])
+      if !__safe_bool(readiness["ok"], false) {
+        return 1
+      }
+    }
+    return 0
+  }
+  let payload = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio
+      .eprintln("internal error: failed to parse provider-probe payload: " + to_string(e))
+    return 70
+  }
+  let readiness = __safe_dict(payload["readiness"])
+  let ok = __safe_bool(readiness["ok"], false)
+  let message = __safe_string(readiness["message"], "")
+  if ok {
+    harness.stdio.println(message)
+    let loaded = __safe_list(payload["loaded_models"])
+    let lines = __render_loaded_lines(loaded)
+    if lines != "" {
+      // Strip the trailing newline `__render_loaded_lines` always
+      // appends so `println` can add exactly one — matches Rust's
+      // `println!` shape line-for-line.
+      let trimmed = if lines[len(lines) - 1] == "\n" {
+        lines[0:len(lines) - 1]
+      } else {
+        lines
+      }
+      harness.stdio.println(trimmed)
+    }
+    return 0
+  }
+  harness.stdio.eprintln(message)
+  return 1
+}

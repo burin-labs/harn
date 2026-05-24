@@ -865,6 +865,22 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/precompile.harn"),
     },
     StdlibCliScript {
+        name: "providers/catalog",
+        source: include_str!("stdlib/cli/providers/catalog.harn"),
+    },
+    StdlibCliScript {
+        name: "providers/probe",
+        source: include_str!("stdlib/cli/providers/probe.harn"),
+    },
+    StdlibCliScript {
+        name: "providers/recommend",
+        source: include_str!("stdlib/cli/providers/recommend.harn"),
+    },
+    StdlibCliScript {
+        name: "providers/tool_probe",
+        source: include_str!("stdlib/cli/providers/tool_probe.harn"),
+    },
+    StdlibCliScript {
         name: "routes",
         source: include_str!("stdlib/cli/routes.harn"),
     },

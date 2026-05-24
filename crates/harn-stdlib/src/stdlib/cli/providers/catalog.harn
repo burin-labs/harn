@@ -1,0 +1,45 @@
+/**
+ * `harn provider-catalog` ported to .harn — see harn#2310 (W10).
+ *
+ * Pure-passthrough port. The whole subcommand is "look up the
+ * configured providers + models + aliases, fold in credential
+ * availability, dump the structured catalog to stdout". The Rust
+ * dispatch shim hands the already-serialized JSON bytes across; this
+ * script's only job is to print them.
+ *
+ * **Why we pass raw bytes instead of re-emitting.** Harn's JSON
+ * round-trip normalises integer-valued floats (e.g. `1.0` → `1`), and
+ * the legacy catalog includes pricing fields like `cache_write_per_mtok
+ * = 1.0` that the parity test would otherwise see as divergent. By
+ * keeping the bytes intact we avoid touching the JSON shape at all —
+ * the script's only contribution is the dispatch wedge plumbing.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_PROVIDER_CATALOG_PAYLOAD_JSON — pre-built JSON string whose
+ *     shape matches the legacy `print_provider_catalog` output:
+ *       {
+ *         "providers": [...],
+ *         "known_model_names": [...],
+ *         "available_providers": [...],
+ *         "aliases": [...],
+ *         "models": [...],
+ *         "qc_defaults": {...},
+ *       }
+ *   HARN_OUTPUT_JSON — ignored. This subcommand is JSON-only on both
+ *     impls; the dispatch wedge still sets it for symmetry with peer
+ *     scripts.
+ */
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_PROVIDER_CATALOG_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_PROVIDER_CATALOG_PAYLOAD_JSON not set by dispatch shim")
+    return 70
+  }
+  // Forward the bytes verbatim — see docstring for why we avoid a
+  // parse/re-emit round-trip. The legacy Rust impl emits via
+  // `println!`, which adds exactly one trailing newline;
+  // `harness.stdio.println` does the same.
+  harness.stdio.println(raw)
+  return 0
+}
