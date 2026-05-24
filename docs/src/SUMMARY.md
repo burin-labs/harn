@@ -71,6 +71,7 @@
 - [Layered runtime configuration](./configuration.md)
 - [Long-running tools](./long-running-tools.md)
 - [Tool surface validation](./tool-surface-validation.md)
+- [Durable step stdlib](./stdlib/step.md)
 - [Cache stdlib](./stdlib/cache.md)
 - [Calendar stdlib](./stdlib/calendar.md)
 - [Daemon stdlib](./stdlib/daemon.md)

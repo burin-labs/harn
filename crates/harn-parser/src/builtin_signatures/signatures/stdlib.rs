@@ -1787,6 +1787,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("starts_with", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("stat", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("stddev", &[Param::new("args", TY_ANY)], TY_FLOAT),
+    BuiltinSignature::simple(
+        "step.inspect",
+        &[Param::optional(
+            "namespace_or_options",
+            Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]),
+        )],
+        TY_LIST,
+    ),
+    BuiltinSignature::variadic("step.run", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("str_pad", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("stream", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("stream.broadcast", &[Param::new("args", TY_ANY)], TY_LIST),

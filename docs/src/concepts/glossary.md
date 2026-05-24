@@ -135,9 +135,9 @@ filled by **session** here. If you arrive from those systems, read `thread` as
 `session`.
 
 **Step.** Used informally in prose; the formal noun for the same concept is
-**stage** in workflows and **iteration** in agent loops. The Inngest sense of
-`step.run` as a memoization barrier is a deliberate non-feature today — tracked
-at [#2217](https://github.com/burin-labs/harn/issues/2217).
+**stage** in workflows and **iteration** in agent loops. The Inngest-style
+`step.run` memoization barrier exists as a stdlib namespace for durable replay
+of completed handler results.
 
 **Run.** Used colloquially for "one invocation of a pipeline or workflow." Not a
 first-class noun in the language.

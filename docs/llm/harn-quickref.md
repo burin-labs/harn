@@ -2819,6 +2819,28 @@ memory_forget("workspace/acme", {tag: "stale"})
   {vector: [...], dim: N, model: "..."}})`. Mocks can match on `params: {text,
   model_hint}` for per-record vectors.
 
+### Durable steps (`step.run`)
+
+`step.run(key, input?, handler, options?)` memoizes a completed handler result
+in the active EventLog. On replay, the script runs from the top but matching
+steps return the persisted result without invoking the handler:
+
+```harn,ignore
+let loaded = step.run("load-user", {user_id: id}, { input ->
+  return load_user(input.user_id)
+}, {namespace: "signup-" + id})
+```
+
+- Match key: `(namespace, key, occurrence_number, deterministic_inputs_hash)`.
+- Pass `options.namespace` for production workflows; the source path default is
+  mainly for local scripts.
+- Replaying the same key/occurrence with a different input hash throws a
+  deterministic input mismatch.
+- `step.inspect(namespace_or_options?)` returns completed records for audit.
+- Inputs and results are persisted under `step.run.<sanitized namespace>` in the
+  active EventLog, so avoid secrets unless the EventLog storage is allowed to
+  hold them.
+
 Workflow stages pick up a session id from `model_policy.session_id`;
 two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was

@@ -20,6 +20,7 @@ mod cookies;
 mod crypto;
 mod csv;
 mod datetime;
+mod durable_step;
 mod event_log;
 pub(crate) mod files;
 mod flow;
@@ -123,6 +124,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     collections::register_collection_builtins(vm);
     iter::register_iter_builtins(vm);
     event_log::register_event_log_builtins(vm);
+    durable_step::register_durable_step_builtins(vm);
     channels::register_channel_builtins(vm);
     channel_guardrails::register_channel_guardrail_builtins(vm);
     shapes::register_shape_builtins(vm);
@@ -291,6 +293,7 @@ pub fn reset_stdlib_state() {
     host::reset_host_state();
     observability::reset_observability_state();
     timing::reset_timing_state();
+    durable_step::reset_durable_step_state();
     crate::egress::reset_egress_policy_for_host();
     hitl::reset_hitl_state();
     crate::http::reset_http_state();

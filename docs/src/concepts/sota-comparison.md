@@ -56,14 +56,15 @@ reducers**. If you arrive from LangGraph and miss them, file your use case on
 |---|---|---|
 | `Function` | pipeline | Both are the durable unit. |
 | `Run` | session, run_id | Direct match. |
-| **`step.run(key, ...)`** | (no direct equivalent) | Inngest's killer primitive: per-step memoization for deterministic replay. Exploration tracked at [#2217](https://github.com/burin-labs/harn/issues/2217). |
+| **`step.run(key, ...)`** | `step.run(key, input?, handler, options?)` | Harn memoizes completed step results in the EventLog and replays matching steps without re-invoking the handler. |
 | `step.sleep` / `step.waitForEvent` | `agent_await_resumption` + `resume_when` | Conceptually equivalent. |
 | `Event` | trigger event, agent event | Direct match. |
-| Step replay | session resume + worker snapshot | Different model — Harn resumes from a checkpoint; Inngest replays from the top and skips memoized steps. |
+| Step replay | `step.run` + session resume + worker snapshot | Harn supports both replay-from-top memoized steps and checkpoint/snapshot resume. |
 
-If you arrive from Inngest expecting `step.run`-style memoized replay, that's a
-deliberate non-feature today. Issue
-[#2217](https://github.com/burin-labs/harn/issues/2217) scopes the exploration.
+If you arrive from Inngest expecting `step.run`-style memoized replay, start
+with [Durable step stdlib](../stdlib/step.md). Durable timers and event waits
+remain separate primitives: use `agent_await_resumption` and `resume_when` for
+long waits.
 
 ## Mastra
 
