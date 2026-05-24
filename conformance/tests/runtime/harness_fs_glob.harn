@@ -1,0 +1,17 @@
+let root = harness.fs.mkdtemp("harn-harness-glob-")
+
+harness.fs.write_text(path_join(root, "alpha.toml"), "name = \"alpha\"\n")
+
+harness.fs.write_text(path_join(root, "beta.toml"), "name = \"beta\"\n")
+
+harness.fs.write_text(path_join(root, "notes.txt"), "ignored\n")
+
+let free_matches = glob("*.toml", root)
+
+let method_matches = harness.fs.glob("*.toml", root)
+
+__io_println(len(method_matches))
+
+__io_println(method_matches == free_matches)
+
+harness.fs.delete(root)

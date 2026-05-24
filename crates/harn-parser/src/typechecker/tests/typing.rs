@@ -1026,6 +1026,29 @@ fn test_builtin_arg_type_mismatch() {
 }
 
 #[test]
+fn test_harness_fs_method_return_type_inference() {
+    let errs = errors(
+        r#"fn main(harness: Harness) {
+  let dir: string = harness.fs.mkdtemp("harn-type-")
+  let matches: list = harness.fs.glob("*.toml", dir)
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_harness_fs_method_arg_type_mismatch() {
+    let errs = errors(
+        r#"fn main(harness: Harness) {
+  harness.fs.mkdtemp(42)
+}"#,
+    );
+    assert_eq!(errs.len(), 1, "expected one error, got: {errs:?}");
+    assert!(errs[0].contains("argument 1 `prefix`"), "{errs:?}");
+    assert!(errs[0].contains("found int"), "{errs:?}");
+}
+
+#[test]
 fn test_len_accepts_nil_like_runtime() {
     let errs = errors(r#"pipeline t(task) { let n: int = len(nil) }"#);
     assert!(errs.is_empty(), "got errors: {errs:?}");

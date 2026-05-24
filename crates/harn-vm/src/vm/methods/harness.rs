@@ -436,26 +436,8 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        let builtin = match method {
-            "read_text" | "read" | "read_file" => "read_file",
-            "read_text_result" | "read_result" => "read_file_result",
-            "read_bytes" | "read_file_bytes" => "read_file_bytes",
-            "write_text" | "write" | "write_file" => "write_file",
-            "write_bytes" | "write_file_bytes" => "write_file_bytes",
-            "exists" | "file_exists" => "file_exists",
-            "delete" | "delete_file" | "remove" => "delete_file",
-            "append" | "append_file" => "append_file",
-            "list_dir" | "list" => "list_dir",
-            "mkdir" | "create_dir" => "mkdir",
-            "path_join" => "path_join",
-            "copy" | "copy_file" => "copy_file",
-            "temp_dir" => "temp_dir",
-            "stat" => "stat",
-            "rename" | "move" | "move_file" => "move_file",
-            "read_lines" => "read_lines",
-            "walk" | "walk_dir" => "walk_dir",
-            "glob" => "glob",
-            _ => return Err(method_unsupported(handle, method)),
+        let Some(builtin) = harn_parser::harness_methods::harness_fs_ambient(method) else {
+            return Err(method_unsupported(handle, method));
         };
         self.call_named_builtin(builtin, args.to_vec())
             .await

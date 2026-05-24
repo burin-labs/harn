@@ -211,6 +211,7 @@ pub fn side_effect_action_for_builtin(name: &str) -> Option<SideEffectAction> {
         "fs.write",
     )
     .or_else(|| first_workspace_write_action(name, &["mkdir"], "fs.mkdir"))
+    .or_else(|| first_workspace_write_action(name, &["mkdtemp"], "fs.mkdtemp"))
     .or_else(|| first_workspace_write_action(name, &["copy_file"], "fs.copy"))
     .or_else(|| first_matching_action(name, &["delete_file"], "fs.delete", "workspace.delete"))
     .or_else(|| first_workspace_write_action(name, &["move_file"], "fs.move"))

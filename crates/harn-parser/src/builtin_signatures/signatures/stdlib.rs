@@ -1542,7 +1542,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("microcompact", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("min", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("mkdir", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("mkdtemp", &[Param::new("args", TY_ANY)], TY_STRING),
+    BuiltinSignature::simple(
+        "mkdtemp",
+        &[Param::optional("prefix", TY_STRING)],
+        TY_STRING,
+    ),
     BuiltinSignature::variadic("month_name", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic(
         "monitor_wait_for_native",

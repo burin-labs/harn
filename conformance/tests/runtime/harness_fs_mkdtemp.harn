@@ -1,0 +1,11 @@
+let dir = harness.fs.mkdtemp("harn-harness-fs-")
+
+__io_println(harness.fs.exists(dir))
+
+__io_println(dir.starts_with(harness.fs.temp_dir()))
+
+__io_println(dir.contains("harn-harness-fs-"))
+
+harness.fs.delete(dir)
+
+__io_println(!harness.fs.exists(dir))

@@ -541,6 +541,9 @@ does **not** drain the iterator.
 
 ## File I/O
 
+Capability-aware scripts should call the `harness.fs.*` methods. The free
+filesystem builtins remain supported as thin aliases for existing scripts.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `read_file(path)` | path: string | string | Read entire file as UTF-8 string, or return raw source for embedded `std/...harn.prompt` assets. Throws on failure. **Deprecated in favor of `read_file_result` for new code; the throwing form remains supported.** |
@@ -552,11 +555,11 @@ does **not** drain the iterator.
 | `file_exists(path)` | path: string | bool | Check if a file or directory exists |
 | `list_dir(path?)` | path: string (default `"."`) | list | List directory contents as sorted list of file names. Throws on failure |
 | `walk_dir(path, options?)` | path: string, options: dict | list or handle dict | Recursively list files/directories. Options: `max_depth`, `follow_symlinks`, `long_running`/`background` |
-| `glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory. Set `long_running`/`background` in options to return a handle |
+| `glob(pattern, base_or_options?, options?)` / `harness.fs.glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory. Set `long_running`/`background` in options to return a handle |
 | `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
 | `temp_dir()` | none | string | System temporary directory path |
-| `mkdtemp(prefix?)` | prefix: string (default `"harn-"`) | string | Create a new uniquely-named directory under the host temp dir and return its absolute path. The caller owns the directory's lifecycle — it is **not** cleaned up automatically; pair with `delete_file(path)` when finished. Path separators in `prefix` are stripped so callers cannot smuggle subdirectory trees |
+| `mkdtemp(prefix?)` / `harness.fs.mkdtemp(prefix?)` | prefix: string (default `"harn-"`) | string | Create a new uniquely-named directory under the host temp dir and return its absolute path. The caller owns the directory's lifecycle — it is **not** cleaned up automatically; pair with `harness.fs.delete(path)` when finished. Path separators in `prefix` are stripped so callers cannot smuggle subdirectory trees |
 | `render(path, bindings?)` | path: string, bindings: dict | string | Read a template asset and render it. `path` may be source-relative, `@/<rel>` (anchored at the calling file's project root), `@<alias>/<rel>` (anchored at a `[asset_roots]` entry in `harn.toml`), or an embedded `std/...harn.prompt` stdlib prompt asset — see [Package-root prompt assets](./modules.md#package-root-prompt-assets). The template language supports `{{ name }}` interpolation (with nested paths and filters), `{{ if }} / {{ elif }} / {{ else }} / {{ end }}`, `{{ for item in xs }} ... {{ end }}` (with `{{ loop.index }}` etc.), `{{ include "..." }}` partials, logical `{{ section "task" }} ... {{ endsection }}` prompt sections, `{{# comments #}}`, `{{ raw }} ... {{ endraw }}` verbatim blocks, and `{{- -}}` whitespace trim markers. See the [Prompt templating reference](./prompt-templating.md) for the full grammar and filter list. Source-relative paths called from an imported module resolve relative to that module's directory, not the entry pipeline. Without bindings, just reads the file |
 | `render_prompt(path, bindings?)` | path: string, bindings: dict | string | Prompt-oriented alias of `render(...)`. Use this for `.harn.prompt` / `.prompt` assets when you want the asset to be surfaced explicitly in bundle manifests and preflight output. Accepts the same `@/<rel>`, `@<alias>/<rel>`, and embedded `std/...harn.prompt` forms as `render(...)` |
 | `render_string(template, bindings?)` | template: string, bindings: dict | string | Render an inline template string with the same template engine as `render(...)`. Useful when a library wants to embed a template directly in source instead of shipping a separate `.prompt` file. `{{ include "..." }}` resolves relative to the current module's asset root, with `@/<rel>` and `@<alias>/<rel>` supported |

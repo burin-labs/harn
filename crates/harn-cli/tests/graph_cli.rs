@@ -200,6 +200,7 @@ fn graph_json_attributes_harness_sub_handle_calls_to_capabilities() {
         r#"
 fn main(harness: Harness) {
   let body = harness.fs.read_text("README.md")
+  harness.fs.mkdtemp("harn-graph-")
   harness.net.get("https://example.test/data")
   harness.stdio.println(body)
 }
@@ -228,6 +229,10 @@ fn main(harness: Harness) {
     assert!(
         cap_strings.contains(&"workspace.read_text"),
         "expected harness.fs.read_text to produce workspace.read_text capability, got: {cap_strings:?}"
+    );
+    assert!(
+        cap_strings.contains(&"workspace.write_text"),
+        "expected harness.fs.mkdtemp to produce workspace.write_text capability, got: {cap_strings:?}"
     );
     assert!(
         cap_strings.contains(&"network.http"),

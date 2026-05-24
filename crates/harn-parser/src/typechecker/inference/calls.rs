@@ -407,6 +407,35 @@ impl TypeChecker {
         }
     }
 
+    pub(in crate::typechecker) fn check_harness_fs_method_call(
+        &mut self,
+        object: &SNode,
+        method: &str,
+        args: &[SNode],
+        scope: &mut TypeScope,
+        span: Span,
+    ) -> bool {
+        let Some(raw_type) = self.infer_type(object, scope) else {
+            return false;
+        };
+        let TypeExpr::Named(type_name) = self.resolve_alias(&raw_type, scope) else {
+            return false;
+        };
+        if type_name != "HarnessFs" {
+            return false;
+        }
+        let Some(ambient) = crate::harness_methods::harness_fs_ambient(method) else {
+            return false;
+        };
+        let Some(sig) = builtin_signatures::lookup(ambient) else {
+            return false;
+        };
+        let display_name = format!("harness.fs.{method}");
+        let has_spread = args.iter().any(|arg| matches!(&arg.node, Node::Spread(_)));
+        self.check_builtin_signature_call(&display_name, sig, &[], args, has_spread, scope, span);
+        true
+    }
+
     pub(in crate::typechecker) fn bind_type_param(
         param_name: &str,
         concrete: &TypeExpr,

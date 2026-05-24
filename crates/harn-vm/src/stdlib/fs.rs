@@ -77,8 +77,7 @@ const FS_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
             "Create a new uniquely-named directory under the host temp dir and return its \
              absolute path. The caller owns the directory's lifecycle — it is NOT cleaned up \
              automatically; pair with `delete_file(path)` when finished. Optional `prefix` is \
-             prepended to the random suffix (default `\"harn-\"`). This is the free-builtin \
-             landing site for the deferred `harness.fs.mkdtemp` sub-handle (see #2297).",
+             prepended to the random suffix (default `\"harn-\"`).",
         ),
     SyncBuiltin::new("stat", stat_builtin)
         .signature("stat(path)")

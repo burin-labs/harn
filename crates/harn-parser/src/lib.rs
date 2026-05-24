@@ -5,6 +5,7 @@ pub mod builtin_signatures;
 pub mod const_eval;
 pub mod diagnostic;
 pub mod diagnostic_codes;
+pub mod harness_methods;
 mod parser;
 pub mod stdlib_metadata;
 pub mod typechecker;

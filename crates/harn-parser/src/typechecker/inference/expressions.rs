@@ -587,6 +587,18 @@ impl TypeChecker {
                         .as_ref()
                         .is_some_and(|ty| self.type_may_include_nil(ty, scope));
                 let result = |ty| Self::optional_method_result_type(ty, include_optional_nil);
+                if let Some(ambient) =
+                    obj_type
+                        .as_ref()
+                        .and_then(|ty| match self.resolve_alias(ty, scope) {
+                            TypeExpr::Named(name) if name == "HarnessFs" => {
+                                crate::harness_methods::harness_fs_ambient(method)
+                            }
+                            _ => None,
+                        })
+                {
+                    return builtin_return_type(ambient).map(result);
+                }
                 // Iter<T> receiver: combinators preserve or transform T; sinks
                 // materialize. This must come before the shared-method match
                 // below so `.map` / `.filter` / etc. on an iter return Iter,
