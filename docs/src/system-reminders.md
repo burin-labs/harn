@@ -286,6 +286,7 @@ but does not evaluate providers.
 | `tool_output_truncated` | `post_tool_use` | none | Fires when tool output was truncated or compacted before the model saw it. Uses tag `truncation`, dedupe key `tool_output_truncated:<tool_name>`, `ttl_turns: 1`, and `propagate: "none"`. |
 | `post_compact_recap` | `post_compact` | none | Fires after compaction archives messages. Uses tag `recap`, dedupe key `post_compact_recap`, `ttl_turns: 2`, and `propagate: "session"`. |
 | `resume_continuity` | `worker_resumed` | none | Fires before the first resumed `agent_loop` turn. Uses tag and dedupe key `resume_continuity`, `ttl_turns: 1`, `preserve_on_compact: true`, and `propagate: "none"`; includes suspension reason, resume cause, optional resume input, and a pre-suspend digest for `continue_transcript: false`. |
+| `project_facts` | `session_start`, `on_budget_threshold` | `namespace`, `scope`, `root`, `max_facts`, `min_confidence`, `kind_filter`, `relevance_query`, `refresh_ratio` | Recalls typed `harn.fact.v1` records via lexical (BM25) match against the session task and top-K by score (records that BM25 cannot score still surface, ranked by recency). Defaults: namespace `project/facts`, `max_facts: 5`, `min_confidence: 0.5`, query derived from the session task. Uses tag and dedupe key `project_facts`, `ttl_turns: 1`, and `propagate: "session"` so the same body refreshes on context-budget pressure and re-injects on the next session start. The `on_budget_threshold` refresh only fires once context usage crosses `refresh_ratio` (default 0.70) so per-turn recall stays bounded. Skipped silently when no schema-matched facts pass the filter. |
 
 Disable every provider with `reminders: false` or
 `reminders: {enabled: false}`. Disable selected providers by prefixing the
@@ -441,6 +442,33 @@ agent_loop(task, system, {
   reminders: {
     config: {
       token_pressure: {context_window: 128000},
+    },
+  },
+})
+```
+
+### Project facts at session start
+
+Persist project facts with `store_fact` so the canonical `project_facts`
+provider can recall them on the next session. Tune the namespace and
+filters per loop when the defaults are too broad.
+
+```harn,ignore
+store_fact({
+  kind: "Decision",
+  claim: "Build cancels in-flight tool calls on SIGINT before clearing state.",
+  confidence: 0.92,
+  evidence: [{kind: "FileRange", ref: "crates/harn-vm/src/cancel.rs:1"}],
+})
+
+agent_loop(task, system, {
+  reminders: {
+    config: {
+      project_facts: {
+        max_facts: 8,
+        min_confidence: 0.6,
+        kind_filter: ["decision", "constraint"],
+      },
     },
   },
 })

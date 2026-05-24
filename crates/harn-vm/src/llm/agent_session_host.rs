@@ -363,6 +363,18 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         &start_payload,
     )
     .await?;
+    // SessionStart is a paired event: hooks above run any user-registered
+    // `session_start` closures, and this call lets canonical reminder
+    // providers (currently `project_facts`) inject pre-turn context.
+    // Mirrors the pattern used at the `PostToolUse` and `PostCompact` call
+    // sites so adding new providers does not require new wiring.
+    let _ = super::reminder_providers::evaluate_and_inject(
+        crate::orchestration::HookEvent::SessionStart,
+        &resolved,
+        start_payload,
+        super::reminder_providers::options_map_to_json(&opts_map),
+    )
+    .await?;
 
     let mut control = BTreeMap::new();
     control.insert(
