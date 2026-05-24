@@ -810,6 +810,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/echo.harn"),
     },
     StdlibCliScript {
+        name: "eval/coding_agent",
+        source: include_str!("stdlib/cli/eval/coding_agent.harn"),
+    },
+    StdlibCliScript {
         name: "eval/prompt",
         source: include_str!("stdlib/cli/eval/prompt.harn"),
     },

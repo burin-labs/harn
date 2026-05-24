@@ -1,9 +1,42 @@
 //! `harn eval coding-agent` — empirical preset/provider benchmark for a
 //! small coding-agent fixture suite.
+//!
+//! ## .harn dispatch (W7 partial port — see harn#2307)
+//!
+//! The **matrix execution pipeline** (fixture resolution, model
+//! discovery, per-cell `execute_run` invocation, Ollama snapshot/
+//! cleanup, scoring, rollups, native/text comparisons, follow-up
+//! generation, baseline diff) stays in Rust. Every cell drives the
+//! embedded `coding_agent_suite.harn` driver through `execute_run`,
+//! which itself reaches into VM internals (`commands::run`,
+//! `harn_vm::llm`, `commands::local::runtime`) that aren't reachable
+//! from script-land today — the same constraint that shaped W5 / W6.
+//!
+//! The **rendering layer** (the `summary.md` body, the `followups.md`
+//! body, the one-line human stdout summary, the `--json` pretty form)
+//! is delegated to
+//! `crates/harn-stdlib/src/stdlib/cli/eval/coding_agent.harn`. The
+//! Rust shim pre-serialises the assembled `EvalSummary` to JSON,
+//! forwards it via [`CODING_AGENT_SUMMARY_ENV`], dispatches four
+//! times (markdown for `summary.md`, followups for `followups.md`,
+//! then either the summary line or the `--json` pretty form for
+//! stdout), and writes the captured payloads to disk / real stdout.
+//!
+//! The on-disk JSON artifacts (`summary.json`, `per_run.jsonl`,
+//! `local_readiness.json`) stay on the serde-driven Rust path because
+//! Harn's `json_stringify_pretty` sorts dict keys alphabetically and
+//! the on-disk format is consumed by the experiment driver in
+//! `experiments/step-judge/run.sh`, the local-readiness regression
+//! check, and hosted ingestion — all of which depend on the serde
+//! struct-field byte order.
+//!
+//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path for the
+//! parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use harn_vm::clock::{Clock, RealClock};
@@ -19,6 +52,34 @@ use crate::commands::local::runtime::{
 };
 use crate::commands::local_readiness;
 use crate::commands::run::{execute_run, CliLlmMockMode, RunProfileOptions};
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
+
+/// Env var the embedded `cli/eval/coding_agent` script reads to pick
+/// up the pre-serialised [`EvalSummary`]. The Rust shim does all the
+/// matrix execution and scoring and hands the script the assembled
+/// summary so it only has to format it.
+const CODING_AGENT_SUMMARY_ENV: &str = "HARN_EVAL_CODING_AGENT_SUMMARY_JSON";
+
+/// Env var the script reads to pick the rendering mode — one of
+/// `"markdown"` (summary.md body), `"followups"` (followups.md body),
+/// `"summary"` (one-line stdout summary), or `"json"` (--json pretty
+/// form). Defaulted to `"summary"` if unset so the script stays robust
+/// against future Rust-side bugs.
+const CODING_AGENT_MODE_ENV: &str = "HARN_EVAL_CODING_AGENT_MODE";
+
+/// Serialises the dispatch-render path so concurrent in-process
+/// callers (the existing `eval_coding_agent_cli` integration test plus
+/// any future fanout caller) don't race on the global env vars the
+/// Rust shim sets to hand the report off to the .harn script. The CLI
+/// binary itself is single-call, so this mutex is uncontended in
+/// production; in tests it serialises the dispatch window only —
+/// matrix execution still parallelises freely.
+///
+/// Mirrors the pattern W5's `eval_prompt.rs` and W6's `eval_context.rs`
+/// / `eval_tool_calls.rs` use (see harn#2305 / #2306) so the cross-
+/// script env-var hand-off stays consistent across the eval cluster.
+static DISPATCH_RENDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const CODING_AGENT_SUITE_HARN: &str = include_str!("../../assets/evals/coding_agent_suite.harn");
 
@@ -368,28 +429,45 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         args.run_label.clone(),
         baseline_comparison,
     );
-    if let Err(error) = write_outputs(&output_dir, &summary) {
+    // The JSON artifacts (summary.json, per_run.jsonl,
+    // local_readiness.json) always stay on the serde-driven Rust path —
+    // see module docstring for the byte-format rationale. They write
+    // before any rendering so a render failure doesn't leave a partially
+    // written report directory.
+    if let Err(error) = write_json_artifacts(&output_dir, &summary) {
         eprintln!("error: failed to write benchmark outputs: {error}");
         return 1;
     }
-    eprintln!(
-        "wrote {}, {}, {}, {}, and {}",
-        output_dir.join("summary.json").display(),
-        output_dir.join("per_run.jsonl").display(),
-        output_dir.join("local_readiness.json").display(),
-        output_dir.join("summary.md").display(),
-        output_dir.join("followups.md").display()
-    );
-    if args.json {
-        match serde_json::to_string_pretty(&summary) {
-            Ok(payload) => println!("{payload}"),
-            Err(error) => eprintln!("warning: failed to render summary JSON: {error}"),
+
+    // `HARN_CLI_IMPL=rust` keeps the legacy direct-render path so the
+    // parity-snapshot harness (#2299) can compare both impls until C1
+    // (#2314) deletes this escape hatch.
+    let use_legacy = std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust");
+
+    if use_legacy {
+        if let Err(error) = write_markdown_artifacts_legacy(&output_dir, &summary) {
+            eprintln!("error: {error}");
+            return 1;
         }
-    } else {
-        println!(
-            "coding-agent eval: {}/{} passed, {} skipped, total_cost_usd={:.6}",
-            summary.passed_runs, summary.total_runs, summary.skipped_runs, summary.total_cost_usd
-        );
+        announce_output_paths(&output_dir);
+        if args.json {
+            print_json_legacy(&summary);
+        } else {
+            print_summary_legacy(&summary);
+        }
+        return if had_error { 1 } else { 0 };
+    }
+
+    if let Err(code) = write_markdown_artifacts_dispatch(&output_dir, &summary).await {
+        return code;
+    }
+    announce_output_paths(&output_dir);
+    if args.json {
+        if let Err(code) = print_json_dispatch(&summary).await {
+            return code;
+        }
+    } else if let Err(code) = print_summary_dispatch(&summary).await {
+        return code;
     }
 
     if had_error {
@@ -1477,7 +1555,7 @@ fn suggest_followups(
     out
 }
 
-fn write_outputs(output_dir: &Path, summary: &EvalSummary) -> Result<(), String> {
+fn write_json_artifacts(output_dir: &Path, summary: &EvalSummary) -> Result<(), String> {
     write_json_pretty(&output_dir.join("summary.json"), summary)?;
     write_jsonl(&output_dir.join("per_run.jsonl"), &summary.runs)?;
     let summary_value = serde_json::to_value(summary).map_err(|error| error.to_string())?;
@@ -1486,11 +1564,112 @@ fn write_outputs(output_dir: &Path, summary: &EvalSummary) -> Result<(), String>
         output_dir.display().to_string(),
     )?;
     write_json_pretty(&output_dir.join("local_readiness.json"), &readiness)?;
-    fs::write(output_dir.join("summary.md"), render_markdown(summary))
-        .map_err(|error| error.to_string())?;
-    fs::write(output_dir.join("followups.md"), render_followups(summary))
-        .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn announce_output_paths(output_dir: &Path) {
+    eprintln!(
+        "wrote {}, {}, {}, {}, and {}",
+        output_dir.join("summary.json").display(),
+        output_dir.join("per_run.jsonl").display(),
+        output_dir.join("local_readiness.json").display(),
+        output_dir.join("summary.md").display(),
+        output_dir.join("followups.md").display()
+    );
+}
+
+// ─── Legacy direct-render path (gated by HARN_CLI_IMPL=rust) ────────────
+
+fn write_markdown_artifacts_legacy(output_dir: &Path, summary: &EvalSummary) -> Result<(), String> {
+    fs::write(output_dir.join("summary.md"), render_markdown(summary))
+        .map_err(|error| format!("failed to write summary.md: {error}"))?;
+    fs::write(output_dir.join("followups.md"), render_followups(summary))
+        .map_err(|error| format!("failed to write followups.md: {error}"))?;
+    Ok(())
+}
+
+fn print_summary_legacy(summary: &EvalSummary) {
+    println!(
+        "coding-agent eval: {}/{} passed, {} skipped, total_cost_usd={:.6}",
+        summary.passed_runs, summary.total_runs, summary.skipped_runs, summary.total_cost_usd
+    );
+}
+
+fn print_json_legacy(summary: &EvalSummary) {
+    match serde_json::to_string_pretty(summary) {
+        Ok(payload) => println!("{payload}"),
+        Err(error) => eprintln!("warning: failed to render summary JSON: {error}"),
+    }
+}
+
+// ─── Dispatch (.harn) render path ────────────────────────────────────────
+
+async fn write_markdown_artifacts_dispatch(
+    output_dir: &Path,
+    summary: &EvalSummary,
+) -> Result<(), i32> {
+    let markdown = render_via_dispatch(summary, "markdown").await?;
+    if let Err(error) = fs::write(output_dir.join("summary.md"), markdown) {
+        eprintln!("error: failed to write summary.md: {error}");
+        return Err(1);
+    }
+    let followups = render_via_dispatch(summary, "followups").await?;
+    if let Err(error) = fs::write(output_dir.join("followups.md"), followups) {
+        eprintln!("error: failed to write followups.md: {error}");
+        return Err(1);
+    }
+    Ok(())
+}
+
+async fn print_summary_dispatch(summary: &EvalSummary) -> Result<(), i32> {
+    let payload = render_via_dispatch(summary, "summary").await?;
+    print!("{payload}");
+    // The script emits exactly the legacy summary line (no trailing
+    // newline); add one to match the legacy `println!` semantics.
+    if !payload.ends_with('\n') {
+        println!();
+    }
+    Ok(())
+}
+
+async fn print_json_dispatch(summary: &EvalSummary) -> Result<(), i32> {
+    let payload = render_via_dispatch(summary, "json").await?;
+    print!("{payload}");
+    if !payload.ends_with('\n') {
+        println!();
+    }
+    Ok(())
+}
+
+/// Dispatch to the embedded `cli/eval/coding_agent.harn` script for one
+/// of the four rendering modes (markdown / followups / summary / json).
+/// Returns the captured stdout on success, or a propagated exit code
+/// on failure.
+///
+/// **Concurrency.** Held under [`DISPATCH_RENDER_LOCK`] so concurrent
+/// in-process callers don't race on the global env vars the Rust shim
+/// sets to hand the report to the script. See the lock's docstring
+/// for the trade-off rationale.
+async fn render_via_dispatch(summary: &EvalSummary, mode: &str) -> Result<String, i32> {
+    let summary_json = match serde_json::to_string(summary) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise EvalSummary for dispatch: {error}");
+            return Err(1);
+        }
+    };
+    let _guard = DISPATCH_RENDER_LOCK.lock().await;
+    let _summary = ScopedEnvVar::set(CODING_AGENT_SUMMARY_ENV, &summary_json);
+    let _mode = ScopedEnvVar::set(CODING_AGENT_MODE_ENV, mode);
+
+    let outcome = dispatch::run_embedded_script("eval/coding_agent", Vec::new(), false).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if outcome.exit_code != 0 {
+        return Err(outcome.exit_code);
+    }
+    Ok(outcome.stdout)
 }
 
 fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
