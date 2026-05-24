@@ -1,0 +1,12 @@
+fn main(harness: Harness) {
+  let ok = harness.process.spawn_captured({cmd: "printf", args: ["hi\n"]})
+  harness.stdio.println(ok.exit_code)
+  harness.stdio.println(ok.stdout == "hi\n")
+  harness.stdio.println(ok.stderr == "")
+  harness.stdio.println(ok.success)
+  harness.stdio.println(ok.timed_out)
+  harness.stdio.println(ok.duration_ms >= 0)
+  let fail = harness.process.spawn_captured({cmd: "sh", args: ["-c", "exit 7"]})
+  harness.stdio.println(fail.exit_code)
+  harness.stdio.println(fail.success)
+}

@@ -1,6 +1,7 @@
-//! Method dispatch for the `Harness` capability handle and its six
+//! Method dispatch for the `Harness` capability handle and its
 //! sub-handles. Every sub-handle (`stdio`, `clock`, `fs`, `env`,
-//! `random`, `net`) is wired end-to-end in real, mock, and null modes;
+//! `random`, `net`, `process`, `system`) is wired end-to-end in real,
+//! mock, and null modes;
 //! sandbox / egress rejections raised inside a sub-handle method are
 //! tagged with the `HARN-CAP-201` diagnostic code so callers can
 //! attribute the error to the active capability profile rather than an
@@ -82,6 +83,7 @@ impl crate::vm::Vm {
             HarnessKind::Env => self.call_harness_env_method(handle, method, args),
             HarnessKind::Random => self.call_harness_random_method(handle, method, args),
             HarnessKind::Net => self.call_harness_net_method(handle, method, args).await,
+            HarnessKind::Process => self.call_harness_process_method(handle, method, args),
         }
     }
 
@@ -589,6 +591,18 @@ impl crate::vm::Vm {
         }
     }
 
+    fn call_harness_process_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        match method {
+            "spawn_captured" => crate::stdlib::process::spawn_captured_value(args),
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
     async fn call_mock_harness_method(
         &mut self,
         handle: &VmHarness,
@@ -710,6 +724,13 @@ impl crate::vm::Vm {
                         }
                     })?)
                 }
+                _ => Err(method_unsupported(handle, method)),
+            },
+            HarnessKind::Process => match method {
+                "spawn_captured" => Err(VmError::CategorizedError {
+                    message: "MockHarness has no process spawn response".to_string(),
+                    category: ErrorCategory::NotFound,
+                }),
                 _ => Err(method_unsupported(handle, method)),
             },
             HarnessKind::System => {

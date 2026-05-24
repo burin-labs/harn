@@ -138,10 +138,8 @@ pub fn compute_handoff_effects(
         }
     }
 
-    // Harness sub-handle method calls aren't builtin invocations, so the
-    // IR doesn't see them. Walk the AST directly to lift them into the
-    // same shape — keeps producer-side analysis consistent with what the
-    // dispatcher will need to enforce.
+    // Keep harness sub-handle effects visible even for policy callers
+    // that work from raw ASTs rather than the lowered IR call surface.
     for node in &program {
         walk_for_harness_effects(node, &mut collected);
     }
@@ -431,6 +429,12 @@ fn harness_method_effect(node: &SNode) -> Option<EffectRecord> {
         ("fs", "delete_file" | "delete" | "remove") => (EffectKind::Fs, EffectScope::Mutate),
         ("fs", _) => (EffectKind::Fs, EffectScope::Read),
         ("net", _) => (EffectKind::Net, EffectScope::Write),
+        ("process", "spawn_captured") => (
+            EffectKind::Hostcall {
+                name: "process.spawn_captured".to_string(),
+            },
+            EffectScope::Write,
+        ),
         // System-introspection methods (`cpu`, `memory`, `gpus`,
         // `temperature`, `platform`, `processes`) are pure host reads
         // — no state mutation, no resource consumed. They're gated by
@@ -899,6 +903,22 @@ mod tests {
                 .any(|effect| matches!(effect.kind, EffectKind::Net)
                     && effect.scope == EffectScope::Write),
             "expected Net write effect, got {effects:?}"
+        );
+    }
+
+    #[test]
+    fn harness_process_spawn_captured_yields_process_hostcall_effect() {
+        let source =
+            r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf"}) }"#;
+        let effects = compute_handoff_effects(source, None);
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(
+                    &effect.kind,
+                    EffectKind::Hostcall { name } if name == "process.spawn_captured"
+                ) && effect.scope == EffectScope::Write
+            }),
+            "expected process hostcall write effect, got {effects:?}"
         );
     }
 

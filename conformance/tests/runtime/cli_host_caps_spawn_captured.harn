@@ -1,6 +1,5 @@
-// Free-builtin landing site for the deferred `harness.process.spawn_captured`
-// sub-handle (see #2297). Verifies the synchronous capture shape returns
-// `{exit_code, stdout, stderr, duration_ms, success, timed_out}`.
+// Legacy free-builtin alias for `harness.process.spawn_captured`.
+// Verifies the synchronous capture shape stays shared by both surfaces.
 let ok = spawn_captured({cmd: "printf", args: ["hi"]})
 
 __io_println(ok.exit_code)

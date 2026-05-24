@@ -2019,7 +2019,9 @@ fn harness_sub_handle_for(object: &SNode, method: &str) -> Option<(&'static str,
         })
 }
 
-const HARNESS_SUB_HANDLES: &[&str] = &["stdio", "clock", "fs", "env", "random", "net"];
+const HARNESS_SUB_HANDLES: &[&str] = &[
+    "stdio", "clock", "fs", "env", "random", "net", "process", "system",
+];
 
 fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
     let literal_args = args.iter().map(literal_value).collect::<Vec<_>>();
@@ -2053,7 +2055,7 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
                 path,
             )])
         }
-        "exec" | "exec_at" | "shell" | "shell_at" => {
+        "exec" | "exec_at" | "shell" | "shell_at" | "spawn_captured" => {
             capability_classification(vec![CapabilityEffect::new(
                 Capability::CommandExecution,
                 name,
@@ -2549,6 +2551,23 @@ fn main(harness: Harness) {
         assert!(
             calls.iter().any(|name| name == "http_get"),
             "expected harness.net.get to lower to ambient http_get, got: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn harness_process_method_call_is_attributed_to_spawn_captured() {
+        let report = analyze(
+            r#"
+fn main(harness: Harness) {
+  harness.process.spawn_captured({cmd: "printf", args: ["hi"]})
+}
+"#,
+        );
+
+        let calls = handler_call_names(&report);
+        assert!(
+            calls.iter().any(|name| name == "spawn_captured"),
+            "expected harness.process.spawn_captured to lower to ambient spawn_captured, got: {calls:?}"
         );
     }
 
