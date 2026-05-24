@@ -747,31 +747,53 @@ async fn agent_session_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         None | Some(VmValue::Nil) => BTreeMap::new(),
         _ => return Err(err("agent_session_compact: `opts` must be a dict or nil")),
     };
-    let config = build_compact_config(&opts_dict)?;
+    let mut config = build_compact_config(&opts_dict)?;
     let mut messages = agent_sessions::messages_json(&id);
-    let original_message_count = messages.len();
-    let estimated_tokens_before = crate::orchestration::estimate_message_tokens(&messages);
-    let summary = crate::orchestration::auto_compact_messages(&mut messages, &config, None).await?;
-    let kept = messages.len();
-    if let Some(summary) = summary {
-        let estimated_tokens_after = crate::orchestration::estimate_message_tokens(&messages);
-        let archived_messages = original_message_count
-            .saturating_sub(messages.len())
-            .saturating_add(1);
-        agent_sessions::replace_messages_with_summary(&id, &messages, Some(&summary))
-            .map_err(err)?;
-        record_agent_session_compaction(
-            &id,
-            &config,
-            archived_messages,
-            estimated_tokens_before,
-            estimated_tokens_after,
-            summary.len(),
-        )?;
+    let original_count = messages.len();
+    let reminder_events = session_compactable_events(&id);
+    let provider_options = if opts_dict.is_empty() {
+        serde_json::json!({})
     } else {
-        agent_sessions::replace_messages(&id, &messages).map_err(err)?;
+        crate::llm::reminder_providers::options_map_to_json(&opts_dict)
+    };
+
+    let lifecycle =
+        crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Host)
+            .with_session_id(Some(&id))
+            .with_reminder_events(reminder_events)
+            .with_provider_options(provider_options);
+
+    let Some(outcome) =
+        crate::orchestration::run_compaction_lifecycle(&mut messages, &mut config, None, lifecycle)
+            .await?
+    else {
+        return Ok(VmValue::Int(original_count as i64));
+    };
+
+    agent_sessions::replace_messages_with_summary(&id, &messages, Some(&outcome.summary))
+        .map_err(err)?;
+    let compaction_event = crate::llm::helpers::transcript_event(
+        "compaction",
+        "system",
+        "internal",
+        "",
+        Some(outcome.event_metadata),
+    );
+    agent_sessions::append_event(&id, compaction_event).map_err(err)?;
+    for preserved in outcome.reminder_report.preserved_events {
+        agent_sessions::append_event(&id, preserved).map_err(err)?;
     }
-    Ok(VmValue::Int(kept as i64))
+    Ok(VmValue::Int(messages.len() as i64))
+}
+
+fn session_compactable_events(id: &str) -> Vec<VmValue> {
+    let Some(transcript) = agent_sessions::transcript(id) else {
+        return Vec::new();
+    };
+    let Some(dict) = transcript.as_dict() else {
+        return Vec::new();
+    };
+    crate::orchestration::transcript_compactable_events(dict)
 }
 
 const COMPACT_OPT_KEYS: &[&str] = &[
@@ -859,53 +881,6 @@ fn build_compact_config(
         cfg.compress_callback = Some(v);
     }
     Ok(cfg)
-}
-
-fn record_agent_session_compaction(
-    id: &str,
-    config: &crate::orchestration::AutoCompactConfig,
-    archived_messages: usize,
-    estimated_tokens_before: usize,
-    estimated_tokens_after: usize,
-    new_summary_len: usize,
-) -> Result<(), VmError> {
-    let mut metadata = serde_json::json!({
-        "mode": "host",
-        "strategy": &config.policy_strategy,
-        "engine_strategy": crate::orchestration::compact_strategy_name(&config.compact_strategy),
-        "archived_messages": archived_messages,
-        "estimated_tokens_before": estimated_tokens_before,
-        "estimated_tokens_after": estimated_tokens_after,
-        "new_summary_len": new_summary_len,
-        "keep_last": config.keep_last,
-    });
-    if let Some(map) = metadata.as_object_mut() {
-        for (key, value) in crate::orchestration::compaction_policy_metadata_fields(&config.policy)
-        {
-            map.insert(key.to_string(), value);
-        }
-    }
-    let event = crate::llm::helpers::transcript_event(
-        "compaction",
-        "system",
-        "internal",
-        "",
-        Some(metadata.clone()),
-    );
-    agent_sessions::append_event(id, event).map_err(err)?;
-    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TranscriptCompacted {
-        session_id: id.to_string(),
-        mode: "host".to_string(),
-        strategy: config.policy_strategy.clone(),
-        archived_messages,
-        estimated_tokens_before,
-        estimated_tokens_after,
-        snapshot_asset_id: None,
-        instruction_mode: Some(config.policy.instruction_mode().to_string()),
-        instruction_source: config.policy.instruction_source().map(str::to_string),
-        compaction_policy: config.policy.metadata_json(),
-    });
-    Ok(())
 }
 
 const CANCEL_TOOL_CALL_OPT_KEYS: &[&str] = &["reason", "inject_reminder", "timeout_ms"];

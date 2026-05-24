@@ -168,7 +168,15 @@ pub(super) async fn transcript_auto_compact_builtin(
     } else {
         None
     };
-    crate::orchestration::auto_compact_messages(&mut messages, &config, llm_opts.as_ref()).await?;
+    let lifecycle =
+        crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Workflow);
+    crate::orchestration::run_compaction_lifecycle(
+        &mut messages,
+        &mut config,
+        llm_opts.as_ref(),
+        lifecycle,
+    )
+    .await?;
     Ok(VmValue::List(Rc::new(
         messages
             .iter()

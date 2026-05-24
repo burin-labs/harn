@@ -42,6 +42,9 @@ pub use command_policy::*;
 mod compaction;
 pub use compaction::*;
 
+mod compact_lifecycle;
+pub use compact_lifecycle::*;
+
 pub mod agent_inbox;
 
 mod artifacts;

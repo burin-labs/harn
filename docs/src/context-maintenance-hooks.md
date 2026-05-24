@@ -57,8 +57,45 @@ watch ordering.
 | `file_edited` | `context.refresh` | Fast deterministic scan/index refresh for changed paths |
 | `session_idle` | `context.crystallize` | Fuzzy or LLM-backed enrichment after foreground activity quiets |
 | `pre_compact` | `context.crystallize` | Last chance to preserve durable facts before transcript compaction |
+| `post_compact` | reminder providers | Re-inject session-defining reminders after the transcript collapses |
 | `post_turn` | `context.refresh` or `context.crystallize` | React to tool outcomes while the model turn is fresh |
 | `session_end` | `context.crystallize` | Final maintenance pass and artifact flush before teardown |
+
+### Compaction hook payload
+
+Every `transcript_compact()`, `agent_session_compact()`, `transcript_auto_compact()`,
+worker-transcript compaction, and resume digest extraction funnels through the
+shared `run_compaction_lifecycle` helper, so `PreCompact` and `PostCompact`
+handlers receive the same payload shape regardless of entry point:
+
+| Field | Pre | Post | Notes |
+|---|---|---|---|
+| `event` | ✓ | ✓ | `"PreCompact"` or `"PostCompact"` |
+| `session.id` / `session_id` | ✓ | ✓ | Empty string when no owning session (e.g. workflow) |
+| `mode` | ✓ | ✓ | `manual` \| `host` \| `auto` \| `workflow` \| `worker` |
+| `strategy` / `engine_strategy` | ✓ | ✓ | One of `truncate`, `llm`, `custom`, `observation_mask` |
+| `keep_last` | ✓ | ✓ | Final config value (after any `Modify` overrides) |
+| `target_tokens` | ✓ | ✓ | `null` when no threshold is configured |
+| `message_count` | ✓ | ✓ | Pre: total before compaction. Post: original count |
+| `estimated_tokens_before` | ✓ | ✓ | Heuristic char/4 estimate |
+| `remaining_messages` |  | ✓ | Length of the transcript after compaction |
+| `archived_messages` |  | ✓ | Messages folded into the summary |
+| `estimated_tokens_after` |  | ✓ | Token estimate of the compacted transcript |
+| `summary` / `new_summary_len` |  | ✓ | Final summary string and length |
+| `snapshot_asset_id` |  | ✓ | Only present when the caller supplied a source transcript |
+| `reminders_decremented` / `expired` / `deduped` / `preserved` |  | ✓ | Counts from the reminder lifecycle |
+| `instruction_mode` / `instruction_source` / `compaction_policy` | ✓ | ✓ | Mirrors the resolved `CompactionPolicy` |
+
+`PreCompact` is veto-capable: a registered hook may return
+`HookControl::Block { … }` to cancel the compaction entirely or
+`HookControl::Modify { payload }` to override `keep_last`, `target_tokens`, or
+`strategy` before the engine runs. `PostCompact` is non-veto; veto attempts on
+`PostCompact` are recorded but ignored.
+
+Reminder events marked `preserve_on_compact: true` survive the lifecycle on
+every call site: they're re-attached to the compacted transcript (manual,
+worker) or re-appended to the session event log (host, auto). `ttl_turns`
+counts decrement per compaction, `dedupe_key` keeps the newest of a group.
 
 Hook handlers are advisory for these recipes. They should enqueue, emit a
 receipt, and return quickly. If a host needs a foreground veto, use the

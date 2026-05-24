@@ -249,15 +249,27 @@ pub(in super::super) async fn compact_worker_transcript(
         .iter()
         .map(crate::llm::helpers::vm_value_to_json)
         .collect::<Vec<_>>();
-    let config = crate::orchestration::AutoCompactConfig {
+    let mut config = crate::orchestration::AutoCompactConfig {
         token_threshold: 1,
         keep_last: 2,
         compact_strategy: crate::orchestration::CompactStrategy::Truncate,
         hard_limit_tokens: None,
+        policy_strategy: crate::orchestration::compact_strategy_name(
+            &crate::orchestration::CompactStrategy::Truncate,
+        )
+        .to_string(),
         ..Default::default()
     };
-    let Some(summary) =
-        crate::orchestration::auto_compact_messages(&mut messages, &config, None).await?
+    let reminder_events = crate::orchestration::transcript_compactable_events(dict);
+    let transcript_id_value = crate::llm::helpers::transcript_id(dict);
+    let lifecycle =
+        crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Worker)
+            .with_transcript_id(transcript_id_value.as_deref())
+            .with_reminder_events(reminder_events)
+            .with_source_transcript(Some(&transcript));
+    let Some(outcome) =
+        crate::orchestration::run_compaction_lifecycle(&mut messages, &mut config, None, lifecycle)
+            .await?
     else {
         return Ok(transcript);
     };
@@ -266,17 +278,8 @@ pub(in super::super) async fn compact_worker_transcript(
         .iter()
         .map(crate::stdlib::json_to_vm_value)
         .collect::<Vec<_>>();
-    let original_message_event_count =
-        crate::llm::helpers::transcript_events_from_messages(&original_messages).len();
     let mut events = crate::llm::helpers::transcript_events_from_messages(&vm_messages);
-    if let Some(VmValue::List(original_events)) = dict.get("events") {
-        events.extend(
-            original_events
-                .iter()
-                .skip(original_message_event_count)
-                .cloned(),
-        );
-    }
+    events.extend(outcome.reminder_report.preserved_events);
     let mut next = dict.clone();
     next.insert(
         "messages".to_string(),
@@ -288,7 +291,7 @@ pub(in super::super) async fn compact_worker_transcript(
     );
     next.insert(
         "summary".to_string(),
-        VmValue::String(std::rc::Rc::from(summary)),
+        VmValue::String(std::rc::Rc::from(outcome.summary)),
     );
     Ok(VmValue::Dict(std::rc::Rc::new(next)))
 }
