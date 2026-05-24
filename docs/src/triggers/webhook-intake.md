@@ -30,7 +30,7 @@ The substrate is exposed as five Harn builtins.
 
 Register an intake. Returns a snapshot dict
 (`{ id, path, topic, signature_header, signature_prefix,
-signature_encoding, algorithm, delivery_id_header,
+signature_encoding, algorithm, allow_legacy_sha1, delivery_id_header,
 dedupe_ttl_seconds }`). Config keys:
 
 | Key | Required | Default | Description |
@@ -41,7 +41,8 @@ dedupe_ttl_seconds }`). Config keys:
 | `signature_header` | yes | — | Header name carrying the signature, e.g. `"x-hub-signature-256"`. |
 | `signature_prefix` | no | `"<algorithm>="` (e.g. `"sha256="`) | Prefix to strip before decoding. Pass `""` to opt out. |
 | `signature_encoding` | no | `"hex"` | `"hex"` or `"base64"`. |
-| `algorithm` | no | `"sha256"` | `"sha256"` or `"sha1"` (legacy). |
+| `algorithm` | no | `"sha256"` | `"sha256"` or legacy `"sha1"` when `allow_legacy_sha1` is true. |
+| `allow_legacy_sha1` | no | `false` | Explicit opt-in for existing providers that still sign with HMAC-SHA1. |
 | `delivery_id_header` | yes | — | Header name carrying the delivery id, e.g. `"x-github-delivery"`. |
 | `topic` | yes | — | Event-log topic to append accepted deliveries onto. |
 | `dedupe_ttl_seconds` | no | 86400 (24h) | How long delivery ids stay claimed in the inbox. |

@@ -13,18 +13,23 @@ fn __strip_signature_prefix(signature) {
 }
 
 /**
- * verify_hmac_signature.
+ * Constant-time HMAC signature check.
+ * Legacy HMAC-SHA1 requires options.allow_legacy_sha1.
  *
  * @effects: []
  * @allocation: heap
  * @errors: []
  * @api_stability: stable
- * @example: verify_hmac_signature(body, signature, secret, algorithm)
+ * @example: verify_hmac_signature(body, signature, secret, algorithm, options)
  */
-pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256") {
+pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", options = nil) {
   let alg = lowercase(trim(algorithm ?? "sha256"))
   let provided = __strip_signature_prefix(signature)
+  let opts = options ?? {}
   if alg == "sha1" || alg == "hmac-sha1" {
+    if !(opts.allow_legacy_sha1 ?? false) {
+      return false
+    }
     return constant_time_eq(hmac_sha1(secret, body), provided)
   }
   if alg != "sha256" && alg != "hmac-sha256" {
