@@ -1331,7 +1331,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
       let stall_warning = stall_observation.warning
       let structural_verdict = __run_structural_validator(
-        opts?._tool_caller,
+        opts?._structural_validator,
         session.session_id,
         normalized + {raw_text: raw_text},
         tool_calls,

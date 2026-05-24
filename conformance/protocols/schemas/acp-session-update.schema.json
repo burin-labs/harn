@@ -91,6 +91,8 @@
                 "loop_stuck",
                 "progress_reported",
                 "session_closed",
+                "step_judge_decision",
+                "structural_validator_decision",
                 "tool_call_audit",
                 "typed_checkpoint",
                 "turn_end",

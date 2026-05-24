@@ -375,6 +375,15 @@ fn __validate_tool_caller(value) {
   }
 }
 
+fn __validate_structural_validator(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `structural_validator` must be a closure or nil; got " + type_of(value)
+  }
+}
+
 fn __validate_max_concurrent_tools(value) {
   if value == nil {
     return
@@ -468,6 +477,9 @@ fn __validate_agent_loop_callback_options(opts) {
   }
   if __has_key(opts, "tool_caller") {
     __validate_tool_caller(opts.tool_caller)
+  }
+  if __has_key(opts, "structural_validator") {
+    __validate_structural_validator(opts.structural_validator)
   }
   if __has_key(opts, "max_concurrent_tools") {
     __validate_max_concurrent_tools(opts.max_concurrent_tools)
@@ -623,6 +635,7 @@ pub fn agent_loop_options(options = nil) {
   __validate_agent_loop_callback_options(opts)
   let llm_caller = opts?.llm_caller
   let tool_caller = opts?.tool_caller
+  let structural_validator = opts?.structural_validator
   let profile = opts?.profile ?? "tool_using"
   let defaults = __profile_defaults(profile)
   opts = defaults + opts
@@ -669,6 +682,7 @@ pub fn agent_loop_options(options = nil) {
   opts = opts + {iteration_budget: budget, max_iterations: budget.max}
   opts = agent_reasoning_apply(opts)
   opts = __normalize_reminder_provider_options(opts)
-  opts = opts + {_llm_caller: llm_caller, _tool_caller: tool_caller}
+  opts = opts
+    + {_llm_caller: llm_caller, _tool_caller: tool_caller, _structural_validator: structural_validator}
   return opts
 }

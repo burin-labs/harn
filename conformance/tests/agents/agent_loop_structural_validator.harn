@@ -1,6 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
 import { with_structural_validator } from "std/llm/structural_validator"
-import { compose_tool_callers } from "std/llm/tool_middleware"
 
 fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
@@ -42,7 +41,7 @@ pipeline default() {
         max_iterations: 4,
         session_id: session,
         tools: write_tools(),
-        tool_caller: compose_tool_callers([with_structural_validator()]),
+        structural_validator: with_structural_validator(),
       },
     ) },
   )
@@ -70,7 +69,7 @@ pipeline default() {
         loop_until_done: true,
         max_iterations: 2,
         tools: write_tools(),
-        tool_caller: compose_tool_callers([with_structural_validator({on_failure: "raise"})]),
+        structural_validator: with_structural_validator({on_failure: "raise"}),
       },
     )
     __io_println("no-throw")
@@ -94,9 +93,7 @@ pipeline default() {
           max_iterations: 2,
           tools: write_tools(),
           session_id: phantom_session,
-          tool_caller: compose_tool_callers(
-            [with_structural_validator({on_failure: "raise", rules: ["no_phantom_completion"]})],
-          ),
+          structural_validator: with_structural_validator({on_failure: "raise", rules: ["no_phantom_completion"]}),
         },
       )
       "no-throw"
@@ -126,7 +123,7 @@ pipeline default() {
         max_iterations: 3,
         tools: write_tools(),
         session_id: post_write_session,
-        tool_caller: compose_tool_callers([with_structural_validator({rules: ["no_phantom_completion"]})]),
+        structural_validator: with_structural_validator({rules: ["no_phantom_completion"]}),
       },
     ) },
   )
@@ -149,9 +146,7 @@ pipeline default() {
           max_iterations: 2,
           tools: write_tools(),
           session_id: malformed_session,
-          tool_caller: compose_tool_callers(
-            [with_structural_validator({on_failure: "raise", rules: ["tool_calls_well_formed"]})],
-          ),
+          structural_validator: with_structural_validator({on_failure: "raise", rules: ["tool_calls_well_formed"]}),
         },
       )
       "no-throw"
@@ -179,7 +174,7 @@ pipeline default() {
         max_iterations: 3,
         tools: write_tools(),
         session_id: well_formed_session,
-        tool_caller: compose_tool_callers([with_structural_validator({rules: ["tool_calls_well_formed"]})]),
+        structural_validator: with_structural_validator({rules: ["tool_calls_well_formed"]}),
       },
     ) },
   )
@@ -203,9 +198,7 @@ pipeline default() {
           max_tokens: 100,
           tools: write_tools(),
           session_id: capped_session,
-          tool_caller: compose_tool_callers(
-            [with_structural_validator({on_failure: "raise", rules: ["output_token_cap_with_zero_calls"]})],
-          ),
+          structural_validator: with_structural_validator({on_failure: "raise", rules: ["output_token_cap_with_zero_calls"]}),
         },
       )
       "no-throw"
@@ -234,7 +227,7 @@ pipeline default() {
         max_tokens: 100,
         tools: write_tools(),
         session_id: under_cap_session,
-        tool_caller: compose_tool_callers([with_structural_validator({rules: ["output_token_cap_with_zero_calls"]})]),
+        structural_validator: with_structural_validator({rules: ["output_token_cap_with_zero_calls"]}),
       },
     ) },
   )
@@ -258,9 +251,7 @@ pipeline default() {
         max_iterations: 4,
         tools: write_tools(),
         session_id: warn_only_session,
-        tool_caller: compose_tool_callers(
-          [with_structural_validator({rules: [{name: "tool_calls_well_formed", warn_only: true}]})],
-        ),
+        structural_validator: with_structural_validator({rules: [{name: "tool_calls_well_formed", warn_only: true}]}),
       },
     ) },
   )

@@ -2,8 +2,8 @@
 //
 // std/llm/structural_validator - deterministic pre-dispatch turn checks.
 //
-// Opt in via `compose_tool_callers([with_structural_validator({...})])`.
-// The middleware intercepts the agent loop's internal
+// Opt in via `agent_loop(..., {structural_validator: with_structural_validator({...})})`.
+// The validator intercepts the agent loop's internal
 // `__structural_validator_turn__` pre-dispatch probe, emits a
 // `structural_validator_decision` event, and either regenerates with
 // feedback or raises.
@@ -508,6 +508,8 @@ fn __sv_handle_turn(call, cfg) {
  * @allocation: heap
  * @errors: [runtime]
  * @api_stability: experimental
+ * Pass the returned closure via `agent_loop({structural_validator: ...})`.
+ *
  * @example: with_structural_validator({on_failure: "regenerate_with_feedback"})
  */
 pub fn with_structural_validator(opts = nil) {
