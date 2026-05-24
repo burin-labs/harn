@@ -30,6 +30,41 @@ type ToolDefinitionSpec = {
   annotations?: dict,
 }
 
+type PathScopeMatcherOptions = {
+  scope?: string,
+  arg_keys?: list<string>,
+  mount_modes?: list<string>,
+  on_violation?: string,
+  patterns?: list<string>,
+}?
+
+/**
+ * path_scope returns a dynamic-permissions matcher that checks path args
+ * against the active session workspace anchor.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: path_scope({mount_modes: ["extend"]})
+ */
+pub fn path_scope(options: PathScopeMatcherOptions = nil) -> dict {
+  let opts = options ?? {}
+  var matcher = {
+    type: "path_scope",
+    scope: opts?.scope ?? "anchor_plus_mounted",
+    arg_keys: opts?.arg_keys ?? ["path", "destination", "source", "file"],
+    on_violation: opts?.on_violation ?? "deny",
+  }
+  if opts?.mount_modes != nil {
+    matcher = matcher + {mount_modes: opts.mount_modes}
+  }
+  if opts?.patterns != nil {
+    matcher = matcher + {patterns: opts.patterns}
+  }
+  return matcher
+}
+
 fn __tool_spec_config(spec: ToolDefinitionSpec) -> ToolDefinitionConfig {
   if type_of(spec) != "dict" {
     throw "tool_define_many: each spec must be a dict"

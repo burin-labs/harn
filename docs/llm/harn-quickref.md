@@ -1893,20 +1893,25 @@ showing stall symptoms.
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 
 ```harn
+import { path_scope } from "std/tools"
+
 agent_loop(task, system, {
   permissions: {
-    allow: {read_note: { args -> args.path.starts_with("/workspace/") }},
-    deny: ["write_note"],
+    allow: {read_note: path_scope(), write_note: path_scope({mount_modes: ["extend"]})},
+    deny: ["dangerous_*"],
     on_escalation: { request -> {grant: "once", approver: "operator"} },
   },
 })
 ```
 
 `allow` and `deny` accept tool-name globs, argument pattern lists, or VM
-predicates. Deny rules win. Escalation callbacks receive a `PermissionRequest`
-dict and return `false`, `true`, `{grant: "once"}`, or `{grant: "session"}`.
-Child agents still intersect with the parent capability policy; escalation
-cannot widen a parent ceiling.
+predicates. `std/tools.path_scope(...)` checks path-like args (`path`,
+`destination`, `source`, `file` by default) against the active session
+`workspace_anchor`; use `mount_modes: ["extend"]` when a mutating tool should
+only accept writable mounted roots. Deny rules win. Escalation callbacks receive
+a `PermissionRequest` dict and return `false`, `true`, `{grant: "once"}`, or
+`{grant: "session"}`. Child agents still intersect with the parent capability
+policy; escalation cannot widen a parent ceiling.
 
 ### Agent lifecycle: pause, resume, self-park
 
@@ -2348,11 +2353,17 @@ agent_session_close(branch)
 agent_session_close(replay)
 ```
 
-Lifecycle builtins (all hard-error on unknown ids except `exists`,
-`open`, `snapshot`, `ancestry`):
+Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
+`snapshot`, `ancestry`):
 
-- `agent_session_open(id?)` / `_close(id)` / `_exists(id)`
+- `agent_session_open(id?, opts?)` / `_close(id)` / `_exists(id)`. `opts` may
+  include `workspace_anchor` and `workspace_policy: {default_mount_mode}`.
 - `agent_session_current_id()` returns the innermost active session id or `nil`.
+- `agent_session_workspace_anchor(id)` / `_set_workspace_anchor(id, anchor)`
+  read and replace the typed anchor.
+- `agent_session_workspace_policy(id)` / `_set_workspace_policy(id, policy)`
+  read and update the default mount mode used when mounted roots omit
+  `mount_mode`.
 - `agent_session_reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
 - `agent_session_inject(id, {role, content, …})` — missing `role` errors.
 - `agent_session_seed_from_jsonl(path, opts?)` creates a new session from a

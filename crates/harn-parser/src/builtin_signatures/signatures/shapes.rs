@@ -343,8 +343,7 @@ pub(crate) const AGENT_SESSION_SEED_OPTS: Ty = Ty::Shape(&[
 /// Input shape for `agent_session_open` `opts.workspace_anchor` and
 /// `agent_session_set_workspace_anchor`. `anchored_at` defaults to now()
 /// when omitted; `additional_roots` defaults to empty. `additional_roots`
-/// element shape is enforced by the runtime
-/// (`crate::workspace_anchor::parse_mounted_root_value`) — keeping the
+/// element shape is enforced by the runtime's workspace-anchor parser — keeping the
 /// type-level slot as `list` keeps the parser-side check lenient enough
 /// to accept gradual call sites without losing runtime safety.
 pub(crate) const WORKSPACE_ANCHOR_INPUT: Ty = Ty::Shape(&[
@@ -362,11 +361,17 @@ pub(crate) const WORKSPACE_ANCHOR_SNAPSHOT: Ty = Ty::Shape(&[
 
 pub(crate) const WORKSPACE_ANCHOR_OR_NIL: Ty = Ty::Union(&[WORKSPACE_ANCHOR_SNAPSHOT, TY_NIL]);
 
-/// `agent_session_open(id?, opts?)` opts argument shape.
-pub(crate) const AGENT_SESSION_OPEN_OPTS: Ty = Ty::Shape(&[ShapeFieldDescriptor::optional(
-    "workspace_anchor",
-    WORKSPACE_ANCHOR_INPUT,
+/// Session-local workspace policy defaults.
+pub(crate) const WORKSPACE_POLICY: Ty = Ty::Shape(&[ShapeFieldDescriptor::optional(
+    "default_mount_mode",
+    TY_STRING,
 )]);
+
+/// `agent_session_open(id?, opts?)` opts argument shape.
+pub(crate) const AGENT_SESSION_OPEN_OPTS: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::optional("workspace_anchor", WORKSPACE_ANCHOR_INPUT),
+    ShapeFieldDescriptor::optional("workspace_policy", WORKSPACE_POLICY),
+]);
 
 /// `agent_session_compact` `opts?` argument.
 pub(crate) const COMPACTION_POLICY: Ty = Ty::Shape(&[
@@ -679,6 +684,7 @@ pub(crate) const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("pinned_model", TY_STRING_OR_NIL),
     ShapeFieldDescriptor::new("pinned_reasoning_policy", TY_STRING_OR_NIL),
     ShapeFieldDescriptor::new("workspace_anchor", WORKSPACE_ANCHOR_OR_NIL),
+    ShapeFieldDescriptor::new("workspace_policy", WORKSPACE_POLICY),
     ShapeFieldDescriptor::optional("summary", TY_STRING),
     ShapeFieldDescriptor::optional("metadata", TY_DICT),
     ShapeFieldDescriptor::optional("state", TY_STRING),

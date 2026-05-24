@@ -60,7 +60,7 @@ the "one-shot" call shape.
 
 | Function | Returns | Notes |
 |---|---|---|
-| `agent_session_open(id?: string)` | `string` | Idempotent. `nil` mints a UUIDv7. |
+| `agent_session_open(id?: string, opts?: dict)` | `string` | Idempotent. `nil` mints a UUIDv7. `opts` may include `workspace_anchor` and `workspace_policy: {default_mount_mode}`. |
 | `agent_session_exists(id)` | `bool` | Safe on unknown ids. |
 | `agent_session_current_id()` | `string` or `nil` | Returns the innermost active session id for the current thread, or `nil` outside any active session. |
 | `agent_session_length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
@@ -73,6 +73,8 @@ the "one-shot" call shape.
 | `agent_session_compact(id, opts)` | `int` | Runs the LLM/truncate/observation-mask/custom compactor. Unknown keys in `opts` error. |
 | `agent_session_inject(id, message)` | `nil` | Appends a `{role, content, …}` message. Missing `role` errors. |
 | `agent_session_seed_from_jsonl(jsonl_path, opts?)` | `dict` | Creates a new session from a replayable `llm_transcript.jsonl` sidecar. |
+| `agent_session_workspace_anchor(id)` / `agent_session_set_workspace_anchor(id, anchor)` | `dict` / `bool` | Read or replace the typed workspace anchor. |
+| `agent_session_workspace_policy(id)` / `agent_session_set_workspace_policy(id, policy)` | `dict` / `bool` | Read or update workspace defaults, including the `default_mount_mode` used for mounted roots that omit `mount_mode`. |
 | `agent_session_close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
 
 ### `agent_session_compact` options

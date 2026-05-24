@@ -1589,12 +1589,15 @@ the ids of artifacts produced by the worker.
 that scopes one agent below the ambient capability policy. `permissions.allow`
 and `permissions.deny` are tool-name glob lists or dicts keyed by tool-name
 glob; dict values may be argument pattern lists or pure Harn predicates of the
-tool args. Deny rules win. If a call is denied and `on_escalation` is present,
-the runtime calls it with a `PermissionRequest` dict. The callback may return
-`false`, `true`, `{grant: "once"}`, or `{grant: "session"}`. Session grants are
-memoized for the same tool and argument payload. Child permissions are still
-intersected with parent `policy` ceilings and cannot widen them. Permission
-decisions append `PermissionGrant`, `PermissionDeny`, and
+tool args. Dict values may also be `path_scope` matchers, which check
+configured path argument keys against the active session `workspace_anchor` and
+can include mounted roots by mount mode. Deny rules win. If a call is denied
+and `on_escalation` is present, the runtime calls it with a `PermissionRequest`
+dict. The callback may return `false`, `true`, `{grant: "once"}`, or
+`{grant: "session"}`. Session grants are memoized for the same tool and
+argument payload. Child permissions are still intersected with parent `policy`
+ceilings and cannot widen them. Permission decisions append `PermissionGrant`,
+`PermissionDeny`, and
 `PermissionEscalation` transcript events; escalation grants from `shadow` or
 `suggest` trigger contexts append a `trust.promote` OpenTrustGraph record at
 `act_with_approval`.

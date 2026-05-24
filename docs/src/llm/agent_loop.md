@@ -1144,11 +1144,14 @@ carry a `policyDecision` receipt with matched rule and rationale.
 `agent_loop(...)`, `sub_agent_run(...)`, and `spawn_agent(...)` also accept a
 `permissions` dict for per-agent dynamic policy. `allow` and `deny` entries can
 be tool-name glob lists, argument pattern lists, or Harn predicates over the tool
-args. `on_escalation` receives a `PermissionRequest` and may return
-`{grant: "once"}`, `{grant: "session"}`, `true`, or `false`. Permission
-decisions are recorded as `PermissionGrant`, `PermissionDeny`, and
-`PermissionEscalation` transcript events, while parent `policy` ceilings still
-intersect with child declarations.
+args. For path-bearing tools, `std/tools.path_scope(...)` returns a matcher that
+checks configured path argument keys against the active session
+`workspace_anchor`; mounted roots can be filtered by `mount_modes` (for example,
+`["extend"]` for writable roots). `on_escalation` receives a
+`PermissionRequest` and may return `{grant: "once"}`, `{grant: "session"}`,
+`true`, or `false`. Permission decisions are recorded as `PermissionGrant`,
+`PermissionDeny`, and `PermissionEscalation` transcript events, while parent
+`policy` ceilings still intersect with child declarations.
 
 Set `background: true` to get a normal worker handle back instead of waiting
 inline. The resulting worker uses `mode: "sub_agent"` and can be resumed with

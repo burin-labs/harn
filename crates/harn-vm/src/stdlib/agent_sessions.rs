@@ -30,8 +30,9 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .arity(VmBuiltinArity::Range { min: 0, max: 2 })
         .doc(
             "Open or create a first-class agent session. `opts` may carry a typed \
-             `workspace_anchor: {primary, additional_roots?, anchored_at?}` to pin the \
-             session's workspace at open time.",
+             `workspace_anchor: {primary, additional_roots?, anchored_at?}` and \
+             `workspace_policy: {default_mount_mode?}` to pin workspace scope at \
+             open time.",
         ),
     SyncBuiltin::new("agent_session_exists", agent_session_exists_builtin)
         .signature("agent_session_exists(id)")
@@ -88,6 +89,20 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
          clear; pass `{primary, additional_roots?, anchored_at?}` to set. Returns \
          true when the value changed.",
     ),
+    SyncBuiltin::new(
+        "agent_session_workspace_policy",
+        agent_session_workspace_policy_builtin,
+    )
+    .signature("agent_session_workspace_policy(id)")
+    .arity(VmBuiltinArity::Exact(1))
+    .doc("Return the session workspace policy defaults."),
+    SyncBuiltin::new(
+        "agent_session_set_workspace_policy",
+        agent_session_set_workspace_policy_builtin,
+    )
+    .signature("agent_session_set_workspace_policy(id, policy)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc("Set the session workspace policy defaults. Returns true when changed."),
     SyncBuiltin::new(
         "agent_session_claim_tool_format",
         agent_session_claim_tool_format_builtin,
@@ -341,7 +356,7 @@ fn close_status_arg(args: &[VmValue]) -> Result<(String, String, serde_json::Val
     }
 }
 
-const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor"];
+const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor", "workspace_policy"];
 
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
@@ -358,14 +373,34 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             )));
         }
     }
-    let anchor = match opts.get("workspace_anchor") {
+    let workspace_policy = match opts.get("workspace_policy") {
         None | Some(VmValue::Nil) => None,
         Some(value) => Some(
-            crate::workspace_anchor::parse_anchor_dict(value)
+            crate::workspace_anchor::parse_workspace_policy_dict(value)
                 .map_err(|message| err(format!("agent_session_open: {message}")))?,
         ),
     };
+    let default_mount_mode = workspace_policy
+        .as_ref()
+        .cloned()
+        .or_else(|| id.as_deref().and_then(agent_sessions::workspace_policy))
+        .unwrap_or_default()
+        .default_mount_mode;
+    let anchor = match opts.get("workspace_anchor") {
+        None | Some(VmValue::Nil) => None,
+        Some(value) => Some(
+            crate::workspace_anchor::parse_anchor_dict_with_default_mount_mode(
+                value,
+                default_mount_mode,
+            )
+            .map_err(|message| err(format!("agent_session_open: {message}")))?,
+        ),
+    };
     let resolved = agent_sessions::open_or_create(id);
+    if let Some(policy) = workspace_policy {
+        agent_sessions::set_workspace_policy(&resolved, policy)
+            .map_err(|message| err(format!("agent_session_open: {message}")))?;
+    }
     if let Some(anchor) = anchor {
         agent_sessions::set_workspace_anchor(&resolved, Some(anchor))
             .map_err(|message| err(format!("agent_session_open: {message}")))?;
@@ -402,12 +437,51 @@ fn agent_session_set_workspace_anchor_builtin(
     let anchor = match args.get(1) {
         None | Some(VmValue::Nil) => None,
         Some(value) => Some(
-            crate::workspace_anchor::parse_anchor_dict(value)
-                .map_err(|message| err(format!("agent_session_set_workspace_anchor: {message}")))?,
+            crate::workspace_anchor::parse_anchor_dict_with_default_mount_mode(
+                value,
+                agent_sessions::workspace_policy(&id)
+                    .unwrap_or_default()
+                    .default_mount_mode,
+            )
+            .map_err(|message| err(format!("agent_session_set_workspace_anchor: {message}")))?,
         ),
     };
     let changed = agent_sessions::set_workspace_anchor(&id, anchor)
         .map_err(|message| err(format!("agent_session_set_workspace_anchor: {message}")))?;
+    Ok(VmValue::Bool(changed))
+}
+
+fn agent_session_workspace_policy_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_workspace_policy", "id")?;
+    agent_sessions::workspace_policy(&id)
+        .map(|policy| policy.to_vm_value())
+        .ok_or_else(|| {
+            err(format!(
+                "agent_session_workspace_policy: unknown session id '{id}'"
+            ))
+        })
+}
+
+fn agent_session_set_workspace_policy_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_set_workspace_policy", "id")?;
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_set_workspace_policy: unknown session id '{id}'"
+        )));
+    }
+    let value = args
+        .get(1)
+        .ok_or_else(|| err("agent_session_set_workspace_policy: `policy` argument is required"))?;
+    let policy = crate::workspace_anchor::parse_workspace_policy_dict(value)
+        .map_err(|message| err(format!("agent_session_set_workspace_policy: {message}")))?;
+    let changed = agent_sessions::set_workspace_policy(&id, policy)
+        .map_err(|message| err(format!("agent_session_set_workspace_policy: {message}")))?;
     Ok(VmValue::Bool(changed))
 }
 
