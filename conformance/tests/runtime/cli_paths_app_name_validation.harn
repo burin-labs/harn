@@ -1,0 +1,20 @@
+import { xdg_config_home } from "std/cli/paths"
+
+fn config_error(name: string) -> string {
+  return try {
+    xdg_config_home(name)
+    "ok"
+  } catch (e) {
+    to_string(e)
+  }
+}
+
+fn main(_harness: Harness) {
+  let message = "std/cli/paths: app_name must be a single path segment"
+  __io_println(config_error("") == message)
+  __io_println(config_error(".") == message)
+  __io_println(config_error("..") == message)
+  __io_println(config_error("harn/config") == message)
+  __io_println(config_error("harn\\config") == message)
+  __io_println(config_error("harn") == "ok")
+}

@@ -17,6 +17,14 @@ condensed series summaries instead of full per-patch history.
   The skip is emitted as a `step_judge_decision` event with `skipped: true`
   and `reason: "low_iteration_budget"`.
 
+### Added
+
+- **CLI path helpers (#2341).** Added `std/cli/paths` with
+  `xdg_config_home(app_name)`, `xdg_data_home(app_name)`, and
+  `xdg_cache_home(app_name)`. The pure-Harn helpers honor absolute XDG
+  env vars, ignore relative XDG values, validate app-name segments, use
+  macOS Library fallbacks, and leave directory creation to callers.
+
 ## v0.8.35
 
 ### Added

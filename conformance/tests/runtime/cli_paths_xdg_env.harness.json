@@ -1,0 +1,9 @@
+{
+  "mode": "mock",
+  "env": {
+    "HOME": "/home/alice",
+    "XDG_CACHE_HOME": "/xdg/cache",
+    "XDG_CONFIG_HOME": "/xdg/config",
+    "XDG_DATA_HOME": "/xdg/data"
+  }
+}

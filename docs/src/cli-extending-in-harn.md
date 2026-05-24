@@ -9,7 +9,8 @@ process spawn — once a port lands, the Rust handler shrinks to a
 This is the cookbook side of the harn-cli self-host epic
 ([harn#2293]). The reference docs for the primitives the scripts
 build on are [`std/cli/argparse`](./cli-argparse-reference.md),
-[`std/cli/render`](./cli-render-reference.md), and the
+[`std/cli/render`](./cli-render-reference.md),
+[`std/cli/paths`](./cli-paths-reference.md), and the
 [`harn --json` contract](./cli-json-contract.md).
 
 ## Architecture
@@ -340,17 +341,39 @@ See the [`std/cli/render` reference](./cli-render-reference.md) for the
 full envelope contract and the [`harn --json` contract](./cli-json-contract.md)
 for the agent-facing version-bump discipline.
 
+## Config, data, and cache paths
+
+CLI scripts that need app-specific directories should use
+[`std/cli/paths`](./cli-paths-reference.md):
+
+```harn
+import { xdg_cache_home, xdg_config_home, xdg_data_home } from "std/cli/paths"
+
+let config_dir = xdg_config_home("harn")
+let data_dir = xdg_data_home("harn")
+let cache_dir = xdg_cache_home("harn")
+```
+
+The helpers honor absolute XDG env vars first, ignore relative XDG env
+vars, use `~/Library/Application Support` and `~/Library/Caches` on
+macOS when XDG is unset, and fall back to the standard `$HOME/.config`,
+`$HOME/.local/share`, and `$HOME/.cache` roots elsewhere. They only
+resolve paths; call `harness.fs.mkdir(...)` if a script needs to create
+the directory.
+
 ## Adding a host capability
 
 When a port discovers a gap in the `harness.*` namespace — something
 the Rust handler does that no `.harn` script can — the answer is a new
 builtin via the G4 pattern ([#2297][g4]). G4 landed a first round of
 free builtins (`sha256_hex`, `spawn_captured`, `term_width`,
-`term_height`, `mkdtemp`, `glob`, `xdg_*`, `llm_catalog`,
+`term_height`, `mkdtemp`, `glob`, `llm_catalog`,
 `llm_provider_status`) that today live as top-level functions so the
-ports could move; the long-term direction promotes each to its
+ports could move. Directory policy that can be expressed from env vars
+belongs in `std/cli/paths` instead of a host capability. The long-term
+direction promotes each remaining free builtin to its
 `harness.X.Y` sub-handle through follow-up issues
-[#2337][f7]-[#2342][f12]. Add new capabilities the same way:
+[#2337][f7]-[#2340][f10] and [#2342][f12]. Add new capabilities the same way:
 
 1. Register the builtin in `crates/harn-vm/src/stdlib/<area>.rs` with
    `register_builtin` and the matching `Harness` accessor.
@@ -407,4 +430,5 @@ per-call allocation off the hot path.
 [g4]: https://github.com/burin-labs/harn/issues/2297
 [g5]: https://github.com/burin-labs/harn/issues/2298
 [f7]: https://github.com/burin-labs/harn/issues/2337
+[f10]: https://github.com/burin-labs/harn/issues/2340
 [f12]: https://github.com/burin-labs/harn/issues/2342

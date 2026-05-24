@@ -1,0 +1,11 @@
+import { xdg_config_home } from "std/cli/paths"
+
+fn main(_harness: Harness) {
+  let message = try {
+    xdg_config_home("harn")
+    "ok"
+  } catch (e) {
+    to_string(e)
+  }
+  __io_println(message == "std/cli/paths: HOME or USERPROFILE must be an absolute path")
+}

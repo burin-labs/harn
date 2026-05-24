@@ -192,6 +192,7 @@
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
 - [`std/cli/argparse`](./cli-argparse-reference.md)
 - [`std/cli/render`](./cli-render-reference.md)
+- [`std/cli/paths`](./cli-paths-reference.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [Project scanning](./project-scan.md)

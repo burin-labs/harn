@@ -214,6 +214,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/cli/render.harn"),
     },
     StdlibSource {
+        module: "cli/paths",
+        source: include_str!("stdlib/cli/paths.harn"),
+    },
+    StdlibSource {
         module: "gha",
         source: include_str!("stdlib/stdlib_gha.harn"),
     },

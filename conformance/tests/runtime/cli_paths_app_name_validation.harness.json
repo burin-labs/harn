@@ -1,0 +1,6 @@
+{
+  "mode": "mock",
+  "env": {
+    "HOME": "/home/alice"
+  }
+}
