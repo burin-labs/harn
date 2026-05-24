@@ -365,6 +365,7 @@ fn write_graph_harness_fixture(root: &Path) {
         r#"
 fn main(harness: Harness) {
   let body = harness.fs.read_text("README.md")
+  harness.fs.mkdtemp("harn-graph-")
   harness.net.get("https://example.test/data")
   harness.stdio.println(body)
 }
@@ -439,9 +440,9 @@ fn graph_harness_sub_calls_byte_identical_between_impls() {
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
     assert_eq!(harn.stdout, rust.stdout);
-    // The harness.fs / harness.net classifier surfaces both
-    // workspace.read_text and network.http; the text path must list
-    // them on a `requires` line.
+    // The harness.fs / harness.net classifier surfaces workspace
+    // read/write requirements and network.http; the text path must
+    // list them on a `requires` line.
     assert!(
         harn.stdout.contains("requires "),
         "expected `requires ` line, got: {}",

@@ -143,26 +143,7 @@ pub fn harness_stdio_replacement(name: &str) -> Option<&'static str> {
 /// Backs the `bindings/thread-harness-fs` repair the E4.4 → E4.6
 /// migration uses to rewrite `.harn` scripts off the legacy surface.
 pub fn harness_fs_replacement(name: &str) -> Option<&'static str> {
-    match name {
-        "read_file" => Some("harness.fs.read_text"),
-        "read_file_result" => Some("harness.fs.read_text_result"),
-        "read_file_bytes" => Some("harness.fs.read_bytes"),
-        "write_file" => Some("harness.fs.write_text"),
-        "write_file_bytes" => Some("harness.fs.write_bytes"),
-        "file_exists" => Some("harness.fs.exists"),
-        "delete_file" => Some("harness.fs.delete"),
-        "append_file" => Some("harness.fs.append"),
-        "list_dir" => Some("harness.fs.list_dir"),
-        "mkdir" => Some("harness.fs.mkdir"),
-        "copy_file" => Some("harness.fs.copy"),
-        "temp_dir" => Some("harness.fs.temp_dir"),
-        "stat" => Some("harness.fs.stat"),
-        "move_file" => Some("harness.fs.rename"),
-        "read_lines" => Some("harness.fs.read_lines"),
-        "walk_dir" => Some("harness.fs.walk"),
-        "glob" => Some("harness.fs.glob"),
-        _ => None,
-    }
+    crate::harness_methods::harness_fs_replacement(name)
 }
 
 /// Map an ambient env-capability builtin to its `harness.env.*` replacement.

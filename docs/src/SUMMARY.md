@@ -48,6 +48,7 @@
 - [Concurrency](./concurrency.md)
 - [Streams](./streams.md)
 - [Runtime context](./runtime-context.md)
+- [Filesystem host capabilities](./host-capabilities/fs.md)
 - [Language specification](./language-spec.md)
 
 ## Agent runtime

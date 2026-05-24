@@ -1,6 +1,5 @@
-// Free-builtin landing site for the deferred `harness.fs.mkdtemp`
-// sub-handle (see #2297). Verifies the returned path exists, lives
-// under the host temp dir, and gets the requested prefix.
+// Free-builtin alias coverage for mkdtemp. The canonical capability-aware
+// surface is `harness.fs.mkdtemp`.
 let dir = mkdtemp("harn-cli-host-caps-")
 
 __io_println(harness.fs.exists(dir))
