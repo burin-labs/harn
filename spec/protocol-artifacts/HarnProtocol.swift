@@ -461,8 +461,8 @@ public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
 }
 
 public enum HarnMCPCacheScope: String, Codable, Sendable, CaseIterable {
-    case private = "private"
-    case public = "public"
+    case `private` = "private"
+    case `public` = "public"
 
     public static let allCases: [Self] = [
         "private",
