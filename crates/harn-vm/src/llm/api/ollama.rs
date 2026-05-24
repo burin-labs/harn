@@ -751,6 +751,7 @@ async fn ollama_warmup(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::framing::{http_content_length_from_header_lines, TEST_HTTP_MAX_BODY_BYTES};
     use crate::llm::env_lock;
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -1290,16 +1291,20 @@ mod tests {
             let text = String::from_utf8_lossy(&data);
             if let Some(header_end) = text.find("\r\n\r\n") {
                 let headers = &text[..header_end];
-                let content_length = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse::<usize>().ok())
-                            .flatten()
-                    })
-                    .unwrap_or(0);
-                if data.len() >= header_end + 4 + content_length {
+                let content_length = match http_content_length_from_header_lines(
+                    headers.lines(),
+                    TEST_HTTP_MAX_BODY_BYTES,
+                ) {
+                    Ok(content_length) => content_length,
+                    Err(_) => break,
+                };
+                let Some(body_end) = header_end
+                    .checked_add(4)
+                    .and_then(|body_start| body_start.checked_add(content_length))
+                else {
+                    break;
+                };
+                if data.len() >= body_end {
                     break;
                 }
             }

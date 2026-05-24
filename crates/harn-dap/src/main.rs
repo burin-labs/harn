@@ -14,6 +14,8 @@ use debugger::Debugger;
 use host_bridge::{deliver_reply, pending_map_new, DapHostBridge, DapHostCallReply, PendingMap};
 use protocol::{DapMessage, DapResponse};
 
+const MAX_DAP_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
 fn main() {
     // Shared seq counter spans both forward responses (debugger.next_seq)
     // and reverse requests (DapHostBridge.next_seq) so every adapter-
@@ -97,7 +99,15 @@ fn stdin_reader(request_tx: Sender<DapMessage>, pending: PendingMap) {
     let stdin = io::stdin();
     let mut reader = io::BufReader::new(stdin.lock());
 
-    while let Some(content_length) = read_content_length(&mut reader) {
+    loop {
+        let content_length = match read_content_length(&mut reader) {
+            Ok(Some(content_length)) => content_length,
+            Ok(None) => break,
+            Err(error) => {
+                eprintln!("Failed to read DAP frame header: {error}");
+                break;
+            }
+        };
         if content_length == 0 {
             continue;
         }
@@ -135,28 +145,44 @@ fn stdin_reader(request_tx: Sender<DapMessage>, pending: PendingMap) {
     }
 }
 
-fn read_content_length(reader: &mut io::BufReader<io::StdinLock>) -> Option<usize> {
+fn read_content_length<R: BufRead>(reader: &mut R) -> io::Result<Option<usize>> {
     let mut content_length = 0usize;
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
-            Ok(0) => return None,
+            Ok(0) => return Ok(None),
             Ok(_) => {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     if content_length > 0 {
-                        return Some(content_length);
+                        return Ok(Some(content_length));
                     }
                     continue;
                 }
-                if let Some(val) = trimmed.strip_prefix("Content-Length:") {
+                if let Some((name, val)) = trimmed.split_once(':') {
+                    if !name.eq_ignore_ascii_case("Content-Length") {
+                        continue;
+                    }
                     if let Ok(len) = val.trim().parse::<usize>() {
-                        content_length = len;
+                        content_length = bounded_dap_content_length(len)?;
                     }
                 }
             }
-            Err(_) => return None,
+            Err(error) => return Err(error),
         }
+    }
+}
+
+fn bounded_dap_content_length(content_length: usize) -> io::Result<usize> {
+    if content_length > MAX_DAP_FRAME_BYTES {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "DAP Content-Length {content_length} exceeds limit {MAX_DAP_FRAME_BYTES} bytes"
+            ),
+        ))
+    } else {
+        Ok(content_length)
     }
 }
 
@@ -173,4 +199,26 @@ fn send_response(stdout: &Arc<Mutex<Box<dyn Write + Send>>>, response: &DapRespo
     let _ = guard.write_all(header.as_bytes());
     let _ = guard.write_all(body.as_bytes());
     let _ = guard.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_content_length_accepts_case_insensitive_header() {
+        let mut reader = io::BufReader::new(b"content-length: 12\r\n\r\n".as_slice());
+        assert_eq!(
+            read_content_length(&mut reader).expect("content length"),
+            Some(12)
+        );
+    }
+
+    #[test]
+    fn read_content_length_rejects_oversized_frame() {
+        let header = format!("Content-Length: {}\r\n\r\n", MAX_DAP_FRAME_BYTES + 1);
+        let mut reader = io::BufReader::new(header.as_bytes());
+        let error = read_content_length(&mut reader).expect_err("oversized frame");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
 }
