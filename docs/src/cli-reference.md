@@ -1097,9 +1097,15 @@ explicit capability rule for both `native_tools` and `preferred_tool_format`.
 The command exits non-zero and lists suggested defaults when catalog rows need
 coverage.
 
+`promote-from-eval` ingests the parity overlay emitted by
+`harn eval coding-agent` and updates `crates/harn-vm/src/llm/capabilities.toml`
+with exact-model `preferred_tool_format`, `tool_mode_parity`, and
+`tool_mode_parity_notes` rows. The edit is idempotent.
+
 ```bash
 harn provider capabilities audit
 harn provider capabilities audit --json
+harn provider capabilities promote-from-eval .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml
 ```
 
 ## harn provider-probe

@@ -54,6 +54,10 @@ use crate::commands::local_readiness;
 use crate::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunProfileOptions, RunSandboxOptions,
 };
+use crate::commands::tool_mode_parity::{
+    self, ToolModeParityObservation, TOOL_MODE_PARITY_FIXTURE_SUITE,
+    TOOL_MODE_PARITY_OVERLAY_FILENAME,
+};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
@@ -1587,15 +1591,44 @@ fn write_json_artifacts(output_dir: &Path, summary: &EvalSummary) -> Result<(), 
         output_dir.display().to_string(),
     )?;
     write_json_pretty(&output_dir.join("local_readiness.json"), &readiness)?;
+    let generated_at = RealClock::new()
+        .now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(|error| format!("failed to format parity overlay timestamp: {error}"))?;
+    let observations = summary
+        .runs
+        .iter()
+        .map(|run| ToolModeParityObservation {
+            provider: run.selector.provider.clone(),
+            model: run.selector.model.clone(),
+            fixture_id: run.fixture_id.clone(),
+            run_id: run.run_id.clone(),
+            tool_format: run.tool_format.clone(),
+            passed: run.passed,
+            skipped: run.skipped,
+            verification_success: run.verification_success,
+        })
+        .collect::<Vec<_>>();
+    let overlay = tool_mode_parity::build_overlay(
+        &observations,
+        &generated_at,
+        TOOL_MODE_PARITY_FIXTURE_SUITE,
+        output_dir,
+    );
+    tool_mode_parity::write_overlay(
+        &output_dir.join(TOOL_MODE_PARITY_OVERLAY_FILENAME),
+        &overlay,
+    )?;
     Ok(())
 }
 
 fn announce_output_paths(output_dir: &Path) {
     eprintln!(
-        "wrote {}, {}, {}, {}, and {}",
+        "wrote {}, {}, {}, {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_run.jsonl").display(),
         output_dir.join("local_readiness.json").display(),
+        output_dir.join(TOOL_MODE_PARITY_OVERLAY_FILENAME).display(),
         output_dir.join("summary.md").display(),
         output_dir.join("followups.md").display()
     );

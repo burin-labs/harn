@@ -26,6 +26,8 @@ pub(crate) struct ProviderCapabilitiesArgs {
 pub(crate) enum ProviderCapabilitiesCommand {
     /// Audit catalogued priced chat models for explicit tool capability fields.
     Audit(ProviderCapabilitiesAuditArgs),
+    /// Apply a generated parity overlay to the capability catalog.
+    PromoteFromEval(ProviderCapabilitiesPromoteFromEvalArgs),
 }
 
 #[derive(Debug, Args)]
@@ -33,6 +35,15 @@ pub(crate) struct ProviderCapabilitiesAuditArgs {
     /// Emit the structured audit report as JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderCapabilitiesPromoteFromEvalArgs {
+    /// Generated overlay TOML from `harn eval coding-agent`.
+    pub overlay_path: PathBuf,
+    /// Capability catalog TOML to update in place.
+    #[arg(long, default_value = "crates/harn-vm/src/llm/capabilities.toml")]
+    pub catalog: PathBuf,
 }
 
 #[derive(Debug, Args)]

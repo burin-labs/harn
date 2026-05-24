@@ -112,6 +112,124 @@ fn markdown_escapes_model_table_pipes() {
 }
 
 #[test]
+fn write_json_artifacts_emits_tool_mode_parity_overlay() {
+    let selector = ModelSelector {
+        selector: "openrouter:qwen/qwen3-coder".to_string(),
+        provider: "openrouter".to_string(),
+        model: "qwen/qwen3-coder".to_string(),
+    };
+    let summary = EvalSummary {
+        schema_version: 2,
+        fixture_ids: vec!["python-add".to_string()],
+        fixtures: vec![FixtureReport {
+            id: "python-add".to_string(),
+            name: "Python add repair".to_string(),
+            tool_sequence: "multi-tool".to_string(),
+            description: "One-file Python bug fix verified by unittest output.".to_string(),
+        }],
+        output_dir: "out".to_string(),
+        models: vec![selector.clone()],
+        tool_formats: vec!["native".to_string(), "text".to_string()],
+        env_keys_loaded: Vec::new(),
+        total_runs: 2,
+        passed_runs: 1,
+        failed_runs: 1,
+        skipped_runs: 0,
+        diverged_comparisons: 1,
+        total_cost_usd: 0.0,
+        rollups: EvalRollups {
+            by_fixture: Vec::new(),
+            by_provider: Vec::new(),
+            by_model: Vec::new(),
+            by_tool_format: Vec::new(),
+            by_tool_sequence: Vec::new(),
+        },
+        runs: vec![
+            RunReport {
+                run_id: "native".to_string(),
+                fixture_id: "python-add".to_string(),
+                fixture_name: "Python add repair".to_string(),
+                fixture_tool_sequence: "multi-tool".to_string(),
+                selector: selector.clone(),
+                tool_format: "native".to_string(),
+                status: "failed".to_string(),
+                passed: false,
+                skipped: false,
+                skipped_reason: None,
+                output_dir: "out/native".to_string(),
+                transcript_events_path: "out/native/transcript_events.jsonl".to_string(),
+                workspace_root: None,
+                elapsed_ms: 1,
+                duration_ms: 1,
+                iterations: 1,
+                input_tokens: 1,
+                output_tokens: 1,
+                cost_usd: 0.0,
+                pricing_known: false,
+                tool_calls: 0,
+                rejected_tool_calls: 0,
+                tool_sequence: Vec::new(),
+                successful_tools: Vec::new(),
+                transcript_event_count: 0,
+                verification_success: false,
+                harn_exit_code: 1,
+                error: None,
+                stderr_excerpt: None,
+                local_cleanup: None,
+            },
+            RunReport {
+                run_id: "text".to_string(),
+                fixture_id: "python-add".to_string(),
+                fixture_name: "Python add repair".to_string(),
+                fixture_tool_sequence: "multi-tool".to_string(),
+                selector,
+                tool_format: "text".to_string(),
+                status: "passed".to_string(),
+                passed: true,
+                skipped: false,
+                skipped_reason: None,
+                output_dir: "out/text".to_string(),
+                transcript_events_path: "out/text/transcript_events.jsonl".to_string(),
+                workspace_root: None,
+                elapsed_ms: 1,
+                duration_ms: 1,
+                iterations: 1,
+                input_tokens: 1,
+                output_tokens: 1,
+                cost_usd: 0.0,
+                pricing_known: false,
+                tool_calls: 0,
+                rejected_tool_calls: 0,
+                tool_sequence: Vec::new(),
+                successful_tools: Vec::new(),
+                transcript_event_count: 0,
+                verification_success: true,
+                harn_exit_code: 0,
+                error: None,
+                stderr_excerpt: None,
+                local_cleanup: None,
+            },
+        ],
+        comparisons: Vec::new(),
+        followups: Vec::new(),
+        step_judge_preset: None,
+        run_label: String::new(),
+        baseline_comparison: None,
+    };
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_json_artifacts(temp.path(), &summary).expect("write artifacts");
+
+    let overlay = crate::commands::tool_mode_parity::read_overlay(
+        &temp.path().join(TOOL_MODE_PARITY_OVERLAY_FILENAME),
+    )
+    .expect("read overlay");
+    assert_eq!(overlay.fixture_suite, TOOL_MODE_PARITY_FIXTURE_SUITE);
+    assert_eq!(overlay.rows.len(), 1);
+    assert_eq!(overlay.rows[0].preferred_tool_format, "text");
+}
+
+#[test]
 fn tool_format_override_warning_line_extracts_first_match() {
     let stderr = "\
 debug noise

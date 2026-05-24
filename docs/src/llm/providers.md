@@ -252,6 +252,12 @@ unreliable side. Model-catalog display tags are derived from this matrix too;
 legacy `models.*.capabilities` entries are parsed for backwards compatibility
 but do not override runtime capability resolution.
 
+`harn eval coding-agent` now emits
+`.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml`, and
+`harn provider capabilities promote-from-eval <overlay>` applies those
+deterministic parity verdicts back into
+`crates/harn-vm/src/llm/capabilities.toml`.
+
 The matrix also records format preferences that prompt renderers can use
 without branching on provider names: XML vs. Markdown section scaffolding,
 native JSON vs. delimited/XML-tagged structured-output preference, assistant
