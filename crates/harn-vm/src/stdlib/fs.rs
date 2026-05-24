@@ -70,6 +70,16 @@ const FS_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("temp_dir()")
         .arity(VmBuiltinArity::Exact(0))
         .doc("Return the host temporary directory path."),
+    SyncBuiltin::new("mkdtemp", mkdtemp_builtin)
+        .signature("mkdtemp(prefix?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .doc(
+            "Create a new uniquely-named directory under the host temp dir and return its \
+             absolute path. The caller owns the directory's lifecycle — it is NOT cleaned up \
+             automatically; pair with `delete_file(path)` when finished. Optional `prefix` is \
+             prepended to the random suffix (default `\"harn-\"`). This is the free-builtin \
+             landing site for the deferred `harness.fs.mkdtemp` sub-handle (see #2297).",
+        ),
     SyncBuiltin::new("stat", stat_builtin)
         .signature("stat(path)")
         .arity(VmBuiltinArity::Exact(1))
@@ -640,6 +650,44 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(Rc::from(
         std::env::temp_dir().to_string_lossy().into_owned().as_str(),
+    )))
+}
+
+fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let raw_prefix = args
+        .first()
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "harn-".to_string());
+    // Strip any path separators from the prefix so callers cannot
+    // smuggle their own subdirectory tree past `std::env::temp_dir()`.
+    // We keep this defensive rather than throwing because most callers
+    // pass a simple identifier like `"harn-doctor-"` and a slip-through
+    // shouldn't blow up the script.
+    let sanitized_prefix: String = raw_prefix
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\'))
+        .collect();
+    // 8 hex chars from the v7 uuid suffix gives 32 bits of distinctness,
+    // more than enough for typical short-lived scratch dirs and short
+    // enough to keep the absolute path readable.
+    let suffix = uuid::Uuid::now_v7().simple().to_string();
+    let short_suffix = &suffix[suffix.len().saturating_sub(12)..];
+    let dir_name = format!("{sanitized_prefix}{short_suffix}");
+    let path = std::env::temp_dir().join(dir_name);
+    crate::stdlib::sandbox::enforce_fs_path(
+        "mkdtemp",
+        &path,
+        crate::stdlib::sandbox::FsAccess::Write,
+    )?;
+    std::fs::create_dir(&path).map_err(|error| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "mkdtemp: failed to create {}: {error}",
+            path.display()
+        ))))
+    })?;
+    Ok(VmValue::String(Rc::from(
+        path.to_string_lossy().into_owned(),
     )))
 }
 

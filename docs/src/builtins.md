@@ -556,6 +556,7 @@ does **not** drain the iterator.
 | `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
 | `temp_dir()` | none | string | System temporary directory path |
+| `mkdtemp(prefix?)` | prefix: string (default `"harn-"`) | string | Create a new uniquely-named directory under the host temp dir and return its absolute path. The caller owns the directory's lifecycle — it is **not** cleaned up automatically; pair with `delete_file(path)` when finished. Path separators in `prefix` are stripped so callers cannot smuggle subdirectory trees |
 | `render(path, bindings?)` | path: string, bindings: dict | string | Read a template asset and render it. `path` may be source-relative, `@/<rel>` (anchored at the calling file's project root), `@<alias>/<rel>` (anchored at a `[asset_roots]` entry in `harn.toml`), or an embedded `std/...harn.prompt` stdlib prompt asset — see [Package-root prompt assets](./modules.md#package-root-prompt-assets). The template language supports `{{ name }}` interpolation (with nested paths and filters), `{{ if }} / {{ elif }} / {{ else }} / {{ end }}`, `{{ for item in xs }} ... {{ end }}` (with `{{ loop.index }}` etc.), `{{ include "..." }}` partials, logical `{{ section "task" }} ... {{ endsection }}` prompt sections, `{{# comments #}}`, `{{ raw }} ... {{ endraw }}` verbatim blocks, and `{{- -}}` whitespace trim markers. See the [Prompt templating reference](./prompt-templating.md) for the full grammar and filter list. Source-relative paths called from an imported module resolve relative to that module's directory, not the entry pipeline. Without bindings, just reads the file |
 | `render_prompt(path, bindings?)` | path: string, bindings: dict | string | Prompt-oriented alias of `render(...)`. Use this for `.harn.prompt` / `.prompt` assets when you want the asset to be surfaced explicitly in bundle manifests and preflight output. Accepts the same `@/<rel>`, `@<alias>/<rel>`, and embedded `std/...harn.prompt` forms as `render(...)` |
 | `render_string(template, bindings?)` | template: string, bindings: dict | string | Render an inline template string with the same template engine as `render(...)`. Useful when a library wants to embed a template directly in source instead of shipping a separate `.prompt` file. `{{ include "..." }}` resolves relative to the current module's asset root, with `@/<rel>` and `@<alias>/<rel>` supported |
@@ -572,6 +573,9 @@ does **not** drain the iterator.
 | `exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute external command inside a specific directory |
 | `shell(cmd)` | cmd: string | dict | Execute command via shell. Returns stdout/stderr plus status metadata and `success` |
 | `shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute shell command inside a specific directory |
+| `spawn_captured(opts)` | opts: dict | dict | Run an external command synchronously with structured options. Unlike `exec(...)` this takes a dict of `{cmd, args?, cwd?, env?, stdin?, timeout_ms?}` and supports feeding a stdin payload plus a per-call timeout. Returns `{exit_code, stdout, stderr, duration_ms, success, timed_out}`. On timeout the child is killed, `exit_code = -1`, `success = false`, and `timed_out = true` |
+| `term_width()` | none | int | Current terminal column count. Reads `COLUMNS` env first (so harnesses can pin a value), falls back to the platform window size, then to `80` |
+| `term_height()` | none | int | Current terminal row count. Reads `LINES` env first, falls back to the platform window size, then to `24` |
 | `exit(code)` | code: int (default 0) | never | Terminate the process |
 | `username()` | none | string | Current OS username |
 | `hostname()` | none | string | Machine hostname |
@@ -672,6 +676,7 @@ log(url_decode("hello+world"))         // hello world
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `sha256(string)` | string: string | string | SHA-256 hash, returned as a lowercase hex-encoded string |
+| `sha256_hex(string_or_bytes)` | string_or_bytes: string or bytes | string | Like `sha256(...)` but accepts a `bytes` value directly without stringifying. Use this when content-addressing binary payloads (e.g. `harn eval *`, `harn trace import`, `harn doctor` file fingerprints). For string inputs the digest matches `sha256(...)` |
 | `md5(string)` | string: string | string | MD5 hash, returned as a lowercase hex-encoded string |
 
 Example:
@@ -1670,10 +1675,12 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` / `thinking_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `reasoning_effort` |
 | `llm_rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool | Set (`{rpm: N}`), query, or clear (`{rpm: 0}`) per-provider rate limit |
 | `llm_providers()` | — | list | List all configured provider names |
+| `llm_provider_status()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"`. Used by `harn providers` and `harn doctor` to render a single combined table |
 | `llm_available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
 | `llm_known_models()` | — | list | List configured model alias names |
 | `llm_qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
 | `llm_provider_catalog()` | — | dict | Return the loaded provider/model catalog: providers, aliases, model metadata, pricing, QC defaults, and availability |
+| `llm_catalog()` | — | list | Return the full configured model catalog as a list of dicts: `[{id, name, provider, context_window, runtime_context_window, capabilities, quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`. Read-only view used by `harn models list` / `harn models recommend` |
 | `llm_config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
 | `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | float | Estimate USD cost from catalog pricing, falling back to embedded pricing |
 | `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |

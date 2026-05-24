@@ -667,7 +667,9 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT_OR_NIL,
     ),
+    BuiltinSignature::simple("llm_catalog", &[], TY_LIST),
     BuiltinSignature::simple("llm_provider_catalog", &[], TY_DICT),
+    BuiltinSignature::simple("llm_provider_status", &[], TY_LIST),
     BuiltinSignature::simple("llm_providers", &[], TY_LIST),
     BuiltinSignature::simple(
         "llm_qc_default_model",

@@ -1,0 +1,8 @@
+// Free-builtin landing site for the deferred `harness.crypto.sha256`
+// sub-handle (see #2297). `sha256_hex` accepts both strings and bytes
+// and returns a lowercase hex digest.
+__io_println(sha256_hex(""))
+
+__io_println(sha256_hex("hello"))
+
+__io_println(sha256_hex("hello") == sha256("hello"))
