@@ -1,0 +1,110 @@
+// std/cli/render — output helpers for CLI subcommand `.harn` scripts
+// dispatched via the harn-cli wedge (harn#2293 epic, harn#2296 G3).
+//
+// Most port-facing rendering primitives already live elsewhere in the
+// stdlib — this module is intentionally a thin layer that fills the
+// gaps:
+//
+//   * Color & tty detection: import from `std/ansi` (`ansi_color`,
+//     `ansi_bold`, `ansi_strip`, `ansi_enabled`) and `std/io` (`is_tty`).
+//     Both honor `NO_COLOR` and `HARN_COLOR` per the existing
+//     `ansi_enabled` policy.
+//   * Tables: `std/table` already provides `render_table`,
+//     `render_markdown_table`, and `render_kv_table` with column
+//     auto-width, alignment, and per-cell truncation.
+//   * Diffs: `std/diff` covers Myers-style diff rendering.
+//
+// What this module adds:
+//
+//   * `envelope` / `write_envelope` — stable-shape JSON envelope wrappers
+//     for `--json` mode, with pinned top-level key ordering so snapshot
+//     tests stay stable across runs.
+//   * `mode()` — small helper for "am I in JSON mode?" so port scripts
+//     don't have to read `HARN_OUTPUT_JSON` directly.
+import { is_tty } from "std/io"
+
+/**
+ * Returns "json" when the host (clap) saw `--json`, or the user's
+ * `HARN_OUTPUT_JSON=1` env is set; otherwise "human". The harn-cli
+ * dispatch wedge sets the env var when `--json` is parsed at the host
+ * level (see harn#2294 G1).
+ *
+ * @effects: [env.read]
+ * @allocation: none
+ * @errors: []
+ * @api_stability: stable
+ * @example: mode()
+ */
+pub fn mode() -> string {
+  if env_or("HARN_OUTPUT_JSON", "0") == "1" {
+    return "json"
+  }
+  return "human"
+}
+
+/**
+ * True when the script should emit a JSON envelope instead of human
+ * output. Sugar over `mode() == "json"`.
+ *
+ * @effects: [env.read]
+ * @allocation: none
+ * @errors: []
+ * @api_stability: stable
+ * @example: json_mode()
+ */
+pub fn json_mode() -> bool {
+  return mode() == "json"
+}
+
+/**
+ * Shape of an `envelope` result. `schema_version` plus `api_stability`
+ * always come first in the serialized form so consumers can switch on
+ * them without parsing prose.
+ */
+type Envelope = {schema_version: int, api_stability: string, payload: any, warnings?: list<string>}
+
+/**
+ * Wrap `payload` in a stable-shape JSON envelope. Harn's
+ * `json_stringify` serializes dict keys alphabetically — so the
+ * envelope's serialized form is always `apiStability` < `payload` <
+ * `schemaVersion` < `warnings`, deterministically, regardless of how
+ * the script builds the dict. Snapshot tests can rely on that order.
+ *
+ * `api_stability` should be one of: "stable", "experimental", "internal".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: envelope({schema_version: 1, api_stability: "stable", payload: {ok: true}})
+ */
+pub fn envelope(spec: Envelope) -> dict {
+  // Insertion order doesn't matter — json_stringify sorts keys
+  // alphabetically — but build the dict in a readable order anyway.
+  var out = {schemaVersion: spec.schema_version, apiStability: spec.api_stability}
+  if spec.warnings != nil && len(spec.warnings) > 0 {
+    out = out + {warnings: spec.warnings}
+  }
+  out = out + {payload: spec.payload}
+  return out
+}
+
+/**
+ * Serialize an envelope and write it to stdout. Uses pretty-printed
+ * JSON when stdout is a tty (so humans can read it without piping
+ * through `jq`), compact JSON otherwise.
+ *
+ * @effects: [stdio.write]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: write_envelope(envelope({schema_version: 1, api_stability: "stable", payload: result}))
+ */
+pub fn write_envelope(env: dict) {
+  let text = if is_tty(1) {
+    json_stringify_pretty(env)
+  } else {
+    json_stringify(env)
+  }
+  __io_println(text)
+}
