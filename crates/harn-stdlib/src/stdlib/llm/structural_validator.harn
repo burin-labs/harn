@@ -1,0 +1,268 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/structural_validator - deterministic pre-dispatch turn checks.
+//
+// Opt in via `compose_tool_callers([with_structural_validator({...})])`.
+// The middleware intercepts the agent loop's internal
+// `__structural_validator_turn__` pre-dispatch probe, emits a
+// `structural_validator_decision` event, and either regenerates with
+// feedback or raises.
+import { agent_emit_event } from "std/agent/state"
+
+fn __sv_tool_name() -> string {
+  return "__structural_validator_turn__"
+}
+
+fn __sv_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __sv_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __sv_string(value) -> string {
+  if value == nil {
+    return ""
+  }
+  return to_string(value)
+}
+
+fn __sv_positive_int(value, default_value, name) -> int {
+  if value == nil {
+    return default_value
+  }
+  let parsed = to_int(value)
+  if parsed == nil {
+    throw "with_structural_validator: `" + name + "` must be an integer; got " + type_of(value)
+  }
+  if parsed <= 0 {
+    throw "with_structural_validator: `" + name + "` must be > 0; got " + to_string(parsed)
+  }
+  return parsed
+}
+
+fn __sv_normalize_rules(value) {
+  if value == nil {
+    return ["non_empty_when_writes_expected"]
+  }
+  let raw = __sv_list(value)
+  if len(raw) == 0 {
+    return ["non_empty_when_writes_expected"]
+  }
+  var rules = []
+  for item in raw {
+    let name = trim(__sv_string(item))
+    if name != "" && !contains(rules, name) {
+      rules = rules.push(name)
+    }
+  }
+  if len(rules) == 0 {
+    return ["non_empty_when_writes_expected"]
+  }
+  return rules
+}
+
+fn __sv_validate_opts(opts) {
+  let cfg = __sv_dict(opts)
+  let on_failure = __sv_string(cfg?.on_failure ?? "regenerate_with_feedback")
+  if on_failure != "regenerate_with_feedback" && on_failure != "raise" {
+    throw "with_structural_validator: `on_failure` must be regenerate_with_feedback|raise; got "
+      + on_failure
+  }
+  let rules = __sv_normalize_rules(cfg?.rules)
+  for rule in rules {
+    if rule != "non_empty_when_writes_expected" {
+      throw "with_structural_validator: unknown rule `" + rule + "`"
+    }
+  }
+  return {
+    on_failure: on_failure,
+    max_attempts: __sv_positive_int(cfg?.max_attempts, 3, "max_attempts"),
+    rules: rules,
+  }
+}
+
+fn __sv_tool_annotations(entry) {
+  let direct = entry?.annotations
+  if type_of(direct) == "dict" {
+    return direct
+  }
+  let func = entry?.function
+  if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
+    return func.annotations
+  }
+  return {}
+}
+
+fn __sv_tool_entry_has_write_capability(entry) -> bool {
+  let annotations = __sv_tool_annotations(entry)
+  let side_effect_level = lowercase(__sv_string(annotations?.side_effect_level ?? annotations?.sideEffectLevel))
+  if side_effect_level == "none" || side_effect_level == "read_only" {
+    return false
+  }
+  let kind = lowercase(__sv_string(annotations?.kind))
+  if contains(["read", "search", "think", "fetch"], kind) {
+    return false
+  }
+  return true
+}
+
+fn __sv_workspace_has_write_capability(payload) -> bool {
+  let policy = __sv_dict(payload?.policy)
+  let ceiling = lowercase(__sv_string(policy?.side_effect_level))
+  if ceiling == "none" || ceiling == "read_only" {
+    return false
+  }
+  let tools = __sv_dict(payload?.tools)
+  let entries = __sv_list(tools?.tools)
+  for entry in entries {
+    if type_of(entry) == "dict" && __sv_tool_entry_has_write_capability(entry) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __sv_done_marker_present(payload) -> bool {
+  return trim(__sv_string(payload?.parsed_done_marker)) != ""
+}
+
+fn __sv_non_empty_when_writes_expected(payload) {
+  if !__sv_workspace_has_write_capability(payload) {
+    return nil
+  }
+  if len(__sv_list(payload?.tool_calls)) > 0 {
+    return nil
+  }
+  if __sv_done_marker_present(payload) {
+    return nil
+  }
+  return {
+    rule: "non_empty_when_writes_expected",
+    diagnostic: "Assistant emitted no tool calls while writable tools were available.",
+    recommended_action: "Emit the concrete write or edit tool call needed for the task, or only mark the task done after that work is complete.",
+  }
+}
+
+fn __sv_feedback_payload(verdict) {
+  return json_stringify(
+    {rule: verdict.rule, diagnostic: verdict.diagnostic, recommended_action: verdict.recommended_action},
+  )
+}
+
+fn __sv_emit_decision(session_id, iteration, cfg, verdict, attempts, skipped = false, reason = nil) {
+  agent_emit_event(
+    session_id,
+    "structural_validator_decision",
+    {
+      iteration: iteration,
+      rule: verdict?.rule ?? "",
+      diagnostic: verdict?.diagnostic ?? "",
+      recommended_action: verdict?.recommended_action ?? "",
+      vetoed: verdict != nil,
+      skipped: skipped,
+      reason: reason,
+      on_failure: cfg.on_failure,
+      attempts: attempts,
+      max_attempts: cfg.max_attempts,
+    },
+  )
+}
+
+fn __sv_pass_result(call, configured, skipped = false, reason = nil) {
+  return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: {configured: configured, vetoed: false, skipped: skipped, reason: reason},
+    rendered_result: "",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  }
+}
+
+fn __sv_veto_result(call, cfg, verdict) {
+  return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: {
+      configured: true,
+      vetoed: true,
+      skipped: false,
+      rule: verdict.rule,
+      diagnostic: verdict.diagnostic,
+      recommended_action: verdict.recommended_action,
+      feedback: __sv_feedback_payload(verdict),
+      on_failure: cfg.on_failure,
+    },
+    rendered_result: verdict.diagnostic,
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  }
+}
+
+fn __sv_handle_turn(call, cfg) {
+  let payload = __sv_dict(call?.tool_args)
+  let session_id = __sv_string(payload?.session_id ?? call?.turn?.session_id)
+  let iteration = to_int(payload?.iteration ?? call?.turn?.iteration) ?? 0
+  let attempts = to_int(payload?.attempts) ?? 0
+  if attempts >= cfg.max_attempts {
+    __sv_emit_decision(session_id, iteration, cfg, nil, attempts, true, "max_attempts_reached")
+    return __sv_pass_result(call, true, true, "max_attempts_reached")
+  }
+  for rule in cfg.rules {
+    let verdict = if rule == "non_empty_when_writes_expected" {
+      __sv_non_empty_when_writes_expected(payload)
+    } else {
+      nil
+    }
+    if verdict != nil {
+      __sv_emit_decision(session_id, iteration, cfg, verdict, attempts)
+      return __sv_veto_result(call, cfg, verdict)
+    }
+  }
+  return __sv_pass_result(call, true)
+}
+
+/**
+ * with_structural_validator(opts) -> caller
+ *
+ * Deterministic pre-dispatch turn validator. The current landable rule
+ * is `non_empty_when_writes_expected`.
+ *
+ * Options:
+ *   on_failure:  "regenerate_with_feedback" | "raise"
+ *   max_attempts: int > 0 (default 3)
+ *   rules: ["non_empty_when_writes_expected"]
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: with_structural_validator({on_failure: "regenerate_with_feedback"})
+ */
+pub fn with_structural_validator(opts = nil) {
+  let cfg = __sv_validate_opts(opts)
+  return { call, next ->
+    if call?.tool_name != __sv_tool_name() {
+      return next(call)
+    }
+    return __sv_handle_turn(call, cfg)
+  }
+}

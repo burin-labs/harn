@@ -329,6 +329,92 @@ fn __middleware_exception_result(envelope, err) {
   }
 }
 
+fn __structural_validator_tool_name() -> string {
+  return "__structural_validator_turn__"
+}
+
+fn __structural_validator_pass_result(envelope) {
+  return {
+    ok: true,
+    status: "ok",
+    tool_name: envelope.tool_name,
+    tool_call_id: envelope.call_id,
+    arguments: envelope.tool_args,
+    result: {configured: false, vetoed: false, skipped: true, reason: "not_configured"},
+    rendered_result: "",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  }
+}
+
+fn __run_structural_validator(
+  caller,
+  session_id,
+  llm_result,
+  tool_calls,
+  parsed,
+  turn_opts,
+  attempts,
+) {
+  if caller == nil {
+    return {configured: false, vetoed: false, skipped: true, reason: "not_configured"}
+  }
+  let envelope = {
+    tool_name: __structural_validator_tool_name(),
+    tool_args: {
+      session_id: session_id,
+      iteration: turn_opts?._turn_iteration ?? 0,
+      attempts: attempts,
+      tool_calls: tool_calls,
+      tools: turn_opts?.tools,
+      policy: turn_opts?.policy,
+      assistant_text: llm_result?.visible_text ?? llm_result?.text ?? "",
+      raw_text: llm_result?.raw_text ?? llm_result?.text ?? "",
+      parsed_done_marker: parsed?.done_marker ?? "",
+      output_tokens: llm_result?.output_tokens ?? 0,
+      provider: llm_result?.provider ?? "",
+      model: llm_result?.model ?? "",
+    },
+    call_id: "structural-validator-turn-" + to_string(turn_opts?._turn_iteration ?? 0),
+    declared_executor: "harn",
+    schema: nil,
+    annotations: nil,
+    description: "Internal structural validator probe",
+    turn: {
+      iteration: turn_opts?._turn_iteration ?? 0,
+      session_id: session_id,
+      run_id: turn_opts?.run_id ?? turn_opts?._run_id,
+      model: turn_opts?.model,
+      provider: turn_opts?.provider,
+      tool_call_index: 0,
+      max_concurrent_tools: 1,
+      prefetch_next_turn: false,
+    },
+  }
+  let next = { env_in -> __structural_validator_pass_result(env_in) }
+  let outcome = try {
+    caller(envelope, next)
+  }
+  if is_err(outcome) {
+    let err = unwrap_err(outcome)
+    if error_category(err) == "cancelled" {
+      throw err
+    }
+    throw "agent_loop: structural validator failed: " + to_string(err)
+  }
+  let result = unwrap(outcome)
+  if type_of(result) != "dict" {
+    throw "agent_loop: structural validator must return a dict; got " + type_of(result)
+  }
+  return if type_of(result?.result) == "dict" {
+    result.result
+  } else {
+    {}
+  }
+}
+
 fn __invoke_tool(call, tools, options) {
   let caller = options?._tool_caller
   if caller == nil {
@@ -1112,6 +1198,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var verify_attempts = 0
     var done_judge_invocations = 0
     var step_judge_attempts = 0
+    var structural_validator_attempts = 0
     var consecutive_text_only = 0
     var fallback_index = 0
     var successful_tools_seen = []
@@ -1235,6 +1322,45 @@ fn __agent_loop_run(message, session, initial_opts) {
       stall_state = stall_observation.state
       stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
       let stall_warning = stall_observation.warning
+      let structural_verdict = __run_structural_validator(
+        opts?._tool_caller,
+        session.session_id,
+        normalized + {raw_text: raw_text},
+        tool_calls,
+        parsed,
+        turn_opts,
+        structural_validator_attempts,
+      )
+      if structural_verdict.vetoed {
+        let on_failure = structural_verdict?.on_failure ?? "regenerate_with_feedback"
+        if on_failure == "raise" {
+          throw structural_verdict?.diagnostic
+            ?? "structural validator rejected assistant turn"
+        }
+        structural_validator_attempts = structural_validator_attempts + 1
+        agent_session_pop_last_assistant(session.session_id)
+        let feedback = to_string(structural_verdict?.feedback ?? "")
+        if feedback != "" {
+          agent_session_inject_feedback(session.session_id, "structural_validator", feedback)
+        }
+        agent_emit_event(
+          session.session_id,
+          "turn_end",
+          {
+            iteration: turn_index + 1,
+            turn_info: __turn_info_payload(llm_result, 0, visible_text)
+              + {
+              dispatch_skipped: true,
+              skip_reason: "structural_validator_revise",
+              structural_validator_attempts: structural_validator_attempts,
+              structural_validator_rule: structural_verdict?.rule ?? "",
+            },
+          },
+        )
+        continue
+      } else if !(structural_verdict?.skipped ?? false) {
+        structural_validator_attempts = 0
+      }
       if stall_judge_due && stall_warning != nil {
         let stall_verify_opts = turn_opts
           + {_done_judge_due: true, _done_judge_trigger: "stalled"}

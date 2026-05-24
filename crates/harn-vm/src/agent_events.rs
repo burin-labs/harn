@@ -486,6 +486,24 @@ pub enum AgentEvent {
         provider: String,
         model: String,
     },
+    /// Deterministic pre-dispatch critique emitted by the structural
+    /// validator middleware. Fires before any LLM-backed judge so hosts
+    /// can distinguish "$0 structural retry" from semantic critique.
+    StructuralValidatorDecision {
+        session_id: String,
+        iteration: usize,
+        rule: String,
+        diagnostic: String,
+        recommended_action: String,
+        vetoed: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        skipped: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        on_failure: String,
+        attempts: usize,
+        max_attempts: usize,
+    },
     TypedCheckpoint {
         session_id: String,
         checkpoint: serde_json::Value,
@@ -839,6 +857,7 @@ impl AgentEvent {
             | Self::SessionClosed { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
             | Self::StepJudgeDecision { session_id, .. }
+            | Self::StructuralValidatorDecision { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }
@@ -1584,6 +1603,76 @@ mod tests {
         }
         let value: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(value["type"], "judge_decision");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn structural_validator_decision_round_trips_through_jsonl_sink() {
+        use std::io::{BufRead, BufReader};
+        let dir = std::env::temp_dir().join(format!(
+            "harn-structural-validator-event-log-{}",
+            uuid::Uuid::now_v7()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("event_log.jsonl");
+        let sink = JsonlEventSink::open(&path).unwrap();
+        sink.handle_event(&AgentEvent::StructuralValidatorDecision {
+            session_id: "s".into(),
+            iteration: 2,
+            rule: "non_empty_when_writes_expected".into(),
+            diagnostic: "Assistant emitted no tool calls while writable tools were available."
+                .into(),
+            recommended_action: "Emit the concrete write or edit tool call needed for the task."
+                .into(),
+            vetoed: true,
+            skipped: false,
+            reason: None,
+            on_failure: "regenerate_with_feedback".into(),
+            attempts: 1,
+            max_attempts: 3,
+        });
+        sink.flush().unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let line = BufReader::new(file).lines().next().unwrap().unwrap();
+        let recovered: PersistedAgentEvent = serde_json::from_str(&line).unwrap();
+        match recovered.event {
+            AgentEvent::StructuralValidatorDecision {
+                session_id,
+                iteration,
+                rule,
+                diagnostic,
+                recommended_action,
+                vetoed,
+                skipped,
+                reason,
+                on_failure,
+                attempts,
+                max_attempts,
+            } => {
+                assert_eq!(session_id, "s");
+                assert_eq!(iteration, 2);
+                assert_eq!(rule, "non_empty_when_writes_expected");
+                assert_eq!(
+                    diagnostic,
+                    "Assistant emitted no tool calls while writable tools were available."
+                );
+                assert_eq!(
+                    recommended_action,
+                    "Emit the concrete write or edit tool call needed for the task."
+                );
+                assert!(vetoed);
+                assert!(!skipped);
+                assert!(reason.is_none());
+                assert_eq!(on_failure, "regenerate_with_feedback");
+                assert_eq!(attempts, 1);
+                assert_eq!(max_attempts, 3);
+            }
+            other => panic!("expected StructuralValidatorDecision, got {other:?}"),
+        }
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["type"], "structural_validator_decision");
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
     }

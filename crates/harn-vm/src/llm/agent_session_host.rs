@@ -1480,6 +1480,25 @@ fn build_agent_event(
             provider: get_string("provider"),
             model: get_string("model"),
         }),
+        "structural_validator_decision" => Ok(AgentEvent::StructuralValidatorDecision {
+            session_id: session_id.to_string(),
+            iteration: get_usize("iteration"),
+            rule: get_string("rule"),
+            diagnostic: get_string("diagnostic"),
+            recommended_action: get_string("recommended_action"),
+            vetoed: payload_obj
+                .and_then(|m| m.get("vetoed"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            skipped: payload_obj
+                .and_then(|m| m.get("skipped"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            reason: get_opt_string("reason"),
+            on_failure: get_string("on_failure"),
+            attempts: get_usize("attempts"),
+            max_attempts: get_usize("max_attempts"),
+        }),
         "typed_checkpoint" => Ok(AgentEvent::TypedCheckpoint {
             session_id: session_id.to_string(),
             checkpoint: payload.clone(),

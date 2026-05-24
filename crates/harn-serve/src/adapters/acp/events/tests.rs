@@ -421,6 +421,22 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             judge_duration_ms: 42,
             trigger: Some("stalled".to_string()),
         },
+        AgentEvent::StructuralValidatorDecision {
+            session_id: "session-1".to_string(),
+            iteration: 1,
+            rule: "non_empty_when_writes_expected".to_string(),
+            diagnostic: "Assistant emitted no tool calls while writable tools were available."
+                .to_string(),
+            recommended_action:
+                "Emit the concrete write or edit tool call needed for the task, or only mark the task done after that work is complete."
+                    .to_string(),
+            vetoed: true,
+            skipped: false,
+            reason: None,
+            on_failure: "regenerate_with_feedback".to_string(),
+            attempts: 0,
+            max_attempts: 3,
+        },
         AgentEvent::TypedCheckpoint {
             session_id: "session-1".to_string(),
             checkpoint: serde_json::json!({
@@ -547,6 +563,37 @@ async fn step_judge_decision_agent_event_marks_skipped_reason() {
     assert_eq!(params["skipped"], true);
     assert_eq!(params["reason"], "low_iteration_budget");
     assert_eq!(params["vetoed"], false);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn structural_validator_decision_agent_event_carries_retry_shape() {
+    let actual = collect_notifications(vec![AgentEvent::StructuralValidatorDecision {
+        session_id: "session-1".to_string(),
+        iteration: 2,
+        rule: "non_empty_when_writes_expected".to_string(),
+        diagnostic: "Assistant emitted no tool calls while writable tools were available."
+            .to_string(),
+        recommended_action: "Emit the concrete write or edit tool call needed for the task."
+            .to_string(),
+        vetoed: true,
+        skipped: false,
+        reason: None,
+        on_failure: "regenerate_with_feedback".to_string(),
+        attempts: 1,
+        max_attempts: 3,
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "structural_validator_decision");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["rule"], "non_empty_when_writes_expected");
+    assert_eq!(params["onFailure"], "regenerate_with_feedback");
+    assert_eq!(params["attempts"], 1);
+    assert_eq!(params["maxAttempts"], 3);
+    assert_eq!(params["vetoed"], true);
 }
 
 #[tokio::test(flavor = "current_thread")]
