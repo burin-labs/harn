@@ -53,6 +53,8 @@ pub use types::{OutlineItem, ParseError, ParsedNode, Symbol, SymbolKind, Undefin
 pub mod api {
     use std::path::Path;
 
+    use tree_sitter::Tree;
+
     use crate::error::HostlibError;
 
     use super::language::Language;
@@ -89,6 +91,26 @@ pub mod api {
     ) -> Result<Vec<Symbol>, HostlibError> {
         let tree = parse_source(source, language)?;
         Ok(extract(&tree, source, language))
+    }
+
+    /// Parse a source `str` for `language` and return the raw tree-sitter
+    /// tree. Used by the typed symbol graph in
+    /// [`crate::code_index::symbol_graph`] to sweep for call sites
+    /// without re-doing the work the AST symbol extractor already did.
+    pub fn parse_tree(source: &str, language: Language) -> Result<Tree, HostlibError> {
+        parse_source(source, language)
+    }
+
+    /// Parse `source` once, then return the tree plus the symbol list
+    /// extracted from it. Lets a caller (e.g. the typed symbol graph)
+    /// avoid paying the parse cost twice when it needs both products.
+    pub fn parse_with_symbols(
+        source: &str,
+        language: Language,
+    ) -> Result<(Tree, Vec<Symbol>), HostlibError> {
+        let tree = parse_source(source, language)?;
+        let symbols = extract(&tree, source, language);
+        Ok((tree, symbols))
     }
 
     fn detect(path: &Path, language_hint: Option<&str>) -> Result<Language, HostlibError> {

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/freshness.request.json",
+  "title": "code_index.freshness request",
+  "description": "Compare the indexed snapshot of a file (hash + mtime) against the bytes currently on disk. Lets callers detect staleness without forcing a rebuild.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Workspace-relative or absolute path to the file."
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/cypher.request.json",
+  "title": "code_index.cypher request",
+  "description": "Run a read-only Cypher query against the workspace typed symbol graph. Supported subset: MATCH, WHERE, RETURN with typed nodes (Function|Type|Module|Import|CallSite|Macro), typed edges (CALLS|REFS|IMPORTS|CONTAINS|OVERRIDES with `_BY` inverses), variable-length hops up to depth 4 (`*1..N`), and AND/OR/NOT predicates. The query observes the per-branch overlay if one is active (see `branch_overlay`).",
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Cypher query text."
+    }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}

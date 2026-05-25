@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/cypher.response.json",
+  "title": "code_index.cypher response",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "array",
+      "description": "One dict per match; keys are projection aliases (use AS to name them, otherwise `var` or `var.property`).",
+      "items": {
+        "type": "object",
+        "additionalProperties": {
+          "type": ["string", "integer", "boolean", "null"]
+        }
+      }
+    },
+    "overlay": {
+      "type": ["string", "null"],
+      "description": "Name of the per-branch overlay that served this query, if any."
+    }
+  },
+  "required": ["rows", "overlay"],
+  "additionalProperties": false
+}
