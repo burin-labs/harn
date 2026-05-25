@@ -112,3 +112,58 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `google/gemma-4*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `moonshotai/*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `vertex` | `gemini-*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+
+## Tool-format recommendations by catalog model
+
+This section starts from the checked-in provider catalog. Recommended format follows the live capability matrix, and the empirical columns are layered from `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml` when that overlay exists locally. Rows without sampled evidence show `data not yet collected`.
+
+| Provider | Model | Recommended format | Parity | Native pass | Text pass | Samples | Last evaluated | Confidence | Evidence |
+|---|---|---|---|---|---|---:|---|---|---|
+| `anthropic` | `claude-3-5-haiku-20241022` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-3-5-sonnet-20240620` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-3-5-sonnet-20241022` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-3-opus-20240229` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-haiku-4-5-20251001` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-opus-4-1-20250805` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-opus-4-20250514` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-opus-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-opus-4-7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-sonnet-4-20250514` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-sonnet-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-sonnet-4-7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `cerebras` | `gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `cerebras` | `llama-3.3-70b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `cerebras` | `qwen-3-coder-480b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-2.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `llamacpp` | `qwen3.6-35b-a3b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-26b-a4b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-31b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-e2b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `local` | `gemma-4-e4b-it` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `mlx` | `unsloth/Qwen3.6-27B-UD-MLX-4bit` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `devstral-small-2:24b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `gemma4:26b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `llama3.2` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `qwen3.6:35b-a3b-coding-nvfp4` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-4-turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-4o` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-4o-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `o1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `o1-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `o3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `o3-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `Qwen/Qwen3.5-9B` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `anthropic/claude-haiku-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `anthropic/claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `deepseek/deepseek-v3.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `google/gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `mistralai/mistral-large-2512` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `mistralai/mistral-small-2603` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `moonshotai/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen3-coder` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `together` | `Qwen/Qwen3-Coder-Next-FP8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

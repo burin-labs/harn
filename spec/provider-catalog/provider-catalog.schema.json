@@ -411,9 +411,60 @@
       ],
       "type": "object"
     },
+    "tool_empirical_parity": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "type": "string"
+        },
+        "last_evaluated": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "native_pass_rate": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "preferred_format": {
+          "type": "string"
+        },
+        "sample_size": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "text_pass_rate": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "verifier_divergence_rate": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "verdict",
+        "preferred_format",
+        "confidence",
+        "sample_size",
+        "last_evaluated",
+        "native_pass_rate",
+        "text_pass_rate",
+        "verifier_divergence_rate"
+      ],
+      "type": "object"
+    },
     "tool_support": {
       "additionalProperties": false,
       "properties": {
+        "empirical_parity": {
+          "$ref": "#/$defs/tool_empirical_parity"
+        },
         "max_tools": {
           "minimum": 1,
           "type": "integer"

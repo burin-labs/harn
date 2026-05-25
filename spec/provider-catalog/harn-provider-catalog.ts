@@ -73,6 +73,7 @@ export interface HarnCatalogModel {
     preferred_format?: string
     parity?: string
     parity_notes?: string
+    empirical_parity?: HarnToolEmpiricalParity
     tool_search: string[]
     max_tools?: number
   }
@@ -99,6 +100,17 @@ export interface HarnCatalogModel {
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
+}
+
+export interface HarnToolEmpiricalParity {
+  verdict: string
+  preferred_format: string
+  confidence: string
+  sample_size: number
+  last_evaluated: string
+  native_pass_rate: number
+  text_pass_rate: number
+  verifier_divergence_rate: number
 }
 
 export interface HarnModelPricing {

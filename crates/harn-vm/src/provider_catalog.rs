@@ -146,9 +146,23 @@ pub struct ModelToolSupport {
     pub parity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parity_notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub empirical_parity: Option<ModelToolEmpiricalParity>,
     pub tool_search: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tools: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelToolEmpiricalParity {
+    pub verdict: String,
+    pub preferred_format: String,
+    pub confidence: String,
+    pub sample_size: u32,
+    pub last_evaluated: String,
+    pub native_pass_rate: f64,
+    pub text_pass_rate: f64,
+    pub verifier_divergence_rate: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -571,8 +585,33 @@ pub fn schema_value() -> Value {
                     "preferred_format": {"type": "string"},
                     "parity": {"type": "string"},
                     "parity_notes": {"type": "string"},
+                    "empirical_parity": {"$ref": "#/$defs/tool_empirical_parity"},
                     "tool_search": {"type": "array", "items": {"type": "string"}},
                     "max_tools": {"type": "integer", "minimum": 1}
+                },
+                "additionalProperties": false
+            },
+            "tool_empirical_parity": {
+                "type": "object",
+                "required": [
+                    "verdict",
+                    "preferred_format",
+                    "confidence",
+                    "sample_size",
+                    "last_evaluated",
+                    "native_pass_rate",
+                    "text_pass_rate",
+                    "verifier_divergence_rate"
+                ],
+                "properties": {
+                    "verdict": {"type": "string"},
+                    "preferred_format": {"type": "string"},
+                    "confidence": {"type": "string"},
+                    "sample_size": {"type": "integer", "minimum": 1},
+                    "last_evaluated": {"type": "string", "minLength": 1},
+                    "native_pass_rate": {"type": "number", "minimum": 0, "maximum": 1},
+                    "text_pass_rate": {"type": "number", "minimum": 0, "maximum": 1},
+                    "verifier_divergence_rate": {"type": "number", "minimum": 0, "maximum": 1}
                 },
                 "additionalProperties": false
             },
@@ -711,6 +750,7 @@ fn catalog_model(
             preferred_format: caps.preferred_tool_format.clone(),
             parity: caps.tool_mode_parity.clone(),
             parity_notes: caps.tool_mode_parity_notes.clone(),
+            empirical_parity: None,
             tool_search: caps.tool_search.clone(),
             max_tools: caps.max_tools,
         },
@@ -1084,6 +1124,7 @@ export interface HarnCatalogModel {
     preferred_format?: string
     parity?: string
     parity_notes?: string
+    empirical_parity?: HarnToolEmpiricalParity
     tool_search: string[]
     max_tools?: number
   }
@@ -1110,6 +1151,17 @@ export interface HarnCatalogModel {
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
+}
+
+export interface HarnToolEmpiricalParity {
+  verdict: string
+  preferred_format: string
+  confidence: string
+  sample_size: number
+  last_evaluated: string
+  native_pass_rate: number
+  text_pass_rate: number
+  verifier_divergence_rate: number
 }
 
 export interface HarnModelPricing {
@@ -1358,6 +1410,7 @@ public struct HarnModelToolSupport: Codable, Sendable, Equatable {
     public let preferredFormat: String?
     public let parity: String?
     public let parityNotes: String?
+    public let empiricalParity: HarnToolEmpiricalParity?
     public let toolSearch: [String]
     public let maxTools: Int?
 
@@ -1367,8 +1420,31 @@ public struct HarnModelToolSupport: Codable, Sendable, Equatable {
         case preferredFormat = "preferred_format"
         case parity
         case parityNotes = "parity_notes"
+        case empiricalParity = "empirical_parity"
         case toolSearch = "tool_search"
         case maxTools = "max_tools"
+    }
+}
+
+public struct HarnToolEmpiricalParity: Codable, Sendable, Equatable {
+    public let verdict: String
+    public let preferredFormat: String
+    public let confidence: String
+    public let sampleSize: Int
+    public let lastEvaluated: String
+    public let nativePassRate: Double
+    public let textPassRate: Double
+    public let verifierDivergenceRate: Double
+
+    enum CodingKeys: String, CodingKey {
+        case verdict
+        case preferredFormat = "preferred_format"
+        case confidence
+        case sampleSize = "sample_size"
+        case lastEvaluated = "last_evaluated"
+        case nativePassRate = "native_pass_rate"
+        case textPassRate = "text_pass_rate"
+        case verifierDivergenceRate = "verifier_divergence_rate"
     }
 }
 
@@ -1676,6 +1752,10 @@ deprecated = true
     fn generated_schema_accepts_generated_artifact_shape() {
         let schema = schema_value();
         assert_eq!(schema["$id"], PROVIDER_CATALOG_SCHEMA_ID);
+        assert_eq!(
+            schema["$defs"]["tool_support"]["properties"]["empirical_parity"]["$ref"],
+            "#/$defs/tool_empirical_parity"
+        );
         let artifact_value = serde_json::to_value(artifact()).expect("artifact serializes");
         assert_eq!(
             artifact_value["schema_version"],
@@ -1687,5 +1767,16 @@ deprecated = true
         assert!(artifact_value["models"]
             .as_array()
             .is_some_and(|v| !v.is_empty()));
+    }
+
+    #[test]
+    fn downstream_bindings_include_empirical_tool_parity_shape() {
+        let typescript = typescript_binding().expect("typescript binding renders");
+        assert!(typescript.contains("empirical_parity?: HarnToolEmpiricalParity"));
+        assert!(typescript.contains("export interface HarnToolEmpiricalParity"));
+
+        let swift = swift_binding().expect("swift binding renders");
+        assert!(swift.contains("public let empiricalParity: HarnToolEmpiricalParity?"));
+        assert!(swift.contains("public struct HarnToolEmpiricalParity"));
     }
 }

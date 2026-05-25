@@ -130,7 +130,8 @@ pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
 
 pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
     let rows = crate::commands::check::provider_matrix::filtered_rows(args.filter.as_deref());
-    let generated = crate::commands::check::provider_matrix::generate_markdown(&rows);
+    let catalog = crate::commands::check::provider_matrix::load_catalog_for_docs()?;
+    let generated = crate::commands::check::provider_matrix::generate_markdown(&rows, &catalog);
     if args.check {
         match fs::read_to_string(&args.output) {
             Ok(existing) if existing == generated => {
