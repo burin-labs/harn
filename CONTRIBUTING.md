@@ -165,6 +165,98 @@ bootstrap the portal frontend dependencies through
 `./scripts/ensure_portal_deps.sh` before running portal lint, and the repo-root
 `npm run portal:*` commands reuse the same bootstrap path.
 
+## Demo gate
+
+Every PR that introduces a new public Harn primitive must also register
+a `harn demo` scenario exercising it. The
+[`Demo gate` workflow](.github/workflows/demo-gate.yml) enforces this on
+every `pull_request` event.
+
+### What counts as "a new public primitive"
+
+The detection logic lives in
+[`.github/scripts/demo-gate.sh`](.github/scripts/demo-gate.sh) and
+flags additions to:
+
+- **Stdlib builtins** — `crates/harn-vm/src/stdlib/**/*.rs`: a new
+  `vm.register_builtin(...)`, `SyncBuiltin::new(...)`,
+  `async_builtin!(...)`, or `register_builtin_group(...)` call.
+- **Host capabilities** — `crates/harn-vm/src/stdlib/host.rs` (a new
+  `("capability", "operation") =>` arm in
+  `dispatch_builtin_host_operation`) or
+  `crates/harn-hostlib/src/**/*.rs` (a new
+  `pub(super) const BUILTIN_*: &str = "hostlib_..."` constant).
+- **Orchestrator surfaces** —
+  `crates/harn-cli/src/commands/orchestrator/**/*.rs`: a new
+  `pub fn` or `pub async fn`.
+- **Language constructs** — `crates/harn-parser/src/parser/**/*.rs`: a
+  new `fn parse_*` rule.
+
+When the gate detects any of the above, the PR must also touch at least
+one file under `crates/harn-cli/assets/demo/**` (a new scenario
+directory, a tape addition, or a script extension).
+
+Pure refactors that move existing builtins between files without adding
+new ones still trip the additive-line detection — use the
+[opt-out](#opting-out) below in that case.
+
+### Authoring a demo scenario
+
+The bundled scenarios under
+[`crates/harn-cli/assets/demo/`](crates/harn-cli/assets/demo) are the
+templates. Each scenario is a directory with two files:
+
+- `scenario.harn` — the `.harn` script. Define a top-level
+  `pipeline default(_task) { ... }` that exercises the primitive and
+  emits a structured receipt on stdout. Use `__io_println(...)` for
+  human-readable narration and `json_stringify(receipt)` for the
+  machine-readable envelope a smoke test asserts on.
+- `tape.jsonl` — the `--llm-mock` replay fixture. One JSONL record per
+  expected LLM call: `{"match":"*pattern*","consume_match":true,"text":"...","model":"...","provider":"..."}`.
+  For failover scenarios, an `"error":{"category":"rate_limit",...}`
+  record stands in for an upstream error response.
+
+Wire the scenario into the CLI by:
+
+1. Adding a `Scenario { ... }` entry to the `SCENARIOS` const in
+   [`crates/harn-cli/src/commands/demo.rs`](crates/harn-cli/src/commands/demo.rs)
+   with `include_str!` references to both files.
+2. Adding a `#[test]` in
+   [`crates/harn-cli/tests/demo_cli.rs`](crates/harn-cli/tests/demo_cli.rs)
+   that runs the scenario end-to-end and asserts on the receipt
+   envelope and any per-task markers.
+
+Examples to mirror:
+
+- **Persona supervision + structured receipts**:
+  [`merge-captain`](crates/harn-cli/assets/demo/merge-captain/scenario.harn).
+- **Human-in-the-loop clarifying questions**:
+  [`review-captain`](crates/harn-cli/assets/demo/review-captain/scenario.harn).
+- **`parallel each` + cost attribution**:
+  [`provider-race`](crates/harn-cli/assets/demo/provider-race/scenario.harn).
+- **`routing_policy` failover + verifier escalation**:
+  [`routing-policy`](crates/harn-cli/assets/demo/routing-policy/scenario.harn).
+
+Verify locally before pushing:
+
+```bash
+cargo run --bin harn -- demo --list                # the new scenario should appear
+cargo run --bin harn -- demo <id> --no-record      # offline-tape replay
+cargo nextest run -p harn-cli --test demo_cli      # in-process smoke
+```
+
+### Opting out
+
+If the PR is hygiene-only (formatting, dependency bumps, docs, generated
+files) or a pure refactor that doesn't add a primitive surface, add the
+`no-demo-needed` label. The workflow re-reads labels on
+`labeled`/`unlabeled` events, so the gate flips green within a minute of
+the label landing.
+
+Use the opt-out sparingly. If you're unsure whether your PR introduces a
+primitive, ship a demo — the cost of an extra scenario is much lower
+than a primitive shipping into a release without a runnable example.
+
 ## Project structure
 
 | Crate | Purpose |

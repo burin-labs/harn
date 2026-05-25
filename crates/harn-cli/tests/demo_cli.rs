@@ -128,13 +128,45 @@ fn provider_race_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn routing_policy_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("routing-policy");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "routing-policy demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("routing_supervision_receipt"),
+        "routing-policy stdout missing receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("=== task smoke ===")
+            && outcome.stdout.contains("=== task rate-lim ===")
+            && outcome.stdout.contains("=== task lint-fail ==="),
+        "routing-policy demo should exercise all three tasks:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"escalations\":2"),
+        "routing-policy demo should record two escalations (rate-lim + lint-fail):\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all
     // exercises it through the same offline-tape path.
-    let known: HashSet<&str> = ["merge-captain", "review-captain", "provider-race"]
-        .into_iter()
-        .collect();
+    let known: HashSet<&str> = [
+        "merge-captain",
+        "review-captain",
+        "provider-race",
+        "routing-policy",
+    ]
+    .into_iter()
+    .collect();
     for id in scenario_ids() {
         if known.contains(id) {
             continue;

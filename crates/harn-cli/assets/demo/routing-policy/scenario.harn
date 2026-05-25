@@ -1,0 +1,100 @@
+/**
+ * routing-policy demo: drive the `routing_policy` primitive through a
+ * cheap→frontier failover chain on three mocked tasks, then surface the
+ * per-attempt routing receipt the v0.8.40 primitive emits on every
+ * `llm_call`.
+ *
+ * Scenarios per task:
+ *   - "smoke"     — cheap link succeeds, frontier is never tried
+ *   - "rate-lim"  — cheap link returns 429 rate_limit, chain advances
+ *                   to the frontier link, which succeeds
+ *   - "lint-fail" — cheap link returns text containing a forbidden
+ *                   pattern ("TODO"), so the lint verifier escalates
+ *                   to the frontier link
+ *
+ * Designed to run fully offline against the bundled `tape.jsonl`
+ * fixture. The tape preloads four entries (one cheap success, one
+ * 429-then-success pair for rate-lim, one TODO-then-clean pair for
+ * lint-fail). Invoke `harn demo routing-policy --live` to race the
+ * configured providers instead.
+ *
+ * Why a demo for this primitive: routing_policy is the trust-receipt
+ * surface that downstream observability (cost attribution, verifier
+ * signals, per-attempt token counts) consumes from `llm_call`. The
+ * demo gate (#2437) flagged it as previously uncovered.
+ */
+fn tasks() {
+  return [
+    {
+      id: "smoke",
+      prompt: "[routing_policy][task=smoke] Reply with the single word OK.",
+      story: "cheap link succeeds; frontier is never invoked",
+    },
+    {
+      id: "rate-lim",
+      prompt: "[routing_policy][task=rate-lim] One sentence: what does a 429 mean?",
+      story: "cheap link 429s; chain advances to frontier",
+    },
+    {
+      id: "lint-fail",
+      prompt: "[routing_policy][task=lint-fail] One sentence: define replay determinism.",
+      story: "cheap reply trips the TODO lint; verifier escalates",
+    },
+  ]
+}
+
+pipeline default(_task) {
+  // Single routing policy reused across all three tasks. The chain
+  // covers both failure-mode dimensions the v0.8.40 primitive handles:
+  // status-based failover plus verifier-signal escalation.
+  let policy = routing_policy(
+    {
+      chain: [
+        {provider: "mock", model: "mock-cheap", label: "cheap"},
+        {provider: "mock", model: "mock-strong", label: "frontier"},
+      ],
+      escalate_on: [{forbidden_patterns: ["TODO"], kind: "lint", on_fail: "escalate"}],
+      failover: {max_attempts: 2, on_status: [429, 500, 502, 503]},
+      label: "cheap-then-frontier",
+    },
+  )
+  var rows = []
+  var total_attempts = 0
+  var escalated = 0
+  for task in tasks() {
+    __io_println("=== task ${task.id} ===")
+    __io_println("story: ${task.story}")
+    let envelope = llm_call(task.prompt, "Be concise.", {routing: policy})
+    let attempts = envelope.routing.attempts
+    total_attempts = total_attempts + len(attempts)
+    if len(attempts) > 1 {
+      escalated = escalated + 1
+    }
+    __io_println("answer:   ${envelope.text}")
+    __io_println("selected: ${envelope.routing.selected}")
+    __io_println("attempts: ${len(attempts)}")
+    for a in attempts {
+      __io_println("  - label=${a.label} status=${a.status} verifier=${a.verifier_outcome}")
+    }
+    __io_println("")
+    let row = {
+      attempts: len(attempts),
+      escalated: len(attempts) > 1,
+      selected: envelope.routing.selected,
+      task: task.id,
+      text: envelope.text,
+    }
+    rows = rows + [row]
+  }
+  let receipt = {
+    escalations: escalated,
+    persona: "routing_policy",
+    policy_label: "cheap-then-frontier",
+    receipt_kind: "routing_supervision_receipt",
+    tasks: rows,
+    total_attempts: total_attempts,
+  }
+  __io_println("=== routing_policy receipt ===")
+  __io_println(json_stringify(receipt))
+  return receipt
+}
