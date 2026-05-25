@@ -20,7 +20,7 @@ impl CompiledRecordFilter {
     pub fn compile(expr: &str) -> Result<Self, String> {
         let normalized_expr = normalize_record_filter_expression(expr)?;
         let source = format!(
-            r#"
+            r"
 fn {FILTER_FN_NAME}(record) {{
   let event = record.event
   let binding = record.binding
@@ -29,7 +29,7 @@ fn {FILTER_FN_NAME}(record) {{
   let audit = record.audit
   return ({normalized_expr})
 }}
-"#
+"
         );
         Ok(Self {
             vm: Vm::new(),

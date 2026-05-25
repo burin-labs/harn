@@ -73,7 +73,7 @@ async fn fresh_service() -> (McpOrchestratorService, TempDir) {
     let temp = TempDir::new().unwrap();
     write_minimal_fixture(&temp);
     let args = fixture_args(&temp);
-    let service = McpOrchestratorService::new_local(args.local.clone()).unwrap();
+    let service = McpOrchestratorService::new_local(args.local).unwrap();
     (service, temp)
 }
 

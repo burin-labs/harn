@@ -418,8 +418,7 @@ impl<'a> Linter<'a> {
                             code: Code::LintUntypedDictAccess,
                             rule: "untyped-dict-access",
                             message: format!(
-                                "property access on raw `{}()` result without schema validation",
-                                name
+                                "property access on raw `{name}()` result without schema validation"
                             ),
                             span: snode.span,
                             severity: LintSeverity::Warning,
@@ -442,8 +441,7 @@ impl<'a> Linter<'a> {
                             code: Code::LintUntypedDictAccess,
                             rule: "untyped-dict-access",
                             message: format!(
-                                "subscript access on raw `{}()` result without schema validation",
-                                name
+                                "subscript access on raw `{name}()` result without schema validation"
                             ),
                             span: snode.span,
                             severity: LintSeverity::Warning,
@@ -586,8 +584,7 @@ impl<'a> Linter<'a> {
                             code: Code::LintInvalidBinaryOpLiteral,
                             rule: "invalid-binary-op-literal",
                             message: format!(
-                                "operator '{}' used with boolean or nil literal — this will cause a runtime error",
-                                op
+                                "operator '{op}' used with boolean or nil literal — this will cause a runtime error"
                             ),
                             span: snode.span,
                             severity: LintSeverity::Warning,

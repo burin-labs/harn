@@ -105,7 +105,7 @@ impl DispatchStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DispatchOutcome {
     pub trigger_id: String,
@@ -153,7 +153,7 @@ impl Default for DispatchOutcome {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DispatchAttemptRecord {
     pub trigger_id: String,

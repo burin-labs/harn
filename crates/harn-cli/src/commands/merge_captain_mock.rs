@@ -267,7 +267,7 @@ pub(crate) async fn run_serve(args: &MergeCaptainMockServeArgs) -> i32 {
             "addr": resolved.to_string(),
             "playground": dir.display().to_string(),
         });
-        println!("{}", summary);
+        println!("{summary}");
     } else {
         eprintln!("serving fake GitHub on http://{resolved} (Ctrl-C to stop)");
     }

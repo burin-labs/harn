@@ -160,7 +160,7 @@ fn build_aggregate(events: &[(String, serde_json::Value)]) -> ExtractedEvents {
                     promoted: Vec::new(),
                     references: Vec::new(),
                     iteration: None,
-                    scope: scope.to_string(),
+                    scope: scope.clone(),
                 };
                 if !id.is_empty() {
                     tool_query_by_id.insert(id, tool_loads.len());
@@ -212,7 +212,7 @@ fn build_aggregate(events: &[(String, serde_json::Value)]) -> ExtractedEvents {
                         promoted,
                         references,
                         iteration: None,
-                        scope: scope.to_string(),
+                        scope: scope.clone(),
                     });
                 }
             }

@@ -23,7 +23,7 @@ def main():
     pipeline = sys.argv[2]
     extra_args = sys.argv[3:]
 
-    cmd = [harn_binary, "run", "--bridge", pipeline] + extra_args
+    cmd = [harn_binary, "run", "--bridge", pipeline, *extra_args]
 
     proc = subprocess.Popen(
         cmd,

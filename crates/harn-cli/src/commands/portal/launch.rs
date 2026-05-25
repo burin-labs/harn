@@ -189,7 +189,7 @@ pub(super) fn launch_output_logs(stdout: &[u8], stderr: &[u8]) -> String {
     }
     let truncated = tail_bytes(&bytes, MAX_LAUNCH_JOB_LOG_BYTES);
     let prefix = if truncated.len() < bytes.len() {
-        format!("[truncated to last {} bytes]\n", MAX_LAUNCH_JOB_LOG_BYTES)
+        format!("[truncated to last {MAX_LAUNCH_JOB_LOG_BYTES} bytes]\n")
     } else {
         String::new()
     };
@@ -412,11 +412,11 @@ fn build_playground_source(
     let persist_path = workspace_dir.join("run.json");
     let provider_line = provider
         .filter(|value| !value.trim().is_empty())
-        .map(|value| format!("provider: {:?},", value))
+        .map(|value| format!("provider: {value:?},"))
         .unwrap_or_default();
     let model_line = model
         .filter(|value| !value.trim().is_empty())
-        .map(|value| format!("model: {:?},", value))
+        .map(|value| format!("model: {value:?},"))
         .unwrap_or_default();
 
     format!(

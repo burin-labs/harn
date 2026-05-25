@@ -170,7 +170,7 @@ pub(crate) fn lookup_cached_result(request: &LlmRequestPayload) -> Option<LlmRes
                 .ok()
                 .and_then(|cache| cache.get(&hash).cloned())
         });
-        if let Some(result) = cached.clone() {
+        if let Some(result) = cached {
             state.cached = true;
             state.entries.insert(hash, result.clone());
             return Some(result);

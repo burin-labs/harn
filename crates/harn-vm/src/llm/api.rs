@@ -1407,7 +1407,7 @@ mod tests {
                     match call {
                         Ok(Ok(_)) => panic!("expected streaming call to fail"),
                         Ok(Err(err)) => err.to_string(),
-                        Err(_) => panic!("streaming call timed out"),
+                        Err(elapsed) => panic!("streaming call timed out ({elapsed})"),
                     }
                 })
                 .await

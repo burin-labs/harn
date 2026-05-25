@@ -315,7 +315,7 @@ fn fake_error_to_vm_error(err: &FakeLlmError) -> VmError {
 pub(crate) struct FakeLlmProvider;
 
 impl LlmProvider for FakeLlmProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "fake"
     }
 
@@ -401,7 +401,7 @@ async fn play_stream(
                 arguments,
             } => {
                 let id = if id.is_empty() {
-                    let auto = format!("fake_call_{}", next_tool_index);
+                    let auto = format!("fake_call_{next_tool_index}");
                     next_tool_index += 1;
                     auto
                 } else {
@@ -683,7 +683,7 @@ mod tests {
             .expect("paused runtime");
         let _guard = install_fake_llm_script(
             FakeLlmScript::default()
-                .push(FakeLlmTurn::Stalled(Duration::from_secs(60)))
+                .push(FakeLlmTurn::Stalled(Duration::from_mins(1)))
                 .push(FakeLlmTurn::stream(vec![
                     FakeLlmEvent::Token("done".into()),
                     FakeLlmEvent::Done(FakeStopReason::EndTurn),
@@ -704,7 +704,7 @@ mod tests {
                 "fake provider should be parked on the stall"
             );
 
-            tokio::time::advance(Duration::from_secs(60)).await;
+            tokio::time::advance(Duration::from_mins(1)).await;
             let result = chat.await.expect("after advance, fake call resolves");
             assert_eq!(result.text, "done");
         });

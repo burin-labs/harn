@@ -548,7 +548,7 @@ mod tests {
         let id = crate::agent_sessions::open_or_create(Some("pinned-resolver-session".to_string()));
         crate::agent_sessions::set_pinned_model(&id, Some("claude-sonnet-4-6".to_string()))
             .expect("set pinned model");
-        let _session_guard = crate::agent_sessions::enter_current_session(id.clone());
+        let _session_guard = crate::agent_sessions::enter_current_session(id);
 
         let provider = vm_resolve_provider(&None);
         let model = vm_resolve_model(&None, &provider);
@@ -592,7 +592,7 @@ mod tests {
             crate::agent_sessions::open_or_create(Some("explicit-override-session".to_string()));
         crate::agent_sessions::set_pinned_model(&id, Some("claude-sonnet-4-6".to_string()))
             .expect("set pinned model");
-        let _session_guard = crate::agent_sessions::enter_current_session(id.clone());
+        let _session_guard = crate::agent_sessions::enter_current_session(id);
 
         // Call-site `model:` option must win — scripts opting into a
         // specific model should not be silently overridden by an ACP

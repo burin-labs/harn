@@ -82,11 +82,7 @@ pub(crate) fn run_replay_audit(args: &FlowReplayAuditArgs) -> Result<i32, String
         );
     }
 
-    Ok(if args.fail_on_drift && report.has_drift() {
-        1
-    } else {
-        0
-    })
+    Ok(i32::from(args.fail_on_drift && report.has_drift()))
 }
 
 /// Inputs for [`ship_watch_payload`]. Mirrors the fields the CLI's
@@ -901,17 +897,16 @@ fn proposal(
 ) -> ArchivistProposal {
     let evidence_harn = evidence
         .iter()
-        .map(|item| format!("{:?}", item))
+        .map(|item| format!("{item:?}"))
         .collect::<Vec<_>>()
         .join(", ");
     let coverage_harn = coverage_examples
         .iter()
-        .map(|item| format!("{:?}", item))
+        .map(|item| format!("{item:?}"))
         .collect::<Vec<_>>()
         .join(", ");
     let source = format!(
-        "@invariant\n@deterministic\n@archivist(evidence: [{evidence_harn}], confidence: {confidence:.2}, source_date: {:?}, coverage_examples: [{coverage_harn}])\nfn {predicate_name}(slice) {{\n  return {result_expr}\n}}\n",
-        source_date
+        "@invariant\n@deterministic\n@archivist(evidence: [{evidence_harn}], confidence: {confidence:.2}, source_date: {source_date:?}, coverage_examples: [{coverage_harn}])\nfn {predicate_name}(slice) {{\n  return {result_expr}\n}}\n"
     );
     ArchivistProposal {
         id,

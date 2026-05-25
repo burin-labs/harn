@@ -24,12 +24,12 @@ pipeline default(task) {
 #[test]
 fn warn_to_int_on_int_literal() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let n = to_int(42)
   log(n)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "unnecessary-cast"),
@@ -40,12 +40,12 @@ pipeline default(task) {
 #[test]
 fn warn_to_float_on_float_literal() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let n = to_float(1.5)
   log(n)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "unnecessary-cast"),
@@ -56,12 +56,12 @@ pipeline default(task) {
 #[test]
 fn warn_to_list_on_list_literal() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let xs = to_list([1, 2, 3])
   log(xs)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "unnecessary-cast"),
@@ -72,12 +72,12 @@ pipeline default(task) {
 #[test]
 fn warn_to_dict_on_dict_literal() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let d = to_dict({a: 1, b: 2})
   log(d)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "unnecessary-cast"),
@@ -107,13 +107,13 @@ fn warn_chained_to_string_calls() {
     // The OUTER call is the redundant one — the inner `to_string(x)` may
     // be load-bearing, but wrapping it again is always a no-op.
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let n = 5
   let s = to_string(to_string(n))
   log(s)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "unnecessary-cast"),
@@ -124,13 +124,13 @@ pipeline default(task) {
 #[test]
 fn no_warn_on_genuine_int_to_string() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let n = 5
   let s = to_string(n)
   log(s)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unnecessary-cast"),
@@ -159,12 +159,12 @@ pipeline default(task) {
 fn no_warn_on_int_to_float() {
     // `to_float(5)` widens int to float. Not a no-op.
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let n = to_float(5)
   log(n)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unnecessary-cast"),
@@ -176,12 +176,12 @@ pipeline default(task) {
 fn no_warn_on_float_to_int() {
     // `to_int(1.5)` truncates. Not a no-op.
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let n = to_int(1.5)
   log(n)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unnecessary-cast"),
@@ -193,12 +193,12 @@ pipeline default(task) {
 fn no_warn_on_to_list_of_set_call() {
     // `to_list(set(...))` materializes a set as a list. Real conversion.
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let xs = to_list(set([1, 2, 3]))
   log(xs)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unnecessary-cast"),
@@ -271,14 +271,14 @@ fn fix_chained_to_string_collapses_one_layer() {
 fn no_warn_on_zero_or_multi_arg_calls() {
     // Defensive: a wrong-arity call is not a cast — leave it alone.
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let s = to_string()
   let t = to_string(1, 2)
   log(s)
   log(t)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unnecessary-cast"),

@@ -192,8 +192,7 @@ fn every_runtime_builtin_has_a_parser_signature() {
         "The VM registers these builtins but the parser has no signature for them.\n\
          Add them to `crates/harn-parser/src/builtin_signatures.rs` (alphabetical),\n\
          or if they are compiler-synthesized helpers add them to\n\
-         `RUNTIME_ONLY_EXCEPTIONS` in this test:\n  {:#?}",
-        missing,
+         `RUNTIME_ONLY_EXCEPTIONS` in this test:\n  {missing:#?}",
     );
 }
 
@@ -213,8 +212,7 @@ fn every_parser_builtin_exists_at_runtime() {
         "The parser registry has entries that no longer exist at runtime.\n\
          Either remove them from `crates/harn-parser/src/builtin_signatures.rs`\n\
          or, if they're intentionally parser-only (e.g. polymorphic method calls),\n\
-         add them to `PARSER_ONLY_EXCEPTIONS` in this test:\n  {:#?}",
-        stale,
+         add them to `PARSER_ONLY_EXCEPTIONS` in this test:\n  {stale:#?}",
     );
 }
 

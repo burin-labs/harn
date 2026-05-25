@@ -107,6 +107,9 @@ fn line_count(bytes: &[u8]) -> u64 {
     if bytes.is_empty() {
         return 0;
     }
+    // Hot enough to matter, but pulling in the `bytecount` crate just for
+    // newline counts is overkill — the manual loop is fine here.
+    #[allow(clippy::naive_bytecount)]
     let newlines = bytes.iter().filter(|b| **b == b'\n').count() as u64;
     if bytes.ends_with(b"\n") {
         newlines

@@ -5,13 +5,13 @@ use super::*;
 
 #[test]
 fn test_fix_redundant_nil_ternary_eq_pattern() {
-    let source = r#"
+    let source = r"
 pipeline default(task) {
   let x = 5
   let y = x == nil ? 0 : x
   log(y)
 }
-"#;
+";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "redundant-nil-ternary");
     assert!(
@@ -31,13 +31,13 @@ pipeline default(task) {
 
 #[test]
 fn test_fix_redundant_nil_ternary_ne_pattern() {
-    let source = r#"
+    let source = r"
 pipeline default(task) {
   let x = 5
   let y = x != nil ? x : 0
   log(y)
 }
-"#;
+";
     let diags = lint_source(source);
     let fix = get_fix(&diags, "redundant-nil-ternary");
     assert!(
@@ -53,14 +53,14 @@ pipeline default(task) {
 
 #[test]
 fn test_no_warn_for_unrelated_ternary() {
-    let source = r#"
+    let source = r"
 pipeline default(task) {
   let a = 1
   let b = 2
   let c = a > b ? a : b
   log(c)
 }
-"#;
+";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "redundant-nil-ternary"),
@@ -72,7 +72,7 @@ pipeline default(task) {
 fn test_no_warn_when_non_nil_arm_differs_from_checked_var() {
     // `x != nil ? y : z` — the non-nil arm is NOT `x`, so the rewrite
     // would change semantics. Lint must stay silent.
-    let source = r#"
+    let source = r"
 pipeline default(task) {
   let x = 1
   let y = 2
@@ -80,7 +80,7 @@ pipeline default(task) {
   let w = x != nil ? y : z
   log(w)
 }
-"#;
+";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "redundant-nil-ternary"),

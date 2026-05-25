@@ -317,8 +317,7 @@ fn upload_file(args: &[VmValue]) -> Result<VmValue, VmError> {
         let accept_refs = accept.iter().map(String::as_str).collect::<Vec<_>>();
         if !media_type_matches_accept(&media_type, &accept_refs) {
             return Err(VmError::Runtime(format!(
-                "mcp.upload_file: media type {media_type:?} does not match accept {:?}",
-                accept
+                "mcp.upload_file: media type {media_type:?} does not match accept {accept:?}"
             )));
         }
     }

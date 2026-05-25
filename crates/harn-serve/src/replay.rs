@@ -9,7 +9,7 @@ use crate::DispatchError;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ReplayKey(pub String);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplayCacheEntry {
     pub value: serde_json::Value,
     pub printed_output: String,

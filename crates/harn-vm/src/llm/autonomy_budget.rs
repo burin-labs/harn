@@ -141,12 +141,12 @@ pub(crate) fn parse_autonomy_budget(
     };
     let per_hour = parse_opt_u64("per_hour")?;
     let per_day = parse_opt_u64("per_day")?;
-    if let Some(0) = per_hour {
+    if per_hour == Some(0) {
         return Err(VmError::Runtime(format!(
             "{label}: autonomy_budget.per_hour must be >= 1 (use nil to disable)"
         )));
     }
-    if let Some(0) = per_day {
+    if per_day == Some(0) {
         return Err(VmError::Runtime(format!(
             "{label}: autonomy_budget.per_day must be >= 1 (use nil to disable)"
         )));

@@ -370,8 +370,7 @@ pub fn evaluate_context_pack_suggestion_expectations(
             continue;
         }
         failures.push(format!(
-            "no context-pack suggestion matched expectation {:?}",
-            expectation
+            "no context-pack suggestion matched expectation {expectation:?}"
         ));
     }
     failures

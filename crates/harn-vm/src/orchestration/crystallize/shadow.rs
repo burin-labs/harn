@@ -87,8 +87,7 @@ pub(super) fn refresh_promotion_metadata(
     };
     if sample_count < min_examples {
         criteria.reasons.push(format!(
-            "sample count {} is below required minimum {min_examples}",
-            sample_count
+            "sample count {sample_count} is below required minimum {min_examples}"
         ));
     }
     if candidate.confidence < min_confidence {

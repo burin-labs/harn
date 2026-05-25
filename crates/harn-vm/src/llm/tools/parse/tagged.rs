@@ -380,8 +380,7 @@ fn parse_mistral_json_payload(
         item @ serde_json::Value::Object(_) => vec![item],
         other => {
             return Err(format!(
-                "Mistral [TOOL_CALLS] JSON payload must be an object or array, got {}.",
-                other
+                "Mistral [TOOL_CALLS] JSON payload must be an object or array, got {other}."
             ))
         }
     };
@@ -449,7 +448,7 @@ fn parse_deepseek_dsml_calls(
     let invoke_re =
         regex::Regex::new(r#"(?s)<｜DSML｜invoke\s+name="([^"]+)"\s*>(.*?)</｜DSML｜invoke>"#)
             .expect("valid DSML invoke regex");
-    let block_re = regex::Regex::new(r#"(?s)<｜DSML｜function_calls>.*?</｜DSML｜function_calls>"#)
+    let block_re = regex::Regex::new(r"(?s)<｜DSML｜function_calls>.*?</｜DSML｜function_calls>")
         .expect("valid DSML function_calls regex");
     let param_re = regex::Regex::new(
         r#"(?s)<｜DSML｜parameter\s+name="([^"]+)"(?:\s+string="(true|false)")?\s*>(.*?)</｜DSML｜parameter>"#,

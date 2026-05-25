@@ -80,7 +80,7 @@ pub struct ClaimedWorkerJob {
     pub job: WorkerQueueJob,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerQueueResponseRecord {
     pub queue: String,
     pub job_event_id: u64,
@@ -998,7 +998,7 @@ mod tests {
             .await
             .unwrap();
         let claimed = queue
-            .claim_next("triage", "consumer-a", StdDuration::from_secs(60))
+            .claim_next("triage", "consumer-a", StdDuration::from_mins(1))
             .await
             .unwrap()
             .unwrap();
@@ -1097,7 +1097,7 @@ mod tests {
         .await
         .unwrap();
         let second = queue
-            .claim_next("triage", "consumer-b", StdDuration::from_secs(60))
+            .claim_next("triage", "consumer-b", StdDuration::from_mins(1))
             .await
             .unwrap()
             .unwrap();
@@ -1146,7 +1146,7 @@ mod tests {
         log.append(&topic, high).await.unwrap();
 
         let claimed = queue
-            .claim_next("triage", "consumer-a", StdDuration::from_secs(60))
+            .claim_next("triage", "consumer-a", StdDuration::from_mins(1))
             .await
             .unwrap()
             .unwrap();
@@ -1245,7 +1245,7 @@ mod tests {
         for n in 0..4 {
             let consumer = format!("c-{n}");
             let claim = queue
-                .claim_next("triage", &consumer, StdDuration::from_secs(60))
+                .claim_next("triage", &consumer, StdDuration::from_mins(1))
                 .await
                 .unwrap()
                 .expect("queue should still have ready jobs");
@@ -1299,7 +1299,7 @@ mod tests {
 
         // FIFO must drain all of tenant-a before touching tenant-b.
         let first = queue
-            .claim_next("triage", "c-0", StdDuration::from_secs(60))
+            .claim_next("triage", "c-0", StdDuration::from_mins(1))
             .await
             .unwrap()
             .unwrap();
@@ -1342,7 +1342,7 @@ mod tests {
         for n in 0..2 {
             let consumer = format!("c-{n}");
             let claim = queue
-                .claim_next("triage", &consumer, StdDuration::from_secs(60))
+                .claim_next("triage", &consumer, StdDuration::from_mins(1))
                 .await
                 .unwrap()
                 .unwrap();
@@ -1400,20 +1400,20 @@ mod tests {
             .unwrap();
 
         let first = queue
-            .claim_next("triage", "consumer-a", StdDuration::from_secs(60))
+            .claim_next("triage", "consumer-a", StdDuration::from_mins(1))
             .await
             .unwrap()
             .unwrap();
         // Without releasing the first claim, the second pick must skip the
         // capped tenant-a and serve tenant-b instead.
         let second = queue
-            .claim_next("triage", "consumer-b", StdDuration::from_secs(60))
+            .claim_next("triage", "consumer-b", StdDuration::from_mins(1))
             .await
             .unwrap()
             .unwrap();
         let pair = [
             first.job.event.tenant_id.clone().unwrap().0,
-            second.job.event.tenant_id.clone().unwrap().0,
+            second.job.event.tenant_id.unwrap().0,
         ];
         assert!(
             pair.contains(&"tenant-a".to_string()) && pair.contains(&"tenant-b".to_string()),

@@ -62,8 +62,7 @@ pub(crate) fn register_connector_builtins(vm: &mut Vm) {
                 .map(|value| VmValue::String(Rc::from(value.to_string())))
                 .map_err(|error| {
                     VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "secret_get: secret '{}' is not valid UTF-8: {error}",
-                        secret_id
+                        "secret_get: secret '{secret_id}' is not valid UTF-8: {error}"
                     ))))
                 })
         })

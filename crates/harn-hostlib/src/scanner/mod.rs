@@ -406,7 +406,7 @@ fn count_lines(content: &str) -> usize {
     }
     let nl = content.bytes().filter(|b| *b == b'\n').count();
     let trailing = content.as_bytes().last() != Some(&b'\n');
-    nl + if trailing { 1 } else { 0 }
+    nl + usize::from(trailing)
 }
 
 fn sort_for_output(

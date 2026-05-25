@@ -165,10 +165,7 @@ async fn orchestrator_lifecycle(
             .to_string()
             .into());
     }
-    eprintln!(
-        "[harn] secret providers: {} (namespace {})",
-        secret_chain_display, secret_namespace
-    );
+    eprintln!("[harn] secret providers: {secret_chain_display} (namespace {secret_namespace})");
     let secret_provider: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(secret_chain);
 
     let extensions = package::load_runtime_extensions(&config_path);

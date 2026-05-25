@@ -1182,7 +1182,7 @@ mod tests {
     #[test]
     fn microcompact_snaps_to_line_boundaries() {
         let lines: Vec<String> = (0..20)
-            .map(|i| format!("line {:02} content here", i))
+            .map(|i| format!("line {i:02} content here"))
             .collect();
         let output = lines.join("\n");
         let result = microcompact_tool_output(&output, 200);

@@ -672,7 +672,7 @@ mod tests {
         .unwrap();
         let output = run_merge_captain_driver(MergeCaptainDriverOptions {
             backend: MergeCaptainDriverBackend::Mock {
-                playground_dir: playground.clone(),
+                playground_dir: playground,
             },
             mode: MergeCaptainDriverMode::Once,
             model_route: None,

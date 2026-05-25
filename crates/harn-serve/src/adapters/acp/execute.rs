@@ -271,7 +271,7 @@ pub(super) async fn load_host_mcp_clients(
                     .get("name")
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown");
-                eprintln!("warning: mcp: failed to connect to '{}': {}", name, err);
+                eprintln!("warning: mcp: failed to connect to '{name}': {err}");
             }
         }
     }

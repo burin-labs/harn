@@ -5,7 +5,7 @@ use serde::Deserialize;
 use super::WorkflowNode;
 use crate::value::{VmError, VmValue};
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct WorkflowStageAgentOptions {
     pub run_agent_loop: bool,
     pub tool_format: String,

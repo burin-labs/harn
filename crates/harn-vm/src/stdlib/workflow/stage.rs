@@ -80,7 +80,7 @@ pub(super) fn replay_stage(
             .and_then(|value| value.as_str())
             .map(|value| value.to_string()),
         attempts: stage.attempts.clone(),
-        consumed_artifact_ids: stage.consumed_artifact_ids.clone(),
+        consumed_artifact_ids: stage.consumed_artifact_ids,
     })
 }
 

@@ -107,7 +107,7 @@ async fn run_legacy(opts: DoctorOptions) {
     let failed = report.summary.blocking > 0;
 
     if opts.json {
-        println!("{}", to_string_pretty(&report.clone().into_envelope()));
+        println!("{}", to_string_pretty(&report.into_envelope()));
     } else {
         render_text(&report);
     }
@@ -981,7 +981,7 @@ fn check_hardware() -> (DoctorCheck, HardwareSnapshot) {
     }
     let snapshot = HardwareSnapshot {
         ram_gb,
-        gpu: gpu.clone(),
+        gpu,
         free_disk_gb,
     };
     (

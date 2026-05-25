@@ -918,11 +918,10 @@ mod tests {
                 }
             }
             let remaining = overall_deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                panic!(
-                    "timed out waiting for feedback for {handle_id}; saw handles {seen_handles:?}"
-                );
-            }
+            assert!(
+                !remaining.is_zero(),
+                "timed out waiting for feedback for {handle_id}; saw handles {seen_handles:?}"
+            );
             // Block until a producer notifies a push, or we hit the
             // remaining deadline. `wait_sync` returns `false` only
             // when nothing matched within the window; we still loop

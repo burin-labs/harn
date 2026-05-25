@@ -251,13 +251,7 @@ impl super::super::Vm {
                 Self::specialized_ordering_result(op, ordering, x == y)
             }
             (_, BinaryShape::Float, VmValue::Float(x), VmValue::Float(y)) => {
-                let ordering = if x < y {
-                    -1
-                } else if x > y {
-                    1
-                } else {
-                    0
-                };
+                let ordering = if x < y { -1 } else { i8::from(x > y) };
                 Self::specialized_ordering_result(op, ordering, x == y)
             }
             (_, BinaryShape::Bool, VmValue::Bool(x), VmValue::Bool(y)) => {
@@ -431,7 +425,7 @@ impl super::super::Vm {
                 match Rc::try_unwrap(y) {
                     Ok(entries) => result.extend(entries),
                     Err(entries) => {
-                        result.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone())))
+                        result.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone())));
                     }
                 }
                 Ok(VmValue::Dict(Rc::new(result)))
@@ -512,14 +506,14 @@ impl super::super::Vm {
     fn pow(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
             (VmValue::Int(base), VmValue::Int(exp)) => {
-                if *exp >= 0 && *exp <= u32::MAX as i64 {
+                if u32::try_from(*exp).is_ok() {
                     Ok(VmValue::Int(base.wrapping_pow(*exp as u32)))
                 } else {
                     Ok(VmValue::Float((*base as f64).powf(*exp as f64)))
                 }
             }
             (VmValue::Float(base), VmValue::Int(exp)) => {
-                if *exp >= i32::MIN as i64 && *exp <= i32::MAX as i64 {
+                if i32::try_from(*exp).is_ok() {
                     Ok(VmValue::Float(base.powi(*exp as i32)))
                 } else {
                     Ok(VmValue::Float(base.powf(*exp as f64)))

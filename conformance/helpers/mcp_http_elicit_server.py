@@ -31,8 +31,7 @@ def sse_frame(message):
 
 def stream_for_session(session_id):
     with LOCK:
-        stream = STREAMS.get(session_id)
-    return stream
+        return STREAMS.get(session_id)
 
 
 def handle_rpc(payload):

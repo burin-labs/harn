@@ -73,7 +73,7 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     for (i, ac) in a_chars.iter().enumerate() {
         curr[0] = i + 1;
         for (j, bc) in b_chars.iter().enumerate() {
-            let cost = if ac == bc { 0 } else { 1 };
+            let cost = usize::from(ac != bc);
             curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
@@ -712,7 +712,7 @@ mod tests {
             Some("never used"),
             None,
         );
-        assert!(result.contains("^"));
+        assert!(result.contains('^'));
         assert!(result.contains("never used"));
     }
 

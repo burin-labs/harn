@@ -16,7 +16,7 @@ use super::{
 };
 
 pub(super) const DESTINATION_CIRCUIT_FAILURE_THRESHOLD: u32 = 5;
-const DESTINATION_CIRCUIT_BACKOFF: Duration = Duration::from_secs(60);
+const DESTINATION_CIRCUIT_BACKOFF: Duration = Duration::from_mins(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DestinationCircuitProbe {

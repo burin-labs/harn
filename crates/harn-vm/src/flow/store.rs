@@ -600,7 +600,7 @@ impl VcsBackend for SqliteFlowStore {
 
 fn initialize_schema(conn: &Connection) -> Result<(), VcsBackendError> {
     conn.execute_batch(
-        r#"
+        r"
         PRAGMA foreign_keys = ON;
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
@@ -731,7 +731,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), VcsBackendError> {
         BEGIN
             SELECT RAISE(ABORT, 'slice atom edges are append-only');
         END;
-        "#,
+        ",
     )?;
     Ok(())
 }
@@ -826,7 +826,7 @@ fn insert_slice_record_tx(
             slice_id.0.as_slice(),
             kind,
             body,
-            if shipped { 1 } else { 0 },
+            i32::from(shipped),
             if shipped {
                 Some(format!("{SQLITE_SLICE_REF_PREFIX}/{slice_id}"))
             } else {
@@ -1103,7 +1103,7 @@ mod tests {
         let replica = SqliteFlowStore::in_memory("site-b").unwrap();
         let first = atom(1, vec![]);
         let second = atom(2, vec![first.id]);
-        source.emit_atoms(&[first.clone(), second.clone()]).unwrap();
+        source.emit_atoms(&[first, second.clone()]).unwrap();
 
         let empty = replica.state_vector("user:alice", "ship-captain").unwrap();
         let delta = source

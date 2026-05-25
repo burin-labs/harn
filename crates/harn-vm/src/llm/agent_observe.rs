@@ -145,7 +145,7 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
         _ => return false,
     };
     let category = classify_error_message(msg);
-    let llm_info = crate::llm::api::classify_llm_error(category.clone(), msg);
+    let llm_info = crate::llm::api::classify_llm_error(category, msg);
     if llm_info.kind == crate::llm::api::LlmErrorKind::Transient {
         return true;
     }

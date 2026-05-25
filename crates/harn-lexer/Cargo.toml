@@ -11,3 +11,6 @@ description = "Tokenizer with span tracking for the Harn programming language"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+
+[lints]
+workspace = true

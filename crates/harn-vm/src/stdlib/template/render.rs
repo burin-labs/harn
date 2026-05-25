@@ -306,7 +306,7 @@ fn render_node(
             };
             rc.current_asset = asset.clone();
             rc.current_include_parent = Some(Box::new(include_call_span));
-            rc.include_stack.push(asset.id.clone());
+            rc.include_stack.push(asset.id);
             let res = render_nodes(
                 &child_nodes,
                 &mut child_scope,

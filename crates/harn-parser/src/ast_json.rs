@@ -13,7 +13,7 @@ use crate::SNode;
 pub const AST_JSON_SCHEMA_VERSION: u32 = 1;
 pub const TOKEN_JSON_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AstJsonProgram {
     pub kind: &'static str,
     #[serde(rename = "schemaVersion")]

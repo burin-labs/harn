@@ -303,8 +303,7 @@ impl SharedScriptSession {
             .lock()
             .expect("session poisoned")
             .stream_tx
-            .as_ref()
-            .cloned()
+            .clone()
     }
 
     fn bus(&self) -> Option<harn_vm::mcp_elicit::ElicitationBus> {
@@ -938,15 +937,14 @@ mod tests {
         let bind: SocketAddr = "0.0.0.0:8080".parse().unwrap();
         let policy = AuthPolicy {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-                keys: ["test-key".to_string()].into_iter().collect(),
+                keys: std::iter::once("test-key".to_string()).collect(),
             })],
         };
         let tls = harn_serve::HttpTlsConfig::plain();
         let result = guard_serve_bind_auth("mcp", bind, &policy, &tls);
         assert!(
             result.is_ok(),
-            "public bind with auth should be allowed: {:?}",
-            result
+            "public bind with auth should be allowed: {result:?}"
         );
     }
 
@@ -970,8 +968,7 @@ mod tests {
         let result = guard_serve_bind_auth("api", bind, &policy, &tls);
         assert!(
             result.is_ok(),
-            "public bind with TLS should be allowed: {:?}",
-            result
+            "public bind with TLS should be allowed: {result:?}"
         );
     }
 }

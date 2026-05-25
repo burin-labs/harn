@@ -186,8 +186,7 @@ fn validate_severity(value: Option<&VmValue>, builtin: &str) -> Result<String, V
                 Ok(s.to_string())
             } else {
                 Err(err(format!(
-                    "{builtin}: `severity` must be one of {:?}, got {s:?}",
-                    VALID_SEVERITIES
+                    "{builtin}: `severity` must be one of {VALID_SEVERITIES:?}, got {s:?}"
                 )))
             }
         }
@@ -1182,8 +1181,7 @@ mod tests {
         let vm = vm_with_stdlib();
         let registry = call_sync(&vm, "tool_hooks_registry", &[]).expect("registry");
         let rule = call_sync(&vm, "tool_rule", &[sample_rule_config()]).expect("rule");
-        let cat =
-            call_sync(&vm, "catalogue", &[sample_catalogue_config(rule.clone())]).expect("cat");
+        let cat = call_sync(&vm, "catalogue", &[sample_catalogue_config(rule)]).expect("cat");
         let r1 = call_sync(&vm, "tool_hooks_register", &[registry, cat.clone()]).expect("register");
         let r2 = call_sync(&vm, "tool_hooks_register", &[r1, cat]).expect("re-register replaces");
         let list = call_sync(&vm, "tool_hooks_list", &[r2]).expect("list");
@@ -1300,7 +1298,7 @@ mod tests {
             &vm,
             "tool_hooks_filter",
             &[
-                r3.clone(),
+                r3,
                 VmValue::List(Rc::new(vec![VmValue::String(Rc::from("rust"))])),
             ],
         )

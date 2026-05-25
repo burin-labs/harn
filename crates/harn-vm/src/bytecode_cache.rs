@@ -374,7 +374,7 @@ fn encode_artifact(key: &CacheKey, kind: u8, payload: &[u8]) -> Vec<u8> {
 
 fn write_atomic(target: &Path, buf: &[u8]) -> io::Result<()> {
     let tmp_name = match target.file_name() {
-        Some(name) => format!(".{}.{}.tmp", name.to_string_lossy(), std::process::id(),),
+        Some(name) => format!(".{}.{}.tmp", name.to_string_lossy(), std::process::id()),
         None => format!(".harn-cache.{}.tmp", std::process::id()),
     };
     let tmp_path = target.with_file_name(tmp_name);
@@ -802,7 +802,7 @@ mod tests {
         store_at(&path, &key, &chunk).expect("write");
         let other = CacheKey {
             compiler_tag: key.compiler_tag ^ 0xFF,
-            ..key.clone()
+            ..key
         };
         assert!(
             read_chunk_if_matches(&path, &other).unwrap().is_none(),

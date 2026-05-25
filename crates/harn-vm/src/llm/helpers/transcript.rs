@@ -73,7 +73,7 @@ pub enum DrainDecisionAction {
 }
 
 #[allow(dead_code)] // schema surface reserved for lifecycle producers
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Suspension {
     pub handle: String,
     pub initiator: SuspensionInitiator,
@@ -88,7 +88,7 @@ pub struct Suspension {
 }
 
 #[allow(dead_code)] // schema surface reserved for lifecycle producers
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerMatch {
     pub source: String,
     pub event_id: String,
@@ -96,7 +96,7 @@ pub struct TriggerMatch {
 }
 
 #[allow(dead_code)] // schema surface reserved for lifecycle producers
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Resumption {
     pub handle: String,
     pub initiator: ResumptionInitiator,
@@ -708,10 +708,7 @@ fn ensure_reminder_correlation(payload: &mut JsonValue) {
     {
         obj.insert(
             "session_id".to_string(),
-            session_id
-                .clone()
-                .map(JsonValue::String)
-                .unwrap_or(JsonValue::Null),
+            session_id.map(JsonValue::String).unwrap_or(JsonValue::Null),
         );
     }
     if obj
@@ -721,10 +718,7 @@ fn ensure_reminder_correlation(payload: &mut JsonValue) {
     {
         obj.insert(
             "task_id".to_string(),
-            task_id
-                .clone()
-                .map(JsonValue::String)
-                .unwrap_or(JsonValue::Null),
+            task_id.map(JsonValue::String).unwrap_or(JsonValue::Null),
         );
     }
     if obj
@@ -734,10 +728,7 @@ fn ensure_reminder_correlation(payload: &mut JsonValue) {
     {
         obj.insert(
             "agent_id".to_string(),
-            agent_id
-                .clone()
-                .map(JsonValue::String)
-                .unwrap_or(JsonValue::Null),
+            agent_id.map(JsonValue::String).unwrap_or(JsonValue::Null),
         );
     }
 }

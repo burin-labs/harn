@@ -5,7 +5,7 @@ use std::fmt;
 
 pub const REPLAY_TRACE_SCHEMA_VERSION: &str = "harn.orchestration.replay_trace.v1";
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ReplayOracleTrace {
     pub schema_version: String,
@@ -41,7 +41,7 @@ pub enum ReplayExpectation {
     Drift,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ReplayAllowlistRule {
     /// JSON-pointer-like path. `*` matches every array element or object value.
@@ -50,7 +50,7 @@ pub struct ReplayAllowlistRule {
     pub replacement: Option<JsonValue>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ReplayTraceRun {
     pub run_id: String,
@@ -116,7 +116,7 @@ pub struct ReplayTraceRunCounts {
     pub lifecycle_receipts: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ReplayOracleReport {
     pub name: String,
@@ -142,7 +142,7 @@ impl Default for ReplayOracleReport {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReplayDivergence {
     pub path: String,
     pub left: JsonValue,

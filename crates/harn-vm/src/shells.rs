@@ -131,6 +131,8 @@ pub fn default_shell_invocation(command: &str) -> Result<ShellInvocation, String
 pub fn resolve_invocation_from_vm_params(
     params: &BTreeMap<String, VmValue>,
 ) -> Result<ShellInvocation, String> {
+    // "{command}" is a downstream template placeholder, not a format string.
+    #[allow(clippy::literal_string_with_formatting_args)]
     let command = params
         .get("command")
         .and_then(vm_string)

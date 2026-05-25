@@ -1600,7 +1600,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 harn_vm::tracing::peek_spans().len() as u64,
                 cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
                 "attestation",
-                error.to_string(),
+                error,
             );
         }
         harn_vm::event_log::reset_active_event_log();
@@ -2788,11 +2788,11 @@ pipeline main() {
         let script = temp.path().join("main.harn");
         std::fs::write(
             &script,
-            r#"
+            r"
 pipeline main() {
   __io_println(sandbox_active_profile())
 }
-"#,
+",
         )
         .expect("write script");
 
@@ -2830,10 +2830,9 @@ pipeline main() {
                 r#"
 pipeline main() {{
   __io_println(sandbox_active_profile())
-  let _ = read_file("{}")
+  let _ = read_file("{outside_literal}")
 }}
-"#,
-                outside_literal
+"#
             ),
         )
         .expect("write script");
@@ -2875,10 +2874,9 @@ pipeline main() {{
                 r#"
 pipeline main() {{
   __io_println(sandbox_active_profile())
-  __io_println(read_file("{}"))
+  __io_println(read_file("{outside_literal}"))
 }}
-"#,
-                outside_literal
+"#
             ),
         )
         .expect("write script");

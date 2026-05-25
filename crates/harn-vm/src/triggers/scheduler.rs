@@ -76,7 +76,7 @@ fn default_quantum() -> u32 {
 }
 
 /// Policy controlling scheduler selection.
-#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SchedulerPolicy {
     #[serde(default)]
     pub strategy: SchedulerStrategy,
@@ -795,7 +795,7 @@ mod tests {
         let second = sched
             .select(&snapshot_views(&second_jobs), &policy, 10_001)
             .unwrap();
-        let tenants = [first.fairness_key.clone(), second.fairness_key.clone()];
+        let tenants = [first.fairness_key, second.fairness_key];
         assert!(
             tenants.contains(&"tenant-a".to_string()) && tenants.contains(&"tenant-b".to_string()),
             "expected both tenants represented in first two picks, got {tenants:?}",

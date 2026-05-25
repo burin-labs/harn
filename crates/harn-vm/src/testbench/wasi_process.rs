@@ -708,7 +708,7 @@ mod tests {
         );
 
         let diff = overlay.diff();
-        assert_eq!(diff.len(), 1, "expected one overlay write, got {:?}", diff);
+        assert_eq!(diff.len(), 1, "expected one overlay write, got {diff:?}");
         assert!(
             diff[0].path.ends_with("out.txt"),
             "diff path should end with out.txt, got {:?}",

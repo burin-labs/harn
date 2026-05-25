@@ -13,7 +13,7 @@ use serde_json::Value as JsonValue;
 
 use super::{hmac, Connector, ConnectorError};
 
-const DEFAULT_JWKS_CACHE_TTL: StdDuration = StdDuration::from_secs(24 * 60 * 60);
+const DEFAULT_JWKS_CACHE_TTL: StdDuration = StdDuration::from_hours(24);
 
 /// Base connector contract name for shared runtime code.
 ///
@@ -305,7 +305,7 @@ fn store_cached_jwks(url: &str, jwks: JwkSet) {
         );
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CursorPage {
     pub items: Vec<JsonValue>,
     pub next_cursor: Option<String>,

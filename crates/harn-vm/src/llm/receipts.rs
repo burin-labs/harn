@@ -20,7 +20,7 @@ pub const TOOL_CALL_RECEIPT_EXECUTORS: &[&str] =
 /// Receipts intentionally avoid raw arguments and raw results. Callers get
 /// stable hashes for correlation, plus free-form audit metadata for
 /// user-visible rationale and middleware decisions.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCallReceipt {
     pub schema_version: u32,
     pub session_id: String,

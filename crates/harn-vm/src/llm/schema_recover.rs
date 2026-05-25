@@ -351,14 +351,14 @@ fn scrape_field(
     let escaped = regex::escape(field);
     let patterns = [
         // Quoted key, quoted value.
-        format!(r#""{esc}"\s*:\s*"((?:[^"\\]|\\.)*)""#, esc = escaped),
+        format!(r#""{escaped}"\s*:\s*"((?:[^"\\]|\\.)*)""#),
         // Quoted key, bare value (until comma / brace / newline).
-        format!(r#""{esc}"\s*:\s*([^,\n\r}}]+)"#, esc = escaped),
+        format!(r#""{escaped}"\s*:\s*([^,\n\r}}]+)"#),
         // Bare key with quoted value (YAML-ish).
-        format!(r#"\b{esc}\s*[:=]\s*"((?:[^"\\]|\\.)*)""#, esc = escaped),
+        format!(r#"\b{escaped}\s*[:=]\s*"((?:[^"\\]|\\.)*)""#),
         // Bare key with bare value (terminated by newline / comma /
         // brace). This is the most permissive pattern and goes last.
-        format!(r#"\b{esc}\s*[:=]\s*([^,\n\r}}]+)"#, esc = escaped),
+        format!(r"\b{escaped}\s*[:=]\s*([^,\n\r}}]+)"),
     ];
     for pat in &patterns {
         let re = match regex::Regex::new(pat) {
@@ -986,8 +986,7 @@ mod tests {
         let dict = env.as_dict().unwrap();
         assert!(
             matches!(dict.get("ok"), Some(VmValue::Bool(true))),
-            "envelope: {:?}",
-            env
+            "envelope: {env:?}"
         );
         assert_eq!(
             dict.get("stage").map(VmValue::display).as_deref(),

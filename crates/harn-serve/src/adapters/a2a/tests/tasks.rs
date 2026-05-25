@@ -6,11 +6,11 @@ async fn send_message_dispatches_to_shared_core_export() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -44,11 +44,11 @@ async fn send_message_round_trips_file_and_data_parts() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn triage(message: dict) -> dict {
   return message
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -232,11 +232,11 @@ async fn streaming_send_and_resubscribe_replay_task_events() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -660,11 +660,11 @@ async fn worker_event_emitted_during_dispatch_streams_to_task_subscribers() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn run(task: string) -> string {
   return task
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -899,11 +899,11 @@ fn hitl_requested_event_does_not_override_terminal_task() {
 #[tokio::test]
 async fn auth_policy_denial_returns_unauthorized_without_storing_task() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret-key",
     );
     let request = harn_vm::jsonrpc::request(

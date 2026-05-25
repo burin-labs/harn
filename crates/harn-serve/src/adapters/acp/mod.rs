@@ -1070,7 +1070,7 @@ impl AcpServer {
 
         let mut meta = serde_json::Map::new();
         meta.insert("state".to_string(), serde_json::json!("forked"));
-        meta.insert("parent_id".to_string(), serde_json::json!(src_id.clone()));
+        meta.insert("parent_id".to_string(), serde_json::json!(src_id));
         meta.insert("branched_at".to_string(), branched_at.clone());
         if let Some(branch_name) = &branch_name {
             meta.insert("branch_name".to_string(), serde_json::json!(branch_name));
@@ -1161,7 +1161,7 @@ impl AcpServer {
             "sessionUpdate": "session_truncated",
             "keptTurnCount": result.kept_turn_count,
             "removedTurnCount": result.removed_turn_count,
-            "newTipTurnId": result.new_tip_turn_id.clone(),
+            "newTipTurnId": result.new_tip_turn_id,
         });
         if let Some(reason) = params.get("reason").and_then(|value| value.as_str()) {
             update["reason"] = serde_json::json!(reason);
@@ -2467,7 +2467,7 @@ impl AcpServer {
         if !self.sessions.contains_key(session_id) {
             self.send_error(id, -32602, &format!("unknown session: {session_id}"));
             return None;
-        };
+        }
 
         harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
         Some(session_id)
@@ -2936,7 +2936,7 @@ impl AcpServer {
             "mode" => self.apply_set_mode_config_option(id, &session_id, value),
             "model" => self.apply_set_model_config_option(id, &session_id, value),
             "thought_level" | "reasoning_policy" => {
-                self.apply_set_reasoning_policy_config_option(id, &session_id, value)
+                self.apply_set_reasoning_policy_config_option(id, &session_id, value);
             }
             other => self.send_error(
                 id,

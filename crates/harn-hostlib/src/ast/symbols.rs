@@ -543,7 +543,7 @@ fn push_jvm_method(
     pos: NodePos,
     out: &mut Vec<Symbol>,
 ) {
-    push_typed_method(node, source, container, pos, "type", out)
+    push_typed_method(node, source, container, pos, "type", out);
 }
 
 fn push_csharp_method(
@@ -553,7 +553,7 @@ fn push_csharp_method(
     pos: NodePos,
     out: &mut Vec<Symbol>,
 ) {
-    push_typed_method(node, source, container, pos, "returns", out)
+    push_typed_method(node, source, container, pos, "returns", out);
 }
 
 /// Shared shape for languages that expose `name` + `parameters` +

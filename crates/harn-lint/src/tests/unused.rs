@@ -62,12 +62,12 @@ greet("hi", "there")
 #[test]
 fn test_unused_closure_param() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 let f = { x, y -> log(x) }
 f(1, 2)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "unused-parameter"),
@@ -96,14 +96,14 @@ greet("hi", "there")
 #[test]
 fn test_used_fn_param_ok() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 fn add(a, b) {
     return a + b
 }
 log(add(1, 2))
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-parameter"),

@@ -2,7 +2,7 @@ use harn_lexer::Span;
 use std::fmt;
 
 /// Parser errors.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParserError {
     Unexpected {
         got: String,

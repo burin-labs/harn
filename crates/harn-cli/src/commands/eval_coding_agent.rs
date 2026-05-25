@@ -469,7 +469,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         } else {
             print_summary_legacy(&summary);
         }
-        return if had_error { 1 } else { 0 };
+        return i32::from(had_error);
     }
 
     if let Err(code) = write_markdown_artifacts_dispatch(&output_dir, &summary).await {
@@ -484,11 +484,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         return code;
     }
 
-    if had_error {
-        1
-    } else {
-        0
-    }
+    i32::from(had_error)
 }
 
 async fn run_matrix_entry(

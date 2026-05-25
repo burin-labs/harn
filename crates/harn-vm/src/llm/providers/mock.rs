@@ -9,7 +9,7 @@ use crate::value::VmError;
 pub(crate) struct MockProvider;
 
 impl LlmProvider for MockProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "mock"
     }
 

@@ -145,7 +145,7 @@ impl HostlibRegistry {
 
     /// Wire every registered builtin into the supplied VM.
     pub fn register_into_vm(&mut self, vm: &mut Vm) {
-        for builtin in self.builtins.iter().cloned().collect::<Vec<_>>() {
+        for builtin in self.builtins.iter().cloned() {
             let handler = builtin.handler.clone();
             vm.register_builtin(
                 builtin.name,

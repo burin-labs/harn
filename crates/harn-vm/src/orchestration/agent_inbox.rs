@@ -389,7 +389,7 @@ mod tests {
         let waiter_sid = sid.clone();
         let waiter_clock = clock.clone();
         let waiter = tokio::spawn(async move {
-            wait_async(&waiter_sid, Duration::from_secs(60), &*waiter_clock).await
+            wait_async(&waiter_sid, Duration::from_mins(1), &*waiter_clock).await
         });
         // Yield once so the waiter installs its notify watch before we push.
         tokio::task::yield_now().await;

@@ -372,7 +372,7 @@ fn deterministic_event_to_action(
             if !success {
                 action.side_effects.push(CrystallizationSideEffect {
                     kind: "shell_failure".to_string(),
-                    target: step_name.clone(),
+                    target: step_name,
                     capability: Some("shell.exec".to_string()),
                     mutation: None,
                     metadata: BTreeMap::from([(
@@ -742,24 +742,21 @@ pub fn build_recovery_summary(fixture: &ReleaseFixture) -> RecoveryFeedbackSumma
     let fed = recovery_runs > 0 && shell_failures > 0;
     let representation = if fed {
         format!(
-            "{} shell/tool failure(s) were observed and {} of them triggered an `agent_loop` \
+            "{shell_failures} shell/tool failure(s) were observed and {recovery_runs} of them triggered an `agent_loop` \
              recovery advice run. Failure stdout/stderr, classification, and recovery hints from \
              the failing release step were embedded in the model prompt; the model produced \
              advisory text only — no automatic re-run or live mutation. Reviewers must validate \
-             the advice before re-running the failing step.",
-            shell_failures, recovery_runs
+             the advice before re-running the failing step."
         )
     } else if shell_failures > 0 {
         format!(
-            "{} shell/tool failure(s) were observed but no agent recovery loop was invoked. \
-             Failure context was recorded for human review only.",
-            shell_failures
+            "{shell_failures} shell/tool failure(s) were observed but no agent recovery loop was invoked. \
+             Failure context was recorded for human review only."
         )
     } else if recovery_runs > 0 {
         format!(
-            "No shell/tool failures were observed in this run, but {} agent recovery loop(s) \
-             ran (likely from a previous attempt or a non-shell error path).",
-            recovery_runs
+            "No shell/tool failures were observed in this run, but {recovery_runs} agent recovery loop(s) \
+             ran (likely from a previous attempt or a non-shell error path)."
         )
     } else {
         "No shell/tool failures were observed and no recovery loops ran. The release \

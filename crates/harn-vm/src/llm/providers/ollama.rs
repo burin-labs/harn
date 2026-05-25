@@ -12,7 +12,7 @@ use std::time::Instant;
 pub(crate) struct OllamaProvider;
 
 impl LlmProvider for OllamaProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "ollama"
     }
 

@@ -163,12 +163,19 @@ async fn run_export(args: TrustExportArgs) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).map_err(|error| {
-                    format!("failed to create parent directory {parent:?}: {error}")
+                    format!(
+                        "failed to create parent directory {}: {error}",
+                        parent.display()
+                    )
                 })?;
             }
         }
-        std::fs::write(&path, serialized.as_bytes())
-            .map_err(|error| format!("failed to write trust chain export to {path:?}: {error}"))?;
+        std::fs::write(&path, serialized.as_bytes()).map_err(|error| {
+            format!(
+                "failed to write trust chain export to {}: {error}",
+                path.display()
+            )
+        })?;
     } else {
         println!("{serialized}");
     }

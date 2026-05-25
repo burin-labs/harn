@@ -2,7 +2,7 @@ use crate::token::*;
 use std::fmt;
 
 /// Lexer errors.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LexerError {
     UnexpectedCharacter(char, Span),
     UnterminatedString(Span),

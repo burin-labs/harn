@@ -5,12 +5,12 @@ use super::*;
 #[test]
 fn test_invalid_binary_op_literal_bool() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 let x = true + 1
 log(x)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "invalid-binary-op-literal"),
@@ -21,12 +21,12 @@ log(x)
 #[test]
 fn test_invalid_binary_op_literal_nil() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 let x = nil - 5
 log(x)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "invalid-binary-op-literal"),

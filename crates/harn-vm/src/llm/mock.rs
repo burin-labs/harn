@@ -6,7 +6,7 @@ use crate::orchestration::ToolCallRecord;
 use crate::value::{ErrorCategory, VmError};
 
 /// LLM replay mode.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmReplayMode {
     Off,
     Record,
@@ -173,13 +173,13 @@ fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
     LLM_MOCK_CALLS.with(|v| {
         v.borrow_mut().push(LlmMockCall {
             api_mode: request.api_mode.as_str().to_string(),
-            messages: request.messages.to_vec(),
+            messages: request.messages.clone(),
             system: request.system.clone(),
             tools: request.native_tools.clone(),
             provider_tools: if request.provider_tools.is_empty() {
                 None
             } else {
-                Some(request.provider_tools.to_vec())
+                Some(request.provider_tools.clone())
             },
             tool_choice: request.tool_choice.clone(),
             output_format: serde_json::to_value(&request.output_format).unwrap_or_else(|_| {
@@ -782,7 +782,7 @@ pub(crate) fn mock_llm_response(
                 output_tokens: 20,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
-                model: request.model.to_string(),
+                model: request.model.clone(),
                 provider: "mock".to_string(),
                 thinking: None,
                 thinking_summary: None,
@@ -832,7 +832,7 @@ pub(crate) fn mock_llm_response(
         output_tokens: 30,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
-        model: request.model.to_string(),
+        model: request.model.clone(),
         provider: "mock".to_string(),
         thinking: None,
         thinking_summary: None,

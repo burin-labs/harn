@@ -21,7 +21,7 @@ pub struct ProviderHealthcheckOptions {
     pub client: Option<reqwest::Client>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderHealthcheckResult {
     pub provider: String,
     pub valid: bool,

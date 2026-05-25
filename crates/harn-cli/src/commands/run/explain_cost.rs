@@ -197,7 +197,7 @@ impl CostAnalyzer {
                 self.walk_node(false_expr);
             }
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                self.walk_node(object)
+                self.walk_node(object);
             }
             Node::SubscriptAccess { object, index }
             | Node::OptionalSubscriptAccess { object, index } => {

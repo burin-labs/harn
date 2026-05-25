@@ -47,3 +47,86 @@ debug = 0
 [profile.release]
 lto = true
 codegen-units = 1
+
+# Workspace-wide clippy floor. `pedantic` + `nursery` raised to `warn`; the
+# allow list below silences the noisy / stylistic / context-dependent lints
+# that fight the existing codebase or produce too many false positives to
+# justify the churn. The remaining enabled lints catch real bugs, dead code,
+# unnecessary clones/allocations, and idiomatic improvements. CI runs
+# `cargo clippy --workspace --all-targets -- -D warnings`, so anything left
+# enabled here is enforced.
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# Volume / style / context-dependent — kept off to avoid PR churn.
+assigning_clones = "allow"           # auto-fix is correct but disruptive in lock-heavy code
+branches_sharing_code = "allow"      # frequently flags clearer code
+collection_is_never_read = "allow"   # sometimes intentional accumulator
+format_collect = "allow"             # `.map(..).collect()` is often clearer than the suggested fold
+inline_always = "allow"              # use sites are intentional perf hints
+iter_with_drain = "allow"            # callers often retain the Vec
+manual_let_else = "allow"            # stylistic; legacy match patterns are still clear
+needless_collect = "allow"           # `.collect::<Vec<_>>()` is often desired for laziness control
+needless_continue = "allow"          # stylistic
+needless_pass_by_ref_mut = "allow"   # API ergonomics — sometimes &mut is contractual
+or_fun_call = "allow"                # context-dependent perf hint
+self_only_used_in_recursion = "allow"# sometimes the recursion is the API
+single_option_map = "allow"          # `.map().is_some()` is sometimes clearer
+unnecessary_wraps = "allow"          # changing a fn signature is often invasive
+unreadable_literal = "allow"         # stylistic
+unused_async = "allow"               # API ergonomics — async is often contractual
+useless_let_if_seq = "allow"         # stylistic
+trait_duplication_in_bounds = "allow"# derive macros generate duplicate bounds
+case_sensitive_file_extension_comparisons = "allow"
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+default_trait_access = "allow"
+doc_markdown = "allow"
+elidable_lifetime_names = "allow"
+enum_glob_use = "allow"
+explicit_iter_loop = "allow"
+float_cmp = "allow"
+format_push_string = "allow"
+future_not_send = "allow"            # async API ergonomics
+if_not_else = "allow"
+ignored_unit_patterns = "allow"
+implicit_hasher = "allow"
+items_after_statements = "allow"
+large_futures = "allow"
+many_single_char_names = "allow"
+map_unwrap_or = "allow"
+match_same_arms = "allow"
+match_wildcard_for_single_variants = "allow"
+missing_const_for_fn = "allow"
+missing_errors_doc = "allow"
+missing_fields_in_debug = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+needless_pass_by_value = "allow"
+option_if_let_else = "allow"
+range_plus_one = "allow"
+redundant_closure_for_method_calls = "allow"
+redundant_pub_crate = "allow"
+ref_option = "allow"
+return_self_not_must_use = "allow"
+significant_drop_in_scrutinee = "allow"
+significant_drop_tightening = "allow"
+similar_names = "allow"
+single_match_else = "allow"
+stable_sort_primitive = "allow"
+struct_excessive_bools = "allow"
+suboptimal_flops = "allow"           # FMA changes user-observable float precision; pinned-output tests break
+struct_field_names = "allow"
+too_long_first_doc_paragraph = "allow"
+too_many_lines = "allow"
+trivially_copy_pass_by_ref = "allow"
+unnested_or_patterns = "allow"
+unused_self = "allow"
+use_self = "allow"
+used_underscore_binding = "allow"
+wildcard_imports = "allow"

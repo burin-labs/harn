@@ -234,7 +234,7 @@ pub(crate) fn outdated_packages_in(
 
     Ok(OutdatedReport {
         manifest_path: ctx.manifest_path().display().to_string(),
-        generator_version: lock.generator_version.clone(),
+        generator_version: lock.generator_version,
         current_harn: env!("CARGO_PKG_VERSION").to_string(),
         entries,
     })
@@ -436,7 +436,7 @@ pub(crate) fn audit_packages_in(
         lock_path: lock_path.display().to_string(),
         current_harn,
         generator_version: lock.generator_version.clone(),
-        protocol_artifact_version: lock.protocol_artifact_version.clone(),
+        protocol_artifact_version: lock.protocol_artifact_version,
         findings,
         ok,
     })

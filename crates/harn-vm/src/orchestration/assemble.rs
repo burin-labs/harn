@@ -384,7 +384,7 @@ pub fn build_candidate_chunks(
         let pieces: Vec<String> = if estimated > options.microcompact_threshold {
             chunk_text(text, options.microcompact_threshold)
         } else {
-            vec![text.to_string()]
+            vec![text.clone()]
         };
         let count = pieces.len();
         for (idx, piece) in pieces.into_iter().enumerate() {

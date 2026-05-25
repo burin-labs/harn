@@ -260,7 +260,7 @@ fn parse_filters(value: Option<&VmValue>) -> Result<HitlPendingFilters, VmError>
         for kind in kinds.iter() {
             let value = kind.display();
             let normalized = match value.as_str() {
-                "question" | "approval" | "dual_control" | "escalation" => value.to_string(),
+                "question" | "approval" | "dual_control" | "escalation" => value.clone(),
                 _ => {
                     return Err(VmError::Runtime(format!(
                         "hitl_pending: unsupported kind '{value}'"
@@ -587,12 +587,12 @@ mod tests {
     async fn hitl_pending_returns_empty_list_without_attached_event_log() {
         reset_thread_local_state();
         let chunk = compile_source(
-            r#"
+            r"
 pipeline test(task) {
   let rows = hitl_pending({})
   __io_println(len(rows))
 }
-"#,
+",
         )
         .expect("compile source");
         let mut vm = Vm::new();

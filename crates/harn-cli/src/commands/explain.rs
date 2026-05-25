@@ -240,10 +240,7 @@ fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
     match harn_ir::explain_handler_invariant(&program, target, invariant) {
         Ok(diagnostics) => {
             if diagnostics.is_empty() {
-                println!(
-                    "No `{}` violations found for `{}` in {}.",
-                    invariant, target, file
-                );
+                println!("No `{invariant}` violations found for `{target}` in {file}.");
                 return 0;
             }
             for diagnostic in diagnostics {

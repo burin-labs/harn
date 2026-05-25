@@ -162,7 +162,7 @@ impl StreamTriggerConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamWindowEnvelope {
     pub stream_id: String,
     pub window_id: String,
@@ -682,7 +682,7 @@ pub fn stream_fixture_event(
     let provider = provider.into();
     let stream = stream.into();
     let kind = kind.into();
-    let provider_id = crate::triggers::ProviderId::from(provider.clone());
+    let provider_id = crate::triggers::ProviderId::from(provider);
     let raw = json!({
         "event": kind,
         "stream": stream,

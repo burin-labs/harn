@@ -675,7 +675,7 @@ pub(crate) fn parse_llm_response(
         if !reasoning_summary.is_empty() {
             blocks.push(serde_json::json!({
                 "type": "reasoning_summary",
-                "text": reasoning_summary.clone(),
+                "text": reasoning_summary,
                 "visibility": "private",
             }));
         }

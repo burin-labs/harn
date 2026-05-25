@@ -40,7 +40,7 @@ pub struct KindBucket {
     pub pct_of_wall: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct SpanRef {
     pub span_id: u64,
     pub kind: String,
@@ -50,7 +50,7 @@ pub struct SpanRef {
     pub model: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct StepSummary {
     pub name: String,
     pub duration_ms: u64,
@@ -342,7 +342,7 @@ pub fn render(profile: &RunProfile) -> String {
 
 fn format_secs(ms: u64) -> String {
     if ms < 1000 {
-        format!("{} ms", ms)
+        format!("{ms} ms")
     } else {
         format!("{:.3} s", ms as f64 / 1000.0)
     }

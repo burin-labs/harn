@@ -78,7 +78,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         if args.len() >= 2 {
             match (&args[0], &args[1]) {
                 (VmValue::Int(base), VmValue::Int(exp)) => {
-                    if *exp >= 0 && *exp <= u32::MAX as i64 {
+                    if u32::try_from(*exp).is_ok() {
                         match base.checked_pow(*exp as u32) {
                             Some(value) => Ok(VmValue::Int(value)),
                             None => Ok(VmValue::Float((*base as f64).powf(*exp as f64))),
@@ -88,7 +88,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
                     }
                 }
                 (VmValue::Float(base), VmValue::Int(exp)) => {
-                    if *exp >= i32::MIN as i64 && *exp <= i32::MAX as i64 {
+                    if i32::try_from(*exp).is_ok() {
                         Ok(VmValue::Float(base.powi(*exp as i32)))
                     } else {
                         Ok(VmValue::Float(base.powf(*exp as f64)))
@@ -214,7 +214,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         if values.len() % 2 == 1 {
             Ok(VmValue::Float(values[mid]))
         } else {
-            Ok(VmValue::Float((values[mid - 1] + values[mid]) / 2.0))
+            Ok(VmValue::Float(f64::midpoint(values[mid - 1], values[mid])))
         }
     });
 

@@ -203,14 +203,14 @@ fn function_body_falls_back_to_path_when_source_omitted() {
 
 #[test]
 fn function_body_surfaces_return_object_fields_for_response_shape() {
-    let source = r#"function buildResponse(req) {
+    let source = r"function buildResponse(req) {
   return {
     id: req.id,
     name: req.name,
     createdAt: Date.now(),
   };
 }
-"#;
+";
     let registry = ast_registry();
     let payload = dict(&[
         ("source", vstring(source)),
@@ -269,11 +269,11 @@ fn name_list(names: &[&str]) -> VmValue {
 
 #[test]
 fn function_bodies_returns_map_keyed_by_name() {
-    let source = r#"
+    let source = r"
 function a() { return 1; }
 function b() { return 2; }
 function c() { return 3; }
-"#;
+";
     let registry = ast_registry();
     let payload = dict(&[
         ("source", vstring(source)),

@@ -26,3 +26,6 @@ harness = false
 name = "bench_vm_hot_paths"
 path = "bench_vm_hot_paths.rs"
 harness = false
+
+[lints]
+workspace = true

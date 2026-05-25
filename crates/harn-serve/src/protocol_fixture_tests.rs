@@ -19,11 +19,10 @@ pub(crate) fn assert_fixture_documents_match(fixture_name: &str, actual: Vec<Val
         .clone();
     let expected_value = Value::Array(expected);
     let actual_value = Value::Array(actual);
-    if actual_value != expected_value {
-        panic!(
-            "protocol fixture drifted: {fixture_name}\nexpected:\n{}\nactual:\n{}",
-            serde_json::to_string_pretty(&expected_value).expect("expected json"),
-            serde_json::to_string_pretty(&actual_value).expect("actual json")
-        );
-    }
+    assert!(
+        actual_value == expected_value,
+        "protocol fixture drifted: {fixture_name}\nexpected:\n{}\nactual:\n{}",
+        serde_json::to_string_pretty(&expected_value).expect("expected json"),
+        serde_json::to_string_pretty(&actual_value).expect("actual json")
+    );
 }

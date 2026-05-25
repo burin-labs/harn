@@ -1709,7 +1709,7 @@ fn host_agent_record_native_tool_fallback_builtin(
     super::trace::emit_agent_event(super::trace::AgentTraceEvent::NativeToolFallback {
         iteration,
         accepted,
-        policy: policy.clone(),
+        policy,
         fallback_index,
         tool_call_count,
     });

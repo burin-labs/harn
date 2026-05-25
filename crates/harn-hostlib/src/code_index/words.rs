@@ -175,7 +175,7 @@ mod tests {
     fn tokenize_skips_punctuation_and_numbers() {
         let mut tokens: Vec<String> = Vec::new();
         tokenize("let foo_bar = baz(1, 2.0); // 42_things", |t| {
-            tokens.push(t.to_string())
+            tokens.push(t.to_string());
         });
         assert_eq!(tokens, vec!["let", "foo_bar", "baz", "_things"]);
     }

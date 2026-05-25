@@ -98,15 +98,15 @@ fn child_path(path: &str, key: &str) -> String {
     if path.is_empty() {
         key.to_string()
     } else {
-        format!("{}.{}", path, key)
+        format!("{path}.{key}")
     }
 }
 
 fn index_path(path: &str, index: usize) -> String {
     if path.is_empty() {
-        format!("[{}]", index)
+        format!("[{index}]")
     } else {
-        format!("{}[{}]", path, index)
+        format!("{path}[{index}]")
     }
 }
 

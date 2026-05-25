@@ -262,7 +262,7 @@ fn parse_scalar_value(input: &str) -> Result<serde_json::Value, VmError> {
         });
     }
     Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-        format!("structural_experiment: unsupported argument value `{input}`",),
+        format!("structural_experiment: unsupported argument value `{input}`"),
     ))))
 }
 

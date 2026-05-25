@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(v1, "");
         assert_eq!(v2, "");
         assert_eq!(v3, "");
-        let combined = format!("{}{}{}{}{}", v1, v2, v3, v4, tail);
+        let combined = format!("{v1}{v2}{v3}{v4}{tail}");
         assert_eq!(combined, "visible answer");
         assert_eq!(s.thinking, "reasoning");
     }
@@ -199,7 +199,7 @@ mod tests {
         let v2 = s.push("nk>inside</thi");
         let v3 = s.push("nk>after");
         let tail = s.flush();
-        let combined = format!("{}{}{}{}", v1, v2, v3, tail);
+        let combined = format!("{v1}{v2}{v3}{tail}");
         assert_eq!(combined, "after");
         assert_eq!(s.thinking, "inside");
     }
@@ -210,7 +210,7 @@ mod tests {
         let v1 = s.push("hello ");
         let v2 = s.push("world");
         let tail = s.flush();
-        let combined = format!("{}{}{}", v1, v2, tail);
+        let combined = format!("{v1}{v2}{tail}");
         assert_eq!(combined, "hello world");
         assert_eq!(s.thinking, "");
     }

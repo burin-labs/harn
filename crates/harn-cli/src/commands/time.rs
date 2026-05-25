@@ -228,8 +228,8 @@ pub(crate) async fn run(args: TimeRunArgs) {
         totals: TimingTotals {
             wall_ms,
             cpu_ms: cpu_ms_total,
-            cache_hits: if cache_hit { 1 } else { 0 },
-            cache_misses: if cache_hit { 0 } else { 1 },
+            cache_hits: u64::from(cache_hit),
+            cache_misses: u64::from(!cache_hit),
         },
         exit_code: outcome.exit_code,
     };
@@ -485,8 +485,8 @@ mod tests {
             totals: TimingTotals {
                 wall_ms: 1335,
                 cpu_ms: 320,
-                cache_hits: if cache_hit { 1 } else { 0 },
-                cache_misses: if cache_hit { 0 } else { 1 },
+                cache_hits: u64::from(cache_hit),
+                cache_misses: u64::from(!cache_hit),
             },
             exit_code: 0,
         }

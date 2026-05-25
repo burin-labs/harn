@@ -36,7 +36,7 @@ impl TypeChecker {
                                     | ("dict", "dict")
                             );
                             if !valid {
-                                let msg = format!("can't add {} and {}", l, r);
+                                let msg = format!("can't add {l} and {r}");
                                 let fix = if l == "string" || r == "string" {
                                     self.build_interpolation_fix(left, right, l == "string", span)
                                 } else {
@@ -60,8 +60,7 @@ impl TypeChecker {
                                 self.error_at(
                                     Code::InvalidBinaryOperator,
                                     format!(
-                                        "can't use '{}' on {} and {} (needs numeric operands)",
-                                        op, l, r
+                                        "can't use '{op}' on {l} and {r} (needs numeric operands)"
                                     ),
                                     span,
                                 );
@@ -76,7 +75,7 @@ impl TypeChecker {
                             if !is_numeric && !is_string_repeat {
                                 self.error_at(
                                     Code::InvalidBinaryOperator,
-                                    format!("can't multiply {} and {} (try string * int)", l, r),
+                                    format!("can't multiply {l} and {r} (try string * int)"),
                                     span,
                                 );
                             }

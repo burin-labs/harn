@@ -463,7 +463,7 @@ mod tests {
     fn cfg(count: u32) -> TriggerAggregationConfig {
         TriggerAggregationConfig {
             count,
-            window: Duration::from_secs(60),
+            window: Duration::from_mins(1),
             key_path: None,
             expire_action: ExpireAction::FirePartial,
         }

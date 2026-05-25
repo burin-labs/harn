@@ -183,6 +183,10 @@ pub fn install_spawner(spawner: Arc<dyn ProcessSpawner>) -> SpawnerGuard {
 /// Guard returned by [`install_spawner`]. Restores the previous spawner on
 /// drop so installs nest correctly across tests.
 pub struct SpawnerGuard {
+    // Outer Option distinguishes "guard already restored" (None) from
+    // "guard owes a restore" (Some(_)); inner Option carries the previous
+    // spawner slot value (which can itself be None when no spawner was set).
+    #[allow(clippy::option_option)]
     prev: Option<Option<Arc<dyn ProcessSpawner>>>,
 }
 

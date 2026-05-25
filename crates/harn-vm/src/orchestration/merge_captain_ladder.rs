@@ -333,8 +333,7 @@ fn resolve_ladder_backend(
             })
         }
         other => Err(VmError::Runtime(format!(
-            "unsupported persona eval ladder backend '{}'",
-            other
+            "unsupported persona eval ladder backend '{other}'"
         ))),
     }
 }
@@ -388,8 +387,8 @@ fn run_ladder_tier(
         },
         model_route: Some(route.route.clone().unwrap_or_else(|| route.id.clone())),
         timeout_tier: Some(tier.id.clone()),
-        transcript_out: Some(transcript_path.clone()),
-        receipt_out: Some(receipt_path.clone()),
+        transcript_out: Some(transcript_path),
+        receipt_out: Some(receipt_path),
         run_root: tier_dir.join("runs"),
         max_sweeps,
         watch_backoff_ms: tier.watch_backoff_ms.unwrap_or(0),

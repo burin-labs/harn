@@ -54,7 +54,7 @@ impl Default for HarnConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ModelPolicyConfig {
     pub default_provider: Option<String>,
@@ -64,7 +64,7 @@ pub struct ModelPolicyConfig {
     pub aliases: BTreeMap<String, ModelAliasConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProviderPolicyConfig {
     pub base_url: Option<String>,
@@ -74,7 +74,7 @@ pub struct ProviderPolicyConfig {
     pub metadata: BTreeMap<String, JsonValue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ModelAliasConfig {
     pub model: String,
@@ -91,7 +91,7 @@ pub enum PermissionMode {
     Deny,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct PermissionConfig {
     pub default: PermissionMode,
@@ -107,7 +107,7 @@ impl Default for PermissionConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct EndpointCatalogConfig {
     pub mcp: BTreeMap<String, EndpointConfig>,
@@ -115,7 +115,7 @@ pub struct EndpointCatalogConfig {
     pub acp: BTreeMap<String, EndpointConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct EndpointConfig {
     pub enabled: bool,
@@ -137,27 +137,27 @@ impl Default for EndpointConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct PackageSourcesConfig {
     pub sources: Vec<SourceConfig>,
     pub lockfile: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct SkillSourcesConfig {
     pub paths: Vec<String>,
     pub sources: Vec<SourceConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct PluginSourcesConfig {
     pub sources: Vec<SourceConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct SourceConfig {
     pub name: String,
@@ -178,7 +178,7 @@ pub enum LogLevel {
     Trace,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct LoggingConfig {
     pub level: LogLevel,
@@ -196,7 +196,7 @@ impl Default for LoggingConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct RetentionConfig {
     pub days: Option<u64>,
@@ -221,7 +221,7 @@ pub enum RedactionMode {
     Strict,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct RedactionConfig {
     pub mode: RedactionMode,
@@ -239,7 +239,7 @@ impl Default for RedactionConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReplayConfig {
     pub enabled: bool,
@@ -308,7 +308,7 @@ impl Default for RuntimeLimitsConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ManagedPolicyConfig {
     pub locked_fields: Vec<String>,
@@ -374,7 +374,7 @@ pub struct LayerSummary {
     pub source: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FieldCandidate {
     pub layer: String,
     pub kind: ConfigLayerKind,
@@ -394,7 +394,7 @@ pub enum CandidateStatus {
     Denied,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FieldExplanation {
     pub path: String,
     pub value: JsonValue,

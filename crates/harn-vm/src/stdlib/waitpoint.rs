@@ -58,7 +58,7 @@ impl WaitpointStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WaitpointRecord {
     pub id: String,
@@ -656,8 +656,7 @@ async fn evaluate_waiter(
                 .await?
                 .ok_or_else(|| {
                     VmError::Runtime(format!(
-                        "waitpoint.wait: unknown waitpoint '{}'",
-                        waitpoint_id
+                        "waitpoint.wait: unknown waitpoint '{waitpoint_id}'"
                     ))
                 })?;
             state_cache.insert(waitpoint_id.clone(), record.clone());
@@ -818,8 +817,7 @@ async fn load_waitpoint_states(
             .await?
             .ok_or_else(|| {
                 VmError::Runtime(format!(
-                    "waitpoint.wait: unknown waitpoint '{}'",
-                    waitpoint_id
+                    "waitpoint.wait: unknown waitpoint '{waitpoint_id}'"
                 ))
             })?;
         records.push(record);

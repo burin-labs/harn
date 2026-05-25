@@ -584,7 +584,7 @@ pub fn close_with_status(
         "system",
         "internal",
         "Agent session closed",
-        Some(event_metadata.clone()),
+        Some(event_metadata),
     );
     let _ = append_event(id, transcript_event);
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::SessionClosed {

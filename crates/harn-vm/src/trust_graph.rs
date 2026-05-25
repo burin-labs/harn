@@ -271,7 +271,7 @@ fn decode_effect_list(value: Option<&serde_json::Value>) -> Vec<EffectRecord> {
         .unwrap_or_default()
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrustGraphRecord {
     pub actor_id: String,
     pub action: String,
@@ -300,7 +300,7 @@ impl TrustGraphRecord {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TrustQueryFilters {
     pub agent: Option<String>,
@@ -351,7 +351,7 @@ pub struct TrustScore {
     pub policy: CapabilityPolicy,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TrustChainReport {
     pub topic: String,
@@ -362,7 +362,7 @@ pub struct TrustChainReport {
     pub errors: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrustChainExportProducer {
     pub name: String,
     pub version: String,
@@ -377,7 +377,7 @@ impl Default for TrustChainExportProducer {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrustChainExportMetadata {
     pub topic: String,
     pub total: u64,

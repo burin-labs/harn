@@ -185,9 +185,8 @@ fn tokenize_expr(src: &str, line: usize, col: usize) -> Result<Vec<EToken>, Temp
                             is_float = true;
                             i += 1;
                             continue;
-                        } else {
-                            break;
                         }
+                        break;
                     }
                     i += 1;
                 }
@@ -371,7 +370,7 @@ impl<'a> ExprParser<'a> {
                 let inner = self.parse_primary(depth + 1)?;
                 Expr::Unary(UnOp::Not, Box::new(inner))
             }
-            other => return Err(self.err(format!("unexpected token `{:?}`", other))),
+            other => return Err(self.err(format!("unexpected token `{other:?}`"))),
         };
         Ok(base)
     }

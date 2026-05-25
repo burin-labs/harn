@@ -187,7 +187,7 @@ pub fn synthesize_sweep(
         i,
         now,
         AgentEvent::AgentThoughtChunk {
-            session_id: session_id.clone(),
+            session_id,
             content: format!(
                 "Sweep complete: {} PR(s) inspected, {} require follow-up",
                 state

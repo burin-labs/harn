@@ -62,10 +62,7 @@ pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
             .map(|policy| policy.as_str())
             .unwrap_or("<missing>");
         let entry = persona.entry_workflow.as_deref().unwrap_or("<missing>");
-        println!(
-            "  {name:<name_width$}  tier={tier:<17} receipts={receipts:<8} entry={entry}",
-            name_width = name_width
-        );
+        println!("  {name:<name_width$}  tier={tier:<17} receipts={receipts:<8} entry={entry}");
     }
 }
 

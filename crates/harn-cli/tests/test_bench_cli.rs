@@ -343,7 +343,7 @@ pipeline default() {
     assert_eq!(outcome_a.exit_code, 0, "stderr: {}", outcome_a.stderr);
 
     let script_clone_b = script.clone();
-    let outcome_b = run_under_testbench(workspace_b.clone(), script.clone(), move || {
+    let outcome_b = run_under_testbench(workspace_b.clone(), script, move || {
         Testbench::builder()
             .paused_clock_at_ms(1_700_000_000_000)
             .fs_overlay(workspace_b)
@@ -399,7 +399,7 @@ pipeline default() {
 
     // Run twice with *different* pinned clocks so the recorded
     // ClockRead values diverge across the two tapes.
-    let outcome_a = run_under_testbench(workspace_a.clone(), script.clone(), move || {
+    let outcome_a = run_under_testbench(workspace_a, script.clone(), move || {
         Testbench::builder()
             .paused_clock_at_ms(1_700_000_000_000)
             .emit_tape_for(
@@ -411,7 +411,7 @@ pipeline default() {
     });
     assert_eq!(outcome_a.exit_code, 0, "stderr: {}", outcome_a.stderr);
 
-    let outcome_b = run_under_testbench(workspace_b.clone(), script.clone(), move || {
+    let outcome_b = run_under_testbench(workspace_b, script, move || {
         Testbench::builder()
             .paused_clock_at_ms(1_700_000_999_999)
             .emit_tape_for(

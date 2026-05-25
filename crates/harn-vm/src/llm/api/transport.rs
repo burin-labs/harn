@@ -231,7 +231,7 @@ async fn dispatch_to_registered_provider(
         return anthropic.chat_impl(opts, delta_tx).await;
     }
 
-    crate::llm::providers::OpenAiCompatibleProvider::new(provider.to_string())
+    crate::llm::providers::OpenAiCompatibleProvider::new(provider.clone())
         .chat_impl(opts, delta_tx)
         .await
 }

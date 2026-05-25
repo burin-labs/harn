@@ -292,11 +292,7 @@ pub(super) fn prepare_workflow_state(
     crate::tracing::set_tracing_enabled(true);
     let workflow_span_id = crate::tracing::span_start(
         crate::tracing::SpanKind::Pipeline,
-        graph
-            .name
-            .clone()
-            .unwrap_or_else(|| graph.id.clone())
-            .to_string(),
+        graph.name.clone().unwrap_or_else(|| graph.id.clone()),
     );
     let run_usage_before = llm_usage_snapshot();
     let report = validate_workflow(&graph, Some(&builtin_ceiling()));
@@ -425,14 +421,14 @@ pub(super) fn prepare_workflow_state(
     }
     run.workflow_id = graph.id.clone();
     run.workflow_name = graph.name.clone();
-    run.task = task.clone();
+    run.task = task;
     run.status = "running".to_string();
-    run.parent_run_id = parent_run_id.clone().or(run.parent_run_id.clone());
+    run.parent_run_id = parent_run_id.or(run.parent_run_id.clone());
     if run.root_run_id.is_none() {
-        run.root_run_id = root_run_id.clone().or(Some(run.id.clone()));
+        run.root_run_id = root_run_id.or(Some(run.id.clone()));
     }
     if run.execution.is_none() {
-        run.execution = execution.clone();
+        run.execution = execution;
     }
     run.metadata.insert(
         "effective_policy".to_string(),

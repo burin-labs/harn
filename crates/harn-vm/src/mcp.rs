@@ -31,7 +31,7 @@ const X_MCP_HEADER: &str = "x-mcp-header";
 const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = 8;
 
 /// Default timeout for MCP requests (60 seconds).
-const MCP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const MCP_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -2841,10 +2841,10 @@ host_mock("mcp", "sample", {action: "accept", options: {provider: "mock", model:
 
     async fn clear_sampling_mock() {
         execute_test_harn(
-            r#"
+            r"
 host_mock_clear()
 llm_mock_clear()
-"#,
+",
         )
         .await;
     }

@@ -225,30 +225,24 @@ pub fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
         (VmValue::Float(x), VmValue::Float(y)) => {
             if x < y {
                 -1
-            } else if x > y {
-                1
             } else {
-                0
+                i32::from(x > y)
             }
         }
         (VmValue::Int(x), VmValue::Float(y)) => {
             let x = *x as f64;
             if x < *y {
                 -1
-            } else if x > *y {
-                1
             } else {
-                0
+                i32::from(x > *y)
             }
         }
         (VmValue::Float(x), VmValue::Int(y)) => {
             let y = *y as f64;
             if *x < y {
                 -1
-            } else if *x > y {
-                1
             } else {
-                0
+                i32::from(*x > y)
             }
         }
         (VmValue::String(x), VmValue::String(y)) => x.cmp(y) as i32,

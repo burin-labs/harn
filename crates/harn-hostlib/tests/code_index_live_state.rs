@@ -442,11 +442,8 @@ fn word_get_returns_per_line_hits() {
     assert!(list.iter().all(|h| {
         let d = extract_dict(h);
         d.get("file_id")
-            .filter(|v| matches!(v, VmValue::Int(_)))
-            .is_some()
-            && d.get("line")
-                .filter(|v| matches!(v, VmValue::Int(_)))
-                .is_some()
+            .is_some_and(|v| matches!(v, VmValue::Int(_)))
+            && d.get("line").is_some_and(|v| matches!(v, VmValue::Int(_)))
     }));
 }
 
@@ -1018,7 +1015,7 @@ fn concurrent_version_record_assigns_unique_seqs() {
             let entry = r.find("hostlib_code_index_version_record").unwrap();
             let mut seqs = Vec::with_capacity(ITERATIONS as usize);
             for i in 0..ITERATIONS {
-                let path = format!("src/f{}_{}.rs", thread_idx, i);
+                let path = format!("src/f{thread_idx}_{i}.rs");
                 let value = (entry.handler)(&[dict(&[
                     ("agent_id", VmValue::Int(thread_idx as i64 + 1)),
                     ("path", VmValue::String(Rc::from(path))),

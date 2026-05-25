@@ -87,7 +87,7 @@ fn pack_writes_valid_harnpack_archive() {
     fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
 
-    run_pack(&pack_args(entry.clone(), out.clone()));
+    run_pack(&pack_args(entry, out.clone()));
 
     assert!(out.exists(), "expected pack to write {}", out.display());
     let bytes = fs::read(&out).unwrap();
@@ -153,7 +153,7 @@ fn pack_is_deterministic_across_runs() {
     let out_b = workdir.path().join("b.harnpack");
 
     run_pack(&pack_args(entry.clone(), out_a.clone()));
-    run_pack(&pack_args(entry.clone(), out_b.clone()));
+    run_pack(&pack_args(entry, out_b.clone()));
 
     let bytes_a = fs::read(&out_a).unwrap();
     let bytes_b = fs::read(&out_b).unwrap();
@@ -176,7 +176,7 @@ fn pack_resolves_transitive_imports() {
     .unwrap();
 
     let out = workdir.path().join("entry.harnpack");
-    run_pack(&pack_args(entry.clone(), out.clone()));
+    run_pack(&pack_args(entry, out.clone()));
 
     let archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
     let paths: Vec<String> = archive
@@ -215,7 +215,7 @@ fn pack_bundles_non_harn_assets_from_imports() {
     .unwrap();
     let out = workdir.path().join("entry.harnpack");
 
-    run_pack(&pack_args(entry.clone(), out.clone()));
+    run_pack(&pack_args(entry, out.clone()));
 
     let archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
     assert!(archive
@@ -346,9 +346,9 @@ fn pack_upgrade_replaces_schema_version_keeping_workflow() {
 
     run_pack(&PackArgs {
         command: None,
-        entrypoint: Some(entry.clone()),
+        entrypoint: Some(entry),
         out: Some(out.clone()),
-        upgrade: Some(v1.clone()),
+        upgrade: Some(v1),
         sign: false,
         key: None,
         unsigned: true,
@@ -379,7 +379,7 @@ fn pack_signs_manifest_and_emits_release_trust_record() {
 
     let outcome = build_pack(&PackArgs {
         command: None,
-        entrypoint: Some(entry.clone()),
+        entrypoint: Some(entry),
         out: Some(out.clone()),
         upgrade: None,
         sign: true,
@@ -427,7 +427,7 @@ fn pack_unsigned_emits_suggest_release_trust_record() {
     fs::write(&entry, "__io_println(\"unsigned\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
 
-    let outcome = build_pack(&pack_args(entry.clone(), out.clone()));
+    let outcome = build_pack(&pack_args(entry, out.clone()));
 
     let archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
     assert!(archive.manifest.signature.is_none());
@@ -455,7 +455,7 @@ fn workflow_bundle_signature_verifier_rejects_content_mismatch() {
 
     run_pack(&PackArgs {
         command: None,
-        entrypoint: Some(entry.clone()),
+        entrypoint: Some(entry),
         out: Some(out.clone()),
         upgrade: None,
         sign: true,
@@ -491,7 +491,7 @@ fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
 
     let outcome = build_pack(&PackArgs {
         command: None,
-        entrypoint: Some(entry.clone()),
+        entrypoint: Some(entry),
         out: Some(out.clone()),
         upgrade: None,
         sign: true,
@@ -503,7 +503,7 @@ fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
     });
 
     let report = pack::verify(&PackVerifyArgs {
-        bundle: out.clone(),
+        bundle: out,
         allow_unsigned: false,
         trust_policy: None,
         require_trusted_signer: false,
@@ -520,7 +520,7 @@ fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
         Some(outcome.bundle_hash.as_str())
     );
     assert_eq!(report.module_count, 1);
-    assert!(report.content_entry_count >= 3, "{:?}", report);
+    assert!(report.content_entry_count >= 3, "{report:?}");
 }
 
 #[test]
@@ -529,7 +529,7 @@ fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
     let entry = workdir.path().join("hello.harn");
     fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
-    build_pack(&pack_args(entry.clone(), out.clone()));
+    build_pack(&pack_args(entry, out.clone()));
 
     let strict = pack::verify(&PackVerifyArgs {
         bundle: out.clone(),
@@ -543,7 +543,7 @@ fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
     assert_eq!(strict.code, "verify.unsigned");
 
     let lenient = pack::verify(&PackVerifyArgs {
-        bundle: out.clone(),
+        bundle: out,
         allow_unsigned: true,
         trust_policy: None,
         require_trusted_signer: false,
@@ -566,7 +566,7 @@ fn pack_verify_tampered_signed_bundle_fails() {
 
     build_pack(&PackArgs {
         command: None,
-        entrypoint: Some(entry.clone()),
+        entrypoint: Some(entry),
         out: Some(out.clone()),
         upgrade: None,
         sign: true,
@@ -593,7 +593,7 @@ fn pack_verify_tampered_signed_bundle_fails() {
     fs::write(&out, &tampered).unwrap();
 
     let err = pack::verify(&PackVerifyArgs {
-        bundle: out.clone(),
+        bundle: out,
         allow_unsigned: true,
         trust_policy: None,
         require_trusted_signer: false,
@@ -614,10 +614,10 @@ fn pack_verify_json_envelope_round_trips_schema() {
     let entry = workdir.path().join("hello.harn");
     fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
-    build_pack(&pack_args(entry.clone(), out.clone()));
+    build_pack(&pack_args(entry, out.clone()));
 
     let envelope = pack::verify_to_envelope(&PackVerifyArgs {
-        bundle: out.clone(),
+        bundle: out,
         allow_unsigned: true,
         trust_policy: None,
         require_trusted_signer: false,
@@ -655,7 +655,7 @@ fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() 
         let out = workdir.path().join("hello.harnpack");
 
         let outcome = pack::build(&BuildArgs {
-            entrypoint: entry.clone(),
+            entrypoint: entry,
             out: Some(out.clone()),
             upgrade: None,
             sign: true,
@@ -665,7 +665,7 @@ fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() 
             json: false,
         })
         .expect("pack succeeds");
-        let signer_fingerprint = outcome.json.signature.key_id.clone().unwrap();
+        let signer_fingerprint = outcome.json.signature.key_id.unwrap();
         fs::write(
             signers_dir.join(format!("{signer_fingerprint}.pub")),
             test_public_key_pem(),
@@ -702,7 +702,7 @@ fn pack_verify_strict_rejects_tampered_sbom_module_hash() {
     let entry = workdir.path().join("hello.harn");
     fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
-    build_pack(&pack_args(entry.clone(), out.clone()));
+    build_pack(&pack_args(entry, out.clone()));
 
     let mut archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
     let module_package = archive
@@ -760,7 +760,7 @@ fn pack_verify_strict_rejects_tampered_sbom_asset_hash() {
     )
     .unwrap();
     let out = workdir.path().join("hello.harnpack");
-    build_pack(&pack_args(entry.clone(), out.clone()));
+    build_pack(&pack_args(entry, out.clone()));
 
     let mut archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
     let asset_package = archive

@@ -368,7 +368,7 @@ fn github_install_callback_captures_installation_id() {
         .expect("revert listener to blocking for deterministic test accept");
     let parsed = Url::parse(&redirect_uri).unwrap();
     let port = parsed.port().unwrap();
-    let redirect_uri_for_server = redirect_uri.clone();
+    let redirect_uri_for_server = redirect_uri;
     let server_ready = Arc::new(Barrier::new(2));
     let client_ready = Arc::clone(&server_ready);
     let server = thread::spawn(move || {

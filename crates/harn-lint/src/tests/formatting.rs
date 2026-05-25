@@ -37,11 +37,11 @@ fn test_blank_line_between_items_ok_with_doc_block_and_blank_above() {
 
 #[test]
 fn test_eager_collection_conversion_let_list() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
   log(xs)
 }
-"#;
+";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "eager-collection-conversion"),
@@ -57,11 +57,11 @@ fn test_eager_collection_conversion_let_list() {
 
 #[test]
 fn test_eager_collection_conversion_no_flag_when_already_to_list() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 }).to_list()
   log(xs)
 }
-"#;
+";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "eager-collection-conversion"),
@@ -72,10 +72,10 @@ fn test_eager_collection_conversion_no_flag_when_already_to_list() {
 
 #[test]
 fn test_eager_collection_conversion_return_stmt() {
-    let source = r#"fn build() -> list<int> {
+    let source = r"fn build() -> list<int> {
   return iter([1, 2, 3]).filter(fn(x) { return x > 0 })
 }
-"#;
+";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "eager-collection-conversion"),
@@ -277,11 +277,11 @@ fn test_trailing_comma_fires_on_fn_call_args() {
 
 #[test]
 fn test_eager_collection_conversion_ignores_iter_annotation() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let xs: Iter<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
   log(xs)
 }
-"#;
+";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "eager-collection-conversion"),

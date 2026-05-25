@@ -87,7 +87,7 @@ impl Vm {
     fn validate_sync_builtin_args(&self, name: &str, args: &[VmValue]) -> Result<(), VmError> {
         if self.denied_builtins.contains(name) {
             return Err(VmError::CategorizedError {
-                message: format!("Tool '{}' is not permitted.", name),
+                message: format!("Tool '{name}' is not permitted."),
                 category: ErrorCategory::ToolRejected,
             });
         }
@@ -422,7 +422,7 @@ impl Vm {
     ) -> Option<Result<VmValue, VmError>> {
         if self.denied_builtins.contains(name) {
             return Some(Err(VmError::CategorizedError {
-                message: format!("Tool '{}' is not permitted.", name),
+                message: format!("Tool '{name}' is not permitted."),
                 category: ErrorCategory::ToolRejected,
             }));
         }
@@ -448,7 +448,7 @@ impl Vm {
     ) -> Option<Result<VmValue, VmError>> {
         if self.denied_builtins.contains(name) {
             return Some(Err(VmError::CategorizedError {
-                message: format!("Tool '{}' is not permitted.", name),
+                message: format!("Tool '{name}' is not permitted."),
                 category: ErrorCategory::ToolRejected,
             }));
         }
@@ -486,7 +486,7 @@ impl Vm {
         // Sandbox check: deny builtins blocked by --deny/--allow flags.
         if self.denied_builtins.contains(name) {
             return Err(VmError::CategorizedError {
-                message: format!("Tool '{}' is not permitted.", name),
+                message: format!("Tool '{name}' is not permitted."),
                 category: ErrorCategory::ToolRejected,
             });
         }

@@ -230,10 +230,8 @@ schema: my_schema
 
 #[test]
 fn test_cross_module_unresolved_call_errors() {
-    let diags = check_source_with_imports(
-        r#"pipeline t(task) { missing_helper() }"#,
-        &["other_helper"],
-    );
+    let diags =
+        check_source_with_imports(r"pipeline t(task) { missing_helper() }", &["other_helper"]);
     let errs: Vec<&String> = diags
         .iter()
         .filter(|d| d.severity == DiagnosticSeverity::Error)
@@ -247,8 +245,7 @@ fn test_cross_module_unresolved_call_errors() {
 
 #[test]
 fn test_cross_module_imported_call_is_allowed() {
-    let diags =
-        check_source_with_imports(r#"pipeline t(task) { helper_fn(1, 2) }"#, &["helper_fn"]);
+    let diags = check_source_with_imports(r"pipeline t(task) { helper_fn(1, 2) }", &["helper_fn"]);
     let errs: Vec<&String> = diags
         .iter()
         .filter(|d| d.severity == DiagnosticSeverity::Error)
@@ -263,7 +260,7 @@ fn test_cross_module_imported_call_is_allowed() {
 #[test]
 fn test_renamed_stdlib_call_suggests_replacement() {
     let diags = check_source_with_imports(
-        r#"pipeline t(task) { retry_with_backoff(1, 0, fn() { return true }) }"#,
+        r"pipeline t(task) { retry_with_backoff(1, 0, fn() { return true }) }",
         &["retry_predicate_with_backoff"],
     );
     let errs: Vec<&String> = diags
@@ -330,8 +327,8 @@ fn test_sub_agent_request_accepts_registry_tools_shape() {
 #[test]
 fn test_cross_module_local_fn_not_flagged() {
     let diags = check_source_with_imports(
-        r#"fn local_fn() { 42 }
-pipeline t(task) { local_fn() }"#,
+        r"fn local_fn() { 42 }
+pipeline t(task) { local_fn() }",
         &[],
     );
     let errs: Vec<&String> = diags
@@ -348,8 +345,8 @@ fn test_cross_module_forward_reference_is_allowed() {
     // should not trigger the strict cross-module undefined-call
     // check, because top-level names are registered up-front.
     let diags = check_source_with_imports(
-        r#"pipeline t(task) { helper() }
-fn helper() { 42 }"#,
+        r"pipeline t(task) { helper() }
+fn helper() { 42 }",
         &[],
     );
     let errs: Vec<&String> = diags
@@ -383,7 +380,7 @@ fn test_cross_module_hostlib_prefix_not_flagged() {
     // opaque escape hatch — the same way `__`-prefixed names are
     // treated.
     let diags =
-        check_source_with_imports(r#"pipeline t(task) { hostlib_code_index_stats({}) }"#, &[]);
+        check_source_with_imports(r"pipeline t(task) { hostlib_code_index_stats({}) }", &[]);
     let errs: Vec<&String> = diags
         .iter()
         .filter(|d| d.severity == DiagnosticSeverity::Error)

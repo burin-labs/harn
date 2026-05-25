@@ -6,7 +6,7 @@ use crate::value::{VmError, VmValue};
 use super::{CallFrame, Vm};
 
 /// Debug action returned by the debug hook.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DebugAction {
     /// Continue execution normally.
     Continue,
@@ -301,7 +301,7 @@ impl Vm {
                 if i == 0 {
                     "pipeline".to_string()
                 } else {
-                    format!("fn_{}", i)
+                    format!("fn_{i}")
                 }
             } else {
                 frame.fn_name.clone()

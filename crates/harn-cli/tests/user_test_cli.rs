@@ -13,20 +13,20 @@ fn user_tests_emit_progress_and_timing_summary() {
     std::fs::create_dir_all(&suite).expect("create suite");
     std::fs::write(
         suite.join("test_alpha.harn"),
-        r#"
+        r"
 pipeline test_alpha(task) {
   assert_eq(1, 1)
 }
-"#,
+",
     )
     .expect("write alpha");
     std::fs::write(
         suite.join("test_beta.harn"),
-        r#"
+        r"
 pipeline test_beta(task) {
   assert_eq(2, 2)
 }
-"#,
+",
     )
     .expect("write beta");
 

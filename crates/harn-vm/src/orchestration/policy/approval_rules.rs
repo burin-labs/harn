@@ -408,7 +408,7 @@ pub struct PolicyMatchedRule {
     pub index: Option<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyEvaluation {
     pub action: String,
     pub reason: String,

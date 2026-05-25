@@ -99,7 +99,7 @@ fn format_size(bytes: u64) -> String {
     } else if bytes >= MIB {
         format!("{:.0} MiB", bytes as f64 / MIB as f64)
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }
 

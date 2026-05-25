@@ -224,14 +224,14 @@ fn fold_mod(left: VmValue, right: VmValue) -> Option<VmValue> {
 fn fold_pow(left: VmValue, right: VmValue) -> Option<VmValue> {
     match (left, right) {
         (VmValue::Int(base), VmValue::Int(exp)) => {
-            if exp >= 0 && exp <= u32::MAX as i64 {
+            if u32::try_from(exp).is_ok() {
                 Some(VmValue::Int(base.wrapping_pow(exp as u32)))
             } else {
                 Some(VmValue::Float((base as f64).powf(exp as f64)))
             }
         }
         (VmValue::Float(base), VmValue::Int(exp)) => {
-            if exp >= i32::MIN as i64 && exp <= i32::MAX as i64 {
+            if i32::try_from(exp).is_ok() {
                 Some(VmValue::Float(base.powi(exp as i32)))
             } else {
                 Some(VmValue::Float(base.powf(exp as f64)))

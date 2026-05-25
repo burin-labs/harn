@@ -70,12 +70,12 @@ fn non_exhaustive_match_attaches_scope_local_repair() {
 #[test]
 fn immutable_assignment_attaches_scope_local_repair() {
     let diag = first_with_code(
-        r#"
+        r"
             pipeline main() {
                 let x = 1
                 x = 2
             }
-        "#,
+        ",
         Code::ImmutableAssignment,
     );
     let repair = diag
@@ -103,9 +103,9 @@ fn string_interpolation_rewrite_attaches_behavior_preserving_repair() {
 #[test]
 fn try_outside_function_attaches_surface_changing_repair() {
     let diag = first_with_code(
-        r#"
+        r"
             try* maybe_fail()
-        "#,
+        ",
         Code::TryOutsideFunction,
     );
     let repair = diag

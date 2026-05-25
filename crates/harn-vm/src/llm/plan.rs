@@ -277,7 +277,7 @@ fn string_field(source: &serde_json::Value, keys: &[&str]) -> Option<String> {
 
 fn scalar_text(value: &serde_json::Value) -> Option<String> {
     match value {
-        serde_json::Value::String(text) => Some(text.to_string()),
+        serde_json::Value::String(text) => Some(text.clone()),
         serde_json::Value::Number(number) => Some(number.to_string()),
         serde_json::Value::Bool(value) => Some(value.to_string()),
         _ => None,

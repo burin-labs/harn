@@ -19,7 +19,7 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 crate::triggers::TriggerFlowControlConfig {
                     rate_limit: Some(crate::triggers::TriggerRateLimitConfig {
                         key: None,
-                        period: Duration::from_secs(60),
+                        period: Duration::from_mins(1),
                         max: 1,
                     }),
                     ..Default::default()

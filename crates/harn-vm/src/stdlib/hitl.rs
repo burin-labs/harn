@@ -141,7 +141,7 @@ struct HitlTimeoutRecord {
     timed_out_at: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ApprovalRequest {
     pub id: String,
     pub action: String,
@@ -1210,7 +1210,7 @@ async fn approval_wait_error(
                     reviewer: record.cancelled_by.clone(),
                     reason: record.reason.clone(),
                     metadata: record.metadata.clone(),
-                    responded_at: record.cancelled_at.clone(),
+                    responded_at: record.cancelled_at,
                     signature: None,
                 },
             );
@@ -1221,7 +1221,7 @@ async fn approval_wait_error(
                 kind,
                 "",
                 &[request_id.to_string()],
-                record.reason.clone(),
+                record.reason,
             );
         }
     }

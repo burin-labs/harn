@@ -108,6 +108,7 @@ fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send)) -> bool {
     print_failure && broken_pipe
 }
 
+#[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
 async fn async_main() {
     let raw_args = normalize_serve_args(env::args().collect());
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
@@ -173,7 +174,7 @@ async fn async_main() {
             SkillCommand::Endorse(endorse) => commands::skill::run_endorse(&endorse),
             SkillCommand::Verify(verify) => commands::skill::run_verify(&verify),
             SkillCommand::WhoSigned(who_signed) => {
-                commands::skill::run_who_signed(&who_signed).await
+                commands::skill::run_who_signed(&who_signed).await;
             }
             SkillCommand::Trust(trust_args) => match trust_args.command {
                 SkillTrustCommand::Add(add) => commands::skill::run_trust_add(&add),
@@ -307,7 +308,7 @@ async fn async_main() {
                             aux_options,
                             harnpack_options,
                         )
-                        .await
+                        .await;
                     }
                 }
                 (Some(_), Some(_)) => command_error(
@@ -905,7 +906,7 @@ async fn async_main() {
             }
         }
         Command::Init(args) => {
-            commands::init::init_project(args.name.as_deref(), args.template).await
+            commands::init::init_project(args.name.as_deref(), args.template).await;
         }
         Command::New(args) => match commands::init::resolve_new_args(&args) {
             Ok((name, template)) => commands::init::init_project(name.as_deref(), template).await,
@@ -920,7 +921,7 @@ async fn async_main() {
                 check_providers: args.check_providers,
                 check_targets: args.check_targets,
             })
-            .await
+            .await;
         }
         Command::Models(args) => commands::models::run(args).await,
         Command::Local(args) => commands::local::run(args).await,
@@ -1016,7 +1017,7 @@ async fn async_main() {
                 args.open,
                 args.allow_remote_launch,
             )
-            .await
+            .await;
         }
         Command::Trigger(args) => {
             if let Err(error) = commands::trigger::handle(args).await {
@@ -1116,7 +1117,7 @@ async fn async_main() {
         }
         Command::Runs(args) => match args.command {
             RunsCommand::Inspect(inspect) => {
-                inspect_run_record(&inspect.path, inspect.compare.as_deref())
+                inspect_run_record(&inspect.path, inspect.compare.as_deref());
             }
         },
         Command::Session(args) => commands::session::run(args),
@@ -1180,7 +1181,7 @@ async fn async_main() {
                     args.structural_experiment.as_deref(),
                     &args.argv,
                     &llm_mock_mode,
-                )
+                );
             }
         },
         Command::Repl => commands::repl::run_repl().await,
@@ -1206,7 +1207,7 @@ async fn async_main() {
             args.registry.as_deref(),
         ),
         Command::Update(args) => {
-            package::update_packages(args.alias.as_deref(), args.all, args.json)
+            package::update_packages(args.alias.as_deref(), args.all, args.json);
         }
         Command::Remove(args) => package::remove_package(&args.alias),
         Command::Lock => package::lock_packages(),
@@ -1219,10 +1220,14 @@ async fn async_main() {
                 search.json,
             ),
             PackageCommand::Info(info) => {
-                package::show_package_registry_info(&info.name, info.registry.as_deref(), info.json)
+                package::show_package_registry_info(
+                    &info.name,
+                    info.registry.as_deref(),
+                    info.json,
+                );
             }
             PackageCommand::Check(check) => {
-                package::check_package(check.package.as_deref(), check.json)
+                package::check_package(check.package.as_deref(), check.json);
             }
             PackageCommand::Pack(pack) => package::pack_package(
                 pack.package.as_deref(),
@@ -1239,7 +1244,7 @@ async fn async_main() {
                 PackageCacheCommand::List => package::list_package_cache(),
                 PackageCacheCommand::Clean(clean) => package::clean_package_cache(clean.all),
                 PackageCacheCommand::Verify(verify) => {
-                    package::verify_package_cache(verify.materialized)
+                    package::verify_package_cache(verify.materialized);
                 }
             },
             PackageCommand::Outdated(args) => package::outdated_packages(
@@ -1249,14 +1254,18 @@ async fn async_main() {
                 args.json,
             ),
             PackageCommand::Audit(args) => {
-                package::audit_packages(args.registry.as_deref(), args.skip_materialized, args.json)
+                package::audit_packages(
+                    args.registry.as_deref(),
+                    args.skip_materialized,
+                    args.json,
+                );
             }
             PackageCommand::Artifacts(args) => match args.command {
                 PackageArtifactsCommand::Manifest(manifest) => {
-                    package::artifacts_manifest(manifest.output.as_deref())
+                    package::artifacts_manifest(manifest.output.as_deref());
                 }
                 PackageArtifactsCommand::Check(check) => {
-                    package::artifacts_check(&check.manifest, check.json)
+                    package::artifacts_check(&check.manifest, check.json);
                 }
             },
             PackageCommand::Scaffold(args) => match args.command {
@@ -1346,13 +1355,13 @@ async fn async_main() {
                 }
             }
             PersonaCommand::Check(check) => {
-                commands::persona::run_check(args.manifest.as_deref(), &check)
+                commands::persona::run_check(args.manifest.as_deref(), &check);
             }
             PersonaCommand::List(list) => {
-                commands::persona::run_list(args.manifest.as_deref(), &list)
+                commands::persona::run_list(args.manifest.as_deref(), &list);
             }
             PersonaCommand::Inspect(inspect) => {
-                commands::persona::run_inspect(args.manifest.as_deref(), &inspect)
+                commands::persona::run_inspect(args.manifest.as_deref(), &inspect);
             }
             PersonaCommand::Status(status) => {
                 if let Err(error) = commands::persona::run_status(
@@ -1469,7 +1478,7 @@ async fn async_main() {
                 args.base_url.as_deref(),
                 args.json,
             )
-            .await
+            .await;
         }
         Command::ProviderProbe(args) => commands::provider::run_provider_probe(args).await,
         Command::ProviderToolProbe(args) => commands::provider::run_provider_tool_probe(args).await,
@@ -1537,14 +1546,14 @@ fn normalize_serve_args(mut raw_args: Vec<String>) -> Vec<String> {
 
 fn print_version() {
     println!(
-        r#"
+        r"
  ╱▔▔╲
  ╱    ╲    harn v{}
  │ ◆  │    the agent harness language
  │    │
  ╰──╯╱
    ╱╱
-"#,
+",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -2033,7 +2042,7 @@ fn print_run_diff(diff: &harn_vm::orchestration::RunDiffReport) {
     for stage in &diff.stage_diffs {
         println!("- {} [{}]", stage.node_id, stage.change);
         for detail in &stage.details {
-            println!("  {}", detail);
+            println!("  {detail}");
         }
     }
     for tool in &diff.tool_diffs {
@@ -2044,7 +2053,7 @@ fn print_run_diff(diff: &harn_vm::orchestration::RunDiffReport) {
     for item in &diff.observability_diffs {
         println!("- {} [{}]", item.label, item.section);
         for detail in &item.details {
-            println!("  {}", detail);
+            println!("  {detail}");
         }
     }
 }
@@ -2085,14 +2094,14 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
         .get("parent_worker_id")
         .and_then(|value| value.as_str())
     {
-        println!("Parent worker: {}", parent_worker_id);
+        println!("Parent worker: {parent_worker_id}");
     }
     if let Some(parent_stage_id) = run
         .metadata
         .get("parent_stage_id")
         .and_then(|value| value.as_str())
     {
-        println!("Parent stage: {}", parent_stage_id);
+        println!("Parent stage: {parent_stage_id}");
     }
     if run
         .metadata
@@ -2136,17 +2145,17 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
         );
         if let Some(worker) = worker {
             if let Some(worker_id) = worker.get("id").and_then(|value| value.as_str()) {
-                println!("  worker_id: {}", worker_id);
+                println!("  worker_id: {worker_id}");
             }
             if let Some(child_run_id) = worker.get("child_run_id").and_then(|value| value.as_str())
             {
-                println!("  child_run_id: {}", child_run_id);
+                println!("  child_run_id: {child_run_id}");
             }
             if let Some(child_run_path) = worker
                 .get("child_run_path")
                 .and_then(|value| value.as_str())
             {
-                println!("  child_run_path: {}", child_run_path);
+                println!("  child_run_path: {child_run_path}");
             }
         }
     }
@@ -2181,7 +2190,7 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
             println!("  id: {}", event.daemon_id);
             println!("  persist_path: {}", event.persist_path);
             if let Some(summary) = &event.payload_summary {
-                println!("  payload: {}", summary);
+                println!("  payload: {summary}");
             }
         }
     }
@@ -2203,10 +2212,10 @@ fn replay_run_record(path: &str) {
             stage.branch.clone().unwrap_or_else(|| "-".to_string())
         );
         if let Some(text) = &stage.visible_text {
-            println!("  visible: {}", text);
+            println!("  visible: {text}");
         }
         if let Some(verification) = &stage.verification {
-            println!("  verification: {}", verification);
+            println!("  verification: {verification}");
         }
     }
     if let Some(transcript) = &run.transcript {
@@ -2255,8 +2264,7 @@ fn eval_run_record(
         if !path_buf.is_file() || path_buf.extension().and_then(|ext| ext.to_str()) != Some("harn")
         {
             eprintln!(
-                "--structural-experiment currently requires a .harn pipeline path, got {}",
-                path
+                "--structural-experiment currently requires a .harn pipeline path, got {path}"
             );
             process::exit(1);
         }
@@ -2352,7 +2360,7 @@ fn eval_run_record(
                 if case.pass { "PASS" } else { "FAIL" }
             );
             if let Some(path) = &case.source_path {
-                println!("  path: {}", path);
+                println!("  path: {path}");
             }
             if let Some(comparison) = &case.comparison {
                 println!("  baseline identical: {}", comparison.identical);
@@ -2364,7 +2372,7 @@ fn eval_run_record(
                 }
             }
             for failure in &case.failures {
-                println!("  {}", failure);
+                println!("  {failure}");
             }
         }
         if !suite.pass {
@@ -2400,13 +2408,13 @@ fn eval_run_record(
                 if case.pass { "PASS" } else { "FAIL" }
             );
             if let Some(path) = &case.source_path {
-                println!("  path: {}", path);
+                println!("  path: {path}");
             }
             if let Some(comparison) = &case.comparison {
                 println!("  baseline identical: {}", comparison.identical);
             }
             for failure in &case.failures {
-                println!("  {}", failure);
+                println!("  {failure}");
             }
         }
         if !suite.pass {
@@ -2429,7 +2437,7 @@ fn eval_run_record(
     }
     if !report.failures.is_empty() {
         for failure in &report.failures {
-            println!("- {}", failure);
+            println!("- {failure}");
         }
     }
     if !report.pass {
@@ -2456,7 +2464,7 @@ fn print_eval_pack_report(report: &harn_vm::orchestration::EvalPackReport) {
             case.severity
         );
         if let Some(path) = &case.source_path {
-            println!("  path: {}", path);
+            println!("  path: {path}");
         }
         if let Some(comparison) = &case.comparison {
             println!("  baseline identical: {}", comparison.identical);
@@ -2468,13 +2476,13 @@ fn print_eval_pack_report(report: &harn_vm::orchestration::EvalPackReport) {
             }
         }
         for failure in &case.failures {
-            println!("  {}", failure);
+            println!("  {failure}");
         }
         for warning in &case.warnings {
-            println!("  warning: {}", warning);
+            println!("  warning: {warning}");
         }
         for item in &case.informational {
-            println!("  info: {}", item);
+            println!("  info: {item}");
         }
     }
     for ladder in &report.ladders {
@@ -2500,7 +2508,7 @@ fn print_eval_pack_report(report: &harn_vm::orchestration::EvalPackReport) {
                 tier.cost_usd
             );
             for reason in &tier.degradation_reasons {
-                println!("    {}", reason);
+                println!("    {reason}");
             }
         }
     }
@@ -2532,7 +2540,7 @@ fn print_persona_ladder_report(report: &harn_vm::orchestration::PersonaEvalLadde
             tier.cost_usd
         );
         for reason in &tier.degradation_reasons {
-            println!("  {}", reason);
+            println!("  {reason}");
         }
     }
 }
@@ -2618,7 +2626,7 @@ fn run_structural_experiment_eval(
     let mut variant_ok = 0usize;
     let mut any_failures = false;
 
-    println!("Structural experiment: {}", experiment);
+    println!("Structural experiment: {experiment}");
     println!("Cases: {}", baseline_runs.len());
     for (baseline_run, variant_run) in baseline_runs.iter().zip(variant_runs.iter()) {
         let baseline_fixture = baseline_run
@@ -2654,14 +2662,14 @@ fn run_structural_experiment_eval(
             if baseline_report.pass { "PASS" } else { "FAIL" }
         );
         for failure in &baseline_report.failures {
-            println!("    {}", failure);
+            println!("    {failure}");
         }
         println!(
             "  variant: {}",
             if variant_report.pass { "PASS" } else { "FAIL" }
         );
         for failure in &variant_report.failures {
-            println!("    {}", failure);
+            println!("    {failure}");
         }
         println!("  diff identical: {}", diff.identical);
         println!("  stage diffs: {}", diff.stage_diffs.len());

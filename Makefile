@@ -44,6 +44,26 @@ fmt:
 lint: lint-no-rust-prompt-prose lint-no-xfail-regression
 	cargo clippy --workspace --all-targets -- -D warnings
 
+# Detect unused workspace dependencies. cargo-machete is fast and good enough
+# for CI; false positives can be silenced via [package.metadata.cargo-machete]
+# in the relevant crate's Cargo.toml. Skips silently if not installed locally.
+lint-deps:
+	@if command -v cargo-machete >/dev/null 2>&1; then \
+		cargo machete; \
+	else \
+		echo "cargo-machete not installed; \`cargo install --locked cargo-machete\` to enable"; \
+	fi
+
+# Ruff lint for the Python scripts that ship alongside the Rust crates
+# (scripts/, conformance/helpers/, tests/). Config is in pyproject.toml.
+# Skips silently if Ruff is not installed locally — CI installs it explicitly.
+lint-py:
+	@if command -v ruff >/dev/null 2>&1; then \
+		ruff check scripts/ conformance/helpers/ tests/; \
+	else \
+		echo "ruff not installed; \`pip install ruff\` or \`brew install ruff\` to enable"; \
+	fi
+
 # Run the fast (in-process, deterministic) test suite via cargo-nextest.
 # Subprocess-spawning integration tests are excluded by the nextest "default"
 # profile's default-filter. Run `make test-e2e` for the slow E2E suite.

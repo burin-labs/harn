@@ -26,7 +26,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
     }
 
     async fn initialized(&self, params: InitializedParams) {
-        self.handle_initialized(params).await
+        self.handle_initialized(params).await;
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -34,15 +34,15 @@ impl tower_lsp::LanguageServer for HarnLsp {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.handle_did_open(params).await
+        self.handle_did_open(params).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        self.handle_did_change(params).await
+        self.handle_did_change(params).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.handle_did_close(params).await
+        self.handle_did_close(params).await;
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {

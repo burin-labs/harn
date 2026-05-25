@@ -6,22 +6,22 @@ use super::*;
 fn test_nil_narrowing_then_branch() {
     // Existing behavior: x != nil narrows to string in then-branch
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn greet(name: string | nil) {
 if name != nil {
   let s: string = name
 }
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_nil_narrowing_else_branch() {
     // NEW: x != nil narrows to nil in else-branch
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x: string | nil) {
 if x != nil {
   let s: string = x
@@ -29,16 +29,16 @@ if x != nil {
   let n: nil = x
 }
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_nil_equality_narrows_both() {
     // x == nil narrows then to nil, else to non-nil
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x: string | nil) {
 if x == nil {
   let n: nil = x
@@ -46,31 +46,31 @@ if x == nil {
   let s: string = x
 }
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_truthiness_narrowing() {
     // Bare identifier in condition removes nil
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x: string | nil) {
 if x {
   let s: string = x
 }
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_negation_narrowing() {
     // !x swaps truthy/falsy
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x: string | nil) {
 if !x {
   let n: nil = x
@@ -78,9 +78,9 @@ if !x {
   let s: string = x
 }
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -95,7 +95,7 @@ if type_of(x) == "string" {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -112,7 +112,7 @@ if type_of(x) == "string" {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -129,7 +129,7 @@ if type_of(x) != "string" {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -144,22 +144,22 @@ if x != nil && type_of(x) == "string" {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_short_circuit_and_narrows_rhs_expression() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn count_values(values: list<int>) -> int { return len(values) }
   fn check(values: list<int> | nil) {
 if values != nil && count_values(values) > 0 {
   let present: list<int> = values
 }
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -174,26 +174,26 @@ if values == nil || count_values(values) > 0 {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_nil_coalescing_call_site_strips_optional_chain_nil() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   type Doc = { components: { schemas: dict<int>? }? }
   let doc: Doc = { components: nil }
   let n: int = len(doc.components?.schemas ?? {})
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_or_falsy_narrowing() {
     // || combines falsy refinements
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x: string | nil, y: int | nil) {
 if x || y {
   // conservative: can't narrow
@@ -202,37 +202,37 @@ if x || y {
   let yn: nil = y
 }
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_guard_narrows_outer_scope() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x: string | nil) {
 guard x != nil else { return }
 let s: string = x
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_while_narrows_body() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x: string | nil) {
 while x != nil {
   let s: string = x
   break
 }
   }
-}"#,
+}",
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -249,7 +249,7 @@ return s
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -264,31 +264,31 @@ let s: string = x
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_no_narrowing_unknown_type() {
     // Gradual typing: untyped vars don't get narrowed
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x) {
 if x != nil {
   let s: string = x
 }
   }
-}"#,
+}",
     );
     // No narrowing possible, so assigning untyped x to string should be fine
     // (gradual typing allows it)
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
 fn test_reassignment_invalidates_narrowing() {
     // After reassigning a narrowed var, the original type should be restored
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn check(x: string | nil) {
 var y: string | nil = x
 if y != nil {
@@ -297,10 +297,10 @@ if y != nil {
   let s2: string = y
 }
   }
-}"#,
+}",
     );
     // s2 should fail because y was reassigned, invalidating the narrowing
-    assert_eq!(errs.len(), 1, "expected 1 error, got: {:?}", errs);
+    assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
     assert!(
         errs[0].contains("expected string"),
         "expected type mismatch, got: {}",
@@ -311,10 +311,10 @@ if y != nil {
 #[test]
 fn test_let_immutable_warning() {
     let all = check_source(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   let x = 42
   x = 43
-}"#,
+}",
     );
     let warnings: Vec<_> = all
         .iter()
@@ -322,8 +322,7 @@ fn test_let_immutable_warning() {
         .collect();
     assert!(
         warnings.iter().any(|w| w.message.contains("immutable")),
-        "expected immutability warning, got: {:?}",
-        warnings
+        "expected immutability warning, got: {warnings:?}"
     );
 }
 
@@ -340,7 +339,7 @@ if x != nil {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -360,7 +359,7 @@ match x {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -393,8 +392,7 @@ pipeline t(task) {
     );
     assert!(
         errs.is_empty(),
-        "expected narrowing on m.kind, got: {:?}",
-        errs
+        "expected narrowing on m.kind, got: {errs:?}"
     );
 }
 
@@ -418,8 +416,7 @@ pipeline t(task) {
     );
     assert!(
         errs.is_empty(),
-        "expected narrowing on e.type, got: {:?}",
-        errs
+        "expected narrowing on e.type, got: {errs:?}"
     );
 }
 
@@ -443,11 +440,7 @@ pipeline t(task) {
   }
 }"#,
     );
-    assert!(
-        errs.is_empty(),
-        "expected narrowing on i.op, got: {:?}",
-        errs
-    );
+    assert!(errs.is_empty(), "expected narrowing on i.op, got: {errs:?}");
 }
 
 #[test]
@@ -465,8 +458,7 @@ pipeline t(task) {
     );
     assert!(
         errs.is_empty(),
-        "expected narrowing in then-branch, got: {:?}",
-        errs
+        "expected narrowing in then-branch, got: {errs:?}"
     );
 }
 
@@ -488,8 +480,7 @@ pipeline t(task) {
     );
     assert!(
         errs.is_empty(),
-        "expected narrowing in both branches, got: {:?}",
-        errs
+        "expected narrowing in both branches, got: {errs:?}"
     );
 }
 
@@ -512,8 +503,7 @@ pipeline t(task) {
     );
     assert!(
         errs.is_empty(),
-        "expected `!=` to invert truthy/falsy, got: {:?}",
-        errs
+        "expected `!=` to invert truthy/falsy, got: {errs:?}"
     );
 }
 
@@ -536,8 +526,7 @@ pipeline t(task) {
     );
     assert!(
         errs.iter().any(|e| e.contains("let binding `wrong`")),
-        "expected residual-narrowing assignment to fail, got: {:?}",
-        errs
+        "expected residual-narrowing assignment to fail, got: {errs:?}"
     );
 }
 
@@ -552,7 +541,7 @@ if x.has("name") {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -581,7 +570,7 @@ pipeline t(task) {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -606,7 +595,7 @@ pipeline t(task) {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -628,7 +617,7 @@ pipeline t(task) {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -649,5 +638,5 @@ fn test_match_or_pattern_on_literal_union_narrows_to_sub_union() {
   }
 }"#,
     );
-    assert!(errs.is_empty(), "got: {:?}", errs);
+    assert!(errs.is_empty(), "got: {errs:?}");
 }

@@ -23,16 +23,13 @@ fn try_dispatch_surfaces_tool_format_override_warning() {
     assert_eq!(
         output.status.code().unwrap_or(-1),
         0,
-        "try failed\nstdout={}\nstderr={}",
-        stdout,
-        stderr
+        "try failed\nstdout={stdout}\nstderr={stderr}"
     );
     assert!(
         stderr.contains(
             "warning: tool_format override: mock:claude-opus-4-7 requested text over recommended native"
         ),
-        "stderr should surface the override warning; got:\n{}",
-        stderr
+        "stderr should surface the override warning; got:\n{stderr}"
     );
     assert!(
         !stdout.trim().is_empty(),

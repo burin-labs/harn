@@ -266,8 +266,7 @@ pub(crate) fn parse_ts_call_from(
         serde_json::Value::Object(map) => Ok((serde_json::Value::Object(map), total_consumed)),
         other => Err(format!(
             "TOOL CALL PARSE ERROR: `{name}(...)` — expected an object literal argument, \
-             got `{}`. Wrap the value in braces: `{name}({{ key: value }})`.",
-            other
+             got `{other}`. Wrap the value in braces: `{name}({{ key: value }})`."
         )),
     }
 }

@@ -57,7 +57,7 @@ pub(super) fn tokenize(src: &str) -> Result<Vec<Token>, TemplateError> {
         };
 
         // Position after `{{` (and optional `-`).
-        let body_start = open + 2 + if this_trim_right { 1 } else { 0 };
+        let body_start = open + 2 + usize::from(this_trim_right);
 
         // Handle `{{# comment #}}`: comments are stripped outright.
         if body_start < len && bytes[body_start] == b'#' {

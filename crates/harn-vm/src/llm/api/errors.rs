@@ -139,7 +139,7 @@ fn redact_provider_error_secrets(text: &str) -> String {
     static BEARER_RE: OnceLock<Regex> = OnceLock::new();
     let secret_field_re = SECRET_FIELD_RE.get_or_init(|| {
         Regex::new(
-            r##"(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|secret|password)["']?\s*[:=]\s*["']?)[^"',\s}]+"##,
+            r#"(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|secret|password)["']?\s*[:=]\s*["']?)[^"',\s}]+"#,
         )
         .expect("valid secret redaction regex")
     });

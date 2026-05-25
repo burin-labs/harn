@@ -814,13 +814,13 @@ fn check_file_inner_uses_imported_callable_signatures() {
     let file = dir.join("main.harn");
     std::fs::write(
         &lib,
-        r#"
+        r"
 type PickOptions = {drop_nil?: bool}
 
 pub fn pick(options: PickOptions = {}) -> nil {
   return nil
 }
-"#,
+",
     )
     .unwrap();
     std::fs::write(
@@ -1506,12 +1506,12 @@ fn check_and_lint_json_share_typecheck_cache() {
     let file = dir.join("main.harn");
     std::fs::write(
         &file,
-        r#"
+        r"
 pipeline main() {
   let x = 1
   log(x)
 }
-"#,
+",
     )
     .unwrap();
 

@@ -291,7 +291,7 @@ pub(crate) fn register_memory_builtins(vm: &mut Vm) {
             id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
             namespace: namespace.clone(),
             backend,
-            embed_model_hint: embed_model_hint.clone(),
+            embed_model_hint,
             embed_dim,
             bm25_weight,
             cosine_weight,
@@ -337,7 +337,7 @@ pub(crate) fn register_memory_builtins(vm: &mut Vm) {
             id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
             namespace: namespace.clone(),
             predicate: predicate_json,
-            forgotten_ids: forgotten_ids.clone(),
+            forgotten_ids,
             forgotten_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
         };
         append_event(&root, &namespace, &MemoryEvent::Forget(event.clone()))?;
@@ -1041,7 +1041,7 @@ fn bm25_score(
                 return 0.0;
             }
             let df = doc_freq.get(term).copied().unwrap_or(0) as f64;
-            let idf = ((total_docs - df + 0.5) / (df + 0.5) + 1.0).ln();
+            let idf = ((total_docs - df + 0.5) / (df + 0.5)).ln_1p();
             idf * (freq * (k1 + 1.0)) / (freq + k1 * (1.0 - b + b * doc_len / avg_len))
         })
         .sum()

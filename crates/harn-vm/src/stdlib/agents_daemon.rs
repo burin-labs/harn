@@ -377,8 +377,7 @@ async fn daemon_resume_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if let Some(state) = find_daemon_by_root(&persist_root) {
         if state.borrow().status == "running" {
             return Err(VmError::Runtime(format!(
-                "daemon_resume: daemon '{}' is already running",
-                persist_root
+                "daemon_resume: daemon '{persist_root}' is already running"
             )));
         }
         let bridge = new_daemon_bridge().await?;

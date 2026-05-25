@@ -128,7 +128,7 @@ struct ResolvedChannel {
     retention: &'static str,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignedTimestamp {
     pub at_ms: i64,
     pub at: String,
@@ -167,7 +167,7 @@ struct StoredChannelEvent {
 /// (`HARN-REP-CHN-002`) without having to canonicalize the full payload
 /// during comparison; `payload` carries the verbatim value for byte
 /// equality + replay reconstruction.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelEmitReceipt {
     pub event_id: String,
     pub name_resolved: String,
@@ -198,7 +198,7 @@ pub struct ChannelEmitReceipt {
 /// `event_id` doubles as the cached-match key: on replay the dispatcher
 /// looks up the recorded match by `event_id` instead of re-evaluating
 /// the filter spec, preserving "the journal IS the spec" determinism.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelMatchReceipt {
     pub event_id: String,
     pub trigger_id: String,
@@ -220,7 +220,7 @@ pub struct ChannelMatchReceipt {
 /// CH-07 (#1878): batched-dispatch summary stamped onto
 /// `ChannelMatchReceipt`. The `constituent_event_ids` list is the full
 /// recorded composition; replay reconstructs the batch from those ids.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelMatchBatchInfo {
     pub count: usize,
     pub constituent_event_ids: Vec<String>,
@@ -230,7 +230,7 @@ pub struct ChannelMatchBatchInfo {
 /// shape of the dispatcher's `DispatchOutcome` but kept lightweight so
 /// the receipt stays compact and self-contained — replay tooling never
 /// needs to cross-reference the dispatcher log to interpret a match.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelMatchResultSummary {
     pub status: String,
     pub attempt_count: u32,
@@ -872,7 +872,7 @@ fn canonical_json_string(value: &serde_json::Value) -> String {
                 .map(|(key, value)| {
                     format!(
                         "{}:{}",
-                        serde_json::to_string(key).unwrap_or_else(|_| key.to_string()),
+                        serde_json::to_string(key).unwrap_or_else(|_| (*key).clone()),
                         canonical_json_string(value)
                     )
                 })

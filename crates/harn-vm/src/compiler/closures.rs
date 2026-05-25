@@ -186,8 +186,7 @@ impl Compiler {
                 schema::schema_to_json_schema_value(&return_type).map_err(|error| {
                     CompileError {
                         message: format!(
-                            "failed to lower tool return schema for '{}': {}",
-                            name, error
+                            "failed to lower tool return schema for '{name}': {error}"
                         ),
                         line: self.line,
                     }

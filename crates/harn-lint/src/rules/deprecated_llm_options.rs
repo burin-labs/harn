@@ -57,7 +57,7 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
             visit_node(inner, diagnostics);
         }
         Node::Pipeline { body, .. } | Node::OverrideDecl { body, .. } => {
-            visit_nodes(body, diagnostics)
+            visit_nodes(body, diagnostics);
         }
         Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
             visit_node(value, diagnostics);

@@ -481,7 +481,7 @@ pub struct WorkflowGraph {
     pub audit_log: Vec<WorkflowAuditEntry>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct WorkflowAuditEntry {
     pub id: String,

@@ -92,7 +92,7 @@ impl FidelityReport {
 /// Single divergence between two tapes. Records are paired by position
 /// for byte-identical / semantic modes; outcome mode emits one
 /// of these per outcome facet that disagreed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Divergence {
     /// Logical sequence number of the diverging record (`None` when the
     /// divergence is an outcome facet, e.g. exit code).

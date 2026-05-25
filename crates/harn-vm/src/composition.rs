@@ -1610,55 +1610,47 @@ pub fn composition_crystallization_trace(
             "failure_category": report.run.failure_category,
         }
     })];
-    actions.extend(
-        report
-            .child_calls
+    actions.extend(report.child_calls.iter().map(|call| {
+        let result = report
+            .child_results
             .iter()
-            .map(|call| {
-                let result = report
-                    .child_results
+            .find(|result| result.tool_call_id == call.tool_call_id);
+        let capabilities = call
+            .annotations
+            .as_ref()
+            .map(|annotations| {
+                annotations
+                    .capabilities
                     .iter()
-                    .find(|result| result.tool_call_id == call.tool_call_id);
-                let capabilities = call
-                    .annotations
-                    .as_ref()
-                    .map(|annotations| {
-                        annotations
-                            .capabilities
-                            .iter()
-                            .flat_map(|(domain, ops)| {
-                                ops.iter().map(move |op| format!("{domain}.{op}"))
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                serde_json::json!({
-                    "id": format!("composition_child_{}", call.operation_index),
-                    "kind": "tool_call",
-                    "name": call.tool_name,
-                    "inputs": call.raw_input,
-                    "parameters": call.raw_input,
-                    "output": result.and_then(|result| result.raw_output.clone()),
-                    "observed_output": result.and_then(|result| result.raw_output.clone()),
-                    "capabilities": capabilities,
-                    "side_effects": [],
-                    "duration_ms": result.and_then(|result| result.duration_ms).unwrap_or(0),
-                    "deterministic": true,
-                    "fuzzy": false,
-                    "metadata": {
-                        "source_kind": "composition_child_call",
-                        "composition_run_id": report.run.run_id,
-                        "composition_tool_call_id": call.tool_call_id,
-                        "requested_side_effect_level": call.requested_side_effect_level,
-                        "annotations": call.annotations,
-                        "policy_context": call.policy_context,
-                        "status": result.map(|result| result.status),
-                        "error_category": result.and_then(|result| result.error_category),
-                    }
-                })
+                    .flat_map(|(domain, ops)| ops.iter().map(move |op| format!("{domain}.{op}")))
+                    .collect::<Vec<_>>()
             })
-            .collect::<Vec<_>>(),
-    );
+            .unwrap_or_default();
+        serde_json::json!({
+            "id": format!("composition_child_{}", call.operation_index),
+            "kind": "tool_call",
+            "name": call.tool_name,
+            "inputs": call.raw_input,
+            "parameters": call.raw_input,
+            "output": result.and_then(|result| result.raw_output.clone()),
+            "observed_output": result.and_then(|result| result.raw_output.clone()),
+            "capabilities": capabilities,
+            "side_effects": [],
+            "duration_ms": result.and_then(|result| result.duration_ms).unwrap_or(0),
+            "deterministic": true,
+            "fuzzy": false,
+            "metadata": {
+                "source_kind": "composition_child_call",
+                "composition_run_id": report.run.run_id,
+                "composition_tool_call_id": call.tool_call_id,
+                "requested_side_effect_level": call.requested_side_effect_level,
+                "annotations": call.annotations,
+                "policy_context": call.policy_context,
+                "status": result.map(|result| result.status),
+                "error_category": result.and_then(|result| result.error_category),
+            }
+        })
+    }));
     let replay_run = composition_replay_run(report, &trace_id);
     serde_json::json!({
         "version": 1,

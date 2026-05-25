@@ -104,13 +104,10 @@ fn generate_file() -> String {
          // Regenerate with: make gen-highlight\n\
          // CI guard:        cargo run -p harn-cli -- dump-highlight-keywords --check\n\
          window.__HARN_KEYWORDS = {{\n\
-         \x20\x20keyword: {keyword:?},\n\
-         \x20\x20literal: {literal:?},\n\
-         \x20\x20built_in: {built_in:?}\n\
+         \x20\x20keyword: {keyword_line:?},\n\
+         \x20\x20literal: {literal_line:?},\n\
+         \x20\x20built_in: {builtin_line:?}\n\
          }};\n",
-        keyword = keyword_line,
-        literal = literal_line,
-        built_in = builtin_line,
     )
 }
 

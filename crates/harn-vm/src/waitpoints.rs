@@ -83,7 +83,7 @@ impl WaitpointWaitStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitpointRecord {
     pub id: String,
     pub status: WaitpointStatus,
@@ -126,7 +126,7 @@ impl WaitpointRecord {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitpointWaitStartRecord {
     pub wait_id: String,
     pub waitpoint_ids: Vec<String>,
@@ -135,7 +135,7 @@ pub struct WaitpointWaitStartRecord {
     pub replay_of_event_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitpointWaitRecord {
     pub wait_id: String,
     pub waitpoint_ids: Vec<String>,

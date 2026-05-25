@@ -20,11 +20,11 @@ use tokio::task::JoinHandle;
 /// Default tool surface every spawned server exposes — a plain `echo`
 /// function so tests can exercise the full `tools/list` and `tools/call`
 /// wire without standing up project-specific .harn fixtures.
-pub const DEFAULT_ECHO_SCRIPT: &str = r#"
+pub const DEFAULT_ECHO_SCRIPT: &str = r"
 pub fn echo(message: string) -> string {
   return message
 }
-"#;
+";
 
 /// Running generic MCP server. Dropping it aborts the spawned task;
 /// the held `TempDir` survives until then so the script file stays

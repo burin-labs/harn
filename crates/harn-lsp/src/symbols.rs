@@ -1197,7 +1197,7 @@ mod tests {
         assert!(out.contains("ttl: int"), "got: {out}");
         assert!(out.contains("kind: \"pong\""), "got: {out}");
         assert!(out.contains("latency_ms: int"), "got: {out}");
-        assert!(out.contains("|"), "expected variant separator, got: {out}");
+        assert!(out.contains('|'), "expected variant separator, got: {out}");
     }
 
     #[test]

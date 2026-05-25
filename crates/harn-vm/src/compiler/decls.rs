@@ -104,7 +104,7 @@ impl Compiler {
                 let has_runtime_type_checks =
                     CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
                 let func = CompiledFunction {
-                    name: format!("{}.{}", type_name, name),
+                    name: format!("{type_name}.{name}"),
                     type_params: type_params.iter().map(|param| param.name.clone()).collect(),
                     nominal_type_names: fn_compiler.nominal_type_names(),
                     params: param_slots,
@@ -126,7 +126,7 @@ impl Compiler {
             .count();
         self.chunk
             .emit_u16(Op::BuildDict, method_count as u16, self.line);
-        let impl_name = format!("__impl_{}", type_name);
+        let impl_name = format!("__impl_{type_name}");
         self.emit_define_binding(&impl_name, false);
         Ok(())
     }

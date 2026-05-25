@@ -304,24 +304,21 @@ impl TempPackageWorkspace {
     pub fn write_harn_package(&self, name: &str) -> io::Result<PathBuf> {
         self.write_file(
             "Harn.toml",
-            format!("[package]\nname = \"{}\"\nversion = \"0.0.0-test\"\n", name),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.0.0-test\"\n"),
         )
     }
 
     pub fn write_cargo_package(&self, name: &str) -> io::Result<PathBuf> {
         self.write_file(
             "Cargo.toml",
-            format!(
-                "[package]\nname = \"{}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
-                name
-            ),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n"),
         )
     }
 
     pub fn write_npm_package(&self, name: &str) -> io::Result<PathBuf> {
         self.write_file(
             "package.json",
-            format!("{{\"name\":\"{}\",\"version\":\"0.0.0-test\"}}\n", name),
+            format!("{{\"name\":\"{name}\",\"version\":\"0.0.0-test\"}}\n"),
         )
     }
 }
@@ -366,7 +363,7 @@ impl Drop for HttpMockGuard {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MockStreamEvent {
     Json(JsonValue),
     Bytes(Vec<u8>),
@@ -432,6 +429,8 @@ impl MockStreamReader {
     }
 }
 
+// `RawInbound.metadata` is `serde_json::Value`, which isn't `Eq`.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct WebhookFixture {
     pub raw: RawInbound,

@@ -218,8 +218,7 @@ impl SharedSession {
             .lock()
             .expect("session poisoned")
             .stream_tx
-            .as_ref()
-            .cloned()
+            .clone()
     }
 }
 
@@ -282,7 +281,7 @@ impl McpServer {
             catalog,
             context,
             auth_policy,
-            executor: ExecutionRuntime::start(core.clone()),
+            executor: ExecutionRuntime::start(core),
         }
     }
 
@@ -668,7 +667,7 @@ impl McpServer {
             .filter(harn_vm::mcp_progress::is_valid_progress_token);
         let request_key = request_key(&request_id);
         Ok(StreamJob {
-            request_id: request_id.clone(),
+            request_id,
             request_key,
             tool_name,
             arguments,

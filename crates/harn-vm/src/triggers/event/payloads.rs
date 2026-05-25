@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 
 use super::util::{parse_json_i64ish, parse_string_array};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubEventCommon {
     pub event: String,
     pub action: Option<String>,
@@ -21,21 +21,21 @@ pub struct GitHubEventCommon {
     pub raw: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubIssuesEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
     pub issue: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubPullRequestEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
     pub pull_request: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubIssueCommentEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -43,7 +43,7 @@ pub struct GitHubIssueCommentEventPayload {
     pub comment: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubPullRequestReviewEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -51,7 +51,7 @@ pub struct GitHubPullRequestReviewEventPayload {
     pub review: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubPushEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -60,14 +60,14 @@ pub struct GitHubPushEventPayload {
     pub distinct_size: Option<i64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubWorkflowRunEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
     pub workflow_run: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubDeploymentStatusEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -75,14 +75,14 @@ pub struct GitHubDeploymentStatusEventPayload {
     pub deployment: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubCheckRunEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
     pub check_run: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubCheckSuiteEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -103,7 +103,7 @@ pub struct GitHubCheckSuiteEventPayload {
     pub conclusion: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubStatusEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -125,7 +125,7 @@ pub struct GitHubStatusEventPayload {
     pub target_url: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubMergeGroupEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -146,7 +146,7 @@ pub struct GitHubMergeGroupEventPayload {
     pub pull_request_numbers: Vec<i64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubInstallationEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -164,7 +164,7 @@ pub struct GitHubInstallationEventPayload {
     pub repositories: Vec<JsonValue>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitHubInstallationRepositoriesEventPayload {
     #[serde(flatten)]
     pub common: GitHubEventCommon,
@@ -186,7 +186,7 @@ pub struct GitHubInstallationRepositoriesEventPayload {
     pub repositories_removed: Vec<JsonValue>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum GitHubEventPayload {
     Issues(GitHubIssuesEventPayload),
@@ -271,7 +271,7 @@ impl<'de> Deserialize<'de> for GitHubEventPayload {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackEventCommon {
     pub event: String,
     pub event_id: Option<String>,
@@ -283,7 +283,7 @@ pub struct SlackEventCommon {
     pub raw: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackMessageEventPayload {
     #[serde(flatten)]
     pub common: SlackEventCommon,
@@ -296,7 +296,7 @@ pub struct SlackMessageEventPayload {
     pub thread_ts: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackAppMentionEventPayload {
     #[serde(flatten)]
     pub common: SlackEventCommon,
@@ -307,7 +307,7 @@ pub struct SlackAppMentionEventPayload {
     pub thread_ts: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackReactionAddedEventPayload {
     #[serde(flatten)]
     pub common: SlackEventCommon,
@@ -316,7 +316,7 @@ pub struct SlackReactionAddedEventPayload {
     pub item: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackAppHomeOpenedEventPayload {
     #[serde(flatten)]
     pub common: SlackEventCommon,
@@ -326,7 +326,7 @@ pub struct SlackAppHomeOpenedEventPayload {
     pub view: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackAssistantThreadStartedEventPayload {
     #[serde(flatten)]
     pub common: SlackEventCommon,
@@ -335,7 +335,7 @@ pub struct SlackAssistantThreadStartedEventPayload {
     pub context: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SlackEventPayload {
     Message(SlackMessageEventPayload),
@@ -346,7 +346,7 @@ pub enum SlackEventPayload {
     Other(SlackEventCommon),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearEventCommon {
     pub event: String,
     pub action: Option<String>,
@@ -514,42 +514,42 @@ pub struct LinearIssueEventPayload {
     pub changes: Vec<LinearIssueChange>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearIssueCommentEventPayload {
     #[serde(flatten)]
     pub common: LinearEventCommon,
     pub comment: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearIssueLabelEventPayload {
     #[serde(flatten)]
     pub common: LinearEventCommon,
     pub label: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearProjectEventPayload {
     #[serde(flatten)]
     pub common: LinearEventCommon,
     pub project: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearCycleEventPayload {
     #[serde(flatten)]
     pub common: LinearEventCommon,
     pub cycle: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearCustomerEventPayload {
     #[serde(flatten)]
     pub common: LinearEventCommon,
     pub customer: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearCustomerRequestEventPayload {
     #[serde(flatten)]
     pub common: LinearEventCommon,
@@ -569,7 +569,7 @@ pub enum LinearEventPayload {
     Other(LinearEventCommon),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotionPolledChangeEvent {
     pub resource: String,
     pub source_id: String,
@@ -579,7 +579,7 @@ pub struct NotionPolledChangeEvent {
     pub after: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotionEventPayload {
     pub event: String,
     pub workspace_id: Option<String>,
@@ -595,7 +595,7 @@ pub struct NotionEventPayload {
     pub raw: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CronEventPayload {
     pub cron_id: Option<String>,
     pub schedule: Option<String>,
@@ -604,14 +604,14 @@ pub struct CronEventPayload {
     pub raw: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenericWebhookPayload {
     pub source: Option<String>,
     pub content_type: Option<String>,
     pub raw: JsonValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct A2aPushPayload {
     pub task_id: Option<String>,
     pub task_state: Option<String>,
@@ -621,7 +621,7 @@ pub struct A2aPushPayload {
     pub kind: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamEventPayload {
     pub event: String,
     pub source: Option<String>,
@@ -644,7 +644,7 @@ pub struct StreamEventPayload {
 /// qualified `name_resolved`) and the user-supplied `payload` ride along
 /// here so handlers can read them off the trigger event without re-parsing
 /// the resolved name string.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChannelEventPayload {
     pub id: String,
     pub name: String,
@@ -661,7 +661,7 @@ pub struct ChannelEventPayload {
     pub pipeline_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtensionProviderPayload {
     pub provider: String,
     pub schema_name: String,

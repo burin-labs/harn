@@ -352,7 +352,7 @@ fn github_status_event_promotes_typed_fields() {
         None,
         original.clone(),
         serde_json::json!({
-            "commit_status": original.clone(),
+            "commit_status": original,
             "status_id": 9101,
             "head_sha": "ccccccccccccccccccccccccccccccccccccccc1",
             "head_ref": "main",

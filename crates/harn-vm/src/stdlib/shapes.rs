@@ -339,8 +339,7 @@ fn assert_shape_field_value(
 
 fn shape_depth_error(param_name: &str) -> VmError {
     VmError::TypeError(format!(
-        "parameter '{}': shape validation depth exceeded ({} levels)",
-        param_name, SHAPE_VALIDATION_MAX_DEPTH
+        "parameter '{param_name}': shape validation depth exceeded ({SHAPE_VALIDATION_MAX_DEPTH} levels)"
     ))
 }
 

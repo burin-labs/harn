@@ -109,7 +109,7 @@ impl SpanLink {
 /// One sub-phase annotation attached to a span. Modeled after OTel span
 /// events: a named checkpoint with optional structured attributes that
 /// piggy-backs on the enclosing span rather than allocating a new one.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct SpanEvent {
     pub name: String,

@@ -1004,11 +1004,11 @@ mod tests {
         let temp = TempTestDir::new();
         temp.write(
             "suite/test_cwd.harn",
-            r#"
+            r"
 pipeline test_current_dir(task) {
   assert_eq(cwd(), source_dir())
 }
-"#,
+",
         );
 
         let original_cwd = std::env::current_dir().unwrap();
@@ -1030,19 +1030,19 @@ pipeline test_current_dir(task) {
         let temp = TempTestDir::new();
         temp.write(
             "suite/a/test_one.harn",
-            r#"
+            r"
 pipeline test_one(task) {
   assert_eq(cwd(), source_dir())
 }
-"#,
+",
         );
         temp.write(
             "suite/b/test_two.harn",
-            r#"
+            r"
 pipeline test_two(task) {
   assert_eq(cwd(), source_dir())
 }
-"#,
+",
         );
 
         let summary = run_tests(&temp.path().join("suite"), None, 1_000, true, &[]).await;
@@ -1056,14 +1056,14 @@ pipeline test_two(task) {
         let temp = TempTestDir::new();
         temp.write(
             "skills/review/SKILL.md",
-            r#"---
+            r"---
 name: review
 short: Review PRs
 description: Review pull requests
 ---
 
 Review instructions.
-"#,
+",
         );
         temp.write(
             "suite/test_skills.harn",
@@ -1209,14 +1209,14 @@ pipeline test_cli_skills(task) {
         let temp = TempTestDir::new();
         temp.write(
             "suite/test_heavy.harn",
-            r#"
+            r"
 @test
 @heavy(threads: 2)
 pipeline test_heavy_one(task) {}
 
 @test
 pipeline test_light(task) {}
-"#,
+",
         );
 
         let opts = RunOptions {
@@ -1262,13 +1262,13 @@ pipeline test_serial_two(task) {}
         let temp = TempTestDir::new();
         temp.write(
             "suite/test_timed.harn",
-            r#"
+            r"
 @test
 pipeline test_first(task) {}
 
 @test
 pipeline test_second(task) {}
-"#,
+",
         );
 
         let opts = RunOptions {
@@ -1342,10 +1342,10 @@ pipeline test_b_clock_is_fresh(task) {
         let temp = TempTestDir::new();
         temp.write(
             "suite/test_phases.harn",
-            r#"
+            r"
 pipeline test_one(task) { assert_eq(1, 1) }
 pipeline test_two(task) { assert_eq(2, 2) }
-"#,
+",
         );
 
         let summary = run_tests(&temp.path().join("suite"), None, 5_000, false, &[]).await;
@@ -1371,13 +1371,13 @@ pipeline test_two(task) { assert_eq(2, 2) }
         let temp = TempTestDir::new();
         temp.write(
             "suite/test_events.harn",
-            r#"
+            r"
 @test
 pipeline test_a(task) {}
 
 @test
 pipeline test_b(task) {}
-"#,
+",
         );
 
         let events: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));

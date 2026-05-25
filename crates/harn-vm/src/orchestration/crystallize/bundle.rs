@@ -86,7 +86,7 @@ pub struct BundleSourceTrace {
     pub fixture_path: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleStep {
     pub index: usize,
@@ -437,7 +437,7 @@ pub fn build_crystallization_bundle(
         rollback_target: selected.and_then(|candidate| candidate.promotion.rollback_target.clone()),
         created_at: now_rfc3339(),
         workflow_version,
-        package_name: package_name.clone(),
+        package_name,
         sample_count: selected
             .map(|candidate| candidate.promotion.sample_count)
             .unwrap_or_default(),

@@ -963,7 +963,7 @@ mod tests {
         let origin = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
         let (harness, paused) = Harness::with_paused_clock(origin);
         assert_eq!(harness.clock().clock().now_utc(), origin);
-        paused.advance(Duration::from_secs(60));
+        paused.advance(Duration::from_mins(1));
         assert_eq!(
             harness.clock().clock().now_utc() - origin,
             time::Duration::seconds(60)
@@ -975,16 +975,16 @@ mod tests {
         let harness = Harness::null();
         for source in [
             r#"fn main(harness: Harness) { harness.stdio.println("blocked") }"#,
-            r#"fn main(harness: Harness) { harness.term.width() }"#,
-            r#"fn main(harness: Harness) { harness.clock.now_ms() }"#,
+            r"fn main(harness: Harness) { harness.term.width() }",
+            r"fn main(harness: Harness) { harness.clock.now_ms() }",
             r#"fn main(harness: Harness) { harness.fs.read_text("/x") }"#,
             r#"fn main(harness: Harness) { harness.env.get("KEY") }"#,
-            r#"fn main(harness: Harness) { harness.random.gen_u64() }"#,
+            r"fn main(harness: Harness) { harness.random.gen_u64() }",
             r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#,
             r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf", args: ["x"]}) }"#,
             r#"fn main(harness: Harness) { harness.crypto.sha256("") }"#,
-            r#"fn main(harness: Harness) { harness.system.cpu() }"#,
-            r#"fn main(harness: Harness) { harness.llm.catalog() }"#,
+            r"fn main(harness: Harness) { harness.system.cpu() }",
+            r"fn main(harness: Harness) { harness.llm.catalog() }",
         ] {
             let error = run_harness_source(source, harness.clone()).expect_err("call denied");
             assert!(
@@ -1093,13 +1093,13 @@ fn main(harness: Harness) {
             .build();
 
         let output = run_harness_source(
-            r#"
+            r"
 fn main(harness: Harness) {
   __io_println(harness.random.gen_u64())
   __io_println(harness.random.gen_u64())
   __io_println(harness.random.gen_u64())
 }
-"#,
+",
             harness,
         )
         .expect("mock random succeeds");
@@ -1115,7 +1115,7 @@ fn main(harness: Harness) {
                 "MockHarness has no fs_read response for /missing",
             ),
             (
-                r#"fn main(harness: Harness) { harness.random.gen_u64() }"#,
+                r"fn main(harness: Harness) { harness.random.gen_u64() }",
                 "MockHarness has no random_u64 response",
             ),
             (
@@ -1228,7 +1228,7 @@ fn main(harness: Harness) {
     #[test]
     fn mock_harness_rejects_wrong_argument_types() {
         let error = run_harness_source(
-            r#"fn main(harness: Harness) { harness.fs.read_text(1) }"#,
+            r"fn main(harness: Harness) { harness.fs.read_text(1) }",
             Harness::mock().build(),
         )
         .expect_err("wrong argument type fails");

@@ -19,7 +19,7 @@ impl NonModuleClosureCallFixture {
         caller_env
             .define(
                 "nested_inner",
-                VmValue::Closure(Rc::new(nested_inner.clone())),
+                VmValue::Closure(Rc::new(nested_inner)),
                 false,
             )
             .expect("synthetic caller closure binding should be valid");

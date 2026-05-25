@@ -49,7 +49,7 @@ pub struct ReplayBenchmarkReport {
     pub fixtures: Vec<ReplayBenchmarkFixtureReport>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReplayBenchmarkCloudIngest {
     pub kind: String,
     pub leaderboard_key: String,
@@ -58,7 +58,7 @@ pub struct ReplayBenchmarkCloudIngest {
     pub artifact_contract: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReplayBenchmarkSuiteIdentity {
     pub name: String,
     pub fixture_count: usize,
@@ -107,7 +107,7 @@ pub struct ReplayBenchmarkMetrics {
     pub category_scores: BTreeMap<String, ReplayCategoryMetric>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReplayCategoryMetric {
     pub compared: bool,
     pub matched: bool,
@@ -140,7 +140,7 @@ pub struct ReplayRuntimeCostMetrics {
     pub observed_cost_usd: Option<f64>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReplayDebuggingProxyMetrics {
     pub proxy_kind: String,
     pub first_divergence_path: Option<String>,
@@ -149,7 +149,7 @@ pub struct ReplayDebuggingProxyMetrics {
     pub estimated_triage_steps: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReplayBenchmarkFixtureReceipt {
     pub ingest_kind: String,
     pub report_schema_version: String,
@@ -703,14 +703,12 @@ fn adapt_opencode_jsonl(input: &str, run_id: &str) -> Result<ReplayTraceRun, Rep
         }
         let value: JsonValue = serde_json::from_str(line).map_err(|error| {
             ReplayBenchmarkError::Adapter(format!(
-                "invalid {} JSONL line {line_no}: {error}",
-                OPENCODE_JSONL_ADAPTER_ID
+                "invalid {OPENCODE_JSONL_ADAPTER_ID} JSONL line {line_no}: {error}"
             ))
         })?;
         let object = value.as_object().ok_or_else(|| {
             ReplayBenchmarkError::Adapter(format!(
-                "{} JSONL line {line_no} must be an object",
-                OPENCODE_JSONL_ADAPTER_ID
+                "{OPENCODE_JSONL_ADAPTER_ID} JSONL line {line_no} must be an object"
             ))
         })?;
         let event_type = object
@@ -744,8 +742,7 @@ fn adapt_opencode_jsonl(input: &str, run_id: &str) -> Result<ReplayTraceRun, Rep
     }
     if trace_material_count(&run.counts()) == 0 {
         return Err(ReplayBenchmarkError::Adapter(format!(
-            "{} input contained no adaptable events",
-            OPENCODE_JSONL_ADAPTER_ID
+            "{OPENCODE_JSONL_ADAPTER_ID} input contained no adaptable events"
         )));
     }
     Ok(run)

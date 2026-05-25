@@ -451,11 +451,11 @@ mod tests {
     fn exported_host_functions_prefers_pub_names() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("host_pub.harn");
-        let source = r#"
+        let source = r"
 fn helper() {}
 pub fn run_shell(command) { return command }
 pub fn request_permission(tool_name, request_args) { return true }
-"#;
+";
         write_file(&path, source);
         let (_, program) = crate::parse_source_file(path.to_string_lossy().as_ref());
         let names = exported_host_functions(&program);

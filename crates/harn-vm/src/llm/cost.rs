@@ -500,8 +500,7 @@ pub(crate) fn accumulate_cost_for_provider(
             let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
             if total > max {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "LLM budget exceeded: spent ${:.4} of ${:.4} budget",
-                    total, max
+                    "LLM budget exceeded: spent ${total:.4} of ${max:.4} budget"
                 )))));
             }
         }

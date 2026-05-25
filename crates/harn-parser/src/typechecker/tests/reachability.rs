@@ -97,7 +97,7 @@ fn test_union_non_exhaustive_match_errors() {
         .iter()
         .filter(|e| e.contains("Non-exhaustive match on union"))
         .collect();
-    assert_eq!(union_errs.len(), 1, "got: {:?}", errs);
+    assert_eq!(union_errs.len(), 1, "got: {errs:?}");
     assert!(union_errs[0].contains("nil"));
 }
 
@@ -105,10 +105,10 @@ fn test_union_non_exhaustive_match_errors() {
 fn test_nil_coalesce_non_union_preserves_left_type() {
     // When left is a known non-nil type, ?? should preserve it
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   let x: int = 42
   let y: int = x ?? 0
-}"#,
+}",
     );
     assert!(errs.is_empty());
 }
@@ -292,12 +292,12 @@ return result
 #[test]
 fn test_unreachable_after_return() {
     let warns = warnings(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn foo() -> int {
 return 1
 let x = 2
   }
-}"#,
+}",
     );
     assert!(
         warns.iter().any(|w| w.contains("unreachable")),
@@ -340,12 +340,12 @@ let y = 2
 #[test]
 fn test_no_unreachable_warning_when_reachable() {
     let warns = warnings(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn foo(x: bool) {
 if x { return 1 }
 let y = 2
   }
-}"#,
+}",
     );
     assert!(
         !warns.iter().any(|w| w.contains("unreachable")),
@@ -357,14 +357,14 @@ let y = 2
 fn test_catch_typed_error_variable() {
     // When catch has a type annotation, the error var should be typed
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   enum AppError { NotFound, Timeout }
   try {
 throw AppError.NotFound
   } catch (e: AppError) {
 let x: AppError = e
   }
-}"#,
+}",
     );
     assert!(errs.is_empty(), "unexpected errors: {errs:?}");
 }
@@ -408,11 +408,11 @@ unreachable(x)
 #[test]
 fn test_unreachable_no_args_no_compile_error() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn foo() {
 unreachable()
   }
-}"#,
+}",
     );
     assert!(
         !errs

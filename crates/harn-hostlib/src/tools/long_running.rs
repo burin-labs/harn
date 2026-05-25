@@ -211,7 +211,7 @@ pub(crate) fn spawn_long_running_with_options(
     let command_id = proc::next_command_id();
     let started_at = proc::now_rfc3339();
 
-    let mut all_argv = vec![program.clone()];
+    let mut all_argv = vec![program];
     all_argv.extend(args.iter().cloned());
     let command_display = all_argv.join(" ");
 

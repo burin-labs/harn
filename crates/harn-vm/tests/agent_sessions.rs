@@ -40,14 +40,14 @@ fn harn_string(value: &str) -> String {
 
 #[test]
 fn open_mints_and_is_idempotent() {
-    let lines = out(r#"
+    let lines = out(r"
 pipeline main(task) {
   let a = agent_session_open()
   let b = agent_session_open(a)
   log(a == b)
   log(agent_session_exists(a))
 }
-"#);
+");
     assert_eq!(lines, vec!["true", "true"]);
 }
 
@@ -231,13 +231,13 @@ pipeline main(task) {
 
 #[test]
 fn close_removes_session() {
-    let lines = out(r#"
+    let lines = out(r"
 pipeline main(task) {
   let s = agent_session_open()
   agent_session_close(s)
   log(agent_session_exists(s))
 }
-"#);
+");
     assert_eq!(lines, vec!["false"]);
 }
 
@@ -290,10 +290,10 @@ pipeline main(task) {
 fn fork_at_on_unknown_or_negative_keep_first_errors() {
     for op in [
         r#"agent_session_fork_at("does-not-exist", 1)"#,
-        r#"
+        r"
 let s = agent_session_open()
 agent_session_fork_at(s, -1)
-"#,
+",
     ] {
         let src = format!("pipeline main(task) {{ {op} }}");
         let err = run(&src).unwrap_err();
@@ -314,7 +314,7 @@ fn lru_eviction_kicks_in_at_cap() {
     let _b = harn_vm::agent_sessions::open_or_create(Some("b".to_string()));
     let _c = harn_vm::agent_sessions::open_or_create(Some("c".to_string()));
     // touch a so b becomes the least-recent
-    harn_vm::agent_sessions::open_or_create(Some(a.clone()));
+    harn_vm::agent_sessions::open_or_create(Some(a));
     let _d = harn_vm::agent_sessions::open_or_create(Some("d".to_string()));
     assert!(harn_vm::agent_sessions::exists("a"));
     assert!(!harn_vm::agent_sessions::exists("b"), "b should be evicted");
@@ -325,12 +325,12 @@ fn lru_eviction_kicks_in_at_cap() {
 
 #[test]
 fn compact_unknown_key_errors() {
-    let err = run(r#"
+    let err = run(r"
 pipeline main(task) {
   let s = agent_session_open()
   agent_session_compact(s, {bogus: 1})
 }
-"#)
+")
     .unwrap_err();
     assert!(err.contains("bogus"), "got: {err}");
 }
@@ -426,11 +426,11 @@ pipeline main(task) {
 
 #[test]
 fn open_rejects_unknown_option_keys() {
-    let err = run(r#"
+    let err = run(r"
 pipeline main(task) {
   agent_session_open(nil, {bogus: 1})
 }
-"#)
+")
     .unwrap_err();
     assert!(err.contains("bogus"), "got: {err}");
 }
@@ -518,7 +518,7 @@ pipeline main(task) {{
             "1".to_string(),
             "extend".to_string(),
             "1".to_string(),
-            mounted_path.clone(),
+            mounted_path,
             "extend".to_string(),
             "shared".to_string(),
             "true".to_string(),

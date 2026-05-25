@@ -1180,7 +1180,7 @@ async fn fork_session(
     let now = now_rfc3339();
     let mut session = parent.clone();
     session["id"] = json!(new_id);
-    session["created_at"] = json!(now.clone());
+    session["created_at"] = json!(now);
     session["updated_at"] = json!(now);
     session["state"] = json!("IDLE");
     session["parent_session_id"] = json!(session_id);
@@ -2426,7 +2426,7 @@ mod tests {
             .with_auth_policy(AuthPolicy {
                 methods: vec![crate::auth::AuthMethodConfig::ApiKey(
                     crate::auth::ApiKeyAuthConfig {
-                        keys: ["secret".to_string()].into_iter().collect(),
+                        keys: std::iter::once("secret".to_string()).collect(),
                     },
                 )],
             });

@@ -120,7 +120,7 @@ impl A2aWorkerSink {
         let mut event = json!({
             "kind": "artifact-update",
             "taskId": self.task_id,
-            "artifact": artifact.clone(),
+            "artifact": artifact,
             "append": false,
             "lastChunk": true,
         });

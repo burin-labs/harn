@@ -256,7 +256,7 @@ fn alias_match_rank(
         (Some("native"), None) => 3,
         _ => 4,
     };
-    let name_rank = if name.contains("native") { 1 } else { 0 };
+    let name_rank = u8::from(name.contains("native"));
     (format_rank, name_rank, name.len())
 }
 

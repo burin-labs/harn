@@ -432,7 +432,7 @@ fn resolve_fleet(args: &EvalPromptArgs, template_path: &Path) -> Result<Vec<Flee
         let Some(fleet) = cfg.eval.fleets.get(name) else {
             let available: Vec<&str> = cfg.eval.fleets.keys().map(|s| s.as_str()).collect();
             return Err(if available.is_empty() {
-                format!("unknown fleet `{name}` — no `[eval.fleets.*]` entries found in harn.toml",)
+                format!("unknown fleet `{name}` — no `[eval.fleets.*]` entries found in harn.toml")
             } else {
                 format!(
                     "unknown fleet `{name}` — known fleets: {}",
@@ -1000,14 +1000,12 @@ fn line_diff_summary(baseline: &[&str], candidate: &[&str]) -> String {
             String::new()
         } else {
             format!(
-                "{} vs {} lines (same content set, different ordering or repeats)",
-                total_baseline, total_candidate,
+                "{total_baseline} vs {total_candidate} lines (same content set, different ordering or repeats)",
             )
         }
     } else {
         format!(
-            "{} line(s) only in baseline, {} line(s) only here",
-            only_in_baseline, only_in_candidate,
+            "{only_in_baseline} line(s) only in baseline, {only_in_candidate} line(s) only here",
         )
     }
 }
@@ -1019,6 +1017,8 @@ fn render_json(report: &PromptReport) -> String {
     }
 }
 
+// CSS rules embed `{color:#...}` syntax that clippy mistakes for format args.
+#[allow(clippy::literal_string_with_formatting_args)]
 fn render_html(report: &PromptReport) -> String {
     let mut out = String::new();
     out.push_str(

@@ -10,7 +10,7 @@ use crate::package::{self, PersonaValidationError, ResolvedPersonaManifest};
 
 use super::persona::{open_persona_log, timestamp_arg};
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PersonaSupervisionTailFrame {
     pub event_id: EventId,
     pub persona_id: String,

@@ -289,7 +289,7 @@ fn emit_event(
             match normalize_backend(&target) {
                 Ok(backend) => delivered.extend(format_backend_payloads(&backend, &event_value)),
                 Err(message) => {
-                    delivered.push(audit_payload(&message, state.config.audit_to_pretty_stderr))
+                    delivered.push(audit_payload(&message, state.config.audit_to_pretty_stderr));
                 }
             }
         }

@@ -312,7 +312,7 @@ fn replay_eval_suite_reports_failed_case() {
             Some("good.json".to_string()),
         ),
         (
-            bad.clone(),
+            bad,
             replay_fixture_from_run(&good),
             Some("bad.json".to_string()),
         ),
@@ -1815,7 +1815,7 @@ fn auto_compact_noop_when_message_tokens_under_threshold() {
 #[test]
 fn observation_mask_preserves_errors_masks_verbose_output() {
     let verbose_lines: Vec<String> = (0..60)
-        .map(|i| format!("// source line {} of the generated file", i))
+        .map(|i| format!("// source line {i} of the generated file"))
         .collect();
     let verbose_content = format!(
         "File created: a.go\npackage main\n{}",

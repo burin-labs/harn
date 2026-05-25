@@ -38,7 +38,7 @@ fn test_non_exhaustive_match_errors() {
         .iter()
         .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert_eq!(exhaustive_errs.len(), 1, "got: {:?}", errs);
+    assert_eq!(exhaustive_errs.len(), 1, "got: {errs:?}");
     assert!(exhaustive_errs[0].contains("Blue"));
 }
 
@@ -57,7 +57,7 @@ fn test_non_exhaustive_multiple_missing_errors() {
         .iter()
         .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert_eq!(exhaustive_errs.len(), 1, "got: {:?}", errs);
+    assert_eq!(exhaustive_errs.len(), 1, "got: {errs:?}");
     assert!(exhaustive_errs[0].contains("Inactive"));
     assert!(exhaustive_errs[0].contains("Pending"));
 }
@@ -82,8 +82,7 @@ pipeline t(task) {
         .collect();
     assert!(
         exh.is_empty(),
-        "no non-exhaustive warning expected, got: {:?}",
-        warns
+        "no non-exhaustive warning expected, got: {warns:?}"
     );
 }
 
@@ -104,7 +103,7 @@ pipeline t(task) {
         .iter()
         .filter(|e| e.contains("Non-exhaustive match on tagged shape union"))
         .collect();
-    assert_eq!(exh.len(), 1, "got: {:?}", errs);
+    assert_eq!(exh.len(), 1, "got: {errs:?}");
     assert!(
         exh[0].contains("\"pong\""),
         "expected missing pong, got: {}",
@@ -131,7 +130,7 @@ pipeline t(task) {
         .iter()
         .filter(|w| w.contains("Non-exhaustive"))
         .collect();
-    assert!(exh.is_empty(), "no warning expected, got: {:?}", warns);
+    assert!(exh.is_empty(), "no warning expected, got: {warns:?}");
 }
 
 #[test]
@@ -152,7 +151,7 @@ pipeline t(task) {
         .iter()
         .filter(|e| e.contains("Non-exhaustive match on literal union"))
         .collect();
-    assert_eq!(exh.len(), 1, "got: {:?}", errs);
+    assert_eq!(exh.len(), 1, "got: {errs:?}");
     assert!(exh[0].contains("\"unclear\""));
 }
 
@@ -173,7 +172,7 @@ fn test_non_exhaustive_match_wildcard_silences_error() {
         .iter()
         .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert!(exhaustive_errs.is_empty(), "got: {:?}", errs);
+    assert!(exhaustive_errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -208,7 +207,7 @@ unreachable("unknown type_of variant")
   log(describe(1))
 }"#;
     let warns = exhaustive_warns(source);
-    assert_eq!(warns.len(), 1, "expected one warning, got: {:?}", warns);
+    assert_eq!(warns.len(), 1, "expected one warning, got: {warns:?}");
     let w = &warns[0];
     for missing in &["float", "bool", "nil", "list", "dict", "bytes", "closure"] {
         assert!(w.contains(missing), "missing {missing} in: {w}");
@@ -243,7 +242,7 @@ throw "unhandled"
   log(describe("x"))
 }"#;
     let warns = exhaustive_warns(source);
-    assert_eq!(warns.len(), 1, "expected one warning, got: {:?}", warns);
+    assert_eq!(warns.len(), 1, "expected one warning, got: {warns:?}");
     assert!(warns[0].contains("throw"));
     assert!(warns[0].contains("int"));
 }
@@ -276,7 +275,7 @@ unreachable("unknown type_of variant")
   log(describe(1, 1))
 }"#;
     let warns = exhaustive_warns(source);
-    assert_eq!(warns.len(), 1, "expected one warning, got: {:?}", warns);
+    assert_eq!(warns.len(), 1, "expected one warning, got: {warns:?}");
     assert!(warns[0].contains("float"));
 }
 
@@ -302,10 +301,10 @@ return v.upper()
 #[test]
 fn test_enum_construct_type_inference() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   enum Color { Red, Green, Blue }
   let c: Color = Color.Red
-}"#,
+}",
     );
     assert!(errs.is_empty());
 }
@@ -340,9 +339,9 @@ fn test_shape_mismatch_detail_missing_field() {
 #[test]
 fn test_shape_mismatch_detail_wrong_type() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   let x: {name: string, age: int} = {name: 42, age: 10}
-}"#,
+}",
     );
     assert_eq!(errs.len(), 1);
     assert!(
@@ -540,7 +539,7 @@ fn test_or_pattern_covers_literal_union_exhaustive() {
         .iter()
         .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert!(exh.is_empty(), "expected no error, got: {:?}", errs);
+    assert!(exh.is_empty(), "expected no error, got: {errs:?}");
 }
 
 #[test]
@@ -560,7 +559,7 @@ fn test_or_pattern_missing_alternative_errors() {
         .iter()
         .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert_eq!(exh.len(), 1, "got: {:?}", errs);
+    assert_eq!(exh.len(), 1, "got: {errs:?}");
     assert!(exh[0].contains("\"skip\""));
 }
 
@@ -587,7 +586,7 @@ pipeline t(task) {
         .iter()
         .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert!(exh.is_empty(), "expected no error, got: {:?}", errs);
+    assert!(exh.is_empty(), "expected no error, got: {errs:?}");
 }
 
 #[test]
@@ -612,7 +611,7 @@ pipeline t(task) {
         .iter()
         .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert_eq!(exh.len(), 1, "got: {:?}", errs);
+    assert_eq!(exh.len(), 1, "got: {errs:?}");
     assert!(exh[0].contains("\"close\""));
 }
 
@@ -634,5 +633,5 @@ fn test_or_pattern_enum_exhaustive() {
         .iter()
         .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert!(exh.is_empty(), "expected no error, got: {:?}", errs);
+    assert!(exh.is_empty(), "expected no error, got: {errs:?}");
 }

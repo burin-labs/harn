@@ -635,7 +635,7 @@ pub(crate) fn run_install(args: &SkillsInstallArgs) {
         }
         (namespace.to_string(), dir)
     } else {
-        ("".to_string(), cache_root.clone())
+        (String::new(), cache_root)
     };
 
     let default_name = args

@@ -975,14 +975,14 @@ async fn defer_trigger(args: &[VmValue]) -> VmValue {
         target,
         serde_json::json!({
             "deferred_trigger": acknowledgement.get("item").cloned().unwrap_or(serde_json::Value::Null),
-            "acknowledgement": acknowledgement.clone(),
+            "acknowledgement": acknowledgement,
         }),
     );
     crate::orchestration::record_lifecycle_audit(
         "trigger_deferred",
         serde_json::json!({
             "trigger_id": id,
-            "envelope_id": envelope.envelope_id.clone(),
+            "envelope_id": envelope.envelope_id,
         }),
     );
     crate::stdlib::json_to_vm_value(&serde_json::json!({

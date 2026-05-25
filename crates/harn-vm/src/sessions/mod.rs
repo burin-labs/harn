@@ -21,7 +21,7 @@ const TOKEN_HANDLE_PREFIX: &str = "sha256:v1:";
 
 pub type SessionAttributes = BTreeMap<String, serde_json::Value>;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
     pub principal: String,
@@ -41,7 +41,7 @@ impl Session {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateSession {
     pub id: Option<String>,
     pub principal: String,
@@ -62,7 +62,7 @@ impl CreateSession {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TouchSession {
     pub id: String,
     pub last_seen_at: OffsetDateTime,
@@ -81,7 +81,7 @@ impl TouchSession {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpireSession {
     pub id: String,
     pub expired_at: OffsetDateTime,
@@ -712,6 +712,7 @@ mod tests {
         };
 
         let (left, right) = tokio::join!(first.create(request.clone()), second.create(request));
+        #[allow(clippy::tuple_array_conversions)]
         let results = [left, right];
         assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
         assert_eq!(

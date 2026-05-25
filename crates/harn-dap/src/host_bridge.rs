@@ -59,7 +59,7 @@ use crate::protocol::DapResponse;
 
 /// Default reverse-request timeout. Generous because the client may need
 /// to do real work (LSP queries, file scans) before responding.
-const REVERSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const REVERSE_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Inner state of the pending-request map: the map itself plus a condvar
 /// the bridge notifies whenever it registers a new pending request.
@@ -359,7 +359,7 @@ fn vm_value_to_json(value: &VmValue) -> Value {
         }
         // Anything else (closures, tasks, error values) we represent as
         // their display string. These are not normal host_call params.
-        other => Value::String(other.display().to_string()),
+        other => Value::String(other.display()),
     }
 }
 
@@ -497,11 +497,12 @@ mod tests {
             }
             let (next, timeout) = pending
                 .inserted
-                .wait_timeout(guard, Duration::from_secs(60))
+                .wait_timeout(guard, Duration::from_mins(1))
                 .expect("pending condvar poisoned");
-            if timeout.timed_out() {
-                panic!("bridge never registered a pending reverse request");
-            }
+            assert!(
+                !timeout.timed_out(),
+                "bridge never registered a pending reverse request"
+            );
             guard = next;
         }
     }

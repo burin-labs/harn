@@ -120,7 +120,7 @@ fn register_handoff(vm: &mut Vm) {
         let envelope = serde_json::json!({
             "_type": "agent_state_handoff",
             "version": 1,
-            "session_id": scope.namespace.clone(),
+            "session_id": scope.namespace,
             "root": scope.root.to_string_lossy(),
             "key": HANDOFF_KEY,
             "summary": summary_json,

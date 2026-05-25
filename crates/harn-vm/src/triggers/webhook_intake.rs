@@ -728,7 +728,7 @@ mod tests {
             secret: secret.to_vec(),
             delivery_id_header: "x-test-delivery".to_string(),
             topic: "tests.webhook_intake".to_string(),
-            dedupe_ttl: StdDuration::from_secs(60),
+            dedupe_ttl: StdDuration::from_mins(1),
         }
     }
 

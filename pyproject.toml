@@ -1,0 +1,55 @@
+# Workspace-wide Python tooling config. The Cargo workspace is the source
+# of truth for Rust; this file exists solely to anchor Ruff for the Python
+# scripts shipped alongside the Rust crates (scripts/, tests/, conformance/
+# helpers, etc.). There is no Python package or distribution here.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    "target",
+    "node_modules",
+    ".claude/worktrees",
+    ".experiments",
+    "experiments",
+    "playground",
+]
+
+[tool.ruff.lint]
+# Curated comprehensive ruleset. Style-only / overly opinionated rules are
+# left out (E501 line-too-long, T201 print — these are CLI scripts; PLR
+# complexity caps, TRY003 long-exception-messages). What stays catches real
+# bugs, modernizes idioms (UP, FURB, PTH, SIM), and removes dead code (F).
+select = [
+    "F",      # pyflakes (unused imports, undefined names)
+    "E",      # pycodestyle errors (syntax-adjacent)
+    "W",      # pycodestyle warnings
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "UP",     # pyupgrade
+    "RUF",    # ruff-specific
+    "RET",    # flake8-return
+    "FURB",   # refurb (modernization)
+    "PTH",    # flake8-use-pathlib
+    "PIE",    # flake8-pie
+    "ASYNC",  # flake8-async
+]
+ignore = [
+    "E501",     # line-too-long (handled by formatter; scripts mix prose + code)
+    "PLR2004",  # magic-value-comparison (too noisy on test/scaffolding scripts)
+    "PLR0911",  # too-many-return-statements (opinionated)
+    "PLR0912",  # too-many-branches (opinionated)
+    "PLR0915",  # too-many-statements (opinionated)
+    "PLW2901",  # loop-variable-overwritten (often intentional)
+    "TRY003",   # long exception message (overly strict for CLI tools)
+    "B008",     # do-not-perform-function-call-in-argument-defaults (false positives on dataclasses)
+    "RUF002",   # ambiguous unicode (allow stylized text in docstrings)
+    "SIM105",   # contextlib.suppress (try/except is sometimes clearer)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files: allow print-debug, magic numbers, single-letter names, etc.
+"tests/**" = ["T201", "ARG", "B011"]
+"conformance/helpers/**" = ["T201", "ARG"]
+"scripts/**" = ["T201"]  # CLI scripts intentionally print

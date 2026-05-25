@@ -393,7 +393,7 @@ mod tests {
     #[tokio::test]
     async fn paused_clock_sleep_until_returns_immediately_for_past_deadline() {
         let clock = PausedClock::new(epoch());
-        clock.advance(Duration::from_secs(60));
+        clock.advance(Duration::from_mins(1));
         clock.sleep_until_utc(epoch()).await;
     }
 

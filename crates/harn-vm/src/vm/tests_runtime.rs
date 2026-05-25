@@ -113,14 +113,14 @@ fn optimizer_differential_success_programs_match() {
   __io_println(({a: 1} + {b: 2}).b)
   __io_println((true && false) || !false)
 }"#,
-        r#"pipeline test(task) {
+        r"pipeline test(task) {
   fn add(a: int, b: int = 4) {
     return a + b
   }
   let base = 3
   __io_println(add(base))
   __io_println(add(1 + 1, 2 + 2))
-}"#,
+}",
     ];
 
     for source in programs {
@@ -319,7 +319,7 @@ fn run_vm_err(source: &str) -> String {
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 match vm.execute(&chunk).await {
-                    Err(e) => format!("{}", e),
+                    Err(e) => format!("{e}"),
                     Ok(_) => panic!("Expected error"),
                 }
             })
@@ -636,7 +636,7 @@ log(total)
 #[test]
 fn test_inline_cache_warms_dict_and_struct_property_sites() {
     let (chunk, out, _) = run_harn_with_chunk(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 struct Point {
   x: int
   y: int
@@ -650,7 +650,7 @@ while i < 3 {
   i = i + 1
 }
 log(total)
-}"#,
+}",
     );
 
     assert_eq!(out.trim_end(), "[harn] 30");
@@ -757,7 +757,7 @@ log(total)
 #[test]
 fn test_adaptive_inline_cache_specializes_generic_integer_add_site() {
     let (chunk, out, _) = run_harn_with_chunk(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 fn erase(x) {
   return x
 }
@@ -768,7 +768,7 @@ while i < erase(8) {
   i = i + erase(1)
 }
 log(total)
-}"#,
+}",
     );
 
     assert_eq!(out.trim_end(), "[harn] 28");
@@ -792,7 +792,7 @@ log(total)
 #[test]
 fn test_adaptive_inline_cache_deoptimizes_mixed_binary_shapes() {
     let (chunk, out, _) = run_harn_with_chunk(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 fn erase(x) {
   return x
 }
@@ -802,7 +802,7 @@ for value in values {
   acc = acc + value
 }
 log(acc)
-}"#,
+}",
     );
 
     assert_eq!(out.trim_end(), "[harn] 15.0");
@@ -826,7 +826,7 @@ log(acc)
 #[test]
 fn test_adaptive_inline_cache_specializes_named_closure_call_site() {
     let (chunk, out, _) = run_harn_with_chunk(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 fn inc(x) {
   return x + 1
 }
@@ -837,7 +837,7 @@ while i < 8 {
   i = i + 1
 }
 log(total)
-}"#,
+}",
     );
 
     assert_eq!(out.trim_end(), "[harn] 36");
@@ -856,7 +856,7 @@ log(total)
 #[test]
 fn test_adaptive_inline_cache_deoptimizes_rebound_closure_call_site() {
     let (chunk, out, _) = run_harn_with_chunk(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 fn inc(x) {
   return x + 1
 }
@@ -874,7 +874,7 @@ while i < 5 {
   i = i + 1
 }
 log(total)
-}"#,
+}",
     );
 
     assert_eq!(out.trim_end(), "[harn] 51");
@@ -893,7 +893,7 @@ log(total)
 #[test]
 fn test_inline_cache_warms_spread_method_site() {
     let (chunk, out, _) = run_harn_with_chunk(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 let list = [1, 2, 3]
 let args = []
 var i = 0
@@ -901,7 +901,7 @@ while i < 3 {
   log(list.count(...args))
   i = i + 1
 }
-}"#,
+}",
     );
 
     assert_eq!(out.trim_end(), "[harn] 3\n[harn] 3\n[harn] 3");
@@ -1079,7 +1079,7 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
 #[test]
 fn test_slot_locals_preserve_shadowing_and_assignment() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 var x = 1
 if true {
   var x = 10
@@ -1088,7 +1088,7 @@ if true {
 }
 x = x + 2
 log(x)
-}"#,
+}",
     );
     assert_eq!(out, "[harn] 11\n[harn] 3");
 }
@@ -1096,7 +1096,7 @@ log(x)
 #[test]
 fn test_slot_params_and_recursive_function_calls() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 fn sum_to(n, acc = 0) {
   if n <= 0 {
     return acc
@@ -1104,7 +1104,7 @@ fn sum_to(n, acc = 0) {
   return sum_to(n - 1, acc + n)
 }
 log(sum_to(5))
-}"#,
+}",
     );
     assert_eq!(out, "[harn] 15");
 }
@@ -1112,12 +1112,12 @@ log(sum_to(5))
 #[test]
 fn test_slot_locals_sync_for_closure_capture() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 var x = 1
 x = 7
 let f = { -> x + 1 }
 log(f())
-}"#,
+}",
     );
     assert_eq!(out, "[harn] 8");
 }
@@ -1125,11 +1125,11 @@ log(f())
 #[test]
 fn test_slot_property_assignment_updates_slot_value() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 var d = {count: 1}
 d.count = d.count + 2
 log(d.count)
-}"#,
+}",
     );
     assert_eq!(out, "[harn] 3");
 }
@@ -1146,11 +1146,11 @@ fn test_try_catch_basic() {
 #[test]
 fn test_try_no_error() {
     let out = run_output(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 var result = 0
 try { result = 42 } catch(e) { result = 0 }
 log(result)
-}"#,
+}",
     );
     assert_eq!(out, "[harn] 42");
 }
@@ -1217,10 +1217,10 @@ return first(["ok"])
 #[test]
 fn test_runtime_user_call_missing_required_arg_rejected() {
     let result = run_harn_result(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 fn echo(value) { return value }
 echo()
-}"#,
+}",
     );
     let err = result.unwrap_err().to_string();
     assert!(err.contains("Arity mismatch: 'echo'"), "{err}");
@@ -1229,7 +1229,7 @@ echo()
 
 #[test]
 fn test_runtime_builtin_call_arg_type_mismatch() {
-    let result = run_harn_result(r#"pipeline t(task) { lowercase(42) }"#);
+    let result = run_harn_result(r"pipeline t(task) { lowercase(42) }");
     let err = result.unwrap_err().to_string();
     assert!(
         err.contains("'lowercase' parameter `text` expects string"),
@@ -1343,7 +1343,7 @@ fn test_match_new() {
 fn test_json_roundtrip() {
     let out = run_vm("pipeline default(task) { let s = json_stringify({a: 1})\nlog(s) }");
     assert!(out.contains("\"a\""));
-    assert!(out.contains("1"));
+    assert!(out.contains('1'));
 }
 
 #[test]
@@ -1357,8 +1357,7 @@ fn test_stack_overflow() {
     let err = run_vm_err("pipeline default(task) { fn f() { f() }\nf() }");
     assert!(
         err.contains("stack") || err.contains("overflow") || err.contains("recursion"),
-        "Expected stack overflow error, got: {}",
-        err
+        "Expected stack overflow error, got: {err}"
     );
 }
 
@@ -1367,8 +1366,7 @@ fn test_division_by_zero() {
     let err = run_vm_err("pipeline default(task) { log(1 / 0) }");
     assert!(
         err.contains("Division by zero") || err.contains("division"),
-        "Expected division by zero error, got: {}",
-        err
+        "Expected division by zero error, got: {err}"
     );
 }
 
@@ -1451,7 +1449,7 @@ async fn test_parallel_each_stream_break_cancels_remaining_work() {
         .run_until(async {
             let handle = tokio::task::spawn_local(async {
                 run_harn_result_async(
-                    r#"pipeline t(task) {
+                    r"pipeline t(task) {
 let completed = atomic(0)
 let results = parallel each [1, 2, 3] with { max_concurrent: 1 } { item ->
   sleep(1s)
@@ -1463,7 +1461,7 @@ for item in results {
 }
 sleep(3s)
 log(atomic_get(completed))
-}"#,
+}",
                 )
                 .await
             });
@@ -1653,12 +1651,12 @@ log(result)
 #[test]
 fn test_deadline_exceeded() {
     let result = run_harn_result(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 deadline 1ms {
   var i = 0
   while i < 1000000 { i = i + 1 }
 }
-}"#,
+}",
     );
     assert!(result.is_err());
 }
@@ -1713,13 +1711,13 @@ async fn test_cancel_during_await_aborts_spawned_task() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let source = r#"pipeline t(task) {
+            let source = r"pipeline t(task) {
 let handle = spawn {
   sleep(1s)
   mark()
 }
 await(handle)
-}"#;
+}";
             let mut lexer = Lexer::new(source);
             let tokens = lexer.tokenize().unwrap();
             let mut parser = Parser::new(tokens);
@@ -1791,12 +1789,12 @@ fn run_harn_with_denied(
 
 #[test]
 fn test_sandbox_deny_builtin() {
-    let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
+    let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 let xs = [1, 2]
 push(xs, 3)
-}"#,
+}",
         denied,
     );
     let err = result.unwrap_err();
@@ -1814,7 +1812,7 @@ push(xs, 3)
 #[test]
 fn test_sandbox_allowed_builtin_works() {
     // Denying "push" should not block "log"
-    let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
+    let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(r#"pipeline t(task) { log("hello") }"#, denied);
     let (output, _) = result.unwrap();
     assert_eq!(output.trim(), "[harn] hello");
@@ -1831,15 +1829,15 @@ fn test_sandbox_empty_denied_set() {
 #[test]
 fn test_sandbox_propagates_to_spawn() {
     // Denied builtins should propagate to spawned VMs.
-    let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
+    let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 let handle = spawn {
   let xs = [1, 2]
   push(xs, 3)
 }
 await(handle)
-}"#,
+}",
         denied,
     );
     let err = result.unwrap_err();
@@ -1853,14 +1851,14 @@ await(handle)
 #[test]
 fn test_sandbox_propagates_to_parallel() {
     // Denied builtins should propagate to parallel VMs.
-    let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
+    let denied: HashSet<String> = std::iter::once("push".to_string()).collect();
     let result = run_harn_with_denied(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 let results = parallel(2) { i ->
   let xs = [1, 2]
   push(xs, 3)
 }
-}"#,
+}",
         denied,
     );
     let err = result.unwrap_err();

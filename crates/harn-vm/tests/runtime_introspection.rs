@@ -45,7 +45,7 @@ fn out(source: &str) -> Vec<String> {
 
 #[test]
 fn runtime_introspection_starts_unresolved() {
-    let lines = out(r#"
+    let lines = out(r"
 pipeline main(task) {
   let snap = runtime_introspection()
   log(snap.provider == nil)
@@ -53,7 +53,7 @@ pipeline main(task) {
   log(snap.harn_version != nil)
   log(snap.harness != nil)
 }
-"#);
+");
     assert_eq!(lines, vec!["true", "true", "true", "true"]);
 }
 
@@ -152,13 +152,13 @@ pipeline main(task) {
 
 #[test]
 fn introspection_tools_are_idempotent() {
-    let lines = out(r#"
+    let lines = out(r"
 pipeline main(task) {
   let once = runtime_introspection_tools(tool_registry())
   let twice = runtime_introspection_tools(once)
   log(len(once.tools) == len(twice.tools))
 }
-"#);
+");
     assert_eq!(lines, vec!["true"]);
 }
 

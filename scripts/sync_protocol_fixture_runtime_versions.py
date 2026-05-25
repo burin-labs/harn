@@ -59,7 +59,7 @@ def main() -> int:
     for path in sorted(FIXTURE_ROOT.rglob("*.json")):
         text = path.read_text()
         data = json.loads(text)
-        updated, count = replace_value(data, args.old, args.new)
+        _updated, count = replace_value(data, args.old, args.new)
         if count == 0:
             continue
         # Keep fixture formatting stable. The parsed rewrite above tells us this

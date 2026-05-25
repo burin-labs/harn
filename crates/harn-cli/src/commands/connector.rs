@@ -695,7 +695,7 @@ fn run_connector_fixture_tests(package_dir: &Path) -> ConnectorGateCheck {
         name: "connector fixture tests".to_string(),
         status: if failed { "fail" } else { "pass" }.to_string(),
         command: Vec::new(),
-        exit_code: Some(if failed { 1 } else { 0 }),
+        exit_code: Some(i32::from(failed)),
         duration_ms: elapsed_ms(started),
         stdout: String::new(),
         stderr: stderr.join("\n"),
@@ -1333,7 +1333,7 @@ impl harn_vm::secrets::SecretProvider for ContractSecretProvider {
         Ok(Vec::new())
     }
 
-    fn namespace(&self) -> &str {
+    fn namespace(&self) -> &'static str {
         "connector-contract"
     }
 

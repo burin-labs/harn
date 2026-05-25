@@ -81,12 +81,7 @@ pub(super) fn fill_missing_child_run_fields(existing: &mut RunChildRecord, child
 }
 
 pub(super) fn materialize_child_runs_from_stage_metadata(run: &mut RunRecord) {
-    for child in run
-        .stages
-        .iter()
-        .filter_map(run_child_from_stage_metadata)
-        .collect::<Vec<_>>()
-    {
+    for child in run.stages.iter().filter_map(run_child_from_stage_metadata) {
         match run
             .child_runs
             .iter_mut()

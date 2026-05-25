@@ -5,11 +5,11 @@ use super::*;
 #[test]
 fn test_assert_outside_test_pipeline_warns() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 assert(true)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "assert-outside-test"),
@@ -20,11 +20,11 @@ assert(true)
 #[test]
 fn test_assert_inside_test_pipeline_is_allowed() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline test(task) {
 assert_eq(1 + 1, 2)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "assert-outside-test"),

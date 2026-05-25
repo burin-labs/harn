@@ -15,7 +15,7 @@ use crate::value::{VmError, VmValue};
 pub(crate) struct GeminiProvider;
 
 impl LlmProvider for GeminiProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "gemini"
     }
 }

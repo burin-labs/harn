@@ -143,7 +143,7 @@ fn warn_adaptive_thinking_rewrite(model: &str) {
 pub(crate) struct AnthropicProvider;
 
 impl LlmProvider for AnthropicProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "anthropic"
     }
 

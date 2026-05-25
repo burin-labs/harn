@@ -500,11 +500,11 @@ fn {name}(slice) -> bool {{
 
     #[test]
     fn parse_warns_when_archivist_missing() {
-        let source = r#"
+        let source = r"
 @invariant
 @deterministic
 fn missing_arch(slice) -> bool { return true }
-"#;
+";
         let parsed = parse_invariants_source(source);
         assert_eq!(parsed.predicates.len(), 1);
         assert!(parsed

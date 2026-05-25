@@ -59,7 +59,7 @@ provider={{ llm.provider }} family={{ llm.family }}\n",
 
     let out_file = tmp.path().join("report.json");
     let args = EvalPromptArgs {
-        file: template.clone(),
+        file: template,
         fleet: vec![
             "claude-3-5-sonnet".to_string(),
             "gpt-4o".to_string(),
@@ -140,7 +140,7 @@ models = ["claude-3-5-sonnet", "gpt-4o"]
 
     let out_file = tmp.path().join("report.json");
     let args = EvalPromptArgs {
-        file: template.clone(),
+        file: template,
         fleet: Vec::new(),
         fleet_name: Some("smoke".to_string()),
         bindings: None,

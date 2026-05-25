@@ -331,9 +331,7 @@ impl TriggerTestHarness {
             .map_err(|error| error.to_string())?;
 
         for target in 1..=30usize {
-            self.clock
-                .advance_std(StdDuration::from_secs(24 * 60 * 60))
-                .await;
+            self.clock.advance_std(StdDuration::from_hours(24)).await;
             let _ = tokio::time::timeout(TEST_DEFAULT_TIMEOUT, async {
                 loop {
                     // Arm the notified future BEFORE checking the count.
@@ -889,7 +887,7 @@ impl TriggerTestHarness {
         let limiter = RateLimiterFactory::new(RateLimitConfig {
             capacity: 1,
             refill_tokens: 1,
-            refill_interval: StdDuration::from_secs(60),
+            refill_interval: StdDuration::from_mins(1),
         });
         let admitted = limiter.try_acquire(&provider, "ingest");
         let saturated = !limiter.try_acquire(&provider, "ingest");
@@ -985,12 +983,12 @@ impl TriggerTestHarness {
         let limiter = RateLimiterFactory::new(RateLimitConfig {
             capacity: 1,
             refill_tokens: 1,
-            refill_interval: StdDuration::from_secs(60),
+            refill_interval: StdDuration::from_mins(1),
         });
         let first_at_ms = self.clock.monotonic_now().as_millis() as u64;
         let first = limiter.try_acquire(&provider, "fixture");
         let second_blocked = !limiter.try_acquire(&provider, "fixture");
-        self.clock.advance_std(StdDuration::from_secs(60)).await;
+        self.clock.advance_std(StdDuration::from_mins(1)).await;
         let second_at_ms = self.clock.monotonic_now().as_millis() as u64;
         let second = limiter.try_acquire(&provider, "fixture");
 
@@ -1320,9 +1318,7 @@ impl TriggerTestHarness {
         self,
     ) -> Result<TriggerHarnessResult, String> {
         let _guard = clock::install_override(self.clock.clone());
-        self.clock
-            .advance_ticks(5, StdDuration::from_secs(60))
-            .await;
+        self.clock.advance_ticks(5, StdDuration::from_mins(1)).await;
         self.connector_registry.record_alert(TriggerHarnessAlert {
             kind: "dead_man_switch".to_string(),
             binding_id: "deadman.fixture".to_string(),
@@ -1470,7 +1466,7 @@ impl SecretProvider for EmptySecretProvider {
         Ok(Vec::new())
     }
 
-    fn namespace(&self) -> &str {
+    fn namespace(&self) -> &'static str {
         "trigger-harness"
     }
 

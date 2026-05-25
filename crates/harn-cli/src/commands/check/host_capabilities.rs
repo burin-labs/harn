@@ -143,13 +143,13 @@ pub(super) fn parse_host_capability_value(
             } else {
                 for (op, enabled) in obj {
                     if enabled.as_bool().unwrap_or(true) {
-                        ops.insert(op.to_string());
+                        ops.insert(op.clone());
                     }
                 }
             }
         }
         if !ops.is_empty() {
-            result.insert(capability.to_string(), ops);
+            result.insert(capability.clone(), ops);
         }
     }
     result

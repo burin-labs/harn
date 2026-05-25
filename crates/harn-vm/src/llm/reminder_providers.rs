@@ -1097,11 +1097,7 @@ mod tests {
     #[test]
     fn under_budget_pressure_threshold_gate() {
         let payload = json!({"tokens_used": 75, "context_window": 100});
-        let high = ctx(
-            HookEvent::OnBudgetThreshold,
-            payload.clone(),
-            JsonValue::Null,
-        );
+        let high = ctx(HookEvent::OnBudgetThreshold, payload, JsonValue::Null);
         assert!(under_budget_pressure(&high, None));
 
         let payload_low = json!({"tokens_used": 50, "context_window": 100});
