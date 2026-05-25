@@ -1,12 +1,9 @@
 import { agent_first_tool_format_override_warning_text } from "std/agent/options"
 
 /**
- * `harn try "<prompt>"` ported to .harn — see harn#2302 (W2).
- *
- * Zero-config agent_loop convenience wrapper. The legacy Rust handler
- * synthesized this exact script into a temp file and shelled out
- * through `execute_run`; this port collapses that round-trip by
- * embedding the script directly.
+ * Zero-config `agent_loop` convenience wrapper for `harn try "<prompt>"`.
+ * The Rust dispatch shim passes resolved CLI options through environment
+ * variables so this script owns the agent-loop behavior.
  *
  * Inputs (from the dispatch shim in crates/harn-cli/src/commands/try_cmd.rs):
  *   argv[0]            — prompt text
