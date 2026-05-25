@@ -1,0 +1,185 @@
+// Run: harn test tests/code_librarian/query_nl_test.harn
+//
+// Exercises std/code_librarian's `code_librarian_query_nl` against the
+// same 30-question fixture corpus used by the typed-graph + Cypher
+// recall test (#2434), rebuilt via the public hostlib surface. Each NL
+// phrasing is paired with the canonical Cypher the compile path is
+// expected to emit; we prime `llm_mock` with that Cypher so the test is
+// deterministic and adds zero inference spend. Aggregate recall ≥ 80%
+// per the #2439 acceptance criteria.
+import { code_librarian_query, code_librarian_query_nl } from "std/code_librarian"
+
+const CORPUS_ROOT = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"
+
+const FIXTURE_PATH = "../../crates/harn-hostlib/tests/fixtures/code_index_queries/queries_nl.json"
+
+fn _load_fixture() {
+  let text = harness.fs.read_text(FIXTURE_PATH)
+  return json_parse(text)
+}
+
+fn _ensure_index() {
+  return hostlib_code_index_rebuild({root: CORPUS_ROOT})
+}
+
+fn _row_value(row, key) {
+  if type_of(row) != "dict" {
+    return ""
+  }
+  let v = row[key]
+  if v == nil {
+    return ""
+  }
+  return to_string(v)
+}
+
+fn _recall(result, expected, match_key) {
+  let rows = result?.rows ?? []
+  var found_count = 0
+  for want in expected {
+    var hit = false
+    for r in rows {
+      if !hit {
+        if _row_value(r, match_key) == want {
+          hit = true
+        }
+      }
+    }
+    if hit {
+      found_count = found_count + 1
+    }
+  }
+  return found_count
+}
+
+pipeline test_query_pass_through(task) {
+  let _ = _ensure_index()
+  let result = code_librarian_query("MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path")
+  let rows = result.rows
+  assert(len(rows) >= 1)
+  assert_eq(_row_value(rows[0], "path"), "src/util.ts")
+}
+
+pipeline test_query_nl_compile_path(task) {
+  let _ = _ensure_index()
+  llm_mock_push_scope()
+  llm_mock(
+    {
+      data: {cypher: "MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path"},
+      model: "mock",
+      provider: "mock",
+      text: "{\"cypher\": \"MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path\"}",
+    },
+  )
+  let r = code_librarian_query_nl("Which file defines formatDate?")
+  llm_mock_pop_scope()
+  assert_eq(r.path, "compile")
+  assert(!r.cache_hit)
+  assert_eq(r.mcts_expansions, 0)
+  assert(len(r.rows) >= 1)
+  assert_eq(_row_value(r.rows[0], "path"), "src/util.ts")
+}
+
+pipeline test_query_nl_cache_hit_inside_5_minutes(task) {
+  let _ = _ensure_index()
+  llm_mock_push_scope()
+  llm_mock(
+    {
+      data: {cypher: "MATCH (f:Function {name: 'parseQuery'}) RETURN f.path AS path"},
+      model: "mock",
+      provider: "mock",
+      text: "{\"cypher\": \"MATCH (f:Function {name: 'parseQuery'}) RETURN f.path AS path\"}",
+    },
+  )
+  let r1 = code_librarian_query_nl("Where is parseQuery defined?")
+  let r2 = code_librarian_query_nl("Where is parseQuery defined?")
+  llm_mock_pop_scope()
+  assert(!r1.cache_hit)
+  assert(r2.cache_hit)
+  assert_eq(_row_value(r2.rows[0], "path"), "src/util.ts")
+}
+
+pipeline test_query_nl_mcts_fallback_when_compile_empty(task) {
+  let _ = _ensure_index()
+  llm_mock_push_scope()
+  // Mock a cypher whose execution returns zero rows. The library must
+  // fall back to MCTS, emit a `code_librarian_query_nl_fallback` event,
+  // and surface candidate nodes with the right `path`.
+  llm_mock(
+    {
+      data: {cypher: "MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path"},
+      model: "mock",
+      provider: "mock",
+      text: "{\"cypher\": \"MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path\"}",
+    },
+  )
+  let r = code_librarian_query_nl("Where is the formatDate function defined?")
+  llm_mock_pop_scope()
+  assert_eq(r.path, "mcts")
+  // MCTS expansion cap is 200; the actual count must be in (0, 200].
+  assert(r.mcts_expansions > 0)
+  assert(r.mcts_expansions <= 200)
+  assert(r.mcts_depth <= 4)
+  // formatDate is a Function in src/util.ts; MCTS should surface it.
+  var found_util = false
+  for row in r.rows {
+    if _row_value(row, "path") == "src/util.ts" {
+      found_util = true
+    }
+  }
+  assert(found_util)
+}
+
+pipeline test_query_nl_mcts_caps_are_respected(task) {
+  let _ = _ensure_index()
+  llm_mock_push_scope()
+  llm_mock(
+    {
+      data: {cypher: "MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path"},
+      model: "mock",
+      provider: "mock",
+      text: "{\"cypher\": \"MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path\"}",
+    },
+  )
+  let r = code_librarian_query_nl(
+    "Find any function or type containing the word main",
+    {mcts_depth_max: 2, mcts_expansions_max: 10},
+  )
+  llm_mock_pop_scope()
+  assert_eq(r.path, "mcts")
+  assert(r.mcts_expansions <= 10)
+  assert(r.mcts_depth <= 2)
+}
+
+pipeline test_query_nl_recall_at_least_80_percent(task) {
+  let _ = _ensure_index()
+  let fixture = _load_fixture()
+  let questions = fixture.questions
+  assert_eq(len(questions), 30)
+  var total_expected = 0
+  var total_found = 0
+  var failures = []
+  for q in questions {
+    llm_mock_push_scope()
+    let mock_text = "{\"cypher\": \"" + q.cypher + "\"}"
+    llm_mock({data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text})
+    let result = code_librarian_query_nl(q.nl)
+    llm_mock_pop_scope()
+    let hits = _recall(result, q.expected, q.match_key)
+    total_expected = total_expected + len(q.expected)
+    total_found = total_found + hits
+    if hits < len(q.expected) {
+      failures = failures + [{id: q.id, missing: len(q.expected) - hits, path: result.path}]
+    }
+  }
+  let recall_pct = to_float(total_found) / to_float(total_expected)
+  __io_println(
+    "[query_nl] recall=" + to_string(recall_pct) + " (" + to_string(total_found) + "/"
+      + to_string(total_expected)
+      + ")",
+  )
+  if len(failures) > 0 {
+    __io_println("[query_nl] failures: " + json_stringify(failures))
+  }
+  assert(recall_pct >= 0.8)
+}
