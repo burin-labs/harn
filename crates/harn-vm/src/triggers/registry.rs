@@ -1584,7 +1584,7 @@ impl TriggerRegistry {
         id: &str,
         as_of: OffsetDateTime,
     ) -> Result<u32, TriggerRegistryError> {
-        let cutoff_ms = (as_of.unix_timestamp_nanos() / 1_000_000) as i64;
+        let cutoff_ms = harn_clock::offset_datetime_to_ms(as_of);
         let mut active_version = None;
         for record in self.lifecycle_records_for(id) {
             if record.occurred_at_ms > cutoff_ms {

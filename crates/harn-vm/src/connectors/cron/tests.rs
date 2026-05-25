@@ -111,6 +111,18 @@ fn fallback_hour_fires_only_once() {
 }
 
 #[test]
+fn next_tick_after_fallback_skips_duplicate_wall_clock_hour() {
+    // After firing at the first 01:00 EDT during fall-back, the scheduler
+    // must not return the second 01:00 EST as the next tick — that wall
+    // clock minute already fired. Roll forward to the next day instead.
+    let schedule = CronSchedule::parse("0 1 * * *", "America/New_York".parse().unwrap()).unwrap();
+    let next = schedule
+        .next_tick_after(parse("2026-11-01T05:00:00Z"))
+        .unwrap();
+    assert_eq!(next, parse("2026-11-02T06:00:00Z"));
+}
+
+#[test]
 fn spring_forward_gap_does_not_fire_missing_hour() {
     let schedule = CronSchedule::parse("0 2 * * *", "America/New_York".parse().unwrap()).unwrap();
     let due = schedule

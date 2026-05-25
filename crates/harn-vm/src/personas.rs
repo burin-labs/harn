@@ -2005,7 +2005,7 @@ fn next_cron_ms(schedule: &str, after_ms: i64) -> Result<i64, String> {
 }
 
 pub fn now_ms() -> i64 {
-    OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000
+    harn_clock::offset_datetime_to_ms(OffsetDateTime::now_utc())
 }
 
 fn offset_datetime_from_ms(ms: i64) -> OffsetDateTime {
@@ -2022,7 +2022,7 @@ pub fn format_ms(ms: i64) -> String {
 pub fn parse_rfc3339_ms(value: &str) -> Result<i64, String> {
     let ts = OffsetDateTime::parse(value, &Rfc3339)
         .map_err(|error| format!("invalid RFC3339 timestamp '{value}': {error}"))?;
-    Ok(ts.unix_timestamp_nanos() as i64 / 1_000_000)
+    Ok(harn_clock::offset_datetime_to_ms(ts))
 }
 
 fn runtime_topic() -> Result<Topic, String> {
@@ -2064,6 +2064,19 @@ mod tests {
 
     fn log() -> Arc<AnyEventLog> {
         Arc::new(AnyEventLog::Memory(MemoryEventLog::new(64)))
+    }
+
+    #[test]
+    fn parse_rfc3339_ms_round_trips_post_2262_dates() {
+        // Year 2300 sits beyond `i64` nanoseconds (~April 2262). Casting
+        // `unix_timestamp_nanos()` to `i64` *before* dividing by 1_000_000
+        // would truncate and yield a negative value; dividing first keeps
+        // the conversion exact.
+        let raw = "2300-01-01T00:00:00Z";
+        let ms = parse_rfc3339_ms(raw).expect("parse 2300-01-01");
+        assert!(ms > 0, "expected positive ms for {raw}, got {ms}");
+        let round_tripped = parse_rfc3339_ms(&format_ms(ms)).expect("re-parse formatted ms");
+        assert_eq!(ms, round_tripped, "ms should round-trip through format_ms");
     }
 
     #[tokio::test]

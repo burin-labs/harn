@@ -865,7 +865,7 @@ pub(super) fn current_unix_ms() -> i64 {
 }
 
 fn unix_ms(timestamp: OffsetDateTime) -> i64 {
-    (timestamp.unix_timestamp_nanos() / 1_000_000) as i64
+    harn_vm::clock::offset_datetime_to_ms(timestamp)
 }
 
 fn duration_between_ms(later_ms: i64, earlier_ms: i64) -> Duration {

@@ -32,7 +32,11 @@ impl CronSchedule {
         after: OffsetDateTime,
     ) -> Result<OffsetDateTime, ConnectorError> {
         let mut cursor = self.to_local(after);
-        let last_local = None;
+        // DST fall-back makes the same `naive_local` happen twice across two
+        // UTC offsets; mirror `due_ticks_between` and skip a candidate that
+        // shares its wall-clock minute with `after` so the caller does not
+        // observe a fresh tick at a time they have already seen.
+        let last_local = cursor.naive_local();
         loop {
             let candidate = self
                 .cron
@@ -46,8 +50,7 @@ impl CronSchedule {
             {
                 continue;
             }
-            let candidate_local = candidate.naive_local();
-            if last_local == Some(candidate_local) {
+            if candidate.naive_local() == last_local {
                 continue;
             }
             return chrono_to_offset(candidate).map_err(schedule_error);
