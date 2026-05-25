@@ -232,6 +232,89 @@ fn verifier_rejects_candidate_when_trace_diverges() {
             .any(|reason| reason.contains("trajectory verifier"))));
 }
 
+/// Build a synthetic agent turn with a single tool call whose name is
+/// driven by `tool` so consecutive turns with different `tool` values
+/// land in different signature groups (and therefore different
+/// trajectory segments).
+fn distinct_tool_turn(iteration: usize, tool: &str) -> AgentTurnRecord {
+    AgentTurnRecord {
+        iteration,
+        session_id: "synthesis_drop_session".to_string(),
+        success: true,
+        tool_calls: vec![merge_captain_call(
+            iteration,
+            tool,
+            &[("repo", json!("burin-labs/harn"))],
+        )],
+        provider: Some("openrouter".to_string()),
+        model: Some("anthropic/claude-haiku".to_string()),
+        input_tokens: 100,
+        output_tokens: 50,
+        duration_ms: Some(200),
+        assistant_text: Some(format!("ran {tool}")),
+        ..AgentTurnRecord::default()
+    }
+}
+
+#[test]
+fn synthesis_branch_surfaces_all_traces_to_caller() {
+    // Bug 2 regression: when `tap.collect()` returns multiple segments
+    // but the count falls below `min_examples.max(2)`, the synthesis
+    // branch used to `.into_iter().next()` and silently drop the rest
+    // of the traces. The fix keeps every collected trace in
+    // `TrajectoryIngestResult::traces` (and emits a `tracing::warn!`
+    // for the dropped-from-synthesis ids).
+    //
+    // We construct three turn-pairs with distinct tool-call signatures
+    // so the TrajectoryTap splits them into three separate segments,
+    // then set `min_examples = 5` to force the synthesis fallback.
+    let turns = vec![
+        distinct_tool_turn(1, "list_open_prs"),
+        distinct_tool_turn(2, "list_open_prs"),
+        distinct_tool_turn(3, "check_ci_status"),
+        distinct_tool_turn(4, "check_ci_status"),
+        distinct_tool_turn(5, "label_pr"),
+        distinct_tool_turn(6, "label_pr"),
+    ];
+    let tap = TrajectoryTap::new("synthesis_drop_session").with_similarity_threshold(1.0);
+    let collected = tap.collect(&turns);
+    assert!(
+        collected.len() >= 3,
+        "fixture should split into at least 3 segments, got {}",
+        collected.len()
+    );
+    let collected_ids: Vec<String> = collected.iter().map(|t| t.id.clone()).collect();
+
+    let result = ingest_agent_loop_trajectory(
+        &tap,
+        &turns,
+        CrystallizeOptions {
+            min_examples: 5,
+            workflow_name: Some("synthesis_drop_workflow".to_string()),
+            ..CrystallizeOptions::default()
+        },
+    )
+    .expect("ingest")
+    .expect("at least one trace");
+
+    // Pre-fix code returned only the first trace here. Post-fix, every
+    // segment the tap surfaced must appear in the result.
+    assert_eq!(
+        result.traces.len(),
+        collected.len(),
+        "all collected traces should be surfaced to the caller; \
+         got {:?}, expected {:?}",
+        result.traces.iter().map(|t| &t.id).collect::<Vec<_>>(),
+        collected_ids,
+    );
+    for id in &collected_ids {
+        assert!(
+            result.traces.iter().any(|t| &t.id == id),
+            "trace id `{id}` missing from result.traces (would have been silently dropped)"
+        );
+    }
+}
+
 #[test]
 fn failed_turn_splits_segment_into_two_candidates() {
     // A failed turn between two successful runs must not appear in any
