@@ -9,6 +9,7 @@ mod bundle;
 mod codegen;
 mod normalize;
 mod shadow;
+mod trajectory;
 mod types;
 mod util;
 
@@ -24,6 +25,10 @@ pub use bundle::{
     BundleValidation, BundleWorkflowRef, CrystallizationBundle, CrystallizationBundleManifest,
 };
 pub use codegen::{generate_eval_pack, generate_harn_code};
+pub use trajectory::{
+    apply_trajectory_verifier, ingest_agent_loop_trajectory, turn_record, AgentTurnRecord,
+    AgentTurnToolCall, TrajectoryIngestResult, TrajectoryTap, TRAJECTORY_SOURCE,
+};
 pub use types::{
     CrystallizationAction, CrystallizationApproval, CrystallizationArtifacts, CrystallizationCost,
     CrystallizationFlowRef, CrystallizationInputFormat, CrystallizationReport,
