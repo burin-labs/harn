@@ -561,7 +561,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
     assert_eq!(listed["result"]["sessions"][0]["liveState"], json!("live"));
     assert_eq!(
         listed["result"]["sessions"][0]["attachableRoles"],
-        json!([])
+        json!(["observer", "controller"])
     );
 
     owner.close(None).await.expect("close owner");
@@ -584,7 +584,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
     );
     assert_eq!(
         detached["result"]["sessions"][0]["attachableRoles"],
-        json!(["host_owner"])
+        json!(["host_owner", "observer"])
     );
 
     listener
@@ -595,7 +595,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn acp_websocket_rejects_duplicate_attach_to_live_session() {
+async fn acp_websocket_multi_client_observer_attaches_to_live_session() {
     let _guard = lock_harn_state();
     reset_active_event_log();
 
@@ -613,18 +613,163 @@ async fn acp_websocket_rejects_duplicate_attach_to_live_session() {
         .expect("session id")
         .to_string();
 
-    let (mut second_socket, _) =
+    let (mut observer, _) =
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
             .await
-            .expect("second connect");
-    let loaded = acp_request(
-        &mut second_socket,
+            .expect("observer connect");
+    let observed = acp_request(
+        &mut observer,
         2,
+        "session/load",
+        json!({
+            "sessionId": session_id,
+            "_harn": {
+                "role": "observer",
+                "clientId": "observer-client",
+            },
+        }),
+    )
+    .await;
+    assert_eq!(observed["result"]["role"], json!("observer"));
+    assert_eq!(
+        observed["result"]["session"]["sessionId"],
+        json!(session_id)
+    );
+    assert_eq!(observed["result"]["session"]["liveState"], json!("live"));
+    assert_eq!(
+        observed["result"]["session"]["attachableRoles"],
+        json!(["observer", "controller"])
+    );
+
+    let rejected = acp_request(
+        &mut observer,
+        3,
+        "session/prompt",
+        json!({
+            "sessionId": session_id,
+            "prompt": [{"type": "text", "text": "__io_println(\"observer\")"}],
+        }),
+    )
+    .await;
+    assert_eq!(rejected["error"]["code"], json!(-32011));
+    assert_eq!(
+        rejected["error"]["data"],
+        json!({
+            "method": "session/prompt",
+            "role": "observer",
+            "reason": "role_not_authorized",
+        })
+    );
+
+    let (mut legacy_second, _) =
+        tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+            .await
+            .expect("legacy connect");
+    let legacy_loaded = acp_request(
+        &mut legacy_second,
+        4,
         "session/load",
         json!({"sessionId": session_id}),
     )
     .await;
-    assert_eq!(loaded["error"]["code"], json!(-32010));
+    assert_eq!(legacy_loaded["error"]["code"], json!(-32010));
+
+    listener
+        .shutdown(Duration::from_secs(5))
+        .await
+        .expect("shutdown listener");
+    reset_active_event_log();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_websocket_routes_host_requests_only_to_host_owner() {
+    let _guard = lock_harn_state();
+    reset_active_event_log();
+
+    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+        ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
+    )
+    .await;
+    let (mut owner, _) =
+        tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+            .await
+            .expect("owner connect");
+    let created = acp_request(&mut owner, 1, "session/new", json!({})).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let (mut observer, _) =
+        tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+            .await
+            .expect("observer connect");
+    let observed = acp_request(
+        &mut observer,
+        2,
+        "session/load",
+        json!({
+            "sessionId": session_id,
+            "_harn": {
+                "role": "observer",
+                "clientId": "observer-client",
+            },
+        }),
+    )
+    .await;
+    assert_eq!(observed["result"]["role"], json!("observer"));
+
+    send_acp_request(
+        &mut owner,
+        3,
+        "session/prompt",
+        json!({
+            "sessionId": session_id,
+            "prompt": [{"type": "text", "text": "__io_println(\"owner-only host request\")"}],
+        }),
+    )
+    .await;
+
+    let host_request = loop {
+        let message = next_acp_text(&mut owner).await;
+        if message.get("method").is_some() && message.get("id").is_some() {
+            break message;
+        }
+    };
+    let host_request_id = host_request["id"].as_u64().expect("host request id");
+    send_acp_response(&mut owner, host_request_id, json!({})).await;
+
+    let mut saw_observer_update = false;
+    let mut saw_owner_prompt_response = false;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !(saw_observer_update && saw_owner_prompt_response) {
+            tokio::select! {
+                owner_message = next_acp_text(&mut owner), if !saw_owner_prompt_response => {
+                    if owner_message.get("method").is_some() && owner_message.get("id").is_some() {
+                        let id = owner_message["id"].as_u64().expect("host request id");
+                        send_acp_response(&mut owner, id, json!({})).await;
+                    } else if owner_message.get("id").and_then(JsonValue::as_u64) == Some(3) {
+                        assert_eq!(owner_message["result"]["stopReason"], json!("end_turn"));
+                        saw_owner_prompt_response = true;
+                    }
+                }
+                observer_message = next_acp_text(&mut observer), if !saw_observer_update => {
+                    assert!(
+                        !(observer_message.get("method").is_some()
+                            && observer_message.get("id").is_some()),
+                        "observer received host request: {observer_message}"
+                    );
+                    if observer_message.get("method").and_then(JsonValue::as_str)
+                        == Some("session/update")
+                    {
+                        saw_observer_update = true;
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .expect("multi-client prompt flow completed");
 
     listener
         .shutdown(Duration::from_secs(5))
@@ -773,7 +918,12 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
     tokio::time::timeout(Duration::from_secs(10), async {
         while !(saw_persisted_replay && saw_expired_session_load) {
             let message = next_acp_text(&mut reconnected).await;
-            if message["_harn"]["replayed"] == json!(true) {
+            if message["_harn"]["replayed"] == json!(true)
+                && message
+                    .get("result")
+                    .and_then(|result| result.get("sessionId"))
+                    .is_some()
+            {
                 assert_eq!(message["result"]["sessionId"], json!(session_id));
                 saw_persisted_replay = true;
             }
