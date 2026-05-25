@@ -2780,7 +2780,7 @@ fn collect_structural_eval_runs(dir: &Path) -> Vec<harn_vm::orchestration::RunRe
     runs
 }
 
-/// Parse a .harn file, returning (source, AST). Exits on error.
+/// Exits on error.
 pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>) {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -2864,7 +2864,7 @@ fn error_span_from_parse(e: &harn_parser::ParserError) -> harn_lexer::Span {
     }
 }
 
-/// Execute source code and return the output. Used by REPL and conformance tests.
+/// Used by REPL and conformance tests.
 pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<String, String> {
     execute_with_skill_dirs(source, source_path, &[]).await
 }

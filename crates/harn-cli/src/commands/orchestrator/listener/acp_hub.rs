@@ -1309,7 +1309,7 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                         Ok(new_worker) => {
                                             client_id = client_id_from_request(&value, &connection_id);
                                             client_role = AcpAttachRole::HostOwner;
-                                            new_worker.attach(
+                                            if let Err(attach_err) = new_worker.attach(
                                                 session_id.as_deref().unwrap_or(&new_worker.id),
                                                 AcpAttachOptions {
                                                     client_id: client_id.clone(),
@@ -1318,8 +1318,16 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                                     socket_tx: socket_tx.clone(),
                                                     last_acked_event_id: 0,
                                                 },
-                                            )
-                                            .expect("fresh ACP worker is unattached");
+                                            ) {
+                                                append_acp_event(
+                                                    &state.event_log,
+                                                    &connection_id,
+                                                    "connection_failed",
+                                                    json!({"reason": format!("{attach_err:?}")}),
+                                                )
+                                                .await;
+                                                break;
+                                            }
                                             worker = Some(new_worker);
                                         }
                                         Err(error) => {

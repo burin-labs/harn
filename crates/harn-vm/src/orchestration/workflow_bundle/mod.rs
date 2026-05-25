@@ -2472,5 +2472,4 @@ fn push_warning(
 }
 
 #[cfg(test)]
-#[path = "workflow_bundle_tests.rs"]
-mod workflow_bundle_tests;
+mod tests;
