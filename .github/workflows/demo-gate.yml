@@ -84,7 +84,9 @@ jobs:
           BYPASS_REASON: ${{ steps.inputs.outputs.bypass_reason }}
         run: |
           set -euo pipefail
-          # Fetch the base commit explicitly: GitHub's shallow PR
-          # checkout often doesn't include the base SHA's tree.
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
+          # The checkout step already used fetch-depth: 0, so the
+          # base commit's tree and ancestry are present locally. An
+          # explicit shallow re-fetch (`--depth=1`) would overwrite the
+          # full-history state for that ref and break `git merge-base`
+          # with a "no merge base" fatal — don't do it.
           bash .github/scripts/demo-gate.sh

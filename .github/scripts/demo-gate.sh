@@ -51,10 +51,13 @@ fi
 
 # Capture the full unified diff once so all detectors can read it. The
 # `--no-renames` flag avoids GitHub's smart rename heuristic, which can
-# hide a file-add-as-rename from our additive-line scan.
+# hide a file-add-as-rename from our additive-line scan. Use the
+# two-arg form (not `merge_base...HEAD`) so we don't re-trigger a
+# merge-base computation that may fail under shallow checkout — we
+# already resolved `merge_base` above with a fallback.
 diff_file=$(mktemp)
 trap 'rm -f "$diff_file"' EXIT
-git diff --unified=0 --no-renames "$merge_base...$HEAD_SHA" > "$diff_file"
+git diff --unified=0 --no-renames "$merge_base" "$HEAD_SHA" > "$diff_file"
 
 # Lines starting with `+` (excluding the `+++ filename` header) are
 # additions; lines starting with `diff --git a/...` are file boundaries.
@@ -140,7 +143,7 @@ awk '
 # any file under DEMO_DIR counts — adding a new scenario, extending an
 # existing one's tape, or growing scenario.harn all satisfy the gate.
 demo_touched=0
-if git diff --name-only --no-renames "$merge_base...$HEAD_SHA" | grep -E "^${DEMO_DIR}/" > /dev/null; then
+if git diff --name-only --no-renames "$merge_base" "$HEAD_SHA" | grep -E "^${DEMO_DIR}/" > /dev/null; then
   demo_touched=1
 fi
 [ -n "$GATE_ENABLE_TRACE" ] && echo "[demo-gate] demo_touched=$demo_touched" >&2
