@@ -1,0 +1,518 @@
+// examples/task_plan/compare_strategies.harn
+//
+// Three-strategy planning comparison for the typed task-plan IR
+// (burin-labs/harn#2196). For each fixture task, run the same English
+// prompt through:
+//
+//   A) baseline  — single-shot prose plan (mirrors a tutorial-style
+//      `agent_loop`-only call, no structure asked for)
+//   B) burin_plan — `harn.plan.v1` JSON via `plan_from`
+//   C) typed_ir  — typed task-plan IR JSON via `task_plan_validate` +
+//      `task_plan_compile`
+//
+// Emits one JSONL record per (task, strategy, trial) with parse +
+// structural metrics, token counts, and wall-clock latency. The records
+// are deliberately judge-free: every field is computed deterministically
+// from the model output and the validator state. The doc page derives
+// recommendation from the aggregated numbers, not from prose review.
+//
+// Usage:
+//   harn run examples/task_plan/compare_strategies.harn -- \
+//     --out=examples/task_plan/results/runs.jsonl
+//   harn run examples/task_plan/compare_strategies.harn -- \
+//     --model=qwen3.6-coding --trials=2 --out=runs/comparison.jsonl
+//
+// Default model is `qwen3.6-coding` (Ollama, ~$0 cost per call). Override
+// with --model=<alias> when re-running against a different provider; the
+// driver itself does not depend on the model choice.
+import { task_plan_compile, task_plan_validate } from "std/agent/task_plan"
+import { plan_from } from "std/plan"
+
+const __DEFAULT_MODEL: string = "qwen3.6-coding"
+
+const __DEFAULT_TRIALS: int = 1
+
+const __DEFAULT_MAX_TOKENS: int = 1800
+
+const __TASKS = [
+  {
+    id: "01_rate_limiter",
+    label: "Rate limiter around auth middleware",
+    prompt: "Add a token-bucket rate limiter (60 requests per minute per token) around the existing auth middleware at `src/auth/middleware.rs`. Excess traffic must respond with HTTP 429 and emit a `rate_limited` metric. Cover the burst window and steady-state regime in unit tests.",
+  },
+  {
+    id: "02_config_option",
+    label: "request_timeout_ms config option",
+    prompt: "Add a `request_timeout_ms` configuration option to the service. Thread it through `config.toml`, `ServiceConfig`, and the request handlers, falling back to 30000ms when unset. Add unit tests that prove the override and the default both apply.",
+  },
+  {
+    id: "03_failing_test",
+    label: "Diagnose + fix one failing test",
+    prompt: "The unit test `service::tests::handles_zero_balance` is failing. Walk through the smallest reproducible diagnosis path and ship the minimal fix. Decide whether the test or the SUT is wrong, and justify the call.",
+  },
+  {
+    id: "04_doc_rename",
+    label: "Doc rename of Client::execute -> Client::run",
+    prompt: "We renamed the public API `Client::execute()` to `Client::run()` in v0.5. Update every `docs/`, `examples/`, and `README.md` reference. Preserve the surrounding prose tone. Confirm the snippets still compile via `scripts/check-docs-snippets.sh`.",
+  },
+  {
+    id: "05_cross_file_refactor",
+    label: "Extract format_amount helper across 3 crates",
+    prompt: "Three crates duplicate a `format_amount(value: i64) -> String` helper. Extract it into a shared `format-utils` crate, replace the three call sites, and verify the workspace still passes `cargo test --workspace`.",
+  },
+]
+
+fn __parse_arg(args, prefix) {
+  for arg in args ?? [] {
+    if starts_with(arg, prefix) {
+      return substring(arg, len(prefix), len(arg))
+    }
+  }
+  return nil
+}
+
+fn __baseline_system() {
+  return "You are an experienced software engineer. Reply with a concrete, actionable plan in prose. Mention specific files, edits, and the commands you would run to verify."
+}
+
+fn __baseline_prompt(task) {
+  return task.prompt
+}
+
+fn __burin_system() {
+  return "You are a planner. Return ONLY a single JSON object (no prose, no markdown fences). Conform to the harn.plan.v1 schema."
+}
+
+fn __burin_prompt(task) {
+  return "Return a JSON object with this shape:\n"
+    + "{\n"
+    + "  \"steps\":[{\"id\":\"s1\",\"content\":\"...\",\"status\":\"pending\"},...],\n"
+    + "  \"assumptions\":[\"...\"],\n"
+    + "  \"open_questions\":[\"...\"],\n"
+    + "  \"verification_commands\":[\"cargo test ...\"]\n"
+    + "}\n\nTask: "
+    + task.prompt
+}
+
+fn __typed_ir_system() {
+  return "You are a planner. Return ONLY a single JSON object — no prose, no markdown fences. The object must match the typed task-plan IR (std/agent/task_plan)."
+}
+
+fn __typed_ir_example() {
+  return "{\"schema_version\":\"1\",\"objective\":\"Add request timeout config\",\"entry\":\"discover\","
+    + "\"nodes\":{"
+    + "\"discover\":{\"kind\":\"read_fact\",\"purpose\":\"Audit current handlers\",\"prompt\":\"Read ServiceConfig and the handler call sites.\"},"
+    + "\"edit\":{\"kind\":\"agent_loop\",\"purpose\":\"Add the option and tests\",\"prompt\":\"Add request_timeout_ms with a 30s default and unit tests.\",\"effects\":[\"writes_files\"],\"agent_loop\":{\"max_iterations\":8,\"done_sentinel\":\"DONE\"}},"
+    + "\"verify\":{\"kind\":\"verify\",\"purpose\":\"Run tests\",\"verify\":{\"command\":\"cargo test\",\"expect_status\":0}}"
+    + "},"
+    + "\"edges\":[{\"from\":\"discover\",\"to\":\"edit\"},{\"from\":\"edit\",\"to\":\"verify\"}],"
+    + "\"capabilities\":{\"tools\":[\"read\",\"edit\",\"run\"],\"side_effect_level\":\"writes_files\"}}"
+}
+
+fn __typed_ir_prompt(task) {
+  return "Node kinds: read_fact, search, context_pack, agent_loop, sub_agent, workflow_map, verify, human_gate, deterministic_command, join, compact.\n"
+    + "Required fields: schema_version=\"1\", objective, entry (node id), nodes (dict keyed by id), edges, capabilities ({tools, side_effect_level}).\n"
+    + "Every write-capable node MUST declare effects (e.g. \"writes_files\"). agent_loop nodes need a prompt and an agent_loop block. verify nodes need a verify block with command + expect_status.\n"
+    + "Example: "
+    + __typed_ir_example()
+    + "\n\nTask: "
+    + task.prompt
+}
+
+fn __extract_json(text) {
+  var t = trim(text)
+  if starts_with(t, "```json") {
+    t = substring(t, 7, len(t))
+  } else if starts_with(t, "```") {
+    t = substring(t, 3, len(t))
+  }
+  t = trim(t)
+  if ends_with(t, "```") {
+    t = trim(substring(t, 0, len(t) - 3))
+  }
+  return t
+}
+
+fn __try_json(text) {
+  try {
+    let value = json_parse(__extract_json(text))
+    return {ok: true, value: value, error: nil}
+  } catch (e) {
+    return {ok: false, value: nil, error: to_string(e)}
+  }
+}
+
+fn __count_numbered_steps(text) {
+  var count = 0
+  for n in range(1, 21) {
+    let marker = to_string(n) + "."
+    if contains(text, marker + " ") {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __count_bullet_lines(text) {
+  let lines = split(text, "\n")
+  var count = 0
+  for line in lines {
+    let t = trim(line)
+    if starts_with(t, "- ") || starts_with(t, "* ") {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __mentions_any(text, needles) {
+  for n in needles {
+    if contains(text, n) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __score_baseline(call) {
+  let text = call.text
+  let chars = len(text)
+  let numbered = __count_numbered_steps(text)
+  let bullets = __count_bullet_lines(text)
+  let step_count = if numbered > bullets {
+    numbered
+  } else {
+    bullets
+  }
+  let mentions_files = __mentions_any(text, [".rs", ".toml", ".md", ".harn", "src/", "tests/", "docs/", "examples/"])
+  let mentions_verify = __mentions_any(text, ["cargo test", "cargo check", "scripts/", "verify"])
+  let success = chars > 80 && (step_count > 0 || mentions_files)
+  return {
+    parse_ok: true,
+    parse_error: nil,
+    structured_steps: step_count,
+    mentions_files: mentions_files,
+    mentions_verify: mentions_verify,
+    has_verification_contract: false,
+    has_capability_policy: false,
+    deterministic_steps: 0,
+    total_nodes: 0,
+    nodes_by_kind: {},
+    validate_ok: false,
+    validate_errors: 0,
+    validate_warnings: 0,
+    compile_ok: false,
+    workflow_validate_ok: false,
+    success: success,
+    output_chars: chars,
+  }
+}
+
+fn __plan_steps_len(plan) {
+  let steps = plan?.steps
+  if type_of(steps) == "list" {
+    return len(steps)
+  }
+  return 0
+}
+
+fn __score_burin(call) {
+  let text = call.text
+  let parsed = __try_json(text)
+  if !parsed.ok {
+    return {
+      parse_ok: false,
+      parse_error: parsed.error,
+      structured_steps: 0,
+      mentions_files: false,
+      mentions_verify: false,
+      has_verification_contract: false,
+      has_capability_policy: false,
+      deterministic_steps: 0,
+      total_nodes: 0,
+      nodes_by_kind: {},
+      validate_ok: false,
+      validate_errors: 0,
+      validate_warnings: 0,
+      compile_ok: false,
+      workflow_validate_ok: false,
+      success: false,
+      output_chars: len(text),
+    }
+  }
+  let raw = parsed.value
+  let artifact = try {
+    plan_from(raw)
+  } catch (e) {
+    nil
+  }
+  let steps = __plan_steps_len(raw)
+  let verification = if type_of(raw?.verification_commands) == "list" {
+    len(raw.verification_commands)
+  } else {
+    0
+  }
+  let assumptions = if type_of(raw?.assumptions) == "list" {
+    len(raw.assumptions)
+  } else {
+    0
+  }
+  let has_verify = verification > 0
+  let success = artifact != nil && steps > 0
+  return {
+    parse_ok: true,
+    parse_error: nil,
+    structured_steps: steps,
+    mentions_files: false,
+    mentions_verify: has_verify,
+    has_verification_contract: has_verify,
+    has_capability_policy: false,
+    deterministic_steps: verification,
+    total_nodes: steps,
+    nodes_by_kind: {step: steps, verification: verification, assumption: assumptions},
+    validate_ok: artifact != nil,
+    validate_errors: if artifact == nil {
+      1
+    } else {
+      0
+    },
+    validate_warnings: 0,
+    compile_ok: artifact != nil,
+    workflow_validate_ok: false,
+    success: success,
+    output_chars: len(text),
+  }
+}
+
+const __DETERMINISTIC_KINDS: list<string> = [
+  "read_fact",
+  "search",
+  "context_pack",
+  "verify",
+  "deterministic_command",
+  "join",
+  "compact",
+  "human_gate",
+]
+
+fn __collect_kind_counts(plan) {
+  var counts = {}
+  let nodes = plan?.nodes
+  if type_of(nodes) != "dict" {
+    return counts
+  }
+  for node_id in nodes.keys() {
+    let node = nodes[node_id]
+    let kind = node?.kind ?? "unknown"
+    let prior = counts[kind] ?? 0
+    counts[kind] = prior + 1
+  }
+  return counts
+}
+
+fn __has_verify_node(plan) {
+  let nodes = plan?.nodes
+  if type_of(nodes) != "dict" {
+    return false
+  }
+  for node_id in nodes.keys() {
+    if nodes[node_id]?.kind == "verify" {
+      return true
+    }
+  }
+  return false
+}
+
+fn __deterministic_count(counts) {
+  var total = 0
+  for kind in __DETERMINISTIC_KINDS {
+    total = total + counts?[kind] ?? 0
+  }
+  return total
+}
+
+fn __sum_counts(counts) {
+  var total = 0
+  for k in counts.keys() {
+    total = total + counts[k]
+  }
+  return total
+}
+
+fn __score_typed(call) {
+  let text = call.text
+  let parsed = __try_json(text)
+  if !parsed.ok {
+    return {
+      parse_ok: false,
+      parse_error: parsed.error,
+      structured_steps: 0,
+      mentions_files: false,
+      mentions_verify: false,
+      has_verification_contract: false,
+      has_capability_policy: false,
+      deterministic_steps: 0,
+      total_nodes: 0,
+      nodes_by_kind: {},
+      validate_ok: false,
+      validate_errors: 0,
+      validate_warnings: 0,
+      compile_ok: false,
+      workflow_validate_ok: false,
+      success: false,
+      output_chars: len(text),
+    }
+  }
+  let plan = parsed.value
+  let report = task_plan_validate(plan)
+  let compiled = task_plan_compile(plan)
+  let wf_report = if compiled.ok {
+    workflow_validate(compiled.workflow)
+  } else {
+    {valid: false, errors: [], warnings: []}
+  }
+  let kinds = __collect_kind_counts(plan)
+  let total = __sum_counts(kinds)
+  let deterministic = __deterministic_count(kinds)
+  let has_verify = __has_verify_node(plan)
+  let has_caps = type_of(plan?.capabilities) == "dict"
+  let success = report.valid && compiled.ok && wf_report?.valid ?? false
+  return {
+    parse_ok: true,
+    parse_error: nil,
+    structured_steps: total,
+    mentions_files: false,
+    mentions_verify: has_verify,
+    has_verification_contract: has_verify,
+    has_capability_policy: has_caps,
+    deterministic_steps: deterministic,
+    total_nodes: total,
+    nodes_by_kind: kinds,
+    validate_ok: report.valid,
+    validate_errors: len(report.errors),
+    validate_warnings: len(report.warnings),
+    compile_ok: compiled.ok,
+    workflow_validate_ok: wf_report?.valid ?? false,
+    success: success,
+    output_chars: len(text),
+  }
+}
+
+fn __call_model(model, prompt, system, max_tokens) {
+  let resp = llm_call(prompt, system, {model: model, temperature: 0.0, max_tokens: max_tokens})
+  let telemetry = resp?.provider_telemetry ?? {}
+  return {
+    text: resp.text ?? "",
+    input_tokens: resp.input_tokens ?? 0,
+    output_tokens: resp.output_tokens ?? 0,
+    wall_ms: telemetry?.client_wall_ms ?? 0,
+    server_load_ms: telemetry?.server_load_ms ?? 0,
+    model: resp.model ?? model,
+    provider: resp.provider ?? "unknown",
+  }
+}
+
+fn __strategy_call(strategy, task, model, max_tokens) {
+  if strategy == "baseline" {
+    return __call_model(model, __baseline_prompt(task), __baseline_system(), max_tokens)
+  }
+  if strategy == "burin_plan" {
+    return __call_model(model, __burin_prompt(task), __burin_system(), max_tokens)
+  }
+  return __call_model(model, __typed_ir_prompt(task), __typed_ir_system(), max_tokens)
+}
+
+fn __strategy_score(strategy, call) {
+  if strategy == "baseline" {
+    return __score_baseline(call)
+  }
+  if strategy == "burin_plan" {
+    return __score_burin(call)
+  }
+  return __score_typed(call)
+}
+
+fn __run_cell(strategy, task, trial, model, max_tokens) {
+  let call = __strategy_call(strategy, task, model, max_tokens)
+  let score = __strategy_score(strategy, call)
+  return {
+    task_id: task.id,
+    task_label: task.label,
+    strategy: strategy,
+    trial: trial,
+    model: call.model,
+    provider: call.provider,
+    input_tokens: call.input_tokens,
+    output_tokens: call.output_tokens,
+    wall_ms: call.wall_ms,
+    server_load_ms: call.server_load_ms,
+    output_chars: score.output_chars,
+    parse_ok: score.parse_ok,
+    parse_error: score.parse_error,
+    success: score.success,
+    structured_steps: score.structured_steps,
+    deterministic_steps: score.deterministic_steps,
+    total_nodes: score.total_nodes,
+    nodes_by_kind: score.nodes_by_kind,
+    has_verification_contract: score.has_verification_contract,
+    has_capability_policy: score.has_capability_policy,
+    mentions_files: score.mentions_files,
+    mentions_verify: score.mentions_verify,
+    validate_ok: score.validate_ok,
+    validate_errors: score.validate_errors,
+    validate_warnings: score.validate_warnings,
+    compile_ok: score.compile_ok,
+    workflow_validate_ok: score.workflow_validate_ok,
+  }
+}
+
+fn main(harness: Harness) -> int {
+  let model = __parse_arg(argv, "--model=") ?? __DEFAULT_MODEL
+  let trials_arg = __parse_arg(argv, "--trials=")
+  let trials = if trials_arg == nil {
+    __DEFAULT_TRIALS
+  } else {
+    to_int(trials_arg)
+  }
+  let max_tokens_arg = __parse_arg(argv, "--max-tokens=")
+  let max_tokens = if max_tokens_arg == nil {
+    __DEFAULT_MAX_TOKENS
+  } else {
+    to_int(max_tokens_arg)
+  }
+  let out_path = __parse_arg(argv, "--out=")
+  let strategies = ["baseline", "burin_plan", "typed_ir"]
+  var records = []
+  for task in __TASKS {
+    for strategy in strategies {
+      for trial in range(1, trials + 1) {
+        harness.stdio.println("[run ] " + task.id + " / " + strategy + " / trial " + to_string(trial))
+        let record = __run_cell(strategy, task, trial, model, max_tokens)
+        records = records + [record]
+        harness.stdio
+          .println(
+          "[done] " + task.id + " / " + strategy + " / trial " + to_string(trial)
+            + " success="
+            + to_string(record.success)
+            + " out_tok="
+            + to_string(record.output_tokens)
+            + " wall_ms="
+            + to_string(record.wall_ms),
+        )
+      }
+    }
+  }
+  var lines = []
+  for record in records {
+    lines = lines + [json_stringify(record)]
+  }
+  let body = lines.join("\n") + "\n"
+  if out_path == nil || out_path == "" {
+    harness.stdio.print(body)
+  } else {
+    harness.fs.write_text(out_path, body)
+    harness.stdio
+      .println("wrote " + to_string(len(records)) + " records to " + out_path)
+  }
+  return 0
+}

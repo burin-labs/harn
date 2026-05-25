@@ -1,0 +1,383 @@
+/**
+ * examples/task_plan/summarize_runs.harn
+ *
+ * Aggregate the per-cell JSONL emitted by `compare_strategies.harn` into a
+ * human-readable markdown summary. Aggregation is deterministic: pass rate,
+ * mean tokens, mean wall-clock, and a structural-quality column per
+ * (strategy, task) pair.
+ *
+ * Usage:
+ *   harn run examples/task_plan/summarize_runs.harn -- \
+ *     --in=examples/task_plan/results/runs.jsonl \
+ *     --out=examples/task_plan/results/summary.md
+ */
+fn __parse_arg(args, prefix) {
+  for arg in args ?? [] {
+    if starts_with(arg, prefix) {
+      return substring(arg, len(prefix), len(arg))
+    }
+  }
+  return nil
+}
+
+fn __read_records(harness, path) {
+  let body = harness.fs.read_text(path)
+  let lines = split(body, "\n")
+  var records = []
+  for line in lines {
+    let trimmed = trim(line)
+    if len(trimmed) > 0 {
+      records = records + [json_parse(trimmed)]
+    }
+  }
+  return records
+}
+
+fn __filter(records, strategy, task_id) {
+  var out = []
+  for r in records {
+    if r.strategy == strategy && r.task_id == task_id {
+      out = out + [r]
+    }
+  }
+  return out
+}
+
+fn __mean_int(records, key) {
+  if len(records) == 0 {
+    return 0
+  }
+  var total = 0
+  for r in records {
+    total = total + r[key]
+  }
+  return total / len(records)
+}
+
+fn __ratio(records, predicate_key) {
+  if len(records) == 0 {
+    return 0.0
+  }
+  var hits = 0
+  for r in records {
+    if r[predicate_key] {
+      hits = hits + 1
+    }
+  }
+  return to_float(hits) / to_float(len(records))
+}
+
+fn __distinct(records, key) {
+  var seen = []
+  for r in records {
+    let v = r[key]
+    var found = false
+    for s in seen {
+      if s == v {
+        found = true
+      }
+    }
+    if !found {
+      seen = seen + [v]
+    }
+  }
+  return seen
+}
+
+fn __pct(value) {
+  let scaled = to_int(value * 1000.0)
+  let whole = scaled / 10
+  let frac = scaled - whole * 10
+  return to_string(whole) + "." + to_string(frac) + "%"
+}
+
+fn __format_strategy_label(strategy) {
+  if strategy == "baseline" {
+    return "baseline"
+  }
+  if strategy == "burin_plan" {
+    return "burin_plan"
+  }
+  return "typed_ir"
+}
+
+fn __strategy_summary(records, strategy) {
+  let tasks_seen = __distinct(records, "task_id")
+  var rows = []
+  var pass_total = 0
+  var pass_count = 0
+  var struct_total = 0
+  var struct_count = 0
+  var det_total = 0
+  var det_count = 0
+  var validate_pass = 0
+  var validate_total = 0
+  var workflow_pass = 0
+  var workflow_total = 0
+  var tok_in = 0
+  var tok_out = 0
+  var wall = 0
+  var trials = 0
+  for task_id in tasks_seen {
+    let scoped = __filter(records, strategy, task_id)
+    if len(scoped) == 0 {
+      continue
+    }
+    let pass_rate = __ratio(scoped, "success")
+    let parse_rate = __ratio(scoped, "parse_ok")
+    let validate_rate = __ratio(scoped, "validate_ok")
+    let mean_in = __mean_int(scoped, "input_tokens")
+    let mean_out = __mean_int(scoped, "output_tokens")
+    let mean_wall = __mean_int(scoped, "wall_ms")
+    let mean_struct = __mean_int(scoped, "structured_steps")
+    let mean_det = __mean_int(scoped, "deterministic_steps")
+    let mean_nodes = __mean_int(scoped, "total_nodes")
+    rows = rows
+      + [
+      {
+        task_id: task_id,
+        n: len(scoped),
+        pass_rate: pass_rate,
+        parse_rate: parse_rate,
+        validate_rate: validate_rate,
+        mean_in: mean_in,
+        mean_out: mean_out,
+        mean_wall: mean_wall,
+        mean_struct: mean_struct,
+        mean_det: mean_det,
+        mean_nodes: mean_nodes,
+      },
+    ]
+    pass_total = pass_total + pass_rate * 1000.0
+    pass_count = pass_count + 1
+    struct_total = struct_total + mean_struct
+    struct_count = struct_count + 1
+    det_total = det_total + mean_det
+    det_count = det_count + 1
+    validate_pass = validate_pass + validate_rate * 1000.0
+    validate_total = validate_total + 1
+    workflow_pass = workflow_pass + __ratio(scoped, "workflow_validate_ok") * 1000.0
+    workflow_total = workflow_total + 1
+    tok_in = tok_in + mean_in
+    tok_out = tok_out + mean_out
+    wall = wall + mean_wall
+    trials = trials + len(scoped)
+  }
+  let overall_pass = if pass_count > 0 {
+    pass_total / (pass_count * 1000.0)
+  } else {
+    0.0
+  }
+  let overall_validate = if validate_total > 0 {
+    validate_pass / (validate_total * 1000.0)
+  } else {
+    0.0
+  }
+  let overall_workflow = if workflow_total > 0 {
+    workflow_pass / (workflow_total * 1000.0)
+  } else {
+    0.0
+  }
+  let mean_struct_overall = if struct_count > 0 {
+    struct_total / struct_count
+  } else {
+    0
+  }
+  let mean_det_overall = if det_count > 0 {
+    det_total / det_count
+  } else {
+    0
+  }
+  let task_n = if pass_count == 0 {
+    1
+  } else {
+    pass_count
+  }
+  return {
+    strategy: __format_strategy_label(strategy),
+    rows: rows,
+    overall: {
+      pass: overall_pass,
+      validate: overall_validate,
+      workflow: overall_workflow,
+      mean_struct: mean_struct_overall,
+      mean_det: mean_det_overall,
+      mean_in: tok_in / task_n,
+      mean_out: tok_out / task_n,
+      mean_wall: wall / task_n,
+      trials: trials,
+    },
+  }
+}
+
+/**
+ * Section renderers return [header, blank, table_rows..., trailing_blank].
+ * The trailing blank acts as the separator before the next section so
+ * `main` never has to interleave its own blanks (which is what produced
+ * double-blank-line markdownlint violations).
+ */
+fn __render_per_task_table(summary) {
+  var lines = [
+    "### " + summary.strategy,
+    "",
+    "| Task | n | pass | parse | validate | mean_in | mean_out | wall_ms | structured | deterministic | total_nodes |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+  ]
+  for row in summary.rows {
+    lines = lines
+      + [
+      "| `" + row.task_id + "` | " + to_string(row.n) + " | " + __pct(row.pass_rate) + " | "
+        + __pct(row.parse_rate)
+        + " | "
+        + __pct(row.validate_rate)
+        + " | "
+        + to_string(row.mean_in)
+        + " | "
+        + to_string(row.mean_out)
+        + " | "
+        + to_string(row.mean_wall)
+        + " | "
+        + to_string(row.mean_struct)
+        + " | "
+        + to_string(row.mean_det)
+        + " | "
+        + to_string(row.mean_nodes)
+        + " |",
+    ]
+  }
+  lines = lines + [""]
+  return lines
+}
+
+fn __render_overall_table(summaries) {
+  var lines = [
+    "## Overall (mean across tasks)",
+    "",
+    "| Strategy | trials | pass | validate | workflow_validate | mean_in | mean_out | mean_wall_ms | mean_structured | mean_deterministic |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+  ]
+  for s in summaries {
+    let o = s.overall
+    lines = lines
+      + [
+      "| `" + s.strategy + "` | " + to_string(o.trials) + " | " + __pct(o.pass) + " | "
+        + __pct(o.validate)
+        + " | "
+        + __pct(o.workflow)
+        + " | "
+        + to_string(o.mean_in)
+        + " | "
+        + to_string(o.mean_out)
+        + " | "
+        + to_string(o.mean_wall)
+        + " | "
+        + to_string(o.mean_struct)
+        + " | "
+        + to_string(o.mean_det)
+        + " |",
+    ]
+  }
+  lines = lines + [""]
+  return lines
+}
+
+fn __filter_by_model(records, model) {
+  var out = []
+  for r in records {
+    if r.model == model {
+      out = out + [r]
+    }
+  }
+  return out
+}
+
+fn __render_per_model_table(model, label, summaries) {
+  var lines = [
+    "### " + label + " — `" + model + "`",
+    "",
+    "| Strategy | trials | pass | validate | workflow_validate | mean_out_tok | mean_wall_ms |",
+    "|---|---:|---:|---:|---:|---:|---:|",
+  ]
+  for s in summaries {
+    let o = s.overall
+    lines = lines
+      + [
+      "| `" + s.strategy + "` | " + to_string(o.trials) + " | " + __pct(o.pass) + " | "
+        + __pct(o.validate)
+        + " | "
+        + __pct(o.workflow)
+        + " | "
+        + to_string(o.mean_out)
+        + " | "
+        + to_string(o.mean_wall)
+        + " |",
+    ]
+  }
+  lines = lines + [""]
+  return lines
+}
+
+fn main(harness: Harness) -> int {
+  let in_path = __parse_arg(argv, "--in=") ?? "examples/task_plan/results/runs.jsonl"
+  let out_path = __parse_arg(argv, "--out=")
+  let records = __read_records(harness, in_path)
+  let strategies = ["baseline", "burin_plan", "typed_ir"]
+  var summaries = []
+  for s in strategies {
+    summaries = summaries + [__strategy_summary(records, s)]
+  }
+  var lines = [
+    "# Three-strategy planning comparison",
+    "",
+    "Source: `" + in_path + "` (" + to_string(len(records)) + " records).",
+    "",
+  ]
+  for chunk in __render_overall_table(summaries) {
+    lines = lines + [chunk]
+  }
+  let models = __distinct(records, "model")
+  if len(models) > 1 {
+    lines = lines + ["## Per-model breakdown", ""]
+    for model in models {
+      let scoped = __filter_by_model(records, model)
+      var model_summaries = []
+      for s in strategies {
+        model_summaries = model_summaries + [__strategy_summary(scoped, s)]
+      }
+      let provider = if len(scoped) > 0 {
+        scoped[0].provider ?? ""
+      } else {
+        ""
+      }
+      let label = if provider == "" {
+        "Model"
+      } else {
+        provider
+      }
+      for chunk in __render_per_model_table(model, label, model_summaries) {
+        lines = lines + [chunk]
+      }
+    }
+  }
+  lines = lines + ["## Per-task breakdown", ""]
+  for s in summaries {
+    for chunk in __render_per_task_table(s) {
+      lines = lines + [chunk]
+    }
+  }
+  // The trailing-blank separator pattern leaves an extra `""` at the
+  // end of the list; strip it so the file ends with a single `\n`
+  // instead of an empty line that markdownlint flags as MD012.
+  var trimmed = lines
+  while len(trimmed) > 0 && trimmed[len(trimmed) - 1] == "" {
+    trimmed = trimmed[0:len(trimmed) - 1]
+  }
+  let body = trimmed.join("\n") + "\n"
+  if out_path == nil || out_path == "" {
+    harness.stdio.print(body)
+  } else {
+    harness.fs.write_text(out_path, body)
+    harness.stdio.println("wrote " + to_string(len(lines)) + " lines to " + out_path)
+  }
+  return 0
+}
