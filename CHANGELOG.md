@@ -16,6 +16,14 @@ condensed series summaries instead of full per-patch history.
   loops do not spend their last turn on a veto that cannot be regenerated.
   The skip is emitted as a `step_judge_decision` event with `skipped: true`
   and `reason: "low_iteration_budget"`.
+- **Workspace anchors now stay out of stored session prompts (#2224).**
+  Agent sessions now render the active workspace anchor through a canonical
+  `workspace_anchor` reminder provider instead of relying on callers to splice
+  workspace/project fields into persisted system prompt text. Re-anchoring
+  updates the next reminder body while leaving `agent_session_system_prompt(id)`
+  byte-stable. Debug builds now assert `HARN-CACHE-001` if a caller records a
+  session system prompt containing `{{workspace_*}}` or `{{project_*}}`
+  template tokens.
 
 ### Added
 

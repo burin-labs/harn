@@ -233,6 +233,18 @@ fn records_system_prompt_as_metadata_event_without_message() {
     assert_eq!(event_count_by_kind(&id, "system_prompt"), 1);
 }
 
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "HARN-CACHE-001")]
+fn debug_build_rejects_workspace_prompt_template_tokens() {
+    reset_session_store();
+    let id = open_or_create(Some("system-prompt-cache-contract".into()));
+    let _ = record_system_prompt(
+        &id,
+        "Never bake {{ project_root }} into the session prompt.",
+    );
+}
+
 #[test]
 fn pinned_model_round_trips_through_session_state_and_snapshot() {
     reset_session_store();

@@ -106,6 +106,7 @@
   - [Merge Captain](./personas/merge-captain.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)
+- [Workspace anchor cache contract](./agents/cache_contract.md)
 - [Session bundles](./session-bundles.md)
 - [Agent state](./agent-state.md)
 - [Agent lifecycle: suspend, resume, self-park](./agent-lifecycle.md)

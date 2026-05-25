@@ -43,6 +43,7 @@ pub const DEFAULT_TRANSCRIPT_MESSAGE_CAP: usize = 4096;
 /// Default cap on retained transcript audit events per session. Events
 /// include message-derived entries plus orchestration lifecycle records.
 pub const DEFAULT_TRANSCRIPT_EVENT_CAP: usize = 32768;
+const CACHE_STABLE_SYSTEM_PROMPT_DIAGNOSTIC: &str = "HARN-CACHE-001";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TranscriptBudgetRecovery {
@@ -1893,6 +1894,7 @@ pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String>
     if system_prompt.is_empty() {
         return Ok(());
     }
+    assert_cache_stable_system_prompt(system_prompt);
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
@@ -1936,6 +1938,33 @@ pub fn system_prompt(id: &str) -> Option<String> {
             .and_then(|state| state.system_prompt.clone())
     })
 }
+
+fn forbidden_workspace_prompt_token(system_prompt: &str) -> Option<&'static str> {
+    let mut remaining = system_prompt;
+    while let Some(index) = remaining.find("{{") {
+        let candidate = remaining[index + 2..].trim_start();
+        if candidate.starts_with("workspace_") {
+            return Some("workspace_");
+        }
+        if candidate.starts_with("project_") {
+            return Some("project_");
+        }
+        remaining = candidate;
+    }
+    None
+}
+
+#[cfg(debug_assertions)]
+fn assert_cache_stable_system_prompt(system_prompt: &str) {
+    if let Some(prefix) = forbidden_workspace_prompt_token(system_prompt) {
+        panic!(
+            "{CACHE_STABLE_SYSTEM_PROMPT_DIAGNOSTIC}: session system prompts must not interpolate `{{{{{prefix}...` tokens; move workspace/project context into the workspace-anchor reminder"
+        );
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn assert_cache_stable_system_prompt(_system_prompt: &str) {}
 
 /// Pin (or clear, with `None`) a model selector on a session. Returns
 /// `Ok(true)` when the value actually changed so callers can decide
