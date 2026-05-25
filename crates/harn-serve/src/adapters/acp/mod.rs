@@ -78,6 +78,74 @@ fn session_id_param(params: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
+fn session_list_filter<'a>(
+    params: &'a serde_json::Value,
+    camel: &str,
+    snake: &str,
+) -> Option<&'a serde_json::Value> {
+    params
+        .get(camel)
+        .or_else(|| params.get(snake))
+        .or_else(|| {
+            params
+                .get("filter")
+                .and_then(|filter| filter.get(camel).or_else(|| filter.get(snake)))
+        })
+        .or_else(|| {
+            params
+                .get("_meta")
+                .and_then(|meta| meta.get("harn"))
+                .and_then(|harn| harn.get(camel).or_else(|| harn.get(snake)))
+        })
+}
+
+fn session_workspace_anchor_filter(params: &serde_json::Value) -> Option<&serde_json::Value> {
+    session_list_filter(params, "workspaceAnchor", "workspace_anchor")
+}
+
+fn session_cwd_filter(params: &serde_json::Value) -> Option<&str> {
+    session_list_filter(params, "cwd", "cwd").and_then(serde_json::Value::as_str)
+}
+
+fn session_live_state_filter(params: &serde_json::Value) -> Option<Vec<String>> {
+    let value = session_list_filter(params, "liveState", "live_state")
+        .or_else(|| session_list_filter(params, "state", "state"))?;
+    if let Some(raw) = value.as_str() {
+        return Some(vec![raw.to_string()]);
+    }
+    value.as_array().map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect()
+    })
+}
+
+fn workspace_anchor_filter_matches(
+    anchor: Option<&harn_vm::workspace_anchor::WorkspaceAnchor>,
+    filter: Option<&serde_json::Value>,
+) -> bool {
+    let Some(filter) = filter else {
+        return true;
+    };
+    let Some(anchor) = anchor else {
+        return false;
+    };
+    if let Some(raw) = filter.as_str() {
+        return anchor.primary.to_string_lossy() == raw;
+    }
+    if let Some(primary) = filter.get("primary").and_then(serde_json::Value::as_str) {
+        return anchor.primary.to_string_lossy() == primary;
+    }
+    harn_vm::workspace_anchor::WorkspaceAnchor::from_json(filter).is_ok_and(|expected| {
+        expected.primary == anchor.primary && expected.additional_roots == anchor.additional_roots
+    })
+}
+
+fn live_state_filter_matches(live_state: &str, filter: Option<&[String]>) -> bool {
+    filter.is_none_or(|states| states.iter().any(|state| state == live_state))
+}
+
 fn bridge_mode_for_session_inject(params: &serde_json::Value) -> Result<&'static str, String> {
     match params.get("mode").and_then(|value| value.as_str()) {
         // ACP `session/inject.mode = "queue"` is the audit/trail variant —
@@ -702,11 +770,15 @@ impl AcpServer {
 
         let session_id = self.next_session_id();
         self.insert_session(session_id.clone(), cwd, SessionInfo::default());
+        let session = self
+            .session_item_json(&session_id, "live", None)
+            .unwrap_or_else(|| serde_json::json!({"sessionId": session_id}));
 
         self.send_response(
             id,
             serde_json::json!({
                 "sessionId": session_id,
+                "session": session,
                 "modes": modes::session_mode_state(modes::DEFAULT_MODE_ID),
                 "configOptions": modes::config_options_state(
                     modes::DEFAULT_MODE_ID,
@@ -1605,23 +1677,12 @@ impl AcpServer {
         }
     }
 
-    fn handle_session_list(&self, id: &serde_json::Value) {
+    fn handle_session_list(&self, id: &serde_json::Value, params: &serde_json::Value) {
         let sessions: Vec<serde_json::Value> = self
             .sessions
             .iter()
-            .map(|(sid, session)| {
-                let mut item = serde_json::json!({
-                    "sessionId": sid,
-                    "cwd": session.cwd,
-                });
-                if let Some(title) = &session.info.title {
-                    item["title"] = serde_json::json!(title);
-                }
-                if !session.info.meta.is_empty() {
-                    item["_meta"] = serde_json::Value::Object(session.info.meta.clone());
-                }
-                item
-            })
+            .filter(|(sid, session)| self.session_matches_list_filters(sid, session, params))
+            .filter_map(|(sid, _)| self.session_item_json(sid, "live", None))
             .collect();
         self.send_response(id, serde_json::json!({"sessions": sessions}));
     }
@@ -1773,17 +1834,7 @@ impl AcpServer {
 
     fn session_restore_result(&self, session_id: &str) -> Option<serde_json::Value> {
         let session = self.sessions.get(session_id)?;
-        let mut session_value = serde_json::json!({
-            "sessionId": session_id,
-            "cwd": session.cwd.display().to_string(),
-        });
-        if let Some(title) = session.info.title.as_ref() {
-            session_value["title"] = serde_json::json!(title);
-        }
-        if !session.info.meta.is_empty() {
-            session_value["_meta"] = serde_json::Value::Object(session.info.meta.clone());
-        }
-
+        let session_value = self.session_item_json(session_id, "live", None)?;
         Some(serde_json::json!({
             "session": session_value,
             "modes": modes::session_mode_state(&session.current_mode_id),
@@ -1793,6 +1844,89 @@ impl AcpServer {
                 self.pinned_reasoning_policy(session_id).as_deref(),
             ),
         }))
+    }
+
+    fn session_item_json(
+        &self,
+        session_id: &str,
+        live_state: &str,
+        last_event_id: Option<u64>,
+    ) -> Option<serde_json::Value> {
+        let session = self.sessions.get(session_id)?;
+        let workspace_anchor = harn_vm::agent_sessions::workspace_anchor(session_id);
+        let snapshot = harn_vm::agent_sessions::snapshot(session_id)
+            .map(|value| harn_vm::llm::vm_value_to_json(&value))
+            .unwrap_or(serde_json::Value::Null);
+        let active_prompt = session.host_bridge.is_some();
+        let attachable_roles = serde_json::json!(["host_owner"]);
+        let mut item = serde_json::json!({
+            "sessionId": session_id,
+            "cwd": session.cwd.display().to_string(),
+            "liveState": live_state,
+            "attachableRoles": attachable_roles,
+            "currentModeId": session.current_mode_id,
+            "activePrompt": active_prompt,
+        });
+        if let Some(created_at) = snapshot.get("created_at").cloned() {
+            item["createdAt"] = created_at;
+        }
+        if let Some(last_event_id) = last_event_id {
+            item["lastEventId"] = serde_json::json!(last_event_id);
+        }
+        if let Some(title) = session.info.title.as_ref() {
+            item["title"] = serde_json::json!(title);
+        }
+        if let Some(anchor) = workspace_anchor.as_ref() {
+            item["workspaceAnchor"] = anchor.to_json();
+        }
+
+        let mut meta = session.info.meta.clone();
+        let mut harn_meta = match meta.remove("harn") {
+            Some(serde_json::Value::Object(map)) => map,
+            _ => serde_json::Map::new(),
+        };
+        harn_meta.insert("liveState".to_string(), serde_json::json!(live_state));
+        harn_meta.insert(
+            "attachableRoles".to_string(),
+            item["attachableRoles"].clone(),
+        );
+        harn_meta.insert(
+            "currentModeId".to_string(),
+            serde_json::json!(session.current_mode_id),
+        );
+        harn_meta.insert("activePrompt".to_string(), serde_json::json!(active_prompt));
+        if let Some(last_event_id) = last_event_id {
+            harn_meta.insert("lastEventId".to_string(), serde_json::json!(last_event_id));
+        }
+        if let Some(anchor) = workspace_anchor {
+            harn_meta.insert("workspaceAnchor".to_string(), anchor.to_json());
+        }
+        meta.insert("harn".to_string(), serde_json::Value::Object(harn_meta));
+        item["_meta"] = serde_json::Value::Object(meta);
+        Some(item)
+    }
+
+    fn session_matches_list_filters(
+        &self,
+        session_id: &str,
+        session: &Session,
+        params: &serde_json::Value,
+    ) -> bool {
+        if let Some(cwd) = session_cwd_filter(params) {
+            if session.cwd.to_string_lossy() != cwd {
+                return false;
+            }
+        }
+        let live_state = "live";
+        let state_filter = session_live_state_filter(params);
+        if !live_state_filter_matches(live_state, state_filter.as_deref()) {
+            return false;
+        }
+        let workspace_anchor = harn_vm::agent_sessions::workspace_anchor(session_id);
+        workspace_anchor_filter_matches(
+            workspace_anchor.as_ref(),
+            session_workspace_anchor_filter(params),
+        )
     }
 
     fn restored_session_id<'a>(
@@ -2581,7 +2715,7 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_list(&id);
+                self.handle_session_list(&id, &params);
             }
             _ => {
                 if !id.is_null() {

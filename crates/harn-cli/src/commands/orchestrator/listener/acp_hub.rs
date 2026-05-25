@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -49,12 +49,22 @@ struct AcpWorker {
     request_tx: Mutex<Option<mpsc::UnboundedSender<JsonValue>>>,
     socket_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
     active_connection_id: Mutex<Option<String>>,
-    sessions: Mutex<BTreeSet<String>>,
+    sessions: Mutex<BTreeMap<String, AcpSessionSummary>>,
     replay_buffer: Mutex<VecDeque<AcpReplayEvent>>,
     next_event_id: AtomicU64,
     detached_at: Mutex<Option<Instant>>,
     event_log: Arc<AnyEventLog>,
     hub: Weak<AcpWebSocketHub>,
+}
+
+#[derive(Clone, Debug)]
+struct AcpSessionSummary {
+    session_id: String,
+    cwd: Option<String>,
+    title: Option<String>,
+    meta: serde_json::Map<String, JsonValue>,
+    workspace_anchor: Option<JsonValue>,
+    last_event_id: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -68,6 +78,11 @@ struct AcpReplayEvent {
 enum AcpAttachError {
     NotFound,
     AlreadyAttached,
+}
+
+struct PersistedAcpReplay {
+    summary: Option<AcpSessionSummary>,
+    replayed: Vec<JsonValue>,
 }
 
 impl AcpWebSocketHub {
@@ -91,7 +106,7 @@ impl AcpWebSocketHub {
             request_tx: Mutex::new(Some(to_acp_tx)),
             socket_tx: Mutex::new(None),
             active_connection_id: Mutex::new(None),
-            sessions: Mutex::new(BTreeSet::new()),
+            sessions: Mutex::new(BTreeMap::new()),
             replay_buffer: Mutex::new(VecDeque::new()),
             next_event_id: AtomicU64::new(1),
             detached_at: Mutex::new(None),
@@ -136,12 +151,13 @@ impl AcpWebSocketHub {
         Ok(worker)
     }
 
-    fn register_session(&self, session_id: String, worker: &Arc<AcpWorker>) {
-        worker
-            .sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(session_id.clone());
+    fn register_session(
+        &self,
+        session_id: String,
+        worker: &Arc<AcpWorker>,
+        summary: Option<AcpSessionSummary>,
+    ) {
+        worker.merge_session_summary(session_id.clone(), summary);
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .workers_by_session
@@ -246,6 +262,112 @@ impl AcpWebSocketHub {
                 .is_some()
         })
     }
+
+    async fn discover_sessions(&self, params: &JsonValue) -> Vec<JsonValue> {
+        let mut summaries: BTreeMap<String, JsonValue> = BTreeMap::new();
+        let workers: Vec<Arc<AcpWorker>> = self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .workers_by_session
+            .values()
+            .cloned()
+            .collect();
+        for worker in workers {
+            let live_state = worker.live_state();
+            let attachable_roles = worker.attachable_roles();
+            for summary in worker.session_summaries() {
+                if acp_session_summary_matches(&summary, live_state, params) {
+                    summaries.insert(
+                        summary.session_id.clone(),
+                        summary.to_json(live_state, &attachable_roles),
+                    );
+                }
+            }
+        }
+
+        for summary in persisted_acp_session_summaries(&self.event_log).await {
+            if summaries.contains_key(&summary.session_id) {
+                continue;
+            }
+            if acp_session_summary_matches(&summary, "expired_replay_only", params) {
+                summaries.insert(
+                    summary.session_id.clone(),
+                    summary.to_json("expired_replay_only", &[]),
+                );
+            }
+        }
+
+        summaries.into_values().collect()
+    }
+}
+
+impl AcpSessionSummary {
+    fn new(session_id: String) -> Self {
+        Self {
+            session_id,
+            cwd: None,
+            title: None,
+            meta: serde_json::Map::new(),
+            workspace_anchor: None,
+            last_event_id: None,
+        }
+    }
+
+    fn merge(&mut self, other: AcpSessionSummary) {
+        if other.cwd.is_some() {
+            self.cwd = other.cwd;
+        }
+        if other.title.is_some() {
+            self.title = other.title;
+        }
+        if other.workspace_anchor.is_some() {
+            self.workspace_anchor = other.workspace_anchor;
+        }
+        if other.last_event_id.is_some() {
+            self.last_event_id = other.last_event_id;
+        }
+        for (key, value) in other.meta {
+            self.meta.insert(key, value);
+        }
+    }
+
+    fn to_json(&self, live_state: &str, attachable_roles: &[&str]) -> JsonValue {
+        let mut item = json!({
+            "sessionId": self.session_id,
+            "liveState": live_state,
+            "attachableRoles": attachable_roles,
+        });
+        if let Some(cwd) = self.cwd.as_ref() {
+            item["cwd"] = json!(cwd);
+        }
+        if let Some(title) = self.title.as_ref() {
+            item["title"] = json!(title);
+        }
+        if let Some(workspace_anchor) = self.workspace_anchor.as_ref() {
+            item["workspaceAnchor"] = workspace_anchor.clone();
+        }
+        if let Some(last_event_id) = self.last_event_id {
+            item["lastEventId"] = json!(last_event_id);
+        }
+
+        let mut meta = self.meta.clone();
+        let mut harn_meta = match meta.remove("harn") {
+            Some(JsonValue::Object(map)) => map,
+            _ => serde_json::Map::new(),
+        };
+        harn_meta.insert("liveState".to_string(), json!(live_state));
+        harn_meta.insert("attachableRoles".to_string(), json!(attachable_roles));
+        if let Some(workspace_anchor) = self.workspace_anchor.as_ref() {
+            harn_meta.insert("workspaceAnchor".to_string(), workspace_anchor.clone());
+        }
+        if let Some(last_event_id) = self.last_event_id {
+            harn_meta.insert("lastEventId".to_string(), json!(last_event_id));
+        }
+        meta.insert("harn".to_string(), JsonValue::Object(harn_meta));
+        item["_meta"] = JsonValue::Object(meta);
+        item
+    }
 }
 
 impl AcpWorker {
@@ -319,23 +441,74 @@ impl AcpWorker {
         self.sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .iter()
+            .keys()
             .cloned()
             .collect()
     }
 
-    async fn handle_output(self: &Arc<Self>, line: String) {
-        let session_id = session_id_from_acp_message(&line).or_else(|| {
-            let sessions = self.session_ids();
-            (sessions.len() == 1).then(|| sessions[0].clone())
-        });
-        if let Some(session_id) = session_id.clone() {
-            if let Some(hub) = self.hub.upgrade() {
-                hub.register_session(session_id, self);
-            }
+    fn session_summaries(&self) -> Vec<AcpSessionSummary> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    fn merge_session_summary(&self, session_id: String, summary: Option<AcpSessionSummary>) {
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = sessions
+            .entry(session_id.clone())
+            .or_insert_with(|| AcpSessionSummary::new(session_id));
+        if let Some(summary) = summary {
+            entry.merge(summary);
         }
+    }
+
+    fn live_state(&self) -> &'static str {
+        if self
+            .active_connection_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+        {
+            "live"
+        } else {
+            "detached_retained"
+        }
+    }
+
+    fn attachable_roles(&self) -> Vec<&'static str> {
+        if self.live_state() == "detached_retained" {
+            vec!["host_owner"]
+        } else {
+            Vec::new()
+        }
+    }
+
+    async fn handle_output(self: &Arc<Self>, line: String) {
+        let mut summaries = acp_session_summaries_from_message(&line);
+        let session_id = summaries
+            .first()
+            .map(|summary| summary.session_id.clone())
+            .or_else(|| session_id_from_acp_message(&line))
+            .or_else(|| {
+                let sessions = self.session_ids();
+                (sessions.len() == 1).then(|| sessions[0].clone())
+            });
 
         let event_id = self.next_event_id.fetch_add(1, Ordering::SeqCst);
+        if summaries.is_empty() {
+            if let Some(session_id) = session_id.clone() {
+                summaries.push(AcpSessionSummary::new(session_id));
+            }
+        }
+        if let Some(hub) = self.hub.upgrade() {
+            for mut summary in summaries {
+                summary.last_event_id = Some(event_id);
+                hub.register_session(summary.session_id.clone(), self, Some(summary));
+            }
+        }
         let annotated = annotate_acp_line(&line, event_id, session_id.as_deref(), false);
         {
             let mut replay_buffer = self.replay_buffer.lock().unwrap_or_else(|e| e.into_inner());
@@ -490,6 +663,20 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                         .await;
                         match serde_json::from_str::<JsonValue>(&line) {
                             Ok(value) => {
+                                if is_session_list_request(&value) {
+                                    let sessions = state
+                                        .hub
+                                        .discover_sessions(
+                                            value.get("params").unwrap_or(&JsonValue::Null),
+                                        )
+                                        .await;
+                                    send_socket_jsonrpc_result(
+                                        &socket_tx,
+                                        value.get("id").unwrap_or(&JsonValue::Null),
+                                        json!({"sessions": sessions}),
+                                    );
+                                    continue;
+                                }
                                 if let Some(load_session_id) = session_load_session_id(&value) {
                                     match state.hub.attach(
                                         &load_session_id,
@@ -511,7 +698,7 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                             continue;
                                         }
                                         Err(AcpAttachError::NotFound) => {
-                                            replay_persisted_acp_events(
+                                            let replay = replay_persisted_acp_events(
                                                 &state.event_log,
                                                 &load_session_id,
                                                 last_acked_event_id(&value),
@@ -519,12 +706,28 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                             )
                                             .await;
                                             if worker.is_none() {
-                                                send_socket_jsonrpc_error(
-                                                    &socket_tx,
-                                                    value.get("id").unwrap_or(&JsonValue::Null),
-                                                    -32004,
-                                                    &format!("Session not found: {load_session_id}"),
-                                                );
+                                                if let Some(summary) = replay.summary {
+                                                    send_socket_jsonrpc_result(
+                                                        &socket_tx,
+                                                        value
+                                                            .get("id")
+                                                            .unwrap_or(&JsonValue::Null),
+                                                        json!({
+                                                            "session": summary
+                                                                .to_json("expired_replay_only", &[]),
+                                                            "replayed": replay.replayed,
+                                                        }),
+                                                    );
+                                                } else {
+                                                    send_socket_jsonrpc_error(
+                                                        &socket_tx,
+                                                        value
+                                                            .get("id")
+                                                            .unwrap_or(&JsonValue::Null),
+                                                        -32004,
+                                                        &format!("Session not found: {load_session_id}"),
+                                                    );
+                                                }
                                                 continue;
                                             }
                                         }
@@ -651,16 +854,24 @@ async fn replay_persisted_acp_events(
     session_id: &str,
     last_acked_event_id: u64,
     socket_tx: &mpsc::UnboundedSender<String>,
-) {
+) -> PersistedAcpReplay {
     let Ok(topic) = Topic::new(format!("{ACP_TOPIC_PREFIX}.{session_id}")) else {
-        return;
+        return PersistedAcpReplay {
+            summary: None,
+            replayed: Vec::new(),
+        };
     };
     let Ok(events) = event_log
         .read_range(&topic, None, ACP_REPLAY_BUFFER_LIMIT)
         .await
     else {
-        return;
+        return PersistedAcpReplay {
+            summary: None,
+            replayed: Vec::new(),
+        };
     };
+    let mut summary: Option<AcpSessionSummary> = None;
+    let mut replayed = Vec::new();
     for (_, event) in events {
         if event.kind != "message_sent" {
             continue;
@@ -672,15 +883,67 @@ async fn replay_persisted_acp_events(
         else {
             continue;
         };
+        if let Some(event_summary) =
+            acp_session_summary_from_log_payload(session_id, &event.payload)
+        {
+            match summary.as_mut() {
+                Some(summary) => summary.merge(event_summary),
+                None => summary = Some(event_summary),
+            }
+        }
         if acp_event_id <= last_acked_event_id {
             continue;
         }
         let Some(line) = event.payload.get("line").and_then(JsonValue::as_str) else {
             continue;
         };
-        let replayed = annotate_acp_line(line, acp_event_id, Some(session_id), true);
-        let _ = socket_tx.send(replayed);
+        let replayed_line = annotate_acp_line(line, acp_event_id, Some(session_id), true);
+        let _ = socket_tx.send(replayed_line);
+        replayed.push(json!({"eventId": acp_event_id}));
     }
+    PersistedAcpReplay { summary, replayed }
+}
+
+async fn persisted_acp_session_summaries(event_log: &Arc<AnyEventLog>) -> Vec<AcpSessionSummary> {
+    let Ok(topics) = event_log.topics().await else {
+        return Vec::new();
+    };
+    let mut summaries = Vec::new();
+    for topic in topics {
+        let Some(session_id) = topic.as_str().strip_prefix(&format!("{ACP_TOPIC_PREFIX}.")) else {
+            continue;
+        };
+        let Ok(events) = event_log
+            .read_range(&topic, None, ACP_REPLAY_BUFFER_LIMIT)
+            .await
+        else {
+            continue;
+        };
+        let mut summary: Option<AcpSessionSummary> = None;
+        for (_, event) in events {
+            if event.kind != "message_sent"
+                || event
+                    .payload
+                    .get("acp_event_id")
+                    .and_then(JsonValue::as_u64)
+                    .is_none()
+            {
+                continue;
+            }
+            if let Some(event_summary) =
+                acp_session_summary_from_log_payload(session_id, &event.payload)
+            {
+                match summary.as_mut() {
+                    Some(summary) => summary.merge(event_summary),
+                    None => summary = Some(event_summary),
+                }
+            }
+        }
+        if let Some(summary) = summary {
+            summaries.push(summary);
+        }
+    }
+    summaries
 }
 
 fn acp_replay_log_payload(line: &str, acp_event_id: u64, session_id: Option<&str>) -> JsonValue {
@@ -719,6 +982,213 @@ fn acp_message_log_payload(line: &str, session_id: Option<&str>) -> JsonValue {
             "session_id": session_id,
         }),
     }
+}
+
+fn acp_session_summary_from_log_payload(
+    topic_session_id: &str,
+    payload: &JsonValue,
+) -> Option<AcpSessionSummary> {
+    let last_event_id = payload.get("acp_event_id").and_then(JsonValue::as_u64);
+    let mut summary = payload
+        .get("line")
+        .and_then(JsonValue::as_str)
+        .and_then(|line| {
+            let mut summaries = acp_session_summaries_from_message(line);
+            summaries
+                .iter()
+                .position(|summary| summary.session_id == topic_session_id)
+                .map(|index| summaries.remove(index))
+                .or_else(|| summaries.into_iter().next())
+        })
+        .unwrap_or_else(|| AcpSessionSummary::new(topic_session_id.to_string()));
+    summary.last_event_id = last_event_id;
+    Some(summary)
+}
+
+fn acp_session_summaries_from_message(line: &str) -> Vec<AcpSessionSummary> {
+    let Ok(value) = serde_json::from_str::<JsonValue>(line) else {
+        return Vec::new();
+    };
+    let mut summaries = BTreeMap::<String, AcpSessionSummary>::new();
+    if let Some(session) = value.get("result").and_then(|result| result.get("session")) {
+        if let Some(summary) = acp_session_summary_from_session_value(session) {
+            summaries.insert(summary.session_id.clone(), summary);
+        }
+    }
+    if let Some(items) = value
+        .get("result")
+        .and_then(|result| result.get("sessions"))
+        .and_then(JsonValue::as_array)
+    {
+        for item in items {
+            if let Some(summary) = acp_session_summary_from_session_value(item) {
+                summaries
+                    .entry(summary.session_id.clone())
+                    .and_modify(|existing| existing.merge(summary.clone()))
+                    .or_insert(summary);
+            }
+        }
+    }
+    if let Some(summary) = acp_session_summary_from_result_value(&value) {
+        summaries
+            .entry(summary.session_id.clone())
+            .and_modify(|existing| existing.merge(summary.clone()))
+            .or_insert(summary);
+    }
+    if let Some(session_id) = session_id_from_acp_message(line) {
+        summaries
+            .entry(session_id.clone())
+            .or_insert_with(|| AcpSessionSummary::new(session_id));
+    }
+    summaries.into_values().collect()
+}
+
+fn acp_session_summary_from_result_value(value: &JsonValue) -> Option<AcpSessionSummary> {
+    let result = value.get("result")?;
+    let session_id = result
+        .get("sessionId")
+        .or_else(|| result.get("session_id"))
+        .and_then(JsonValue::as_str)?;
+    let mut summary = AcpSessionSummary::new(session_id.to_string());
+    summary.cwd = result
+        .get("cwd")
+        .and_then(JsonValue::as_str)
+        .map(str::to_string);
+    summary.workspace_anchor = workspace_anchor_json(result);
+    summary.last_event_id = result
+        .get("lastEventId")
+        .or_else(|| result.get("last_event_id"))
+        .and_then(JsonValue::as_u64);
+    Some(summary)
+}
+
+fn acp_session_summary_from_session_value(session: &JsonValue) -> Option<AcpSessionSummary> {
+    let session_id = session
+        .get("sessionId")
+        .or_else(|| session.get("session_id"))
+        .and_then(JsonValue::as_str)?;
+    let mut summary = AcpSessionSummary::new(session_id.to_string());
+    summary.cwd = session
+        .get("cwd")
+        .and_then(JsonValue::as_str)
+        .map(str::to_string);
+    summary.title = session
+        .get("title")
+        .and_then(JsonValue::as_str)
+        .map(str::to_string);
+    summary.meta = session
+        .get("_meta")
+        .and_then(JsonValue::as_object)
+        .cloned()
+        .unwrap_or_default();
+    summary.workspace_anchor = workspace_anchor_json(session);
+    summary.last_event_id = session
+        .get("lastEventId")
+        .or_else(|| session.get("last_event_id"))
+        .and_then(JsonValue::as_u64)
+        .or_else(|| {
+            session
+                .get("_meta")
+                .and_then(|meta| meta.get("harn"))
+                .and_then(|harn| {
+                    harn.get("lastEventId")
+                        .or_else(|| harn.get("last_event_id"))
+                        .and_then(JsonValue::as_u64)
+                })
+        });
+    Some(summary)
+}
+
+fn workspace_anchor_json(value: &JsonValue) -> Option<JsonValue> {
+    value
+        .get("workspaceAnchor")
+        .or_else(|| value.get("workspace_anchor"))
+        .cloned()
+        .or_else(|| {
+            value
+                .get("_meta")
+                .and_then(|meta| meta.get("harn"))
+                .and_then(|harn| {
+                    harn.get("workspaceAnchor")
+                        .or_else(|| harn.get("workspace_anchor"))
+                })
+                .cloned()
+        })
+}
+
+fn is_session_list_request(value: &JsonValue) -> bool {
+    value.get("method").and_then(JsonValue::as_str) == Some("session/list")
+}
+
+fn acp_session_summary_matches(
+    summary: &AcpSessionSummary,
+    live_state: &str,
+    params: &JsonValue,
+) -> bool {
+    if let Some(cwd) = acp_session_filter_value(params, "cwd", "cwd").and_then(JsonValue::as_str) {
+        if summary.cwd.as_deref() != Some(cwd) {
+            return false;
+        }
+    }
+    if let Some(states) = acp_session_state_filter(params) {
+        if !states.iter().any(|state| state == live_state) {
+            return false;
+        }
+    }
+    if let Some(filter) = acp_session_filter_value(params, "workspaceAnchor", "workspace_anchor") {
+        let Some(anchor) = summary.workspace_anchor.as_ref() else {
+            return false;
+        };
+        if let Some(primary) = filter.as_str() {
+            return anchor
+                .get("primary")
+                .and_then(JsonValue::as_str)
+                .is_some_and(|value| value == primary);
+        }
+        if let Some(primary) = filter.get("primary").and_then(JsonValue::as_str) {
+            return anchor
+                .get("primary")
+                .and_then(JsonValue::as_str)
+                .is_some_and(|value| value == primary);
+        }
+        return anchor == filter;
+    }
+    true
+}
+
+fn acp_session_state_filter(params: &JsonValue) -> Option<Vec<String>> {
+    let value = acp_session_filter_value(params, "liveState", "live_state")
+        .or_else(|| acp_session_filter_value(params, "state", "state"))?;
+    if let Some(raw) = value.as_str() {
+        return Some(vec![raw.to_string()]);
+    }
+    value.as_array().map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect()
+    })
+}
+
+fn acp_session_filter_value<'a>(
+    params: &'a JsonValue,
+    camel: &str,
+    snake: &str,
+) -> Option<&'a JsonValue> {
+    params
+        .get(camel)
+        .or_else(|| params.get(snake))
+        .or_else(|| {
+            params
+                .get("filter")
+                .and_then(|filter| filter.get(camel).or_else(|| filter.get(snake)))
+        })
+        .or_else(|| {
+            params
+                .get("_meta")
+                .and_then(|meta| meta.get("harn"))
+                .and_then(|harn| harn.get(camel).or_else(|| harn.get(snake)))
+        })
 }
 
 fn annotate_acp_line(
@@ -778,6 +1248,17 @@ fn send_socket_jsonrpc_error(
     message: &str,
 ) {
     let response = harn_vm::jsonrpc::error_response(id.clone(), code, message);
+    if let Ok(line) = serde_json::to_string(&response) {
+        let _ = socket_tx.send(line);
+    }
+}
+
+fn send_socket_jsonrpc_result(
+    socket_tx: &mpsc::UnboundedSender<String>,
+    id: &JsonValue,
+    result: JsonValue,
+) {
+    let response = harn_vm::jsonrpc::response(id.clone(), result);
     if let Ok(line) = serde_json::to_string(&response) {
         let _ = socket_tx.send(line);
     }
