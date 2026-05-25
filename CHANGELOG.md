@@ -59,6 +59,10 @@ condensed series summaries instead of full per-patch history.
   confident `out_of_scope` labels skip the heavy turn and synthesize the
   canonical `<scope-alert>` handoff prompt. `harn eval scope_triage` runs the
   100-case synthetic measurement harness and writes summary artifacts.
+- **Workflow state channels design (#2219).** Added the v0 design record for
+  typed workflow state channels with deterministic reducers, including the
+  adoption boundary relative to artifacts, transcripts, map/join/reduce nodes,
+  replay, and resume.
 
 ## v0.8.37
 
