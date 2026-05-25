@@ -226,6 +226,36 @@ pipeline default() {
   __io_println(well_formed.result.status == "done")
   __io_println(len(well_formed_decisions) == 0)
   llm_mock_clear()
+  llm_mock({text: "", tool_calls: [{id: "write_missing", name: "write_note", arguments: {}}]})
+  llm_mock(
+    {text: "", tool_calls: [{id: "write_2", name: "write_note", arguments: {path: "notes.txt"}}]},
+  )
+  llm_mock({text: "<done>##DONE##</done>"})
+  let missing_arg_session = "structural-validator-native-missing-arg-" + uuid()
+  let missing_arg = agent_capture_events(
+    missing_arg_session,
+    fn() { return agent_loop(
+      "Update notes.txt and then finish.",
+      nil,
+      {
+        provider: "mock",
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 3,
+        tools: write_tools(),
+        session_id: missing_arg_session,
+        structural_validator: with_structural_validator({rules: ["tool_calls_well_formed"]}),
+      },
+    ) },
+  )
+  let missing_arg_decisions = events_of(missing_arg.events, "structural_validator_decision")
+  let missing_arg_regen_messages = json_stringify(llm_mock_calls()[1].messages)
+  __io_println(missing_arg.result.status == "done")
+  __io_println(missing_arg.result.tools.successful[0] == "write_note")
+  __io_println(len(missing_arg_decisions) == 1)
+  __io_println(missing_arg_decisions[0].diagnostic.contains("missing required parameter"))
+  __io_println(missing_arg_regen_messages.contains("missing required parameter"))
+  llm_mock_clear()
   llm_mock({text: "Working on it.", output_tokens: 95})
   let capped_session = "structural-validator-output-cap-" + uuid()
   let capped = agent_capture_events(
