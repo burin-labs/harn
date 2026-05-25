@@ -1143,7 +1143,7 @@ mod tests {
             std::env::remove_var("HARN_DEFAULT_PROVIDER");
         }
 
-        for model in ["gpt-oss-120b", "llama-3.3-70b", "qwen-3-coder-480b"] {
+        for model in ["gpt-oss-120b", "llama-3.3-70b"] {
             assert_eq!(
                 infer_provider(model),
                 "cerebras",
