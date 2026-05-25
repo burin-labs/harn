@@ -1149,6 +1149,9 @@ async fn async_main() {
                     process::exit(code);
                 }
             }
+            Some(EvalCommand::ScopeTriage(scope_args)) => {
+                process::exit(commands::eval_scope_triage::run(scope_args).await)
+            }
             Some(EvalCommand::ToolCalls(tool_calls_args)) => {
                 let code = commands::eval_tool_calls::run(tool_calls_args).await;
                 if code != 0 {
@@ -1157,10 +1160,7 @@ async fn async_main() {
             }
             None => {
                 let Some(path) = args.path else {
-                    eprintln!(
-                        "error: `harn eval` requires a path or a subcommand (e.g. `prompt`)."
-                    );
-                    eprintln!("See `harn eval --help`.");
+                    eprintln!("error: `harn eval` requires a path or a subcommand (e.g. `prompt`).\nSee `harn eval --help`.");
                     process::exit(2);
                 };
                 let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {

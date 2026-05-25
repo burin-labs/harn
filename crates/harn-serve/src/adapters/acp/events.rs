@@ -1039,6 +1039,36 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::ScopeClassifierVerdict {
+                session_id,
+                iteration,
+                label,
+                original_label,
+                confidence,
+                confidence_threshold,
+                evidence,
+                skip_main_turn,
+                classifier_kind,
+                model,
+                error,
+            } => {
+                self.emit_agent_event_ext(
+                    "scope_classifier_verdict",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "label": label,
+                        "originalLabel": original_label,
+                        "confidence": confidence,
+                        "confidenceThreshold": confidence_threshold,
+                        "evidence": evidence,
+                        "skipMainTurn": skip_main_turn,
+                        "classifierKind": classifier_kind,
+                        "model": model,
+                        "error": error,
+                    }),
+                );
+            }
             AgentEvent::TypedCheckpoint {
                 session_id,
                 checkpoint,

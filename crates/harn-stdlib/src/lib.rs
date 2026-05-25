@@ -310,6 +310,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/structural_validator.harn"),
     },
     StdlibSource {
+        module: "llm/scope_classifier",
+        source: include_str!("stdlib/llm/scope_classifier.harn"),
+    },
+    StdlibSource {
         module: "llm/refine",
         source: include_str!("stdlib/llm/refine.harn"),
     },
@@ -847,6 +851,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
     StdlibCliScript {
         name: "eval/coding_agent",
         source: include_str!("stdlib/cli/eval/coding_agent.harn"),
+    },
+    StdlibCliScript {
+        name: "eval/scope_triage",
+        source: include_str!("stdlib/cli/eval/scope_triage.harn"),
     },
     StdlibCliScript {
         name: "eval/prompt",

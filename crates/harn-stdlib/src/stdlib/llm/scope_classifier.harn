@@ -1,0 +1,254 @@
+import { agent_typed_output_checkpoint } from "std/agent/primitives"
+
+fn __scope_classifier_label(value) {
+  let label = lowercase(trim(to_string(value ?? "")))
+  if label == "in_scope" || label == "inscope" || label == "in-scope" {
+    return "in_scope"
+  }
+  if label == "out_of_scope" || label == "outscope" || label == "out-of-scope" {
+    return "out_of_scope"
+  }
+  if label == "escalate" || label == "ambiguous" || label == "uncertain" {
+    return "escalate"
+  }
+  return "escalate"
+}
+
+fn __scope_classifier_confidence(value, fallback) {
+  let parsed = to_float(value ?? fallback)
+  if parsed == nil {
+    return fallback
+  }
+  if parsed < 0.0 {
+    return 0.0
+  }
+  if parsed > 1.0 {
+    return 1.0
+  }
+  return parsed
+}
+
+fn __scope_classifier_threshold(value) {
+  let threshold = to_float(value ?? 0.65)
+  if threshold == nil || threshold < 0.0 || threshold > 1.0 {
+    throw "pre_turn_scope_classifier: confidence_threshold must be between 0.0 and 1.0"
+  }
+  return threshold
+}
+
+fn __scope_classifier_context_window(value) {
+  if value == nil {
+    return 3
+  }
+  if type_of(value) != "int" || value < 0 {
+    throw "pre_turn_scope_classifier: context_window must be a non-negative integer"
+  }
+  return value
+}
+
+fn __scope_classifier_recent_context(messages, limit) {
+  if type_of(messages) != "list" {
+    return []
+  }
+  if limit == 0 {
+    return []
+  }
+  let total = len(messages)
+  var start = total - limit
+  if start < 0 {
+    start = 0
+  }
+  var out = []
+  var i = start
+  while i < total {
+    let msg = messages[i]
+    out = out
+      .push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
+    i = i + 1
+  }
+  return out
+}
+
+fn __scope_classifier_schema() {
+  return {
+    type: "object",
+    properties: {
+      label: {type: "string", description: "One of: in_scope, out_of_scope, escalate."},
+      confidence: {type: "number", description: "Confidence from 0.0 to 1.0."},
+      evidence: {type: "string", description: "Concrete reason for the classification."},
+    },
+    required: ["label", "confidence", "evidence"],
+  }
+}
+
+fn __scope_classifier_anchor_summary(anchor) {
+  if anchor == nil {
+    return "Current session has no workspace anchor."
+  }
+  let primary = to_string(anchor?.primary ?? "(none)")
+  let roots = anchor?.additional_roots ?? []
+  var out = "Current workspace anchor: " + primary + "\nMounted additional roots:"
+  if type_of(roots) != "list" || len(roots) == 0 {
+    return out + "\n  (none)"
+  }
+  for root in roots {
+    out = out + "\n  - " + to_string(root?.path ?? root?.root ?? "")
+      + " (mount_mode: "
+      + to_string(root?.mount_mode ?? "")
+      + ")"
+  }
+  return out
+}
+
+fn __scope_classifier_prompt(payload, context) {
+  return "You are a scope-classification agent.\n\n"
+    + __scope_classifier_anchor_summary(payload?.workspace_anchor)
+    + "\n\nUser message:\n"
+    + to_string(payload?.user_message ?? "")
+    + "\n\nRecent context JSON:\n"
+    + json_stringify(context)
+    + "\n\nDecide if this task can be completed within the current anchor plus mounted roots.\n\n"
+    + "Output JSON exactly matching this shape: "
+    + "{\"label\":\"in_scope|out_of_scope|escalate\",\"confidence\":0.0,\"evidence\":\"...\"}\n\n"
+    + "Rules:\n"
+    + "- in_scope: clearly within the anchor or mounted roots.\n"
+    + "- out_of_scope: clearly references a path or repository outside the anchor; evidence must be concrete.\n"
+    + "- escalate: ambiguous; let the main model decide.\n"
+}
+
+fn __scope_classifier_normalize(raw, threshold, skip_main_turn) {
+  if type_of(raw) != "dict" {
+    return {
+      label: "escalate",
+      original_label: "invalid",
+      confidence: 0.0,
+      confidence_threshold: threshold,
+      evidence: "classifier returned " + type_of(raw) + ", not a dict",
+      skip_main_turn: false,
+    }
+  }
+  let original_label = __scope_classifier_label(raw?.label)
+  let confidence = __scope_classifier_confidence(raw?.confidence, 0.0)
+  let label = if original_label != "escalate" && confidence < threshold {
+    "escalate"
+  } else {
+    original_label
+  }
+  let evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
+  return raw
+    + {
+    label: label,
+    original_label: original_label,
+    confidence: confidence,
+    confidence_threshold: threshold,
+    evidence: if evidence == "" {
+      "no evidence provided"
+    } else {
+      evidence
+    },
+    skip_main_turn: skip_main_turn,
+  }
+}
+
+fn __scope_classifier_fail_open(error, threshold) {
+  return {
+    label: "escalate",
+    original_label: "error",
+    confidence: 0.0,
+    confidence_threshold: threshold,
+    evidence: "scope classifier failed: " + to_string(error),
+    error: to_string(error),
+    skip_main_turn: false,
+  }
+}
+
+/**
+ * pre_turn_scope_classifier returns an opt-in hook for `agent_loop`.
+ *
+ * Pass the returned closure as `agent_loop({pre_turn_scope_classifier: ...})`.
+ * The hook is disabled unless `enabled: true` is set. The default live path
+ * uses the local Ollama small-model selector `ollama:qwen3:1.7b`; tests and
+ * evals can pass `classifier` to provide a deterministic closure.
+ *
+ * @effects: [llm]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pre_turn_scope_classifier({enabled: true})
+ */
+pub fn pre_turn_scope_classifier(opts = nil) {
+  let cfg = opts ?? {}
+  if type_of(cfg) != "dict" {
+    throw "pre_turn_scope_classifier: opts must be a dict or nil; got " + type_of(cfg)
+  }
+  let enabled = cfg?.enabled ?? false
+  if type_of(enabled) != "bool" {
+    throw "pre_turn_scope_classifier: enabled must be a bool"
+  }
+  let model = trim(to_string(cfg?.model ?? "ollama:qwen3:1.7b"))
+  let threshold = __scope_classifier_threshold(cfg?.confidence_threshold)
+  let context_window = __scope_classifier_context_window(cfg?.context_window)
+  let skip_main_turn = cfg?.skip_main_turn ?? true
+  if type_of(skip_main_turn) != "bool" {
+    throw "pre_turn_scope_classifier: skip_main_turn must be a bool"
+  }
+  let classifier = cfg?.classifier ?? cfg?.classify
+  if classifier != nil && type_of(classifier) != "closure" {
+    throw "pre_turn_scope_classifier: classifier must be a closure or nil; got " + type_of(classifier)
+  }
+  return { payload ->
+    if !enabled {
+      return nil
+    }
+    let source_messages = if type_of(payload?.messages) == "list" {
+      payload.messages
+    } else {
+      payload?.recent_context ?? []
+    }
+    let recent_context = __scope_classifier_recent_context(source_messages, context_window)
+    let classifier_payload = payload
+      + {recent_context: recent_context, context_window: context_window, confidence_threshold: threshold}
+    if classifier != nil {
+      let custom = try {
+        classifier(classifier_payload)
+      }
+      if is_err(custom) {
+        let err = unwrap_err(custom)
+        if error_category(err) == "cancelled" {
+          throw err
+        }
+        return __scope_classifier_fail_open(err, threshold)
+      }
+      return __scope_classifier_normalize(unwrap(custom), threshold, skip_main_turn)
+        + {classifier_kind: "custom"}
+    }
+    let schema = __scope_classifier_schema()
+    var llm_opts = {
+      model: model,
+      output_schema: schema,
+      max_tokens: cfg?.max_tokens ?? 256,
+      temperature: cfg?.temperature ?? 0.0,
+      session_id: payload?.session_id ?? "",
+    }
+    if cfg?.provider != nil {
+      llm_opts = llm_opts + {provider: cfg.provider}
+    }
+    for key in ["top_p", "seed", "reasoning_effort", "timeout"] {
+      if cfg[key] != nil {
+        llm_opts[key] = cfg[key]
+      }
+    }
+    let checkpoint = agent_typed_output_checkpoint(
+      "agent.scope_classifier",
+      __scope_classifier_prompt(classifier_payload, recent_context),
+      schema,
+      llm_opts,
+    )
+    if !checkpoint.ok {
+      return __scope_classifier_fail_open(checkpoint.error, threshold)
+        + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
+    }
+    return __scope_classifier_normalize(checkpoint.data, threshold, skip_main_turn)
+      + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
+  }
+}

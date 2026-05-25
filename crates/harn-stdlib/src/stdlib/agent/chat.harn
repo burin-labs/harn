@@ -47,6 +47,7 @@ fn __chat_agent_option_keys() {
     "llm_caller",
     "tool_caller",
     "structural_validator",
+    "pre_turn_scope_classifier",
     "llm_options",
     "iteration_budget",
     "loop_control",
