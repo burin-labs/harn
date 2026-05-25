@@ -273,19 +273,32 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
     if let Ok(p) = std::env::var("HARN_LLM_PROVIDER") {
         return p;
     }
+    let explicit_model = options
+        .as_ref()
+        .and_then(|o| o.get("model"))
+        .map(|v| v.display());
+    if let Some(model) = explicit_model.as_deref() {
+        let (_, catalog_provider) = llm_config::resolve_model(model);
+        if let Some(provider) = catalog_provider {
+            return provider;
+        }
+        let normalized = llm_config::normalize_model_id(model);
+        if let Some(entry) = llm_config::model_catalog_entry(model)
+            .or_else(|| llm_config::model_catalog_entry(&normalized))
+        {
+            return entry.provider;
+        }
+    }
+
     // First-class local OpenAI-compatible server support.
     if std::env::var("LOCAL_LLM_BASE_URL").is_ok()
-        && (options.as_ref().and_then(|o| o.get("model")).is_some()
+        && (explicit_model.is_some()
             || std::env::var("HARN_LLM_MODEL").is_ok()
             || std::env::var("LOCAL_LLM_MODEL").is_ok())
     {
         return "local".to_string();
     }
-    if let Some(m) = options
-        .as_ref()
-        .and_then(|o| o.get("model"))
-        .map(|v| v.display())
-    {
+    if let Some(m) = explicit_model {
         return infer_provider_from_model_selector(&m, true);
     }
     if let Some(tier) = options

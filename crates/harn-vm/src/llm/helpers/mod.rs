@@ -137,6 +137,55 @@ mod tests {
     }
 
     #[test]
+    fn catalog_model_entry_beats_local_base_url_fast_path() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
+        let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+
+        unsafe {
+            std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434");
+            std::env::remove_var("LOCAL_LLM_MODEL");
+            std::env::remove_var("HARN_LLM_PROVIDER");
+            std::env::remove_var("HARN_LLM_MODEL");
+        }
+        reset_provider_key_cache();
+
+        let catalog_model = Some(BTreeMap::from([(
+            "model".to_string(),
+            VmValue::String(Rc::from("qwen-3-coder-480b")),
+        )]));
+        assert_eq!(vm_resolve_provider(&catalog_model), "cerebras");
+
+        let local_model = Some(BTreeMap::from([(
+            "model".to_string(),
+            VmValue::String(Rc::from("my-custom-local-tag")),
+        )]));
+        assert_eq!(vm_resolve_provider(&local_model), "local");
+
+        unsafe {
+            match prev_base {
+                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
+                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
+            }
+            match prev_local_model {
+                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
+                None => std::env::remove_var("LOCAL_LLM_MODEL"),
+            }
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+        }
+        reset_provider_key_cache();
+    }
+
+    #[test]
     fn vm_messages_to_json_preserves_tool_message_fields() {
         let message = VmValue::Dict(Rc::new(BTreeMap::from([
             ("role".to_string(), VmValue::String(Rc::from("tool"))),
