@@ -503,7 +503,7 @@ fn build_recommendations(outcomes: &[LocalModelOutcome]) -> Vec<LocalModelRecomm
 
     let mut recommendations = grouped
         .into_iter()
-        .map(|((provider, model), group)| recommendation_for_group(provider, model, &group))
+        .filter_map(|((provider, model), group)| recommendation_for_group(provider, model, &group))
         .collect::<Vec<_>>();
     recommendations.sort_by(|a, b| {
         recommendation_status_rank(&a.status)
@@ -522,16 +522,13 @@ fn recommendation_for_group(
     provider: String,
     model: String,
     outcomes: &[&LocalModelOutcome],
-) -> LocalModelRecommendation {
-    let best = outcomes
-        .iter()
-        .min_by(|a, b| {
-            a.class
-                .rank()
-                .cmp(&b.class.rank())
-                .then_with(|| b.score.cmp(&a.score))
-        })
-        .expect("non-empty group");
+) -> Option<LocalModelRecommendation> {
+    let best = outcomes.iter().min_by(|a, b| {
+        a.class
+            .rank()
+            .cmp(&b.class.rank())
+            .then_with(|| b.score.cmp(&a.score))
+    })?;
     let status = if outcomes
         .iter()
         .any(|outcome| outcome.class == LocalOutcomeClass::Passed)
@@ -568,7 +565,7 @@ fn recommendation_for_group(
             )
         })
         .collect::<Vec<_>>();
-    LocalModelRecommendation {
+    Some(LocalModelRecommendation {
         rank: 0,
         provider,
         model,
@@ -587,7 +584,7 @@ fn recommendation_for_group(
             .collect(),
         caveats,
         outcome_classes,
-    }
+    })
 }
 
 fn recommendation_status_rank(status: &str) -> u8 {

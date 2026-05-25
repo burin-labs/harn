@@ -371,16 +371,26 @@ pub(crate) fn check_diagnostic_from_analysis_error(error: AnalysisError) -> Chec
             help: None,
         },
         AnalysisError::Parse { errors, .. } => {
-            let error = errors
-                .first()
-                .expect("analysis parse errors should include at least one error");
-            CheckDiagnostic {
-                source: "parser",
-                severity: "error",
-                code: Some(harn_parser::diagnostic::parser_error_code(error).to_string()),
-                message: harn_parser::diagnostic::parser_error_message(error),
-                span: Some(check_span(span_from_parser_error(error))),
-                help: harn_parser::diagnostic::parser_error_help(error).map(str::to_string),
+            // Defensive: if the parser ever returns AnalysisError::Parse with
+            // an empty errors vec, fall back to a synthetic diagnostic rather
+            // than panicking the `harn check` process.
+            match errors.first() {
+                Some(error) => CheckDiagnostic {
+                    source: "parser",
+                    severity: "error",
+                    code: Some(harn_parser::diagnostic::parser_error_code(error).to_string()),
+                    message: harn_parser::diagnostic::parser_error_message(error),
+                    span: Some(check_span(span_from_parser_error(error))),
+                    help: harn_parser::diagnostic::parser_error_help(error).map(str::to_string),
+                },
+                None => CheckDiagnostic {
+                    source: "parser",
+                    severity: "error",
+                    code: None,
+                    message: "parser reported failure without a specific diagnostic".to_string(),
+                    span: None,
+                    help: None,
+                },
             }
         }
     }

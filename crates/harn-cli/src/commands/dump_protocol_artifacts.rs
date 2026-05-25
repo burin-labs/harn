@@ -3806,10 +3806,9 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-/// Render `value` as a double-quoted JSON string literal. The output is also a
-/// valid TypeScript, Swift, Python, and Go string literal because all four
-/// languages share JSON's escape rules for the characters that appear in our
-/// wire vocabulary (printable ASCII plus `/` and `_`).
+/// Output is also valid TypeScript/Swift/Python/Go because all four share
+/// JSON's escape rules for the characters in our wire vocabulary
+/// (printable ASCII plus `/` and `_`).
 fn json_string_literal(value: &str) -> String {
     serde_json::to_string(value).expect("string serializes")
 }
