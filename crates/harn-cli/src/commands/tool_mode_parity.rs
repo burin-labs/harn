@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -7,17 +7,80 @@ use serde::{Deserialize, Serialize};
 pub(crate) const TOOL_MODE_PARITY_OVERLAY_SCHEMA_VERSION: u32 = 1;
 pub(crate) const TOOL_MODE_PARITY_FIXTURE_SUITE: &str = "coding-agent";
 pub(crate) const TOOL_MODE_PARITY_OVERLAY_FILENAME: &str = "tool_mode_parity_overlay.toml";
+pub(crate) const TOOL_MODE_PARITY_DIRECTORY: &str = "parity";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ToolModeParityObservation {
+pub(crate) struct ToolModeParityFixtureInput {
     pub provider: String,
     pub model: String,
     pub fixture_id: String,
-    pub run_id: String,
-    pub tool_format: String,
-    pub passed: bool,
-    pub skipped: bool,
-    pub verification_success: bool,
+    pub native_verdict: String,
+    pub text_verdict: String,
+    pub native_passed: bool,
+    pub text_passed: bool,
+    pub agreement: bool,
+    pub verifier_agreement: bool,
+    pub native_tool_call_count: usize,
+    pub text_tool_call_count: usize,
+    pub native_rejected_tool_call_count: usize,
+    pub text_rejected_tool_call_count: usize,
+    pub native_evidence_path: String,
+    pub text_evidence_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ToolModeParityEvidencePaths {
+    pub native: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ToolModeParityFixtureReport {
+    pub fixture_id: String,
+    pub provider: String,
+    pub model: String,
+    pub native_verdict: String,
+    pub text_verdict: String,
+    pub native_passed: bool,
+    pub text_passed: bool,
+    pub agreement: bool,
+    pub verifier_agreement: bool,
+    pub divergence_class: String,
+    pub native_tool_call_count: usize,
+    pub text_tool_call_count: usize,
+    pub native_rejected_tool_call_count: usize,
+    pub text_rejected_tool_call_count: usize,
+    pub evidence_paths: ToolModeParityEvidencePaths,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ToolModeParityDivergenceCounts {
+    pub native_only_pass: usize,
+    pub text_only_pass: usize,
+    pub both_pass: usize,
+    pub both_fail: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub(crate) struct ToolModeParityFormatStats {
+    pub total_runs: usize,
+    pub passed_runs: usize,
+    pub unique_fixtures: usize,
+    pub replicate_count: usize,
+    pub pass_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub(crate) struct ToolModeParityPairSummary {
+    pub provider: String,
+    pub model: String,
+    pub sample_size: usize,
+    pub agreement_rate: f64,
+    pub verifier_divergence_rate: f64,
+    pub native: ToolModeParityFormatStats,
+    pub text: ToolModeParityFormatStats,
+    pub divergence_counts: ToolModeParityDivergenceCounts,
+    pub evidence_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -43,54 +106,140 @@ pub(crate) struct ToolModeParityOverlayRow {
     pub text: ToolModeParityFormatStats,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub(crate) struct ToolModeParityFormatStats {
-    pub total_runs: usize,
-    pub passed_runs: usize,
-    pub unique_fixtures: usize,
-    pub replicate_count: usize,
-    pub pass_rate: f64,
+pub(crate) fn build_fixture_reports(
+    inputs: &[ToolModeParityFixtureInput],
+) -> Vec<ToolModeParityFixtureReport> {
+    inputs
+        .iter()
+        .map(|input| ToolModeParityFixtureReport {
+            fixture_id: input.fixture_id.clone(),
+            provider: input.provider.clone(),
+            model: input.model.clone(),
+            native_verdict: input.native_verdict.clone(),
+            text_verdict: input.text_verdict.clone(),
+            native_passed: input.native_passed,
+            text_passed: input.text_passed,
+            agreement: input.agreement,
+            verifier_agreement: input.verifier_agreement,
+            divergence_class: divergence_class(input.native_passed, input.text_passed),
+            native_tool_call_count: input.native_tool_call_count,
+            text_tool_call_count: input.text_tool_call_count,
+            native_rejected_tool_call_count: input.native_rejected_tool_call_count,
+            text_rejected_tool_call_count: input.text_rejected_tool_call_count,
+            evidence_paths: ToolModeParityEvidencePaths {
+                native: input.native_evidence_path.clone(),
+                text: input.text_evidence_path.clone(),
+            },
+        })
+        .collect()
+}
+
+pub(crate) fn build_pair_summaries(
+    reports: &[ToolModeParityFixtureReport],
+) -> Vec<ToolModeParityPairSummary> {
+    let mut grouped: BTreeMap<(String, String), Vec<&ToolModeParityFixtureReport>> =
+        BTreeMap::new();
+    for report in reports {
+        grouped
+            .entry((report.provider.clone(), report.model.clone()))
+            .or_default()
+            .push(report);
+    }
+
+    grouped
+        .into_iter()
+        .map(|((provider, model), bucket)| {
+            let sample_size = bucket.len();
+            let native = format_stats(&bucket, true);
+            let text = format_stats(&bucket, false);
+            let agreement_rate = ratio(
+                bucket.iter().filter(|report| report.agreement).count(),
+                sample_size,
+            );
+            let verifier_divergence_rate = ratio(
+                bucket
+                    .iter()
+                    .filter(|report| !report.verifier_agreement)
+                    .count(),
+                sample_size,
+            );
+            let mut evidence_paths = bucket
+                .iter()
+                .flat_map(|report| {
+                    [
+                        report.evidence_paths.native.clone(),
+                        report.evidence_paths.text.clone(),
+                    ]
+                })
+                .collect::<Vec<_>>();
+            evidence_paths.sort();
+            evidence_paths.dedup();
+
+            ToolModeParityPairSummary {
+                provider,
+                model,
+                sample_size,
+                agreement_rate,
+                verifier_divergence_rate,
+                native,
+                text,
+                divergence_counts: ToolModeParityDivergenceCounts {
+                    native_only_pass: bucket
+                        .iter()
+                        .filter(|report| report.divergence_class == "native_only_pass")
+                        .count(),
+                    text_only_pass: bucket
+                        .iter()
+                        .filter(|report| report.divergence_class == "text_only_pass")
+                        .count(),
+                    both_pass: bucket
+                        .iter()
+                        .filter(|report| report.divergence_class == "both_pass")
+                        .count(),
+                    both_fail: bucket
+                        .iter()
+                        .filter(|report| report.divergence_class == "both_fail")
+                        .count(),
+                },
+                evidence_paths,
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn build_overlay(
-    observations: &[ToolModeParityObservation],
+    parity_by_pair: &[ToolModeParityPairSummary],
     generated_at: &str,
     fixture_suite: &str,
     evidence_path: &Path,
 ) -> ToolModeParityOverlay {
-    let mut grouped: BTreeMap<(String, String), Vec<&ToolModeParityObservation>> = BTreeMap::new();
-    for observation in observations {
-        grouped
-            .entry((observation.provider.clone(), observation.model.clone()))
-            .or_default()
-            .push(observation);
-    }
-
-    let rows = grouped
-        .into_iter()
-        .map(|((provider, model), bucket)| {
-            let native = format_stats(&bucket, "native");
-            let text = format_stats(&bucket, "text");
-            let sample_size = native.unique_fixtures.min(text.unique_fixtures);
-            let verifier_divergence_rate = verifier_divergence_rate(&bucket);
-            let tool_mode_parity =
-                classify_tool_mode_parity(sample_size, native.pass_rate, text.pass_rate);
-            let preferred_tool_format =
-                preferred_tool_format(&tool_mode_parity, native.pass_rate, text.pass_rate);
-            let confidence = parity_confidence(sample_size, &native, &text);
+    let rows = parity_by_pair
+        .iter()
+        .map(|summary| {
+            let tool_mode_parity = classify_tool_mode_parity(
+                summary.sample_size,
+                summary.native.pass_rate,
+                summary.text.pass_rate,
+            );
+            let preferred_tool_format = preferred_tool_format(
+                &tool_mode_parity,
+                summary.native.pass_rate,
+                summary.text.pass_rate,
+            );
+            let confidence = parity_confidence(summary.sample_size, &summary.native, &summary.text);
 
             ToolModeParityOverlayRow {
-                provider,
-                model,
+                provider: summary.provider.clone(),
+                model: summary.model.clone(),
                 tool_mode_parity,
                 preferred_tool_format,
                 confidence,
-                sample_size,
+                sample_size: summary.sample_size,
                 last_updated: generated_at.to_string(),
                 evidence_path: evidence_path.display().to_string(),
-                verifier_divergence_rate,
-                native,
-                text,
+                verifier_divergence_rate: summary.verifier_divergence_rate,
+                native: summary.native.clone(),
+                text: summary.text.clone(),
             }
         })
         .collect();
@@ -101,6 +250,20 @@ pub(crate) fn build_overlay(
         fixture_suite: fixture_suite.to_string(),
         rows,
     }
+}
+
+pub(crate) fn write_fixture_report(
+    path: &Path,
+    report: &ToolModeParityFixtureReport,
+) -> Result<(), String> {
+    let body = serde_json::to_string_pretty(report)
+        .map_err(|error| format!("failed to render {}: {error}", path.display()))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    fs::write(path, format!("{body}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 pub(crate) fn write_overlay(path: &Path, overlay: &ToolModeParityOverlay) -> Result<(), String> {
@@ -132,29 +295,37 @@ pub(crate) fn render_promotion_note(row: &ToolModeParityOverlayRow) -> String {
     )
 }
 
+fn divergence_class(native_passed: bool, text_passed: bool) -> String {
+    match (native_passed, text_passed) {
+        (true, false) => "native_only_pass".to_string(),
+        (false, true) => "text_only_pass".to_string(),
+        (true, true) => "both_pass".to_string(),
+        (false, false) => "both_fail".to_string(),
+    }
+}
+
 fn format_stats(
-    observations: &[&ToolModeParityObservation],
-    tool_format: &str,
+    reports: &[&ToolModeParityFixtureReport],
+    native: bool,
 ) -> ToolModeParityFormatStats {
-    let filtered = observations
-        .iter()
-        .copied()
-        .filter(|observation| observation.tool_format == tool_format && !observation.skipped)
-        .collect::<Vec<_>>();
-    if filtered.is_empty() {
+    if reports.is_empty() {
         return ToolModeParityFormatStats::default();
     }
 
-    let total_runs = filtered.len();
-    let passed_runs = filtered
+    let total_runs = reports.len();
+    let passed_runs = reports
         .iter()
-        .filter(|observation| observation.passed)
+        .filter(|report| {
+            if native {
+                report.native_passed
+            } else {
+                report.text_passed
+            }
+        })
         .count();
     let mut by_fixture: BTreeMap<&str, usize> = BTreeMap::new();
-    for observation in &filtered {
-        *by_fixture
-            .entry(observation.fixture_id.as_str())
-            .or_insert(0) += 1;
+    for report in reports {
+        *by_fixture.entry(report.fixture_id.as_str()).or_insert(0) += 1;
     }
 
     ToolModeParityFormatStats {
@@ -164,45 +335,6 @@ fn format_stats(
         replicate_count: by_fixture.values().copied().min().unwrap_or(0),
         pass_rate: ratio(passed_runs, total_runs),
     }
-}
-
-fn verifier_divergence_rate(observations: &[&ToolModeParityObservation]) -> f64 {
-    let mut native_by_fixture: BTreeMap<&str, Vec<&ToolModeParityObservation>> = BTreeMap::new();
-    let mut text_by_fixture: BTreeMap<&str, Vec<&ToolModeParityObservation>> = BTreeMap::new();
-    for observation in observations.iter().copied().filter(|obs| !obs.skipped) {
-        match observation.tool_format.as_str() {
-            "native" => native_by_fixture
-                .entry(observation.fixture_id.as_str())
-                .or_default()
-                .push(observation),
-            "text" => text_by_fixture
-                .entry(observation.fixture_id.as_str())
-                .or_default()
-                .push(observation),
-            _ => {}
-        }
-    }
-
-    let shared = native_by_fixture
-        .keys()
-        .filter(|fixture| text_by_fixture.contains_key(**fixture))
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let mut compared = 0usize;
-    let mut diverged = 0usize;
-    for fixture in shared {
-        let mut native = native_by_fixture.remove(fixture).unwrap_or_default();
-        let mut text = text_by_fixture.remove(fixture).unwrap_or_default();
-        native.sort_by(|left, right| left.run_id.cmp(&right.run_id));
-        text.sort_by(|left, right| left.run_id.cmp(&right.run_id));
-        for (native, text) in native.iter().zip(text.iter()) {
-            compared += 1;
-            if native.verification_success != text.verification_success {
-                diverged += 1;
-            }
-        }
-    }
-    ratio(diverged, compared)
 }
 
 fn classify_tool_mode_parity(
@@ -263,40 +395,89 @@ fn ratio(numerator: usize, denominator: usize) -> f64 {
 mod tests {
     use super::*;
 
-    fn observation(
+    fn fixture_input(
         fixture_id: &str,
-        run_id: &str,
-        tool_format: &str,
-        passed: bool,
-        verification_success: bool,
-    ) -> ToolModeParityObservation {
-        ToolModeParityObservation {
+        native_passed: bool,
+        text_passed: bool,
+        verifier_agreement: bool,
+    ) -> ToolModeParityFixtureInput {
+        ToolModeParityFixtureInput {
             provider: "openrouter".to_string(),
             model: "qwen/qwen3-coder".to_string(),
             fixture_id: fixture_id.to_string(),
-            run_id: run_id.to_string(),
-            tool_format: tool_format.to_string(),
-            passed,
-            skipped: false,
-            verification_success,
+            native_verdict: if native_passed {
+                "passed".to_string()
+            } else {
+                "failed".to_string()
+            },
+            text_verdict: if text_passed {
+                "passed".to_string()
+            } else {
+                "failed".to_string()
+            },
+            native_passed,
+            text_passed,
+            agreement: native_passed == text_passed,
+            verifier_agreement,
+            native_tool_call_count: 1,
+            text_tool_call_count: 2,
+            native_rejected_tool_call_count: 0,
+            text_rejected_tool_call_count: 1,
+            native_evidence_path: format!("native/{fixture_id}.jsonl"),
+            text_evidence_path: format!("text/{fixture_id}.jsonl"),
         }
     }
 
     #[test]
-    fn overlay_classifies_native_unreliable_and_low_confidence() {
+    fn fixture_reports_capture_divergence_classes() {
+        let reports = build_fixture_reports(&[
+            fixture_input("a", true, false, false),
+            fixture_input("b", false, true, true),
+            fixture_input("c", true, true, true),
+            fixture_input("d", false, false, true),
+        ]);
+
+        assert_eq!(reports[0].divergence_class, "native_only_pass");
+        assert_eq!(reports[1].divergence_class, "text_only_pass");
+        assert_eq!(reports[2].divergence_class, "both_pass");
+        assert_eq!(reports[3].divergence_class, "both_fail");
+    }
+
+    #[test]
+    fn pair_summary_aggregates_rates_and_divergence_counts() {
+        let reports = build_fixture_reports(&[
+            fixture_input("a", false, true, false),
+            fixture_input("b", false, true, true),
+            fixture_input("c", false, true, false),
+            fixture_input("d", true, true, true),
+            fixture_input("e", false, true, false),
+        ]);
+        let summaries = build_pair_summaries(&reports);
+        let summary = summaries.first().expect("summary");
+
+        assert_eq!(summary.sample_size, 5);
+        assert_eq!(summary.native.pass_rate, 0.2);
+        assert_eq!(summary.text.pass_rate, 1.0);
+        assert_eq!(summary.agreement_rate, 0.2);
+        assert_eq!(summary.verifier_divergence_rate, 0.6);
+        assert_eq!(summary.divergence_counts.native_only_pass, 0);
+        assert_eq!(summary.divergence_counts.text_only_pass, 4);
+        assert_eq!(summary.divergence_counts.both_pass, 1);
+        assert_eq!(summary.divergence_counts.both_fail, 0);
+    }
+
+    #[test]
+    fn overlay_uses_pair_summary_for_classification_and_confidence() {
+        let reports = build_fixture_reports(&[
+            fixture_input("a", false, true, false),
+            fixture_input("b", false, true, true),
+            fixture_input("c", false, true, false),
+            fixture_input("d", true, true, true),
+            fixture_input("e", false, true, false),
+        ]);
+        let summaries = build_pair_summaries(&reports);
         let overlay = build_overlay(
-            &[
-                observation("a", "a-native", "native", false, false),
-                observation("a", "a-text", "text", true, true),
-                observation("b", "b-native", "native", false, false),
-                observation("b", "b-text", "text", true, true),
-                observation("c", "c-native", "native", false, false),
-                observation("c", "c-text", "text", true, true),
-                observation("d", "d-native", "native", true, true),
-                observation("d", "d-text", "text", true, true),
-                observation("e", "e-native", "native", false, false),
-                observation("e", "e-text", "text", true, true),
-            ],
+            &summaries,
             "2026-05-24T00:00:00Z",
             TOOL_MODE_PARITY_FIXTURE_SUITE,
             Path::new(".harn-runs/coding-agent-bench/latest"),
@@ -307,56 +488,6 @@ mod tests {
         assert_eq!(row.tool_mode_parity, "native_unreliable");
         assert_eq!(row.preferred_tool_format, "text");
         assert_eq!(row.confidence, "low");
-        assert_eq!(row.native.pass_rate, 0.2);
-        assert_eq!(row.text.pass_rate, 1.0);
-        assert_eq!(row.verifier_divergence_rate, 0.8);
-    }
-
-    #[test]
-    fn overlay_requires_two_replicates_for_high_confidence() {
-        let mut observations = Vec::new();
-        for fixture in ["a", "b", "c", "d", "e"] {
-            observations.push(observation(
-                fixture,
-                &format!("{fixture}-native-1"),
-                "native",
-                true,
-                true,
-            ));
-            observations.push(observation(
-                fixture,
-                &format!("{fixture}-native-2"),
-                "native",
-                true,
-                true,
-            ));
-            observations.push(observation(
-                fixture,
-                &format!("{fixture}-text-1"),
-                "text",
-                true,
-                true,
-            ));
-            observations.push(observation(
-                fixture,
-                &format!("{fixture}-text-2"),
-                "text",
-                true,
-                true,
-            ));
-        }
-
-        let overlay = build_overlay(
-            &observations,
-            "2026-05-24T00:00:00Z",
-            TOOL_MODE_PARITY_FIXTURE_SUITE,
-            Path::new(".harn-runs/coding-agent-bench/latest"),
-        );
-
-        let row = overlay.rows.first().expect("row");
-        assert_eq!(row.confidence, "high");
-        assert_eq!(row.tool_mode_parity, "interchangeable");
-        assert_eq!(row.native.replicate_count, 2);
-        assert_eq!(row.text.replicate_count, 2);
+        assert_eq!(row.verifier_divergence_rate, 0.6);
     }
 }

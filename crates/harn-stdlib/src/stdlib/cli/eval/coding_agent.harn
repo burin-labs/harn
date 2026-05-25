@@ -126,6 +126,30 @@ fn __format_float_signed_1(value) -> string {
 }
 
 /**
+ * Format a float as `"X.Y"` (1 decimal, half-up padded). Used for the
+ * parity summary percentages to mirror Rust's `"{:.1}%"`.
+ */
+fn __format_float_1(value) -> string {
+  let f = to_float(value) ?? 0.0
+  let negative = f < 0.0
+  let abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  let scaled = to_int(round(abs_f * 10.0)) ?? 0
+  let whole = scaled / 10
+  let frac = scaled - whole * 10
+  let frac_str = to_string(frac)
+  let sign = if negative && (whole != 0 || frac != 0) {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(whole) + "." + frac_str
+}
+
+/**
  * Escape Markdown table cell content by replacing `|` with `\|`.
  * Mirrors Rust's `value.replace('|', "\\|")`.
  */
@@ -412,6 +436,46 @@ fn __render_divergence_evidence(comparisons) -> string {
   return out
 }
 
+fn __render_parity_report(parity_by_pair) -> string {
+  var out = "\n## Parity report — native vs text\n\n"
+  out = out
+    + "| selector | sample | native pass | text pass | agreement | verifier divergence | native_only | text_only | both_pass | both_fail |\n"
+  out = out + "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n"
+  for pair in __safe_list(parity_by_pair) {
+    let pd = __safe_dict(pair)
+    let selector = {
+      selector: __safe_string(pd["provider"], "") + ":" + __safe_string(pd["model"], ""),
+      provider: __safe_string(pd["provider"], ""),
+      model: __safe_string(pd["model"], ""),
+    }
+    let divergence_counts = __safe_dict(pd["divergence_counts"])
+    let native = __safe_dict(pd["native"])
+    let text = __safe_dict(pd["text"])
+    out = out + "| `"
+      + __selector_label(selector)
+      + "` | "
+      + to_string(pd["sample_size"] ?? 0)
+      + " | "
+      + __format_float_1((to_float(native["pass_rate"]) ?? 0.0) * 100.0)
+      + "% | "
+      + __format_float_1((to_float(text["pass_rate"]) ?? 0.0) * 100.0)
+      + "% | "
+      + __format_float_1((to_float(pd["agreement_rate"]) ?? 0.0) * 100.0)
+      + "% | "
+      + __format_float_1((to_float(pd["verifier_divergence_rate"]) ?? 0.0) * 100.0)
+      + "% | "
+      + to_string(divergence_counts["native_only_pass"] ?? 0)
+      + " | "
+      + to_string(divergence_counts["text_only_pass"] ?? 0)
+      + " | "
+      + to_string(divergence_counts["both_pass"] ?? 0)
+      + " | "
+      + to_string(divergence_counts["both_fail"] ?? 0)
+      + " |\n"
+  }
+  return out
+}
+
 fn __render_markdown(summary: dict) -> string {
   let fixture_ids = __safe_list(summary["fixture_ids"])
   var out = "# Coding Agent Harness Quality Suite\n\n"
@@ -440,6 +504,10 @@ fn __render_markdown(summary: dict) -> string {
   let comparisons = __safe_list(summary["comparisons"])
   if len(comparisons) > 0 {
     out = out + __render_comparison_table(comparisons)
+  }
+  let parity_by_pair = __safe_list(summary["parity_by_pair"])
+  if len(parity_by_pair) > 0 {
+    out = out + __render_parity_report(parity_by_pair)
   }
   out = out + __render_divergence_evidence(comparisons)
   return out
