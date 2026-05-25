@@ -19,6 +19,10 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::api::{LlmCallOptions, LlmRoutePolicy};
 use super::cost::{calculate_cost_for_provider, peek_total_cost, LlmBudgetEnvelope};
+use super::routing_verifier::{
+    build_refine_nudge, parse_escalate_on, run_verifier, verifiers_summary, Verifier,
+    VerifierSignal,
+};
 
 /// Marker key set by `routing_policy(...)` to distinguish a validated
 /// routing config dict from a stray dict the user happened to pass.
@@ -137,6 +141,16 @@ pub(crate) struct RoutingPolicyConfig {
     pub latency: LatencyRules,
     pub budget: BudgetRules,
     pub observe: ObserveRules,
+    /// Verifier chain that gates frontier-tier escalation. Each
+    /// verifier inspects the candidate's text after a successful
+    /// link; the first non-`accept` signal drives the next decision
+    /// (refine = retry same link with a nudge; escalate = advance).
+    pub escalate_on: Vec<Verifier>,
+    /// Maximum number of refine retries permitted **per link**.
+    /// Refines also count against `failover.max_attempts`, so the
+    /// effective cap is `min(refines_per_link, remaining_attempts)`.
+    /// Defaults to 1.
+    pub max_refines_per_link: usize,
     /// Stable identifier — short label or the full
     /// `routing_policy(chain=N)` summary. Forwarded into tape events so
     /// transcripts can correlate attempts back to the policy that drove
@@ -501,6 +515,17 @@ pub(crate) fn build_routing_policy(config: &BTreeMap<String, VmValue>) -> Result
     let latency = parse_latency(config.get("latency"))?;
     let budget = parse_budget(config.get("budget"))?;
     let observe = parse_observe(config.get("observe"))?;
+    let escalate_on = parse_escalate_on(config.get("escalate_on"))?;
+    let max_refines_per_link = match config.get("max_refines_per_link") {
+        None | Some(VmValue::Nil) => 1usize,
+        Some(VmValue::Int(n)) if *n >= 0 => *n as usize,
+        Some(other) => {
+            return Err(runtime_error(format!(
+                "routing_policy.max_refines_per_link: expected a non-negative integer, got {}",
+                other.type_name()
+            )));
+        }
+    };
     let label_text = parse_label(config, "label")?;
     let label = if label_text.is_empty() {
         format!("routing_policy(chain={})", chain.len())
@@ -521,6 +546,13 @@ pub(crate) fn build_routing_policy(config: &BTreeMap<String, VmValue>) -> Result
     summary.insert("failover".to_string(), failover_value(&failover));
     summary.insert("latency".to_string(), latency_value(&latency));
     summary.insert("observe".to_string(), observe_value(&observe));
+    if !escalate_on.is_empty() {
+        summary.insert("escalate_on".to_string(), verifiers_summary(&escalate_on));
+        summary.insert(
+            "max_refines_per_link".to_string(),
+            VmValue::Int(max_refines_per_link as i64),
+        );
+    }
 
     let parsed = RoutingPolicyConfig {
         chain,
@@ -528,6 +560,8 @@ pub(crate) fn build_routing_policy(config: &BTreeMap<String, VmValue>) -> Result
         latency,
         budget,
         observe,
+        escalate_on,
+        max_refines_per_link,
         label,
     };
     let handle = intern_policy(parsed);
@@ -695,6 +729,46 @@ pub(crate) struct RoutingAttempt {
     pub duration_ms: u64,
     pub cost_usd: Option<f64>,
     pub error: Option<RoutingErrorSnapshot>,
+    /// Per-verifier signals emitted after this attempt's response.
+    /// Empty when the policy has no `escalate_on` chain or the
+    /// attempt failed before verifiers ran.
+    pub verifier_signals: Vec<VerifierSignalRecord>,
+    /// What the verifier chain told the router to do with this
+    /// candidate. `Accept` means the answer was returned;
+    /// `Refine`/`Escalate` mean the router moved on (within the same
+    /// link or to the next link respectively).
+    pub verifier_outcome: Option<VerifierOutcome>,
+}
+
+/// One signal entry in `RoutingAttempt.verifier_signals`. Kept simple
+/// so it survives serialization through `VmValue` dicts without losing
+/// the verifier's name and the human-readable reason.
+#[derive(Clone, Debug)]
+pub(crate) struct VerifierSignalRecord {
+    pub name: String,
+    pub kind: String,
+    pub signal: String,
+    pub reason: Option<String>,
+}
+
+/// Aggregated verdict across the verifier chain for one attempt. Drives
+/// receipt rendering ("escalated because verifier=refine on attempt 1,
+/// escalate on attempt 2").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VerifierOutcome {
+    Accept,
+    Refine,
+    Escalate,
+}
+
+impl VerifierOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Refine => "refine",
+            Self::Escalate => "escalate",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -984,6 +1058,8 @@ fn check_link_budget(
                 duration_ms: 0,
                 cost_usd: None,
                 error: Some(snapshot),
+                verifier_signals: Vec::new(),
+                verifier_outcome: None,
             });
             Ok(false)
         }
@@ -1047,16 +1123,134 @@ fn pending_attempt_record(
         duration_ms: duration_ms(elapsed),
         cost_usd: None,
         error: None,
+        verifier_signals: Vec::new(),
+        verifier_outcome: None,
     }
+}
+
+/// Extract the text the verifier chain should inspect. Mirrors how
+/// `agent_config::build_llm_call_result` derives the human-visible
+/// answer so the verifier sees the same thing the script will.
+fn candidate_text_for_verifier(result: &super::api::LlmResult) -> String {
+    if !result.text.is_empty() {
+        return result.text.clone();
+    }
+    // Tool-only responses still get a deterministic text payload
+    // verifiers can match against (their JSON serialization), so
+    // `lint`-style pattern rules work on tool-call shape too.
+    if !result.tool_calls.is_empty() {
+        return serde_json::to_string(&result.tool_calls).unwrap_or_default();
+    }
+    String::new()
+}
+
+/// Run the verifier chain over a candidate. Returns the per-verifier
+/// records plus the aggregated outcome. The first non-`accept` signal
+/// dominates: a single `escalate` outranks any later `refine`s, so
+/// callers don't have to redo the precedence reasoning.
+async fn run_verifier_chain(
+    verifiers: &[Verifier],
+    text: &str,
+) -> (Vec<VerifierSignalRecord>, VerifierOutcome, Vec<String>) {
+    if verifiers.is_empty() {
+        return (Vec::new(), VerifierOutcome::Accept, Vec::new());
+    }
+    let mut records = Vec::with_capacity(verifiers.len());
+    let mut outcome = VerifierOutcome::Accept;
+    let mut refine_reasons: Vec<String> = Vec::new();
+    for verifier in verifiers {
+        let signal = run_verifier(verifier, text).await;
+        let signal_label = signal.as_str().to_string();
+        let reason = signal.reason().map(str::to_string);
+        records.push(VerifierSignalRecord {
+            name: verifier.name().to_string(),
+            kind: verifier.kind_label().to_string(),
+            signal: signal_label,
+            reason: reason.clone(),
+        });
+        match signal {
+            VerifierSignal::Accept => {}
+            VerifierSignal::Refine { reason } => {
+                if outcome == VerifierOutcome::Accept {
+                    outcome = VerifierOutcome::Refine;
+                }
+                refine_reasons.push(reason);
+            }
+            VerifierSignal::Escalate { .. } => {
+                outcome = VerifierOutcome::Escalate;
+                // Don't `break` — we still want the full picture for
+                // receipts, but no later refine can downgrade escalate.
+            }
+        }
+    }
+    (records, outcome, refine_reasons)
+}
+
+/// Default `max_attempts` budget when `escalate_on` is configured but
+/// the script didn't set one explicitly. Without this nudge, the
+/// default `chain.len()` would silently disable refine retries (each
+/// link only gets one shot, leaving no slot for a tightened-prompt
+/// retry). Adding `chain.len() * max_refines_per_link` keeps the
+/// "happy path = once per link" semantics intact while making room
+/// for the refine fan-out the verifier chain expects.
+fn implied_max_attempts(policy: &RoutingPolicyConfig) -> usize {
+    let base = policy.chain.len();
+    if policy.escalate_on.is_empty() {
+        base
+    } else {
+        base + base.saturating_mul(policy.max_refines_per_link)
+    }
+}
+
+fn emit_verifier_signal_event(
+    dispatch: &str,
+    policy: &RoutingPolicyConfig,
+    attempt_no: usize,
+    link: &ChainLink,
+    outcome: VerifierOutcome,
+    signals: &[VerifierSignalRecord],
+) {
+    let mut meta = serde_json::Map::new();
+    meta.insert("policy".to_string(), json!(policy.label.clone()));
+    meta.insert("attempt".to_string(), json!(attempt_no));
+    meta.insert("provider".to_string(), json!(link.provider.clone()));
+    meta.insert("model".to_string(), json!(link.model.clone()));
+    meta.insert("link_label".to_string(), json!(link.display_label()));
+    meta.insert("outcome".to_string(), json!(outcome.as_str()));
+    meta.insert(
+        "signals".to_string(),
+        serde_json::Value::Array(
+            signals
+                .iter()
+                .map(|s| {
+                    json!({
+                        "name": s.name,
+                        "kind": s.kind,
+                        "signal": s.signal,
+                        "reason": s.reason,
+                    })
+                })
+                .collect(),
+        ),
+    );
+    emit_routing_event(dispatch, "verifier_signal", meta);
 }
 
 /// Run the chain. Each link is tried in order; failover rules decide
 /// whether to advance after an error. `latency.race_after_ms`, when
 /// set, kicks off the next attempt in parallel and returns whichever
 /// finishes first; the loser is cancelled and recorded as `race_lost`.
+///
+/// When `policy.escalate_on` is non-empty, each successful link's
+/// candidate runs through the verifier chain before being returned:
+/// `accept` returns, `refine` retries the same link with a nudge
+/// (up to `policy.max_refines_per_link` per link), `escalate`
+/// advances to the next link. If the verifier rejects the last link
+/// and no frontier remains, the rejected candidate is returned anyway
+/// — verifiers gate routing, not correctness.
 pub(crate) async fn execute_with_routing(
     policy: &RoutingPolicyConfig,
-    base_opts: LlmCallOptions,
+    mut base_opts: LlmCallOptions,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<(super::api::LlmResult, RoutingTrace), VmError> {
     let dispatch = policy.dispatch_label();
@@ -1066,7 +1260,10 @@ pub(crate) async fn execute_with_routing(
         selected: None,
         session_cost_usd: peek_total_cost(),
     };
-    let max_attempts = policy.failover.max_attempts.unwrap_or(policy.chain.len());
+    let max_attempts = policy
+        .failover
+        .max_attempts
+        .unwrap_or_else(|| implied_max_attempts(policy));
     if max_attempts == 0 {
         return Err(runtime_error(
             "routing_policy.failover.max_attempts: must be >= 1".to_string(),
@@ -1075,6 +1272,14 @@ pub(crate) async fn execute_with_routing(
     let mut last_error: Option<VmError> = None;
     let mut last_snapshot: Option<RoutingErrorSnapshot> = None;
     let mut attempts_used: usize = 0;
+    let original_messages = base_opts.messages.clone();
+    // Per-link refine bookkeeping. Both reset on `idx` advance so a
+    // refine streak from one link doesn't bleed into the next.
+    let mut refines_for_current_link: usize = 0;
+    let mut nudge_reasons_for_current_link: Vec<String> = Vec::new();
+    // Last verifier-rejected candidate, returned as a fallback when
+    // the chain exhausts without an `accept`.
+    let mut last_rejected_candidate: Option<(super::api::LlmResult, usize)> = None;
 
     let mut decision_meta = serde_json::Map::new();
     decision_meta.insert("policy".to_string(), json!(policy.label.clone()));
@@ -1203,9 +1408,34 @@ pub(crate) async fn execute_with_routing(
                     record.status = AttemptStatus::Succeeded;
                     record.cost_usd = Some(project_link_cost_usd(&value));
                 }
+                // Run the verifier chain over the winning candidate.
+                let candidate_text = if policy.escalate_on.is_empty() {
+                    String::new()
+                } else {
+                    candidate_text_for_verifier(&value)
+                };
+                let (signals, outcome, refine_reasons) =
+                    run_verifier_chain(&policy.escalate_on, &candidate_text).await;
+                let outcome_for_attempt = if policy.escalate_on.is_empty() {
+                    None
+                } else {
+                    Some(outcome)
+                };
+                if let Some(record) = attempt_records
+                    .iter_mut()
+                    .find(|rec| matches!(rec.status, AttemptStatus::Succeeded))
+                {
+                    record.verifier_signals = signals.clone();
+                    record.verifier_outcome = outcome_for_attempt;
+                }
+                if !policy.escalate_on.is_empty() {
+                    emit_verifier_signal_event(
+                        &dispatch, policy, attempt_no, &link, outcome, &signals,
+                    );
+                }
                 let starting_len = trace.attempts.len();
                 trace.attempts.extend(attempt_records);
-                trace.selected = trace
+                let success_idx = trace
                     .attempts
                     .iter()
                     .enumerate()
@@ -1216,8 +1446,53 @@ pub(crate) async fn execute_with_routing(
                             && a.model == value.model
                     })
                     .map(|(idx, _)| idx);
-                trace.session_cost_usd = peek_total_cost();
-                return Ok((value, trace));
+
+                match outcome {
+                    VerifierOutcome::Accept => {
+                        trace.selected = success_idx;
+                        trace.session_cost_usd = peek_total_cost();
+                        return Ok((value, trace));
+                    }
+                    VerifierOutcome::Refine
+                        if refines_for_current_link < policy.max_refines_per_link
+                            && attempts_used + consumed < max_attempts =>
+                    {
+                        // Same link, tightened prompt: append the
+                        // cumulative refine nudge to the original
+                        // messages snapshot (re-applying each iteration
+                        // keeps prior bad responses out of context).
+                        nudge_reasons_for_current_link.extend(refine_reasons);
+                        let nudge = build_refine_nudge(&nudge_reasons_for_current_link);
+                        base_opts.messages = original_messages.clone();
+                        if !nudge.is_empty() {
+                            base_opts.messages.push(serde_json::json!({
+                                "role": "user",
+                                "content": nudge,
+                            }));
+                        }
+                        refines_for_current_link += 1;
+                        attempts_used += consumed;
+                        if let Some(idx_v) = success_idx {
+                            last_rejected_candidate = Some((value, idx_v));
+                        }
+                        continue;
+                    }
+                    VerifierOutcome::Refine | VerifierOutcome::Escalate => {
+                        // Either refine budget is exhausted (treat as
+                        // escalate) or verifier escalated outright:
+                        // advance to the next link, reset link-local
+                        // refine state.
+                        refines_for_current_link = 0;
+                        nudge_reasons_for_current_link.clear();
+                        base_opts.messages = original_messages.clone();
+                        attempts_used += consumed;
+                        idx += consumed;
+                        if let Some(idx_v) = success_idx {
+                            last_rejected_candidate = Some((value, idx_v));
+                        }
+                        continue;
+                    }
+                }
             }
             Err(err) => {
                 let (eligible, snapshot) = matches_failover(&policy.failover, &err);
@@ -1238,6 +1513,20 @@ pub(crate) async fn execute_with_routing(
                 idx += consumed;
                 continue;
             }
+        }
+    }
+
+    // Verifier-rejected fallback: if the chain exhausted because the
+    // verifier kept escalating but we never got a transport error,
+    // return the last successful candidate the chain produced rather
+    // than failing the call. The verifier complaint is preserved on
+    // `routing.attempts[*].verifier_outcome` so the caller can still
+    // see why escalation ran out.
+    if last_error.is_none() {
+        if let Some((value, idx)) = last_rejected_candidate {
+            trace.selected = Some(idx);
+            trace.session_cost_usd = peek_total_cost();
+            return Ok((value, trace));
         }
     }
 
@@ -1424,7 +1713,23 @@ pub(crate) fn trace_to_decision(
     for (idx, attempt) in trace.attempts.iter().enumerate() {
         let selected = trace.selected == Some(idx);
         let reason = match attempt.status {
-            AttemptStatus::Succeeded => "selected".to_string(),
+            AttemptStatus::Succeeded => match attempt.verifier_outcome {
+                Some(VerifierOutcome::Refine) => {
+                    if selected {
+                        "selected:verifier_refine_fallback".to_string()
+                    } else {
+                        "verifier:refine".to_string()
+                    }
+                }
+                Some(VerifierOutcome::Escalate) => {
+                    if selected {
+                        "selected:verifier_escalate_fallback".to_string()
+                    } else {
+                        "verifier:escalate".to_string()
+                    }
+                }
+                Some(VerifierOutcome::Accept) | None => "selected".to_string(),
+            },
             AttemptStatus::Failed => attempt
                 .error
                 .as_ref()
@@ -1515,6 +1820,44 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                     err_dict.insert("status".to_string(), VmValue::Int(status as i64));
                 }
                 dict.insert("error".to_string(), VmValue::Dict(Rc::new(err_dict)));
+            }
+            if let Some(outcome) = attempt.verifier_outcome {
+                dict.insert(
+                    "verifier_outcome".to_string(),
+                    VmValue::String(Rc::from(outcome.as_str())),
+                );
+            }
+            if !attempt.verifier_signals.is_empty() {
+                let signals: Vec<VmValue> = attempt
+                    .verifier_signals
+                    .iter()
+                    .map(|signal| {
+                        let mut sig_dict = BTreeMap::new();
+                        sig_dict.insert(
+                            "name".to_string(),
+                            VmValue::String(Rc::from(signal.name.clone())),
+                        );
+                        sig_dict.insert(
+                            "kind".to_string(),
+                            VmValue::String(Rc::from(signal.kind.clone())),
+                        );
+                        sig_dict.insert(
+                            "signal".to_string(),
+                            VmValue::String(Rc::from(signal.signal.clone())),
+                        );
+                        if let Some(reason) = &signal.reason {
+                            sig_dict.insert(
+                                "reason".to_string(),
+                                VmValue::String(Rc::from(reason.clone())),
+                            );
+                        }
+                        VmValue::Dict(Rc::new(sig_dict))
+                    })
+                    .collect();
+                dict.insert(
+                    "verifier_signals".to_string(),
+                    VmValue::List(Rc::new(signals)),
+                );
             }
             VmValue::Dict(Rc::new(dict))
         })
