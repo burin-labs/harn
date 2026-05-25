@@ -641,6 +641,7 @@ pub fn sub_agent_request(task, options = nil) {
       carry: opts?.carry,
       execution: opts?.execution,
       policy: opts?.policy,
+      anchor: opts?.anchor,
       reminder_propagation: opts?.reminder_propagation,
       allowed_tools: allowed_tools,
     },

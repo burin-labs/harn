@@ -2054,6 +2054,76 @@ pub fn workspace_anchor(id: &str) -> Option<WorkspaceAnchor> {
     })
 }
 
+/// Outcome of `reanchor_session`: previous + new anchor and whether the
+/// swap actually moved anything. Callers use `changed` to suppress
+/// no-op transcript / live events.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReanchorOutcome {
+    pub previous: Option<WorkspaceAnchor>,
+    pub current: WorkspaceAnchor,
+    pub changed: bool,
+}
+
+/// Atomically swap the session's primary anchor + emit the canonical
+/// `AnchorChanged` transcript event and live `AgentEvent::AnchorChanged`
+/// notification (#2218). Clears session-scoped permission grants so
+/// stale anchor-based decisions don't leak into the next turn.
+pub fn reanchor_session(
+    id: &str,
+    new_anchor: WorkspaceAnchor,
+    carry_transcript: bool,
+    compacted: bool,
+    reason: Option<String>,
+) -> Result<ReanchorOutcome, String> {
+    let outcome = SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let previous = state.workspace_anchor.clone();
+        let changed = previous.as_ref() != Some(&new_anchor);
+        state.workspace_anchor = Some(new_anchor.clone());
+        if changed {
+            crate::llm::permissions::clear_session_grants(id);
+        }
+        state.last_accessed = Instant::now();
+        Ok(ReanchorOutcome {
+            previous,
+            current: new_anchor,
+            changed,
+        })
+    })?;
+    if !outcome.changed {
+        return Ok(outcome);
+    }
+    let previous_json = outcome.previous.as_ref().map(WorkspaceAnchor::to_json);
+    let current_json = outcome.current.to_json();
+    let event_metadata = serde_json::json!({
+        "previous": previous_json,
+        "current": current_json,
+        "carry_transcript": carry_transcript,
+        "compacted": compacted,
+        "reason": reason,
+    });
+    let event = crate::llm::helpers::transcript_event(
+        "AnchorChanged",
+        "system",
+        "internal",
+        "",
+        Some(event_metadata),
+    );
+    let _ = append_event(id, event);
+    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::AnchorChanged {
+        session_id: id.to_string(),
+        previous: previous_json,
+        current: current_json,
+        carry_transcript,
+        compacted,
+        reason,
+    });
+    Ok(outcome)
+}
+
 /// Set session-local workspace defaults. Returns `Ok(true)` when the
 /// policy changed.
 pub fn set_workspace_policy(id: &str, policy: WorkspacePolicy) -> Result<bool, String> {

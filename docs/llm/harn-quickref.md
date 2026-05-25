@@ -2373,6 +2373,16 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
   workspace policy.
 - `agent_session_list_roots(id)` returns `{primary, additional}` for the
   current mounted roots.
+- `agent_session_reanchor(id, new_anchor, opts?)` atomically swaps the primary
+  anchor mid-run. `opts.carry_transcript` (default true) keeps the transcript;
+  `false` forks into a fresh empty session. `opts.compact: true` runs
+  compaction before the swap (requires `carry_transcript: true`). Emits an
+  `AnchorChanged` transcript event and `AgentEvent::AnchorChanged`.
+- `sub_agent_run` accepts an `anchor` option. The runtime rejects a child
+  anchor that escapes the parent's anchor + mounted roots.
+- `register_path_scope_guard(opts?)` / `clear_path_scope_guard()` install a
+  singleton PreToolUse hook that denies (or emits a `<scope-alert>` reminder
+  for) tool calls whose path args escape the session anchor.
 - `agent_session_reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
 - `agent_session_inject(id, {role, content, …})` — missing `role` errors.
 - `agent_session_seed_from_jsonl(path, opts?)` creates a new session from a

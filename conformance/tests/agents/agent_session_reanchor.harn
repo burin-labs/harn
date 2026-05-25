@@ -1,0 +1,57 @@
+pipeline main(task) {
+  let session = agent_session_open(
+    "reanchor-conformance",
+    {workspace_anchor: {primary: "/workspace/main", anchored_at: "2026-05-23T00:00:00Z"}},
+  )
+  let res = agent_session_reanchor(
+    session,
+    {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"},
+    {reason: "switch to lib"},
+  )
+  assert(res.ok, "reanchor returns ok")
+  assert(res.changed, "reanchor reports change")
+  assert(res.anchor.primary == "/workspace/lib", "anchor updated")
+  assert(!res.compacted, "compaction off by default")
+  assert(res.session_id == session, "same session id when carry_transcript=true")
+  let live = agent_session_workspace_anchor(session)
+  assert(live?.primary == "/workspace/lib", "session sees the new anchor")
+  let snap = agent_session_snapshot(session)
+  let events = snap.events
+  let anchor_changed = events.filter({ ev -> ev?.kind == "AnchorChanged" })
+  assert(len(anchor_changed) == 1, "AnchorChanged transcript event emitted exactly once")
+  assert(
+    anchor_changed[0]?.metadata?.current?.primary == "/workspace/lib",
+    "AnchorChanged records new primary",
+  )
+  let unchanged = agent_session_reanchor(session, {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"})
+  assert(unchanged.ok, "second reanchor reports ok")
+  assert(!unchanged.changed, "no-op reanchor reports unchanged")
+  let snap2 = agent_session_snapshot(session)
+  let events2 = snap2.events
+  let anchor_changed2 = events2.filter({ ev -> ev?.kind == "AnchorChanged" })
+  assert(len(anchor_changed2) == 1, "no-op reanchor does not emit another event")
+  let invalid = try {
+    agent_session_reanchor(
+      session,
+      {primary: "/workspace/foo"},
+      {carry_transcript: false, compact: true},
+    )
+  }
+  assert(is_err(invalid), "compact+drop-transcript is rejected")
+  let forked = agent_session_reanchor(
+    session,
+    {primary: "/workspace/forked", anchored_at: "2026-05-23T00:00:20Z"},
+    {carry_transcript: false},
+  )
+  assert(forked.ok, "carry_transcript=false succeeds")
+  assert(forked.session_id != session, "carry_transcript=false returns a fresh session id")
+  assert(
+    agent_session_workspace_anchor(forked.session_id)?.primary == "/workspace/forked",
+    "forked session carries the new anchor",
+  )
+  assert(
+    agent_session_length(forked.session_id) == 0,
+    "forked session starts with an empty transcript",
+  )
+  log("agent_session_reanchor tests passed")
+}

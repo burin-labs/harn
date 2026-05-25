@@ -455,6 +455,22 @@ thread_local! {
     /// at the start of each agent-loop turn — so VM closure handlers
     /// can run inside an async builtin context.
     static FILE_EDIT_QUEUE: RefCell<Vec<FileEditedNotification>> = const { RefCell::new(Vec::new()) };
+    /// Optional singleton PreToolUse hook owned by stdlib opt-in surfaces
+    /// (currently the `path_scope_guard` from #2221). Kept separate from
+    /// `RUNTIME_HOOKS` so the runtime can swap or clear it without
+    /// touching user-registered hooks.
+    static SINGLETON_PRE_TOOL_HOOK: RefCell<Option<PreToolHookFn>> = const { RefCell::new(None) };
+}
+
+/// Install (or replace, with `None`) the singleton runtime pre-tool
+/// hook. The singleton runs ahead of user-registered hooks so a tagged
+/// deny lands in the reminder path before any other hook fires.
+pub fn set_singleton_pre_tool_hook(hook: Option<PreToolHookFn>) {
+    SINGLETON_PRE_TOOL_HOOK.with(|slot| *slot.borrow_mut() = hook);
+}
+
+pub fn singleton_pre_tool_hook() -> Option<PreToolHookFn> {
+    SINGLETON_PRE_TOOL_HOOK.with(|slot| slot.borrow().clone())
 }
 
 #[derive(Clone, Debug)]
@@ -549,10 +565,12 @@ pub fn clear_tool_hooks() {
             .borrow_mut()
             .retain(|hook| !matches!(hook.event, HookEvent::PreToolUse | HookEvent::PostToolUse));
     });
+    set_singleton_pre_tool_hook(None);
 }
 
 pub fn clear_runtime_hooks() {
     RUNTIME_HOOKS.with(|hooks| hooks.borrow_mut().clear());
+    set_singleton_pre_tool_hook(None);
     super::clear_command_policies();
 }
 
@@ -1306,6 +1324,15 @@ pub async fn run_pre_tool_hooks(
 ) -> Result<PreToolAction, VmError> {
     let hooks = runtime_hooks_for_event(HookEvent::PreToolUse);
     let mut current_args = args.clone();
+    // Singleton runtime hook (currently the stdlib path_scope_guard) runs
+    // before user-registered hooks so a tagged deny lands in the
+    // PostToolUse / reminder path before any other hook fires.
+    if let Some(singleton) = singleton_pre_tool_hook() {
+        let action = singleton(tool_name, &current_args);
+        if let Some(reason) = apply_pre_tool_action(action, &mut current_args)? {
+            return Ok(PreToolAction::Deny(reason));
+        }
+    }
     for hook in &hooks {
         let payload = if matches!(hook.matcher, PatternMatcher::EventExpression { .. }) {
             Some(serde_json::json!({
