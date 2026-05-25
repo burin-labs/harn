@@ -49,6 +49,7 @@ mod oauth_storage;
 mod observability;
 mod options;
 mod path;
+pub(crate) mod path_scope_guard;
 pub(crate) mod pool;
 mod postgres;
 pub mod process;
@@ -182,6 +183,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     oauth_dynreg::register_oauth_dynreg_builtins(vm);
     token_redaction::register_token_redaction_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
+    path_scope_guard::register_path_scope_guard_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
     transcript_project::register_transcript_projection_builtins(vm);

@@ -6,6 +6,29 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Cross-project handoff primitives (#2208).** Finishes the workspace-anchor
+  epic by layering three opt-in primitives on top of the typed anchor +
+  permission matcher + cache-stable rendering:
+  - `agent_session_reanchor(id, new_anchor, opts?)` atomically swaps the
+    session's primary anchor mid-run. `opts.carry_transcript` (default true)
+    keeps the transcript; `false` forks into a fresh empty session.
+    `opts.compact: true` runs compaction before the swap (requires
+    `carry_transcript: true`). Emits an `AnchorChanged` transcript event and
+    a live `AgentEvent::AnchorChanged` notification.
+  - `register_path_scope_guard(opts?)` / `clear_path_scope_guard()` install a
+    singleton PreToolUse hook that denies (or emits a `<scope-alert>`
+    reminder for) tool calls whose path-shaped args escape the session
+    anchor. The reminder body lists the three handoff options the model has:
+    `agent_session_add_root`, `agent_session_reanchor`, or `spawn_agent`
+    against a sub-agent anchor.
+  - `sub_agent_run` accepts an `anchor` option. The runtime rejects a child
+    anchor that escapes the parent's anchor + mounted roots and applies the
+    anchor to the child session on spawn.
+
 ## v0.8.37
 
 ### Changed

@@ -1,0 +1,56 @@
+fn path_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "Read",
+    "Read a file",
+    {
+      handler: { args -> "read " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+fn run_read(session, path) {
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "call_Read", name: "Read", arguments: {path: path}}]})
+  llm_mock({text: "done"})
+  return agent_loop(
+    "Use Read",
+    nil,
+    {
+      session_id: session,
+      provider: "mock",
+      tools: path_tools(),
+      tool_format: "native",
+      max_iterations: 2,
+    },
+  )
+}
+
+pipeline main() {
+  clear_tool_hooks()
+  let session = agent_session_open(
+    "path-scope-guard-conformance",
+    {workspace_anchor: {primary: "/tmp/harn-anchor-a", anchored_at: "2026-05-24T00:00:00Z"}},
+  )
+  register_path_scope_guard()
+  let denied = run_read(session, "/tmp/harn-anchor-b/file.txt")
+  let rejected = denied?.tools?.rejected ?? []
+  assert(len(rejected) == 1 && rejected[0] == "Read", "out-of-anchor path is denied")
+  let snap = agent_session_snapshot(session)
+  let reminders = (snap.events ?? []).filter({ ev -> ev?.kind == "system_reminder" })
+  let scope_alerts = reminders
+    .filter(
+    { ev -> ev?.reminder?.tags != nil && ev.reminder.tags.any({ tag -> tag == "scope_alert" }) },
+  )
+  assert(len(scope_alerts) >= 1, "scope_alert reminder is appended on deny")
+  clear_path_scope_guard()
+  let allowed = run_read(session, "/tmp/harn-anchor-a/file.txt")
+  assert(len(allowed?.tools?.rejected ?? []) == 0, "in-anchor path is allowed")
+  let after_clear = run_read(session, "/tmp/harn-anchor-b/another.txt")
+  assert(len(after_clear?.tools?.rejected ?? []) == 0, "guard removed after clear")
+  log("agent_path_scope_guard tests passed")
+}

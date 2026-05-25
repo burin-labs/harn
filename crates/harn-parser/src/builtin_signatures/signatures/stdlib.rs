@@ -727,6 +727,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple("circuit_reset", &[Param::new("name", TY_STRING)], TY_NIL),
+    BuiltinSignature::simple("clear_path_scope_guard", &[], TY_NIL),
     BuiltinSignature::simple("clear_tool_hooks", &[], TY_NIL),
     BuiltinSignature::simple("clear_persona_hooks", &[], TY_NIL),
     BuiltinSignature::simple("clear_session_hooks", &[], TY_NIL),
@@ -1690,6 +1691,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "register_checkpoint_hook",
         &[Param::new("kinds", TY_ANY), Param::new("handler", TY_ANY)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "register_path_scope_guard",
+        &[Param::optional("opts", TY_DICT_OR_NIL)],
         TY_NIL,
     ),
     BuiltinSignature::simple(

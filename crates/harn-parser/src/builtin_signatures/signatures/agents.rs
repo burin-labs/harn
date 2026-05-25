@@ -419,6 +419,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
+        "agent_session_reanchor",
+        &[
+            Param::new("id", TY_STRING),
+            Param::new("new_anchor", WORKSPACE_ANCHOR_INPUT),
+            Param::optional("opts", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "agent_session_remove_root",
         &[Param::new("id", TY_STRING), Param::new("root", TY_STRING)],
         AGENT_SESSION_ROOT_MUTATION_RESULT,

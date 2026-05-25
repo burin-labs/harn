@@ -130,6 +130,17 @@ fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec
             })
             .transpose()?
             .unwrap_or_default(),
+        workspace_anchor: dict
+            .get("workspace_anchor")
+            .filter(|value| !value.is_null())
+            .map(|value| {
+                crate::workspace_anchor::WorkspaceAnchor::from_json(value).map_err(|error| {
+                    VmError::Runtime(format!(
+                        "worker snapshot sub-agent workspace_anchor parse error: {error}"
+                    ))
+                })
+            })
+            .transpose()?,
     })
 }
 

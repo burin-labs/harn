@@ -184,6 +184,18 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
 ];
 
 const AGENT_SESSION_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
+    async_builtin!("agent_session_reanchor", agent_session_reanchor_builtin)
+        .signature("agent_session_reanchor(id, new_anchor, opts?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .doc(
+            "Atomically replace a session's primary workspace anchor (#2218). `opts` \
+             may set `carry_transcript` (default true), `compact` (default false), \
+             and `reason` for telemetry. `compact: true` is invalid with \
+             `carry_transcript: false`; when set, compaction runs before the swap so \
+             the resumed turn sees a digested transcript + the new anchor. Emits an \
+             `AnchorChanged` transcript event and a live `AgentEvent::AnchorChanged` \
+             notification. Returns `{ok, changed, session_id, anchor, compacted, error}`.",
+        ),
     async_builtin!("agent_session_compact", agent_session_compact_builtin)
         .signature("agent_session_compact(id, opts?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
@@ -886,6 +898,90 @@ fn agent_session_seed_from_jsonl_builtin(
         "provider": seeded.provider,
         "model": seeded.model,
         "tool_format": seeded.tool_format,
+        "error": serde_json::Value::Null,
+    })))
+}
+
+const REANCHOR_OPT_KEYS: &[&str] = &["carry_transcript", "compact", "reason"];
+
+async fn agent_session_reanchor_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let id = arg_string_required(&args, 0, "agent_session_reanchor", "id")?;
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_reanchor: unknown session id '{id}'"
+        )));
+    }
+    let anchor_value = args
+        .get(1)
+        .ok_or_else(|| err("agent_session_reanchor: `new_anchor` argument is required"))?;
+    let default_mount_mode = agent_sessions::workspace_policy(&id)
+        .unwrap_or_default()
+        .default_mount_mode;
+    let new_anchor = crate::workspace_anchor::parse_anchor_dict_with_default_mount_mode(
+        anchor_value,
+        default_mount_mode,
+    )
+    .map_err(|message| err(format!("agent_session_reanchor: {message}")))?;
+    let opts = match args.get(2) {
+        None | Some(VmValue::Nil) => BTreeMap::new(),
+        Some(VmValue::Dict(d)) => d.as_ref().clone(),
+        _ => return Err(err("agent_session_reanchor: `opts` must be a dict or nil")),
+    };
+    for key in opts.keys() {
+        if !REANCHOR_OPT_KEYS.contains(&key.as_str()) {
+            let expected = REANCHOR_OPT_KEYS.join(", ");
+            return Err(err(format!(
+                "agent_session_reanchor: unknown option key '{key}' (expected one of: {expected})"
+            )));
+        }
+    }
+    let carry_transcript = arg_bool_opt(&opts, "agent_session_reanchor", "carry_transcript", true)?;
+    let compact = arg_bool_opt(&opts, "agent_session_reanchor", "compact", false)?;
+    if compact && !carry_transcript {
+        return Err(err(
+            "agent_session_reanchor: `compact: true` requires `carry_transcript: true`",
+        ));
+    }
+    let reason = opt_string(&opts, "agent_session_reanchor", "reason")?;
+    // `carry_transcript: false` drops the transcript by forking into a
+    // fresh session id. The fork inherits system prompt + workspace
+    // policy; the transcript is then cleared so the resumed turn starts
+    // clean against the new anchor.
+    let target_id = if carry_transcript {
+        id.clone()
+    } else {
+        let dst = agent_sessions::fork(&id, None).ok_or_else(|| {
+            err(format!(
+                "agent_session_reanchor: failed to fork session '{id}' for carry_transcript=false"
+            ))
+        })?;
+        if !agent_sessions::reset_transcript(&dst) {
+            return Err(err(format!(
+                "agent_session_reanchor: failed to reset forked transcript '{dst}'"
+            )));
+        }
+        dst
+    };
+    let mut compacted = false;
+    if compact {
+        let _ = agent_session_compact_builtin(vec![VmValue::String(Rc::from(target_id.clone()))])
+            .await?;
+        compacted = true;
+    }
+    let outcome = agent_sessions::reanchor_session(
+        &target_id,
+        new_anchor,
+        carry_transcript,
+        compacted,
+        reason,
+    )
+    .map_err(|message| err(format!("agent_session_reanchor: {message}")))?;
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "ok": true,
+        "changed": outcome.changed,
+        "session_id": target_id,
+        "anchor": outcome.current.to_json(),
+        "compacted": compacted,
         "error": serde_json::Value::Null,
     })))
 }

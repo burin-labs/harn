@@ -461,6 +461,18 @@ pub enum AgentEvent {
         status: String,
         metadata: serde_json::Value,
     },
+    /// Emitted when `agent_session_reanchor` swaps the primary workspace
+    /// anchor (#2218). Hosts use this to drive cross-project handoff UX.
+    /// Carries the previous and current anchors so consumers can diff
+    /// without re-fetching session state.
+    AnchorChanged {
+        session_id: String,
+        previous: Option<serde_json::Value>,
+        current: serde_json::Value,
+        carry_transcript: bool,
+        compacted: bool,
+        reason: Option<String>,
+    },
     JudgeDecision {
         session_id: String,
         iteration: usize,
@@ -881,6 +893,7 @@ impl AgentEvent {
             | Self::IterationStart { session_id, .. }
             | Self::IterationEnd { session_id, .. }
             | Self::SessionClosed { session_id, .. }
+            | Self::AnchorChanged { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
             | Self::StepJudgeDecision { session_id, .. }
             | Self::StructuralValidatorDecision { session_id, .. }

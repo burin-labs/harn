@@ -863,6 +863,26 @@ fn custom_path_scope_allows(path: &str, patterns: &[String]) -> bool {
     })
 }
 
+/// Public surface used by the `path_scope_guard` PreToolUse hook
+/// (#2221) and sub-agent anchor validation (#2223). Returns `None` when
+/// `path` is inside the anchor (or one of the writable mounted roots
+/// when `accept_modes` is non-empty) and `Some(reason)` otherwise.
+/// `accept_modes` empty means "primary anchor only".
+pub fn anchor_scope_violation(
+    path: &str,
+    anchor: &WorkspaceAnchor,
+    accept_modes: &[MountMode],
+) -> Option<String> {
+    let scope = if accept_modes.is_empty() {
+        PathScopeMode::AnchorOnly
+    } else {
+        PathScopeMode::AnchorPlusMounted(MountModeFilter {
+            modes: accept_modes.to_vec(),
+        })
+    };
+    anchor_path_scope_violation(path, &scope, anchor)
+}
+
 fn anchor_path_scope_violation(
     path: &str,
     scope: &PathScopeMode,

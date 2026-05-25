@@ -130,7 +130,11 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
             .collect::<Result<Vec<_>, _>>()?,
         None => inherited_reminders_from_parent(parent_session_id.as_deref()),
     };
+    let workspace_anchor = parse_sub_agent_workspace_anchor(&mut parser)?;
     parser.finish_strict(&[])?;
+    if let Some(anchor) = workspace_anchor.as_ref() {
+        validate_child_anchor_against_parent(parent_session_id.as_deref(), anchor)?;
+    }
 
     Ok(ParsedSubAgentRequest {
         spec: SubAgentRunSpec {
@@ -142,12 +146,68 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
             session_id,
             parent_session_id,
             reminder_propagation,
+            workspace_anchor,
         },
         background,
         carry_policy: policies.carry_policy,
         execution: policies.execution,
         worker_policy: policies.worker_policy,
     })
+}
+
+fn parse_sub_agent_workspace_anchor(
+    parser: &mut OptionsParser<'_>,
+) -> Result<Option<crate::workspace_anchor::WorkspaceAnchor>, VmError> {
+    let Some(value) = parser.raw("anchor") else {
+        return Ok(None);
+    };
+    if matches!(value, VmValue::Nil) {
+        return Ok(None);
+    }
+    let anchor = crate::workspace_anchor::parse_anchor_dict(value)
+        .map_err(|message| VmError::Runtime(format!("{SUB_AGENT_RUN_FN}: anchor: {message}")))?;
+    Ok(Some(anchor))
+}
+
+/// Reject child anchors that escape the parent's anchor + mounted
+/// roots (#2223). The parent gates which directories sub-agents can
+/// own; without this guard, a parent that itself runs scoped to /tmp/a
+/// could spawn a child against /etc and silently widen its blast
+/// radius.
+fn validate_child_anchor_against_parent(
+    parent_session_id: Option<&str>,
+    child: &crate::workspace_anchor::WorkspaceAnchor,
+) -> Result<(), VmError> {
+    let Some(parent_session_id) = parent_session_id else {
+        return Ok(());
+    };
+    let Some(parent) = crate::agent_sessions::workspace_anchor(parent_session_id) else {
+        return Ok(());
+    };
+    let child_primary = child.primary.display().to_string();
+    let modes = vec![
+        crate::workspace_anchor::MountMode::ReadOnly,
+        crate::workspace_anchor::MountMode::Extend,
+        crate::workspace_anchor::MountMode::Sandboxed,
+    ];
+    if let Some(reason) =
+        crate::llm::permissions::anchor_scope_violation(&child_primary, &parent, &modes)
+    {
+        return Err(VmError::Runtime(format!(
+            "{SUB_AGENT_RUN_FN}: child anchor escapes parent: {reason}"
+        )));
+    }
+    for root in &child.additional_roots {
+        let root_path = root.path.display().to_string();
+        if let Some(reason) =
+            crate::llm::permissions::anchor_scope_violation(&root_path, &parent, &modes)
+        {
+            return Err(VmError::Runtime(format!(
+                "{SUB_AGENT_RUN_FN}: child additional_root escapes parent: {reason}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_sub_agent_request_envelope(
@@ -674,6 +734,10 @@ pub(super) async fn execute_sub_agent(
     } else {
         crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
     }
+    if let Some(anchor) = spec.workspace_anchor.as_ref() {
+        crate::agent_sessions::set_workspace_anchor(&spec.session_id, Some(anchor.clone()))
+            .map_err(VmError::Runtime)?;
+    }
     seed_child_reminder_propagation(&spec)?;
     append_parent_sub_agent_event(
         spec.parent_session_id.as_deref(),
@@ -990,6 +1054,126 @@ mod tests {
         assert_eq!(parsed.spec.session_id, "  child-session  ");
     }
 
+    fn anchor_dict(primary: &str, additional: Vec<(&str, &str)>) -> VmValue {
+        let mut roots = Vec::new();
+        for (path, mount_mode) in additional {
+            roots.push(VmValue::Dict(Rc::new(BTreeMap::from([
+                ("path".to_string(), VmValue::String(Rc::from(path))),
+                (
+                    "mount_mode".to_string(),
+                    VmValue::String(Rc::from(mount_mode)),
+                ),
+                (
+                    "mounted_at".to_string(),
+                    VmValue::String(Rc::from("2026-05-24T00:00:00Z")),
+                ),
+            ]))));
+        }
+        let mut anchor = BTreeMap::from([
+            ("primary".to_string(), VmValue::String(Rc::from(primary))),
+            (
+                "anchored_at".to_string(),
+                VmValue::String(Rc::from("2026-05-24T00:00:00Z")),
+            ),
+        ]);
+        if !roots.is_empty() {
+            anchor.insert(
+                "additional_roots".to_string(),
+                VmValue::List(Rc::new(roots)),
+            );
+        }
+        VmValue::Dict(Rc::new(anchor))
+    }
+
+    fn path_string(path: &std::path::Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn parse_sub_agent_request_accepts_anchor_in_parent_scope() {
+        crate::agent_sessions::reset_session_store();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let parent = dir.path().join("parent");
+        let sibling = dir.path().join("sibling");
+        let parent_nested = parent.join("nested");
+        let sibling_sub = sibling.join("sub");
+        let parent_nested_text = path_string(&parent_nested);
+        let sibling_sub_text = path_string(&sibling_sub);
+        let parent_id = crate::agent_sessions::open_or_create(Some("anchor-parent".to_string()));
+        crate::agent_sessions::set_workspace_anchor(
+            &parent_id,
+            Some(crate::workspace_anchor::WorkspaceAnchor {
+                primary: parent,
+                additional_roots: vec![crate::workspace_anchor::MountedRoot {
+                    path: sibling,
+                    mount_mode: crate::workspace_anchor::MountMode::Extend,
+                    mounted_at: "2026-05-24T00:00:00Z".to_string(),
+                }],
+                anchored_at: "2026-05-24T00:00:00Z".to_string(),
+            }),
+        )
+        .unwrap();
+        let _guard = crate::agent_sessions::enter_current_session(parent_id);
+
+        for primary in [&parent_nested_text, &sibling_sub_text] {
+            let request = normalized_request(vec![("anchor", anchor_dict(primary, Vec::new()))]);
+            let parsed = parse_sub_agent_request(&[request])
+                .unwrap_or_else(|err| panic!("anchor {primary} should be accepted: {err}"));
+            assert_eq!(
+                parsed.spec.workspace_anchor.as_ref().unwrap().primary,
+                std::path::PathBuf::from(primary)
+            );
+        }
+    }
+
+    #[test]
+    fn parse_sub_agent_request_rejects_anchor_outside_parent_scope() {
+        crate::agent_sessions::reset_session_store();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let parent = dir.path().join("parent");
+        let outside = dir.path().join("elsewhere");
+        let outside_text = path_string(&outside);
+        let parent_id = crate::agent_sessions::open_or_create(Some("anchor-parent".to_string()));
+        crate::agent_sessions::set_workspace_anchor(
+            &parent_id,
+            Some(crate::workspace_anchor::WorkspaceAnchor {
+                primary: parent,
+                additional_roots: Vec::new(),
+                anchored_at: "2026-05-24T00:00:00Z".to_string(),
+            }),
+        )
+        .unwrap();
+        let _guard = crate::agent_sessions::enter_current_session(parent_id);
+
+        let request = normalized_request(vec![("anchor", anchor_dict(&outside_text, Vec::new()))]);
+        let err = parse_sub_agent_request(&[request])
+            .err()
+            .expect("expected anchor escape to fail");
+        match err {
+            VmError::Runtime(message) => {
+                assert!(
+                    message.contains("child anchor escapes parent"),
+                    "unexpected error: {message}"
+                );
+            }
+            other => panic!("expected Runtime error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sub_agent_request_anchor_without_parent_passes() {
+        crate::agent_sessions::reset_session_store();
+        let request = normalized_request(vec![(
+            "anchor",
+            anchor_dict("/workspace/anywhere", Vec::new()),
+        )]);
+        let parsed = parse_sub_agent_request(&[request]).unwrap();
+        assert_eq!(
+            parsed.spec.workspace_anchor.as_ref().unwrap().primary,
+            std::path::PathBuf::from("/workspace/anywhere")
+        );
+    }
+
     #[test]
     fn synthesize_summary_uses_prior_assistant_json_from_transcript() {
         let transcript = crate::llm::helpers::new_transcript_with(
@@ -1095,6 +1279,7 @@ mod tests {
             session_id: "child-subagent".to_string(),
             parent_session_id: Some(parent.clone()),
             reminder_propagation: Vec::new(),
+            workspace_anchor: None,
         };
 
         let mut vm = crate::Vm::new();
@@ -1158,6 +1343,7 @@ mod tests {
             session_id: "child-budget".to_string(),
             parent_session_id: Some(parent.clone()),
             reminder_propagation: Vec::new(),
+            workspace_anchor: None,
         };
 
         let mut vm = crate::Vm::new();

@@ -900,6 +900,26 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::AnchorChanged {
+                session_id,
+                previous,
+                current,
+                carry_transcript,
+                compacted,
+                reason,
+            } => {
+                self.emit_agent_event_ext(
+                    "anchor_changed",
+                    session_id,
+                    serde_json::json!({
+                        "previous": previous,
+                        "current": current,
+                        "carryTranscript": carry_transcript,
+                        "compacted": compacted,
+                        "reason": reason,
+                    }),
+                );
+            }
             AgentEvent::JudgeDecision {
                 session_id,
                 iteration,
