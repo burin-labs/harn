@@ -428,30 +428,6 @@ async fn audit_events_emit_log_notifications_with_logger_and_level() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn latest_spec_gap_methods_return_explicit_json_rpc_errors() {
-    let _guard = lock_harn_state();
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
-
-    for method in mcp_protocol::UNSUPPORTED_LATEST_SPEC_METHODS
-        .iter()
-        .map(|entry| entry.method)
-    {
-        let response = service
-            .handle_request(
-                &mut session,
-                harn_vm::jsonrpc::request(99, method, json!({})),
-            )
-            .await;
-        assert_eq!(response["error"]["code"], json!(-32601), "{method}");
-        assert_eq!(response["error"]["data"]["method"], json!(method));
-        assert_eq!(response["error"]["data"]["status"], json!("unsupported"));
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn resource_template_and_empty_prompt_lists_roundtrip() {
     let _guard = lock_harn_state();
     let temp = TempDir::new().unwrap();

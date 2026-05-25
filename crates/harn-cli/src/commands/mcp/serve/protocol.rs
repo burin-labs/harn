@@ -1,8 +1,9 @@
 use serde_json::{json, Value as JsonValue};
 
 use harn_vm::mcp_protocol::{
-    self, apply_rc_result_envelope, enforce_request_protocol_version, parse_request_metadata,
-    server_discover_result, McpCacheHint, McpProtocolMode,
+    self, apply_rc_result_envelope, enforce_request_protocol_version,
+    is_supported_protocol_version, parse_request_metadata, server_discover_result, McpCacheHint,
+    McpProtocolMode,
 };
 
 use super::types::{ConnectionState, McpOrchestratorService};
@@ -77,56 +78,35 @@ impl McpOrchestratorService {
             return response;
         }
 
-        match method {
-            "initialized" => JsonValue::Null,
+        let response = match method {
+            "initialized" => return JsonValue::Null,
             "ping" => harn_vm::jsonrpc::response(id, json!({})),
             mcp_protocol::METHOD_LOGGING_SET_LEVEL => {
                 self.handle_logging_set_level(id, session, &params)
             }
-            "tools/list" => apply_envelope(self.handle_tools_list(id, &params), mode, list_hint()),
-            "tools/call" => apply_envelope(
-                self.handle_tools_call(id, session, &params).await,
-                mode,
-                None,
-            ),
+            "tools/list" => self.handle_tools_list(id, &params),
+            "tools/call" => self.handle_tools_call(id, session, &params).await,
             mcp_protocol::METHOD_TASKS_GET => self.handle_tasks_get(id, session, &params),
             mcp_protocol::METHOD_TASKS_RESULT => {
                 self.handle_tasks_result(id, session, &params).await
             }
             mcp_protocol::METHOD_TASKS_LIST => self.handle_tasks_list(id, session, &params),
             mcp_protocol::METHOD_TASKS_CANCEL => self.handle_tasks_cancel(id, session, &params),
-            "resources/list" => apply_envelope(
-                self.handle_resources_list(id, &params).await,
-                mode,
-                list_hint(),
-            ),
-            "resources/read" => apply_envelope(
-                self.handle_resources_read(id, &params).await,
-                mode,
-                read_hint(),
-            ),
+            "resources/list" => self.handle_resources_list(id, &params).await,
+            "resources/read" => self.handle_resources_read(id, &params).await,
             "resources/subscribe" => self.handle_resources_subscribe(id, session, &params).await,
             "resources/unsubscribe" => self.handle_resources_unsubscribe(id, session, &params),
-            "resources/templates/list" => apply_envelope(
-                self.handle_resource_templates_list(id, &params),
-                mode,
-                list_hint(),
-            ),
-            "prompts/list" => {
-                apply_envelope(self.handle_prompts_list(id, &params), mode, list_hint())
-            }
-            "prompts/get" => apply_envelope(self.handle_prompts_get(id, &params), mode, None),
+            "resources/templates/list" => self.handle_resource_templates_list(id, &params),
+            "prompts/list" => self.handle_prompts_list(id, &params),
+            "prompts/get" => self.handle_prompts_get(id, &params),
             mcp_protocol::METHOD_COMPLETION_COMPLETE => {
                 self.handle_completion_complete(id, &params).await
-            }
-            _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
-                mcp_protocol::unsupported_latest_spec_method_response(id, method)
-                    .expect("checked unsupported MCP method")
             }
             _ => {
                 harn_vm::jsonrpc::error_response(id, -32601, &format!("Method not found: {method}"))
             }
-        }
+        };
+        apply_envelope(response, mode, cache_hint_for_method(method))
     }
 
     pub(super) fn handle_server_discover(&self, id: JsonValue) -> JsonValue {
@@ -155,11 +135,16 @@ impl McpOrchestratorService {
             .and_then(JsonValue::as_str)
             .unwrap_or("unknown");
         session.client_identity = format!("{client_name}/{client_version}");
-        session.protocol_version = params
+        // Echo the version the client asked for when we support it,
+        // falling back to the stable default. Unknown versions silently
+        // negotiate down rather than failing initialize — the RC's
+        // `-32004` path is reserved for explicit `_meta` negotiation.
+        let advertised_version = params
             .get("protocolVersion")
             .and_then(JsonValue::as_str)
-            .unwrap_or(MCP_PROTOCOL_VERSION)
-            .to_string();
+            .filter(|version| is_supported_protocol_version(version))
+            .unwrap_or(MCP_PROTOCOL_VERSION);
+        session.protocol_version = advertised_version.to_string();
 
         if super::http::initialize_api_key(params).is_some() {
             eprintln!(
@@ -179,18 +164,15 @@ impl McpOrchestratorService {
         session.initialized = true;
         session.protocol_mode = McpProtocolMode::Legacy;
 
-        let mut result = json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "capabilities": orchestrator_capabilities(),
-            "serverInfo": orchestrator_server_info(),
-            "instructions": "Expose Harn trigger and orchestrator controls over MCP."
-        });
-        // Legacy initialize never carries `resultType`, so this leaves
-        // the existing wire bytes unchanged. The branch keeps the path
-        // symmetric in case a Modern client routes through here for
-        // backwards-compat probing.
-        apply_rc_result_envelope(&mut result, session.protocol_mode, None);
-        harn_vm::jsonrpc::response(id, result)
+        harn_vm::jsonrpc::response(
+            id,
+            json!({
+                "protocolVersion": advertised_version,
+                "capabilities": orchestrator_capabilities(),
+                "serverInfo": orchestrator_server_info(),
+                "instructions": "Expose Harn trigger and orchestrator controls over MCP.",
+            }),
+        )
     }
 
     pub(super) fn handle_prompts_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
@@ -429,20 +411,27 @@ pub(super) fn orchestrator_server_info() -> JsonValue {
     })
 }
 
-fn list_hint() -> Option<&'static McpCacheHint> {
+/// Map a JSON-RPC method to its conservative cache hint. Read/list
+/// methods get a TTL; everything else is `None`, which still routes
+/// through [`apply_envelope`] so Modern clients see `resultType`.
+pub(super) fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
     const LIST: McpCacheHint = McpCacheHint::list_default();
-    Some(&LIST)
-}
-
-fn read_hint() -> Option<&'static McpCacheHint> {
     const READ: McpCacheHint = McpCacheHint::read_default();
-    Some(&READ)
+    match method {
+        "tools/list"
+        | "resources/list"
+        | "resources/templates/list"
+        | "prompts/list"
+        | mcp_protocol::METHOD_TASKS_LIST => Some(&LIST),
+        "resources/read" => Some(&READ),
+        _ => None,
+    }
 }
 
 /// Stamp the RC `resultType`/cache-hint envelope onto a handler's
 /// response in one place. Error responses pass through untouched —
 /// the RC envelope only applies to `result` bodies.
-fn apply_envelope(
+pub(super) fn apply_envelope(
     mut response: JsonValue,
     mode: McpProtocolMode,
     hint: Option<&'static McpCacheHint>,

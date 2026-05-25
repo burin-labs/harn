@@ -146,6 +146,7 @@ jobs:
           cache-bin: false
       - run: make conformance
       - run: make protocol-conformance
+      - run: make mcp-rc-conformance
       # Promoted out of `make lint` (in the rust-lint job) so the Linux
       # critical path doesn't pay ~1-2 min to compile harn-cli from scratch
       # just to count `@xfail:` markers. `make conformance` above already

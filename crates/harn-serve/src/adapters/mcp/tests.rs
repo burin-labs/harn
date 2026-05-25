@@ -396,54 +396,6 @@ async fn mcp_response(server: &McpServer, request: JsonValue, session: SharedSes
 }
 
 #[tokio::test]
-async fn latest_spec_gap_methods_return_explicit_json_rpc_errors() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r#"
-pub fn greet(name: string) -> string {
-  return name
-}
-"#,
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = McpServer::new(McpServerConfig::new(core));
-    let session = SharedSession::new();
-    let _ = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "clientInfo": {"name": "test", "version": "1"}
-        }),
-    );
-
-    for method in harn_vm::mcp_protocol::UNSUPPORTED_LATEST_SPEC_METHODS
-        .iter()
-        .map(|entry| entry.method)
-    {
-        let response = match server
-            .process_message(
-                harn_vm::jsonrpc::request(2, method, json!({})),
-                session.clone(),
-                AuthRequest::default(),
-            )
-            .await
-        {
-            ImmediateResult::Response(response) => response,
-            ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
-                panic!("expected error response for {method}")
-            }
-        };
-        assert_eq!(response["error"]["code"], json!(-32601), "{method}");
-        assert_eq!(response["error"]["data"]["method"], json!(method));
-        assert_eq!(response["error"]["data"]["status"], json!("unsupported"));
-    }
-}
-
-#[tokio::test]
 async fn tool_call_rejects_task_augmentation() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");

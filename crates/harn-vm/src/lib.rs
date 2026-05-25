@@ -159,10 +159,7 @@ pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
 pub use llm::trigger_predicate::TriggerPredicateBudget;
 pub use llm::{current_agent_session_id, register_session_end_hook};
-pub use mcp::{
-    connect_mcp_server, connect_mcp_server_from_json, connect_mcp_server_from_spec,
-    register_mcp_builtins,
-};
+pub use mcp::{connect_mcp_server_from_json, connect_mcp_server_from_spec, register_mcp_builtins};
 pub use mcp_card::{fetch_server_card, load_server_card_from_path, CardError};
 pub use mcp_registry::{
     active_handle as mcp_active_handle, ensure_active as mcp_ensure_active,

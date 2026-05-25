@@ -57,9 +57,10 @@ mod serve_tests;
 #[path = "../mcp_rc_compat_tests.rs"]
 mod mcp_rc_compat_tests;
 
-pub(super) const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
-pub(super) const MCP_SESSION_HEADER: &str = "mcp-session-id";
-pub(super) const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";
+pub(super) use harn_vm::mcp_protocol::{
+    MCP_SESSION_HEADER_LEGACY as MCP_SESSION_HEADER, PROTOCOL_VERSION as MCP_PROTOCOL_VERSION,
+    RC_HEADER_PROTOCOL_VERSION as MCP_PROTOCOL_HEADER,
+};
 pub(super) const DEPRECATION_HEADER: &str = "deprecation";
 pub(super) const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 pub(super) const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";

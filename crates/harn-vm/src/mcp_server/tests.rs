@@ -264,40 +264,6 @@ fn test_annotations_empty_returns_none() {
 }
 
 #[tokio::test]
-async fn server_latest_spec_gap_methods_return_explicit_json_rpc_errors() {
-    let server = McpServer::new(
-        "test".to_string(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-
-    for method in crate::mcp_protocol::UNSUPPORTED_LATEST_SPEC_METHODS
-        .iter()
-        .map(|entry| entry.method)
-    {
-        let response = server
-            .handle_json_rpc(
-                crate::jsonrpc::request(1, method, serde_json::json!({})),
-                &mut vm,
-            )
-            .await
-            .expect("response");
-        assert_eq!(response["error"]["code"], serde_json::json!(-32601));
-        assert_eq!(
-            response["error"]["data"]["method"],
-            serde_json::json!(method)
-        );
-        assert_eq!(
-            response["error"]["data"]["status"],
-            serde_json::json!("unsupported")
-        );
-    }
-}
-
-#[tokio::test]
 async fn server_advertises_resource_list_changed_capability() {
     let server = McpServer::new(
         "test".to_string(),
@@ -745,6 +711,78 @@ async fn server_modern_tools_list_emits_result_type_and_cache_hint() {
     );
     assert!(legacy["result"].get("ttlMs").is_none());
     assert!(legacy["result"].get("cacheScope").is_none());
+}
+
+#[tokio::test]
+async fn server_modern_non_list_methods_carry_result_type_envelope() {
+    let server = McpServer::new(
+        "rc-test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    for method in [
+        "ping",
+        "logging/setLevel",
+        crate::mcp_protocol::METHOD_TASKS_LIST,
+    ] {
+        let params = rc_metadata_params(serde_json::json!({"level": "warning"}));
+        let response = server
+            .handle_json_rpc(crate::jsonrpc::request(1, method, params), &mut vm)
+            .await
+            .expect("response");
+        let result = response
+            .get("result")
+            .unwrap_or_else(|| panic!("{method} should return result, got {response:?}"));
+        assert_eq!(
+            result["resultType"],
+            serde_json::json!(crate::mcp_protocol::RESULT_TYPE_COMPLETE),
+            "{method} modern response must carry RC envelope"
+        );
+    }
+}
+
+#[tokio::test]
+async fn server_initialize_echoes_client_requested_protocol_version() {
+    let server = McpServer::new(
+        "rc-test".to_string(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "initialize",
+                serde_json::json!({"protocolVersion": "2025-11-25"}),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(response["result"]["protocolVersion"], "2025-11-25");
+
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                2,
+                "initialize",
+                serde_json::json!({"protocolVersion": "2099-12-31"}),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        response["result"]["protocolVersion"],
+        crate::mcp_protocol::PROTOCOL_VERSION,
+        "unsupported version must negotiate down to the stable default"
+    );
 }
 
 #[tokio::test]

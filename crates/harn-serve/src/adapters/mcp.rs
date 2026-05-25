@@ -478,63 +478,30 @@ impl McpServer {
             return ImmediateResult::Response(response);
         }
 
-        match method {
-            "notifications/initialized" | "initialized" => ImmediateResult::Accepted,
-            "ping" => ImmediateResult::Response(harn_vm::jsonrpc::response(id, json!({}))),
-            "logging/setLevel" => {
-                ImmediateResult::Response(harn_vm::jsonrpc::response(id, json!({})))
-            }
-            "tools/list" => ImmediateResult::Response(envelope(
-                harn_vm::jsonrpc::response(id, self.tools_list_result(&params)),
-                mode,
-                Some(McpCacheHint::list_default()),
-            )),
+        let response = match method {
+            "notifications/initialized" | "initialized" => return ImmediateResult::Accepted,
+            "ping" => harn_vm::jsonrpc::response(id, json!({})),
+            "logging/setLevel" => harn_vm::jsonrpc::response(id, json!({})),
+            "tools/list" => harn_vm::jsonrpc::response(id, self.tools_list_result(&params)),
             "tools/call" => match self.prepare_stream_job(id, params, session, connection, auth) {
-                Ok(job) => ImmediateResult::Stream(Box::new(job)),
-                Err(response) => ImmediateResult::Response(response),
+                Ok(job) => return ImmediateResult::Stream(Box::new(job)),
+                Err(response) => return ImmediateResult::Response(response),
             },
-            "resources/list" => ImmediateResult::Response(envelope(
-                harn_vm::jsonrpc::response(id, self.resources_list_result(&params)),
-                mode,
-                Some(McpCacheHint::list_default()),
-            )),
-            "resources/read" => ImmediateResult::Response(envelope(
-                self.handle_resources_read(id, &params),
-                mode,
-                Some(McpCacheHint::read_default()),
-            )),
-            "resources/templates/list" => ImmediateResult::Response(envelope(
-                harn_vm::jsonrpc::response(id, self.resources_templates_list_result(&params)),
-                mode,
-                Some(McpCacheHint::list_default()),
-            )),
-            "prompts/list" => ImmediateResult::Response(envelope(
-                harn_vm::jsonrpc::response(id, self.prompts_list_result(&params)),
-                mode,
-                Some(McpCacheHint::list_default()),
-            )),
-            "prompts/get" => ImmediateResult::Response(envelope(
-                self.handle_prompts_get(id, &params),
-                mode,
-                None,
-            )),
-            mcp_protocol::METHOD_COMPLETION_COMPLETE => ImmediateResult::Response(envelope(
-                self.handle_completion_complete(id, &params),
-                mode,
-                None,
-            )),
-            _ if mcp_protocol::unsupported_latest_spec_method(method).is_some() => {
-                ImmediateResult::Response(
-                    mcp_protocol::unsupported_latest_spec_method_response(id, method)
-                        .expect("checked unsupported MCP method"),
-                )
+            "resources/list" => harn_vm::jsonrpc::response(id, self.resources_list_result(&params)),
+            "resources/read" => self.handle_resources_read(id, &params),
+            "resources/templates/list" => {
+                harn_vm::jsonrpc::response(id, self.resources_templates_list_result(&params))
             }
-            _ => ImmediateResult::Response(harn_vm::jsonrpc::error_response(
-                id,
-                -32601,
-                &format!("Method not found: {method}"),
-            )),
-        }
+            "prompts/list" => harn_vm::jsonrpc::response(id, self.prompts_list_result(&params)),
+            "prompts/get" => self.handle_prompts_get(id, &params),
+            mcp_protocol::METHOD_COMPLETION_COMPLETE => {
+                self.handle_completion_complete(id, &params)
+            }
+            _ => {
+                harn_vm::jsonrpc::error_response(id, -32601, &format!("Method not found: {method}"))
+            }
+        };
+        ImmediateResult::Response(envelope(response, mode, cache_hint_for_method(method)))
     }
 
     fn handle_initialize(
@@ -944,12 +911,29 @@ impl McpServer {
 fn envelope(
     mut response: JsonValue,
     mode: McpProtocolMode,
-    cache: Option<McpCacheHint>,
+    cache: Option<&'static McpCacheHint>,
 ) -> JsonValue {
     if let Some(result) = response.get_mut("result") {
-        apply_rc_result_envelope(result, mode, cache.as_ref());
+        apply_rc_result_envelope(result, mode, cache);
     }
     response
+}
+
+/// Map a JSON-RPC method to its conservative cache hint. Read/list
+/// methods get a TTL; everything else is `None`, which still routes
+/// through [`envelope`] so Modern clients see `resultType`.
+fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
+    const LIST: McpCacheHint = McpCacheHint::list_default();
+    const READ: McpCacheHint = McpCacheHint::read_default();
+    match method {
+        "tools/list"
+        | "resources/list"
+        | "resources/templates/list"
+        | "prompts/list"
+        | mcp_protocol::METHOD_TASKS_LIST => Some(&LIST),
+        "resources/read" => Some(&READ),
+        _ => None,
+    }
 }
 
 fn requires_protocol_auth(method: &str) -> bool {

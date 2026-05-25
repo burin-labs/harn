@@ -35,6 +35,9 @@ pub const RC_META_KEY_CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clien
 pub const RC_HEADER_PROTOCOL_VERSION: &str = "mcp-protocol-version";
 pub const RC_HEADER_METHOD: &str = "mcp-method";
 pub const RC_HEADER_NAME: &str = "mcp-name";
+/// Legacy HTTP session header that pre-RC clients and servers carry. The
+/// RC modern profile is stateless and never emits this header.
+pub const MCP_SESSION_HEADER_LEGACY: &str = "mcp-session-id";
 
 /// `resultType` discriminants exposed to RC clients on every response
 /// result body. Legacy clients never see this field, which preserves the
@@ -66,31 +69,6 @@ pub struct McpListPage {
     pub end: usize,
     pub next_cursor: Option<String>,
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UnsupportedMcpMethod {
-    pub method: &'static str,
-    pub feature: &'static str,
-    pub role: &'static str,
-    pub reason: &'static str,
-}
-
-pub const UNSUPPORTED_LATEST_SPEC_METHODS: &[UnsupportedMcpMethod] = &[
-    // `sampling/createMessage` (client) is supported — handled in
-    // `mcp::handle_inbound_client_request` via
-    // `mcp_sampling::dispatch_inbound_sampling`, which routes the
-    // request through the host bridge's `("mcp", "sample")` operation
-    // and on to Harn's `llm_call`. Intentionally omitted from this
-    // gap list.
-    //
-    // `elicitation/create` is supported on both roles — handled in
-    // `mcp::stdio_call`/`mcp::http_call` (client) and via `mcp_elicit(...)`
-    // (server). It is intentionally omitted from this gap list.
-    //
-    // `roots/list` is supported when Harn acts as an MCP client and answers
-    // inbound server-to-client root discovery requests. It is intentionally
-    // omitted from this gap list.
-];
 
 pub const MCP_COMPLETION_MAX_VALUES: usize = 100;
 
@@ -398,6 +376,53 @@ impl McpCacheHint {
             scope: None,
         }
     }
+
+    /// Extract a cache hint from an RC result body. Returns `None` when
+    /// neither `ttlMs` nor a recognized `cacheScope` is present; unknown
+    /// scopes are silently dropped so we stay forward-compatible.
+    pub fn from_result(result: &JsonValue) -> Option<Self> {
+        let ttl_ms = result.get("ttlMs").and_then(JsonValue::as_u64);
+        let scope = result
+            .get("cacheScope")
+            .and_then(JsonValue::as_str)
+            .and_then(Self::canonical_scope);
+        if ttl_ms.is_none() && scope.is_none() {
+            return None;
+        }
+        Some(Self { ttl_ms, scope })
+    }
+
+    fn canonical_scope(value: &str) -> Option<&'static str> {
+        match value {
+            "public" => Some("public"),
+            "private" => Some("private"),
+            _ => None,
+        }
+    }
+
+    pub fn to_json_object(&self) -> serde_json::Map<String, JsonValue> {
+        let mut entry = serde_json::Map::new();
+        if let Some(ttl_ms) = self.ttl_ms {
+            entry.insert("ttlMs".to_string(), json!(ttl_ms));
+        }
+        if let Some(scope) = self.scope {
+            entry.insert("cacheScope".to_string(), JsonValue::String(scope.into()));
+        }
+        entry
+    }
+}
+
+/// Build a JSON object mapping method names to their recorded RC cache
+/// hints. Empty input yields an empty object.
+pub fn cache_hints_to_json<'a, I>(hints: I) -> JsonValue
+where
+    I: IntoIterator<Item = (&'a String, &'a McpCacheHint)>,
+{
+    let mut object = serde_json::Map::new();
+    for (method, hint) in hints {
+        object.insert(method.clone(), JsonValue::Object(hint.to_json_object()));
+    }
+    JsonValue::Object(object)
 }
 
 /// Build the canonical `server/discover` result both server surfaces
@@ -420,26 +445,6 @@ pub fn server_discover_result(
         result["instructions"] = JsonValue::String(instructions.to_string());
     }
     result
-}
-
-pub fn unsupported_latest_spec_method(method: &str) -> Option<&'static UnsupportedMcpMethod> {
-    UNSUPPORTED_LATEST_SPEC_METHODS
-        .iter()
-        .find(|entry| entry.method == method)
-}
-
-pub fn unsupported_latest_spec_method_response(
-    id: impl Into<JsonValue>,
-    method: &str,
-) -> Option<JsonValue> {
-    unsupported_latest_spec_method(method).map(|entry| {
-        crate::jsonrpc::error_response_with_data(
-            id,
-            -32601,
-            &format!("Unsupported MCP method: {method}"),
-            unsupported_method_data(entry),
-        )
-    })
 }
 
 pub fn unsupported_client_bound_method_response(
@@ -692,18 +697,6 @@ pub fn mcp_list_page(
     })
 }
 
-fn unsupported_method_data(entry: &UnsupportedMcpMethod) -> JsonValue {
-    json!({
-        "type": "mcp.unsupportedFeature",
-        "protocolVersion": PROTOCOL_VERSION,
-        "method": entry.method,
-        "feature": entry.feature,
-        "role": entry.role,
-        "status": "unsupported",
-        "reason": entry.reason,
-    })
-}
-
 fn parse_mcp_list_cursor(params: &JsonValue, method: &str) -> Result<usize, String> {
     let Some(cursor) = params.get("cursor") else {
         return Ok(0);
@@ -726,8 +719,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn completion_complete_is_no_longer_in_the_unsupported_gap_list() {
-        assert!(unsupported_latest_spec_method(METHOD_COMPLETION_COMPLETE).is_none());
+    fn completion_payload_dedupes_and_ranks_prefix_matches() {
         let response = completion_result(
             json!(1),
             vec![
@@ -744,37 +736,6 @@ mod tests {
         );
         assert_eq!(response["result"]["completion"]["total"], json!(2));
         assert_eq!(response["result"]["completion"]["hasMore"], json!(false));
-    }
-
-    #[test]
-    fn elicitation_create_is_no_longer_in_the_unsupported_gap_list() {
-        // Removed from `UNSUPPORTED_LATEST_SPEC_METHODS` once we
-        // implemented bidirectional elicitation (issue #875). Lookup
-        // therefore returns `None` and callers route the method
-        // through the elicitation bus (server) or the host bridge
-        // (client) instead of the auto-rejection path.
-        assert!(unsupported_latest_spec_method("elicitation/create").is_none());
-    }
-
-    #[test]
-    fn roots_list_is_no_longer_in_the_unsupported_gap_list() {
-        assert!(unsupported_latest_spec_method(METHOD_ROOTS_LIST).is_none());
-    }
-
-    #[test]
-    fn resource_subscriptions_are_no_longer_in_the_unsupported_gap_list() {
-        assert!(unsupported_latest_spec_method("resources/subscribe").is_none());
-        assert!(unsupported_latest_spec_method("resources/unsubscribe").is_none());
-    }
-
-    #[test]
-    fn sampling_create_message_is_no_longer_in_the_unsupported_gap_list() {
-        // Removed from `UNSUPPORTED_LATEST_SPEC_METHODS` once we
-        // implemented inbound server-to-client sampling (issue #874).
-        // Lookup therefore returns `None` and callers route the method
-        // through `mcp_sampling::dispatch_inbound_sampling` on the
-        // client side instead of the auto-rejection path.
-        assert!(unsupported_latest_spec_method("sampling/createMessage").is_none());
     }
 
     #[test]
