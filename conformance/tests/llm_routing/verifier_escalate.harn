@@ -28,4 +28,8 @@ pipeline test(task) {
   __io_println(attempts[1].label)
   __io_println(attempts[1].verifier_outcome)
   __io_println(result.routing.selected)
+  // Per-attempt token counts now ride on the trace so downstream graders
+  // can re-cost against alternate pricing tables.
+  __io_println(to_string(attempts[0].input_tokens > 0))
+  __io_println(to_string(attempts[1].output_tokens > 0))
 }

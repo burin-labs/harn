@@ -1,0 +1,263 @@
+// Multi-task routing_policy v2 eval.
+//
+// Same task list, two strategies side by side:
+//   • baseline: always devstral-small
+//   • routed:   devstral → opus, escalate when the typecheck verifier
+//               fails to parse the extracted Harn block
+//
+// Each task is a different "Devstral can / can't handle Harn-specific
+// syntax" probe so we can see when the verifier escalates vs accepts.
+//
+// Cost is computed from per-call tokens against a hard-coded
+// OpenRouter rate table (Devstral $0.10/$0.30 per M, Opus $5/$25 per M).
+let CHEAP_MODEL = {provider: "openrouter", model: "mistralai/devstral-small"}
+
+let FRONTIER_MODEL = {provider: "openrouter", model: "anthropic/claude-opus-4.7"}
+
+let MAX_TOKENS = 500
+
+let TASKS = [
+  {
+    id: "fib",
+    prompt: "Write a Harn function `fib(n: int) -> int` that returns the n-th Fibonacci number. "
+      + "Definition: fib(0)=0, fib(1)=1, fib(n)=fib(n-1)+fib(n-2). "
+      + "Output ONLY the function definition wrapped in a ```harn fenced code block.",
+  },
+  {
+    id: "trivial_let",
+    prompt: "Output exactly this Harn snippet inside a ```harn fenced code block:\n"
+      + "let answer: int = 42\n"
+      + "No prose, no extra code.",
+  },
+  {
+    id: "sum_list",
+    prompt: "Write a Harn function `sum_list(items: list) -> int` that returns the sum of all integers "
+      + "in the list. Use a `for` loop. Harn uses `fn` for functions, `let` for bindings, and braces "
+      + "for blocks (not Python-style colons or `def`). Output ONLY the function in a ```harn code block.",
+  },
+  {
+    id: "is_even_pipeline",
+    prompt: "Write a Harn pipeline named `check` that takes one parameter `task` of type int, and prints "
+      + "'even' if task is divisible by 2, else 'odd'. Use `pipeline check(task: int) { ... }`. Use "
+      + "`__io_println(\"even\")` for printing. Output ONLY the pipeline definition in a ```harn block.",
+  },
+  {
+    id: "fix_typo",
+    prompt: "The following Harn snippet has a typo — `funtion` should be `fn`. Output the corrected "
+      + "snippet inside a ```harn code block:\n"
+      + "funtion greet(name: string) {\n  __io_println(\"hello \" + name)\n}",
+  },
+]
+
+fn or_pricing_usd_per_m(model: string) -> dict {
+  if model == "mistralai/devstral-small" {
+    return {input: 0.1, output: 0.3}
+  }
+  if model == "anthropic/claude-opus-4.7" {
+    return {input: 5.0, output: 25.0}
+  }
+  return {input: 0.0, output: 0.0}
+}
+
+fn cost_for_tokens(model: string, input_tokens: int, output_tokens: int) -> float {
+  let p = or_pricing_usd_per_m(model)
+  return to_float(input_tokens) / 1000000.0 * to_float(p.input)
+    + to_float(output_tokens) / 1000000.0 * to_float(p.output)
+}
+
+fn extract_first_fenced_harn(text: string) -> string {
+  let after_open = split(text, "```harn")
+  if len(after_open) < 2 {
+    return ""
+  }
+  let body_and_after = after_open[1]
+  let before_close = split(body_and_after, "```")
+  if len(before_close) < 1 {
+    return ""
+  }
+  return trim(before_close[0])
+}
+
+/**
+ * Grade a candidate using the SAME verifier the routing_policy uses.
+ *
+ * We push the code as a mock-LLM response into a 1-link routing_policy
+ * whose only verifier is `typecheck`; the chain returns immediately
+ * because the mock provider is free + deterministic. Whatever the
+ * verifier emits is the canonical "would the typecheck gate have
+ * accepted this" answer.
+ */
+fn grade_outcome(code: string) -> string {
+  llm_mock_push_scope()
+  llm_mock({text: code, model: "mock", provider: "mock"})
+  let policy = routing_policy(
+    {
+      chain: [{provider: "mock", model: "mock"}],
+      escalate_on: [{kind: "typecheck", extract_fenced: false, on_fail: "escalate"}],
+      label: "typecheck-grader",
+    },
+  )
+  let outcome = try {
+    let validation = llm_call("validate", nil, {routing: policy, max_tokens: 1})
+    let attempts = validation.routing.attempts
+    if len(attempts) > 0 {
+      attempts[0]?.verifier_outcome ?? "escalate"
+    } else {
+      "escalate"
+    }
+  } catch (err) {
+    "escalate"
+  }
+  llm_mock_pop_scope()
+  return outcome
+}
+
+fn typechecks(code: string) -> bool {
+  if trim(code) == "" {
+    return false
+  }
+  return grade_outcome(code) == "accept"
+}
+
+fn run_one_baseline(task: dict) -> dict {
+  let result = llm_call(
+    task.prompt,
+    nil,
+    {
+      provider: CHEAP_MODEL.provider,
+      model: CHEAP_MODEL.model,
+      max_tokens: MAX_TOKENS,
+      budget: {max_cost_usd: 0.2},
+    },
+  )
+  let code = extract_first_fenced_harn(result.text)
+  return {
+    task_id: task.id,
+    strategy: "baseline",
+    cost_usd: cost_for_tokens(CHEAP_MODEL.model, result.input_tokens, result.output_tokens),
+    input_tokens: result.input_tokens,
+    output_tokens: result.output_tokens,
+    code: code,
+    looks_valid: typechecks(code),
+  }
+}
+
+fn attempt_cost(attempt: dict) -> float {
+  // Each successful attempt now carries `input_tokens` / `output_tokens`
+  // on the trace, so we can attribute spend precisely against the
+  // hard-coded OpenRouter rate table (the runtime's catalog cost_usd
+  // is native-providers-only and would report 0 here).
+  let input = to_int(attempt?.input_tokens ?? 0)
+  let output = to_int(attempt?.output_tokens ?? 0)
+  return cost_for_tokens(attempt.model, input, output)
+}
+
+fn run_one_routed(task: dict) -> dict {
+  let policy = routing_policy(
+    {
+      chain: [
+        {provider: CHEAP_MODEL.provider, model: CHEAP_MODEL.model, label: "cheap"},
+        {provider: FRONTIER_MODEL.provider, model: FRONTIER_MODEL.model, label: "frontier"},
+      ],
+      escalate_on: [{kind: "typecheck", extract_fenced: true, on_fail: "escalate"}],
+      budget: {per_call_usd: 0.5, session_usd: 2.5, on_exceed: "abort"},
+      max_refines_per_link: 0,
+      label: "routing-v2",
+    },
+  )
+  let result = llm_call(task.prompt, nil, {routing: policy, max_tokens: MAX_TOKENS})
+  let code = extract_first_fenced_harn(result.text)
+  let attempts = result.routing.attempts
+  let selected = result.routing.selected ?? 0
+  let final_model = attempts[selected].model
+  let total_cost = attempts.map({ a -> attempt_cost(a) }).reduce(0.0, { acc, x -> acc + x })
+  let escalated = len(attempts) > 1
+  return {
+    task_id: task.id,
+    strategy: "routed",
+    cost_usd: total_cost,
+    escalated: escalated,
+    attempts: attempts,
+    selected: selected,
+    final_model: final_model,
+    code: code,
+    looks_valid: typechecks(code),
+  }
+}
+
+fn run_task_pair(task: dict) -> dict {
+  __io_println("=== task " + task.id + " ===")
+  let b = run_one_baseline(task)
+  let r = run_one_routed(task)
+  __io_println("  baseline cost=" + to_string(b.cost_usd) + " valid=" + to_string(b.looks_valid))
+  __io_println(
+    "  routed   cost=" + to_string(r.cost_usd) + " valid=" + to_string(r.looks_valid)
+      + " escalated="
+      + to_string(r.escalated),
+  )
+  return {baseline: b, routed: r}
+}
+
+fn main(_harness: Harness) {
+  let rows = TASKS.map({ task -> run_task_pair(task) })
+  let baseline_total = rows
+    .map({ row -> to_float(row.baseline.cost_usd) })
+    .reduce(0.0, { acc, x -> acc + x })
+  let routed_total = rows
+    .map({ row -> to_float(row.routed.cost_usd) })
+    .reduce(0.0, { acc, x -> acc + x })
+  let baseline_valid = rows
+    .map(
+    { row ->
+      if row.baseline.looks_valid {
+        1
+      } else {
+        0
+      }
+    },
+  )
+    .reduce(0, { acc, x -> acc + x })
+  let routed_valid = rows
+    .map(
+    { row ->
+      if row.routed.looks_valid {
+        1
+      } else {
+        0
+      }
+    },
+  )
+    .reduce(0, { acc, x -> acc + x })
+  let escalations = rows
+    .map(
+    { row ->
+      if row.routed.escalated {
+        1
+      } else {
+        0
+      }
+    },
+  )
+    .reduce(0, { acc, x -> acc + x })
+  __io_println("=========================================")
+  __io_println("baseline total cost: " + to_string(baseline_total))
+  __io_println("routed   total cost: " + to_string(routed_total))
+  __io_println("baseline valid: " + to_string(baseline_valid) + "/" + to_string(len(TASKS)))
+  __io_println("routed   valid: " + to_string(routed_valid) + "/" + to_string(len(TASKS)))
+  __io_println("escalations: " + to_string(escalations) + "/" + to_string(len(TASKS)))
+  __io_println(
+    json_stringify_pretty(
+      {
+        summary: {
+          baseline_total_cost_usd: baseline_total,
+          routed_total_cost_usd: routed_total,
+          baseline_valid: baseline_valid,
+          routed_valid: routed_valid,
+          escalations: escalations,
+          n_tasks: len(TASKS),
+        },
+        rows: rows,
+      },
+    ),
+  )
+}

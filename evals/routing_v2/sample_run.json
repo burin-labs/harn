@@ -1,0 +1,265 @@
+{
+  "rows": [
+    {
+      "baseline": {
+        "code": "def fib(n: int) -> int:\n    if n == 0:\n        return 0\n    elif n == 1:\n        return 1\n    else:\n        return fib(n-1) + fib(n-2)",
+        "cost_usd": 0.0000234,
+        "input_tokens": 69,
+        "looks_valid": false,
+        "output_tokens": 55,
+        "strategy": "baseline",
+        "task_id": "fib"
+      },
+      "routed": {
+        "attempts": [
+          {
+            "cost_usd": 0.001032,
+            "duration_ms": 677,
+            "index": 1,
+            "input_tokens": 69,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 55,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "escalate",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "reason": "typecheck: parse failed: Expected top-level item separator (`;` or newline), got id(fib) at 1:5",
+                "signal": "escalate"
+              }
+            ]
+          },
+          {
+            "cost_usd": 0.002241,
+            "duration_ms": 2472,
+            "index": 2,
+            "input_tokens": 112,
+            "label": "frontier",
+            "model": "anthropic/claude-opus-4.7",
+            "output_tokens": 127,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "escalate",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "reason": "typecheck: parse failed: Expected =, got id(a) at 5:13",
+                "signal": "escalate"
+              }
+            ]
+          }
+        ],
+        "code": "fn fib(n: int) -> int {\n    if n < 2 {\n        return n;\n    }\n    let mut a: int = 0;\n    let mut b: int = 1;\n    let mut i: int = 2;\n    while i <= n {\n        let c: int = a + b;\n        a = b;\n        b = c;\n        i = i + 1;\n    }\n    return b;\n}",
+        "cost_usd": 0.0037583999999999994,
+        "escalated": true,
+        "final_model": "anthropic/claude-opus-4.7",
+        "looks_valid": false,
+        "selected": 1,
+        "strategy": "routed",
+        "task_id": "fib"
+      }
+    },
+    {
+      "baseline": {
+        "code": "let answer: int = 42",
+        "cost_usd": 8e-6,
+        "input_tokens": 35,
+        "looks_valid": true,
+        "output_tokens": 15,
+        "strategy": "baseline",
+        "task_id": "trivial_let"
+      },
+      "routed": {
+        "attempts": [
+          {
+            "cost_usd": 0.00032999999999999994,
+            "duration_ms": 360,
+            "index": 1,
+            "input_tokens": 35,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 15,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "accept",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "signal": "accept"
+              }
+            ]
+          }
+        ],
+        "code": "let answer: int = 42",
+        "cost_usd": 8e-6,
+        "escalated": false,
+        "final_model": "mistralai/devstral-small",
+        "looks_valid": true,
+        "selected": 0,
+        "strategy": "routed",
+        "task_id": "trivial_let"
+      }
+    },
+    {
+      "baseline": {
+        "code": "fn sum_list(items: list) -> int {\n    let sum = 0\n    for item in items {\n        sum = sum + item\n    }\n    return sum\n}",
+        "cost_usd": 0.0000205,
+        "input_tokens": 76,
+        "looks_valid": true,
+        "output_tokens": 43,
+        "strategy": "baseline",
+        "task_id": "sum_list"
+      },
+      "routed": {
+        "attempts": [
+          {
+            "cost_usd": 0.000873,
+            "duration_ms": 741,
+            "index": 1,
+            "input_tokens": 76,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 43,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "accept",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "signal": "accept"
+              }
+            ]
+          }
+        ],
+        "code": "fn sum_list(items: list) -> int {\n  let sum = 0\n  for item in items {\n    sum = sum + item\n  }\n  return sum\n}",
+        "cost_usd": 0.0000205,
+        "escalated": false,
+        "final_model": "mistralai/devstral-small",
+        "looks_valid": true,
+        "selected": 0,
+        "strategy": "routed",
+        "task_id": "sum_list"
+      }
+    },
+    {
+      "baseline": {
+        "code": "pipeline check(task: int) {\n    if (task % 2 == 0) {\n        __io_println(\"even\")\n    } else {\n        __io_println(\"odd\")\n    }\n}",
+        "cost_usd": 0.0000224,
+        "input_tokens": 77,
+        "looks_valid": false,
+        "output_tokens": 49,
+        "strategy": "baseline",
+        "task_id": "is_even_pipeline"
+      },
+      "routed": {
+        "attempts": [
+          {
+            "cost_usd": 0.000966,
+            "duration_ms": 607,
+            "index": 1,
+            "input_tokens": 77,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 49,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "escalate",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "reason": "typecheck: parse failed: Expected parameter name, got : at 1:20",
+                "signal": "escalate"
+              }
+            ]
+          },
+          {
+            "cost_usd": 0.0013289999999999999,
+            "duration_ms": 1712,
+            "index": 2,
+            "input_tokens": 118,
+            "label": "frontier",
+            "model": "anthropic/claude-opus-4.7",
+            "output_tokens": 65,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "escalate",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "reason": "typecheck: parse failed: Expected parameter name, got : at 1:20",
+                "signal": "escalate"
+              }
+            ]
+          }
+        ],
+        "code": "pipeline check(task: int) {\n    if (task % 2 == 0) {\n        __io_println(\"even\");\n    } else {\n        __io_println(\"odd\");\n    }\n}",
+        "cost_usd": 0.0022374,
+        "escalated": true,
+        "final_model": "anthropic/claude-opus-4.7",
+        "looks_valid": false,
+        "selected": 1,
+        "strategy": "routed",
+        "task_id": "is_even_pipeline"
+      }
+    },
+    {
+      "baseline": {
+        "code": "fn greet(name: string) {\n  __io_println(\"hello \" + name)\n}",
+        "cost_usd": 0.000013000000000000001,
+        "input_tokens": 55,
+        "looks_valid": true,
+        "output_tokens": 25,
+        "strategy": "baseline",
+        "task_id": "fix_typo"
+      },
+      "routed": {
+        "attempts": [
+          {
+            "cost_usd": 0.00054,
+            "duration_ms": 370,
+            "index": 1,
+            "input_tokens": 55,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 25,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "accept",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "signal": "accept"
+              }
+            ]
+          }
+        ],
+        "code": "fn greet(name: string) {\n  __io_println(\"hello \" + name)\n}",
+        "cost_usd": 0.000013000000000000001,
+        "escalated": false,
+        "final_model": "mistralai/devstral-small",
+        "looks_valid": true,
+        "selected": 0,
+        "strategy": "routed",
+        "task_id": "fix_typo"
+      }
+    }
+  ],
+  "summary": {
+    "baseline_total_cost_usd": 0.00008730000000000001,
+    "baseline_valid": 3,
+    "escalations": 2,
+    "n_tasks": 5,
+    "routed_total_cost_usd": 0.0060373,
+    "routed_valid": 3
+  }
+}
+
