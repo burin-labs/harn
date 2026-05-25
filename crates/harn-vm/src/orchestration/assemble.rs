@@ -346,7 +346,7 @@ fn keyword_overlap_score(text: &str, query: &str) -> f64 {
     // so a 100-char chunk that mentions "parser" scores higher than a
     // 10k-char chunk that mentions "parser" once.
     let density = (matches as f64) / (text.len() as f64 / 400.0 + 1.0);
-    base.mul_add(0.7, density.min(1.0) * 0.3)
+    base * 0.7 + density.min(1.0) * 0.3
 }
 
 /// Build every candidate chunk from the input artifacts. Artifacts that
@@ -495,10 +495,9 @@ pub fn score_chunks(
                 let recency_rank = created_at
                     .chars()
                     .fold(0u64, |acc, c| acc.wrapping_mul(131).wrapping_add(c as u64));
-                chunk.score = (chunk.chunk_index as f64).mul_add(
-                    -1e-12,
-                    (input_idx as f64).mul_add(-1e-9, recency_rank as f64 / u64::MAX as f64),
-                );
+                chunk.score = recency_rank as f64 / u64::MAX as f64
+                    - (input_idx as f64) * 1e-9
+                    - (chunk.chunk_index as f64) * 1e-12;
             }
         }
         AssembleStrategy::Relevance => {
@@ -518,7 +517,7 @@ pub fn score_chunks(
             // Round-robin is handled at pack time; score just reflects
             // input order so ties break deterministically.
             for (idx, chunk) in chunks.iter_mut().enumerate() {
-                chunk.score = (idx as f64).mul_add(-1e-6, 1.0);
+                chunk.score = 1.0 - (idx as f64) * 1e-6;
             }
         }
     }

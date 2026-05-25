@@ -2356,7 +2356,7 @@ pub(crate) fn render_trace_summary() -> String {
     }
     let total_tokens = total_input + total_output;
     // Rough cost estimate using Sonnet 4 pricing ($3/MTok in, $15/MTok out).
-    let cost = (total_input as f64).mul_add(3.0, total_output as f64 * 15.0) / 1_000_000.0;
+    let cost = (total_input as f64 * 3.0 + total_output as f64 * 15.0) / 1_000_000.0;
     let _ = writeln!(
         out,
         "  \x1b[1m{} call{}, {} tokens ({}in + {}out), {} ms, ~${:.4}\x1b[0m",

@@ -108,10 +108,7 @@ fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send)) -> bool {
     print_failure && broken_pipe
 }
 
-// The CLI entry point necessarily owns the full Args struct and several
-// per-feature local state values; splitting it further fights the dispatch
-// pattern, so the large stack frame here is intentional.
-#[allow(clippy::large_stack_frames)]
+#[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
 async fn async_main() {
     let raw_args = normalize_serve_args(env::args().collect());
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {

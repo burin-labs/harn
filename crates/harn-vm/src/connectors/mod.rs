@@ -1577,9 +1577,7 @@ impl TokenBucket {
         let interval = config.refill_interval.as_secs_f64().max(f64::EPSILON);
         let rate = config.refill_tokens.max(1) as f64 / interval;
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
-        self.tokens = elapsed
-            .mul_add(rate, self.tokens)
-            .min(config.capacity.max(1) as f64);
+        self.tokens = (self.tokens + elapsed * rate).min(config.capacity.max(1) as f64);
         self.last_refill = now;
     }
 

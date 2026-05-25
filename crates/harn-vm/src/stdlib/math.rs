@@ -230,7 +230,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         if values.len() == 1 {
             return Ok(VmValue::Float(values[0]));
         }
-        let h = (values.len() as f64 - 1.0).mul_add(p / 100.0, 1.0);
+        let h = 1.0 + (values.len() as f64 - 1.0) * (p / 100.0);
         let lower = h.floor();
         let upper = h.ceil();
         if lower == upper {

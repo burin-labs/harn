@@ -49,7 +49,10 @@ max_loc = 285
 
 [[handler]]
 path = "crates/harn-cli/src/lib.rs"
-max_loc = 3162
+# Bumped from 3162 to 3175 to fit one-time growth from the workspace lint
+# floor commit (clippy::semicolon_if_nothing_returned + reformatted call
+# sites + a single #[allow(clippy::large_stack_frames)] attr on async_main).
+max_loc = 3175
 
 [[handler]]
 path = "crates/harn-cli/src/commands/models/list.rs"

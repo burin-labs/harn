@@ -429,7 +429,9 @@ impl MockStreamReader {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+// `RawInbound.metadata` is `serde_json::Value`, which isn't `Eq`.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WebhookFixture {
     pub raw: RawInbound,
     pub body: Vec<u8>,

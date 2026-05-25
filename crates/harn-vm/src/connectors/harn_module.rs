@@ -40,7 +40,10 @@ const HARN_CONNECTOR_POLL_STATE_TOPIC: &str = "connectors.harn.poll.state";
 const HARN_CONNECTOR_POLL_STATE_KIND: &str = "harn.poll.state";
 const DEFAULT_POLL_INTERVAL: StdDuration = StdDuration::from_mins(5);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+// `ProviderPayloadSchema` carries types that aren't `Eq` (e.g. JSON values),
+// so `HarnConnectorContract` can only be `PartialEq`.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct HarnConnectorContract {
     pub module_path: PathBuf,
     pub provider_id: ProviderId,

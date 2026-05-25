@@ -139,7 +139,7 @@ fn landlock_profile(
     let ruleset_fd = unsafe {
         libc::syscall(
             libc::SYS_landlock_create_ruleset,
-            &ruleset_attr as *const LandlockRulesetAttr,
+            &raw const ruleset_attr,
             std::mem::size_of::<LandlockRulesetAttr>(),
             0,
         ) as libc::c_int
@@ -221,7 +221,7 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
                 libc::SYS_landlock_add_rule,
                 profile.ruleset_fd,
                 LANDLOCK_RULE_PATH_BENEATH,
-                &path_beneath as *const LandlockPathBeneathAttr,
+                &raw const path_beneath,
                 0,
             )
         };
@@ -276,7 +276,7 @@ fn install_seccomp_filter(denied_syscalls: &[libc::c_long]) -> io::Result<()> {
         if libc::prctl(
             libc::PR_SET_SECCOMP,
             libc::SECCOMP_MODE_FILTER,
-            &mut program as *mut libc::sock_fprog,
+            &raw mut program,
             0,
             0,
         ) != 0

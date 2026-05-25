@@ -630,8 +630,7 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
     let pricing = harn_vm::llm::llm_pricing_per_1k(&ctx.selector.provider, &ctx.selector.model);
     let cost_usd = pricing
         .map(|(input, output)| {
-            (input_tokens.max(0) as f64).mul_add(input, output_tokens.max(0) as f64 * output)
-                / 1000.0
+            (input_tokens.max(0) as f64 * input + output_tokens.max(0) as f64 * output) / 1000.0
         })
         .unwrap_or(0.0);
     let status = if passed {

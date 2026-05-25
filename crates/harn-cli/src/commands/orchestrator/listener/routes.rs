@@ -490,9 +490,7 @@ impl IngestBucket {
             return;
         }
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
-        self.tokens = elapsed
-            .mul_add(refill_per_sec as f64, self.tokens)
-            .min(capacity.max(1) as f64);
+        self.tokens = (self.tokens + elapsed * refill_per_sec as f64).min(capacity.max(1) as f64);
         self.last_refill = now;
     }
 

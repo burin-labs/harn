@@ -417,8 +417,7 @@ fn phase_report(model: ModelSelector, output: RawPhaseOutput) -> PhaseReport {
     let pricing = harn_vm::llm::llm_pricing_per_1k(provider, model_id);
     let cost_usd = pricing
         .map(|(input, output)| {
-            (input_tokens.max(0) as f64).mul_add(input, output_tokens.max(0) as f64 * output)
-                / 1000.0
+            (input_tokens.max(0) as f64 * input + output_tokens.max(0) as f64 * output) / 1000.0
         })
         .unwrap_or(0.0);
     PhaseReport {

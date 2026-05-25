@@ -731,7 +731,7 @@ async fn score_records_async(
                 if bm25_raw == 0.0 && cosine_raw <= 0.0 {
                     continue;
                 }
-                let score = bm25_weight.mul_add(bm25_raw / max_bm25, cosine_weight * cosine_raw);
+                let score = bm25_weight * (bm25_raw / max_bm25) + cosine_weight * cosine_raw;
                 blended.push(ScoredRecord {
                     record,
                     score,

@@ -371,7 +371,7 @@ pub(super) fn confidence_for(
         .filter(|step| step.segment == SegmentKind::Deterministic)
         .count() as f64
         / steps.len().max(1) as f64;
-    coverage.mul_add(0.65, deterministic * 0.35).min(0.99)
+    ((coverage * 0.65) + (deterministic * 0.35)).min(0.99)
 }
 
 pub(super) fn infer_workflow_name(steps: &[WorkflowCandidateStep]) -> String {
