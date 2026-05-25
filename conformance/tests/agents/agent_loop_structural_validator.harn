@@ -155,6 +155,26 @@ pipeline default() {
   __io_println(post_write_non_empty.result.status == "done")
   __io_println(len(post_write_non_empty_decisions) == 0)
   llm_mock_clear()
+  llm_mock({text: "The PATCH_HINT is:\n\n```python\ndef add(a, b): return a + b\n```"})
+  let lifecycle_only_session = "structural-validator-lifecycle-only-" + uuid()
+  let lifecycle_only = agent_capture_events(
+    lifecycle_only_session,
+    fn() { return agent_loop(
+      "No tools are available. State the smallest code change.",
+      nil,
+      {
+        provider: "mock",
+        tool_format: "text",
+        max_iterations: 1,
+        session_id: lifecycle_only_session,
+        structural_validator: with_structural_validator(),
+      },
+    ) },
+  )
+  let lifecycle_only_decisions = events_of(lifecycle_only.events, "structural_validator_decision")
+  __io_println(lifecycle_only.result.status == "done")
+  __io_println(len(lifecycle_only_decisions) == 0)
+  llm_mock_clear()
   llm_mock({text: malformed_tool_text})
   let malformed_session = "structural-validator-malformed-" + uuid()
   let malformed = agent_capture_events(

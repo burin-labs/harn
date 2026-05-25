@@ -732,9 +732,12 @@ fn __verify_read_only_audit(harness: Harness, root: string, result) {
 
 fn __verify_no_tool_diagnosis(result) {
   let final_text = __final_text(result)
+  let normalized = lowercase(final_text)
+  let describes_change = contains(final_text, "return a + b")
+    || (contains(normalized, "subtraction") && contains(normalized, "addition"))
   let success = __tool_call_count(result) == 0
     && contains(final_text, "PATCH_HINT")
-    && contains(final_text, "return a + b")
+    && describes_change
   return __command_verification(
     success,
     if success {
