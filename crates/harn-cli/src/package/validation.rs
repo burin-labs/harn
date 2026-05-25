@@ -494,7 +494,9 @@ pub(crate) fn parse_duration_millis(raw: &str) -> Result<u64, PackageError> {
             return Err(format!("invalid duration unit in '{raw}'; expected ms, s, m, or h").into())
         }
     };
-    Ok(amount.saturating_mul(multiplier))
+    amount
+        .checked_mul(multiplier)
+        .ok_or_else(|| format!("duration '{raw}' is too large").into())
 }
 
 pub(crate) fn validate_static_trigger_config(
@@ -1288,4 +1290,23 @@ pub(crate) fn is_predicate_return_type(ty: &harn_parser::TypeExpr) -> bool {
                 && args.len() == 2
                 && args.first().is_some_and(is_bool_type)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_duration_millis_rejects_unit_overflow() {
+        let err = parse_duration_millis("18446744073709551615h").unwrap_err();
+        assert!(err.to_string().contains("too large"), "{err}");
+    }
+
+    #[test]
+    fn parse_duration_millis_accepts_large_plain_milliseconds() {
+        assert_eq!(
+            parse_duration_millis("18446744073709551615").unwrap(),
+            u64::MAX
+        );
+    }
 }

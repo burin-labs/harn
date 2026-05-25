@@ -2131,6 +2131,7 @@ pub(crate) fn safe_package_relative_path(
     let rel = PathBuf::from(rel_path);
     if rel.is_absolute()
         || has_windows_rooted_or_drive_relative_prefix(rel_path)
+        || has_windows_separator_escape(rel_path)
         || rel.components().any(|component| {
             matches!(
                 component,
@@ -2150,6 +2151,18 @@ fn has_windows_rooted_or_drive_relative_prefix(path: &str) -> bool {
     let bytes = normalized.as_bytes();
     normalized.starts_with('/')
         || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+}
+
+fn has_windows_separator_escape(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    Path::new(&normalized).components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::Prefix(_)
+                | std::path::Component::RootDir
+        )
+    })
 }
 
 pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
@@ -2911,6 +2924,9 @@ rev = "feedface"
             r"C:\repo\secret.harn",
             "C:secret.harn",
             r"\\server\share\secret.harn",
+            r"..\secret.harn",
+            r"lib\..\secret.harn",
+            r"lib/..\secret.harn",
         ] {
             assert!(
                 safe_package_relative_path(tmp.path(), rel_path).is_err(),

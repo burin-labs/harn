@@ -2478,8 +2478,18 @@ mod tests {
         body: serde_json::Value,
     }
 
+    // The loopback HTTP tests start background GET streams against in-process
+    // mock servers. Keep those stream lifetimes isolated under the parallel
+    // Rust test harness so one test cannot consume another test's scarce local
+    // networking resources while it is still shutting down.
+    async fn http_mcp_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().await
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn http_get_stream_dispatches_inbound_elicitation_response() {
+        let _guard = http_mcp_test_guard().await;
         tokio::task::LocalSet::new()
             .run_until(async {
                 let (base_url, mut responses) = spawn_eliciting_http_mcp_server().await;
@@ -2640,6 +2650,7 @@ print(json.dumps({
 
     #[tokio::test(flavor = "current_thread")]
     async fn modern_http_sends_stateless_metadata_headers_and_schema_headers() {
+        let _guard = http_mcp_test_guard().await;
         tokio::task::LocalSet::new()
             .run_until(async {
                 let (base_url, mut requests) = spawn_modern_http_mcp_server().await;
@@ -2694,6 +2705,7 @@ print(json.dumps({
 
     #[tokio::test(flavor = "current_thread")]
     async fn modern_http_discovery_falls_back_to_legacy_initialize_when_endpoint_is_not_modern() {
+        let _guard = http_mcp_test_guard().await;
         tokio::task::LocalSet::new()
             .run_until(async {
                 let (base_url, mut requests) = spawn_legacy_http_fallback_server().await;
@@ -2728,6 +2740,7 @@ print(json.dumps({
 
     #[tokio::test(flavor = "current_thread")]
     async fn modern_input_required_result_dispatches_and_retries() {
+        let _guard = http_mcp_test_guard().await;
         tokio::task::LocalSet::new()
             .run_until(async {
                 let (base_url, mut requests) = spawn_modern_http_mcp_server().await;
@@ -2904,23 +2917,20 @@ llm_mock_clear()
                 let Ok((mut stream, _)) = listener.accept().await else {
                     break;
                 };
-                let request_tx = request_tx.clone();
-                tokio::spawn(async move {
-                    let Ok((_request_line, headers, body)) = read_http_request(&mut stream).await
-                    else {
-                        return;
-                    };
-                    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
-                        return;
-                    };
-                    let _ = request_tx.send(RecordedHttpRequest {
-                        headers: headers.clone(),
-                        body: request.clone(),
-                    });
-                    let method = request.get("method").and_then(|value| value.as_str());
-                    let response = modern_http_response(&request, method);
-                    let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
+                let Ok((_request_line, headers, body)) = read_http_request(&mut stream).await
+                else {
+                    continue;
+                };
+                let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
+                    continue;
+                };
+                let _ = request_tx.send(RecordedHttpRequest {
+                    headers: headers.clone(),
+                    body: request.clone(),
                 });
+                let method = request.get("method").and_then(|value| value.as_str());
+                let response = modern_http_response(&request, method);
+                let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
             }
         });
 
@@ -2938,54 +2948,50 @@ llm_mock_clear()
                 let Ok((mut stream, _)) = listener.accept().await else {
                     break;
                 };
-                let request_tx = request_tx.clone();
-                tokio::spawn(async move {
-                    let Ok((request_line, headers, body)) = read_http_request(&mut stream).await
-                    else {
-                        return;
-                    };
-                    if request_line.starts_with("GET ") {
-                        let _ = write_http_empty(&mut stream, "404 Not Found").await;
-                        return;
-                    }
-                    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
-                        return;
-                    };
-                    let method = request.get("method").and_then(|value| value.as_str());
-                    let _ = request_tx.send(RecordedHttpRequest {
-                        headers: headers.clone(),
-                        body: request.clone(),
-                    });
-                    match method {
-                        Some("server/discover") => {
-                            let _ = write_http_empty(&mut stream, "400 Bad Request").await;
-                        }
-                        Some("initialize") => {
-                            let response = serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": request["id"].clone(),
-                                "result": {
-                                    "protocolVersion": PROTOCOL_VERSION,
-                                    "capabilities": {"tools": {}},
-                                    "serverInfo": {"name": "legacy-http", "version": "1.0.0"}
-                                }
-                            });
-                            let _ = write_http_json(
-                                &mut stream,
-                                "200 OK",
-                                &[("MCP-Session-Id", "legacy-session")],
-                                response,
-                            )
-                            .await;
-                        }
-                        Some("notifications/initialized") => {
-                            let _ = write_http_empty(&mut stream, "202 Accepted").await;
-                        }
-                        _ => {
-                            let _ = write_http_empty(&mut stream, "404 Not Found").await;
-                        }
-                    }
+                let Ok((request_line, headers, body)) = read_http_request(&mut stream).await else {
+                    continue;
+                };
+                if request_line.starts_with("GET ") {
+                    let _ = write_http_empty(&mut stream, "404 Not Found").await;
+                    continue;
+                }
+                let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
+                    continue;
+                };
+                let method = request.get("method").and_then(|value| value.as_str());
+                let _ = request_tx.send(RecordedHttpRequest {
+                    headers: headers.clone(),
+                    body: request.clone(),
                 });
+                match method {
+                    Some("server/discover") => {
+                        let _ = write_http_empty(&mut stream, "400 Bad Request").await;
+                    }
+                    Some("initialize") => {
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": request["id"].clone(),
+                            "result": {
+                                "protocolVersion": PROTOCOL_VERSION,
+                                "capabilities": {"tools": {}},
+                                "serverInfo": {"name": "legacy-http", "version": "1.0.0"}
+                            }
+                        });
+                        let _ = write_http_json(
+                            &mut stream,
+                            "200 OK",
+                            &[("MCP-Session-Id", "legacy-session")],
+                            response,
+                        )
+                        .await;
+                    }
+                    Some("notifications/initialized") => {
+                        let _ = write_http_empty(&mut stream, "202 Accepted").await;
+                    }
+                    _ => {
+                        let _ = write_http_empty(&mut stream, "404 Not Found").await;
+                    }
+                }
             }
         });
 
@@ -3119,10 +3125,7 @@ llm_mock_clear()
                 let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
-                let response_tx = response_tx.clone();
-                tokio::spawn(async move {
-                    let _ = handle_mock_http_mcp_connection(stream, response_tx).await;
-                });
+                let _ = handle_mock_http_mcp_connection(stream, response_tx.clone()).await;
             }
         });
 
@@ -3140,17 +3143,14 @@ llm_mock_clear()
                 let Ok((mut stream, _)) = listener.accept().await else {
                     break;
                 };
-                let request_tx = request_tx.clone();
-                tokio::spawn(async move {
-                    let Ok((_request_line, _headers, body)) = read_http_request(&mut stream).await
-                    else {
-                        return;
-                    };
-                    if let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) {
-                        let _ = request_tx.send(request);
-                    }
-                    let _ = write_http_empty(&mut stream, "202 Accepted").await;
-                });
+                let Ok((_request_line, _headers, body)) = read_http_request(&mut stream).await
+                else {
+                    continue;
+                };
+                if let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) {
+                    let _ = request_tx.send(request);
+                }
+                let _ = write_http_empty(&mut stream, "202 Accepted").await;
             }
         });
 
@@ -3167,6 +3167,7 @@ llm_mock_clear()
                 "HTTP/1.1 200 OK\r\n",
                 "content-type: text/event-stream\r\n",
                 "cache-control: no-cache\r\n",
+                "connection: close\r\n",
                 "\r\n",
                 "id: prime\r\n",
                 "data: \r\n",
@@ -3177,6 +3178,7 @@ llm_mock_clear()
                 "\r\n"
             );
             stream.write_all(response.as_bytes()).await?;
+            stream.flush().await?;
             return Ok(());
         }
 
@@ -3310,7 +3312,7 @@ llm_mock_clear()
     ) -> Result<(), std::io::Error> {
         let body = serde_json::to_string(&body).unwrap();
         let mut response = format!(
-            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n",
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n",
             body.len()
         );
         for (name, value) in headers {
@@ -3321,12 +3323,15 @@ llm_mock_clear()
         }
         response.push_str("\r\n");
         response.push_str(&body);
-        stream.write_all(response.as_bytes()).await
+        stream.write_all(response.as_bytes()).await?;
+        stream.flush().await
     }
 
     async fn write_http_empty(stream: &mut TcpStream, status: &str) -> Result<(), std::io::Error> {
-        let response = format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\n\r\n");
-        stream.write_all(response.as_bytes()).await
+        let response =
+            format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        stream.write_all(response.as_bytes()).await?;
+        stream.flush().await
     }
 
     #[test]
@@ -3481,6 +3486,7 @@ llm_mock_clear()
 
     #[tokio::test(flavor = "current_thread")]
     async fn roots_list_changed_notification_is_sent_once_per_snapshot() {
+        let _guard = http_mcp_test_guard().await;
         tokio::task::LocalSet::new()
             .run_until(async {
                 let (base_url, mut requests) = spawn_recording_http_mcp_server().await;
