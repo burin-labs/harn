@@ -99,7 +99,7 @@ zeroize = "1"
 flate2 = "1.1.9"
 zstd = "0.13.3"
 brotli = "8.0.2"
-tar = { version = "0.4.45", default-features = false }
+tar = { version = "0.4.46", default-features = false }
 zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 x509-parser = "0.18.1"
 wasmtime = { version = "44", optional = true, default-features = false, features = ["cranelift", "runtime"] }
