@@ -1,8 +1,9 @@
 {
   "rows": [
     {
-      "baseline": {
+      "baseline_bare": {
         "code": "def fib(n: int) -> int:\n    if n == 0:\n        return 0\n    elif n == 1:\n        return 1\n    else:\n        return fib(n-1) + fib(n-2)",
+        "context": "bare",
         "cost_usd": 0.0000234,
         "input_tokens": 69,
         "looks_valid": false,
@@ -10,16 +11,26 @@
         "strategy": "baseline",
         "task_id": "fib"
       },
-      "routed": {
+      "baseline_skill": {
+        "code": "fn fib(n: int) -> int {\n  match n {\n    0 => 0,\n    1 => 1,\n    _ => fib(n - 1) + fib(n - 2),\n  }\n}",
+        "context": "skill",
+        "cost_usd": 0.0001356,
+        "input_tokens": 1200,
+        "looks_valid": false,
+        "output_tokens": 52,
+        "strategy": "baseline",
+        "task_id": "fib"
+      },
+      "routed_bare": {
         "attempts": [
           {
-            "cost_usd": 0.001032,
-            "duration_ms": 677,
+            "cost_usd": 0.001062,
+            "duration_ms": 653,
             "index": 1,
             "input_tokens": 69,
             "label": "cheap",
             "model": "mistralai/devstral-small",
-            "output_tokens": 55,
+            "output_tokens": 57,
             "provider": "openrouter",
             "status": "succeeded",
             "verifier_outcome": "escalate",
@@ -34,7 +45,7 @@
           },
           {
             "cost_usd": 0.002241,
-            "duration_ms": 2472,
+            "duration_ms": 2364,
             "index": 2,
             "input_tokens": 112,
             "label": "frontier",
@@ -54,18 +65,52 @@
           }
         ],
         "code": "fn fib(n: int) -> int {\n    if n < 2 {\n        return n;\n    }\n    let mut a: int = 0;\n    let mut b: int = 1;\n    let mut i: int = 2;\n    while i <= n {\n        let c: int = a + b;\n        a = b;\n        b = c;\n        i = i + 1;\n    }\n    return b;\n}",
-        "cost_usd": 0.0037583999999999994,
+        "context": "bare",
+        "cost_usd": 0.0037589999999999998,
         "escalated": true,
         "final_model": "anthropic/claude-opus-4.7",
         "looks_valid": false,
         "selected": 1,
         "strategy": "routed",
         "task_id": "fib"
+      },
+      "routed_skill": {
+        "attempts": [
+          {
+            "cost_usd": 0.0045449999999999996,
+            "duration_ms": 730,
+            "index": 1,
+            "input_tokens": 1200,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 63,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "accept",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "signal": "accept"
+              }
+            ]
+          }
+        ],
+        "code": "fn fib(n: int) -> int {\n  if n == 0 {\n    return 0\n  } else if n == 1 {\n    return 1\n  } else {\n    return fib(n - 1) + fib(n - 2)\n  }\n}",
+        "context": "skill",
+        "cost_usd": 0.0001389,
+        "escalated": false,
+        "final_model": "mistralai/devstral-small",
+        "looks_valid": true,
+        "selected": 0,
+        "strategy": "routed",
+        "task_id": "fib"
       }
     },
     {
-      "baseline": {
+      "baseline_bare": {
         "code": "let answer: int = 42",
+        "context": "bare",
         "cost_usd": 8e-6,
         "input_tokens": 35,
         "looks_valid": true,
@@ -73,11 +118,21 @@
         "strategy": "baseline",
         "task_id": "trivial_let"
       },
-      "routed": {
+      "baseline_skill": {
+        "code": "let answer: int = 42",
+        "context": "skill",
+        "cost_usd": 0.0001211,
+        "input_tokens": 1166,
+        "looks_valid": true,
+        "output_tokens": 15,
+        "strategy": "baseline",
+        "task_id": "trivial_let"
+      },
+      "routed_bare": {
         "attempts": [
           {
             "cost_usd": 0.00032999999999999994,
-            "duration_ms": 360,
+            "duration_ms": 604,
             "index": 1,
             "input_tokens": 35,
             "label": "cheap",
@@ -96,7 +151,40 @@
           }
         ],
         "code": "let answer: int = 42",
+        "context": "bare",
         "cost_usd": 8e-6,
+        "escalated": false,
+        "final_model": "mistralai/devstral-small",
+        "looks_valid": true,
+        "selected": 0,
+        "strategy": "routed",
+        "task_id": "trivial_let"
+      },
+      "routed_skill": {
+        "attempts": [
+          {
+            "cost_usd": 0.003723,
+            "duration_ms": 845,
+            "index": 1,
+            "input_tokens": 1166,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 15,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "accept",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "signal": "accept"
+              }
+            ]
+          }
+        ],
+        "code": "let answer: int = 42",
+        "context": "skill",
+        "cost_usd": 0.0001211,
         "escalated": false,
         "final_model": "mistralai/devstral-small",
         "looks_valid": true,
@@ -106,22 +194,85 @@
       }
     },
     {
-      "baseline": {
-        "code": "fn sum_list(items: list) -> int {\n    let sum = 0\n    for item in items {\n        sum = sum + item\n    }\n    return sum\n}",
-        "cost_usd": 0.0000205,
-        "input_tokens": 76,
+      "baseline_bare": {
+        "code": "function sum_list(items: list) -> int:\n    total = 0\n    for item in items:\n        total += item\n    return total",
+        "context": "bare",
+        "cost_usd": 0.0000159,
+        "input_tokens": 48,
+        "looks_valid": false,
+        "output_tokens": 37,
+        "strategy": "baseline",
+        "task_id": "sum_list"
+      },
+      "baseline_skill": {
+        "code": "fn sum_list(items: list) -> int {\n  let sum = 0\n  for item in items {\n    sum = sum + item\n  }\n  return sum\n}",
+        "context": "skill",
+        "cost_usd": 0.00013079999999999998,
+        "input_tokens": 1179,
         "looks_valid": true,
         "output_tokens": 43,
         "strategy": "baseline",
         "task_id": "sum_list"
       },
-      "routed": {
+      "routed_bare": {
         "attempts": [
           {
-            "cost_usd": 0.000873,
-            "duration_ms": 741,
+            "cost_usd": 0.000699,
+            "duration_ms": 683,
             "index": 1,
-            "input_tokens": 76,
+            "input_tokens": 48,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 37,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "escalate",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "reason": "typecheck: parse failed: Expected top-level item separator (`;` or newline), got id(sum_list) at 1:10",
+                "signal": "escalate"
+              }
+            ]
+          },
+          {
+            "cost_usd": 0.001056,
+            "duration_ms": 1981,
+            "index": 2,
+            "input_tokens": 72,
+            "label": "frontier",
+            "model": "anthropic/claude-opus-4.7",
+            "output_tokens": 56,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "accept",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "signal": "accept"
+              }
+            ]
+          }
+        ],
+        "code": "fn sum_list(items: list) -> int {\n    let total = 0\n    for item in items {\n        total = total + item\n    }\n    return total\n}",
+        "context": "bare",
+        "cost_usd": 0.0017759,
+        "escalated": true,
+        "final_model": "anthropic/claude-opus-4.7",
+        "looks_valid": true,
+        "selected": 1,
+        "strategy": "routed",
+        "task_id": "sum_list"
+      },
+      "routed_skill": {
+        "attempts": [
+          {
+            "cost_usd": 0.004182,
+            "duration_ms": 584,
+            "index": 1,
+            "input_tokens": 1179,
             "label": "cheap",
             "model": "mistralai/devstral-small",
             "output_tokens": 43,
@@ -138,7 +289,8 @@
           }
         ],
         "code": "fn sum_list(items: list) -> int {\n  let sum = 0\n  for item in items {\n    sum = sum + item\n  }\n  return sum\n}",
-        "cost_usd": 0.0000205,
+        "context": "skill",
+        "cost_usd": 0.00013079999999999998,
         "escalated": false,
         "final_model": "mistralai/devstral-small",
         "looks_valid": true,
@@ -148,8 +300,9 @@
       }
     },
     {
-      "baseline": {
+      "baseline_bare": {
         "code": "pipeline check(task: int) {\n    if (task % 2 == 0) {\n        __io_println(\"even\")\n    } else {\n        __io_println(\"odd\")\n    }\n}",
+        "context": "bare",
         "cost_usd": 0.0000224,
         "input_tokens": 77,
         "looks_valid": false,
@@ -157,11 +310,21 @@
         "strategy": "baseline",
         "task_id": "is_even_pipeline"
       },
-      "routed": {
+      "baseline_skill": {
+        "code": "pipeline check(task: int) {\n  if task % 2 == 0 {\n    __io_println(\"even\")\n  } else {\n    __io_println(\"odd\")\n  }\n}",
+        "context": "skill",
+        "cost_usd": 0.0001349,
+        "input_tokens": 1208,
+        "looks_valid": false,
+        "output_tokens": 47,
+        "strategy": "baseline",
+        "task_id": "is_even_pipeline"
+      },
+      "routed_bare": {
         "attempts": [
           {
             "cost_usd": 0.000966,
-            "duration_ms": 607,
+            "duration_ms": 543,
             "index": 1,
             "input_tokens": 77,
             "label": "cheap",
@@ -181,7 +344,7 @@
           },
           {
             "cost_usd": 0.0013289999999999999,
-            "duration_ms": 1712,
+            "duration_ms": 1870,
             "index": 2,
             "input_tokens": 118,
             "label": "frontier",
@@ -200,8 +363,62 @@
             ]
           }
         ],
-        "code": "pipeline check(task: int) {\n    if (task % 2 == 0) {\n        __io_println(\"even\");\n    } else {\n        __io_println(\"odd\");\n    }\n}",
+        "code": "pipeline check(task: int) {\n    if (task % 2 == 0) {\n        __io_println(\"even\")\n    } else {\n        __io_println(\"odd\")\n    }\n}",
+        "context": "bare",
         "cost_usd": 0.0022374,
+        "escalated": true,
+        "final_model": "anthropic/claude-opus-4.7",
+        "looks_valid": false,
+        "selected": 1,
+        "strategy": "routed",
+        "task_id": "is_even_pipeline"
+      },
+      "routed_skill": {
+        "attempts": [
+          {
+            "cost_usd": 0.0043289999999999995,
+            "duration_ms": 535,
+            "index": 1,
+            "input_tokens": 1208,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 47,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "escalate",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "reason": "typecheck: parse failed: Expected parameter name, got : at 1:20",
+                "signal": "escalate"
+              }
+            ]
+          },
+          {
+            "cost_usd": 0.006915,
+            "duration_ms": 3127,
+            "index": 2,
+            "input_tokens": 1985,
+            "label": "frontier",
+            "model": "anthropic/claude-opus-4.7",
+            "output_tokens": 64,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "escalate",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "reason": "typecheck: parse failed: Expected parameter name, got : at 1:20",
+                "signal": "escalate"
+              }
+            ]
+          }
+        ],
+        "code": "pipeline check(task: int) {\n    if task % 2 == 0 {\n        __io_println(\"even\")\n    } else {\n        __io_println(\"odd\")\n    }\n}",
+        "context": "skill",
+        "cost_usd": 0.0116599,
         "escalated": true,
         "final_model": "anthropic/claude-opus-4.7",
         "looks_valid": false,
@@ -211,8 +428,9 @@
       }
     },
     {
-      "baseline": {
+      "baseline_bare": {
         "code": "fn greet(name: string) {\n  __io_println(\"hello \" + name)\n}",
+        "context": "bare",
         "cost_usd": 0.000013000000000000001,
         "input_tokens": 55,
         "looks_valid": true,
@@ -220,11 +438,21 @@
         "strategy": "baseline",
         "task_id": "fix_typo"
       },
-      "routed": {
+      "baseline_skill": {
+        "code": "fn greet(name: string) {\n  __io_println(\"hello \" + name)\n}",
+        "context": "skill",
+        "cost_usd": 0.0001261,
+        "input_tokens": 1186,
+        "looks_valid": true,
+        "output_tokens": 25,
+        "strategy": "baseline",
+        "task_id": "fix_typo"
+      },
+      "routed_bare": {
         "attempts": [
           {
             "cost_usd": 0.00054,
-            "duration_ms": 370,
+            "duration_ms": 385,
             "index": 1,
             "input_tokens": 55,
             "label": "cheap",
@@ -243,7 +471,40 @@
           }
         ],
         "code": "fn greet(name: string) {\n  __io_println(\"hello \" + name)\n}",
+        "context": "bare",
         "cost_usd": 0.000013000000000000001,
+        "escalated": false,
+        "final_model": "mistralai/devstral-small",
+        "looks_valid": true,
+        "selected": 0,
+        "strategy": "routed",
+        "task_id": "fix_typo"
+      },
+      "routed_skill": {
+        "attempts": [
+          {
+            "cost_usd": 0.003933,
+            "duration_ms": 410,
+            "index": 1,
+            "input_tokens": 1186,
+            "label": "cheap",
+            "model": "mistralai/devstral-small",
+            "output_tokens": 25,
+            "provider": "openrouter",
+            "status": "succeeded",
+            "verifier_outcome": "accept",
+            "verifier_signals": [
+              {
+                "kind": "typecheck",
+                "name": "typecheck",
+                "signal": "accept"
+              }
+            ]
+          }
+        ],
+        "code": "fn greet(name: string) {\n  __io_println(\"hello \" + name)\n}",
+        "context": "skill",
+        "cost_usd": 0.0001261,
         "escalated": false,
         "final_model": "mistralai/devstral-small",
         "looks_valid": true,
@@ -254,12 +515,23 @@
     }
   ],
   "summary": {
-    "baseline_total_cost_usd": 0.00008730000000000001,
-    "baseline_valid": 3,
-    "escalations": 2,
+    "baseline_bare": {
+      "cost_usd": 0.0000827,
+      "valid": 2
+    },
+    "baseline_skill": {
+      "cost_usd": 0.0006485,
+      "valid": 3
+    },
     "n_tasks": 5,
-    "routed_total_cost_usd": 0.0060373,
-    "routed_valid": 3
+    "routed_bare": {
+      "cost_usd": 0.0077933,
+      "valid": 3
+    },
+    "routed_skill": {
+      "cost_usd": 0.012176800000000002,
+      "valid": 4
+    }
   }
 }
 
