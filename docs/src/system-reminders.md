@@ -273,6 +273,17 @@ Host-specific extension fields belong under `_meta`. Invalid reminder
 payloads fail with `HARN-RMD-002`; unknown top-level reminder options
 fail with `HARN-RMD-001`.
 
+Hosts can inspect the bridge queue with `session/pending_injections`. The
+response is `{pendingCount, injections}` in FIFO order and includes both
+pending user-message injects and pending reminders. Reminder rows carry the
+stable `reminderId`, `mode`, `body`, `tags`, `dedupeKey`, `ttlTurns`,
+`roleHint`, and `source` fields.
+
+Hosts can revoke a queued reminder with `session/revoke_reminder` before a
+checkpoint drains it. The response returns `status: "revoked"` or
+`"already_revoked"` for idempotent repeats; races after delivery return a
+structured `already_delivered` error.
+
 ## Canonical stdlib providers
 
 Canonical providers are enabled by default inside `agent_loop(...)`.

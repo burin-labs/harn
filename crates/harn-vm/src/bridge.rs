@@ -260,6 +260,14 @@ impl QueuedUserMessageMode {
             _ => Self::AuditOnly,
         }
     }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::InterruptImmediate => "interrupt_immediate",
+            Self::FinishStep => "finish_step",
+            Self::AuditOnly => "audit_only",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -287,6 +295,8 @@ struct QueuedTranscriptInjections {
     queue: VecDeque<QueuedTranscriptInjection>,
     revoked_user_message_ids: HashSet<String>,
     delivered_user_message_ids: HashSet<String>,
+    revoked_reminder_ids: HashSet<String>,
+    delivered_reminder_ids: HashSet<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -309,6 +319,44 @@ impl QueuedTranscriptInjection {
             Self::Reminder(reminder) => reminder.mode,
         }
     }
+
+    fn pending_json(&self, position: usize) -> serde_json::Value {
+        match self {
+            Self::User(message) => serde_json::json!({
+                "kind": "user",
+                "id": message.message_id,
+                "messageId": message.message_id,
+                "mode": message.mode.as_str(),
+                "position": position,
+                "content": message.transcript_content,
+            }),
+            Self::Reminder(reminder) => serde_json::json!({
+                "kind": "reminder",
+                "id": reminder.reminder.id,
+                "reminderId": reminder.reminder.id,
+                "mode": reminder.mode.as_str(),
+                "position": position,
+                "body": reminder.reminder.body,
+                "tags": reminder.reminder.tags,
+                "dedupeKey": reminder.reminder.dedupe_key,
+                "ttlTurns": reminder.reminder.ttl_turns,
+                "preserveOnCompact": reminder.reminder.preserve_on_compact,
+                "propagate": reminder.reminder.propagate.as_str(),
+                "roleHint": reminder.reminder.role_hint.as_str(),
+                "source": reminder.reminder.source.as_str(),
+                "firedAtTurn": reminder.reminder.fired_at_turn,
+                "originatingAgentId": reminder.reminder.originating_agent_id,
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingReminderMutationResult {
+    Mutated,
+    AlreadyRevoked,
+    AlreadyDelivered,
+    UnknownReminderId,
 }
 
 fn new_inject_message_id() -> String {
@@ -371,6 +419,37 @@ impl HostBridgeInjectionState {
         }
     }
 
+    pub async fn revoke_pending_reminder(
+        &self,
+        reminder_id: &str,
+    ) -> PendingReminderMutationResult {
+        let mut state = self.inner.lock().await;
+        let mut retained = VecDeque::new();
+        let mut revoked = false;
+        while let Some(injection) = state.queue.pop_front() {
+            match &injection {
+                QueuedTranscriptInjection::Reminder(reminder)
+                    if reminder.reminder.id == reminder_id =>
+                {
+                    revoked = true;
+                }
+                _ => retained.push_back(injection),
+            }
+        }
+        state.queue = retained;
+        if revoked {
+            state.revoked_reminder_ids.insert(reminder_id.to_string());
+            return PendingReminderMutationResult::Mutated;
+        }
+        if state.revoked_reminder_ids.contains(reminder_id) {
+            PendingReminderMutationResult::AlreadyRevoked
+        } else if state.delivered_reminder_ids.contains(reminder_id) {
+            PendingReminderMutationResult::AlreadyDelivered
+        } else {
+            PendingReminderMutationResult::UnknownReminderId
+        }
+    }
+
     pub async fn replace_pending_user_message(
         &self,
         message_id: &str,
@@ -402,6 +481,20 @@ impl HostBridgeInjectionState {
             .await
             .queue
             .push_back(QueuedTranscriptInjection::Reminder(reminder));
+    }
+
+    pub async fn pending_injections_json(&self) -> serde_json::Value {
+        let state = self.inner.lock().await;
+        let injections = state
+            .queue
+            .iter()
+            .enumerate()
+            .map(|(position, injection)| injection.pending_json(position))
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "pendingCount": injections.len(),
+            "injections": injections,
+        })
     }
 }
 
@@ -1129,6 +1222,21 @@ impl HostBridge {
             .await
     }
 
+    pub async fn revoke_pending_reminder(
+        &self,
+        reminder_id: &str,
+    ) -> PendingReminderMutationResult {
+        self.queued_transcript_injections
+            .revoke_pending_reminder(reminder_id)
+            .await
+    }
+
+    pub async fn pending_injections_json(&self) -> serde_json::Value {
+        self.queued_transcript_injections
+            .pending_injections_json()
+            .await
+    }
+
     pub async fn replace_pending_user_message(
         &self,
         message_id: &str,
@@ -1197,10 +1305,17 @@ impl HostBridge {
                 QueuedUserMessageMode::AuditOnly => include_audit_only,
             };
             if should_take {
-                if let QueuedTranscriptInjection::User(message) = &injection {
-                    state
-                        .delivered_user_message_ids
-                        .insert(message.message_id.clone());
+                match &injection {
+                    QueuedTranscriptInjection::User(message) => {
+                        state
+                            .delivered_user_message_ids
+                            .insert(message.message_id.clone());
+                    }
+                    QueuedTranscriptInjection::Reminder(reminder) => {
+                        state
+                            .delivered_reminder_ids
+                            .insert(reminder.reminder.id.clone());
+                    }
                 }
                 selected.push(injection);
             } else {
@@ -1886,6 +2001,109 @@ mod tests {
             assert_eq!(
                 reminder.reminder.source,
                 crate::llm::helpers::ReminderSource::Bridge
+            );
+        });
+    }
+
+    #[test]
+    fn pending_injections_list_user_messages_and_reminders_in_fifo_order() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let bridge = test_bridge();
+            let message_id = bridge
+                .push_pending_user_message(
+                    "human follow-up".to_string(),
+                    serde_json::json!([{"type": "text", "text": "human follow-up"}]),
+                    "finish_step",
+                )
+                .await;
+            let reminder_id = bridge
+                .push_queued_session_remind_from_params(&serde_json::json!({
+                    "id": "rem-test",
+                    "body": "Host reminder",
+                    "tags": ["host"],
+                    "dedupe_key": "host-reminder",
+                    "ttl_turns": 2,
+                    "mode": "interrupt_immediate",
+                }))
+                .await
+                .expect("valid session/remind payload");
+
+            let pending = bridge.pending_injections_json().await;
+            assert_eq!(pending["pendingCount"], 2);
+            assert_eq!(pending["injections"][0]["kind"], "user");
+            assert_eq!(pending["injections"][0]["id"], message_id);
+            assert_eq!(pending["injections"][0]["messageId"], message_id);
+            assert_eq!(pending["injections"][0]["mode"], "finish_step");
+            assert_eq!(pending["injections"][0]["position"], 0);
+            assert_eq!(pending["injections"][1]["kind"], "reminder");
+            assert_eq!(pending["injections"][1]["id"], reminder_id);
+            assert_eq!(pending["injections"][1]["reminderId"], "rem-test");
+            assert_eq!(pending["injections"][1]["mode"], "interrupt_immediate");
+            assert_eq!(pending["injections"][1]["body"], "Host reminder");
+            assert_eq!(pending["injections"][1]["dedupeKey"], "host-reminder");
+            assert_eq!(pending["injections"][1]["ttlTurns"], 2);
+            assert_eq!(pending["injections"][1]["position"], 1);
+        });
+    }
+
+    #[test]
+    fn pending_reminders_support_revoke_and_delivery_states() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let bridge = test_bridge();
+            let revoked_id = bridge
+                .push_queued_session_remind_from_params(&serde_json::json!({
+                    "id": "rem-revoke",
+                    "body": "remove me",
+                    "mode": "finish_step",
+                }))
+                .await
+                .expect("valid session/remind payload");
+            let delivered_id = bridge
+                .push_queued_session_remind_from_params(&serde_json::json!({
+                    "id": "rem-deliver",
+                    "body": "deliver me",
+                    "mode": "finish_step",
+                }))
+                .await
+                .expect("valid session/remind payload");
+
+            assert_eq!(
+                bridge.revoke_pending_reminder(&revoked_id).await,
+                PendingReminderMutationResult::Mutated
+            );
+            assert_eq!(
+                bridge.revoke_pending_reminder(&revoked_id).await,
+                PendingReminderMutationResult::AlreadyRevoked
+            );
+
+            let pending = bridge.pending_injections_json().await;
+            assert_eq!(pending["pendingCount"], 1);
+            assert_eq!(pending["injections"][0]["reminderId"], delivered_id);
+
+            let delivered = bridge
+                .take_queued_transcript_injections_for(DeliveryCheckpoint::AfterCurrentOperation)
+                .await;
+            assert_eq!(delivered.len(), 1);
+            let QueuedTranscriptInjection::Reminder(reminder) = &delivered[0] else {
+                panic!("expected delivered reminder");
+            };
+            assert_eq!(reminder.reminder.id, delivered_id);
+
+            assert_eq!(
+                bridge.revoke_pending_reminder(&delivered_id).await,
+                PendingReminderMutationResult::AlreadyDelivered
+            );
+            assert_eq!(
+                bridge.revoke_pending_reminder("missing").await,
+                PendingReminderMutationResult::UnknownReminderId
             );
         });
     }

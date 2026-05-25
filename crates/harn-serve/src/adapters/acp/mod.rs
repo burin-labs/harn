@@ -2001,6 +2001,31 @@ impl AcpServer {
         Some(message_id)
     }
 
+    fn pending_reminder_id_param<'a>(
+        &self,
+        id: &serde_json::Value,
+        params: &'a serde_json::Value,
+        method: &str,
+    ) -> Option<&'a str> {
+        let Some(reminder_id) = params
+            .get("reminderId")
+            .or_else(|| params.get("reminder_id"))
+            .and_then(|v| v.as_str())
+        else {
+            self.send_error(id, -32602, &format!("{method} requires reminderId"));
+            return None;
+        };
+        if reminder_id.trim().is_empty() {
+            self.send_error(
+                id,
+                -32602,
+                &format!("{method} requires non-empty reminderId"),
+            );
+            return None;
+        }
+        Some(reminder_id)
+    }
+
     fn send_pending_inject_error(
         &self,
         id: &serde_json::Value,
@@ -2034,6 +2059,24 @@ impl AcpServer {
             }
         }
         self.send_error_with_data(id, -32602, message, serde_json::Value::Object(data));
+    }
+
+    fn send_pending_reminder_error(
+        &self,
+        id: &serde_json::Value,
+        reminder_id: &str,
+        reason: &str,
+        message: &str,
+    ) {
+        self.send_error_with_data(
+            id,
+            -32602,
+            message,
+            serde_json::json!({
+                "reason": reason,
+                "reminderId": reminder_id,
+            }),
+        );
     }
 
     async fn handle_session_remind(&self, id: &serde_json::Value, params: &serde_json::Value) {
@@ -2073,6 +2116,66 @@ impl AcpServer {
                 if !id.is_null() {
                     self.send_error(id, -32602, &format!("session/remind: {error}"));
                 }
+            }
+        }
+    }
+
+    async fn handle_session_pending_injections(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(inject_state) =
+            self.session_inject_state(id, params, "session/pending_injections", false)
+        else {
+            return;
+        };
+        self.send_response(id, inject_state.pending_injections_json().await);
+    }
+
+    async fn handle_session_revoke_reminder(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(inject_state) =
+            self.session_inject_state(id, params, "session/revoke_reminder", false)
+        else {
+            return;
+        };
+        let Some(reminder_id) =
+            self.pending_reminder_id_param(id, params, "session/revoke_reminder")
+        else {
+            return;
+        };
+        match inject_state.revoke_pending_reminder(reminder_id).await {
+            harn_vm::bridge::PendingReminderMutationResult::Mutated => {
+                self.send_response(
+                    id,
+                    serde_json::json!({"reminderId": reminder_id, "status": "revoked"}),
+                );
+            }
+            harn_vm::bridge::PendingReminderMutationResult::AlreadyRevoked => {
+                self.send_response(
+                    id,
+                    serde_json::json!({"reminderId": reminder_id, "status": "already_revoked"}),
+                );
+            }
+            harn_vm::bridge::PendingReminderMutationResult::AlreadyDelivered => {
+                self.send_pending_reminder_error(
+                    id,
+                    reminder_id,
+                    "already_delivered",
+                    "pending reminder already delivered",
+                );
+            }
+            harn_vm::bridge::PendingReminderMutationResult::UnknownReminderId => {
+                self.send_pending_reminder_error(
+                    id,
+                    reminder_id,
+                    "unknown_reminder_id",
+                    "unknown pending reminderId",
+                );
             }
         }
     }
@@ -3085,6 +3188,18 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_remind(&id, &params).await;
+            }
+            "session/pending_injections" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_pending_injections(&id, &params).await;
+            }
+            "session/revoke_reminder" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_revoke_reminder(&id, &params).await;
             }
             "agent/resume" => {
                 if self.reject_unauthenticated(&id) {

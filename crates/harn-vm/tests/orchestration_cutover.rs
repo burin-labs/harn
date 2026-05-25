@@ -48,6 +48,8 @@ fn stdlib_facades_and_host_primitives_are_discoverable() {
         "__host_agent_session_totals",
         "__host_agent_session_inject_feedback",
         "__host_agent_session_post_event",
+        "__host_agent_session_pending_injections",
+        "__host_agent_session_revoke_reminder",
         "__host_agent_session_set_active_skills",
         "__host_agent_session_active_skills",
         "__host_agent_session_compact_if_needed",

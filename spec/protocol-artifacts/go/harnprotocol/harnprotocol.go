@@ -60,6 +60,8 @@ var ACPAgentMethods = []ACPAgentMethod{
 	"session/revoke_inject",
 	"session/truncate",
 	"session/remind",
+	"session/pending_injections",
+	"session/revoke_reminder",
 	"session/cancel_tool_call",
 	"session/close",
 	"session/stop",

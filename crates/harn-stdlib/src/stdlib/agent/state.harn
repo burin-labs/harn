@@ -181,6 +181,42 @@ pub fn agent_session_push_bridge_injection(session_id, options) {
 }
 
 /**
+ * agent_session_pending_injections.
+ *
+ * Return a FIFO snapshot of queued bridge injections for `session_id`.
+ * The result shape is `{pendingCount, injections}` where each row has
+ * `kind: "user"` or `kind: "reminder"`, stable `id`, `mode`, and
+ * kind-specific fields such as `messageId`, `reminderId`, or `body`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_session_pending_injections(session_id)
+ */
+pub fn agent_session_pending_injections(session_id) {
+  return __host_agent_session_pending_injections(session_id)
+}
+
+/**
+ * agent_session_revoke_reminder.
+ *
+ * Revoke a pending bridge reminder before it is drained by an agent
+ * checkpoint. Returns `{status, reminderId}` where `status` is one of
+ * `"revoked"`, `"already_revoked"`, `"already_delivered"`, or
+ * `"unknown_reminder_id"`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_session_revoke_reminder(session_id, reminder_id)
+ */
+pub fn agent_session_revoke_reminder(session_id, reminder_id) {
+  return __host_agent_session_revoke_reminder(session_id, reminder_id)
+}
+
+/**
  * agent_session_totals.
  *
  * @effects: [host]

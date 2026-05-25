@@ -185,6 +185,13 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
                     "replace": true,
                 },
             },
+            "remind": {
+                "modes": ["interrupt_immediate", "finish_step", "audit_only"],
+                "pending": {
+                    "list": true,
+                    "revoke": true,
+                },
+            },
         },
         "promptCapabilities": acp_prompt_capabilities(),
         "mcpCapabilities": {

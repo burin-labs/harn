@@ -137,6 +137,8 @@ ACP_AGENT_METHODS: tuple = (
     "session/revoke_inject",
     "session/truncate",
     "session/remind",
+    "session/pending_injections",
+    "session/revoke_reminder",
     "session/cancel_tool_call",
     "session/close",
     "session/stop",
@@ -408,6 +410,8 @@ class ACPAgentMethod(str, Enum):
     SESSION_REVOKE_INJECT = "session/revoke_inject"
     SESSION_TRUNCATE = "session/truncate"
     SESSION_REMIND = "session/remind"
+    SESSION_PENDING_INJECTIONS = "session/pending_injections"
+    SESSION_REVOKE_REMINDER = "session/revoke_reminder"
     SESSION_CANCEL_TOOL_CALL = "session/cancel_tool_call"
     SESSION_CLOSE = "session/close"
     SESSION_STOP = "session/stop"

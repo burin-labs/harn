@@ -566,6 +566,9 @@ The ACP server supports these JSON-RPC methods:
 | `session/inject` | Accept a pending user message for a running turn and return its `messageId` |
 | `session/revoke_inject` | Revoke a pending injected user message before delivery |
 | `session/replace_inject` | Replace pending injected content without changing its queue position |
+| `session/remind` | Queue a typed system reminder for the active agent loop |
+| `session/pending_injections` | Inspect pending bridge user-message and reminder injections |
+| `session/revoke_reminder` | Revoke a pending bridge reminder before delivery |
 | `session/cancel` | Cancel the currently running prompt |
 | `session/cancel_tool_call` | Cancel one in-flight tool call without tearing down the session |
 | `session/truncate` | Truncate the session transcript to a requested prefix |
@@ -591,7 +594,10 @@ upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`,
 `session.inject`, and the canonical `sessionCapabilities.close` and
 `sessionCapabilities.list` flags are advertised in their upstream locations.
 Harn advertises `session.inject.modes = ["queue", "steer"]` and
-`session.inject.pending.replace = true`. Harn-only methods such as
+`session.inject.pending.replace = true`. Harn also advertises
+`session.remind.modes = ["interrupt_immediate", "finish_step", "audit_only"]`
+and `session.remind.pending = {list: true, revoke: true}` for host-side
+system-reminder queue controls. Harn-only methods such as
 `session/fork` remain documented extensions instead of being inserted into
 upstream `sessionCapabilities`.
 
@@ -861,6 +867,8 @@ Relevant methods and notifications:
 - `session/revoke_inject`
 - `session/replace_inject`
 - `session/remind`
+- `session/pending_injections`
+- `session/revoke_reminder`
 - `session/update` with `worker_update` content for delegated worker lifecycle events
 
 Pending inject payload shape:
@@ -904,12 +912,13 @@ Reminder payload shape:
 }
 ```
 
-Supported `mode` values:
+Reminder `mode` values:
 
-- `queue`
-- `steer`
+- `interrupt_immediate`
+- `finish_step`
+- `audit_only`
 
-Runtime behavior:
+Pending inject runtime behavior:
 
 - `steer`: deliver after the current operation finishes.
 - `queue`: deliver at the end of the current interaction.
@@ -918,9 +927,26 @@ Runtime behavior:
   revoke them before cancelling.
 - Pending, revoked, and pre-replacement content never enter transcript replay.
   Replay shows only delivered `user_message` updates.
+
+Reminder runtime behavior:
+
 - `session/remind`: queues a typed system reminder instead of a user-role
   message. Malformed reminder payloads are rejected with `HARN-RMD-002`.
   `session/inject` never creates reminders.
+- `interrupt_immediate`: drain at the next eligible bridge checkpoint,
+  including `pre_tool_dispatch` when the reminder arrives between LLM output
+  and tool dispatch.
+- `finish_step`: drain at the next iteration boundary so the model sees the
+  reminder on the next prompt build.
+- `audit_only`: drain at `loop_exit` for transcript audit only; no later model
+  call sees it.
+- `session/pending_injections`: returns `{pendingCount, injections}` for the
+  bridge queue. Rows are FIFO ordered and include `kind: "user"` or
+  `kind: "reminder"` plus stable `messageId` / `reminderId` identifiers.
+- `session/revoke_reminder`: removes a queued reminder by `reminderId` before
+  a checkpoint drains it. Revoke is idempotent for known revoked ids; races
+  after delivery return `already_delivered`, and unknown ids return
+  `unknown_reminder_id`.
 - `session/cancel_tool_call`: abort one in-flight tool call (e.g. user
   clicked stop on a runaway `git push --force`) without closing the
   session. Params: `sessionId`, `toolCallId`, optional `reason`
