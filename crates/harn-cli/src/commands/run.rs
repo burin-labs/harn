@@ -51,6 +51,13 @@ pub struct RunRusageOptions {
     pub sink: RunJsonSink,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RunAuxOptions {
+    pub summary: Option<RunSummaryOptions>,
+    pub phase: Option<RunPhaseOptions>,
+    pub rusage: Option<RunRusageOptions>,
+}
+
 #[derive(Clone, Debug)]
 pub struct RunJsonSink {
     pub target: RunJsonSinkTarget,
@@ -111,6 +118,14 @@ pub(crate) fn run_summary_options_from_args(
     args.emit_summary_json.then(|| RunSummaryOptions {
         sink: build_run_json_sink(args.summary_file.clone(), args.summary_fd, "--summary-fd"),
     })
+}
+
+pub(crate) fn run_aux_options_from_args(args: &crate::cli::RunArgs) -> RunAuxOptions {
+    RunAuxOptions {
+        summary: run_summary_options_from_args(args),
+        phase: run_phase_options_from_args(args),
+        rusage: run_rusage_options_from_args(args),
+    }
 }
 
 pub(crate) fn run_phase_options_from_args(args: &crate::cli::RunArgs) -> Option<RunPhaseOptions> {
@@ -608,9 +623,7 @@ struct ExecuteRunInputs<'a> {
     sandbox: RunSandboxOptions,
     interrupt_tokens: Option<RunInterruptTokens>,
     json: Option<(RunJsonOptions, Box<dyn io::Write + Send>)>,
-    summary: Option<RunSummaryOptions>,
-    phase: Option<RunPhaseOptions>,
-    rusage: Option<RunRusageOptions>,
+    aux: RunAuxOptions,
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
 }
@@ -689,9 +702,7 @@ pub(crate) async fn run_file(
         profile,
         RunSandboxOptions::default(),
         None,
-        None,
-        None,
-        None,
+        RunAuxOptions::default(),
         HarnpackRunOptions::default(),
     )
     .await;
@@ -722,9 +733,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     profile: RunProfileOptions,
     sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
-    summary: Option<RunSummaryOptions>,
-    phase: Option<RunPhaseOptions>,
-    rusage: Option<RunRusageOptions>,
+    aux: RunAuxOptions,
     harnpack: HarnpackRunOptions,
 ) {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
@@ -745,9 +754,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         sandbox,
         interrupt_tokens: Some(interrupt_tokens.clone()),
         json: json_with_stdout,
-        summary,
-        phase,
-        rusage,
+        aux,
         timing: None,
         harnpack,
     })
@@ -783,9 +790,7 @@ pub(crate) async fn run_resume_with_skill_dirs(
     profile: RunProfileOptions,
     sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
-    summary: Option<RunSummaryOptions>,
-    phase: Option<RunPhaseOptions>,
-    rusage: Option<RunRusageOptions>,
+    aux: RunAuxOptions,
 ) {
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
 
@@ -823,9 +828,7 @@ pipeline main(task) {
         profile,
         sandbox,
         json,
-        summary,
-        phase,
-        rusage,
+        aux,
         HarnpackRunOptions::default(),
     )
     .await;
@@ -1169,9 +1172,7 @@ async fn execute_run_with_harnpack_and_sandbox_options(
         sandbox,
         interrupt_tokens: None,
         json: None,
-        summary: None,
-        phase: None,
-        rusage: None,
+        aux: RunAuxOptions::default(),
         timing: None,
         harnpack,
     })
@@ -1208,9 +1209,7 @@ pub async fn execute_run_json(
         sandbox: RunSandboxOptions::default(),
         interrupt_tokens: None,
         json: Some((options, out)),
-        summary: None,
-        phase: None,
-        rusage: None,
+        aux: RunAuxOptions::default(),
         timing: None,
         harnpack: HarnpackRunOptions::default(),
     })
@@ -1238,9 +1237,7 @@ pub(crate) async fn execute_run_with_timing(
         sandbox,
         interrupt_tokens: None,
         json: None,
-        summary: None,
-        phase: None,
-        rusage: None,
+        aux: RunAuxOptions::default(),
         timing,
         harnpack: HarnpackRunOptions::default(),
     })
@@ -1263,12 +1260,15 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         sandbox,
         interrupt_tokens,
         json,
-        summary,
-        phase,
-        rusage,
+        aux,
         timing,
         harnpack,
     } = inputs;
+    let RunAuxOptions {
+        summary,
+        phase,
+        rusage,
+    } = aux;
     let run_started = Instant::now();
     let cpu_started_ms = rusage.as_ref().map(|_| time::cpu_ms());
     let mut owned_timing = if timing.is_none() && (phase.is_some() || rusage.is_some()) {
