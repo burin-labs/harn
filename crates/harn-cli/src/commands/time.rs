@@ -216,54 +216,8 @@ pub(crate) async fn run(args: TimeRunArgs) {
         })
         .collect();
 
-    let main_events = spans.len() as u64;
-
     let cache_hit = timing.cache_hit;
-    let phases = vec![
-        PhaseRecord {
-            name: "parse".into(),
-            duration_ms: timing.parse.as_millis() as u64,
-            input_bytes: if cache_hit {
-                None
-            } else {
-                Some(timing.input_bytes)
-            },
-            cache: None,
-            events: None,
-        },
-        PhaseRecord {
-            name: "typecheck".into(),
-            duration_ms: timing.typecheck.as_millis() as u64,
-            input_bytes: None,
-            cache: None,
-            events: None,
-        },
-        PhaseRecord {
-            name: "bytecode_compile".into(),
-            duration_ms: timing.bytecode_compile.as_millis() as u64,
-            input_bytes: None,
-            cache: Some(if cache_hit {
-                "hit".into()
-            } else {
-                "miss".into()
-            }),
-            events: None,
-        },
-        PhaseRecord {
-            name: "run_setup".into(),
-            duration_ms: timing.run_setup.as_millis() as u64,
-            input_bytes: None,
-            cache: None,
-            events: None,
-        },
-        PhaseRecord {
-            name: "run_main".into(),
-            duration_ms: timing.run_main.as_millis() as u64,
-            input_bytes: None,
-            cache: None,
-            events: Some(main_events),
-        },
-    ];
+    let phases = build_phase_records(&timing, spans.len() as u64);
 
     let report = TimingReport {
         command: "run".into(),
@@ -363,7 +317,7 @@ fn format_ms(ms: u64) -> String {
 /// milliseconds. Falls back to `0` on platforms where `getrusage` is
 /// unavailable so the field is always present in the envelope.
 #[cfg(unix)]
-fn cpu_ms() -> u64 {
+pub(crate) fn cpu_ms() -> u64 {
     use std::mem::MaybeUninit;
     // SAFETY: `getrusage` writes a fully-initialized `rusage` on success;
     // we treat the value as live only after the syscall reports OK.
@@ -380,7 +334,7 @@ fn cpu_ms() -> u64 {
 }
 
 #[cfg(not(unix))]
-fn cpu_ms() -> u64 {
+pub(crate) fn cpu_ms() -> u64 {
     0
 }
 
@@ -393,6 +347,55 @@ fn duration_ms(secs: libc::time_t, micros: libc::suseconds_t) -> u64 {
     let secs_ms = i128::from(secs).saturating_mul(1000);
     let micros_ms = i128::from(micros) / 1000;
     secs_ms.saturating_add(micros_ms).max(0) as u64
+}
+
+pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<PhaseRecord> {
+    let cache_hit = timing.cache_hit;
+    vec![
+        PhaseRecord {
+            name: "parse".into(),
+            duration_ms: timing.parse.as_millis() as u64,
+            input_bytes: if cache_hit {
+                None
+            } else {
+                Some(timing.input_bytes)
+            },
+            cache: None,
+            events: None,
+        },
+        PhaseRecord {
+            name: "typecheck".into(),
+            duration_ms: timing.typecheck.as_millis() as u64,
+            input_bytes: None,
+            cache: None,
+            events: None,
+        },
+        PhaseRecord {
+            name: "bytecode_compile".into(),
+            duration_ms: timing.bytecode_compile.as_millis() as u64,
+            input_bytes: None,
+            cache: Some(if cache_hit {
+                "hit".into()
+            } else {
+                "miss".into()
+            }),
+            events: None,
+        },
+        PhaseRecord {
+            name: "run_setup".into(),
+            duration_ms: timing.run_setup.as_millis() as u64,
+            input_bytes: None,
+            cache: None,
+            events: None,
+        },
+        PhaseRecord {
+            name: "run_main".into(),
+            duration_ms: timing.run_main.as_millis() as u64,
+            input_bytes: None,
+            cache: None,
+            events: Some(main_events),
+        },
+    ]
 }
 
 #[cfg(test)]

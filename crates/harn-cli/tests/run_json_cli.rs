@@ -6,7 +6,10 @@
 
 use std::process::Command;
 
-use harn_cli::commands::run::{json_events::RUN_JSON_SCHEMA_VERSION, RUN_SUMMARY_SCHEMA_VERSION};
+use harn_cli::commands::run::{
+    json_events::RUN_JSON_SCHEMA_VERSION, RUN_PHASE_SCHEMA_VERSION, RUN_RUSAGE_SCHEMA_VERSION,
+    RUN_SUMMARY_SCHEMA_VERSION,
+};
 use harn_cli::tests::common::json_envelope::assert_envelope;
 use serde_json::Value;
 
@@ -40,6 +43,17 @@ fn last_json_line(bytes: &[u8]) -> Value {
         .unwrap_or_else(|| panic!("expected at least one stderr line, got: {text:?}"));
     serde_json::from_str(line).unwrap_or_else(|error| {
         panic!("last stderr line is not valid JSON ({error}): {line}\nfull stderr:\n{text}")
+    })
+}
+
+fn read_json_file(path: &std::path::Path) -> Value {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+    serde_json::from_str(text.trim()).unwrap_or_else(|error| {
+        panic!(
+            "file is not valid JSON ({error}): {}\n{text}",
+            path.display()
+        )
     })
 }
 
@@ -425,6 +439,215 @@ pipeline main(_) {
     );
     assert_eq!(summary["event"], "run_summary");
     assert_eq!(summary["exit_code"].as_i64(), Some(1));
+}
+
+#[test]
+fn run_emit_phase_json_defaults_to_terminal_stderr_with_fixed_phase_shape() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let cache_dir = tempfile::TempDir::new().expect("cache dir");
+    let script = write_script(
+        tmp.path(),
+        "phase_stderr.harn",
+        r#"
+pipeline main(_) {
+    __io_println("phase")
+}
+"#,
+    );
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--emit-phase-json")
+        .arg(&script)
+        .env("HARN_CACHE_DIR", cache_dir.path())
+        .env("HARN_BYTECODE_CACHE", "1")
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn harn run --emit-phase-json");
+
+    assert!(
+        output.status.success(),
+        "exit={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "phase\n");
+
+    let phase = last_json_line(&output.stderr);
+    assert_eq!(
+        phase["schema_version"].as_u64(),
+        Some(u64::from(RUN_PHASE_SCHEMA_VERSION))
+    );
+    assert_eq!(phase["event"], "run_phase");
+    let phases = phase["phases"].as_array().expect("phase rows");
+    assert_eq!(phases.len(), 5, "{phase}");
+    let names: Vec<&str> = phases
+        .iter()
+        .map(|row| row["name"].as_str().expect("phase name"))
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "parse",
+            "typecheck",
+            "bytecode_compile",
+            "run_setup",
+            "run_main"
+        ]
+    );
+    assert_eq!(phases[2]["cache"], "miss");
+    assert!(phases[4]["events"].as_u64().is_some(), "{phase}");
+}
+
+#[test]
+fn run_emit_phase_and_rusage_file_sinks_keep_run_json_stdout_clean() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let cache_dir = tempfile::TempDir::new().expect("cache dir");
+    let script = write_script(
+        tmp.path(),
+        "phase_file.harn",
+        r#"
+pipeline main(_) {
+    __io_println("hello")
+}
+"#,
+    );
+    let phase_path = tmp.path().join("run-phase.jsonl");
+    let rusage_path = tmp.path().join("run-rusage.jsonl");
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--json")
+        .arg("--emit-phase-json")
+        .arg("--phase-file")
+        .arg(&phase_path)
+        .arg("--emit-rusage-json")
+        .arg("--rusage-file")
+        .arg(&rusage_path)
+        .arg(&script)
+        .env("HARN_CACHE_DIR", cache_dir.path())
+        .env("HARN_BYTECODE_CACHE", "1")
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn harn run --json --emit-phase-json --emit-rusage-json");
+
+    assert!(
+        output.status.success(),
+        "exit={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "file sinks should keep stderr clean: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let lines = parse_ndjson(&output.stdout);
+    assert_eq!(lines.last().unwrap()["data"]["event_type"], "result");
+    assert!(
+        lines.iter().all(|line| {
+            !matches!(
+                line["data"]["event_type"].as_str(),
+                Some("run_phase" | "run_rusage")
+            )
+        }),
+        "aux JSON must not be mixed into --json stdout: {lines:?}"
+    );
+
+    let phase = read_json_file(&phase_path);
+    assert_eq!(phase["event"], "run_phase");
+    assert_eq!(
+        phase["schema_version"].as_u64(),
+        Some(u64::from(RUN_PHASE_SCHEMA_VERSION))
+    );
+    assert_eq!(phase["phases"].as_array().expect("phases").len(), 5);
+
+    let rusage = read_json_file(&rusage_path);
+    assert_eq!(rusage["event"], "run_rusage");
+    assert_eq!(
+        rusage["schema_version"].as_u64(),
+        Some(u64::from(RUN_RUSAGE_SCHEMA_VERSION))
+    );
+    assert!(rusage["cpu_ms"].as_u64().is_some(), "{rusage}");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_emit_rusage_json_fd_sink_writes_inherited_descriptor() {
+    use std::os::fd::AsRawFd;
+
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let script = write_script(
+        tmp.path(),
+        "rusage_fd.harn",
+        r#"
+pipeline main(_) {
+    __io_println("fd")
+}
+"#,
+    );
+    let rusage_path = tmp.path().join("rusage-fd.jsonl");
+    let rusage_file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(true)
+        .open(&rusage_path)
+        .expect("open rusage fd");
+    let fd = rusage_file.as_raw_fd();
+
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    assert!(
+        flags >= 0,
+        "fcntl(F_GETFD): {}",
+        std::io::Error::last_os_error()
+    );
+    let clear_result = unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) };
+    assert!(
+        clear_result >= 0,
+        "fcntl(F_SETFD clear CLOEXEC): {}",
+        std::io::Error::last_os_error()
+    );
+
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--emit-rusage-json")
+        .arg("--rusage-fd")
+        .arg(fd.to_string())
+        .arg(&script)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn harn run --rusage-fd");
+
+    let restore_result = unsafe { libc::fcntl(fd, libc::F_SETFD, flags) };
+    assert!(
+        restore_result >= 0,
+        "fcntl(F_SETFD restore): {}",
+        std::io::Error::last_os_error()
+    );
+    drop(rusage_file);
+
+    assert!(
+        output.status.success(),
+        "exit={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "fd\n");
+    assert!(
+        output.stderr.is_empty(),
+        "--rusage-fd should keep stderr clean: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let rusage = read_json_file(&rusage_path);
+    assert_eq!(rusage["event"], "run_rusage");
+    assert_eq!(
+        rusage["schema_version"].as_u64(),
+        Some(u64::from(RUN_RUSAGE_SCHEMA_VERSION))
+    );
+    assert!(rusage["cpu_ms"].as_u64().is_some(), "{rusage}");
 }
 
 #[test]

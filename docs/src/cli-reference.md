@@ -49,6 +49,12 @@ harn run --resume .harn/workers/worker_...json
 | `--emit-summary-json` | Emit one terminal `run_summary` JSON object as a single NDJSON line; defaults to stderr |
 | `--summary-file <path>` | Write `--emit-summary-json` output to a file instead of stderr |
 | `--summary-fd <fd>` | Write `--emit-summary-json` output to an already-open Unix file descriptor |
+| `--emit-phase-json` | Emit one terminal `run_phase` JSON object as a single NDJSON line; defaults to stderr |
+| `--phase-file <path>` | Write `--emit-phase-json` output to a file instead of stderr |
+| `--phase-fd <fd>` | Write `--emit-phase-json` output to an already-open Unix file descriptor |
+| `--emit-rusage-json` | Emit one terminal `run_rusage` JSON object as a single NDJSON line; defaults to stderr |
+| `--rusage-file <path>` | Write `--emit-rusage-json` output to a file instead of stderr |
+| `--rusage-fd <fd>` | Write `--emit-rusage-json` output to an already-open Unix file descriptor |
 | `--allow-unsigned` | When running a `.harnpack`, accept bundles that carry no Ed25519 signature (local-dev override) |
 | `--dry-run-verify` | When running a `.harnpack`, verify the signature and replay into the cache without executing the entrypoint |
 
@@ -121,6 +127,53 @@ Shape (`schema_version: 1`):
 `profile` is present only when the run enables profiling with
 `--profile` or `--profile-json`. The LLM metrics are collected whenever
 summary JSON is requested, even without `--trace`.
+
+### Post-run phase JSON
+
+`harn run --emit-phase-json <file>` emits one raw JSON object after
+the run finishes. This uses the same fixed five-phase contract as
+`harn time run --json`, but keeps the data on a separate sink so a
+wrapper can spawn `harn run` and recover parse/typecheck/compile/setup
+timings without changing stdout. Use `--phase-file <path>` or
+`--phase-fd <fd>` to isolate the line from stderr.
+
+Shape (`schema_version: 1`):
+
+```json
+{
+  "schema_version": 1,
+  "event": "run_phase",
+  "phases": [
+    { "name": "parse", "duration_ms": 12, "input_bytes": 4096 },
+    { "name": "typecheck", "duration_ms": 80 },
+    { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
+    { "name": "run_setup", "duration_ms": 8 },
+    { "name": "run_main", "duration_ms": 1200, "events": 14 }
+  ]
+}
+```
+
+The phase array is always in this order: `parse`, `typecheck`,
+`bytecode_compile`, `run_setup`, `run_main`. On a bytecode-cache hit,
+`parse` and `typecheck` stay present with `duration_ms: 0`, and the
+`bytecode_compile` row flips to `"cache": "hit"`.
+
+### Post-run rusage JSON
+
+`harn run --emit-rusage-json <file>` emits one raw JSON object after
+the run finishes containing the total `getrusage(RUSAGE_SELF)` CPU time
+sample for the process during that run. Use `--rusage-file <path>` or
+`--rusage-fd <fd>` to isolate the line from stderr.
+
+Shape (`schema_version: 1`):
+
+```json
+{
+  "schema_version": 1,
+  "event": "run_rusage",
+  "cpu_ms": 320
+}
+```
 
 You can also run a file directly without the `run` subcommand:
 

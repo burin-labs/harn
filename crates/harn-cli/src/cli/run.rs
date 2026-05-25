@@ -114,6 +114,48 @@ pub(crate) struct RunArgs {
         conflicts_with = "summary_file"
     )]
     pub summary_fd: Option<i32>,
+    /// Emit one terminal run-phase JSON object as a single NDJSON line.
+    /// Defaults to stderr; use --phase-file or --phase-fd to keep the
+    /// phase report separate from the script's own stderr.
+    #[arg(long = "emit-phase-json", action = clap::ArgAction::SetTrue)]
+    pub emit_phase_json: bool,
+    /// Write --emit-phase-json output to this file instead of stderr.
+    #[arg(
+        long = "phase-file",
+        value_name = "PATH",
+        requires = "emit_phase_json",
+        conflicts_with = "phase_fd"
+    )]
+    pub phase_file: Option<PathBuf>,
+    /// Write --emit-phase-json output to this already-open file descriptor.
+    #[arg(
+        long = "phase-fd",
+        value_name = "FD",
+        requires = "emit_phase_json",
+        conflicts_with = "phase_file"
+    )]
+    pub phase_fd: Option<i32>,
+    /// Emit one terminal run-rusage JSON object as a single NDJSON line.
+    /// Defaults to stderr; use --rusage-file or --rusage-fd to keep the
+    /// CPU sample separate from the script's own stderr.
+    #[arg(long = "emit-rusage-json", action = clap::ArgAction::SetTrue)]
+    pub emit_rusage_json: bool,
+    /// Write --emit-rusage-json output to this file instead of stderr.
+    #[arg(
+        long = "rusage-file",
+        value_name = "PATH",
+        requires = "emit_rusage_json",
+        conflicts_with = "rusage_fd"
+    )]
+    pub rusage_file: Option<PathBuf>,
+    /// Write --emit-rusage-json output to this already-open file descriptor.
+    #[arg(
+        long = "rusage-fd",
+        value_name = "FD",
+        requires = "emit_rusage_json",
+        conflicts_with = "rusage_file"
+    )]
+    pub rusage_fd: Option<i32>,
     /// Path to the .harn file to execute.
     pub file: Option<String>,
     /// Positional arguments passed to the pipeline as the global `argv`

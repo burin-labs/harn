@@ -318,6 +318,34 @@ fn test_parses_run_summary_flags() {
 }
 
 #[test]
+fn test_parses_run_phase_and_rusage_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--emit-phase-json",
+        "--phase-file",
+        "phases.jsonl",
+        "--emit-rusage-json",
+        "--rusage-fd",
+        "4",
+        "main.harn",
+    ]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.emit_phase_json);
+    assert_eq!(
+        args.phase_file.as_deref(),
+        Some(std::path::Path::new("phases.jsonl"))
+    );
+    assert_eq!(args.phase_fd, None);
+    assert!(args.emit_rusage_json);
+    assert_eq!(args.rusage_file, None);
+    assert_eq!(args.rusage_fd, Some(4));
+}
+
+#[test]
 fn test_parses_eval_tool_calls_args() {
     let cli = Cli::parse_from([
         "harn",
