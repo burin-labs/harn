@@ -73,6 +73,10 @@ pub(super) const BUILTIN_LOCK_RELEASE: &str = "hostlib_code_index_lock_release";
 pub(super) const BUILTIN_STATUS: &str = "hostlib_code_index_status";
 pub(super) const BUILTIN_CURRENT_AGENT_ID: &str = "hostlib_code_index_current_agent_id";
 
+pub(super) const BUILTIN_CYPHER: &str = "hostlib_code_index_cypher";
+pub(super) const BUILTIN_BRANCH_OVERLAY: &str = "hostlib_code_index_branch_overlay";
+pub(super) const BUILTIN_FRESHNESS: &str = "hostlib_code_index_freshness";
+
 // === Search / rebuild / stats ===
 
 pub(super) fn run_query(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -825,6 +829,177 @@ pub(super) fn run_current_agent_id(
     })
 }
 
+// === Symbol graph: cypher, branch_overlay, freshness (issue #2434) ===
+
+pub(super) fn run_cypher(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(BUILTIN_CYPHER, args)?;
+    let dict = raw.as_ref();
+    let query = require_string(BUILTIN_CYPHER, dict, "query")?;
+
+    let guard = index.lock().expect("code_index mutex poisoned");
+    let Some(state) = guard.as_ref() else {
+        return Ok(build_dict([
+            ("rows", VmValue::List(Rc::new(Vec::new()))),
+            ("overlay", VmValue::Nil),
+        ]));
+    };
+
+    let graph = state.overlays.graph(&state.symbols);
+    let rows = super::cypher::execute(&query, graph).map_err(|err| HostlibError::Backend {
+        builtin: BUILTIN_CYPHER,
+        message: err.to_string(),
+    })?;
+
+    let rows_vm: Vec<VmValue> = rows
+        .into_iter()
+        .map(|row| {
+            let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+            for (k, v) in row {
+                map.insert(k, v.to_vm());
+            }
+            VmValue::Dict(Rc::new(map))
+        })
+        .collect();
+
+    Ok(build_dict([
+        ("rows", VmValue::List(Rc::new(rows_vm))),
+        (
+            "overlay",
+            match state.overlays.active() {
+                Some(name) => str_value(name),
+                None => VmValue::Nil,
+            },
+        ),
+    ]))
+}
+
+pub(super) fn run_branch_overlay(
+    index: &SharedIndex,
+    args: &[VmValue],
+) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(BUILTIN_BRANCH_OVERLAY, args)?;
+    let dict = raw.as_ref();
+    let branch = optional_string(BUILTIN_BRANCH_OVERLAY, dict, "branch")?;
+    let activate = optional_bool(BUILTIN_BRANCH_OVERLAY, dict, "activate", true)?;
+    let action = optional_string(BUILTIN_BRANCH_OVERLAY, dict, "action")?;
+
+    let mut guard = index.lock().expect("code_index mutex poisoned");
+    let state = ensure_state(BUILTIN_BRANCH_OVERLAY, &mut guard)?;
+
+    let mut reuse: f64 = 1.0;
+    match action.as_deref().unwrap_or("activate") {
+        "deactivate" => {
+            state.overlays.activate(None);
+        }
+        "create" => {
+            let branch_name = branch.ok_or(HostlibError::MissingParameter {
+                builtin: BUILTIN_BRANCH_OVERLAY,
+                param: "branch",
+            })?;
+            let mut overlay = super::overlay::BranchOverlay::new(&branch_name);
+            overlay.materialize(&state.symbols);
+            state.overlays.set(overlay);
+            if activate {
+                state.overlays.activate(Some(branch_name));
+            }
+            reuse = state.overlays.reuse_fraction(&state.symbols);
+        }
+        "activate" => {
+            let branch_name = branch.ok_or(HostlibError::MissingParameter {
+                builtin: BUILTIN_BRANCH_OVERLAY,
+                param: "branch",
+            })?;
+            // If the overlay doesn't exist, create an empty pass-through
+            // one — the base graph then serves it untouched, giving the
+            // 100% reuse / 0-change baseline.
+            if state.overlays.get(&branch_name).is_none() {
+                let mut overlay = super::overlay::BranchOverlay::new(&branch_name);
+                overlay.materialize(&state.symbols);
+                state.overlays.set(overlay);
+            }
+            state.overlays.activate(Some(branch_name));
+            reuse = state.overlays.reuse_fraction(&state.symbols);
+        }
+        other => {
+            return Err(HostlibError::InvalidParameter {
+                builtin: BUILTIN_BRANCH_OVERLAY,
+                param: "action",
+                message: format!("expected one of activate|deactivate|create, got `{other}`"),
+            })
+        }
+    }
+
+    Ok(build_dict([
+        (
+            "active",
+            match state.overlays.active() {
+                Some(name) => str_value(name),
+                None => VmValue::Nil,
+            },
+        ),
+        ("reuse_fraction", VmValue::Float(reuse)),
+    ]))
+}
+
+pub(super) fn run_freshness(
+    index: &SharedIndex,
+    args: &[VmValue],
+) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(BUILTIN_FRESHNESS, args)?;
+    let dict = raw.as_ref();
+    let path = require_string(BUILTIN_FRESHNESS, dict, "path")?;
+
+    let guard = index.lock().expect("code_index mutex poisoned");
+    let state = guard.as_ref().ok_or_else(|| HostlibError::Backend {
+        builtin: BUILTIN_FRESHNESS,
+        message: "code index has not been initialised — call \
+            `hostlib_code_index_rebuild` first"
+            .to_string(),
+    })?;
+
+    let normalized = normalize_relative_path(state, &path);
+    let file = state
+        .lookup_path(&normalized)
+        .and_then(|id| state.files.get(&id));
+    let Some(file) = file else {
+        return Ok(unknown_freshness_response(&path));
+    };
+
+    let abs = state.root.join(&file.relative_path);
+    let (disk_mtime, disk_hash) = match std::fs::read(&abs) {
+        Ok(bytes) => {
+            let hash = fnv1a64(&bytes);
+            let mtime = std::fs::metadata(&abs)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            (mtime, Some(hash))
+        }
+        Err(_) => (0, None),
+    };
+    let stale = disk_hash != Some(file.content_hash);
+    Ok(build_dict([
+        ("path", str_value(&file.relative_path)),
+        ("known", VmValue::Bool(true)),
+        ("stale", VmValue::Bool(stale)),
+        (
+            "indexed_hash",
+            VmValue::String(Rc::from(format!("{:016x}", file.content_hash).as_str())),
+        ),
+        ("indexed_mtime_ms", VmValue::Int(file.mtime_ms)),
+        (
+            "disk_hash",
+            match disk_hash {
+                Some(h) => VmValue::String(Rc::from(format!("{h:016x}").as_str())),
+                None => VmValue::Nil,
+            },
+        ),
+        ("disk_mtime_ms", VmValue::Int(disk_mtime)),
+    ]))
+}
+
 // === Helpers ===
 
 fn ensure_state<'a>(
@@ -1104,5 +1279,17 @@ fn empty_importers_response(module: &str) -> VmValue {
     build_dict([
         ("module", str_value(module)),
         ("importers", VmValue::List(Rc::new(Vec::new()))),
+    ])
+}
+
+fn unknown_freshness_response(path: &str) -> VmValue {
+    build_dict([
+        ("path", str_value(path)),
+        ("known", VmValue::Bool(false)),
+        ("stale", VmValue::Bool(true)),
+        ("indexed_hash", VmValue::Nil),
+        ("indexed_mtime_ms", VmValue::Nil),
+        ("disk_hash", VmValue::Nil),
+        ("disk_mtime_ms", VmValue::Nil),
     ])
 }

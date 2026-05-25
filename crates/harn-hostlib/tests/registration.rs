@@ -113,6 +113,10 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_lock_release",
             "hostlib_code_index_status",
             "hostlib_code_index_current_agent_id",
+            // Typed symbol graph + Cypher (#2434).
+            "hostlib_code_index_cypher",
+            "hostlib_code_index_branch_overlay",
+            "hostlib_code_index_freshness",
         ]
     );
     // Without a populated workspace, code-index read methods return empty

@@ -99,5 +99,9 @@ harn-parser = { path = "../harn-parser", version = "0.8" }
 name = "ast_parse"
 harness = false
 
+[[bench]]
+name = "code_index_cypher"
+harness = false
+
 [lints]
 workspace = true

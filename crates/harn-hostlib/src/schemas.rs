@@ -498,6 +498,42 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/code_index/current_agent_id.response.json"),
     ),
+    (
+        "code_index",
+        "cypher",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/cypher.request.json"),
+    ),
+    (
+        "code_index",
+        "cypher",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/cypher.response.json"),
+    ),
+    (
+        "code_index",
+        "branch_overlay",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/branch_overlay.request.json"),
+    ),
+    (
+        "code_index",
+        "branch_overlay",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/branch_overlay.response.json"),
+    ),
+    (
+        "code_index",
+        "freshness",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/freshness.request.json"),
+    ),
+    (
+        "code_index",
+        "freshness",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/freshness.response.json"),
+    ),
     // scanner/
     (
         "scanner",

@@ -29,6 +29,20 @@
 //! - **Cached reads**: `read_range`, `reindex_file`, `trigram_query`,
 //!   `extract_trigrams`, `word_get`, `deps_get`, `outline_get`.
 //!
+//! ### Typed symbol graph (added in #2434)
+//!
+//! - **`cypher`**: read-only Cypher executor over the typed graph
+//!   ([`SymbolGraph`]) — `MATCH ... WHERE ... RETURN` with typed
+//!   nodes (Function|Type|Module|Import|CallSite|Macro), typed edges
+//!   (CALLS|REFS|IMPORTS|CONTAINS|OVERRIDES, plus `_BY` inverses),
+//!   and variable-length hops up to depth 4.
+//! - **`branch_overlay`**: per-branch CDC overlay that layers a delta
+//!   on top of the base graph; reuses ≥95% of the main index in
+//!   storage/CPU for untouched files. See [`BranchOverlay`].
+//! - **`freshness`**: per-file hash + mtime comparison against the
+//!   indexed snapshot; consumers detect staleness without forcing a
+//!   rebuild.
+//!
 //! ## Concurrency model
 //!
 //! All ops serialise through a single `Arc<Mutex<Option<IndexState>>>` so
@@ -38,11 +52,14 @@
 
 mod agents;
 mod builtins;
+mod cypher;
 mod file_table;
 mod graph;
 mod imports;
+mod overlay;
 mod snapshot;
 mod state;
+mod symbol_graph;
 mod trigram;
 mod versions;
 mod walker;
@@ -58,10 +75,13 @@ use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, Syn
 
 pub use agents::{AgentId, AgentInfo, AgentRegistry, AgentState, RegistryConfig};
 pub use builtins::SharedIndex;
+pub use cypher::{CypherError, CypherRow, CypherValue};
 pub use file_table::{FileId, IndexedFile, IndexedSymbol};
 pub use graph::DepGraph;
+pub use overlay::{BranchOverlay, OverlayState};
 pub use snapshot::{CodeIndexSnapshot, SnapshotMeta};
 pub use state::{BuildOutcome, IndexState};
+pub use symbol_graph::{Edge, EdgeKind, Node, NodeId, NodeKind, SymbolGraph};
 pub use trigram::TrigramIndex;
 pub use versions::{ChangeRecord, EditOp, VersionEntry, VersionLog, HISTORY_LIMIT};
 pub use words::{WordHit, WordIndex};
@@ -362,6 +382,29 @@ impl HostlibCapability for CodeIndexCapability {
             method: "current_agent_id",
             handler,
         });
+
+        // Typed symbol graph builtins (issue #2434).
+        register(
+            registry,
+            self.index.clone(),
+            builtins::BUILTIN_CYPHER,
+            "cypher",
+            builtins::run_cypher,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            builtins::BUILTIN_BRANCH_OVERLAY,
+            "branch_overlay",
+            builtins::run_branch_overlay,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            builtins::BUILTIN_FRESHNESS,
+            "freshness",
+            builtins::run_freshness,
+        );
     }
 }
 

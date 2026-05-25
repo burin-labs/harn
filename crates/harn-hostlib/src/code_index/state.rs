@@ -18,10 +18,14 @@ use super::agents::AgentRegistry;
 use super::file_table::{fnv1a64, FileId, IndexedFile};
 use super::graph::DepGraph;
 use super::imports;
+use super::overlay::OverlayState;
+use super::symbol_graph::SymbolGraph;
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
 use super::walker::{is_indexable_file, language_for_extension, walk_indexable, MAX_FILE_BYTES};
 use super::words::WordIndex;
+
+use crate::ast::Language as AstLanguage;
 
 /// In-memory index for one workspace. Composed from the per-file table,
 /// the trigram + word sub-indexes, the dep graph, the append-only version
@@ -43,6 +47,10 @@ pub struct IndexState {
     pub versions: VersionLog,
     /// Live agents + advisory locks.
     pub agents: AgentRegistry,
+    /// Typed symbol graph (issue #2434). Populated lazily on rebuild.
+    pub symbols: SymbolGraph,
+    /// Per-branch overlay registry (issue #2434).
+    pub overlays: OverlayState,
     /// Wall-clock timestamp (ms since epoch) of the most recent rebuild.
     pub last_built_unix_ms: i64,
     /// Best-effort `HEAD` SHA, or `None` if the workspace isn't a git repo.
@@ -74,6 +82,8 @@ impl IndexState {
             deps: DepGraph::new(),
             versions: VersionLog::new(),
             agents: AgentRegistry::new(),
+            symbols: SymbolGraph::new(),
+            overlays: OverlayState::new(),
             last_built_unix_ms: now_unix_ms(),
             git_head: read_git_head(&canonical_root),
             next_id: 1,
@@ -93,7 +103,10 @@ impl IndexState {
         });
         for (id, rel) in to_resolve {
             state.rebuild_deps(id, &rel);
+            state.rebuild_symbol_graph_for(id);
         }
+        // Second pass: every Module node exists now, so resolve IMPORTS.
+        state.link_symbol_imports();
         (state, outcome)
     }
 
@@ -118,6 +131,8 @@ impl IndexState {
             .unwrap_or_default();
         if !rel.is_empty() {
             self.rebuild_deps(id, &rel);
+            self.rebuild_symbol_graph_for(id);
+            self.link_symbol_imports();
         }
         Some(id)
     }
@@ -135,6 +150,7 @@ impl IndexState {
         self.trigrams.remove_file(id);
         self.words.remove_file(id);
         self.deps.remove_file(id);
+        self.symbols.remove_file(id);
     }
 
     fn ingest(&mut self, abs: &Path) -> Option<FileId> {
@@ -218,6 +234,39 @@ impl IndexState {
             .set_edges(id, resolved.resolved, resolved.unresolved);
     }
 
+    /// Re-parse `id`'s source and replace its slice of the typed symbol
+    /// graph in [`Self::symbols`]. Cheap to call after a single-file
+    /// reindex; the full-rebuild loop calls this once per file. Files
+    /// with no recognised tree-sitter grammar (the index also handles
+    /// `.md`, `.json`, …) are skipped silently.
+    pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId) {
+        let Some(file) = self.files.get(&id).cloned() else {
+            return;
+        };
+        let abs = self.root.join(&file.relative_path);
+        let Ok(source) = std::fs::read_to_string(&abs) else {
+            return;
+        };
+        let Some(language) = AstLanguage::detect(std::path::Path::new(&file.relative_path), None)
+        else {
+            return;
+        };
+        self.symbols
+            .rebuild_file(id, &file.relative_path, language, &source, &file.imports);
+    }
+
+    /// Walk every file's import-resolution table and add the
+    /// corresponding Module→Module IMPORTS edges in the typed graph.
+    /// Idempotent; called once at end-of-rebuild and after every
+    /// per-file reindex.
+    pub(super) fn link_symbol_imports(&mut self) {
+        let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
+        for id in self.files.keys() {
+            resolved.insert(*id, self.deps.imports_of(*id));
+        }
+        self.symbols.link_imports(&resolved);
+    }
+
     /// Look up a file by either its workspace-relative path or its
     /// absolute path inside the workspace root.
     pub fn lookup_path(&self, raw: &str) -> Option<FileId> {
@@ -276,6 +325,8 @@ impl IndexState {
             deps: DepGraph::new(),
             versions: VersionLog::new(),
             agents: AgentRegistry::new(),
+            symbols: SymbolGraph::new(),
+            overlays: OverlayState::new(),
             last_built_unix_ms: 0,
             git_head: None,
             next_id: 1,

@@ -1,0 +1,215 @@
+{
+  "description": "Ground-truth Q&A fixture for the typed symbol graph + Cypher executor (issue #2434). The integration test in tests/code_index_cypher_recall.rs rebuilds the sibling corpus/ workspace, runs every Cypher query against the symbol graph, and asserts that aggregate recall is at least 80%.",
+  "questions": [
+    {
+      "id": "Q01",
+      "question": "Which file defines formatDate?",
+      "cypher": "MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/util.ts"]
+    },
+    {
+      "id": "Q02",
+      "question": "Which file defines parseQuery?",
+      "cypher": "MATCH (f:Function {name: 'parseQuery'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/util.ts"]
+    },
+    {
+      "id": "Q03",
+      "question": "Which file defines pad?",
+      "cypher": "MATCH (f:Function {name: 'pad'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/util.ts"]
+    },
+    {
+      "id": "Q04",
+      "question": "Which file defines debounce?",
+      "cypher": "MATCH (f:Function {name: 'debounce'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/helper.ts"]
+    },
+    {
+      "id": "Q05",
+      "question": "Which file defines throttle?",
+      "cypher": "MATCH (f:Function {name: 'throttle'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/helper.ts"]
+    },
+    {
+      "id": "Q06",
+      "question": "Which file defines fetchUser?",
+      "cypher": "MATCH (f:Function {name: 'fetchUser'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/api.ts"]
+    },
+    {
+      "id": "Q07",
+      "question": "Which file defines buildHeaders?",
+      "cypher": "MATCH (f:Function {name: 'buildHeaders'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/api.ts"]
+    },
+    {
+      "id": "Q08",
+      "question": "Which file defines saveSession?",
+      "cypher": "MATCH (f:Function {name: 'saveSession'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/storage.ts"]
+    },
+    {
+      "id": "Q09",
+      "question": "Which file defines login?",
+      "cypher": "MATCH (f:Function {name: 'login'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/auth.ts"]
+    },
+    {
+      "id": "Q10",
+      "question": "Which file defines logout?",
+      "cypher": "MATCH (f:Function {name: 'logout'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/auth.ts"]
+    },
+    {
+      "id": "Q11",
+      "question": "Which file defines route?",
+      "cypher": "MATCH (f:Function {name: 'route'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/router.ts"]
+    },
+    {
+      "id": "Q12",
+      "question": "Which files define a function named main?",
+      "cypher": "MATCH (f:Function {name: 'main'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/index.ts", "src/main.rs"]
+    },
+    {
+      "id": "Q13",
+      "question": "Which file defines start_server?",
+      "cypher": "MATCH (f:Function {name: 'start_server'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/server.rs"]
+    },
+    {
+      "id": "Q14",
+      "question": "Which file defines load_config?",
+      "cypher": "MATCH (f:Function {name: 'load_config'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/config.rs"]
+    },
+    {
+      "id": "Q15",
+      "question": "Which file defines handle_request?",
+      "cypher": "MATCH (f:Function {name: 'handle_request'}) RETURN f.path AS path",
+      "match_key": "path",
+      "expected": ["src/handler.rs"]
+    },
+    {
+      "id": "Q16",
+      "question": "Which files contain a call to parseQuery?",
+      "cypher": "MATCH (f:Function {name: 'parseQuery'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/api.ts"]
+    },
+    {
+      "id": "Q17",
+      "question": "Which files contain a call to formatDate?",
+      "cypher": "MATCH (f:Function {name: 'formatDate'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/api.ts"]
+    },
+    {
+      "id": "Q18",
+      "question": "Which files contain a call to pad?",
+      "cypher": "MATCH (f:Function {name: 'pad'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/storage.ts"]
+    },
+    {
+      "id": "Q19",
+      "question": "Which files contain a call to fetchUser?",
+      "cypher": "MATCH (f:Function {name: 'fetchUser'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/auth.ts", "src/router.ts"]
+    },
+    {
+      "id": "Q20",
+      "question": "Which files contain a call to login?",
+      "cypher": "MATCH (f:Function {name: 'login'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/router.ts"]
+    },
+    {
+      "id": "Q21",
+      "question": "Which files contain a call to logout?",
+      "cypher": "MATCH (f:Function {name: 'logout'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/router.ts"]
+    },
+    {
+      "id": "Q22",
+      "question": "Which files contain a call to route?",
+      "cypher": "MATCH (f:Function {name: 'route'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/index.ts"]
+    },
+    {
+      "id": "Q23",
+      "question": "Which files contain a call to load_config?",
+      "cypher": "MATCH (f:Function {name: 'load_config'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/main.rs"]
+    },
+    {
+      "id": "Q24",
+      "question": "Which files contain a call to start_server?",
+      "cypher": "MATCH (f:Function {name: 'start_server'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/main.rs"]
+    },
+    {
+      "id": "Q25",
+      "question": "Which files contain a call to handle_request?",
+      "cypher": "MATCH (f:Function {name: 'handle_request'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+      "match_key": "path",
+      "expected": ["src/main.rs"]
+    },
+    {
+      "id": "Q26",
+      "question": "Which file defines the User type?",
+      "cypher": "MATCH (t:Type {name: 'User'}) RETURN t.path AS path",
+      "match_key": "path",
+      "expected": ["src/models.ts"]
+    },
+    {
+      "id": "Q27",
+      "question": "Which file defines the Session type?",
+      "cypher": "MATCH (t:Type {name: 'Session'}) RETURN t.path AS path",
+      "match_key": "path",
+      "expected": ["src/models.ts"]
+    },
+    {
+      "id": "Q28",
+      "question": "Which file defines the Repository interface?",
+      "cypher": "MATCH (t:Type {name: 'Repository'}) RETURN t.path AS path",
+      "match_key": "path",
+      "expected": ["src/models.ts"]
+    },
+    {
+      "id": "Q29",
+      "question": "Which file defines the Config struct?",
+      "cypher": "MATCH (t:Type {name: 'Config'}) RETURN t.path AS path",
+      "match_key": "path",
+      "expected": ["src/config.rs"]
+    },
+    {
+      "id": "Q30",
+      "question": "Which file defines the Server struct?",
+      "cypher": "MATCH (t:Type {name: 'Server'}) RETURN t.path AS path",
+      "match_key": "path",
+      "expected": ["src/server.rs"]
+    }
+  ]
+}
