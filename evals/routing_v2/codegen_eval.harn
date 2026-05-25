@@ -1,20 +1,28 @@
-// Multi-task routing_policy v2 eval.
-//
-// Same task list, two strategies side by side:
-//   • baseline: always devstral-small
-//   • routed:   devstral → opus, escalate when the typecheck verifier
-//               fails to parse the extracted Harn block
-//
-// Each task is a different "Devstral can / can't handle Harn-specific
-// syntax" probe so we can see when the verifier escalates vs accepts.
-//
-// Cost is computed from per-call tokens against a hard-coded
-// OpenRouter rate table (Devstral $0.10/$0.30 per M, Opus $5/$25 per M).
+/**
+ * Multi-task routing_policy v2 eval.
+ *
+ * Runs the same task list across four cells:
+ *
+ *   strategy \ context   | bare prompt | + harn-language skill
+ *   ---------------------+-------------+-----------------------
+ *   baseline (devstral)  |    cell A   |       cell B
+ *   routed (devstral→opus,
+ *           typecheck)   |    cell C   |       cell D
+ *
+ * The skill body lives in `harn_language_skill.md` (captured from
+ * `harn skills get harn-language --full` so the cell-B/D system prompt
+ * matches what a real coding agent would inject).
+ *
+ * Cost is computed from per-call tokens against a hard-coded OpenRouter
+ * rate table (Devstral $0.10/$0.30 per M, Opus $5/$25 per M).
+ */
 let CHEAP_MODEL = {provider: "openrouter", model: "mistralai/devstral-small"}
 
 let FRONTIER_MODEL = {provider: "openrouter", model: "anthropic/claude-opus-4.7"}
 
 let MAX_TOKENS = 500
+
+let SKILL_BODY_PATH = "evals/routing_v2/harn_language_skill.md"
 
 let TASKS = [
   {
@@ -32,8 +40,7 @@ let TASKS = [
   {
     id: "sum_list",
     prompt: "Write a Harn function `sum_list(items: list) -> int` that returns the sum of all integers "
-      + "in the list. Use a `for` loop. Harn uses `fn` for functions, `let` for bindings, and braces "
-      + "for blocks (not Python-style colons or `def`). Output ONLY the function in a ```harn code block.",
+      + "in the list. Use a `for` loop. Output ONLY the function in a ```harn code block.",
   },
   {
     id: "is_even_pipeline",
@@ -81,11 +88,10 @@ fn extract_first_fenced_harn(text: string) -> string {
 /**
  * Grade a candidate using the SAME verifier the routing_policy uses.
  *
- * We push the code as a mock-LLM response into a 1-link routing_policy
- * whose only verifier is `typecheck`; the chain returns immediately
- * because the mock provider is free + deterministic. Whatever the
- * verifier emits is the canonical "would the typecheck gate have
- * accepted this" answer.
+ * Pushes the code as a mock-LLM response into a 1-link routing_policy whose
+ * only verifier is `typecheck`. The chain returns immediately because the
+ * mock provider is free + deterministic; whatever the verifier emits is the
+ * canonical "would the typecheck gate have accepted this" answer.
  */
 fn grade_outcome(code: string) -> string {
   llm_mock_push_scope()
@@ -119,10 +125,16 @@ fn typechecks(code: string) -> bool {
   return grade_outcome(code) == "accept"
 }
 
-fn run_one_baseline(task: dict) -> dict {
+fn attempt_cost(attempt: dict) -> float {
+  let input = to_int(attempt?.input_tokens ?? 0)
+  let output = to_int(attempt?.output_tokens ?? 0)
+  return cost_for_tokens(attempt.model, input, output)
+}
+
+fn run_one_baseline(task: dict, system: dict) -> dict {
   let result = llm_call(
     task.prompt,
-    nil,
+    system.body,
     {
       provider: CHEAP_MODEL.provider,
       model: CHEAP_MODEL.model,
@@ -134,6 +146,7 @@ fn run_one_baseline(task: dict) -> dict {
   return {
     task_id: task.id,
     strategy: "baseline",
+    context: system.label,
     cost_usd: cost_for_tokens(CHEAP_MODEL.model, result.input_tokens, result.output_tokens),
     input_tokens: result.input_tokens,
     output_tokens: result.output_tokens,
@@ -142,17 +155,7 @@ fn run_one_baseline(task: dict) -> dict {
   }
 }
 
-fn attempt_cost(attempt: dict) -> float {
-  // Each successful attempt now carries `input_tokens` / `output_tokens`
-  // on the trace, so we can attribute spend precisely against the
-  // hard-coded OpenRouter rate table (the runtime's catalog cost_usd
-  // is native-providers-only and would report 0 here).
-  let input = to_int(attempt?.input_tokens ?? 0)
-  let output = to_int(attempt?.output_tokens ?? 0)
-  return cost_for_tokens(attempt.model, input, output)
-}
-
-fn run_one_routed(task: dict) -> dict {
+fn run_one_routed(task: dict, system: dict) -> dict {
   let policy = routing_policy(
     {
       chain: [
@@ -165,7 +168,7 @@ fn run_one_routed(task: dict) -> dict {
       label: "routing-v2",
     },
   )
-  let result = llm_call(task.prompt, nil, {routing: policy, max_tokens: MAX_TOKENS})
+  let result = llm_call(task.prompt, system.body, {routing: policy, max_tokens: MAX_TOKENS})
   let code = extract_first_fenced_harn(result.text)
   let attempts = result.routing.attempts
   let selected = result.routing.selected ?? 0
@@ -175,6 +178,7 @@ fn run_one_routed(task: dict) -> dict {
   return {
     task_id: task.id,
     strategy: "routed",
+    context: system.label,
     cost_usd: total_cost,
     escalated: escalated,
     attempts: attempts,
@@ -185,31 +189,52 @@ fn run_one_routed(task: dict) -> dict {
   }
 }
 
-fn run_task_pair(task: dict) -> dict {
+fn run_task_quartet(task: dict, skill_body: string) -> dict {
   __io_println("=== task " + task.id + " ===")
-  let b = run_one_baseline(task)
-  let r = run_one_routed(task)
-  __io_println("  baseline cost=" + to_string(b.cost_usd) + " valid=" + to_string(b.looks_valid))
+  let bare = {label: "bare", body: nil}
+  let with_skill = {label: "skill", body: skill_body}
+  let baseline_bare = run_one_baseline(task, bare)
+  let baseline_skill = run_one_baseline(task, with_skill)
+  let routed_bare = run_one_routed(task, bare)
+  let routed_skill = run_one_routed(task, with_skill)
   __io_println(
-    "  routed   cost=" + to_string(r.cost_usd) + " valid=" + to_string(r.looks_valid)
-      + " escalated="
-      + to_string(r.escalated),
+    "  baseline_bare  cost=" + to_string(baseline_bare.cost_usd)
+      + " valid="
+      + to_string(baseline_bare.looks_valid),
   )
-  return {baseline: b, routed: r}
+  __io_println(
+    "  baseline_skill cost=" + to_string(baseline_skill.cost_usd)
+      + " valid="
+      + to_string(baseline_skill.looks_valid),
+  )
+  __io_println(
+    "  routed_bare    cost=" + to_string(routed_bare.cost_usd)
+      + " valid="
+      + to_string(routed_bare.looks_valid)
+      + " escalated="
+      + to_string(routed_bare.escalated),
+  )
+  __io_println(
+    "  routed_skill   cost=" + to_string(routed_skill.cost_usd)
+      + " valid="
+      + to_string(routed_skill.looks_valid)
+      + " escalated="
+      + to_string(routed_skill.escalated),
+  )
+  return {
+    baseline_bare: baseline_bare,
+    baseline_skill: baseline_skill,
+    routed_bare: routed_bare,
+    routed_skill: routed_skill,
+  }
 }
 
-fn main(_harness: Harness) {
-  let rows = TASKS.map({ task -> run_task_pair(task) })
-  let baseline_total = rows
-    .map({ row -> to_float(row.baseline.cost_usd) })
-    .reduce(0.0, { acc, x -> acc + x })
-  let routed_total = rows
-    .map({ row -> to_float(row.routed.cost_usd) })
-    .reduce(0.0, { acc, x -> acc + x })
-  let baseline_valid = rows
+fn col_totals(rows: list, key: string) -> dict {
+  let cost = rows.map({ row -> to_float(row[key].cost_usd) }).reduce(0.0, { acc, x -> acc + x })
+  let valid = rows
     .map(
     { row ->
-      if row.baseline.looks_valid {
+      if row[key].looks_valid {
         1
       } else {
         0
@@ -217,45 +242,42 @@ fn main(_harness: Harness) {
     },
   )
     .reduce(0, { acc, x -> acc + x })
-  let routed_valid = rows
-    .map(
-    { row ->
-      if row.routed.looks_valid {
-        1
-      } else {
-        0
-      }
-    },
-  )
-    .reduce(0, { acc, x -> acc + x })
-  let escalations = rows
-    .map(
-    { row ->
-      if row.routed.escalated {
-        1
-      } else {
-        0
-      }
-    },
-  )
-    .reduce(0, { acc, x -> acc + x })
+  return {cost_usd: cost, valid: valid}
+}
+
+fn main(harness: Harness) {
+  let skill_body = harness.fs.read_text(SKILL_BODY_PATH)
+  let rows = TASKS.map({ task -> run_task_quartet(task, skill_body) })
+  let bb = col_totals(rows, "baseline_bare")
+  let bs = col_totals(rows, "baseline_skill")
+  let rb = col_totals(rows, "routed_bare")
+  let rs = col_totals(rows, "routed_skill")
+  let n = len(TASKS)
   __io_println("=========================================")
-  __io_println("baseline total cost: " + to_string(baseline_total))
-  __io_println("routed   total cost: " + to_string(routed_total))
-  __io_println("baseline valid: " + to_string(baseline_valid) + "/" + to_string(len(TASKS)))
-  __io_println("routed   valid: " + to_string(routed_valid) + "/" + to_string(len(TASKS)))
-  __io_println("escalations: " + to_string(escalations) + "/" + to_string(len(TASKS)))
+  __io_println(
+    "baseline_bare  : valid=" + to_string(bb.valid) + "/" + to_string(n)
+      + " cost="
+      + to_string(bb.cost_usd),
+  )
+  __io_println(
+    "baseline_skill : valid=" + to_string(bs.valid) + "/" + to_string(n)
+      + " cost="
+      + to_string(bs.cost_usd),
+  )
+  __io_println(
+    "routed_bare    : valid=" + to_string(rb.valid) + "/" + to_string(n)
+      + " cost="
+      + to_string(rb.cost_usd),
+  )
+  __io_println(
+    "routed_skill   : valid=" + to_string(rs.valid) + "/" + to_string(n)
+      + " cost="
+      + to_string(rs.cost_usd),
+  )
   __io_println(
     json_stringify_pretty(
       {
-        summary: {
-          baseline_total_cost_usd: baseline_total,
-          routed_total_cost_usd: routed_total,
-          baseline_valid: baseline_valid,
-          routed_valid: routed_valid,
-          escalations: escalations,
-          n_tasks: len(TASKS),
-        },
+        summary: {n_tasks: n, baseline_bare: bb, baseline_skill: bs, routed_bare: rb, routed_skill: rs},
         rows: rows,
       },
     ),
