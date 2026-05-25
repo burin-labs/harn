@@ -134,7 +134,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `anthropic` | `claude-sonnet-4-7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `llama-3.3-70b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `cerebras` | `qwen-3-coder-480b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
