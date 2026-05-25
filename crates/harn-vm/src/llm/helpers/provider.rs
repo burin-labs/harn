@@ -273,19 +273,43 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
     if let Ok(p) = std::env::var("HARN_LLM_PROVIDER") {
         return p;
     }
-    // First-class local OpenAI-compatible server support.
+    // When an explicit `model:` option is set, prefer a catalog-known
+    // provider over the LOCAL_LLM_BASE_URL fast-path. Without this,
+    // a user with `LOCAL_LLM_BASE_URL` pointing at Ollama silently
+    // routes every catalog-known model
+    // (e.g. `anthropic/claude-sonnet-4-6` → openrouter,
+    // `qwen-3-coder-480b` → cerebras) to their local server and
+    // gets a `model_unavailable` 404 instead of the real provider.
+    let explicit_model = options
+        .as_ref()
+        .and_then(|o| o.get("model"))
+        .map(|v| v.display());
+    if let Some(ref m) = explicit_model {
+        use crate::llm::provider::ProviderInferenceSource;
+        // 1. Direct `[aliases]` match wins immediately.
+        let (_resolved, alias_provider) = llm_config::resolve_model(m);
+        if let Some(provider) = alias_provider {
+            return provider;
+        }
+        // 2. `[models]` table + `[[inference_rules]]` matches are also
+        //    authoritative. Only a DefaultFallback (nothing matched)
+        //    falls through to the local fast-path below.
+        let inference = llm_config::infer_provider_detail(m);
+        if inference.source != ProviderInferenceSource::DefaultFallback {
+            return inference.provider;
+        }
+    }
+    // First-class local OpenAI-compatible server support: only kicks in
+    // when the model isn't catalog-known, so unknown ids still route to
+    // the local server.
     if std::env::var("LOCAL_LLM_BASE_URL").is_ok()
-        && (options.as_ref().and_then(|o| o.get("model")).is_some()
+        && (explicit_model.is_some()
             || std::env::var("HARN_LLM_MODEL").is_ok()
             || std::env::var("LOCAL_LLM_MODEL").is_ok())
     {
         return "local".to_string();
     }
-    if let Some(m) = options
-        .as_ref()
-        .and_then(|o| o.get("model"))
-        .map(|v| v.display())
-    {
+    if let Some(m) = explicit_model {
         return infer_provider_from_model_selector(&m, true);
     }
     if let Some(tier) = options
