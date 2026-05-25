@@ -1,5 +1,45 @@
 use super::*;
 
+fn format_comparison_for_test(
+    fixture_id: &str,
+    native_status: &str,
+    text_status: &str,
+) -> FormatComparison {
+    let native_passed = native_status == "passed";
+    let text_passed = text_status == "passed";
+    FormatComparison {
+        fixture_id: fixture_id.to_string(),
+        selector: ModelSelector {
+            selector: "openrouter:qwen/qwen3-coder".to_string(),
+            provider: "openrouter".to_string(),
+            model: "qwen/qwen3-coder".to_string(),
+        },
+        native_run_id: Some(format!("{fixture_id}-native")),
+        text_run_id: Some(format!("{fixture_id}-text")),
+        native_evidence_path: Some(format!("out/{fixture_id}/native/transcript_events.jsonl")),
+        text_evidence_path: Some(format!("out/{fixture_id}/text/transcript_events.jsonl")),
+        native_status: Some(native_status.to_string()),
+        text_status: Some(text_status.to_string()),
+        native_passed: Some(native_passed),
+        text_passed: Some(text_passed),
+        native_tool_call_count: Some(0),
+        text_tool_call_count: Some(0),
+        native_rejected_tool_call_count: Some(0),
+        text_rejected_tool_call_count: Some(0),
+        verifier_match: Some(native_passed == text_passed),
+        tool_sequence_match: Some(true),
+        rejected_tool_call_delta_text_minus_native: Some(0),
+        token_delta_text_minus_native: Some(0),
+        iteration_delta_text_minus_native: Some(0),
+        equivalent: Some(native_status == text_status && native_passed == text_passed),
+        divergence_reasons: Vec::new(),
+        evidence_paths: vec![
+            format!("out/{fixture_id}/native/transcript_events.jsonl"),
+            format!("out/{fixture_id}/text/transcript_events.jsonl"),
+        ],
+    }
+}
+
 #[test]
 fn dotenv_parser_strips_export_and_quotes_without_leaking_values() {
     let parsed = parse_env_line("export TOGETHER_API_KEY=\"secret\"")
@@ -295,6 +335,22 @@ fn write_json_artifacts_emits_tool_mode_parity_overlay() {
         .join("python-add__openrouter_qwen_qwen3-coder")
         .join("parity.json")
         .exists());
+}
+
+#[test]
+fn parity_overlay_excludes_skipped_comparisons() {
+    let summaries = build_parity_by_pair(&[
+        format_comparison_for_test("python-add", "skipped", "skipped"),
+        format_comparison_for_test("cli-help-flag", "failed", "passed"),
+    ]);
+
+    assert_eq!(summaries.len(), 1);
+    let summary = &summaries[0];
+    assert_eq!(summary.sample_size, 1);
+    assert_eq!(summary.native.total_runs, 1);
+    assert_eq!(summary.text.total_runs, 1);
+    assert_eq!(summary.text.passed_runs, 1);
+    assert_eq!(summary.divergence_counts.text_only_pass, 1);
 }
 
 #[test]

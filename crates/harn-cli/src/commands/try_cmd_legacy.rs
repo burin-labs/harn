@@ -1,9 +1,7 @@
 use crate::cli::TryArgs;
 
-/// Legacy synth-into-tempfile-then-`execute_run` path, retained so the
-/// parity-snapshot harness can pin the new dispatch against it. The
-/// C1 ratchet (#2314) removes this once the .harn impl is the
-/// production default everywhere.
+/// Host-side synth-into-tempfile-then-`execute_run` fallback retained for
+/// parity snapshot coverage.
 pub(super) async fn run(args: TryArgs, provider: &str, model: &str) {
     use std::collections::HashSet;
     use std::fs;

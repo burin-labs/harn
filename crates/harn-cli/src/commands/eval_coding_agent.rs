@@ -1,7 +1,7 @@
-//! `harn eval coding-agent` — empirical preset/provider benchmark for a
+//! `harn eval coding-agent` - empirical preset/provider benchmark for a
 //! small coding-agent fixture suite.
 //!
-//! ## .harn dispatch (W7 partial port — see harn#2307)
+//! ## Dispatch boundary
 //!
 //! The **matrix execution pipeline** (fixture resolution, model
 //! discovery, per-cell `execute_run` invocation, Ollama snapshot/
@@ -9,8 +9,8 @@
 //! generation, baseline diff) stays in Rust. Every cell drives the
 //! embedded `coding_agent_suite.harn` driver through `execute_run`,
 //! which itself reaches into VM internals (`commands::run`,
-//! `harn_vm::llm`, `commands::local::runtime`) that aren't reachable
-//! from script-land today — the same constraint that shaped W5 / W6.
+//! `harn_vm::llm`, `commands::local::runtime`) that are not exposed as
+//! script capabilities.
 //!
 //! The **rendering layer** (the `summary.md` body, the `followups.md`
 //! body, the one-line human stdout summary, the `--json` pretty form)
@@ -30,8 +30,8 @@
 //! check, and hosted ingestion — all of which depend on the serde
 //! struct-field byte order.
 //!
-//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path for the
-//! parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
+//! `HARN_CLI_IMPL=rust` keeps the direct-render path available for
+//! parity snapshot coverage.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ffi::OsString;
@@ -85,9 +85,8 @@ const CODING_AGENT_MODE_ENV: &str = "HARN_EVAL_CODING_AGENT_MODE";
 /// production; in tests it serialises the dispatch window only —
 /// matrix execution still parallelises freely.
 ///
-/// Mirrors the pattern W5's `eval_prompt.rs` and W6's `eval_context.rs`
-/// / `eval_tool_calls.rs` use (see harn#2305 / #2306) so the cross-
-/// script env-var hand-off stays consistent across the eval cluster.
+/// Matches the other eval render shims so the cross-script env-var handoff
+/// stays consistent across the eval cluster.
 static DISPATCH_RENDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const CODING_AGENT_SUITE_HARN: &str = include_str!("../../assets/evals/coding_agent_suite.harn");
@@ -1446,12 +1445,17 @@ fn build_parity_by_pair(comparisons: &[FormatComparison]) -> Vec<ToolModeParityP
 }
 
 fn parity_fixture_input(comparison: &FormatComparison) -> Option<ToolModeParityFixtureInput> {
+    let native_verdict = comparison.native_status.clone()?;
+    let text_verdict = comparison.text_status.clone()?;
+    if native_verdict == "skipped" || text_verdict == "skipped" {
+        return None;
+    }
     Some(ToolModeParityFixtureInput {
         provider: comparison.selector.provider.clone(),
         model: comparison.selector.model.clone(),
         fixture_id: comparison.fixture_id.clone(),
-        native_verdict: comparison.native_status.clone()?,
-        text_verdict: comparison.text_status.clone()?,
+        native_verdict,
+        text_verdict,
         native_passed: comparison.native_passed?,
         text_passed: comparison.text_passed?,
         agreement: comparison.equivalent?,

@@ -1,11 +1,9 @@
-//! `harn try "<prompt>"` — dispatches to the embedded
-//! `cli/try.harn` script (see harn#2302 / W2). The shim is
-//! intentionally tiny because all the agent_loop wiring lives in
-//! the .harn impl now.
+//! `harn try "<prompt>"` dispatches to the embedded `cli/try.harn`
+//! script. The shim stays intentionally tiny because agent-loop option
+//! wiring belongs in the script.
 //!
-//! `HARN_CLI_IMPL=rust` is reserved for the parity-snapshot harness
-//! to keep both impls comparable until the harn impl is the default
-//! everywhere (see C1 ratchet, #2314).
+//! `HARN_CLI_IMPL=rust` keeps the legacy path available for parity
+//! snapshot coverage.
 
 use harn_vm::llm_config;
 
