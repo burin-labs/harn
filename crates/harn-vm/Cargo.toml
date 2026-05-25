@@ -35,7 +35,7 @@ harn-modules = { path = "../harn-modules", version = "0.8" }
 harn-parser = { path = "../harn-parser", version = "0.8" }
 harn-stdlib = { path = "../harn-stdlib", version = "0.8" }
 async-trait = "0.1"
-bincode = "1.3"
+bincode = { version = "2.0", features = ["serde"] }
 chrono = "0.4"
 chrono-tz = "0.10.4"
 croner = "3.0.1"

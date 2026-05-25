@@ -51,7 +51,7 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 
 /// On-disk format version. Bump when [`CachedChunk`] or the header
 /// layout changes in a backwards-incompatible way.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -344,7 +344,7 @@ fn write_atomic_module(target: &Path, key: &CacheKey, artifact: &ModuleArtifact)
 /// the filesystem.
 pub fn serialize_chunk_artifact(key: &CacheKey, chunk: &Chunk) -> io::Result<Vec<u8>> {
     let cached = chunk.freeze_for_cache();
-    let payload = bincode::serialize(&cached)
+    let payload = bincode::serde::encode_to_vec(&cached, bincode::config::standard())
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
     Ok(encode_artifact(key, KIND_ENTRY_CHUNK, &payload))
 }
@@ -352,7 +352,7 @@ pub fn serialize_chunk_artifact(key: &CacheKey, chunk: &Chunk) -> io::Result<Vec
 /// Serialize a module artifact (header + payload) to bytes. Companion
 /// to [`serialize_chunk_artifact`] for the `.harnmod` family.
 pub fn serialize_module_artifact(key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<Vec<u8>> {
-    let payload = bincode::serialize(artifact)
+    let payload = bincode::serde::encode_to_vec(artifact, bincode::config::standard())
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
     Ok(encode_artifact(key, KIND_MODULE_ARTIFACT, &payload))
 }
@@ -456,10 +456,11 @@ fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk
     if header.kind != KIND_ENTRY_CHUNK {
         return Ok(None);
     }
-    let cached: CachedChunk = match bincode::deserialize(&header.payload) {
-        Ok(c) => c,
-        Err(_) => return Ok(None),
-    };
+    let cached: CachedChunk =
+        match bincode::serde::decode_from_slice(&header.payload, bincode::config::standard()) {
+            Ok((c, _)) => c,
+            Err(_) => return Ok(None),
+        };
     Ok(Some(Chunk::from_cached(&cached)))
 }
 
@@ -470,8 +471,11 @@ fn read_module_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Modu
     if header.kind != KIND_MODULE_ARTIFACT {
         return Ok(None);
     }
-    match bincode::deserialize::<ModuleArtifact>(&header.payload) {
-        Ok(artifact) => Ok(Some(artifact)),
+    match bincode::serde::decode_from_slice::<ModuleArtifact, _>(
+        &header.payload,
+        bincode::config::standard(),
+    ) {
+        Ok((artifact, _)) => Ok(Some(artifact)),
         Err(_) => Ok(None),
     }
 }
