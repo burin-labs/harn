@@ -158,8 +158,10 @@ metadata is available. `liveState` is one of:
 - `controller` clients may send bounded session controls such as
   `session/cancel`, `session/inject`, `session/revoke_inject`,
   `session/replace_inject`, `session/truncate`, `session/remind`,
-  `session/set_mode`, and `session/set_config_option`. Host requests are still
-  delivered only to the `host_owner`.
+  `session/set_mode`, and `session/set_config_option`. General host requests
+  are still delivered only to the `host_owner`; `session/request_permission`
+  is also delivered to controllers so an attached control surface can answer
+  approval prompts.
 
 Legacy clients that omit a role request `host_owner`, preserving the old
 single-host behavior. To attach a read-only client, pass the role through
@@ -229,6 +231,21 @@ Read-only control attempts fail with a structured JSON-RPC error:
   }
 }
 ```
+
+Permission decisions are deterministic when multiple control-capable clients
+race on the same `session/request_permission` request:
+
+- the first valid response wins and is forwarded to the running ACP worker;
+- the same response from the same actor/request id is idempotent and returns
+  `status: "already_applied"`;
+- conflicting late responses fail with `code: -32013` and `data.reason:
+  "already_decided"`, including `decidedBy`, `decidedAtMs`, and the attempted
+  actor.
+
+Forwarded controls carry `_harn.actor` with `clientId`, `connectionId`, `role`,
+and `source: "websocket"`. ACP adapter audit/replay emits matching
+`_harn/agentEvent` frames with `kind: "control_outcome"` for accepted,
+idempotent, and rejected outcomes.
 
 Retained workers expire after 5 minutes by default. `HARN_ACP_WS_RETAIN_SECS`
 can tune that window for controlled deployments and tests. After expiry, or
