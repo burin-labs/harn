@@ -160,6 +160,7 @@ public struct HarnModelToolSupport: Codable, Sendable, Equatable {
     public let preferredFormat: String?
     public let parity: String?
     public let parityNotes: String?
+    public let empiricalParity: HarnToolEmpiricalParity?
     public let toolSearch: [String]
     public let maxTools: Int?
 
@@ -169,8 +170,31 @@ public struct HarnModelToolSupport: Codable, Sendable, Equatable {
         case preferredFormat = "preferred_format"
         case parity
         case parityNotes = "parity_notes"
+        case empiricalParity = "empirical_parity"
         case toolSearch = "tool_search"
         case maxTools = "max_tools"
+    }
+}
+
+public struct HarnToolEmpiricalParity: Codable, Sendable, Equatable {
+    public let verdict: String
+    public let preferredFormat: String
+    public let confidence: String
+    public let sampleSize: Int
+    public let lastEvaluated: String
+    public let nativePassRate: Double
+    public let textPassRate: Double
+    public let verifierDivergenceRate: Double
+
+    enum CodingKeys: String, CodingKey {
+        case verdict
+        case preferredFormat = "preferred_format"
+        case confidence
+        case sampleSize = "sample_size"
+        case lastEvaluated = "last_evaluated"
+        case nativePassRate = "native_pass_rate"
+        case textPassRate = "text_pass_rate"
+        case verifierDivergenceRate = "verifier_divergence_rate"
     }
 }
 
