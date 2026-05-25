@@ -202,7 +202,20 @@ fn __sv_tool_annotations(entry) {
   return {}
 }
 
+fn __sv_annotation_enabled(value) -> bool {
+  return type_of(value) == "bool" && value
+}
+
+fn __sv_tool_entry_is_structural(entry) -> bool {
+  let annotations = __sv_tool_annotations(entry)
+  return __sv_annotation_enabled(annotations?.structural)
+    || __sv_annotation_enabled(annotations?.agent_lifecycle)
+}
+
 fn __sv_tool_entry_has_write_capability(entry) -> bool {
+  if __sv_tool_entry_is_structural(entry) {
+    return false
+  }
   let annotations = __sv_tool_annotations(entry)
   let side_effect_level = lowercase(__sv_string(annotations?.side_effect_level ?? annotations?.sideEffectLevel))
   if side_effect_level == "none" || side_effect_level == "read_only" {
@@ -225,6 +238,16 @@ fn __sv_workspace_has_write_capability(payload) -> bool {
   let entries = __sv_list(tools?.tools)
   for entry in entries {
     if type_of(entry) == "dict" && __sv_tool_entry_has_write_capability(entry) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __sv_has_non_structural_tools(payload) -> bool {
+  let tools = __sv_dict(payload?.tools)
+  for entry in __sv_list(tools?.tools) {
+    if type_of(entry) == "dict" && !__sv_tool_entry_is_structural(entry) {
       return true
     }
   }
@@ -327,12 +350,13 @@ fn __sv_join_messages(values) -> string {
 
 fn __sv_tool_calls_well_formed(payload) {
   let is_text_tool_format = lowercase(__sv_string(payload?.tool_format)) == "text"
-  let parse_errors = if is_text_tool_format {
+  let should_enforce_text_protocol = is_text_tool_format && __sv_has_non_structural_tools(payload)
+  let parse_errors = if should_enforce_text_protocol {
     __sv_string_list(payload?.tool_parse_errors)
   } else {
     []
   }
-  let protocol_violations = if is_text_tool_format {
+  let protocol_violations = if should_enforce_text_protocol {
     __sv_string_list(payload?.protocol_violations)
   } else {
     []
