@@ -1,7 +1,8 @@
-// std/schema — ergonomic schema builders and typed-value helpers
-//
-// Import with: import "std/schema"
-
+/**
+ * std/schema — ergonomic schema builders and typed-value helpers
+ *
+ * Import with: import "std/schema"
+ */
 pub fn schema_any() {
   return {type: "any"}
 }
@@ -67,7 +68,6 @@ pub fn schema_field(schema, required = true) {
 pub fn schema_object(fields, options = nil) {
   var properties = {}
   var required = []
-
   for entry in fields {
     let raw_schema = entry.value
     let is_required = raw_schema.required == nil || raw_schema.required
@@ -77,7 +77,6 @@ pub fn schema_object(fields, options = nil) {
       required = required + [entry.key]
     }
   }
-
   var out = {type: "dict", properties: properties}
   if len(required) > 0 {
     out = out + {required: required}

@@ -90,9 +90,7 @@ pub fn list_all_checkpoints(handle) {
       }
     },
   )
-    .filter(
-    { env -> env != nil },
-  )
+    .filter({ env -> env != nil })
 }
 
 /** Drop a checkpoint (e.g. for a merged or closed PR we no longer track). */

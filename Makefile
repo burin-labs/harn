@@ -211,6 +211,12 @@ lint-harn:
 FMT_HARN_SKIP := semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn
 EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
 STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
+# Extra repo-root directories that contain user-facing .harn fixtures
+# but were historically outside the fmt-harn gate. Keeping them in the
+# gate avoids the "I edited persona X and pre-commit reformatted three
+# unrelated files" surprise from accumulated drift.
+EXTRA_HARN_DIRS := stdlib personas tests examples evals
+
 fmt-harn-fix:
 	@echo "=== Formatting Harn files ==="
 	@find $(STDLIB_HARN_DIR) -name '*.harn' -print0 \
@@ -221,6 +227,8 @@ fmt-harn-fix:
 		| xargs -0 cargo run --quiet --bin harn -- fmt
 	@find scripts -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt
+	@find $(EXTRA_HARN_DIRS) -type f -name '*.harn' -print0 2>/dev/null \
+		| xargs -0 -r cargo run --quiet --bin harn -- fmt
 	@echo "    Harn formatting OK."
 
 fmt-harn:
@@ -235,6 +243,8 @@ fmt-harn:
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
 	@find crates/harn-cli/assets/demo -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+	@find $(EXTRA_HARN_DIRS) -type f -name '*.harn' -print0 2>/dev/null \
+		| xargs -0 -r cargo run --quiet --bin harn -- fmt --check
 	@echo "    Harn formatting OK."
 
 # Run the @test pipelines that cover scripts/*.harn against pure-logic

@@ -1,7 +1,6 @@
 // std/path — Path manipulation utilities
 //
 // Import with: import "std/path"
-
 /** Get the file extension without the dot. */
 fn ext(path) {
   let e = extname(path)
@@ -15,7 +14,9 @@ fn ext(path) {
 fn stem(path) {
   let base = basename(path)
   let dot = base.index_of(".")
-  if dot < 0 { return base }
+  if dot < 0 {
+    return base
+  }
   return base.substring(0, dot)
 }
 
@@ -42,19 +43,25 @@ fn workspace_normalize(path, workspace_root = nil) {
 /** List files in a directory recursively (one level). */
 fn list_files(dir) {
   let entries = list_dir(dir)
-  return entries.filter({ name ->
-    let full = path_join(dir, name)
-    let info = stat(full)
-    return info.is_file
-  })
+  return entries
+    .filter(
+    { name ->
+      let full = path_join(dir, name)
+      let info = stat(full)
+      return info.is_file
+    },
+  )
 }
 
 /** List subdirectories. */
 fn list_dirs(dir) {
   let entries = list_dir(dir)
-  return entries.filter({ name ->
-    let full = path_join(dir, name)
-    let info = stat(full)
-    return info.is_dir
-  })
+  return entries
+    .filter(
+    { name ->
+      let full = path_join(dir, name)
+      let info = stat(full)
+      return info.is_dir
+    },
+  )
 }

@@ -1,13 +1,9 @@
-// std/vision — deterministic OCR helpers built on the runtime's vision builtins.
-//
-// Import with: import "std/vision"
-
-type VisionBox = {
-  left: int,
-  top: int,
-  width: int,
-  height: int,
-}
+/**
+ * std/vision — deterministic OCR helpers built on the runtime's vision builtins.
+ *
+ * Import with: import "std/vision"
+ */
+type VisionBox = {left: int, top: int, width: int, height: int}
 
 type VisionToken = {
   page: int,
@@ -19,7 +15,7 @@ type VisionToken = {
   normalized: string,
   char_start: int,
   char_end: int,
-  confidence: float | nil,
+  confidence: float?,
   bbox: VisionBox,
 }
 
@@ -33,7 +29,7 @@ type VisionLine = {
   token_count: int,
   char_start: int,
   char_end: int,
-  confidence: float | nil,
+  confidence: float?,
   bbox: VisionBox,
 }
 
@@ -47,14 +43,14 @@ type VisionBlock = {
   line_count: int,
   char_start: int,
   char_end: int,
-  confidence: float | nil,
+  confidence: float?,
   bbox: VisionBox,
 }
 
 type VisionSource = {
   kind: string,
-  path: string | nil,
-  name: string | nil,
+  path: string?,
+  name: string?,
   mime_type: string,
   byte_len: int,
   sha256: string,

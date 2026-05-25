@@ -472,22 +472,16 @@ fn _checkpoint_validator(id, context, extra_validator) {
         if !extra {
           errors = errors + ["custom validator returned false"]
         }
-      } else {
-        if type_of(extra) == "dict" {
-          if !(extra?.ok ?? false) {
-            let extra_errors = extra?.errors ?? extra?.validation_errors
-              ?? [extra?.message ?? "custom validator rejected output"]
-            errors = errors + extra_errors
-          }
-        } else {
-          if type_of(extra) == "list" {
-            errors = errors + extra.map({ item -> to_string(item) })
-          } else {
-            if type_of(extra) == "string" && trim(extra) != "" {
-              errors = errors + [extra]
-            }
-          }
+      } else if type_of(extra) == "dict" {
+        if !(extra?.ok ?? false) {
+          let extra_errors = extra?.errors ?? extra?.validation_errors
+            ?? [extra?.message ?? "custom validator rejected output"]
+          errors = errors + extra_errors
         }
+      } else if type_of(extra) == "list" {
+        errors = errors + extra.map({ item -> to_string(item) })
+      } else if type_of(extra) == "string" && trim(extra) != "" {
+        errors = errors + [extra]
       }
     }
     return {ok: len(errors) == 0, errors: errors}
