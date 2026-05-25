@@ -2368,6 +2368,11 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
 - `agent_session_workspace_policy(id)` / `_set_workspace_policy(id, policy)`
   read and update the default mount mode used when mounted roots omit
   `mount_mode`.
+- `agent_session_add_root(id, root, opts?)` / `_remove_root(id, root)` mount or
+  unmount additional roots. `opts.mount_mode` defaults from the session
+  workspace policy.
+- `agent_session_list_roots(id)` returns `{primary, additional}` for the
+  current mounted roots.
 - `agent_session_reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
 - `agent_session_inject(id, {role, content, …})` — missing `role` errors.
 - `agent_session_seed_from_jsonl(path, opts?)` creates a new session from a

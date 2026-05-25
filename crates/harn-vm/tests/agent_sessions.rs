@@ -2,6 +2,7 @@
 //! Integration tests for first-class sessions.
 
 use harn_vm::value::VmError;
+use tempfile::tempdir;
 
 fn run(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
@@ -455,4 +456,95 @@ pipeline main(task) {
 "#)
     .unwrap_err();
     assert!(err.contains("bogus"), "got: {err}");
+}
+
+#[test]
+fn add_root_uses_default_mount_mode_emits_event_and_removes_cleanly() {
+    let primary = tempdir().expect("primary tempdir");
+    let mounted = tempdir().expect("mounted tempdir");
+    let primary_path = primary.path().display().to_string();
+    let mounted_path = std::fs::canonicalize(mounted.path())
+        .expect("canonical mounted tempdir")
+        .display()
+        .to_string();
+    let lines = out(&format!(
+        r#"
+pipeline main(task) {{
+  let s = agent_session_open("anchor-roots", {{
+    workspace_policy: {{default_mount_mode: "extend"}},
+    workspace_anchor: {{
+      primary: "{primary_path}",
+      anchored_at: "2026-05-24T00:00:00Z",
+    }},
+  }})
+  let added = agent_session_add_root(s, "{mounted_path}", {{reason: "shared"}})
+  log(added.ok)
+  log(added.mounted_at != nil)
+  let roots = agent_session_list_roots(s)
+  log(roots["primary"])
+  log(len(roots["additional"]))
+  log(roots["additional"][0]["mount_mode"])
+  let mounted_events = transcript_events_by_kind(agent_session_snapshot(s), "RootMounted")
+  log(len(mounted_events))
+  log(mounted_events[0]["metadata"]["path"])
+  log(mounted_events[0]["metadata"]["mount_mode"])
+  log(mounted_events[0]["metadata"]["reason"])
+
+  let updated = agent_session_add_root(s, "{mounted_path}", {{mount_mode: "sandboxed"}})
+  log(updated.ok)
+  log(agent_session_list_roots(s)["additional"][0]["mount_mode"])
+  log(len(agent_session_list_roots(s)["additional"]))
+
+  let removed = agent_session_remove_root(s, "{mounted_path}")
+  log(removed.ok)
+  log(len(agent_session_list_roots(s)["additional"]))
+  let missing = agent_session_remove_root(s, "{mounted_path}")
+  log(missing.ok)
+}}
+"#
+    ));
+    assert_eq!(
+        lines,
+        vec![
+            "true".to_string(),
+            "true".to_string(),
+            primary_path,
+            "1".to_string(),
+            "extend".to_string(),
+            "1".to_string(),
+            mounted_path.clone(),
+            "extend".to_string(),
+            "shared".to_string(),
+            "true".to_string(),
+            "sandboxed".to_string(),
+            "1".to_string(),
+            "true".to_string(),
+            "0".to_string(),
+            "true".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn add_root_reports_missing_directory_in_result_envelope() {
+    let primary = tempdir().expect("primary tempdir");
+    let missing = primary.path().join("missing-root");
+    let primary_path = primary.path().display().to_string();
+    let missing_path = missing.display().to_string();
+    let lines = out(&format!(
+        r#"
+pipeline main(task) {{
+  let s = agent_session_open("anchor-roots-missing", {{
+    workspace_anchor: {{
+      primary: "{primary_path}",
+      anchored_at: "2026-05-24T00:00:00Z",
+    }},
+  }})
+  let added = agent_session_add_root(s, "{missing_path}")
+  log(added.ok)
+  log(contains(added.error ?? "", "must exist"))
+}}
+"#
+    ));
+    assert_eq!(lines, vec!["false", "true"]);
 }
