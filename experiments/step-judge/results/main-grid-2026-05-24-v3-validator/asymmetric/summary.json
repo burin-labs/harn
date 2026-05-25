@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "fixture_ids": [
     "python-add",
     "cli-help-flag",
@@ -104,28 +104,28 @@
     }
   ],
   "total_runs": 6,
-  "passed_runs": 4,
-  "failed_runs": 2,
+  "passed_runs": 3,
+  "failed_runs": 3,
   "skipped_runs": 0,
   "diverged_comparisons": 0,
-  "total_cost_usd": 0.051351,
+  "total_cost_usd": 0.07935099999999999,
   "rollups": {
     "by_fixture": [
       {
         "key": "cli-help-flag",
         "total_runs": 1,
-        "passed_runs": 0,
-        "failed_runs": 1,
+        "passed_runs": 1,
+        "failed_runs": 0,
         "skipped_runs": 0,
-        "total_cost_usd": 0.010126000000000001
+        "total_cost_usd": 0.03164
       },
       {
         "key": "docs-symbol-rename",
         "total_runs": 1,
-        "passed_runs": 1,
-        "failed_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 1,
         "skipped_runs": 0,
-        "total_cost_usd": 0.012547999999999998
+        "total_cost_usd": 0.007147000000000001
       },
       {
         "key": "no-tool-diagnosis",
@@ -138,10 +138,10 @@
       {
         "key": "python-add",
         "total_runs": 1,
-        "passed_runs": 1,
-        "failed_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 1,
         "skipped_runs": 0,
-        "total_cost_usd": 0.013788
+        "total_cost_usd": 0.006736000000000001
       },
       {
         "key": "read-only-audit",
@@ -149,7 +149,7 @@
         "passed_runs": 1,
         "failed_runs": 0,
         "skipped_runs": 0,
-        "total_cost_usd": 0.0053479999999999995
+        "total_cost_usd": 0.004228
       },
       {
         "key": "test-output-first",
@@ -157,47 +157,47 @@
         "passed_runs": 0,
         "failed_runs": 1,
         "skipped_runs": 0,
-        "total_cost_usd": 0.007993
+        "total_cost_usd": 0.028052
       }
     ],
     "by_provider": [
       {
         "key": "openrouter",
         "total_runs": 6,
-        "passed_runs": 4,
-        "failed_runs": 2,
+        "passed_runs": 3,
+        "failed_runs": 3,
         "skipped_runs": 0,
-        "total_cost_usd": 0.051351
+        "total_cost_usd": 0.07935099999999999
       }
     ],
     "by_model": [
       {
         "key": "anthropic/claude-haiku-4-5",
         "total_runs": 6,
-        "passed_runs": 4,
-        "failed_runs": 2,
+        "passed_runs": 3,
+        "failed_runs": 3,
         "skipped_runs": 0,
-        "total_cost_usd": 0.051351
+        "total_cost_usd": 0.07935099999999999
       }
     ],
     "by_tool_format": [
       {
         "key": "text",
         "total_runs": 6,
-        "passed_runs": 4,
-        "failed_runs": 2,
+        "passed_runs": 3,
+        "failed_runs": 3,
         "skipped_runs": 0,
-        "total_cost_usd": 0.051351
+        "total_cost_usd": 0.07935099999999999
       }
     ],
     "by_tool_sequence": [
       {
         "key": "multi-tool",
         "total_runs": 4,
-        "passed_runs": 2,
-        "failed_runs": 2,
+        "passed_runs": 1,
+        "failed_runs": 3,
         "skipped_runs": 0,
-        "total_cost_usd": 0.044455
+        "total_cost_usd": 0.073575
       },
       {
         "key": "no-tool",
@@ -213,7 +213,7 @@
         "passed_runs": 1,
         "failed_runs": 0,
         "skipped_runs": 0,
-        "total_cost_usd": 0.0053479999999999995
+        "total_cost_usd": 0.004228
       }
     ]
   },
@@ -229,47 +229,55 @@
         "model": "anthropic/claude-haiku-4-5"
       },
       "tool_format": "text",
-      "status": "passed",
-      "passed": true,
+      "status": "failed",
+      "passed": false,
       "skipped": false,
       "output_dir": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/python-add__openrouter_anthropic_claude-haiku-4-5__text",
       "transcript_events_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/python-add__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "workspace_root": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/python-add__openrouter_anthropic_claude-haiku-4-5__text/workspace",
-      "elapsed_ms": 28863,
-      "duration_ms": 28723,
-      "iterations": 5,
-      "input_tokens": 9193,
-      "output_tokens": 919,
-      "cost_usd": 0.013788,
+      "elapsed_ms": 22549,
+      "duration_ms": 22384,
+      "iterations": 4,
+      "input_tokens": 3451,
+      "output_tokens": 657,
+      "cost_usd": 0.006736000000000001,
       "pricing_known": true,
-      "tool_calls": 12,
-      "rejected_tool_calls": 2,
+      "tool_calls": 20,
+      "rejected_tool_calls": 3,
       "tool_sequence": [
         "list_directory",
         "list_directory",
         "run_command",
+        "read_file",
+        "list_directory",
+        "search_files",
+        "run_command",
+        "list_directory",
+        "run_command",
+        "read_file",
+        "run_command",
         "list_directory",
         "list_directory",
-        "read_file",
-        "read_file",
+        "run_command",
+        "search_files",
         "read_file",
         "run_command",
         "read_file",
-        "replace_in_file",
-        "run_command"
+        "list_directory",
+        "search_files"
       ],
       "successful_tools": [
         "list_directory",
         "list_directory",
+        "search_files",
         "read_file",
-        "read_file",
-        "read_file",
-        "read_file",
-        "replace_in_file"
+        "list_directory",
+        "search_files"
       ],
-      "transcript_event_count": 35,
-      "verification_success": true,
-      "harn_exit_code": 0,
+      "transcript_event_count": 22,
+      "verification_success": false,
+      "harn_exit_code": 1,
+      "error": "failed",
       "local_cleanup": null
     },
     {
@@ -283,81 +291,46 @@
         "model": "anthropic/claude-haiku-4-5"
       },
       "tool_format": "text",
-      "status": "failed",
-      "passed": false,
+      "status": "passed",
+      "passed": true,
       "skipped": false,
       "output_dir": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__text",
       "transcript_events_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "workspace_root": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__text/workspace",
-      "elapsed_ms": 28305,
-      "duration_ms": 28112,
-      "iterations": 3,
-      "input_tokens": 2796,
-      "output_tokens": 1466,
-      "cost_usd": 0.010126000000000001,
+      "elapsed_ms": 27901,
+      "duration_ms": 27755,
+      "iterations": 5,
+      "input_tokens": 25640,
+      "output_tokens": 1200,
+      "cost_usd": 0.03164,
       "pricing_known": true,
-      "tool_calls": 42,
-      "rejected_tool_calls": 8,
+      "tool_calls": 12,
+      "rejected_tool_calls": 3,
       "tool_sequence": [
         "list_directory",
         "read_file",
-        "search_files",
-        "search_files",
-        "list_directory",
-        "read_file",
-        "search_files",
-        "search_files",
-        "run_command",
-        "list_directory",
-        "read_file",
-        "search_files",
-        "run_command",
-        "run_command",
         "read_file",
         "run_command",
-        "list_directory",
-        "read_file",
-        "read_file",
+        "run_command",
+        "run_command",
+        "replace_in_file",
         "replace_in_file",
         "replace_in_file",
         "run_command",
         "run_command",
-        "run_command",
-        "list_directory",
-        "list_directory",
-        "search_files",
-        "read_file",
-        "search_files",
-        "list_directory",
-        "run_command",
-        "run_command",
-        "read_file",
-        "read_file",
-        "replace_in_file",
-        "run_command",
-        "run_command",
-        "run_command",
-        "read_file",
-        "replace_in_file",
-        "read_file",
-        "read_file"
+        "run_command"
       ],
       "successful_tools": [
         "list_directory",
-        "list_directory",
-        "search_files",
-        "read_file",
-        "search_files",
-        "list_directory",
         "read_file",
         "read_file",
         "replace_in_file",
-        "read_file"
+        "replace_in_file",
+        "replace_in_file"
       ],
-      "transcript_event_count": 30,
-      "verification_success": false,
-      "harn_exit_code": 1,
-      "error": "failed",
+      "transcript_event_count": 33,
+      "verification_success": true,
+      "harn_exit_code": 0,
       "local_cleanup": null
     },
     {
@@ -377,28 +350,30 @@
       "output_dir": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/test-output-first__openrouter_anthropic_claude-haiku-4-5__text",
       "transcript_events_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/test-output-first__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "workspace_root": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/test-output-first__openrouter_anthropic_claude-haiku-4-5__text/workspace",
-      "elapsed_ms": 12602,
-      "duration_ms": 12488,
-      "iterations": 4,
-      "input_tokens": 5563,
-      "output_tokens": 486,
-      "cost_usd": 0.007993,
+      "elapsed_ms": 36558,
+      "duration_ms": 36462,
+      "iterations": 8,
+      "input_tokens": 22917,
+      "output_tokens": 1027,
+      "cost_usd": 0.028052,
       "pricing_known": true,
-      "tool_calls": 6,
-      "rejected_tool_calls": 3,
+      "tool_calls": 8,
+      "rejected_tool_calls": 5,
       "tool_sequence": [
         "run_command",
-        "run_command",
-        "list_directory",
         "list_directory",
         "run_command",
-        "run_command"
+        "run_command",
+        "run_command",
+        "run_command",
+        "run_command",
+        "read_file"
       ],
       "successful_tools": [
         "list_directory",
-        "list_directory"
+        "run_command"
       ],
-      "transcript_event_count": 24,
+      "transcript_event_count": 54,
       "verification_success": false,
       "harn_exit_code": 1,
       "error": "failed",
@@ -415,26 +390,45 @@
         "model": "anthropic/claude-haiku-4-5"
       },
       "tool_format": "text",
-      "status": "passed",
-      "passed": true,
+      "status": "failed",
+      "passed": false,
       "skipped": false,
       "output_dir": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__text",
       "transcript_events_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "workspace_root": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__text/workspace",
-      "elapsed_ms": 22879,
-      "duration_ms": 22805,
+      "elapsed_ms": 32828,
+      "duration_ms": 32678,
       "iterations": 4,
-      "input_tokens": 8158,
-      "output_tokens": 878,
-      "cost_usd": 0.012547999999999998,
+      "input_tokens": 2407,
+      "output_tokens": 948,
+      "cost_usd": 0.007147000000000001,
       "pricing_known": true,
-      "tool_calls": 8,
+      "tool_calls": 27,
       "rejected_tool_calls": 1,
       "tool_sequence": [
         "list_directory",
+        "list_directory",
         "search_files",
         "read_file",
+        "list_directory",
+        "run_command",
         "read_file",
+        "search_files",
+        "list_directory",
+        "run_command",
+        "read_file",
+        "read_file",
+        "replace_in_file",
+        "replace_in_file",
+        "run_command",
+        "list_directory",
+        "search_files",
+        "read_file",
+        "search_files",
+        "list_directory",
+        "search_files",
+        "read_file",
+        "search_files",
         "read_file",
         "replace_in_file",
         "replace_in_file",
@@ -444,14 +438,19 @@
         "list_directory",
         "search_files",
         "read_file",
+        "search_files",
+        "list_directory",
+        "search_files",
         "read_file",
+        "search_files",
         "read_file",
         "replace_in_file",
         "replace_in_file"
       ],
-      "transcript_event_count": 33,
-      "verification_success": true,
-      "harn_exit_code": 0,
+      "transcript_event_count": 25,
+      "verification_success": false,
+      "harn_exit_code": 1,
+      "error": "failed",
       "local_cleanup": null
     },
     {
@@ -471,17 +470,16 @@
       "output_dir": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/read-only-audit__openrouter_anthropic_claude-haiku-4-5__text",
       "transcript_events_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/read-only-audit__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "workspace_root": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/read-only-audit__openrouter_anthropic_claude-haiku-4-5__text/workspace",
-      "elapsed_ms": 7121,
-      "duration_ms": 7105,
-      "iterations": 3,
-      "input_tokens": 3493,
-      "output_tokens": 371,
-      "cost_usd": 0.0053479999999999995,
+      "elapsed_ms": 3745,
+      "duration_ms": 3717,
+      "iterations": 2,
+      "input_tokens": 2908,
+      "output_tokens": 264,
+      "cost_usd": 0.004228,
       "pricing_known": true,
-      "tool_calls": 2,
+      "tool_calls": 1,
       "rejected_tool_calls": 0,
       "tool_sequence": [
-        "read_file",
         "read_file"
       ],
       "successful_tools": [
@@ -509,8 +507,8 @@
       "output_dir": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__text",
       "transcript_events_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "workspace_root": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/no-tool-diagnosis__openrouter_anthropic_claude-haiku-4-5__text/workspace",
-      "elapsed_ms": 1772,
-      "duration_ms": 1757,
+      "elapsed_ms": 1551,
+      "duration_ms": 1523,
       "iterations": 1,
       "input_tokens": 1063,
       "output_tokens": 97,
@@ -520,7 +518,7 @@
       "rejected_tool_calls": 0,
       "tool_sequence": [],
       "successful_tools": [],
-      "transcript_event_count": 10,
+      "transcript_event_count": 11,
       "verification_success": true,
       "harn_exit_code": 0,
       "local_cleanup": null
@@ -539,9 +537,13 @@
       "native_evidence_path": null,
       "text_evidence_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/cli-help-flag__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "native_status": null,
-      "text_status": "failed",
+      "text_status": "passed",
       "native_passed": null,
-      "text_passed": false,
+      "text_passed": true,
+      "native_tool_call_count": null,
+      "text_tool_call_count": 12,
+      "native_rejected_tool_call_count": null,
+      "text_rejected_tool_call_count": 3,
       "verifier_match": null,
       "tool_sequence_match": null,
       "rejected_tool_call_delta_text_minus_native": null,
@@ -565,9 +567,13 @@
       "native_evidence_path": null,
       "text_evidence_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "native_status": null,
-      "text_status": "passed",
+      "text_status": "failed",
       "native_passed": null,
-      "text_passed": true,
+      "text_passed": false,
+      "native_tool_call_count": null,
+      "text_tool_call_count": 27,
+      "native_rejected_tool_call_count": null,
+      "text_rejected_tool_call_count": 1,
       "verifier_match": null,
       "tool_sequence_match": null,
       "rejected_tool_call_delta_text_minus_native": null,
@@ -594,6 +600,10 @@
       "text_status": "passed",
       "native_passed": null,
       "text_passed": true,
+      "native_tool_call_count": null,
+      "text_tool_call_count": 0,
+      "native_rejected_tool_call_count": null,
+      "text_rejected_tool_call_count": 0,
       "verifier_match": null,
       "tool_sequence_match": null,
       "rejected_tool_call_delta_text_minus_native": null,
@@ -617,9 +627,13 @@
       "native_evidence_path": null,
       "text_evidence_path": "experiments/step-judge/results/main-grid-2026-05-24-v3-validator/asymmetric/python-add__openrouter_anthropic_claude-haiku-4-5__text/transcript_events.jsonl",
       "native_status": null,
-      "text_status": "passed",
+      "text_status": "failed",
       "native_passed": null,
-      "text_passed": true,
+      "text_passed": false,
+      "native_tool_call_count": null,
+      "text_tool_call_count": 20,
+      "native_rejected_tool_call_count": null,
+      "text_rejected_tool_call_count": 3,
       "verifier_match": null,
       "tool_sequence_match": null,
       "rejected_tool_call_delta_text_minus_native": null,
@@ -646,6 +660,10 @@
       "text_status": "passed",
       "native_passed": null,
       "text_passed": true,
+      "native_tool_call_count": null,
+      "text_tool_call_count": 1,
+      "native_rejected_tool_call_count": null,
+      "text_rejected_tool_call_count": 0,
       "verifier_match": null,
       "tool_sequence_match": null,
       "rejected_tool_call_delta_text_minus_native": null,
@@ -672,6 +690,10 @@
       "text_status": "failed",
       "native_passed": null,
       "text_passed": false,
+      "native_tool_call_count": null,
+      "text_tool_call_count": 8,
+      "native_rejected_tool_call_count": null,
+      "text_rejected_tool_call_count": 5,
       "verifier_match": null,
       "tool_sequence_match": null,
       "rejected_tool_call_delta_text_minus_native": null,
@@ -684,6 +706,7 @@
       ]
     }
   ],
+  "parity_by_pair": [],
   "followups": [
     {
       "title": "Normalize coding-agent fixture failures across provider presets",
@@ -693,8 +716,9 @@
         "providers"
       ],
       "run_ids": [
-        "cli-help-flag__openrouter_anthropic_claude-haiku-4-5__text",
-        "test-output-first__openrouter_anthropic_claude-haiku-4-5__text"
+        "python-add__openrouter_anthropic_claude-haiku-4-5__text",
+        "test-output-first__openrouter_anthropic_claude-haiku-4-5__text",
+        "docs-symbol-rename__openrouter_anthropic_claude-haiku-4-5__text"
       ]
     },
     {
@@ -719,7 +743,12 @@
     "baseline_path": "experiments/step-judge/results/main-grid-2026-05-24-v3/asymmetric-native/summary.json",
     "regressions": [
       {
-        "fixture_id": "cli-help-flag",
+        "fixture_id": "docs-symbol-rename",
+        "baseline_status": "passed",
+        "cell_status": "failed"
+      },
+      {
+        "fixture_id": "python-add",
         "baseline_status": "passed",
         "cell_status": "failed"
       },
@@ -742,14 +771,13 @@
       }
     ],
     "unchanged_passes": [
-      "docs-symbol-rename",
-      "python-add"
+      "cli-help-flag"
     ],
     "unchanged_failures": [],
     "missing_in_baseline": [],
     "missing_in_cell": [],
-    "regressions_count": 2,
+    "regressions_count": 3,
     "recoveries_count": 2,
-    "net_lift_pp": 0.0
+    "net_lift_pp": -16.7
   }
 }

@@ -12,7 +12,6 @@ import { edit_apply_old_new_patch } from "std/edit"
 import { write_json } from "std/fs"
 import { write_jsonl } from "std/jsonl"
 import { with_structural_validator } from "std/llm/structural_validator"
-import { compose_tool_callers } from "std/llm/tool_middleware"
 
 let __READ_ONLY_AUDIT_SETTINGS = "DEFAULT_TIMEOUT_SECONDS = 30\n"
 
@@ -853,7 +852,7 @@ fn __run_fixture_agent(
   }
   if structural_validator_config != nil {
     options = options
-      + {tool_caller: compose_tool_callers([with_structural_validator(structural_validator_config)])}
+      + {structural_validator: with_structural_validator(structural_validator_config)}
   }
   if fixture == "read-only-audit" {
     return audit_agent(task, options)

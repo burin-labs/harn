@@ -131,6 +131,30 @@ pipeline default() {
   __io_println(post_write.result.status == "done")
   __io_println(len(post_write_decisions) == 0)
   llm_mock_clear()
+  llm_mock(
+    {text: "", tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
+  )
+  llm_mock({text: "I fixed it already."})
+  let post_write_non_empty_session = "structural-validator-post-write-non-empty-" + uuid()
+  let post_write_non_empty = agent_capture_events(
+    post_write_non_empty_session,
+    fn() { return agent_loop(
+      "Update notes.txt and then summarize.",
+      nil,
+      {
+        provider: "mock",
+        tool_format: "native",
+        max_iterations: 3,
+        tools: write_tools(),
+        session_id: post_write_non_empty_session,
+        structural_validator: with_structural_validator(),
+      },
+    ) },
+  )
+  let post_write_non_empty_decisions = events_of(post_write_non_empty.events, "structural_validator_decision")
+  __io_println(post_write_non_empty.result.status == "done")
+  __io_println(len(post_write_non_empty_decisions) == 0)
+  llm_mock_clear()
   llm_mock({text: malformed_tool_text})
   let malformed_session = "structural-validator-malformed-" + uuid()
   let malformed = agent_capture_events(

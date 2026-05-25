@@ -243,6 +243,77 @@ fn read_only_audit_verifier_accepts_repeated_read_file_calls() {
 }
 
 #[test]
+fn coding_agent_suite_default_structural_validator_vetoes_phantom_completion() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let fixture_path = tmp.path().join("llm-mocks.jsonl");
+    fs::write(
+        &fixture_path,
+        r#"{"text":"I fixed it already.","model":"mock"}
+{"text":"","tool_calls":[{"name":"read_file","args":{"path":"math_utils.py"}}],"model":"mock"}
+{"text":"","tool_calls":[{"name":"replace_in_file","args":{"path":"math_utils.py","old_text":"def add(a, b):\n    return a - b\n","new_text":"def add(a, b):\n    return a + b\n"}}],"model":"mock"}
+{"text":"","tool_calls":[{"name":"run_command","args":{"argv":["python3","-m","unittest","discover","-s","tests"],"capture":{"max_inline_bytes":4000}}}],"model":"mock"}
+{"text":"Fixed add and verified the unittest suite passes.","model":"mock"}
+"#,
+    )
+    .expect("write llm mock fixture");
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let suite = manifest_dir.join("assets/evals/coding_agent_suite.harn");
+    let output_dir = workspace.join("out");
+    let output_dir_for_run = output_dir.clone();
+    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
+        let _env_guard = env_lock::lock_env().lock().await;
+        harn_vm::reset_thread_local_state();
+        execute_run_with_sandbox_options(
+            &suite.to_string_lossy(),
+            false,
+            HashSet::new(),
+            vec![
+                "--fixture".to_string(),
+                "python-add".to_string(),
+                "--output-dir".to_string(),
+                output_dir_for_run.display().to_string(),
+                "--provider".to_string(),
+                "mock".to_string(),
+                "--model".to_string(),
+                "mock".to_string(),
+                "--tool-format".to_string(),
+                "native".to_string(),
+                "--max-iterations".to_string(),
+                "6".to_string(),
+                "--python".to_string(),
+                "python3".to_string(),
+            ],
+            Vec::new(),
+            CliLlmMockMode::Replay { fixture_path },
+            None,
+            RunProfileOptions::default(),
+            RunSandboxOptions::default().with_workspace_root(workspace),
+        )
+        .await
+    });
+    assert_eq!(
+        outcome.exit_code, 0,
+        "suite failed\nstdout={}\nstderr={}",
+        outcome.stdout, outcome.stderr
+    );
+    let transcript = fs::read_to_string(output_dir.join("transcript_events.jsonl"))
+        .expect("transcript events exist");
+    assert!(
+        transcript.contains("<runtime_feedback kind=\\\"structural_validator\\\">"),
+        "default validator should inject runtime feedback; got:\n{}",
+        transcript
+    );
+    assert!(
+        transcript.contains("\\\"rule\\\":\\\"non_empty_when_writes_expected\\\""),
+        "phantom completion should trip the write-expected rule; got:\n{}",
+        transcript
+    );
+}
+
+#[test]
 fn coding_agent_suite_records_tool_format_override_transcript_event() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let workspace = tmp.path().join("workspace");

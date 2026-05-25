@@ -1,6 +1,6 @@
 # Step-Judge Experiment — Report
 
-**Last updated:** v3 + validator ablation (2026-05-24).
+**Last updated:** v3 + corrected validator ablation (2026-05-25).
 
 ## TL;DR
 
@@ -22,12 +22,12 @@ your generator is structurally weak; otherwise it's overhead."
 
 Follow-up ablation with the 4-rule structural validator wired on by
 default in the coding-agent suite, and `step_judge` forced off,
-does not change that recommendation. Averaged across the three
-Haiku text-mode samples, the validator recovers only about **one
-third** of the remaining +16.7pp text-format lift that v1 had
-credited to `step_judge`, and it does so via a different fixture
-mix (recovering `read-only-audit` / `no-tool-diagnosis` while
-regressing `cli-help-flag`).
+does not change that recommendation. A corrected rerun, after fixing
+the suite so the validator was actually installed on `agent_loop`,
+shows the validator is useful structural hygiene but not a replacement
+for judge-on-text behavior: averaged across the three Haiku text-mode
+samples, validator-on / judge-off scored **7/18 = 38.9%**, below the
+v1 text baseline's **50%** and far below the **80% capture** threshold.
 
 The v1 numbers are preserved below for historical context and as
 evidence of what step_judge can paper over when the generator path
@@ -111,19 +111,19 @@ samples of one condition rather than distinct strategies.
 
 | Cell | Pass | Cost | Delta vs paired v3 native | Key regressions | Key recoveries |
 |---|---:|---:|---:|---|---|
-| `baseline-cheap` | 4/6 = **67%** | $0.07 | 0pp | `cli-help-flag` | `read-only-audit` |
+| `baseline-cheap` | 2/6 = **33%** | $0.08 | **−33.3pp** | `cli-help-flag`, `docs-symbol-rename`, `python-add` | `read-only-audit` |
 | `symmetric-cheap` | 2/6 = **33%** | $0.05 | **−16.7pp** | `cli-help-flag`, `docs-symbol-rename`, `python-add` | `no-tool-diagnosis`, `read-only-audit` |
-| `asymmetric` | 4/6 = **67%** | $0.05 | 0pp | `cli-help-flag`, `test-output-first` | `no-tool-diagnosis`, `read-only-audit` |
-| `symmetric-strong` | 2/6 = **33%** | $0.11 | **−33.3pp** | `cli-help-flag`, `docs-symbol-rename`, `python-add`, `test-output-first` | `no-tool-diagnosis`, `read-only-audit` |
+| `asymmetric` | 3/6 = **50%** | $0.08 | **−16.7pp** | `docs-symbol-rename`, `python-add`, `test-output-first` | `no-tool-diagnosis`, `read-only-audit` |
+| `symmetric-strong` | 5/6 = **83%** | $0.47 | **+16.7pp** | `test-output-first` | `no-tool-diagnosis`, `read-only-audit` |
 
 Truth table across the three equivalent Haiku samples:
 
 | Fixture | v1 baseline (text) | validator-on Haiku text (3 samples) | v3 baseline (native) |
 |---|:---:|:---:|:---:|
-| python-add | ✗ | 2/3 | ✓ |
-| cli-help-flag | ✓ | 0/3 | ✓ |
+| python-add | ✗ | 0/3 | ✓ |
+| cli-help-flag | ✓ | 1/3 | ✓ |
 | test-output-first | ✗ | 0/3 | ✗ |
-| docs-symbol-rename | ✗ | 2/3 | ✓ |
+| docs-symbol-rename | ✗ | 0/3 | ✓ |
 | read-only-audit | ✓ | 3/3 | ✗ |
 | no-tool-diagnosis | ✓ | 3/3 | ✓ |
 
@@ -134,17 +134,21 @@ Three conclusions fall out of that table:
    (`read-only-audit`, `no-tool-diagnosis`) that are most exposed to
    text-format protocol drift.
 2. **It does not recover the v1 judge win.** `test-output-first`
-   stayed 0/3, and `cli-help-flag` regressed in all three Haiku
-   samples. So the validator is not a drop-in replacement for the
-   old judge-on-text behavior.
-3. **The pass-rate lift is too small and too noisy.** Averaging the
-   three Haiku samples gives **10/18 = 55.6%** at an average cost of
-   **$0.0569** per 6-fixture run. Against the v1 baseline text pass
-   rate (**3/6 = 50%**), that is only **+5.6pp**. The report's
-   "remaining step_judge effect" after native tools was **+16.7pp**,
-   so the validator captures about **33%** of that lift, well below
-   the **80%** threshold for changing the recommended shipping
-   config.
+   stayed 0/3, `python-add` fell to 0/3, and `docs-symbol-rename`
+   fell to 0/3. So the validator is not a drop-in replacement for
+   the old judge-on-text behavior.
+3. **The net pass-rate effect is negative for Haiku text mode.**
+   Averaging the three Haiku samples gives **7/18 = 38.9%** at an
+   average cost of **$0.0723** per 6-fixture run. Against the v1
+   baseline text pass rate (**3/6 = 50%**), that is **−11.1pp**.
+   The report's "remaining step_judge effect" after native tools was
+   **+16.7pp**, so the validator captures **0%** of that lift on net,
+   well below the **80%** threshold for changing the recommended
+   shipping config.
+
+The Sonnet text-mode cell was strong at **5/6 = 83%**, but that is a
+different generator, not evidence that the validator alone recovers
+Haiku's judge-on-text failure mode.
 
 ## Updated GO / no-go
 
@@ -222,14 +226,14 @@ agent_loop(message, system, {
     on_veto: "replace",       // default; pop-and-regen validated
     max_attempts: 3,
     rubric: "default",        // default; adversarial probe lost in v1
-    skip_when_iterations_remaining: 1,  // proposed v3.1, avoids the
+    skip_when_iterations_remaining: 1,  // default; avoids the
                                         // no-tool-diagnosis regression
   },
 })
 ```
 
-`skip_when_iterations_remaining` is proposed but not implemented
-yet — filed as a follow-up.
+`skip_when_iterations_remaining` has since landed as the default for
+`step_judge` configs.
 
 ## Caveats
 
@@ -244,15 +248,15 @@ yet — filed as a follow-up.
 - Spend: v3 grid cost **$0.71** total ($0.14 + $0.11 + $0.13 +
   $0.33), well under the $15 cap. Adding replicates 2-3 + 6 more
   fixtures would cost ~$5 — proposed for v3.1.
-- The validator ablation cost **$0.28** total
-  ($0.07 + $0.05 + $0.05 + $0.11). Cheap, but still not strong
+- The corrected validator ablation cost **$0.69** total
+  ($0.08 + $0.05 + $0.08 + $0.47). Cheap, but still not strong
   enough evidence to revise the shipping recommendation.
 
 ## Raw data
 
 - v1 (text, OpenRouter, 2026-05-23): `results/main-grid-2026-05-23/`
 - v3 (native, OpenRouter, 2026-05-24): `results/main-grid-2026-05-24-v3/`
-- v3 validator ablation (text, judge off, 2026-05-24):
+- v3 validator ablation (text, judge off, corrected 2026-05-25):
   `results/main-grid-2026-05-24-v3-validator/`
 
 Per-run JSONL + transcript_events are gitignored under the
