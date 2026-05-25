@@ -149,7 +149,21 @@ metadata is available. `liveState` is one of:
 - `detached_retained`: a retained worker is waiting for a host owner reconnect.
 - `expired_replay_only`: only serialized audit/replay frames remain.
 
-On reconnect, call `session/load` with the selected session id and cursor:
+`attachableRoles` uses Harn's host-owner model:
+
+- `host_owner` is the single authoritative client that receives host JSON-RPC
+  requests and may answer them.
+- `observer` clients receive replay, live `session/update` frames, and
+  `_harn/presence` notifications, but cannot send session controls.
+- `controller` clients may send bounded session controls such as
+  `session/cancel`, `session/inject`, `session/revoke_inject`,
+  `session/replace_inject`, `session/truncate`, `session/remind`,
+  `session/set_mode`, and `session/set_config_option`. Host requests are still
+  delivered only to the `host_owner`.
+
+Legacy clients that omit a role request `host_owner`, preserving the old
+single-host behavior. To attach a read-only client, pass the role through
+Harn's extension metadata:
 
 ```json
 {
@@ -158,17 +172,63 @@ On reconnect, call `session/load` with the selected session id and cursor:
   "method": "session/load",
   "params": {
     "sessionId": "session-id",
-    "lastAckedEventId": 42
+    "lastAckedEventId": 42,
+    "_harn": {
+      "role": "observer",
+      "clientId": "ide-panel-1"
+    }
   }
 }
 ```
 
 `session/load` attaches the new socket to the retained session worker when one
-is still live. The server replays missed outbound frames with
-`_harn.replayed = true`, then continues the same worker. This includes pending
-JSON-RPC requests from Harn to the host, so a prompt that is waiting on
-`host/capabilities`, `host/call`, or another host response can continue after
-the host reconnects and responds to the replayed request.
+is still live. For non-owner roles, the hub returns the session metadata and
+role capabilities directly. The server replays missed outbound frames with
+`_harn.replayed = true`, then continues the same worker. Host-owner replay
+includes pending JSON-RPC requests from Harn to the host, so a prompt that is
+waiting on `host/capabilities`, `host/call`, or another host response can
+continue after the host reconnects and responds to the replayed request.
+Observer/controller replay excludes host requests and response ids that belong
+to other clients; those clients receive broadcast notifications and presence.
+
+Attach and detach changes are emitted as JSON-RPC notifications:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "_harn/presence",
+  "params": {
+    "sessionId": "session-id",
+    "clientId": "ide-panel-1",
+    "connectionId": "connection-id",
+    "role": "observer",
+    "state": "attached"
+  },
+  "_harn": {
+    "eventId": 43,
+    "sessionId": "session-id",
+    "replayed": false
+  }
+}
+```
+
+Read-only control attempts fail with a structured JSON-RPC error:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "error": {
+    "code": -32011,
+    "message": "ACP client role is not authorized for this method",
+    "data": {
+      "method": "session/prompt",
+      "role": "observer",
+      "reason": "role_not_authorized"
+    }
+  }
+}
+```
 
 Retained workers expire after 5 minutes by default. `HARN_ACP_WS_RETAIN_SECS`
 can tune that window for controlled deployments and tests. After expiry, or

@@ -47,14 +47,46 @@ struct AcpWebSocketHubState {
 struct AcpWorker {
     id: String,
     request_tx: Mutex<Option<mpsc::UnboundedSender<JsonValue>>>,
-    socket_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
-    active_connection_id: Mutex<Option<String>>,
+    clients: Mutex<BTreeMap<String, AcpClient>>,
+    host_owner_client_id: Mutex<Option<String>>,
+    pending_client_requests: Mutex<BTreeMap<String, String>>,
     sessions: Mutex<BTreeMap<String, AcpSessionSummary>>,
     replay_buffer: Mutex<VecDeque<AcpReplayEvent>>,
     next_event_id: AtomicU64,
     detached_at: Mutex<Option<Instant>>,
     event_log: Arc<AnyEventLog>,
     hub: Weak<AcpWebSocketHub>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AcpAttachRole {
+    HostOwner,
+    Controller,
+    Observer,
+}
+
+#[derive(Clone)]
+struct AcpClient {
+    connection_id: String,
+    role: AcpAttachRole,
+    socket_tx: mpsc::UnboundedSender<String>,
+}
+
+struct AcpAttachOptions {
+    client_id: String,
+    connection_id: String,
+    role: AcpAttachRole,
+    socket_tx: mpsc::UnboundedSender<String>,
+    last_acked_event_id: u64,
+}
+
+struct AcpAttachResult {
+    session_id: String,
+    role: AcpAttachRole,
+    session: Option<AcpSessionSummary>,
+    live_state: &'static str,
+    attachable_roles: Vec<&'static str>,
+    presence_state: &'static str,
 }
 
 #[derive(Clone, Debug)]
@@ -77,7 +109,20 @@ struct AcpReplayEvent {
 #[derive(Debug)]
 enum AcpAttachError {
     NotFound,
-    AlreadyAttached,
+    HostOwnerClaimed,
+}
+
+#[derive(Debug)]
+enum AcpClientRequestError {
+    Disconnected,
+    DuplicateRequestId,
+    Forbidden { method: String, role: AcpAttachRole },
+}
+
+enum AcpOutboundRoute {
+    HostRequest,
+    Response(Option<String>),
+    Broadcast,
 }
 
 struct PersistedAcpReplay {
@@ -104,8 +149,9 @@ impl AcpWebSocketHub {
         let worker = Arc::new(AcpWorker {
             id: worker_id.clone(),
             request_tx: Mutex::new(Some(to_acp_tx)),
-            socket_tx: Mutex::new(None),
-            active_connection_id: Mutex::new(None),
+            clients: Mutex::new(BTreeMap::new()),
+            host_owner_client_id: Mutex::new(None),
+            pending_client_requests: Mutex::new(BTreeMap::new()),
             sessions: Mutex::new(BTreeMap::new()),
             replay_buffer: Mutex::new(VecDeque::new()),
             next_event_id: AtomicU64::new(1),
@@ -168,10 +214,8 @@ impl AcpWebSocketHub {
     fn attach(
         &self,
         session_id: &str,
-        connection_id: &str,
-        socket_tx: mpsc::UnboundedSender<String>,
-        last_acked_event_id: u64,
-    ) -> Result<Arc<AcpWorker>, AcpAttachError> {
+        options: AcpAttachOptions,
+    ) -> Result<(Arc<AcpWorker>, AcpAttachResult), AcpAttachError> {
         let worker = self
             .state
             .lock()
@@ -180,8 +224,8 @@ impl AcpWebSocketHub {
             .get(session_id)
             .cloned()
             .ok_or(AcpAttachError::NotFound)?;
-        worker.attach(connection_id, socket_tx, last_acked_event_id)?;
-        Ok(worker)
+        let attached = worker.attach(session_id, options)?;
+        Ok((worker, attached))
     }
 
     fn remove_worker(&self, worker: &Arc<AcpWorker>) {
@@ -370,53 +414,166 @@ impl AcpSessionSummary {
     }
 }
 
+impl AcpAttachRole {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::HostOwner => "host_owner",
+            Self::Controller => "controller",
+            Self::Observer => "observer",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "host_owner" | "hostOwner" | "owner" => Some(Self::HostOwner),
+            "controller" => Some(Self::Controller),
+            "observer" | "read_only" | "readOnly" => Some(Self::Observer),
+            _ => None,
+        }
+    }
+
+    fn capabilities_json(self) -> JsonValue {
+        match self {
+            Self::HostOwner => json!({
+                "hostOwner": true,
+                "control": true,
+                "observe": true,
+                "receiveReplay": true,
+            }),
+            Self::Controller => json!({
+                "hostOwner": false,
+                "control": true,
+                "observe": true,
+                "receiveReplay": true,
+            }),
+            Self::Observer => json!({
+                "hostOwner": false,
+                "control": false,
+                "observe": true,
+                "receiveReplay": true,
+            }),
+        }
+    }
+}
+
 impl AcpWorker {
     fn attach(
         &self,
-        connection_id: &str,
-        socket_tx: mpsc::UnboundedSender<String>,
-        last_acked_event_id: u64,
-    ) -> Result<(), AcpAttachError> {
-        {
-            let mut active = self
-                .active_connection_id
+        session_id: &str,
+        options: AcpAttachOptions,
+    ) -> Result<AcpAttachResult, AcpAttachError> {
+        if options.role == AcpAttachRole::HostOwner {
+            let mut host_owner = self
+                .host_owner_client_id
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
-            if active
+            if host_owner
                 .as_deref()
-                .is_some_and(|active_connection_id| active_connection_id != connection_id)
+                .is_some_and(|client_id| client_id != options.client_id)
             {
-                return Err(AcpAttachError::AlreadyAttached);
+                return Err(AcpAttachError::HostOwnerClaimed);
             }
-            *active = Some(connection_id.to_string());
+            *host_owner = Some(options.client_id.clone());
+            *self.detached_at.lock().unwrap_or_else(|e| e.into_inner()) = None;
         }
-        *self.socket_tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(socket_tx.clone());
-        *self.detached_at.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        self.replay_since(last_acked_event_id, socket_tx);
-        Ok(())
+
+        let presence_state = {
+            let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
+            let presence_state = if clients.contains_key(&options.client_id) {
+                "reconnected"
+            } else {
+                "attached"
+            };
+            clients.insert(
+                options.client_id.clone(),
+                AcpClient {
+                    connection_id: options.connection_id,
+                    role: options.role,
+                    socket_tx: options.socket_tx.clone(),
+                },
+            );
+            presence_state
+        };
+
+        self.replay_since(options.last_acked_event_id, options.role, options.socket_tx);
+        Ok(AcpAttachResult {
+            session_id: session_id.to_string(),
+            role: options.role,
+            session: self.session_summary(session_id),
+            live_state: self.live_state(),
+            attachable_roles: self.attachable_roles(),
+            presence_state,
+        })
     }
 
-    fn detach(&self, connection_id: &str) {
-        let mut active = self
-            .active_connection_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if active.as_deref() != Some(connection_id) {
-            return;
+    fn detach(&self, connection_id: &str) -> Option<(String, AcpAttachRole)> {
+        let removed = {
+            let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
+            let client_id = clients.iter().find_map(|(client_id, client)| {
+                (client.connection_id == connection_id).then(|| client_id.clone())
+            });
+            client_id.and_then(|client_id| {
+                let removed = clients.remove(&client_id)?;
+                Some((client_id, removed.role))
+            })
+        };
+        let (client_id, role) = removed?;
+        if role == AcpAttachRole::HostOwner {
+            let mut host_owner = self
+                .host_owner_client_id
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if host_owner.as_deref() == Some(client_id.as_str()) {
+                *host_owner = None;
+                *self.detached_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+            }
         }
-        *active = None;
-        *self.socket_tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        *self.detached_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        Some((client_id, role))
     }
 
-    fn send_request(&self, value: JsonValue) -> Result<(), ()> {
+    fn send_client_request(
+        &self,
+        client_id: &str,
+        role: AcpAttachRole,
+        value: JsonValue,
+    ) -> Result<(), AcpClientRequestError> {
+        if let Some(method) = value.get("method").and_then(JsonValue::as_str) {
+            if !role_may_send_method(role, method) {
+                return Err(AcpClientRequestError::Forbidden {
+                    method: method.to_string(),
+                    role,
+                });
+            }
+        } else if role != AcpAttachRole::HostOwner {
+            return Err(AcpClientRequestError::Forbidden {
+                method: "<response>".to_string(),
+                role,
+            });
+        }
+
+        if let Some(id_key) = jsonrpc_id_key(&value) {
+            if value.get("method").is_some() {
+                let mut pending = self
+                    .pending_client_requests
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if pending
+                    .get(&id_key)
+                    .is_some_and(|pending_client_id| pending_client_id != client_id)
+                {
+                    return Err(AcpClientRequestError::DuplicateRequestId);
+                }
+                pending.insert(id_key, client_id.to_string());
+            }
+        }
+
         self.request_tx
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
-            .ok_or(())?
+            .ok_or(AcpClientRequestError::Disconnected)?
             .send(value)
-            .map_err(|_| ())
+            .map_err(|_| AcpClientRequestError::Disconnected)
     }
 
     fn shutdown(&self) {
@@ -424,7 +581,11 @@ impl AcpWorker {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
-        self.socket_tx
+        self.clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.host_owner_client_id
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
@@ -455,6 +616,14 @@ impl AcpWorker {
             .collect()
     }
 
+    fn session_summary(&self, session_id: &str) -> Option<AcpSessionSummary> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(session_id)
+            .cloned()
+    }
+
     fn merge_session_summary(&self, session_id: String, summary: Option<AcpSessionSummary>) {
         let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let entry = sessions
@@ -466,12 +635,7 @@ impl AcpWorker {
     }
 
     fn live_state(&self) -> &'static str {
-        if self
-            .active_connection_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_some()
-        {
+        if self.has_host_owner() {
             "live"
         } else {
             "detached_retained"
@@ -479,11 +643,18 @@ impl AcpWorker {
     }
 
     fn attachable_roles(&self) -> Vec<&'static str> {
-        if self.live_state() == "detached_retained" {
-            vec!["host_owner"]
+        if self.has_host_owner() {
+            vec!["observer", "controller"]
         } else {
-            Vec::new()
+            vec!["host_owner", "observer"]
         }
+    }
+
+    fn has_host_owner(&self) -> bool {
+        self.host_owner_client_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
     }
 
     async fn handle_output(self: &Arc<Self>, line: String) {
@@ -531,23 +702,68 @@ impl AcpWorker {
         )
         .await;
 
-        let socket_tx = self
-            .socket_tx
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        if let Some(socket_tx) = socket_tx {
-            let _ = socket_tx.send(annotated);
-        }
+        self.deliver_output(&line, annotated);
     }
 
-    fn replay_since(&self, last_acked_event_id: u64, socket_tx: mpsc::UnboundedSender<String>) {
+    async fn emit_presence(
+        self: &Arc<Self>,
+        session_id: &str,
+        client_id: &str,
+        connection_id: &str,
+        role: AcpAttachRole,
+        state: &str,
+    ) {
+        let event_id = self.next_event_id.fetch_add(1, Ordering::SeqCst);
+        let line = harn_vm::jsonrpc::notification(
+            "_harn/presence",
+            json!({
+                "sessionId": session_id,
+                "clientId": client_id,
+                "connectionId": connection_id,
+                "role": role.as_str(),
+                "state": state,
+            }),
+        );
+        let Ok(line) = serde_json::to_string(&line) else {
+            return;
+        };
+        let annotated = annotate_acp_line(&line, event_id, Some(session_id), false);
+        {
+            let mut replay_buffer = self.replay_buffer.lock().unwrap_or_else(|e| e.into_inner());
+            replay_buffer.push_back(AcpReplayEvent {
+                id: event_id,
+                line: annotated.clone(),
+                session_id: Some(session_id.to_string()),
+            });
+            while replay_buffer.len() > ACP_REPLAY_BUFFER_LIMIT {
+                replay_buffer.pop_front();
+            }
+        }
+        append_acp_event(
+            &self.event_log,
+            session_id,
+            "message_sent",
+            acp_replay_log_payload(&annotated, event_id, Some(session_id)),
+        )
+        .await;
+        self.broadcast(annotated);
+    }
+
+    fn replay_since(
+        &self,
+        last_acked_event_id: u64,
+        role: AcpAttachRole,
+        socket_tx: mpsc::UnboundedSender<String>,
+    ) {
         let events: Vec<AcpReplayEvent> = self
             .replay_buffer
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
             .filter(|event| event.id > last_acked_event_id)
+            .filter(|event| {
+                role == AcpAttachRole::HostOwner || replay_visible_to_non_owner(&event.line)
+            })
             .cloned()
             .collect();
         for event in events {
@@ -555,6 +771,64 @@ impl AcpWorker {
                 annotate_acp_line(&event.line, event.id, event.session_id.as_deref(), true);
             let _ = socket_tx.send(replayed);
         }
+    }
+
+    fn deliver_output(&self, original_line: &str, annotated: String) {
+        match acp_outbound_route(original_line) {
+            AcpOutboundRoute::HostRequest => self.send_to_host_owner(annotated),
+            AcpOutboundRoute::Response(id_key) => {
+                let target = id_key.and_then(|id_key| {
+                    self.pending_client_requests
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&id_key)
+                });
+                if let Some(client_id) = target {
+                    if !self.send_to_client(&client_id, annotated.clone()) {
+                        self.send_to_host_owner(annotated);
+                    }
+                } else {
+                    self.send_to_host_owner(annotated);
+                }
+            }
+            AcpOutboundRoute::Broadcast => self.broadcast(annotated),
+        }
+    }
+
+    fn send_to_host_owner(&self, line: String) {
+        let host_owner = self
+            .host_owner_client_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(client_id) = host_owner {
+            let _ = self.send_to_client(&client_id, line);
+        }
+    }
+
+    fn broadcast(&self, line: String) {
+        let clients: Vec<mpsc::UnboundedSender<String>> = self
+            .clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .map(|client| client.socket_tx.clone())
+            .collect();
+        for socket_tx in clients {
+            let _ = socket_tx.send(line.clone());
+        }
+    }
+
+    fn send_to_client(&self, client_id: &str, line: String) -> bool {
+        let socket_tx = self
+            .clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(client_id)
+            .map(|client| client.socket_tx.clone());
+        socket_tx
+            .map(|socket_tx| socket_tx.send(line).is_ok())
+            .unwrap_or(false)
     }
 }
 
@@ -619,6 +893,8 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
     let mut ping_sent_at: Option<Instant> = None;
     let mut session_id: Option<String> = None;
     let mut worker: Option<Arc<AcpWorker>> = None;
+    let mut client_id = connection_id.clone();
+    let mut client_role = AcpAttachRole::HostOwner;
 
     loop {
         tokio::select! {
@@ -678,22 +954,48 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                     continue;
                                 }
                                 if let Some(load_session_id) = session_load_session_id(&value) {
+                                    let requested_role = attach_role_from_request(&value);
+                                    let requested_client_id =
+                                        client_id_from_request(&value, &connection_id);
                                     match state.hub.attach(
                                         &load_session_id,
-                                        &connection_id,
-                                        socket_tx.clone(),
-                                        last_acked_event_id(&value),
+                                        AcpAttachOptions {
+                                            client_id: requested_client_id.clone(),
+                                            connection_id: connection_id.clone(),
+                                            role: requested_role,
+                                            socket_tx: socket_tx.clone(),
+                                            last_acked_event_id: last_acked_event_id(&value),
+                                        },
                                     ) {
-                                        Ok(attached) => {
-                                            session_id = Some(load_session_id);
+                                        Ok((attached, attach_result)) => {
+                                            session_id = Some(load_session_id.clone());
+                                            client_id = requested_client_id;
+                                            client_role = attach_result.role;
+                                            attached
+                                                .emit_presence(
+                                                    &load_session_id,
+                                                    &client_id,
+                                                    &connection_id,
+                                                    client_role,
+                                                    attach_result.presence_state,
+                                                )
+                                                .await;
                                             worker = Some(attached);
+                                            if attach_result.role != AcpAttachRole::HostOwner {
+                                                send_socket_jsonrpc_result(
+                                                    &socket_tx,
+                                                    value.get("id").unwrap_or(&JsonValue::Null),
+                                                    session_load_attach_result(attach_result),
+                                                );
+                                                continue;
+                                            }
                                         }
-                                        Err(AcpAttachError::AlreadyAttached) => {
+                                        Err(AcpAttachError::HostOwnerClaimed) => {
                                             send_socket_jsonrpc_error(
                                                 &socket_tx,
                                                 value.get("id").unwrap_or(&JsonValue::Null),
                                                 -32010,
-                                                "ACP session is already attached to another WebSocket",
+                                                "ACP session host_owner role is already attached to another WebSocket",
                                             );
                                             continue;
                                         }
@@ -736,10 +1038,17 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                 if worker.is_none() {
                                     match state.hub.spawn_worker(state.pipeline.clone()) {
                                         Ok(new_worker) => {
+                                            client_id = client_id_from_request(&value, &connection_id);
+                                            client_role = AcpAttachRole::HostOwner;
                                             new_worker.attach(
-                                                &connection_id,
-                                                socket_tx.clone(),
-                                                0,
+                                                session_id.as_deref().unwrap_or(&new_worker.id),
+                                                AcpAttachOptions {
+                                                    client_id: client_id.clone(),
+                                                    connection_id: connection_id.clone(),
+                                                    role: client_role,
+                                                    socket_tx: socket_tx.clone(),
+                                                    last_acked_event_id: 0,
+                                                },
                                             )
                                             .expect("fresh ACP worker is unattached");
                                             worker = Some(new_worker);
@@ -756,11 +1065,35 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                         }
                                     }
                                 }
-                                if worker
-                                    .as_ref()
-                                    .is_none_or(|worker| worker.send_request(value).is_err())
-                                {
+                                let Some(worker) = worker.as_ref() else {
                                     break;
+                                };
+                                let request_id =
+                                    value.get("id").cloned().unwrap_or(JsonValue::Null);
+                                match worker.send_client_request(&client_id, client_role, value) {
+                                    Ok(()) => {}
+                                    Err(AcpClientRequestError::Forbidden { method, role }) => {
+                                        send_socket_jsonrpc_error_with_data(
+                                            &socket_tx,
+                                            &request_id,
+                                            -32011,
+                                            "ACP client role is not authorized for this method",
+                                            json!({
+                                                "method": method,
+                                                "role": role.as_str(),
+                                                "reason": "role_not_authorized",
+                                            }),
+                                        );
+                                    }
+                                    Err(AcpClientRequestError::DuplicateRequestId) => {
+                                        send_socket_jsonrpc_error(
+                                            &socket_tx,
+                                            &request_id,
+                                            -32012,
+                                            "JSON-RPC request id is already in flight for another ACP client",
+                                        );
+                                    }
+                                    Err(AcpClientRequestError::Disconnected) => break,
                                 }
                             }
                             Err(error) => {
@@ -823,7 +1156,13 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
     }
 
     if let Some(worker) = worker.as_ref() {
-        worker.detach(&connection_id);
+        if let Some((client_id, role)) = worker.detach(&connection_id) {
+            if let Some(session_id) = session_id.as_deref() {
+                worker
+                    .emit_presence(session_id, &client_id, &connection_id, role, "detached")
+                    .await;
+            }
+        }
     }
     append_acp_event(
         &state.event_log,
@@ -1191,6 +1530,102 @@ fn acp_session_filter_value<'a>(
         })
 }
 
+fn session_load_attach_result(attach: AcpAttachResult) -> JsonValue {
+    let session = attach
+        .session
+        .unwrap_or_else(|| AcpSessionSummary::new(attach.session_id))
+        .to_json(attach.live_state, &attach.attachable_roles);
+    json!({
+        "session": session,
+        "role": attach.role.as_str(),
+        "capabilities": attach.role.capabilities_json(),
+    })
+}
+
+fn attach_role_from_request(value: &JsonValue) -> AcpAttachRole {
+    request_harn_value(value, "role")
+        .and_then(JsonValue::as_str)
+        .and_then(AcpAttachRole::parse)
+        .or_else(|| {
+            value
+                .get("params")
+                .and_then(|params| params.get("role").or_else(|| params.get("attachRole")))
+                .and_then(JsonValue::as_str)
+                .and_then(AcpAttachRole::parse)
+        })
+        .unwrap_or(AcpAttachRole::HostOwner)
+}
+
+fn client_id_from_request(value: &JsonValue, connection_id: &str) -> String {
+    request_harn_value(value, "clientId")
+        .or_else(|| request_harn_value(value, "client_id"))
+        .and_then(JsonValue::as_str)
+        .or_else(|| {
+            value
+                .get("params")
+                .and_then(|params| params.get("clientId").or_else(|| params.get("client_id")))
+                .and_then(JsonValue::as_str)
+        })
+        .unwrap_or(connection_id)
+        .to_string()
+}
+
+fn request_harn_value<'a>(value: &'a JsonValue, key: &str) -> Option<&'a JsonValue> {
+    value
+        .get("_harn")
+        .and_then(|harn| harn.get(key))
+        .or_else(|| {
+            value
+                .get("params")
+                .and_then(|params| params.get("_harn"))
+                .and_then(|harn| harn.get(key))
+        })
+}
+
+fn role_may_send_method(role: AcpAttachRole, method: &str) -> bool {
+    match role {
+        AcpAttachRole::HostOwner => true,
+        AcpAttachRole::Controller => matches!(
+            method,
+            "session/cancel"
+                | "session/inject"
+                | "session/revoke_inject"
+                | "session/replace_inject"
+                | "session/truncate"
+                | "session/remind"
+                | "session/set_mode"
+                | "session/set_config_option"
+        ),
+        AcpAttachRole::Observer => false,
+    }
+}
+
+fn acp_outbound_route(line: &str) -> AcpOutboundRoute {
+    let Ok(value) = serde_json::from_str::<JsonValue>(line) else {
+        return AcpOutboundRoute::Broadcast;
+    };
+    let has_method = value.get("method").and_then(JsonValue::as_str).is_some();
+    let id_key = jsonrpc_id_key(&value);
+    match (has_method, id_key) {
+        (true, Some(_)) => AcpOutboundRoute::HostRequest,
+        (false, id_key) => AcpOutboundRoute::Response(id_key),
+        (true, None) => AcpOutboundRoute::Broadcast,
+    }
+}
+
+fn replay_visible_to_non_owner(line: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<JsonValue>(line) else {
+        return true;
+    };
+    value.get("id").is_none()
+}
+
+fn jsonrpc_id_key(value: &JsonValue) -> Option<String> {
+    value
+        .get("id")
+        .and_then(|id| serde_json::to_string(id).ok())
+}
+
 fn annotate_acp_line(
     line: &str,
     event_id: u64,
@@ -1253,6 +1688,19 @@ fn send_socket_jsonrpc_error(
     }
 }
 
+fn send_socket_jsonrpc_error_with_data(
+    socket_tx: &mpsc::UnboundedSender<String>,
+    id: &JsonValue,
+    code: i64,
+    message: &str,
+    data: JsonValue,
+) {
+    let response = harn_vm::jsonrpc::error_response_with_data(id.clone(), code, message, data);
+    if let Ok(line) = serde_json::to_string(&response) {
+        let _ = socket_tx.send(line);
+    }
+}
+
 fn send_socket_jsonrpc_result(
     socket_tx: &mpsc::UnboundedSender<String>,
     id: &JsonValue,
@@ -1273,6 +1721,16 @@ fn session_id_from_acp_response(line: &str) -> Option<String> {
                 .get("sessionId")
                 .or_else(|| result.get("session_id"))
                 .and_then(JsonValue::as_str)
+                .or_else(|| {
+                    result
+                        .get("session")
+                        .and_then(|session| {
+                            session
+                                .get("sessionId")
+                                .or_else(|| session.get("session_id"))
+                        })
+                        .and_then(JsonValue::as_str)
+                })
                 .map(ToString::to_string)
         })
 }

@@ -32,6 +32,11 @@ condensed series summaries instead of full per-patch history.
   accepts workspace-anchor, cwd, and live-state filters, returns attach metadata
   for live, detached-retained, and replay-only sessions, and `session/load`
   reports replay-only state after retained WebSocket workers expire.
+- **ACP WebSocket multi-client attach (#2411).** Live retained sessions now
+  accept explicit `observer` and `controller` attach roles alongside the single
+  `host_owner`. Harn routes host JSON-RPC requests only to the host owner,
+  broadcasts session notifications and presence updates, and rejects read-only
+  observer controls with structured role errors.
 
 ## v0.8.37
 
