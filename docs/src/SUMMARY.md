@@ -121,6 +121,7 @@
 - [Team learning and context packs](./team-learning.md)
 - [Workflow crystallization](./workflow-crystallization.md)
 - [Flow predicate language](./flow-predicates.md)
+- [Workflow state channels v0](./spec/workflow-channels/v0.md)
 
 ## Protocols
 

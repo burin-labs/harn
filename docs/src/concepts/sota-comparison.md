@@ -39,16 +39,17 @@ mapping in the table.
 |---|---|---|
 | `Node` | `stage` (workflow) | Both encode a unit of computation. |
 | `Edge` | workflow transition | Same shape; Harn doesn't expose it as a separate noun. |
-| **`State` (typed dict)** | `transcript` + `session` (combined) | LangGraph's strict typed-dict-with-reducers does not have a direct Harn analog. |
-| **`Channel`** | (no direct equivalent) | LangGraph channels are typed slots with merge reducers. Harn's `agent_channels` are something else entirely (pub/sub for agent-to-agent communication). Exploration tracked at [#2219](https://github.com/burin-labs/harn/issues/2219). |
+| **`State` (typed dict)** | Workflow artifacts + optional state-channel proposal | LangGraph's strict typed-dict-with-reducers is not Harn's default state model. The v0 design is tracked in [Workflow state channels](../spec/workflow-channels/v0.md). |
+| **`Channel`** | proposed workflow state channel | LangGraph channels are typed slots with merge reducers. Harn's `agent_channels` are something else entirely (pub/sub for agent-to-agent communication). |
 | `Thread` (`thread_id`) | `session_id` | Direct match. |
 | **`super-step`** | `iteration` | LangGraph's super-step is one parallel barrier; semantically Harn's per-iteration. |
 | `checkpoint` / `checkpointer` | session bundle, snapshot | Direct match. |
 | `interrupt` / `Command(resume=...)` | `agent_await_resumption` | Direct match. |
 
-LangGraph's biggest *Harn-doesn't-have-this* is **typed-state channels with
-reducers**. If you arrive from LangGraph and miss them, file your use case on
-[#2219](https://github.com/burin-labs/harn/issues/2219).
+LangGraph's biggest *Harn-doesn't-have-this-by-default* is **typed-state
+channels with reducers**. Harn's v0 design keeps artifacts and transcripts as
+the common path, then adds explicit workflow state channels for structured
+fan-out/reduce cases.
 
 ## Inngest
 

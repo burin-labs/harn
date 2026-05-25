@@ -299,6 +299,13 @@ accepts:
 retained alongside successful branch artifacts instead of aborting the whole map
 stage on the first error.
 
+Workflow state channels are a design-stage extension for workflows whose
+fan-out branches should merge structured state by name instead of only
+producing artifacts. The v0 proposal keeps artifacts and transcripts as the
+default runtime model, then adds explicit `state_channels`, node `reads` /
+`writes`, and deterministic reducers for cases that need LangGraph-style typed
+state. See [Workflow state channels v0](./spec/workflow-channels/v0.md).
+
 Runs may also include `metadata.mutation_session`, a normalized audit record
 used to tie tool gates, workers, and artifacts back to one mutation boundary:
 
