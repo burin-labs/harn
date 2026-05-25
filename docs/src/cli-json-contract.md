@@ -54,11 +54,11 @@ per line) rather than a single document. Today this set is `harn run
 --json` and `harn dev --watch --json`. Each line still carries
 `schemaVersion`; consumers can `jq -c` over the stream.
 
-`harn run --emit-summary-json` is intentionally separate from this
-envelope stream. It emits one raw NDJSON object to stderr by default
-or to `--summary-file` / `--summary-fd` when supplied, so wrappers can
-read aggregate metrics without changing the `harn run --json` stdout
-contract.
+`harn run --emit-summary-json`, `--emit-phase-json`, and
+`--emit-rusage-json` are intentionally separate from this envelope
+stream. Each emits one raw NDJSON object to stderr by default or to a
+dedicated file/fd sink when supplied, so wrappers can read auxiliary
+run metadata without changing the `harn run --json` stdout contract.
 
 ## Supported commands
 
@@ -77,6 +77,8 @@ versions.
 | `harn tokens --json`           | Lexer token stream with source lexemes                   |
 | `harn run --json`              | Streaming NDJSON event log (stdout/stderr/tool/result)   |
 | `harn run --emit-summary-json` | One terminal raw NDJSON summary object on stderr/file/fd  |
+| `harn run --emit-phase-json`   | One terminal raw NDJSON phase object on stderr/file/fd    |
+| `harn run --emit-rusage-json`  | One terminal raw NDJSON CPU sample on stderr/file/fd      |
 | `harn replay --json`           | Per-stage replay summary + embedded fixture verdict      |
 | `harn test conformance --json` | Conformance results with xfail accounting                |
 | `harn graph --json`            | Static module graph: symbols, imports, capabilities      |
@@ -194,6 +196,51 @@ Unix file descriptor.
 The LLM counters are enabled by the summary flag itself, so callers do
 not need to add `--trace` to receive `llm.call_count`, token totals,
 LLM time, and accumulated cost.
+
+### `harn run --emit-phase-json`
+
+The phase sink is also a raw NDJSON line. It preserves the same
+five-row phase contract as `harn time run --json`, but routes it to a
+separate sink so a parent wrapper can spawn `harn run` and recover
+parse/typecheck/compile/setup/main timing without parsing stdout.
+`--phase-file <path>` overwrites the file with the one-line phase
+object; `--phase-fd <fd>` writes the same line to an already-open Unix
+file descriptor.
+
+```json
+{
+  "schema_version": 1,
+  "event": "run_phase",
+  "phases": [
+    { "name": "parse", "duration_ms": 12, "input_bytes": 4096 },
+    { "name": "typecheck", "duration_ms": 80 },
+    { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
+    { "name": "run_setup", "duration_ms": 8 },
+    { "name": "run_main", "duration_ms": 1200, "events": 14 }
+  ]
+}
+```
+
+The phase order is fixed: `parse`, `typecheck`, `bytecode_compile`,
+`run_setup`, `run_main`. Cache hits keep all five rows and switch the
+`bytecode_compile` row to `"cache": "hit"` while leaving `parse` and
+`typecheck` at `duration_ms: 0`.
+
+### `harn run --emit-rusage-json`
+
+The rusage sink is a raw NDJSON line carrying the process CPU sample
+needed by subprocess wrappers that cannot call `getrusage` in-process.
+`--rusage-file <path>` overwrites the file with the one-line object;
+`--rusage-fd <fd>` writes the same line to an already-open Unix file
+descriptor.
+
+```json
+{
+  "schema_version": 1,
+  "event": "run_rusage",
+  "cpu_ms": 320
+}
+```
 
 ## Compatibility
 

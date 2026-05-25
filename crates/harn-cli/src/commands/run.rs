@@ -12,7 +12,7 @@ use harn_vm::event_log::EventLog;
 use serde::Serialize;
 
 use crate::commands::mcp::{self, AuthResolution};
-use crate::commands::time::RunTiming;
+use crate::commands::time::{self, PhaseRecord, RunTiming};
 use crate::package;
 use crate::parse_source_file;
 use crate::skill_loader::{
@@ -38,11 +38,27 @@ pub struct RunJsonOptions {
 /// Post-run summary configuration for `harn run --emit-summary-json`.
 #[derive(Clone, Debug)]
 pub struct RunSummaryOptions {
-    pub sink: RunSummarySink,
+    pub sink: RunJsonSink,
 }
 
 #[derive(Clone, Debug)]
-pub enum RunSummarySink {
+pub struct RunPhaseOptions {
+    pub sink: RunJsonSink,
+}
+
+#[derive(Clone, Debug)]
+pub struct RunRusageOptions {
+    pub sink: RunJsonSink,
+}
+
+#[derive(Clone, Debug)]
+pub struct RunJsonSink {
+    pub target: RunJsonSinkTarget,
+    pub fd_flag: &'static str,
+}
+
+#[derive(Clone, Debug)]
+pub enum RunJsonSinkTarget {
     /// Append the summary to the captured stderr buffer so it remains
     /// terminal after all diagnostics that `run_file_with_skill_dirs`
     /// flushes on return.
@@ -72,19 +88,58 @@ struct RunSummaryLlm {
 }
 
 pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 1;
+pub const RUN_PHASE_SCHEMA_VERSION: u32 = 1;
+pub const RUN_RUSAGE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Serialize)]
+struct RunPhaseEvent {
+    schema_version: u32,
+    event: &'static str,
+    phases: Vec<PhaseRecord>,
+}
+
+#[derive(Serialize)]
+struct RunRusageEvent {
+    schema_version: u32,
+    event: &'static str,
+    cpu_ms: u64,
+}
 
 pub(crate) fn run_summary_options_from_args(
     args: &crate::cli::RunArgs,
 ) -> Option<RunSummaryOptions> {
     args.emit_summary_json.then(|| RunSummaryOptions {
-        sink: if let Some(path) = args.summary_file.clone() {
-            RunSummarySink::File(path)
-        } else if let Some(fd) = args.summary_fd {
-            RunSummarySink::Fd(fd)
-        } else {
-            RunSummarySink::Stderr
-        },
+        sink: build_run_json_sink(args.summary_file.clone(), args.summary_fd, "--summary-fd"),
     })
+}
+
+pub(crate) fn run_phase_options_from_args(args: &crate::cli::RunArgs) -> Option<RunPhaseOptions> {
+    args.emit_phase_json.then(|| RunPhaseOptions {
+        sink: build_run_json_sink(args.phase_file.clone(), args.phase_fd, "--phase-fd"),
+    })
+}
+
+pub(crate) fn run_rusage_options_from_args(args: &crate::cli::RunArgs) -> Option<RunRusageOptions> {
+    args.emit_rusage_json.then(|| RunRusageOptions {
+        sink: build_run_json_sink(args.rusage_file.clone(), args.rusage_fd, "--rusage-fd"),
+    })
+}
+
+fn build_run_json_sink(
+    file: Option<PathBuf>,
+    fd: Option<i32>,
+    fd_flag: &'static str,
+) -> RunJsonSink {
+    RunJsonSink {
+        target: if let Some(path) = file {
+            RunJsonSinkTarget::File(path)
+        } else if let Some(fd) = fd {
+            RunJsonSinkTarget::Fd(fd)
+        } else {
+            RunJsonSinkTarget::Stderr
+        },
+        fd_flag,
+    }
 }
 
 pub(crate) enum RunFileMcpServeMode {
@@ -554,6 +609,8 @@ struct ExecuteRunInputs<'a> {
     interrupt_tokens: Option<RunInterruptTokens>,
     json: Option<(RunJsonOptions, Box<dyn io::Write + Send>)>,
     summary: Option<RunSummaryOptions>,
+    phase: Option<RunPhaseOptions>,
+    rusage: Option<RunRusageOptions>,
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
 }
@@ -633,6 +690,8 @@ pub(crate) async fn run_file(
         RunSandboxOptions::default(),
         None,
         None,
+        None,
+        None,
         HarnpackRunOptions::default(),
     )
     .await;
@@ -664,6 +723,8 @@ pub(crate) async fn run_file_with_skill_dirs(
     sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
     summary: Option<RunSummaryOptions>,
+    phase: Option<RunPhaseOptions>,
+    rusage: Option<RunRusageOptions>,
     harnpack: HarnpackRunOptions,
 ) {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
@@ -685,6 +746,8 @@ pub(crate) async fn run_file_with_skill_dirs(
         interrupt_tokens: Some(interrupt_tokens.clone()),
         json: json_with_stdout,
         summary,
+        phase,
+        rusage,
         timing: None,
         harnpack,
     })
@@ -721,6 +784,8 @@ pub(crate) async fn run_resume_with_skill_dirs(
     sandbox: RunSandboxOptions,
     json: Option<RunJsonOptions>,
     summary: Option<RunSummaryOptions>,
+    phase: Option<RunPhaseOptions>,
+    rusage: Option<RunRusageOptions>,
 ) {
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
 
@@ -759,6 +824,8 @@ pipeline main(task) {
         sandbox,
         json,
         summary,
+        phase,
+        rusage,
         HarnpackRunOptions::default(),
     )
     .await;
@@ -1103,6 +1170,8 @@ async fn execute_run_with_harnpack_and_sandbox_options(
         interrupt_tokens: None,
         json: None,
         summary: None,
+        phase: None,
+        rusage: None,
         timing: None,
         harnpack,
     })
@@ -1140,6 +1209,8 @@ pub async fn execute_run_json(
         interrupt_tokens: None,
         json: Some((options, out)),
         summary: None,
+        phase: None,
+        rusage: None,
         timing: None,
         harnpack: HarnpackRunOptions::default(),
     })
@@ -1168,6 +1239,8 @@ pub(crate) async fn execute_run_with_timing(
         interrupt_tokens: None,
         json: None,
         summary: None,
+        phase: None,
+        rusage: None,
         timing,
         harnpack: HarnpackRunOptions::default(),
     })
@@ -1191,10 +1264,19 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         interrupt_tokens,
         json,
         summary,
-        mut timing,
+        phase,
+        rusage,
+        timing,
         harnpack,
     } = inputs;
     let run_started = Instant::now();
+    let cpu_started_ms = rusage.as_ref().map(|_| time::cpu_ms());
+    let mut owned_timing = if timing.is_none() && (phase.is_some() || rusage.is_some()) {
+        Some(RunTiming::default())
+    } else {
+        None
+    };
+    let mut timing = timing.or(owned_timing.as_mut());
 
     // `--json` installs an in-process sink that diverts every
     // observable VM event (stdout, stderr, transcript, tool, hook,
@@ -1219,6 +1301,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                     stderr,
                     json_session,
                     summary.as_ref(),
+                    phase.as_ref(),
+                    rusage.as_ref(),
                     run_started,
                     err,
                 );
@@ -1236,7 +1320,10 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 stderr,
                 json_session,
                 summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
                 run_started,
+                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
                 &outcome,
             );
         }
@@ -1255,8 +1342,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             stderr,
             json_session,
             summary.as_ref(),
+            phase.as_ref(),
+            rusage.as_ref(),
             run_started,
             None,
+            timing.as_deref(),
+            0,
+            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
             "compile_error",
             message,
         );
@@ -1271,7 +1363,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     if trace || summary.is_some() {
         harn_vm::llm::enable_tracing();
     }
-    if profile.is_enabled() {
+    if profile.is_enabled() || phase.is_some() {
         harn_vm::tracing::set_tracing_enabled(true);
     }
     if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
@@ -1281,8 +1373,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             stderr,
             json_session,
             summary.as_ref(),
+            phase.as_ref(),
+            rusage.as_ref(),
             run_started,
             None,
+            timing.as_deref(),
+            0,
+            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
             "llm_mock_install",
             error,
         );
@@ -1388,8 +1485,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             stderr,
             json_session,
             summary.as_ref(),
+            phase.as_ref(),
+            rusage.as_ref(),
             run_started,
             None,
+            timing.as_deref(),
+            0,
+            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
             "manifest_triggers",
             error.to_string(),
         );
@@ -1403,8 +1505,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             stderr,
             json_session,
             summary.as_ref(),
+            phase.as_ref(),
+            rusage.as_ref(),
             run_started,
             None,
+            timing.as_deref(),
+            0,
+            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
             "manifest_hooks",
             error.to_string(),
         );
@@ -1439,8 +1546,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             stderr,
             json_session,
             summary.as_ref(),
+            phase.as_ref(),
+            rusage.as_ref(),
             run_started,
             profile_rollup.as_ref(),
+            timing.as_deref(),
+            harn_vm::tracing::peek_spans().len() as u64,
+            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
             "llm_mock_record",
             error,
         );
@@ -1480,8 +1592,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 stderr,
                 json_session,
                 summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
                 run_started,
                 profile_rollup.as_ref(),
+                timing.as_deref(),
+                harn_vm::tracing::peek_spans().len() as u64,
+                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
                 "attestation",
                 error.to_string(),
             );
@@ -1492,6 +1609,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     match execution {
         Ok((output, return_value)) => {
             stdout.push_str(output);
+            let main_events = harn_vm::tracing::peek_spans().len() as u64;
+            let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
             let profile_rollup = if profile.is_enabled() {
                 Some(harn_vm::profile::build(&harn_vm::tracing::peek_spans()))
             } else {
@@ -1511,38 +1630,45 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             if exit_code != 0 {
                 stderr.push_str(&render_return_value_error(&return_value));
             }
-            let summary_emission = emit_run_summary_for_exit(
+            let aux_emission = emit_run_aux_for_exit(
                 summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
                 run_started,
                 exit_code,
                 profile_rollup.as_ref(),
                 summary_llm,
+                timing.as_deref(),
+                main_events,
+                cpu_ms_total,
                 json_session.is_some(),
                 &mut stderr,
             );
             if let Some(session) = json_session {
-                if let Some(error) = summary_emission.error {
+                if let Some(error) = aux_emission.error {
                     let mut outcome = session.finalize_error(
-                        "summary",
-                        format!("failed to emit run summary: {error}"),
+                        "run_aux",
+                        format!("failed to emit auxiliary run JSON: {error}"),
                         1,
                     );
-                    outcome.stderr = summary_emission.stderr;
+                    outcome.stderr = aux_emission.stderr;
                     return outcome;
                 }
                 let value = harn_vm::llm::vm_value_to_json(&return_value);
-                let mut outcome = session.finalize_result(value, summary_emission.exit_code);
-                outcome.stderr = summary_emission.stderr;
+                let mut outcome = session.finalize_result(value, aux_emission.exit_code);
+                outcome.stderr = aux_emission.stderr;
                 return outcome;
             }
             RunOutcome {
                 stdout,
                 stderr,
-                exit_code: summary_emission.exit_code,
+                exit_code: aux_emission.exit_code,
             }
         }
         Err(rendered_error) => {
             stderr.push_str(&rendered_error);
+            let main_events = harn_vm::tracing::peek_spans().len() as u64;
+            let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
             let profile_rollup = if profile.is_enabled() {
                 Some(harn_vm::profile::build(&harn_vm::tracing::peek_spans()))
             } else {
@@ -1555,25 +1681,30 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                     stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
                 }
             }
-            let summary_emission = emit_run_summary_for_exit(
+            let aux_emission = emit_run_aux_for_exit(
                 summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
                 run_started,
                 1,
                 profile_rollup.as_ref(),
                 None,
+                timing.as_deref(),
+                main_events,
+                cpu_ms_total,
                 json_session.is_some(),
                 &mut stderr,
             );
             if let Some(session) = json_session {
                 let mut outcome =
-                    session.finalize_error("runtime", rendered_error, summary_emission.exit_code);
-                outcome.stderr = summary_emission.stderr;
+                    session.finalize_error("runtime", rendered_error, aux_emission.exit_code);
+                outcome.stderr = aux_emission.stderr;
                 return outcome;
             }
             RunOutcome {
                 stdout,
                 stderr,
-                exit_code: summary_emission.exit_code,
+                exit_code: aux_emission.exit_code,
             }
         }
     }
@@ -1629,68 +1760,125 @@ fn run_summary_llm_snapshot() -> RunSummaryLlm {
     }
 }
 
-struct RunSummaryEmission {
+struct RunAuxEmission {
     stderr: String,
     exit_code: i32,
     error: Option<String>,
 }
 
-fn emit_run_summary_for_exit(
-    options: Option<&RunSummaryOptions>,
+#[allow(clippy::too_many_arguments)]
+fn emit_run_aux_for_exit(
+    summary: Option<&RunSummaryOptions>,
+    phase: Option<&RunPhaseOptions>,
+    rusage: Option<&RunRusageOptions>,
     started: Instant,
     exit_code: i32,
     profile: Option<&harn_vm::profile::RunProfile>,
     llm: Option<RunSummaryLlm>,
+    timing: Option<&RunTiming>,
+    main_events: u64,
+    cpu_ms_total: Option<u64>,
     json_mode: bool,
     stderr: &mut String,
-) -> RunSummaryEmission {
-    let mut summary_stderr = String::new();
+) -> RunAuxEmission {
+    let mut aux_stderr = String::new();
     let mut final_exit_code = exit_code;
-    let mut summary_error = None;
+    let mut aux_error = None;
+    let aux_target = if json_mode { &mut aux_stderr } else { stderr };
+    let default_timing = RunTiming::default();
+    let timing = timing.unwrap_or(&default_timing);
 
-    if let Some(options) = options {
+    if let Some(options) = summary {
         let llm = llm.unwrap_or_else(run_summary_llm_snapshot);
         let summary = build_run_summary(started, exit_code, profile, llm);
-        let summary_target = if json_mode {
-            &mut summary_stderr
-        } else {
-            stderr
+        if let Err(error) = emit_raw_json_line(&options.sink, &summary, "run summary", aux_target) {
+            record_aux_error(
+                &mut final_exit_code,
+                &mut aux_error,
+                aux_target,
+                "run summary",
+                error,
+            );
+        }
+    }
+    if let Some(options) = phase {
+        let phase_event = RunPhaseEvent {
+            schema_version: RUN_PHASE_SCHEMA_VERSION,
+            event: "run_phase",
+            phases: time::build_phase_records(timing, main_events),
         };
-        if let Err(error) = emit_run_summary(options, &summary, summary_target) {
-            summary_target.push_str(&format!("error: failed to emit run summary: {error}\n"));
-            if final_exit_code == 0 {
-                final_exit_code = 1;
-                summary_error = Some(error);
-            }
+        if let Err(error) = emit_raw_json_line(&options.sink, &phase_event, "run phase", aux_target)
+        {
+            record_aux_error(
+                &mut final_exit_code,
+                &mut aux_error,
+                aux_target,
+                "run phase",
+                error,
+            );
+        }
+    }
+    if let Some(options) = rusage {
+        let rusage_event = RunRusageEvent {
+            schema_version: RUN_RUSAGE_SCHEMA_VERSION,
+            event: "run_rusage",
+            cpu_ms: cpu_ms_total.unwrap_or(0),
+        };
+        if let Err(error) =
+            emit_raw_json_line(&options.sink, &rusage_event, "run rusage", aux_target)
+        {
+            record_aux_error(
+                &mut final_exit_code,
+                &mut aux_error,
+                aux_target,
+                "run rusage",
+                error,
+            );
         }
     }
 
-    RunSummaryEmission {
-        stderr: summary_stderr,
+    RunAuxEmission {
+        stderr: aux_stderr,
         exit_code: final_exit_code,
-        error: summary_error,
+        error: aux_error,
     }
 }
 
-fn emit_run_summary(
-    options: &RunSummaryOptions,
-    summary: &RunSummary<'_>,
+fn record_aux_error(
+    final_exit_code: &mut i32,
+    aux_error: &mut Option<String>,
+    stderr: &mut String,
+    label: &str,
+    error: String,
+) {
+    stderr.push_str(&format!("error: failed to emit {label}: {error}\n"));
+    if *final_exit_code == 0 {
+        *final_exit_code = 1;
+    }
+    if aux_error.is_none() {
+        *aux_error = Some(error);
+    }
+}
+
+fn emit_raw_json_line(
+    sink: &RunJsonSink,
+    value: &impl Serialize,
+    label: &str,
     stderr: &mut String,
 ) -> Result<(), String> {
-    let line = serde_json::to_string(summary)
-        .map_err(|error| format!("serialize run summary: {error}"))?
-        + "\n";
-    match &options.sink {
-        RunSummarySink::Stderr => {
+    let line =
+        serde_json::to_string(value).map_err(|error| format!("serialize {label}: {error}"))? + "\n";
+    match &sink.target {
+        RunJsonSinkTarget::Stderr => {
             stderr.push_str(&line);
             Ok(())
         }
-        RunSummarySink::File(path) => write_run_summary_file(path, &line),
-        RunSummarySink::Fd(fd) => write_run_summary_fd(*fd, &line),
+        RunJsonSinkTarget::File(path) => write_raw_json_file(path, &line),
+        RunJsonSinkTarget::Fd(fd) => write_raw_json_fd(*fd, &line, sink.fd_flag),
     }
 }
 
-fn write_run_summary_file(path: &Path, line: &str) -> Result<(), String> {
+fn write_raw_json_file(path: &Path, line: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)
@@ -1701,29 +1889,29 @@ fn write_run_summary_file(path: &Path, line: &str) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn write_run_summary_fd(fd: i32, line: &str) -> Result<(), String> {
+fn write_raw_json_fd(fd: i32, line: &str, flag: &str) -> Result<(), String> {
     use std::fs::File;
     use std::os::unix::io::FromRawFd;
 
     if fd < 0 {
-        return Err(format!("invalid --summary-fd {fd}: must be non-negative"));
+        return Err(format!("invalid {flag} {fd}: must be non-negative"));
     }
     let duped = unsafe { libc::dup(fd) };
     if duped < 0 {
         return Err(format!(
-            "duplicate --summary-fd {fd}: {}",
+            "duplicate {flag} {fd}: {}",
             io::Error::last_os_error()
         ));
     }
     let mut file = unsafe { File::from_raw_fd(duped) };
     file.write_all(line.as_bytes())
         .and_then(|_| file.flush())
-        .map_err(|error| format!("write --summary-fd {fd}: {error}"))
+        .map_err(|error| format!("write {flag} {fd}: {error}"))
 }
 
 #[cfg(not(unix))]
-fn write_run_summary_fd(_fd: i32, _line: &str) -> Result<(), String> {
-    Err("--summary-fd is only supported on Unix platforms".to_string())
+fn write_raw_json_fd(_fd: i32, _line: &str, flag: &str) -> Result<(), String> {
+    Err(format!("{flag} is only supported on Unix platforms"))
 }
 
 async fn append_run_provenance_event(
@@ -1902,29 +2090,39 @@ fn finalize_run_error(
     mut stderr: String,
     json_session: Option<JsonRunSession>,
     summary: Option<&RunSummaryOptions>,
+    phase: Option<&RunPhaseOptions>,
+    rusage: Option<&RunRusageOptions>,
     started: Instant,
     profile: Option<&harn_vm::profile::RunProfile>,
+    timing: Option<&RunTiming>,
+    main_events: u64,
+    cpu_ms_total: Option<u64>,
     code: impl Into<String>,
     message: impl Into<String>,
 ) -> RunOutcome {
-    let summary_emission = emit_run_summary_for_exit(
+    let aux_emission = emit_run_aux_for_exit(
         summary,
+        phase,
+        rusage,
         started,
         1,
         profile,
         None,
+        timing,
+        main_events,
+        cpu_ms_total,
         json_session.is_some(),
         &mut stderr,
     );
     if let Some(session) = json_session {
-        let mut outcome = session.finalize_error(code, message, summary_emission.exit_code);
-        outcome.stderr = summary_emission.stderr;
+        let mut outcome = session.finalize_error(code, message, aux_emission.exit_code);
+        outcome.stderr = aux_emission.stderr;
         return outcome;
     }
     RunOutcome {
         stdout,
         stderr,
-        exit_code: summary_emission.exit_code,
+        exit_code: aux_emission.exit_code,
     }
 }
 
@@ -1936,6 +2134,8 @@ fn finalize_harnpack_error(
     mut stderr: String,
     json_session: Option<JsonRunSession>,
     summary: Option<&RunSummaryOptions>,
+    phase: Option<&RunPhaseOptions>,
+    rusage: Option<&RunRusageOptions>,
     started: Instant,
     err: HarnpackError,
 ) -> RunOutcome {
@@ -1947,7 +2147,12 @@ fn finalize_harnpack_error(
         stderr,
         json_session,
         summary,
+        phase,
+        rusage,
         started,
+        None,
+        None,
+        0,
         None,
         code,
         message,
@@ -1962,7 +2167,10 @@ fn finalize_harnpack_dry_run(
     mut stderr: String,
     json_session: Option<JsonRunSession>,
     summary_options: Option<&RunSummaryOptions>,
+    phase_options: Option<&RunPhaseOptions>,
+    rusage_options: Option<&RunRusageOptions>,
     started: Instant,
+    cpu_ms_total: Option<u64>,
     prepared: &PreparedHarnpack,
 ) -> RunOutcome {
     let summary = format!(
@@ -1970,23 +2178,28 @@ fn finalize_harnpack_dry_run(
         prepared.bundle_hash, prepared.signature_verified, prepared.cache_hit
     );
     stderr.push_str(&summary);
-    let summary_emission = emit_run_summary_for_exit(
+    let aux_emission = emit_run_aux_for_exit(
         summary_options,
+        phase_options,
+        rusage_options,
         started,
         0,
         None,
         None,
+        None,
+        0,
+        cpu_ms_total,
         json_session.is_some(),
         &mut stderr,
     );
     if let Some(session) = json_session {
-        if let Some(error) = summary_emission.error {
+        if let Some(error) = aux_emission.error {
             let mut outcome = session.finalize_error(
-                "summary",
-                format!("failed to emit run summary: {error}"),
+                "run_aux",
+                format!("failed to emit auxiliary run JSON: {error}"),
                 1,
             );
-            outcome.stderr = summary_emission.stderr;
+            outcome.stderr = aux_emission.stderr;
             return outcome;
         }
         let value = serde_json::json!({
@@ -1996,14 +2209,14 @@ fn finalize_harnpack_dry_run(
             "cache_hit": prepared.cache_hit,
             "dry_run_verify": true,
         });
-        let mut outcome = session.finalize_result(value, summary_emission.exit_code);
-        outcome.stderr = summary_emission.stderr;
+        let mut outcome = session.finalize_result(value, aux_emission.exit_code);
+        outcome.stderr = aux_emission.stderr;
         return outcome;
     }
     RunOutcome {
         stdout: String::new(),
         stderr,
-        exit_code: summary_emission.exit_code,
+        exit_code: aux_emission.exit_code,
     }
 }
 
