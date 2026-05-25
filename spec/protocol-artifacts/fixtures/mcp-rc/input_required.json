@@ -1,0 +1,71 @@
+{
+  "name": "harn.mcp_rc.input_required",
+  "description": "Modern tools/call returns resultType=input_required with an elicitation request; client resolves the elicitation and resubmits the call with inputResponses.",
+  "kind": "exchange",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "method": "tools/call",
+      "params": {
+        "name": "needs_input",
+        "arguments": {"prompt": "continue"},
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "result": {
+        "resultType": "input_required",
+        "requestState": "opaque-server-state",
+        "inputRequests": {
+          "approve": {
+            "method": "elicitation/create",
+            "params": {
+              "mode": "form",
+              "message": "Approve the call?",
+              "requestedSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {"approved": {"type": "boolean"}},
+                "required": ["approved"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 11,
+      "method": "tools/call",
+      "params": {
+        "name": "needs_input",
+        "arguments": {"prompt": "continue"},
+        "requestState": "opaque-server-state",
+        "inputResponses": {
+          "approve": {"action": "accept", "content": {"approved": true}}
+        },
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 11,
+      "result": {
+        "resultType": "complete",
+        "content": [{"type": "text", "text": "done"}],
+        "isError": false
+      }
+    }
+  ]
+}

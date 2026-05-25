@@ -42,6 +42,12 @@ the same host-facing surface (Python 3.9+, stdlib-only).
 aliases, and constants mirroring the Python and Swift bindings.
 - `fixtures/round_trip.json`: representative JSON envelopes used by
 `make check-bindings` to exercise Python and Go round-trips.
+- `fixtures/mcp-rc/`: hand-authored MCP DRAFT-2026-v1 wire fixtures
+(modern success, unsupported-version retry, cache hints,
+input-required, header mismatch, no-session HTTP, recursive
+`$defs` tool schema, legacy 2025-11-25 compat) replayed by
+`make mcp-rc-conformance` and republished here for Burin Code
+and harn-cloud test suites.
 
 Compatibility rule: additive enum values and optional fields are minor-version
 compatible; removing or renaming a wire value requires a Harn minor-version

@@ -2,7 +2,7 @@
 use super::auth::{
     accepts_media, attach_http_headers, attach_legacy_deprecation_headers, http_auth_request,
     lookup_or_create_session, should_stream_post_response, validate_origin,
-    validate_protocol_header,
+    validate_protocol_header, validate_rc_routing_headers,
 };
 use super::schema::parse_error_response;
 use super::*;
@@ -30,6 +30,15 @@ pub(super) async fn http_post_request(
                 .into_response()
         }
     };
+    // RC Streamable HTTP cross-checks the routing headers against the
+    // JSON-RPC body so a fuzzed or spoofed peer can't smuggle a tools/call
+    // past a header-only audit. A mismatch is `-32600`; we ship it as a
+    // 200 with the JSON-RPC body so the client sees the diagnostic.
+    if let Err(error_body) = validate_rc_routing_headers(&headers, &request) {
+        let mut http = Json(error_body).into_response();
+        attach_http_headers(&mut http, None, MCP_PROTOCOL_VERSION);
+        return http;
+    }
     let header_session = headers
         .get(MCP_SESSION_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -40,6 +49,7 @@ pub(super) async fn http_post_request(
             Err(response) => return *response,
         };
     let auth = http_auth_request(method, &state.options.path, body.to_vec(), &headers);
+    let response_protocol = response_protocol_version(&headers, &request);
 
     match state.server.process_message(request, session, auth).await {
         ImmediateResult::Accepted => StatusCode::ACCEPTED.into_response(),
@@ -52,7 +62,7 @@ pub(super) async fn http_post_request(
             attach_http_headers(
                 &mut http,
                 created.then_some(session_id.as_str()),
-                MCP_PROTOCOL_VERSION,
+                response_protocol,
             );
             http
         }
@@ -62,11 +72,38 @@ pub(super) async fn http_post_request(
             attach_http_headers(
                 &mut http,
                 created.then_some(session_id.as_str()),
-                MCP_PROTOCOL_VERSION,
+                response_protocol,
             );
             http
         }
     }
+}
+
+/// Pick the protocol version we echo back on this response. Modern
+/// requests (RC `_meta` or RC header) get the draft version so the peer
+/// can confirm both sides agreed on the same wire profile.
+fn response_protocol_version(headers: &HeaderMap, request: &JsonValue) -> &'static str {
+    if let Some(value) = headers
+        .get(MCP_PROTOCOL_HEADER)
+        .and_then(|value| value.to_str().ok())
+    {
+        if value == mcp_protocol::DRAFT_PROTOCOL_VERSION {
+            return mcp_protocol::DRAFT_PROTOCOL_VERSION;
+        }
+    }
+    if headers.contains_key(MCP_METHOD_HEADER) || headers.contains_key(MCP_NAME_HEADER) {
+        return mcp_protocol::DRAFT_PROTOCOL_VERSION;
+    }
+    if request
+        .pointer("/params/_meta")
+        .and_then(JsonValue::as_object)
+        .and_then(|meta| meta.get(mcp_protocol::RC_META_KEY_PROTOCOL_VERSION))
+        .and_then(JsonValue::as_str)
+        == Some(mcp_protocol::DRAFT_PROTOCOL_VERSION)
+    {
+        return mcp_protocol::DRAFT_PROTOCOL_VERSION;
+    }
+    MCP_PROTOCOL_VERSION
 }
 
 pub(super) async fn http_get_stream(

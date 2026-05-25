@@ -1,0 +1,54 @@
+{
+  "name": "harn.mcp_rc.unsupported_version_retry",
+  "description": "Client posts server/discover targeting a draft the server does not understand; server returns -32004 with the supported list; client retries with the negotiated version.",
+  "kind": "exchange",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+        "code": -32004,
+        "message": "Unsupported protocol version",
+        "data": {
+          "requested": "DRAFT-2026-v1",
+          "supported": ["2025-11-25"]
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2025-11-25",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "resultType": "complete",
+        "protocolVersion": "DRAFT-2026-v1",
+        "supportedVersions": ["DRAFT-2026-v1", "2025-11-25"],
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "fake-rc-server", "version": "0.1.0"}
+      }
+    }
+  ]
+}

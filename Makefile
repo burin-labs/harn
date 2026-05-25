@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone bench-llm bench-orchestration bench-cli-cold-start all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-support check-provider-support gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc
+.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone bench-llm bench-orchestration bench-cli-cold-start all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-support check-provider-support gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs check-provider-catalog-drift portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs check-provider-catalog-drift portal-check
 
 check: all
 
@@ -79,6 +79,24 @@ conformance:
 
 protocol-conformance:
 	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test protocols
+
+# MCP RC compatibility harness: exercises Harn's MCP client against fake
+# RC servers, fake RC clients against the generic and orchestrator
+# servers, and validates the published wire fixtures + JSON Schema
+# 2020-12 recursive `$defs` handling.
+#
+# Failures are scoped per surface so CI breakage attribution is
+# unambiguous:
+#   - tests/client.rs           — fake-server self-consistency
+#   - tests/generic_server.rs   — generic harn-serve MCP server
+#   - tests/legacy_compat.rs    — 2025-11-25 wire compat regression
+#   - tests/artifacts.rs        — published fixtures + recursive $defs
+#   - harn-cli mcp_rc_compat_tests — orchestrator MCP server
+mcp-rc-conformance:
+	@echo "=== MCP RC harness: harn-mcp-rc-compat suite (client / generic_server / legacy_compat / artifacts) ==="
+	HARN_LLM_CALLS_DISABLED=1 cargo test -p harn-mcp-rc-compat --tests
+	@echo "=== MCP RC harness: orchestrator server (harn-cli mcp_rc_compat_tests) ==="
+	HARN_LLM_CALLS_DISABLED=1 cargo test -p harn-cli --lib mcp_rc_compat_tests
 
 replay-oracle:
 	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- orchestrator replay-oracle

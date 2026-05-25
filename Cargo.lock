@@ -2148,6 +2148,7 @@ dependencies = [
  "harn-ir",
  "harn-lexer",
  "harn-lint",
+ "harn-mcp-rc-compat",
  "harn-modules",
  "harn-parser",
  "harn-serve",
@@ -2325,6 +2326,21 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower-lsp",
+]
+
+[[package]]
+name = "harn-mcp-rc-compat"
+version = "0.8.35"
+dependencies = [
+ "axum",
+ "futures",
+ "harn-serve",
+ "harn-vm",
+ "jsonschema",
+ "reqwest",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

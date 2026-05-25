@@ -1,0 +1,31 @@
+{
+  "name": "harn.mcp_rc.recursive_schema_tool",
+  "description": "Tool input schema that exercises JSON Schema 2020-12 $defs with a self-referential $ref. Used to validate clients accept recursive schemas without bailing.",
+  "kind": "schema",
+  "documents": [
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://harnlang.com/mcp-rc/recursive-tree.input.schema.json",
+      "title": "RecursiveTreeInput",
+      "type": "object",
+      "properties": {
+        "root": {"$ref": "#/$defs/Node"}
+      },
+      "required": ["root"],
+      "$defs": {
+        "Node": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "children": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/Node"}
+            }
+          },
+          "required": ["name"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

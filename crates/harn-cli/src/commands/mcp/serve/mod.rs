@@ -53,6 +53,10 @@ pub(in crate::commands::mcp::serve) use {
 #[path = "../serve_tests.rs"]
 mod serve_tests;
 
+#[cfg(test)]
+#[path = "../mcp_rc_compat_tests.rs"]
+mod mcp_rc_compat_tests;
+
 pub(super) const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 pub(super) const MCP_SESSION_HEADER: &str = "mcp-session-id";
 pub(super) const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";

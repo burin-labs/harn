@@ -1,0 +1,41 @@
+{
+  "name": "harn.mcp_rc.cache_hints",
+  "description": "Modern tools/list answers with overridden ttlMs and cacheScope values so clients can cache aggressively for the advertised window.",
+  "kind": "exchange",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "method": "tools/list",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-rc-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "resultType": "complete",
+        "ttlMs": 300000,
+        "cacheScope": "public",
+        "tools": [
+          {
+            "name": "echo",
+            "title": "Echo",
+            "description": "Return the input string back to the caller.",
+            "inputSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {"message": {"type": "string"}},
+              "required": ["message"]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
