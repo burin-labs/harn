@@ -43,6 +43,7 @@ pub const DEFAULT_TRANSCRIPT_MESSAGE_CAP: usize = 4096;
 /// Default cap on retained transcript audit events per session. Events
 /// include message-derived entries plus orchestration lifecycle records.
 pub const DEFAULT_TRANSCRIPT_EVENT_CAP: usize = 32768;
+#[cfg(debug_assertions)]
 const CACHE_STABLE_SYSTEM_PROMPT_DIAGNOSTIC: &str = "HARN-CACHE-001";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1939,6 +1940,7 @@ pub fn system_prompt(id: &str) -> Option<String> {
     })
 }
 
+#[cfg(debug_assertions)]
 fn forbidden_workspace_prompt_token(system_prompt: &str) -> Option<&'static str> {
     let mut remaining = system_prompt;
     while let Some(index) = remaining.find("{{") {

@@ -6,6 +6,24 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.8.37
+
+### Changed
+
+- **Iteration-boundary runtime rename ships in the published patch (#2209).**
+  The `v0.8.36` release notes documented the `turn_*` to `iteration_*`
+  migration, but the implementation merged immediately after the `v0.8.36`
+  tag. This patch is the first published version whose runtime, ACP extension
+  stream, protocol artifacts, conformance fixtures, docs, and merge-captain
+  examples all emit and accept the `iteration_start` / `iteration_end`
+  vocabulary described in those notes.
+- **VM string and name hot paths are cheaper (#2410).** The compiler now
+  deduplicates repeated string constants per bytecode chunk, VM name operands
+  avoid repeated string allocations in common paths, and interpolation writes
+  stack values into one pre-sized buffer instead of allocating intermediate
+  display strings. Focused Criterion probes cover many-part interpolation,
+  builtin-reference lookup, and repeated compiler string constants.
+
 ## v0.8.36
 
 ### Changed
