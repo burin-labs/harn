@@ -728,6 +728,14 @@ pub(crate) struct RoutingAttempt {
     pub status: AttemptStatus,
     pub duration_ms: u64,
     pub cost_usd: Option<f64>,
+    /// Token counts attributed to this attempt's provider call. Mirrors
+    /// the winning `LlmResult.input_tokens` / `output_tokens` so
+    /// downstream graders can re-compute spend against alternate
+    /// pricing tables (e.g. OpenRouter, which isn't in the catalog).
+    /// `None` when the attempt was skipped, race-lost, or budget-aborted
+    /// before the provider returned a payload.
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
     pub error: Option<RoutingErrorSnapshot>,
     /// Per-verifier signals emitted after this attempt's response.
     /// Empty when the policy has no `escalate_on` chain or the
@@ -1057,6 +1065,8 @@ fn check_link_budget(
                 status: AttemptStatus::Skipped,
                 duration_ms: 0,
                 cost_usd: None,
+                input_tokens: None,
+                output_tokens: None,
                 error: Some(snapshot),
                 verifier_signals: Vec::new(),
                 verifier_outcome: None,
@@ -1122,6 +1132,8 @@ fn pending_attempt_record(
         status: AttemptStatus::Failed,
         duration_ms: duration_ms(elapsed),
         cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
         error: None,
         verifier_signals: Vec::new(),
         verifier_outcome: None,
@@ -1407,6 +1419,8 @@ pub(crate) async fn execute_with_routing(
                 {
                     record.status = AttemptStatus::Succeeded;
                     record.cost_usd = Some(project_link_cost_usd(&value));
+                    record.input_tokens = Some(value.input_tokens);
+                    record.output_tokens = Some(value.output_tokens);
                 }
                 // Run the verifier chain over the winning candidate.
                 let candidate_text = if policy.escalate_on.is_empty() {
@@ -1587,6 +1601,8 @@ async fn run_race(
             if let Ok(ref v) = res {
                 record.status = AttemptStatus::Succeeded;
                 record.cost_usd = Some(project_link_cost_usd(v));
+                record.input_tokens = Some(v.input_tokens);
+                record.output_tokens = Some(v.output_tokens);
             }
             (res, vec![record])
         }
@@ -1628,6 +1644,8 @@ async fn run_race(
                     if let Ok(ref v) = res {
                         primary_record.status = AttemptStatus::Succeeded;
                         primary_record.cost_usd = Some(project_link_cost_usd(v));
+                        primary_record.input_tokens = Some(v.input_tokens);
+                        primary_record.output_tokens = Some(v.output_tokens);
                     }
                     let mut backup_record = pending_attempt_record(
                         backup_attempt_no,
@@ -1657,6 +1675,8 @@ async fn run_race(
                     if let Ok(ref v) = res {
                         backup_record.status = AttemptStatus::Succeeded;
                         backup_record.cost_usd = Some(project_link_cost_usd(v));
+                        backup_record.input_tokens = Some(v.input_tokens);
+                        backup_record.output_tokens = Some(v.output_tokens);
                     }
                     let mut primary_record = pending_attempt_record(
                         primary_attempt_no,
@@ -1805,6 +1825,12 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
             );
             if let Some(cost) = attempt.cost_usd {
                 dict.insert("cost_usd".to_string(), VmValue::Float(cost));
+            }
+            if let Some(tokens) = attempt.input_tokens {
+                dict.insert("input_tokens".to_string(), VmValue::Int(tokens));
+            }
+            if let Some(tokens) = attempt.output_tokens {
+                dict.insert("output_tokens".to_string(), VmValue::Int(tokens));
             }
             if let Some(error) = &attempt.error {
                 let mut err_dict = BTreeMap::new();
