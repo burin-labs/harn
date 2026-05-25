@@ -52,6 +52,13 @@ condensed series summaries instead of full per-patch history.
   structured output, records finish reasons, bounded retry history, truncated
   raw output, and cost telemetry, and can run one length continuation plus one
   schema-repair retry for fairer typed-IR comparisons.
+- **Pre-turn scope triage (#2210, #2226, #2227, #2229).** `agent_loop` accepts
+  an opt-in `pre_turn_scope_classifier` hook from
+  `std/llm/scope_classifier`. The default live classifier targets the local
+  `ollama:qwen3:1.7b` model, low-confidence labels escalate to the main model,
+  confident `out_of_scope` labels skip the heavy turn and synthesize the
+  canonical `<scope-alert>` handoff prompt. `harn eval scope_triage` runs the
+  100-case synthetic measurement harness and writes summary artifacts.
 
 ## v0.8.37
 

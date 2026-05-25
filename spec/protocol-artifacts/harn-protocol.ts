@@ -128,6 +128,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "loop_control_decision",
   "loop_stuck",
   "progress_reported",
+  "scope_classifier_verdict",
   "session_closed",
   "structural_validator_decision",
   "step_judge_decision",

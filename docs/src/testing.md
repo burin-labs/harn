@@ -281,6 +281,17 @@ harn eval context examples/evals/context-engineering-smoke.json \
   --output target/context-eval --json
 ```
 
+`harn eval scope_triage` runs the opt-in pre-turn scope-classifier measurement
+harness. The default mode uses a deterministic reference classifier over the
+100-case synthetic dataset; pass `--live --model ollama:qwen3:1.7b` to exercise
+the local small-model classifier. The report includes turn-cost reduction,
+coverage, false-positive rate, false-negative rate, and a keep-default-off /
+graduate decision.
+
+```bash
+harn eval scope_triage --output .harn-runs/scope-triage/latest
+```
+
 ## Eval packs
 
 Portable eval packs live in `harn.eval.toml` or another TOML file listed in

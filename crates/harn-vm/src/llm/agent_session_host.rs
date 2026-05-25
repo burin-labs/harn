@@ -1500,6 +1500,28 @@ fn build_agent_event(
             attempts: get_usize("attempts"),
             max_attempts: get_usize("max_attempts"),
         }),
+        "scope_classifier_verdict" => Ok(AgentEvent::ScopeClassifierVerdict {
+            session_id: session_id.to_string(),
+            iteration: get_usize("iteration"),
+            label: get_string("label"),
+            original_label: get_string("original_label"),
+            confidence: payload_obj
+                .and_then(|m| m.get("confidence"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0),
+            confidence_threshold: payload_obj
+                .and_then(|m| m.get("confidence_threshold"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.65),
+            evidence: get_string("evidence"),
+            skip_main_turn: payload_obj
+                .and_then(|m| m.get("skip_main_turn"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            classifier_kind: get_opt_string("classifier_kind"),
+            model: get_opt_string("model"),
+            error: get_opt_string("error"),
+        }),
         "typed_checkpoint" => Ok(AgentEvent::TypedCheckpoint {
             session_id: session_id.to_string(),
             checkpoint: payload.clone(),

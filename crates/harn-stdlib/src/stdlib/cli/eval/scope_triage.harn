@@ -1,0 +1,441 @@
+import { agent_capture_events } from "std/agent/events"
+import { pre_turn_scope_classifier } from "std/llm/scope_classifier"
+
+fn __env_bool(harness: Harness, name: string) -> bool {
+  let value = lowercase(trim(harness.env.get_or(name, "")))
+  return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
+fn __env_int(harness: Harness, name: string) {
+  let value = trim(harness.env.get_or(name, ""))
+  if value == "" {
+    return nil
+  }
+  return to_int(value)
+}
+
+fn __env_float(harness: Harness, name: string, fallback) {
+  let value = trim(harness.env.get_or(name, ""))
+  if value == "" {
+    return fallback
+  }
+  return to_float(value) ?? fallback
+}
+
+fn __mkdirp(harness: Harness, path: string) {
+  if trim(path) == "" {
+    return
+  }
+  let absolute = starts_with(path, "/")
+  var current = if absolute {
+    "/"
+  } else {
+    ""
+  }
+  for part in split(path, "/") {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    try {
+      harness.fs.mkdir(current)
+    } catch (_e) {
+      nil
+    }
+  }
+}
+
+fn __load_cases(harness: Harness, path: string, max_cases) {
+  let raw = try {
+    harness.fs.read_text(path)
+  } catch (e) {
+    harness.stdio.eprintln("error: failed to read scope-triage dataset " + path + ": " + to_string(e))
+    return nil
+  }
+  let decoded = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("error: failed to parse scope-triage dataset " + path + ": " + to_string(e))
+    return nil
+  }
+  var cases = if type_of(decoded) == "list" {
+    decoded
+  } else {
+    decoded?.cases ?? []
+  }
+  if type_of(cases) != "list" {
+    harness.stdio.eprintln("error: scope-triage dataset must be a list or {cases: list}")
+    return nil
+  }
+  if max_cases != nil && max_cases >= 0 && len(cases) > max_cases {
+    var limited = []
+    var i = 0
+    while i < max_cases {
+      limited = limited.push(cases[i])
+      i = i + 1
+    }
+    cases = limited
+  }
+  return cases
+}
+
+fn __contains_any(text, needles) {
+  for needle in needles {
+    if contains(text, needle) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __reference_classifier(payload) {
+  let text = lowercase(to_string(payload?.user_message ?? ""))
+  let out_markers = [
+    "burin-code",
+    "harn-cloud",
+    "project y",
+    "project z",
+    "unrelated project",
+    "sibling repo",
+    "other repo",
+    "/workspace/other",
+    "/workspace/mobile",
+    "/workspace/web",
+    "/tmp/other",
+    "../",
+    "ios app",
+    "android app",
+    "marketing site",
+  ]
+  if contains(text, "dependency bump") && __contains_any(text, out_markers) {
+    return {
+      label: "out_of_scope",
+      confidence: 0.94,
+      evidence: "message names a path or repo outside /workspace/harn",
+    }
+  }
+  let ambiguous = [
+    "maybe",
+    "explore",
+    "compare",
+    "relationship",
+    "should we",
+    "investigate",
+    "coordinate",
+    "dependency",
+    "sibling integration",
+    "nearby repo",
+  ]
+  if __contains_any(text, ambiguous) {
+    return {label: "escalate", confidence: 0.7, evidence: "ambiguous cross-workspace intent"}
+  }
+  if __contains_any(text, out_markers) {
+    return {
+      label: "out_of_scope",
+      confidence: 0.94,
+      evidence: "message names a path or repo outside /workspace/harn",
+    }
+  }
+  let in_markers = [
+    "this repo",
+    "current repo",
+    "current workspace",
+    "/workspace/harn",
+    "harn",
+    "conformance",
+    "crates/harn",
+    "docs/src",
+    "agent loop",
+    "parser",
+    "stdlib",
+    "readme",
+    "changelog",
+  ]
+  if __contains_any(text, in_markers) {
+    return {label: "in_scope", confidence: 0.93, evidence: "message targets the current Harn workspace"}
+  }
+  return {label: "escalate", confidence: 0.55, evidence: "no concrete workspace target"}
+}
+
+fn __scope_eval_anchor() {
+  return {
+    primary: "/workspace/harn",
+    additional_roots: [{path: "/workspace/shared", mount_mode: "read_only", mounted_at: "2026-05-25T00:00:00Z"}],
+    anchored_at: "2026-05-25T00:00:00Z",
+  }
+}
+
+fn __verdict_event(events) {
+  let verdicts = events.filter({ event -> event.type == "scope_classifier_verdict" })
+  if len(verdicts) == 0 {
+    return {label: "none", confidence: 0.0, evidence: "no scope_classifier_verdict event"}
+  }
+  return verdicts[0]
+}
+
+fn __run_case(case, classifier) {
+  let session = "scope-triage-eval-" + to_string(case?.id ?? uuid())
+  let captured = agent_capture_events(
+    session,
+    fn() {
+      agent_session_open(session, {workspace_anchor: __scope_eval_anchor()})
+      return agent_loop(
+        to_string(case?.prompt ?? case?.message ?? ""),
+        nil,
+        {
+          provider: "mock",
+          model: "mock-heavy",
+          session_id: session,
+          max_iterations: 1,
+          done_judge: false,
+          pre_turn_scope_classifier: classifier,
+          llm_caller: { call -> return {
+            ok: true,
+            value: {
+              text: "heavy model reached",
+              provider: call?.opts?.provider ?? "mock",
+              model: call?.opts?.model ?? "mock-heavy",
+              input_tokens: 1000,
+              output_tokens: 100,
+            },
+          } },
+        },
+      )
+    },
+  )
+  let verdict = __verdict_event(captured.events)
+  let expected = to_string(case?.expected ?? case?.label ?? "")
+  let predicted = to_string(verdict?.label ?? "none")
+  let correct = if expected == "ambiguous" || expected == "escalate" {
+    predicted == "escalate"
+  } else {
+    predicted == expected
+  }
+  let skipped_main_turn = captured.result?.status == "scope_alert"
+    && captured.result?.stop_reason == "out_of_scope"
+  let main_calls = if skipped_main_turn {
+    0
+  } else {
+    1
+  }
+  return {
+    id: to_string(case?.id ?? ""),
+    prompt: to_string(case?.prompt ?? case?.message ?? ""),
+    expected: expected,
+    predicted: predicted,
+    confidence: verdict?.confidence ?? 0.0,
+    evidence: verdict?.evidence ?? "",
+    correct: correct,
+    false_positive: expected == "in_scope" && predicted == "out_of_scope",
+    false_negative: expected == "out_of_scope" && predicted != "out_of_scope",
+    covered: predicted == "in_scope" || predicted == "out_of_scope",
+    main_llm_calls: main_calls,
+    skipped_main_turn: skipped_main_turn,
+    status: captured.result?.status ?? "",
+    stop_reason: captured.result?.stop_reason ?? "",
+  }
+}
+
+fn __rate(n, d) {
+  if d == 0 {
+    return 0.0
+  }
+  return n * 1.0 / (d * 1.0)
+}
+
+fn __summarize(dataset_path, output_dir, live, model, threshold, cases, reports) {
+  var correct = 0
+  var covered = 0
+  var false_positive = 0
+  var false_negative = 0
+  var in_scope = 0
+  var out_scope = 0
+  var ambiguous = 0
+  var main_calls = 0
+  for report in reports {
+    if report.correct {
+      correct = correct + 1
+    }
+    if report.covered {
+      covered = covered + 1
+    }
+    if report.false_positive {
+      false_positive = false_positive + 1
+    }
+    if report.false_negative {
+      false_negative = false_negative + 1
+    }
+    if report.expected == "in_scope" {
+      in_scope = in_scope + 1
+    } else if report.expected == "out_of_scope" {
+      out_scope = out_scope + 1
+    } else {
+      ambiguous = ambiguous + 1
+    }
+    main_calls = main_calls + report.main_llm_calls
+  }
+  let total = len(reports)
+  let baseline_main_calls = total
+  let saved_main_calls = baseline_main_calls - main_calls
+  let cost_reduction = __rate(saved_main_calls, baseline_main_calls)
+  let false_positive_rate = __rate(false_positive, in_scope)
+  let false_negative_rate = __rate(false_negative, out_scope)
+  let pass = cost_reduction >= 0.3 && false_positive_rate <= 0.05 && false_negative_rate <= 0.2
+  let decision = if pass {
+    "keep_opt_in_candidate_for_default_on"
+  } else if false_positive_rate > 0.15 || cost_reduction < 0.1 {
+    "did_not_converge_keep_hook_opt_in"
+  } else {
+    "keep_opt_in_collect_more_data"
+  }
+  return {
+    schema_version: 1,
+    dataset: dataset_path,
+    output_dir: output_dir,
+    mode: if live {
+      "live"
+    } else {
+      "deterministic"
+    },
+    model: model,
+    confidence_threshold: threshold,
+    total_cases: total,
+    expected_counts: {in_scope: in_scope, out_of_scope: out_scope, ambiguous: ambiguous},
+    correct_cases: correct,
+    accuracy: __rate(correct, total),
+    coverage: __rate(covered, total),
+    baseline_main_llm_calls: baseline_main_calls,
+    triaged_main_llm_calls: main_calls,
+    saved_main_llm_calls: saved_main_calls,
+    turn_cost_reduction: cost_reduction,
+    false_positives: false_positive,
+    false_positive_rate: false_positive_rate,
+    false_negatives: false_negative,
+    false_negative_rate: false_negative_rate,
+    pass: pass,
+    decision: decision,
+    cases: reports,
+  }
+}
+
+fn __jsonl(reports) {
+  var lines = []
+  for report in reports {
+    lines = lines.push(json_stringify(report))
+  }
+  return join(lines, "\n") + "\n"
+}
+
+fn __pct(value) {
+  return to_string(round(value * 1000.0) / 10.0) + "%"
+}
+
+fn __markdown(report) {
+  let status = if report.pass {
+    "PASS"
+  } else {
+    "FAIL"
+  }
+  var out = "# Scope Triage Eval\n\n"
+  out = out + "- status: " + status + "\n"
+  out = out + "- cases: " + to_string(report.total_cases) + "\n"
+  out = out + "- accuracy: " + __pct(report.accuracy) + "\n"
+  out = out + "- coverage: " + __pct(report.coverage) + "\n"
+  out = out + "- turn cost reduction: " + __pct(report.turn_cost_reduction) + "\n"
+  out = out + "- false-positive rate: " + __pct(report.false_positive_rate) + "\n"
+  out = out + "- false-negative rate: " + __pct(report.false_negative_rate) + "\n"
+  out = out + "- decision: " + report.decision + "\n\n"
+  out = out + "| id | expected | predicted | main calls | correct |\n"
+  out = out + "|---|---|---|---:|---:|\n"
+  for case in report.cases {
+    let correct_label = if case.correct {
+      "yes"
+    } else {
+      "no"
+    }
+    out = out + "| " + case.id
+      + " | "
+      + case.expected
+      + " | "
+      + case.predicted
+      + " | "
+      + to_string(case.main_llm_calls)
+      + " | "
+      + correct_label
+      + " |\n"
+  }
+  return out
+}
+
+fn main(harness: Harness) -> int {
+  let dataset_path = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_DATASET", "evals/scope_triage/dataset.json")
+  let output_dir = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_OUTPUT", "")
+  let resolved_output = if trim(output_dir) == "" {
+    ".harn-runs/scope-triage/latest"
+  } else {
+    output_dir
+  }
+  let json_mode = __env_bool(harness, "HARN_EVAL_SCOPE_TRIAGE_JSON")
+  let live = __env_bool(harness, "HARN_EVAL_SCOPE_TRIAGE_LIVE")
+  let model = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_MODEL", "ollama:qwen3:1.7b")
+  let threshold = __env_float(harness, "HARN_EVAL_SCOPE_TRIAGE_THRESHOLD", 0.65)
+  let max_cases = __env_int(harness, "HARN_EVAL_SCOPE_TRIAGE_MAX_CASES")
+  let cases = __load_cases(harness, dataset_path, max_cases)
+  if cases == nil {
+    return 1
+  }
+  let classifier = if live {
+    pre_turn_scope_classifier({enabled: true, model: model, confidence_threshold: threshold})
+  } else {
+    pre_turn_scope_classifier(
+      {
+        enabled: true,
+        confidence_threshold: threshold,
+        classifier: { payload -> __reference_classifier(payload) },
+      },
+    )
+  }
+  var reports = []
+  for case in cases {
+    reports = reports.push(__run_case(case, classifier))
+  }
+  let report = __summarize(dataset_path, resolved_output, live, model, threshold, cases, reports)
+  __mkdirp(harness, resolved_output)
+  harness.fs.write_text(path_join(resolved_output, "summary.json"), json_stringify_pretty(report))
+  harness.fs.write_text(path_join(resolved_output, "per_case.jsonl"), __jsonl(reports))
+  harness.fs.write_text(path_join(resolved_output, "summary.md"), __markdown(report))
+  harness.stdio
+    .eprintln(
+    "wrote "
+      + path_join(resolved_output, "summary.json")
+      + ", "
+      + path_join(resolved_output, "per_case.jsonl")
+      + ", and "
+      + path_join(resolved_output, "summary.md"),
+  )
+  if json_mode {
+    __io_println(json_stringify_pretty(report))
+  } else {
+    __io_println(
+      "scope-triage eval: "
+        + to_string(report.correct_cases)
+        + "/"
+        + to_string(report.total_cases)
+        + " correct, saved_main_llm_calls="
+        + to_string(report.saved_main_llm_calls)
+        + ", false_positive_rate="
+        + __pct(report.false_positive_rate)
+        + ", decision="
+        + report.decision,
+    )
+  }
+  return if report.pass {
+    0
+  } else {
+    1
+  }
+}

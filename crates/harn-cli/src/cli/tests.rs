@@ -436,6 +436,44 @@ fn test_parses_eval_context_args() {
 }
 
 #[test]
+fn test_parses_eval_scope_triage_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "scope_triage",
+        "--dataset",
+        "evals/scope_triage/dataset.json",
+        "--output",
+        ".harn-runs/scope-triage/smoke",
+        "--max-cases",
+        "5",
+        "--confidence-threshold",
+        "0.8",
+        "--live",
+        "--json",
+    ]);
+
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::ScopeTriage(scope)) = args.command else {
+        panic!("expected scope_triage command");
+    };
+    assert_eq!(
+        scope.dataset,
+        PathBuf::from("evals/scope_triage/dataset.json")
+    );
+    assert_eq!(
+        scope.output,
+        Some(PathBuf::from(".harn-runs/scope-triage/smoke"))
+    );
+    assert_eq!(scope.max_cases, Some(5));
+    assert_eq!(scope.confidence_threshold, 0.8);
+    assert!(scope.live);
+    assert!(scope.json);
+}
+
+#[test]
 fn test_parses_run_yes_flag() {
     let cli = Cli::parse_from(["harn", "run", "--yes", "main.harn"]);
 

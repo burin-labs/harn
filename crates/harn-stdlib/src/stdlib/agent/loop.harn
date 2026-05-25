@@ -1188,6 +1188,257 @@ fn __agent_loop_fire_resume_continuity(session, opts) {
   return omit(opts, ["_resume_continuity"])
 }
 
+fn __scope_classifier_recent_context(messages, limit) {
+  if type_of(messages) != "list" {
+    return []
+  }
+  let cap = if type_of(limit) == "int" && limit > 0 {
+    limit
+  } else {
+    3
+  }
+  let total = len(messages)
+  var start = total - cap
+  if start < 0 {
+    start = 0
+  }
+  var out = []
+  var i = start
+  while i < total {
+    let msg = messages[i]
+    out = out
+      .push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
+    i = i + 1
+  }
+  return out
+}
+
+fn __scope_classifier_confidence(value, fallback) {
+  let parsed = to_float(value ?? fallback)
+  if parsed == nil {
+    return fallback
+  }
+  if parsed < 0.0 {
+    return 0.0
+  }
+  if parsed > 1.0 {
+    return 1.0
+  }
+  return parsed
+}
+
+fn __scope_classifier_label(value) {
+  let label = lowercase(trim(to_string(value ?? "")))
+  if label == "in_scope" || label == "inscope" || label == "in-scope" {
+    return "in_scope"
+  }
+  if label == "out_of_scope" || label == "outscope" || label == "out-of-scope" {
+    return "out_of_scope"
+  }
+  if label == "escalate" || label == "ambiguous" || label == "uncertain" {
+    return "escalate"
+  }
+  return "escalate"
+}
+
+fn __scope_classifier_normalize(raw, session_id, iteration) {
+  if raw == nil {
+    return nil
+  }
+  if type_of(raw) != "dict" {
+    return {
+      label: "escalate",
+      original_label: "invalid",
+      confidence: 0.0,
+      confidence_threshold: 0.65,
+      evidence: "scope classifier returned " + type_of(raw) + ", not a dict",
+      session_id: session_id,
+      iteration: iteration,
+      skip_main_turn: false,
+    }
+  }
+  let threshold = __scope_classifier_confidence(raw?.confidence_threshold ?? raw?.threshold, 0.65)
+  let original_label = __scope_classifier_label(raw?.original_label ?? raw?.label)
+  let confidence = __scope_classifier_confidence(raw?.confidence, 0.0)
+  let label = if original_label != "escalate" && confidence < threshold {
+    "escalate"
+  } else {
+    original_label
+  }
+  let evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
+  return raw
+    + {
+    label: label,
+    original_label: original_label,
+    confidence: confidence,
+    confidence_threshold: threshold,
+    evidence: if evidence == "" {
+      "no evidence provided"
+    } else {
+      evidence
+    },
+    session_id: session_id,
+    iteration: iteration,
+    skip_main_turn: raw?.skip_main_turn ?? true,
+  }
+}
+
+fn __scope_classifier_fail_open(session_id, iteration, err) {
+  return {
+    label: "escalate",
+    original_label: "error",
+    confidence: 0.0,
+    confidence_threshold: 0.65,
+    evidence: "scope classifier failed: " + to_string(err),
+    error: to_string(err),
+    session_id: session_id,
+    iteration: iteration,
+    skip_main_turn: false,
+  }
+}
+
+fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iteration_index) {
+  if classifier == nil {
+    return nil
+  }
+  let iteration = iteration_index + 1
+  let messages = agent_session_messages(session.session_id)
+  let anchor = agent_session_workspace_anchor(session.session_id)
+  let payload = {
+    session_id: session.session_id,
+    session: {id: session.session_id},
+    iteration: iteration,
+    user_message: message,
+    task: session?.task ?? message,
+    messages: messages,
+    recent_context: __scope_classifier_recent_context(messages, 3),
+    workspace_anchor: anchor,
+    provider: turn_opts?.provider ?? "",
+    model: turn_opts?.model ?? "",
+  }
+  let outcome = try {
+    classifier(payload)
+  }
+  let verdict = if is_err(outcome) {
+    let err = unwrap_err(outcome)
+    if error_category(err) == "cancelled" {
+      throw err
+    }
+    __scope_classifier_fail_open(session.session_id, iteration, err)
+  } else {
+    __scope_classifier_normalize(unwrap(outcome), session.session_id, iteration)
+  }
+  if verdict != nil {
+    agent_emit_event(session.session_id, "scope_classifier_verdict", verdict)
+  }
+  return verdict
+}
+
+fn __scope_classifier_mounted_roots(anchor) {
+  let roots = anchor?.additional_roots ?? []
+  if type_of(roots) != "list" || len(roots) == 0 {
+    return "  (none)"
+  }
+  var lines = []
+  for root in roots {
+    lines = lines
+      .push(
+      "  - " + to_string(root?.path ?? root?.root ?? "")
+        + " (mount_mode: "
+        + to_string(root?.mount_mode ?? "")
+        + ")",
+    )
+  }
+  return join(lines, "\n")
+}
+
+fn __scope_classifier_alert_body(verdict, session) {
+  let anchor = verdict?.workspace_anchor ?? agent_session_workspace_anchor(session.session_id)
+  let primary = to_string(anchor?.primary ?? "(none)")
+  return "<scope-alert>\nThe latest user turn appears outside the current workspace anchor. "
+    + to_string(verdict?.evidence ?? "")
+    + "\n\nCurrent anchor: "
+    + primary
+    + "\nMounted roots:\n"
+    + __scope_classifier_mounted_roots(anchor)
+    + "\n\nThree options:\n"
+    + "  - add_root: mount the target repo into this session with `agent_session_add_root(session_id, root, {mount_mode})`\n"
+    + "  - reanchor: switch the session primary anchor with `agent_session_reanchor(session_id, new_anchor)`\n"
+    + "  - fork: spawn a sub-agent against the target repo with `spawn_agent({anchor: new_anchor, ...})`\n\n"
+    + "Ask the user which handoff they prefer before doing workspace-mutating work.\n</scope-alert>"
+}
+
+fn __scope_classifier_assistant_text(verdict) {
+  let evidence = trim(to_string(verdict?.evidence ?? ""))
+  let suffix = if evidence == "" {
+    ""
+  } else {
+    " " + evidence
+  }
+  return "This task appears to be outside the current workspace anchor."
+    + suffix
+    + " Options: 1) Add Root, 2) Re-anchor, 3) Fork to a new session. Which would you prefer?"
+}
+
+fn __scope_classifier_skip_main(verdict) {
+  return verdict != nil && verdict?.label == "out_of_scope" && verdict?.skip_main_turn ?? true
+}
+
+fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
+  let text = __scope_classifier_assistant_text(verdict)
+  agent_session_record_assistant(
+    session.session_id,
+    {
+      text: text,
+      visible_text: text,
+      provider: "harn",
+      model: "scope_classifier",
+      input_tokens: 0,
+      output_tokens: 0,
+      scope_classifier_verdict: verdict,
+    },
+  )
+  agent_session_inject(
+    session.session_id,
+    transcript_reminder_event(
+      {
+        body: __scope_classifier_alert_body(verdict, session),
+        source: "in_pipeline",
+        tags: ["scope_alert", "pre_turn_scope_classifier"],
+        dedupe_key: "scope_alert:pre_turn:" + substring(sha256(session.session_id + text), 0, 16),
+        ttl_turns: 3,
+        fired_at_turn: iteration_index + 1,
+      },
+    ),
+  )
+  agent_emit_event(
+    session.session_id,
+    "iteration_end",
+    {
+      iteration: iteration_index + 1,
+      iteration_info: __iteration_info_payload(
+        {
+          text: text,
+          visible_text: text,
+          provider: "harn",
+          model: "scope_classifier",
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+        0,
+        text,
+      )
+        + {
+        dispatch_skipped: true,
+        skip_reason: "scope_classifier_out_of_scope",
+        scope_classifier_verdict: verdict,
+      },
+    },
+  )
+  let _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+  return text
+}
+
 fn __agent_loop_pop_structural_veto_turn(session_id) {
   let messages = agent_session_messages(session_id)
   if len(messages) == 0 {
@@ -1279,6 +1530,20 @@ fn __agent_loop_run(message, session, initial_opts) {
       __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
       agent_autocompact_if_needed(session, turn_opts)
       __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: iteration_index + 1})
+      let scope_verdict = __run_pre_turn_scope_classifier(
+        turn_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,
+        session,
+        message,
+        turn_opts,
+        iteration_index,
+      )
+      if __scope_classifier_skip_main(scope_verdict) {
+        __scope_classifier_record_skip_turn(session, scope_verdict, iteration_index)
+        iteration = iteration + 1
+        final_status = "scope_alert"
+        stop_reason = "out_of_scope"
+        break
+      }
       let turn_system = agent_build_turn_system(session, turn_opts, iteration_index)
       let turn_messages = agent_build_turn_messages(session, turn_opts, iteration_index)
       let llm_overrides = turn_opts?.llm_options ?? {}

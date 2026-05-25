@@ -1,0 +1,165 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop_options } from "std/agent/options"
+import { pre_turn_scope_classifier } from "std/llm/scope_classifier"
+
+fn scope_events(events) {
+  return events.filter({ event -> event.type == "scope_classifier_verdict" })
+}
+
+fn scope_reminders(result) {
+  return transcript_events_by_kind(result?.transcript, "system_reminder")
+    .filter(
+    { event -> event?.reminder?.tags != nil && event.reminder.tags.any({ tag -> tag == "scope_alert" }) },
+  )
+}
+
+fn heavy_caller(text) {
+  return { call -> return {
+    ok: true,
+    value: {
+      text: text,
+      provider: call?.opts?.provider ?? "mock",
+      model: call?.opts?.model ?? "mock",
+      input_tokens: 10,
+      output_tokens: 2,
+    },
+  } }
+}
+
+fn anchor_opts() {
+  return {
+    workspace_anchor: {
+      primary: "/workspace/harn",
+      additional_roots: [{path: "/workspace/shared", mount_mode: "read_only", mounted_at: "2026-05-25T00:00:00Z"}],
+      anchored_at: "2026-05-25T00:00:00Z",
+    },
+  }
+}
+
+fn anchored_session(prefix) {
+  return prefix + "-" + uuid()
+}
+
+fn open_anchored_session(session) {
+  agent_session_open(session, anchor_opts())
+}
+
+pipeline default() {
+  let out_session = anchored_session("scope-out")
+  let out_classifier = pre_turn_scope_classifier(
+    {
+      enabled: true,
+      confidence_threshold: 0.8,
+      classifier: { payload -> return {
+        label: "out_of_scope",
+        confidence: 0.95,
+        evidence: payload.workspace_anchor.primary
+          + " recent_context="
+          + to_string(len(payload.recent_context) > 0),
+      } },
+    },
+  )
+  let out = agent_capture_events(
+    out_session,
+    fn() {
+      open_anchored_session(out_session)
+      return agent_loop(
+        "Change the CSS in /workspace/other.",
+        nil,
+        {
+          provider: "mock",
+          session_id: out_session,
+          max_iterations: 1,
+          done_judge: false,
+          pre_turn_scope_classifier: out_classifier,
+          llm_caller: { _call ->
+            throw "main llm should have been skipped"
+          },
+        },
+      )
+    },
+  )
+  let out_events = scope_events(out.events)
+  let out_reminders = scope_reminders(out.result)
+  __io_println(out.result.status)
+  __io_println(out.result.stop_reason)
+  __io_println(out.result.llm.iterations)
+  __io_println(len(out_events))
+  __io_println(out_events[0].label)
+  __io_println(out_events[0].confidence >= 0.9)
+  __io_println(len(out_reminders))
+  __io_println(contains(out.result.text, "Add Root"))
+  __io_println(contains(out_events[0].evidence, "/workspace/harn"))
+  __io_println(contains(out_events[0].evidence, "recent_context=true"))
+  let in_session = anchored_session("scope-in")
+  let in_classifier = pre_turn_scope_classifier(
+    {
+      enabled: true,
+      confidence_threshold: 0.8,
+      classifier: { _payload -> {label: "in_scope", confidence: 0.91, evidence: "current repo"} },
+    },
+  )
+  let in_scope = agent_capture_events(
+    in_session,
+    fn() {
+      open_anchored_session(in_session)
+      return agent_loop(
+        "Add a parser conformance test in this repo.",
+        nil,
+        {
+          provider: "mock",
+          session_id: in_session,
+          max_iterations: 1,
+          done_judge: false,
+          pre_turn_scope_classifier: in_classifier,
+          llm_caller: heavy_caller("heavy model reached"),
+        },
+      )
+    },
+  )
+  let in_events = scope_events(in_scope.events)
+  __io_println(in_scope.result.status)
+  __io_println(in_scope.result.text)
+  __io_println(in_events[0].label)
+  __io_println(len(scope_reminders(in_scope.result)))
+  let low_session = anchored_session("scope-low")
+  let low_classifier = pre_turn_scope_classifier(
+    {
+      enabled: true,
+      confidence_threshold: 0.8,
+      classifier: { _payload -> {label: "in_scope", confidence: 0.2, evidence: "weak signal"} },
+    },
+  )
+  let low = agent_capture_events(
+    low_session,
+    fn() {
+      open_anchored_session(low_session)
+      return agent_loop(
+        "Maybe compare this repository to a sibling repo.",
+        nil,
+        {
+          provider: "mock",
+          session_id: low_session,
+          max_iterations: 1,
+          done_judge: false,
+          pre_turn_scope_classifier: low_classifier,
+          llm_caller: heavy_caller("escalated to heavy model"),
+        },
+      )
+    },
+  )
+  let low_events = scope_events(low.events)
+  __io_println(low.result.text)
+  __io_println(low_events[0].label)
+  __io_println(low_events[0].original_label)
+  let invalid = try {
+    agent_loop_options({pre_turn_scope_classifier: "yes"})
+  }
+  __io_println(is_err(invalid))
+  __io_println(contains(to_string(unwrap_err(invalid)), "pre_turn_scope_classifier"))
+  let invalid_threshold = try {
+    pre_turn_scope_classifier({enabled: true, confidence_threshold: -0.1})
+  }
+  __io_println(is_err(invalid_threshold))
+  __io_println(contains(to_string(unwrap_err(invalid_threshold)), "confidence_threshold"))
+}
