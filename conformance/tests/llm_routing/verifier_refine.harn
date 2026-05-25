@@ -1,0 +1,25 @@
+/**
+ * Verifier-signal refine: the first attempt has a forbidden pattern,
+ * the lint verifier asks the router to retry the same link with a
+ * tightened prompt. The second attempt is clean and gets returned.
+ * Both attempts must show up on the routing trace.
+ */
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({text: "use unwrap() here", model: "mock", provider: "mock"})
+  llm_mock({text: "use match instead", model: "mock", provider: "mock"})
+  let policy = routing_policy(
+    {
+      chain: [{provider: "mock", model: "mock", label: "cheap"}],
+      escalate_on: [{kind: "lint", forbidden_patterns: ["unwrap"], on_fail: "refine"}],
+      label: "verifier-refine",
+    },
+  )
+  let result = llm_call("question", nil, {routing: policy})
+  __io_println(result.text)
+  let attempts = result.routing.attempts
+  __io_println(len(attempts))
+  __io_println(attempts[0].verifier_outcome)
+  __io_println(attempts[1].verifier_outcome)
+  __io_println(result.routing.selected)
+}

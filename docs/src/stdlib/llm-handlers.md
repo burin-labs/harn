@@ -218,15 +218,31 @@ let policy = routing_policy({
   latency: {race_after_ms: 5000},
   budget:  {per_call_usd: 0.5, on_exceed: "abort"},
   observe: {emit_event: "billing.routing_decision"},
+  escalate_on: [                                       // optional verifier chain
+    {kind: "typecheck"},
+    {kind: "lint", forbidden_patterns: ["TODO"], on_fail: "refine"},
+  ],
 })
 
 let result = llm_call("Summarize this PR.", nil, {routing: policy})
 ```
 
+`escalate_on` makes frontier escalation **conditional on a
+code-quality signal** rather than static routing. Verifiers see the
+candidate's text after a successful link: `accept` keeps it,
+`refine` retries the same link with the verifier's reason appended to
+the prompt (capped by `max_refines_per_link`, default `1`),
+`escalate` advances to the next link. Three built-in kinds —
+`typecheck` (harn-parser), `lint` (regex `forbidden_patterns` /
+`required_patterns` / `max_line_length`), and `test_run` (spawns a
+configurable command with the candidate on stdin) — let scripts gate
+"only call Opus when Devstral's answer doesn't typecheck." See the
+quickref for the full per-kind option list.
+
 Compared to `compose([with_routing, with_retry, with_fallback])`, the
 primitive is replay-deterministic (every attempt rides on the result
 envelope's `routing` block), records its own tape events
-(`<dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}`),
+(`<dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,verifier_signal,exhausted}`),
 and pays for `latency.race_after_ms` racing out-of-the-box. Migrate
 existing chains by replacing the wrapper composition with one
 `routing_policy({...})` call; layer `compose([with_logging,

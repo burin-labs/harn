@@ -3544,10 +3544,16 @@ let policy = routing_policy({
     on_exceed: "abort",                               // or "skip" | "warn"
   },
   observe: {emit_event: "billing.routing_decision"},  // optional dispatch label
+  escalate_on: [                                      // optional verifier chain
+    {kind: "typecheck"},                              // parse the candidate as Harn
+    {kind: "lint", forbidden_patterns: ["TODO", "unwrap\\("], on_fail: "refine"},
+    {kind: "test_run", command: ["cargo", "test", "--quiet"], timeout_secs: 60},
+  ],
+  max_refines_per_link: 1,                            // optional, default 1
 })
 
 let result = llm_call("Summarize this PR.", nil, {routing: policy})
-// result.routing = {policy, attempts: [{provider, model, status, duration_ms, cost_usd, error?}], selected, session_cost_usd}
+// result.routing = {policy, attempts: [{provider, model, status, duration_ms, cost_usd, error?, verifier_outcome?, verifier_signals?}], selected, session_cost_usd}
 ```
 
 Semantics:
@@ -3569,11 +3575,34 @@ Semantics:
   pricing in `std/llm/economics`. `on_exceed: "abort"` throws the
   standard budget-exceeded error, `"skip"` advances to the next chain
   link, `"warn"` emits an event and proceeds.
+- **Verifier escalation** (`escalate_on`): each verifier inspects the
+  successful candidate's text. The first non-`accept` signal drives
+  the next decision — `refine` re-runs the **same** link with a
+  tightened prompt (up to `max_refines_per_link` retries; nudge text
+  includes the verifier's reason), `escalate` advances to the next
+  link. If the verifier rejects the last link and no frontier remains,
+  the rejected candidate is returned anyway with
+  `verifier_outcome: "escalate"` on the trace — verifiers gate routing
+  decisions, not correctness. Each `escalate_on` entry is a dict with
+  `kind: "typecheck" | "lint" | "test_run"` plus kind-specific
+  options:
+  - `typecheck`: parses the candidate as Harn (extracting ```harn /
+    ``` fenced blocks by default via `extract_fenced: true`); parse
+    or type errors trigger `on_fail` (default `escalate`).
+  - `lint`: regex-based pattern check with
+    `forbidden_patterns: [...]`, `required_patterns: [...]`, and
+    `max_line_length: N`; any rule violation triggers `on_fail`
+    (default `refine`).
+  - `test_run`: spawns `command: [...]` with the candidate text on
+    stdin (toggle with `pass_via_stdin: false`); non-zero exit
+    triggers `on_fail` (default `escalate`). `timeout_secs` defaults
+    to 30. **Authority lives in the script that builds the policy** —
+    `test_run` shells out under the calling process's permissions.
 - **Tape events**: `<dispatch>.decision`, `<dispatch>.attempt`,
   `<dispatch>.race_started`, `<dispatch>.race_won`,
   `<dispatch>.race_lost`, `<dispatch>.budget_exceeded`,
-  `<dispatch>.exhausted` (default `dispatch = llm.routing`; override via
-  `observe.emit_event`).
+  `<dispatch>.verifier_signal`, `<dispatch>.exhausted` (default
+  `dispatch = llm.routing`; override via `observe.emit_event`).
 - **Replay**: the routing decision rides on the result envelope's
   `routing_decision` block, so transcripts and replay re-attribute each
   attempt to the same chain link without re-resolving.
