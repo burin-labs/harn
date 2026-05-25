@@ -775,7 +775,7 @@ fn signed_timestamp(
     emitted_by: &str,
 ) -> SignedTimestamp {
     let at = crate::clock_mock::now_utc();
-    let at_ms = (at.unix_timestamp_nanos() / 1_000_000) as i64;
+    let at_ms = harn_clock::offset_datetime_to_ms(at);
     let at_text = at.format(&Rfc3339).unwrap_or_else(|_| at.to_string());
     let material = format!(
         "harn.channel.timestamp.v1\nat_ms={at_ms}\nid={event_id}\nname={}\nscope={}\nscope_id={}\nemitted_by={emitted_by}\n",
@@ -821,7 +821,7 @@ fn signed_match_timestamp(
     trigger_id: &str,
 ) -> SignedTimestamp {
     let at = crate::clock_mock::now_utc();
-    let at_ms = (at.unix_timestamp_nanos() / 1_000_000) as i64;
+    let at_ms = harn_clock::offset_datetime_to_ms(at);
     let at_text = at.format(&Rfc3339).unwrap_or_else(|_| at.to_string());
     let material = format!(
         "harn.channel.match_timestamp.v1\nat_ms={at_ms}\nevent_id={event_id}\ntrigger_id={trigger_id}\nname={}\nscope={}\nscope_id={}\n",
@@ -1898,7 +1898,7 @@ async fn fire_channel_match(
         match_span.set_metadata("batch", summary.clone());
     }
     let span_id = crate::tracing::current_span_id().unwrap_or(0);
-    let matched_at_ms = crate::clock_mock::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
+    let matched_at_ms = harn_clock::offset_datetime_to_ms(crate::clock_mock::now_utc());
     let matched_in_session_id = crate::agent_sessions::current_session_id()
         .or_else(|| event.tenant_id.as_ref().map(|t| t.0.clone()));
     emit_channel_match_transcript(

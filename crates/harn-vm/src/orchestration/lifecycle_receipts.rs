@@ -106,7 +106,7 @@ impl SignedLifecycleTimestamp {
     /// `at_ms` rewritten on disk fails verification.
     pub fn now_for(kind: &str, subject_id: &str, initiator_id: &str) -> Self {
         let at = crate::clock_mock::now_utc();
-        let at_ms = (at.unix_timestamp_nanos() / 1_000_000) as i64;
+        let at_ms = harn_clock::offset_datetime_to_ms(at);
         let at_text = at.format(&Rfc3339).unwrap_or_else(|_| at.to_string());
         let signature = sign_timestamp_material(kind, at_ms, subject_id, initiator_id);
         Self {

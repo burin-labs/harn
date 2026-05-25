@@ -225,7 +225,7 @@ pub(super) fn current_unix_ms() -> i64 {
 }
 
 pub(super) fn unix_ms(timestamp: time::OffsetDateTime) -> i64 {
-    (timestamp.unix_timestamp_nanos() / 1_000_000) as i64
+    harn_clock::offset_datetime_to_ms(timestamp)
 }
 
 pub(super) fn accepted_at_ms(
@@ -364,7 +364,7 @@ pub(super) fn next_budget_reset_rfc3339(binding: &TriggerBinding) -> String {
 }
 
 pub(super) fn now_unix_ms() -> i64 {
-    (crate::triggers::test_util::clock::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+    harn_clock::offset_datetime_to_ms(crate::triggers::test_util::clock::now_utc())
 }
 
 pub(super) fn cancelled_dispatch_outcome(

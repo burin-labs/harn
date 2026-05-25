@@ -44,11 +44,16 @@ pub trait Clock: Send + Sync + fmt::Debug {
     async fn sleep_until_utc(&self, deadline: OffsetDateTime);
 }
 
+/// Convert an `OffsetDateTime` to Unix epoch milliseconds. The division
+/// happens in `i128` so timestamps past April 2262 — where nanoseconds
+/// exceed `i64::MAX` — don't silently corrupt when cast.
+pub fn offset_datetime_to_ms(ts: OffsetDateTime) -> i64 {
+    (ts.unix_timestamp_nanos() / 1_000_000) as i64
+}
+
 /// Convenience: current wall-clock millis since UNIX_EPOCH.
 pub fn now_wall_ms(clock: &dyn Clock) -> i64 {
-    let ts = clock.now_utc();
-    let nanos = ts.unix_timestamp_nanos();
-    (nanos / 1_000_000) as i64
+    offset_datetime_to_ms(clock.now_utc())
 }
 
 // ── Real clock ─────────────────────────────────────────────────────────────────

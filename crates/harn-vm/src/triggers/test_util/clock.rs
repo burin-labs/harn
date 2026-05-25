@@ -93,7 +93,7 @@ impl MockClock {
 
     /// Wall clock in millis since `UNIX_EPOCH`.
     pub fn now_wall_ms(&self) -> i64 {
-        self.now_utc().unix_timestamp_nanos() as i64 / 1_000_000
+        harn_clock::offset_datetime_to_ms(self.now_utc())
     }
 
     /// Monotonic millis since this clock was created.
@@ -184,7 +184,7 @@ pub fn now_utc() -> OffsetDateTime {
 }
 
 pub fn now_ms() -> i64 {
-    now_utc().unix_timestamp_nanos() as i64 / 1_000_000
+    harn_clock::offset_datetime_to_ms(now_utc())
 }
 
 pub fn instant_now() -> ClockInstant {
