@@ -332,17 +332,13 @@ impl VmValue {
         }
     }
 
-    pub fn struct_instance_with_property(
-        &self,
-        field_name: String,
-        value: VmValue,
-    ) -> Option<Self> {
+    pub fn struct_instance_with_property(&self, field_name: &str, value: VmValue) -> Option<Self> {
         let VmValue::StructInstance { layout, fields } = self else {
             return None;
         };
 
         let mut new_fields = fields.as_ref().clone();
-        let layout = match layout.field_index(&field_name) {
+        let layout = match layout.field_index(field_name) {
             Some(index) => {
                 if index >= new_fields.len() {
                     new_fields.resize(index + 1, None);
@@ -351,7 +347,7 @@ impl VmValue {
                 Rc::clone(layout)
             }
             None => {
-                let new_layout = Rc::new(layout.with_appended_field(field_name));
+                let new_layout = Rc::new(layout.with_appended_field(field_name.to_string()));
                 new_fields.push(Some(value));
                 new_layout
             }

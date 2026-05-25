@@ -29,9 +29,7 @@ impl Compiler {
             BindingPattern::Dict(fields) => {
                 // Runtime `__assert_dict(value)` type check on the RHS.
                 self.chunk.emit(Op::Dup, self.line);
-                let assert_idx = self
-                    .chunk
-                    .add_constant(Constant::String("__assert_dict".into()));
+                let assert_idx = self.string_constant("__assert_dict");
                 self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
                 self.chunk.emit(Op::Swap, self.line);
                 self.chunk.emit_u8(Op::Call, 1, self.line);
@@ -42,7 +40,7 @@ impl Compiler {
 
                 for field in &non_rest {
                     self.chunk.emit(Op::Dup, self.line);
-                    let key_idx = self.chunk.add_constant(Constant::String(field.key.clone()));
+                    let key_idx = self.string_constant(&field.key);
                     self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                     self.chunk.emit(Op::Subscript, self.line);
                     if let Some(default_expr) = &field.default_value {
@@ -65,13 +63,11 @@ impl Compiler {
 
                 if let Some(rest) = rest_field {
                     // `__dict_rest(dict, [keys_to_exclude])`.
-                    let fn_idx = self
-                        .chunk
-                        .add_constant(Constant::String("__dict_rest".into()));
+                    let fn_idx = self.string_constant("__dict_rest");
                     self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
                     self.chunk.emit(Op::Swap, self.line);
                     for field in &non_rest {
-                        let key_idx = self.chunk.add_constant(Constant::String(field.key.clone()));
+                        let key_idx = self.string_constant(&field.key);
                         self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                     }
                     self.chunk
@@ -85,16 +81,12 @@ impl Compiler {
             }
             BindingPattern::Pair(first_name, second_name) => {
                 self.chunk.emit(Op::Dup, self.line);
-                let first_key_idx = self
-                    .chunk
-                    .add_constant(Constant::String("first".to_string()));
+                let first_key_idx = self.string_constant("first");
                 self.chunk
                     .emit_u16(Op::GetProperty, first_key_idx, self.line);
                 self.emit_binding_target(first_name, is_mutable);
 
-                let second_key_idx = self
-                    .chunk
-                    .add_constant(Constant::String("second".to_string()));
+                let second_key_idx = self.string_constant("second");
                 self.chunk
                     .emit_u16(Op::GetProperty, second_key_idx, self.line);
                 self.emit_binding_target(second_name, is_mutable);
@@ -103,9 +95,7 @@ impl Compiler {
             BindingPattern::List(elements) => {
                 // Runtime `__assert_list(value)` type check on the RHS.
                 self.chunk.emit(Op::Dup, self.line);
-                let assert_idx = self
-                    .chunk
-                    .add_constant(Constant::String("__assert_list".into()));
+                let assert_idx = self.string_constant("__assert_list");
                 self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
                 self.chunk.emit(Op::Swap, self.line);
                 self.chunk.emit_u8(Op::Call, 1, self.line);
@@ -192,8 +182,8 @@ impl Compiler {
                     args: pat_args,
                 } => {
                     self.chunk.emit(Op::Dup, self.line);
-                    let en_idx = self.chunk.add_constant(Constant::String(enum_name.clone()));
-                    let vn_idx = self.chunk.add_constant(Constant::String(variant.clone()));
+                    let en_idx = self.string_constant(enum_name);
+                    let vn_idx = self.string_constant(variant);
                     self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
                     let hi = (vn_idx >> 8) as u8;
                     let lo = vn_idx as u8;
@@ -212,9 +202,7 @@ impl Compiler {
                     for (i, pat_arg) in pat_args.iter().enumerate() {
                         if let Node::Identifier(binding_name) = &pat_arg.node {
                             self.chunk.emit(Op::Dup, self.line);
-                            let fields_idx = self
-                                .chunk
-                                .add_constant(Constant::String("fields".to_string()));
+                            let fields_idx = self.string_constant("fields");
                             self.chunk.emit_u16(Op::GetProperty, fields_idx, self.line);
                             let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
                             self.chunk.emit_u16(Op::Constant, idx_const, self.line);
@@ -248,13 +236,13 @@ impl Compiler {
                 Node::PropertyAccess { object, property } if matches!(&object.node, Node::Identifier(n) if self.enum_names.contains(n)) =>
                 {
                     let enum_name = if let Node::Identifier(n) = &object.node {
-                        n.clone()
+                        n.as_str()
                     } else {
                         unreachable!()
                     };
                     self.chunk.emit(Op::Dup, self.line);
-                    let en_idx = self.chunk.add_constant(Constant::String(enum_name));
-                    let vn_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                    let en_idx = self.string_constant(enum_name);
+                    let vn_idx = self.string_constant(property);
                     self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
                     let hi = (vn_idx >> 8) as u8;
                     let lo = vn_idx as u8;
@@ -296,13 +284,13 @@ impl Compiler {
                     args: pat_args,
                 } if matches!(&object.node, Node::Identifier(n) if self.enum_names.contains(n)) => {
                     let enum_name = if let Node::Identifier(n) = &object.node {
-                        n.clone()
+                        n.as_str()
                     } else {
                         unreachable!()
                     };
                     self.chunk.emit(Op::Dup, self.line);
-                    let en_idx = self.chunk.add_constant(Constant::String(enum_name));
-                    let vn_idx = self.chunk.add_constant(Constant::String(method.clone()));
+                    let en_idx = self.string_constant(enum_name);
+                    let vn_idx = self.string_constant(method);
                     self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
                     let hi = (vn_idx >> 8) as u8;
                     let lo = vn_idx as u8;
@@ -319,9 +307,7 @@ impl Compiler {
                     for (i, pat_arg) in pat_args.iter().enumerate() {
                         if let Node::Identifier(binding_name) = &pat_arg.node {
                             self.chunk.emit(Op::Dup, self.line);
-                            let fields_idx = self
-                                .chunk
-                                .add_constant(Constant::String("fields".to_string()));
+                            let fields_idx = self.string_constant("fields");
                             self.chunk.emit_u16(Op::GetProperty, fields_idx, self.line);
                             let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
                             self.chunk.emit_u16(Op::Constant, idx_const, self.line);
@@ -382,11 +368,11 @@ impl Compiler {
                         .all(|e| matches!(&e.key.node, Node::StringLiteral(_))) =>
                 {
                     self.chunk.emit(Op::Dup, self.line);
-                    let typeof_idx = self.chunk.add_constant(Constant::String("type_of".into()));
+                    let typeof_idx = self.string_constant("type_of");
                     self.chunk.emit_u16(Op::Constant, typeof_idx, self.line);
                     self.chunk.emit(Op::Swap, self.line);
                     self.chunk.emit_u8(Op::Call, 1, self.line);
-                    let dict_str = self.chunk.add_constant(Constant::String("dict".into()));
+                    let dict_str = self.string_constant("dict");
                     self.chunk.emit_u16(Op::Constant, dict_str, self.line);
                     self.chunk.emit(Op::Equal, self.line);
                     let skip_type = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
@@ -404,8 +390,7 @@ impl Compiler {
                                 | Node::BoolLiteral(_)
                                 | Node::NilLiteral => {
                                     self.chunk.emit(Op::Dup, self.line);
-                                    let key_idx =
-                                        self.chunk.add_constant(Constant::String(key.clone()));
+                                    let key_idx = self.string_constant(key);
                                     self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                                     self.chunk.emit(Op::Subscript, self.line);
                                     self.compile_node(&entry.value)?;
@@ -420,8 +405,7 @@ impl Compiler {
                                 _ => {
                                     // Complex expression constraint: dict[key] == expr.
                                     self.chunk.emit(Op::Dup, self.line);
-                                    let key_idx =
-                                        self.chunk.add_constant(Constant::String(key.clone()));
+                                    let key_idx = self.string_constant(key);
                                     self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                                     self.chunk.emit(Op::Subscript, self.line);
                                     self.compile_node(&entry.value)?;
@@ -436,7 +420,7 @@ impl Compiler {
 
                     for (key, binding) in &bindings {
                         self.chunk.emit(Op::Dup, self.line);
-                        let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+                        let key_idx = self.string_constant(key);
                         self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                         self.chunk.emit(Op::Subscript, self.line);
                         self.emit_binding_target(binding, false);
@@ -478,18 +462,18 @@ impl Compiler {
                 // List pattern: [literal, binding, ...]
                 Node::ListLiteral(elements) => {
                     self.chunk.emit(Op::Dup, self.line);
-                    let typeof_idx = self.chunk.add_constant(Constant::String("type_of".into()));
+                    let typeof_idx = self.string_constant("type_of");
                     self.chunk.emit_u16(Op::Constant, typeof_idx, self.line);
                     self.chunk.emit(Op::Swap, self.line);
                     self.chunk.emit_u8(Op::Call, 1, self.line);
-                    let list_str = self.chunk.add_constant(Constant::String("list".into()));
+                    let list_str = self.string_constant("list");
                     self.chunk.emit_u16(Op::Constant, list_str, self.line);
                     self.chunk.emit(Op::Equal, self.line);
                     let skip_type = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                     self.chunk.emit(Op::Pop, self.line);
 
                     self.chunk.emit(Op::Dup, self.line);
-                    let len_idx = self.chunk.add_constant(Constant::String("len".into()));
+                    let len_idx = self.string_constant("len");
                     self.chunk.emit_u16(Op::Constant, len_idx, self.line);
                     self.chunk.emit(Op::Swap, self.line);
                     self.chunk.emit_u8(Op::Call, 1, self.line);
@@ -655,9 +639,7 @@ impl Compiler {
                 }
             }
         }
-        let msg_idx = self.chunk.add_constant(Constant::String(
-            "No match arm matched the value".to_string(),
-        ));
+        let msg_idx = self.string_constant("No match arm matched the value");
         self.chunk.emit(Op::Pop, self.line);
         self.chunk.emit_u16(Op::Constant, msg_idx, self.line);
         self.chunk.emit(Op::Throw, self.line);

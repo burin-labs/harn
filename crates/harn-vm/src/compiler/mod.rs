@@ -142,6 +142,9 @@ pub struct Compiler {
     /// from the parser's diagnostic type checker so compile-only callers keep
     /// working without a required type-check pass.
     type_scopes: Vec<std::collections::HashMap<String, TypeExpr>>,
+    /// Current-chunk string constant index. This avoids repeatedly scanning the
+    /// constant pool while compiling name-heavy scripts.
+    string_constants: std::collections::HashMap<String, u16>,
     /// Lexical variable slots for the current compiled frame. The compiler
     /// only consults this for names declared inside the current function-like
     /// body; all unresolved names stay on the existing dynamic/name path.
@@ -179,7 +182,7 @@ impl Compiler {
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             Node::StringLiteral(s) | Node::RawStringLiteral(s) => {
-                let idx = self.chunk.add_constant(Constant::String(s.clone()));
+                let idx = self.string_constant(s);
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             Node::BoolLiteral(true) => self.chunk.emit(Op::True, self.line),
@@ -290,7 +293,7 @@ impl Compiler {
                 for arg in args {
                     self.compile_node(arg)?;
                 }
-                let name_idx = self.chunk.add_constant(Constant::String(method.clone()));
+                let name_idx = self.string_constant(method);
                 self.chunk
                     .emit_method_call_opt(name_idx, args.len() as u8, self.line);
             }
@@ -299,7 +302,7 @@ impl Compiler {
             }
             Node::OptionalPropertyAccess { object, property } => {
                 self.compile_node(object)?;
-                let idx = self.chunk.add_constant(Constant::String(property.clone()));
+                let idx = self.string_constant(property);
                 self.chunk.emit_u16(Op::GetPropertyOpt, idx, self.line);
             }
             Node::SubscriptAccess { object, index } => {
@@ -408,9 +411,7 @@ impl Compiler {
                 end,
                 inclusive,
             } => {
-                let name_idx = self
-                    .chunk
-                    .add_constant(Constant::String("__range__".to_string()));
+                let name_idx = self.string_constant("__range__");
                 self.chunk.emit_u16(Op::Constant, name_idx, self.line);
                 self.compile_node(start)?;
                 self.compile_node(end)?;
@@ -434,9 +435,7 @@ impl Compiler {
                 if let Some(message) = message {
                     self.compile_node(message)?;
                 } else {
-                    let idx = self
-                        .chunk
-                        .add_constant(Constant::String("require condition failed".to_string()));
+                    let idx = self.string_constant("require condition failed");
                     self.chunk.emit_u16(Op::Constant, idx, self.line);
                 }
                 self.chunk.emit(Op::Throw, self.line);
@@ -455,9 +454,7 @@ impl Compiler {
             Node::MutexBlock { body } => {
                 self.begin_scope();
                 let finally_floor = self.finally_bodies.len();
-                let key_idx = self
-                    .chunk
-                    .add_constant(Constant::String("__default__".to_string()));
+                let key_idx = self.string_constant("__default__");
                 self.chunk.emit_u16(Op::SyncMutexEnter, key_idx, self.line);
                 for sn in body {
                     self.compile_node(sn)?;
@@ -501,13 +498,13 @@ impl Compiler {
                 self.compile_struct_construct(struct_name, fields)?;
             }
             Node::ImportDecl { path, .. } => {
-                let idx = self.chunk.add_constant(Constant::String(path.clone()));
+                let idx = self.string_constant(path);
                 self.chunk.emit_u16(Op::Import, idx, self.line);
             }
             Node::SelectiveImport { names, path, .. } => {
-                let path_idx = self.chunk.add_constant(Constant::String(path.clone()));
+                let path_idx = self.string_constant(path);
                 let names_str = names.join(",");
-                let names_idx = self.chunk.add_constant(Constant::String(names_str));
+                let names_idx = self.owned_string_constant(names_str);
                 self.chunk
                     .emit_u16(Op::SelectiveImport, path_idx, self.line);
                 let hi = (names_idx >> 8) as u8;

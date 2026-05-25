@@ -9,11 +9,13 @@ build_release=1
 harn_bin="${HARN_BIN:-}"
 mode="loop"
 startup_runs="${HARN_BENCH_STARTUP_RUNS:-5}"
+profile_json_dir="${HARN_BENCH_PROFILE_JSON_DIR:-}"
 
 usage() {
   cat <<'EOF'
 Usage: scripts/bench_vm.sh [--iterations N] [--baseline FILE] [--no-build]
                            [--cold-start | --warm-start] [--startup-runs N]
+                           [--profile-json-dir DIR]
 
 Runs the deterministic VM microbenchmark fixture set with the release harn
 binary and prints one row per benchmark.
@@ -33,6 +35,9 @@ Options:
   -n, --iterations N    `harn bench` iterations per fixture (default: 20)
   --startup-runs N      cold/warm-start measurement runs per fixture
                         (default: 5)
+  --profile-json-dir DIR
+                        In loop mode, also write `harn bench --profile-json`
+                        rollups to DIR/<fixture>.json
   --baseline FILE       Markdown baseline table to compare average wall time
   --no-build            Skip cargo build --release --bin harn
   -h, --help            Show this help
@@ -42,6 +47,8 @@ Environment:
   HARN_BENCH_ITERATIONS     Default iteration count for loop mode
   HARN_BENCH_STARTUP_RUNS   Default per-fixture runs for cold/warm modes
   HARN_BENCH_FIXTURES_DIR   Override fixture directory
+  HARN_BENCH_PROFILE_JSON_DIR
+                            Default --profile-json-dir
   CARGO_TARGET_DIR          Cargo target directory for release builds
 EOF
 }
@@ -84,6 +91,14 @@ while [[ $# -gt 0 ]]; do
       startup_runs="${2:-}"
       shift 2
       ;;
+    --profile-json-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "error: --profile-json-dir requires a value" >&2
+        exit 2
+      fi
+      profile_json_dir="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -114,6 +129,10 @@ fi
 if [[ ! -d "$fixtures_dir" ]]; then
   echo "error: fixture directory not found: $fixtures_dir" >&2
   exit 2
+fi
+
+if [[ -n "$profile_json_dir" ]]; then
+  mkdir -p "$profile_json_dir"
 fi
 
 if [[ "$build_release" -eq 1 ]]; then
@@ -227,7 +246,11 @@ if [[ "$mode" == "loop" ]]; then
   status=0
   for fixture in "${fixtures[@]}"; do
     benchmark="$(basename "$fixture" .harn)"
-    output="$("$harn_bin" bench "$fixture" --iterations "$iterations")" || status=$?
+    bench_args=(bench "$fixture" --iterations "$iterations")
+    if [[ -n "$profile_json_dir" ]]; then
+      bench_args+=(--profile-json "$profile_json_dir/$benchmark.json")
+    fi
+    output="$("$harn_bin" "${bench_args[@]}")" || status=$?
     if [[ "$status" -ne 0 ]]; then
       printf "%s\n" "$output" >&2
       exit "$status"

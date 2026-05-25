@@ -28,6 +28,13 @@ To compare against the checked-in local baseline:
 full suite passes. The comparison column uses the baseline table's
 `mean_avg_ms` value.
 
+For runs where the VM loop timing needs the CLI's span rollup too, ask the
+runner to persist `harn bench --profile-json` output beside the table:
+
+```bash
+./scripts/bench_vm.sh --iterations 20 --profile-json-dir /tmp/harn-vm-profiles
+```
+
 The Criterion VM clone-on-call probe is separate from the fixture runner:
 
 ```bash
@@ -101,6 +108,8 @@ The microbench suite covers focused VM hot paths:
 - method inline-cache hits for list/string/dict/set helpers
 - list callback dispatch through `.filter` and `.map`
 - std/collections dict helper builtins
+- many-part string interpolation and builtin-reference lookup
+- compiler string-constant reuse on name-heavy generated scripts
 - bytecode-cache freeze/serialize and adjacent-artifact load paths
 
 Each Criterion benchmark emits one JSON object per allocation probe on stderr:

@@ -1041,26 +1041,32 @@ impl super::super::Vm {
     /// Async path for `Op::CallBuiltin`. Arguments stay on the VM stack
     /// until the selected callee shape requires owned arguments.
     pub(super) async fn execute_call_builtin_async(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
-        frame.ip += 8;
-        let name_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let argc = frame.chunk.code[frame.ip] as usize;
-        frame.ip += 1;
-        let name = Self::const_string(&frame.chunk.constants[name_idx])?;
+        let (chunk, id, name_idx, argc) = {
+            let frame = self.frames.last_mut().unwrap();
+            let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
+            frame.ip += 8;
+            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let argc = frame.chunk.code[frame.ip] as usize;
+            frame.ip += 1;
+            (Rc::clone(&frame.chunk), id, name_idx, argc)
+        };
+        let name = Self::const_str(&chunk.constants[name_idx])?;
         let args_start = self.stack_arg_start(argc)?;
-        self.call_named_value_from_stack_args(&name, args_start, args_start, Some(id))
+        self.call_named_value_from_stack_args(name, args_start, args_start, Some(id))
             .await
     }
 
     pub(super) async fn execute_call_builtin_spread(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
-        frame.ip += 8;
-        let name_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let name = Self::const_string(&frame.chunk.constants[name_idx])?;
+        let (chunk, id, name_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
+            frame.ip += 8;
+            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), id, name_idx)
+        };
+        let name = Self::const_str(&chunk.constants[name_idx])?;
         let args_val = self.pop()?;
         let args = match args_val {
             VmValue::List(items) => (*items).clone(),
@@ -1070,7 +1076,7 @@ impl super::super::Vm {
                 ))
             }
         };
-        self.call_named_value(&name, args, Some(id)).await
+        self.call_named_value(name, args, Some(id)).await
     }
 
     /// Tail-call optimization body: validate arguments directly on the VM
@@ -1339,20 +1345,21 @@ impl super::super::Vm {
             self.stack.truncate(obj_idx);
             self.stack.push(result);
         } else {
-            let method = {
+            let chunk = {
                 let frame = self.frames.last().unwrap();
-                Self::const_string(&frame.chunk.constants[name_idx as usize])?
+                Rc::clone(&frame.chunk)
             };
-            let cache_target = Self::method_cache_target(&obj, &method, argc);
+            let method = Self::const_str(&chunk.constants[name_idx as usize])?;
+            let cache_target = Self::method_cache_target(&obj, method, argc);
             let result = if let Some(result) =
-                Self::call_method_sync(&obj, &method, &self.stack[args_start..])
+                Self::call_method_sync(&obj, method, &self.stack[args_start..])
             {
                 self.stack.truncate(obj_idx);
                 result?
             } else {
                 let args = self.take_stack_args_from(args_start)?;
                 self.stack.truncate(obj_idx);
-                self.call_method_async(obj, &method, &args).await?
+                self.call_method_async(obj, method, &args).await?
             };
             if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
                 let frame = self.frames.last().unwrap();
@@ -1492,15 +1499,16 @@ impl super::super::Vm {
         {
             self.stack.push(result);
         } else {
-            let method = {
+            let chunk = {
                 let frame = self.frames.last().unwrap();
-                Self::const_string(&frame.chunk.constants[name_idx as usize])?
+                Rc::clone(&frame.chunk)
             };
-            let cache_target = Self::method_cache_target(&obj, &method, args.len());
-            let result = if let Some(result) = Self::call_method_sync(&obj, &method, &args) {
+            let method = Self::const_str(&chunk.constants[name_idx as usize])?;
+            let cache_target = Self::method_cache_target(&obj, method, args.len());
+            let result = if let Some(result) = Self::call_method_sync(&obj, method, &args) {
                 result?
             } else {
-                self.call_method_async(obj, &method, &args).await?
+                self.call_method_async(obj, method, &args).await?
             };
             if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
                 let frame = self.frames.last().unwrap();

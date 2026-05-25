@@ -5,6 +5,18 @@ use crate::chunk::{InlineCacheEntry, PropertyCacheTarget};
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
+    fn concat_display_values(parts: &[VmValue]) -> String {
+        let all_strings_len = parts.iter().try_fold(0usize, |len, part| match part {
+            VmValue::String(text) => Some(len + text.len()),
+            _ => None,
+        });
+        let mut result = String::with_capacity(all_strings_len.unwrap_or(0));
+        for part in parts {
+            part.write_display(&mut result);
+        }
+        result
+    }
+
     fn char_to_value(ch: char) -> VmValue {
         let mut buffer = [0; 4];
         VmValue::String(Rc::from(ch.encode_utf8(&mut buffer)))
@@ -446,28 +458,31 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_set_property(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let prop_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let var_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let prop_name = Self::const_string(&frame.chunk.constants[prop_idx])?;
-        let var_name = Self::const_string(&frame.chunk.constants[var_idx])?;
+        let (chunk, prop_idx, var_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let prop_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let var_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), prop_idx, var_idx)
+        };
+        let prop_name = Self::const_str(&chunk.constants[prop_idx])?;
+        let var_name = Self::const_str(&chunk.constants[var_idx])?;
         let new_value = self.pop()?;
         if let Some(obj) = self
-            .active_local_slot_value(&var_name)
-            .or_else(|| self.env.get(&var_name))
+            .active_local_slot_value(var_name)
+            .or_else(|| self.env.get(var_name))
         {
             let assign_value = |vm: &mut Self, value: VmValue| -> Result<(), VmError> {
-                if !vm.assign_active_local_slot(&var_name, value.clone(), false)? {
-                    vm.env.assign(&var_name, value)?;
+                if !vm.assign_active_local_slot(var_name, value.clone(), false)? {
+                    vm.env.assign(var_name, value)?;
                 }
                 Ok(())
             };
             match obj {
                 VmValue::Dict(map) => {
                     let mut new_map = (*map).clone();
-                    new_map.insert(prop_name, new_value);
+                    new_map.insert(prop_name.to_string(), new_value);
                     assign_value(self, VmValue::Dict(Rc::new(new_map)))?;
                 }
                 VmValue::StructInstance { .. } => {
@@ -488,10 +503,13 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_set_subscript(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let var_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let var_name = Self::const_string(&frame.chunk.constants[var_idx])?;
+        let (chunk, var_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let var_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), var_idx)
+        };
+        let var_name = Self::const_str(&chunk.constants[var_idx])?;
         let index = self.pop()?;
         let new_value = self.pop()?;
 
@@ -500,10 +518,10 @@ impl super::super::Vm {
         // defensive `VmValue::clone` + collection clone the env-fallback
         // path has to pay, which is the per-iteration cost behind builder
         // loops like `out[k] = v` and `aliases[id] = …`.
-        if let Some(slot_idx) = self.active_local_slot_index(&var_name) {
+        if let Some(slot_idx) = self.active_local_slot_index(var_name) {
             let frame = self.frames.last_mut().unwrap();
             if !frame.chunk.local_slots[slot_idx].mutable {
-                return Err(VmError::ImmutableAssignment(var_name));
+                return Err(VmError::ImmutableAssignment(var_name.to_string()));
             }
             let slot = &mut frame.local_slots[slot_idx];
             match &mut slot.value {
@@ -539,7 +557,7 @@ impl super::super::Vm {
         // declared in an outer scope). The env path still has to rebind
         // because `env.get` returns by value, but `Rc::try_unwrap` keeps
         // the no-other-references case allocation-free.
-        if let Some(obj) = self.env.get(&var_name) {
+        if let Some(obj) = self.env.get(var_name) {
             match obj {
                 VmValue::List(items) => {
                     if let Some(i) = index.as_int() {
@@ -559,15 +577,14 @@ impl super::super::Vm {
                         }
                         new_items[idx] = new_value;
                         self.env
-                            .assign(&var_name, VmValue::List(Rc::new(new_items)))?;
+                            .assign(var_name, VmValue::List(Rc::new(new_items)))?;
                     }
                 }
                 VmValue::Dict(map) => {
                     let key = index.display();
                     let mut new_map = Rc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
                     new_map.insert(key, new_value);
-                    self.env
-                        .assign(&var_name, VmValue::Dict(Rc::new(new_map)))?;
+                    self.env.assign(var_name, VmValue::Dict(Rc::new(new_map)))?;
                 }
                 _ => {}
             }
@@ -579,21 +596,29 @@ impl super::super::Vm {
         let frame = self.frames.last_mut().unwrap();
         let count = frame.chunk.read_u16(frame.ip) as usize;
         frame.ip += 2;
-        let parts = self.stack.split_off(self.stack.len().saturating_sub(count));
-        let result: String = parts.iter().map(|p| p.display()).collect();
+        let start = self.stack.len().saturating_sub(count);
+        let result = Self::concat_display_values(&self.stack[start..]);
+        self.stack.truncate(start);
         self.stack.push(VmValue::String(Rc::from(result)));
     }
 
     pub(super) fn execute_build_enum(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let field_count = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let enum_name = Self::const_string(&frame.chunk.constants[enum_idx])?;
-        let variant = Self::const_string(&frame.chunk.constants[variant_idx])?;
+        let (chunk, enum_idx, variant_idx, field_count) = {
+            let frame = self.frames.last_mut().unwrap();
+            let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let field_count = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), enum_idx, variant_idx, field_count)
+        };
+        let enum_name = chunk
+            .constant_string_rc(enum_idx)
+            .ok_or_else(|| VmError::TypeError("expected string constant".into()))?;
+        let variant = chunk
+            .constant_string_rc(variant_idx)
+            .ok_or_else(|| VmError::TypeError("expected string constant".into()))?;
         let fields = self
             .stack
             .split_off(self.stack.len().saturating_sub(field_count));
@@ -603,18 +628,19 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_match_enum(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let enum_name = Self::const_string(&frame.chunk.constants[enum_idx])?;
-        let variant_name = Self::const_string(&frame.chunk.constants[variant_idx])?;
+        let (chunk, enum_idx, variant_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), enum_idx, variant_idx)
+        };
+        let enum_name = Self::const_str(&chunk.constants[enum_idx])?;
+        let variant_name = Self::const_str(&chunk.constants[variant_idx])?;
         let val = self.pop()?;
         let matches = match &val {
-            VmValue::EnumVariant(enum_variant) => {
-                enum_variant.is_variant(&enum_name, &variant_name)
-            }
+            VmValue::EnumVariant(enum_variant) => enum_variant.is_variant(enum_name, variant_name),
             _ => false,
         };
         self.stack.push(val);

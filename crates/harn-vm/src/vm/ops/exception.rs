@@ -1,4 +1,3 @@
-use crate::chunk::Constant;
 use crate::value::{VmError, VmValue};
 
 use super::super::ExceptionHandler;
@@ -15,10 +14,10 @@ impl super::super::Vm {
         frame.ip += 2;
         let type_idx = frame.chunk.read_u16(frame.ip) as usize;
         frame.ip += 2;
-        let error_type = match &frame.chunk.constants[type_idx] {
-            Constant::String(s) => s.clone(),
-            _ => String::new(),
-        };
+        let error_type = frame
+            .chunk
+            .constant_string_rc(type_idx)
+            .filter(|name| !name.is_empty());
         self.exception_handlers.push(ExceptionHandler {
             catch_ip: catch_offset,
             stack_depth: self.stack.len(),

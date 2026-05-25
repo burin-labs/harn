@@ -17,12 +17,8 @@ impl Compiler {
         for arg in args {
             self.compile_node(arg)?;
         }
-        let enum_idx = self
-            .chunk
-            .add_constant(Constant::String(enum_name.to_string()));
-        let var_idx = self
-            .chunk
-            .add_constant(Constant::String(variant.to_string()));
+        let enum_idx = self.string_constant(enum_name);
+        let var_idx = self.string_constant(variant);
         // BuildEnum operands: enum_name_idx, variant_idx, field_count.
         self.chunk.emit_u16(Op::BuildEnum, enum_idx, self.line);
         let hi = (var_idx >> 8) as u8;
@@ -51,12 +47,8 @@ impl Compiler {
         fields: &[DictEntry],
     ) -> Result<(), CompileError> {
         // Route through `__make_struct` so impl dispatch sees a StructInstance.
-        let make_idx = self
-            .chunk
-            .add_constant(Constant::String("__make_struct".to_string()));
-        let struct_name_idx = self
-            .chunk
-            .add_constant(Constant::String(struct_name.to_string()));
+        let make_idx = self.string_constant("__make_struct");
+        let struct_name_idx = self.string_constant(struct_name);
         self.chunk.emit_u16(Op::Constant, make_idx, self.line);
         self.chunk
             .emit_u16(Op::Constant, struct_name_idx, self.line);
@@ -92,7 +84,7 @@ impl Compiler {
                 ..
             } = &method_sn.node
             {
-                let key_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                let key_idx = self.string_constant(name);
                 self.chunk.emit_u16(Op::Constant, key_idx, self.line);
 
                 let mut fn_compiler = self.nested_body();
@@ -154,15 +146,11 @@ impl Compiler {
         fn_compiler.declare_param_slots(&params);
         fn_compiler.emit_default_preamble(&params)?;
 
-        let make_idx = fn_compiler
-            .chunk
-            .add_constant(Constant::String("__make_struct".into()));
+        let make_idx = fn_compiler.string_constant("__make_struct");
         fn_compiler
             .chunk
             .emit_u16(Op::Constant, make_idx, self.line);
-        let sname_idx = fn_compiler
-            .chunk
-            .add_constant(Constant::String(name.to_string()));
+        let sname_idx = fn_compiler.string_constant(name);
         fn_compiler
             .chunk
             .emit_u16(Op::Constant, sname_idx, self.line);
@@ -196,7 +184,7 @@ impl Compiler {
 
     pub(super) fn emit_string_list(&mut self, values: &[String]) {
         for value in values {
-            let idx = self.chunk.add_constant(Constant::String(value.clone()));
+            let idx = self.string_constant(value);
             self.chunk.emit_u16(Op::Constant, idx, self.line);
         }
         self.chunk
@@ -260,24 +248,22 @@ impl Compiler {
         attr: &harn_parser::Attribute,
         fn_name: &str,
     ) -> Result<(), CompileError> {
-        let define_idx = self
-            .chunk
-            .add_constant(Constant::String("__register_persona".into()));
+        let define_idx = self.string_constant("__register_persona");
         self.chunk.emit_u16(Op::Constant, define_idx, self.line);
 
-        let fn_const = self.chunk.add_constant(Constant::String(fn_name.into()));
+        let fn_const = self.string_constant(fn_name);
         self.chunk.emit_u16(Op::Constant, fn_const, self.line);
 
         let mut entries: u16 = 0;
         if let Some(name) = attr.named_arg("name") {
-            let key_idx = self.chunk.add_constant(Constant::String("name".into()));
+            let key_idx = self.string_constant("name");
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             self.compile_attribute_value(name)?;
             entries += 1;
         }
         if let Some(stages) = attr.named_arg("stages") {
             if matches!(stages.node, Node::ListLiteral(_)) {
-                let key_idx = self.chunk.add_constant(Constant::String("stages".into()));
+                let key_idx = self.string_constant("stages");
                 self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                 self.compile_attribute_value(stages)?;
                 entries += 1;
@@ -302,13 +288,11 @@ impl Compiler {
         fn_name: &str,
     ) -> Result<(), CompileError> {
         // Push the builtin name.
-        let define_idx = self
-            .chunk
-            .add_constant(Constant::String("__register_step".into()));
+        let define_idx = self.string_constant("__register_step");
         self.chunk.emit_u16(Op::Constant, define_idx, self.line);
 
         // Arg 0: function name (the registry key).
-        let fn_const = self.chunk.add_constant(Constant::String(fn_name.into()));
+        let fn_const = self.string_constant(fn_name);
         self.chunk.emit_u16(Op::Constant, fn_const, self.line);
 
         // Arg 1: metadata dict — emit only the fields the step
@@ -322,7 +306,7 @@ impl Compiler {
             if !META_KEYS.contains(&key.as_str()) {
                 continue;
             }
-            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            let key_idx = self.string_constant(key);
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             self.compile_attribute_value(&arg.value)?;
             entries += 1;
@@ -333,7 +317,7 @@ impl Compiler {
         // the dict literal through verbatim.
         if let Some(budget) = attr.named_arg("budget") {
             if matches!(budget.node, Node::DictLiteral(_)) {
-                let key_idx = self.chunk.add_constant(Constant::String("budget".into()));
+                let key_idx = self.string_constant("budget");
                 self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                 self.compile_attribute_value(budget)?;
                 entries += 1;
@@ -365,28 +349,24 @@ impl Compiler {
             .unwrap_or_else(|| fn_name.to_string());
 
         // Push tool_define
-        let define_idx = self
-            .chunk
-            .add_constant(Constant::String("tool_define".into()));
+        let define_idx = self.string_constant("tool_define");
         self.chunk.emit_u16(Op::Constant, define_idx, self.line);
 
         // Push tool_registry()
-        let reg_idx = self
-            .chunk
-            .add_constant(Constant::String("tool_registry".into()));
+        let reg_idx = self.string_constant("tool_registry");
         self.chunk.emit_u16(Op::Constant, reg_idx, self.line);
         self.chunk.emit_u8(Op::Call, 0, self.line);
 
         // Push tool name
-        let name_const = self.chunk.add_constant(Constant::String(tool_name));
+        let name_const = self.owned_string_constant(tool_name);
         self.chunk.emit_u16(Op::Constant, name_const, self.line);
 
         // Push empty description
-        let desc_const = self.chunk.add_constant(Constant::String(String::new()));
+        let desc_const = self.string_constant("");
         self.chunk.emit_u16(Op::Constant, desc_const, self.line);
 
         // Build config dict: { handler: <fn>, annotations: {...} }
-        let handler_key = self.chunk.add_constant(Constant::String("handler".into()));
+        let handler_key = self.string_constant("handler");
         self.chunk.emit_u16(Op::Constant, handler_key, self.line);
         self.emit_get_binding(fn_name);
 
@@ -399,14 +379,12 @@ impl Compiler {
             if key == "name" {
                 continue;
             }
-            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            let key_idx = self.string_constant(key);
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             self.compile_attribute_value(&arg.value)?;
             ann_count += 1;
         }
-        let ann_key_idx = self
-            .chunk
-            .add_constant(Constant::String("annotations".into()));
+        let ann_key_idx = self.string_constant("annotations");
         self.chunk.emit_u16(Op::Constant, ann_key_idx, self.line);
         self.chunk.emit_u16(Op::BuildDict, ann_count, self.line);
 
@@ -441,20 +419,16 @@ impl Compiler {
             .unwrap_or_else(|| fn_name.to_string());
 
         // Push skill_define
-        let define_idx = self
-            .chunk
-            .add_constant(Constant::String("skill_define".into()));
+        let define_idx = self.string_constant("skill_define");
         self.chunk.emit_u16(Op::Constant, define_idx, self.line);
 
         // Push skill_registry()
-        let reg_idx = self
-            .chunk
-            .add_constant(Constant::String("skill_registry".into()));
+        let reg_idx = self.string_constant("skill_registry");
         self.chunk.emit_u16(Op::Constant, reg_idx, self.line);
         self.chunk.emit_u8(Op::Call, 0, self.line);
 
         // Push skill name
-        let name_const = self.chunk.add_constant(Constant::String(skill_name));
+        let name_const = self.owned_string_constant(skill_name);
         self.chunk.emit_u16(Op::Constant, name_const, self.line);
 
         // Build config dict: every named attr arg (except `name`) + on_activate.
@@ -466,16 +440,14 @@ impl Compiler {
             if key == "name" {
                 continue;
             }
-            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            let key_idx = self.string_constant(key);
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             self.compile_attribute_value(&arg.value)?;
             entries += 1;
         }
 
         // on_activate: <fn_name>
-        let activate_key = self
-            .chunk
-            .add_constant(Constant::String("on_activate".into()));
+        let activate_key = self.string_constant("on_activate");
         self.chunk.emit_u16(Op::Constant, activate_key, self.line);
         self.emit_get_binding(fn_name);
         entries += 1;
@@ -492,7 +464,7 @@ impl Compiler {
     pub(super) fn compile_attribute_value(&mut self, node: &SNode) -> Result<(), CompileError> {
         match &node.node {
             Node::StringLiteral(s) | Node::RawStringLiteral(s) => {
-                let idx = self.chunk.add_constant(Constant::String(s.clone()));
+                let idx = self.string_constant(s);
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             Node::IntLiteral(i) => {
@@ -515,7 +487,7 @@ impl Compiler {
                 // should behave the same as `kind: "edit"`). This mirrors
                 // common attribute-DSL ergonomics. The parser also folds
                 // dotted sentinels like `github.pr_opened` into this node.
-                let idx = self.chunk.add_constant(Constant::String(name.clone()));
+                let idx = self.string_constant(name);
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             Node::ListLiteral(items) => {
@@ -539,9 +511,7 @@ impl Compiler {
                     .map(attribute_value_repr)
                     .collect::<Result<Vec<_>, _>>()?
                     .join(", ");
-                let idx = self
-                    .chunk
-                    .add_constant(Constant::String(format!("{name}({rendered_args})")));
+                let idx = self.owned_string_constant(format!("{name}({rendered_args})"));
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             _ => {

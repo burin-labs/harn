@@ -1,6 +1,6 @@
 use harn_parser::{Node, SNode};
 
-use crate::chunk::{Constant, Op};
+use crate::chunk::Op;
 
 use super::error::CompileError;
 use super::pipe::contains_pipe_placeholder;
@@ -43,8 +43,8 @@ impl Compiler {
             }
         } else if let Node::PropertyAccess { object, property } = &target.node {
             if let Some(var_name) = self.root_var_name(object) {
-                let var_idx = self.chunk.add_constant(Constant::String(var_name.clone()));
-                let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                let var_idx = self.string_constant(&var_name);
+                let prop_idx = self.string_constant(property);
                 if let Some(op) = op {
                     self.compile_node(target)?;
                     self.compile_node(value)?;
@@ -66,7 +66,7 @@ impl Compiler {
             }
         } else if let Node::SubscriptAccess { object, index } = &target.node {
             if let Some(var_name) = self.root_var_name(object) {
-                let var_idx = self.chunk.add_constant(Constant::String(var_name.clone()));
+                let var_idx = self.string_constant(&var_name);
                 if let Some(op) = op {
                     self.compile_node(target)?;
                     self.compile_node(value)?;
@@ -216,7 +216,7 @@ impl Compiler {
             // No pending finally — use tail-call optimization when possible.
             if let Some(val) = value {
                 if let Node::FunctionCall { name, args, .. } = &val.node {
-                    let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                    let name_idx = self.string_constant(name);
                     self.chunk.emit_u16(Op::Constant, name_idx, self.line);
                     for arg in args {
                         self.compile_node(arg)?;
@@ -248,22 +248,18 @@ impl Compiler {
         options: &[(String, SNode)],
         body: &[SNode],
     ) -> Result<(), CompileError> {
-        let route_idx = self
-            .chunk
-            .add_constant(Constant::String("__cost_route".to_string()));
+        let route_idx = self.string_constant("__cost_route");
         self.chunk.emit_u16(Op::Constant, route_idx, self.line);
 
         for (key, value) in options {
-            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            let key_idx = self.string_constant(key);
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             if matches!(
                 key.as_str(),
                 "fallback_strategy" | "strategy" | "quality" | "min_quality"
             ) {
                 if let Node::Identifier(identifier) = &value.node {
-                    let value_idx = self
-                        .chunk
-                        .add_constant(Constant::String(identifier.clone()));
+                    let value_idx = self.string_constant(identifier);
                     self.chunk.emit_u16(Op::Constant, value_idx, self.line);
                     continue;
                 }

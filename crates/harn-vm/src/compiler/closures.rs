@@ -104,22 +104,18 @@ impl Compiler {
         let fn_idx = self.chunk.functions.len();
         self.chunk.functions.push(Rc::new(func));
 
-        let define_name = self
-            .chunk
-            .add_constant(Constant::String("tool_define".into()));
+        let define_name = self.string_constant("tool_define");
         self.chunk.emit_u16(Op::Constant, define_name, self.line);
 
-        let reg_name = self
-            .chunk
-            .add_constant(Constant::String("tool_registry".into()));
+        let reg_name = self.string_constant("tool_registry");
         self.chunk.emit_u16(Op::Constant, reg_name, self.line);
         self.chunk.emit_u8(Op::Call, 0, self.line);
 
-        let tool_name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+        let tool_name_idx = self.string_constant(name);
         self.chunk.emit_u16(Op::Constant, tool_name_idx, self.line);
 
         let desc = description.as_deref().unwrap_or("");
-        let desc_idx = self.chunk.add_constant(Constant::String(desc.to_string()));
+        let desc_idx = self.string_constant(desc);
         self.chunk.emit_u16(Op::Constant, desc_idx, self.line);
 
         // Build parameters dict using the same schema lowering as
@@ -127,7 +123,7 @@ impl Compiler {
         // unions, item schemas, defaults, and dict value schemas.
         let mut param_count: u16 = 0;
         for p in params {
-            let pn_idx = self.chunk.add_constant(Constant::String(p.name.clone()));
+            let pn_idx = self.string_constant(&p.name);
             self.chunk.emit_u16(Op::Constant, pn_idx, self.line);
 
             let base_schema = p
@@ -162,7 +158,7 @@ impl Compiler {
             self.emit_vm_value_literal(&VmValue::Dict(Rc::new(param_schema)));
 
             if let Some(default_value) = p.default_value.as_ref() {
-                let default_key = self.chunk.add_constant(Constant::String("default".into()));
+                let default_key = self.string_constant("default");
                 self.chunk.emit_u16(Op::Constant, default_key, self.line);
                 self.compile_node(default_value)?;
                 self.chunk.emit_u16(Op::BuildDict, 1, self.line);
@@ -173,13 +169,11 @@ impl Compiler {
         }
         self.chunk.emit_u16(Op::BuildDict, param_count, self.line);
 
-        let params_key = self
-            .chunk
-            .add_constant(Constant::String("parameters".into()));
+        let params_key = self.string_constant("parameters");
         self.chunk.emit_u16(Op::Constant, params_key, self.line);
         self.chunk.emit(Op::Swap, self.line);
 
-        let handler_key = self.chunk.add_constant(Constant::String("handler".into()));
+        let handler_key = self.string_constant("handler");
         self.chunk.emit_u16(Op::Constant, handler_key, self.line);
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
 
@@ -198,7 +192,7 @@ impl Compiler {
                         line: self.line,
                     }
                 })?;
-            let returns_key = self.chunk.add_constant(Constant::String("returns".into()));
+            let returns_key = self.string_constant("returns");
             self.chunk.emit_u16(Op::Constant, returns_key, self.line);
             self.emit_vm_value_literal(&return_type);
             config_entries += 1;
@@ -225,26 +219,22 @@ impl Compiler {
         fields: &[(String, SNode)],
     ) -> Result<(), CompileError> {
         // Push skill_define
-        let define_idx = self
-            .chunk
-            .add_constant(Constant::String("skill_define".into()));
+        let define_idx = self.string_constant("skill_define");
         self.chunk.emit_u16(Op::Constant, define_idx, self.line);
 
         // Push skill_registry()
-        let reg_idx = self
-            .chunk
-            .add_constant(Constant::String("skill_registry".into()));
+        let reg_idx = self.string_constant("skill_registry");
         self.chunk.emit_u16(Op::Constant, reg_idx, self.line);
         self.chunk.emit_u8(Op::Call, 0, self.line);
 
         // Push skill name
-        let name_const = self.chunk.add_constant(Constant::String(name.to_string()));
+        let name_const = self.string_constant(name);
         self.chunk.emit_u16(Op::Constant, name_const, self.line);
 
         // Build config dict from fields.
         let mut field_count: u16 = 0;
         for (key, value) in fields {
-            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            let key_idx = self.string_constant(key);
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             self.compile_node(value)?;
             field_count += 1;
@@ -283,9 +273,7 @@ impl Compiler {
             }
             for field_name in visible_fields {
                 self.emit_get_binding(binding_name);
-                let field_idx = self
-                    .chunk
-                    .add_constant(Constant::String(field_name.clone()));
+                let field_idx = self.string_constant(&field_name);
                 self.chunk.emit_u16(Op::GetProperty, field_idx, self.line);
                 self.emit_define_binding(&field_name, false);
             }
@@ -315,32 +303,28 @@ impl Compiler {
         pack_id: &str,
         fields: &[(String, SNode)],
     ) -> Result<(), CompileError> {
-        let manifest_idx = self
-            .chunk
-            .add_constant(Constant::String("eval_pack_manifest".into()));
+        let manifest_idx = self.string_constant("eval_pack_manifest");
         self.chunk.emit_u16(Op::Constant, manifest_idx, self.line);
 
         let has_id = fields.iter().any(|(key, _)| key == "id");
         let has_version = fields.iter().any(|(key, _)| key == "version");
         let mut entry_count = fields.len() as u16;
         if !has_version {
-            let key_idx = self.chunk.add_constant(Constant::String("version".into()));
+            let key_idx = self.string_constant("version");
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             let value_idx = self.chunk.add_constant(Constant::Int(1));
             self.chunk.emit_u16(Op::Constant, value_idx, self.line);
             entry_count += 1;
         }
         if !has_id {
-            let key_idx = self.chunk.add_constant(Constant::String("id".into()));
+            let key_idx = self.string_constant("id");
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
-            let value_idx = self
-                .chunk
-                .add_constant(Constant::String(pack_id.to_string()));
+            let value_idx = self.string_constant(pack_id);
             self.chunk.emit_u16(Op::Constant, value_idx, self.line);
             entry_count += 1;
         }
         for (key, value) in fields {
-            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            let key_idx = self.string_constant(key);
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             self.compile_node(value)?;
         }

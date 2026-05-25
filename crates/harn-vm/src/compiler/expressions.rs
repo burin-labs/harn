@@ -1,7 +1,7 @@
 use harn_lexer::StringSegment;
 use harn_parser::{DictEntry, Node, SNode, TypedParam};
 
-use crate::chunk::{Constant, Op};
+use crate::chunk::Op;
 use crate::BuiltinId;
 
 use super::error::CompileError;
@@ -10,7 +10,7 @@ use super::Compiler;
 
 impl Compiler {
     pub(super) fn emit_named_call(&mut self, name: &str, arg_count: usize) {
-        let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+        let name_idx = self.string_constant(name);
         self.chunk.emit_call_builtin(
             BuiltinId::from_name(name),
             name_idx,
@@ -20,7 +20,7 @@ impl Compiler {
     }
 
     pub(super) fn emit_named_call_spread(&mut self, name: &str) {
-        let name_idx = self.chunk.add_constant(Constant::String(name.to_string()));
+        let name_idx = self.string_constant(name);
         self.chunk
             .emit_call_builtin_spread(BuiltinId::from_name(name), name_idx, self.line);
     }
@@ -225,10 +225,8 @@ impl Compiler {
                 for arg in args {
                     self.compile_node(arg)?;
                 }
-                let enum_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                let var_idx = self
-                    .chunk
-                    .add_constant(Constant::String(method.to_string()));
+                let enum_idx = self.string_constant(name);
+                let var_idx = self.string_constant(method);
                 self.chunk.emit_u16(Op::BuildEnum, enum_idx, self.line);
                 let hi = (var_idx >> 8) as u8;
                 let lo = var_idx as u8;
@@ -252,9 +250,7 @@ impl Compiler {
         }
         let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
         self.compile_node(object)?;
-        let name_idx = self
-            .chunk
-            .add_constant(Constant::String(method.to_string()));
+        let name_idx = self.string_constant(method);
         if has_spread {
             self.chunk.emit_u16(Op::BuildList, 0, self.line);
             let mut pending = 0u16;
@@ -267,9 +263,7 @@ impl Compiler {
                     }
                     self.compile_node(inner)?;
                     self.chunk.emit(Op::Dup, self.line);
-                    let assert_idx = self
-                        .chunk
-                        .add_constant(Constant::String("__assert_list".into()));
+                    let assert_idx = self.string_constant("__assert_list");
                     self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
                     self.chunk.emit(Op::Swap, self.line);
                     self.chunk.emit_u8(Op::Call, 1, self.line);
@@ -304,10 +298,8 @@ impl Compiler {
         // Bare `EnumName.Variant` desugars to a zero-field BuildEnum.
         if let Node::Identifier(name) = &object.node {
             if self.enum_names.contains(name) {
-                let enum_idx = self.chunk.add_constant(Constant::String(name.clone()));
-                let var_idx = self
-                    .chunk
-                    .add_constant(Constant::String(property.to_string()));
+                let enum_idx = self.string_constant(name);
+                let var_idx = self.string_constant(property);
                 self.chunk.emit_u16(Op::BuildEnum, enum_idx, self.line);
                 let hi = (var_idx >> 8) as u8;
                 let lo = var_idx as u8;
@@ -327,9 +319,7 @@ impl Compiler {
             }
         }
         self.compile_node(object)?;
-        let idx = self
-            .chunk
-            .add_constant(Constant::String(property.to_string()));
+        let idx = self.string_constant(property);
         self.chunk.emit_u16(Op::GetProperty, idx, self.line);
         Ok(())
     }
@@ -355,9 +345,7 @@ impl Compiler {
                     }
                     self.compile_node(inner)?;
                     self.chunk.emit(Op::Dup, self.line);
-                    let assert_idx = self
-                        .chunk
-                        .add_constant(Constant::String("__assert_list".into()));
+                    let assert_idx = self.string_constant("__assert_list");
                     self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
                     self.chunk.emit(Op::Swap, self.line);
                     self.chunk.emit_u8(Op::Call, 1, self.line);
@@ -418,9 +406,7 @@ impl Compiler {
                     }
                     self.compile_node(inner)?;
                     self.chunk.emit(Op::Dup, self.line);
-                    let assert_idx = self
-                        .chunk
-                        .add_constant(Constant::String("__assert_dict".into()));
+                    let assert_idx = self.string_constant("__assert_dict");
                     self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
                     self.chunk.emit(Op::Swap, self.line);
                     self.chunk.emit_u8(Op::Call, 1, self.line);
@@ -448,7 +434,7 @@ impl Compiler {
         for seg in segments {
             match seg {
                 StringSegment::Literal(s) => {
-                    let idx = self.chunk.add_constant(Constant::String(s.clone()));
+                    let idx = self.string_constant(s);
                     self.chunk.emit_u16(Op::Constant, idx, self.line);
                     part_count += 1;
                 }
@@ -459,16 +445,14 @@ impl Compiler {
                         let mut parser = harn_parser::Parser::new(tokens);
                         if let Ok(snode) = parser.parse_single_expression() {
                             self.compile_node(&snode)?;
-                            let to_str = self
-                                .chunk
-                                .add_constant(Constant::String("to_string".into()));
+                            let to_str = self.string_constant("to_string");
                             self.chunk.emit_u16(Op::Constant, to_str, self.line);
                             self.chunk.emit(Op::Swap, self.line);
                             self.chunk.emit_u8(Op::Call, 1, self.line);
                             part_count += 1;
                         } else {
                             // Fallback: treat as literal.
-                            let idx = self.chunk.add_constant(Constant::String(expr_str.clone()));
+                            let idx = self.string_constant(expr_str);
                             self.chunk.emit_u16(Op::Constant, idx, self.line);
                             part_count += 1;
                         }

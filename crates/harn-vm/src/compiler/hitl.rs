@@ -165,9 +165,7 @@ impl Compiler {
             // the value, alternating: BuildDict consumes them as
             // pairs. This mirrors `compile_dict_literal` for the
             // non-spread path.
-            let key_idx = self
-                .chunk
-                .add_constant(crate::chunk::Constant::String((*key).to_string()));
+            let key_idx = self.string_constant(key);
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
             self.compile_node(value)?;
         }

@@ -1,9 +1,15 @@
 use std::rc::Rc;
 
-use crate::chunk::Constant;
+use crate::chunk::{Chunk, Constant};
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
+    fn constant_name_rc(chunk: &Chunk, idx: usize, fallback: &str) -> Rc<str> {
+        chunk
+            .constant_string_rc(idx)
+            .unwrap_or_else(|| Rc::from(fallback))
+    }
+
     pub(super) fn execute_constant(&mut self) -> Result<(), VmError> {
         let frame = self.frames.last_mut().unwrap();
         let idx = frame.chunk.read_u16(frame.ip) as usize;
@@ -43,46 +49,48 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_get_var(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let name = match &frame.chunk.constants[idx] {
-            Constant::String(s) => s.clone(),
-            _ => return Err(VmError::TypeError("expected string constant".into())),
+        let (chunk, idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), idx)
         };
-        if let Some(val) = self.active_local_slot_value(&name) {
+        let name = Self::const_str(&chunk.constants[idx])?;
+        if let Some(val) = self.active_local_slot_value(name) {
             self.stack.push(val);
-        } else if let Some(val) = self.env.get(&name) {
+        } else if let Some(val) = self.env.get(name) {
             self.stack.push(val);
         } else if let Some(val) = self
             .frames
             .last()
             .and_then(|f| f.module_state.as_ref())
-            .and_then(|ms| ms.borrow().get(&name))
+            .and_then(|ms| ms.borrow().get(name))
         {
             // Module-level var from the closure's originating module.
             self.stack.push(val);
-        } else if let Some(val) = self.globals.get(&name) {
+        } else if let Some(val) = self.globals.get(name) {
             self.stack.push(val.clone());
-        } else if let Some(id) = self.registered_builtin_id(&name) {
+        } else if let Some(id) = self.registered_builtin_id(name) {
             // Allow bare builtin references so they can be passed as callbacks.
             self.stack.push(VmValue::BuiltinRefId {
                 id,
-                name: Rc::from(name.as_str()),
+                name: Self::constant_name_rc(&chunk, idx, name),
             });
-        } else if self.builtins.contains_key(&name) || self.async_builtins.contains_key(&name) {
+        } else if self.builtins.contains_key(name) || self.async_builtins.contains_key(name) {
             // Collided IDs cannot use the direct index, but remain valid callbacks.
-            self.stack
-                .push(VmValue::BuiltinRef(Rc::from(name.as_str())));
-        } else if self.ensure_deferred_builtin(&name) {
-            if let Some(id) = self.registered_builtin_id(&name) {
+            self.stack.push(VmValue::BuiltinRef(Self::constant_name_rc(
+                &chunk, idx, name,
+            )));
+        } else if self.ensure_deferred_builtin(name) {
+            if let Some(id) = self.registered_builtin_id(name) {
                 self.stack.push(VmValue::BuiltinRefId {
                     id,
-                    name: Rc::from(name.as_str()),
+                    name: Self::constant_name_rc(&chunk, idx, name),
                 });
             } else {
-                self.stack
-                    .push(VmValue::BuiltinRef(Rc::from(name.as_str())));
+                self.stack.push(VmValue::BuiltinRef(Self::constant_name_rc(
+                    &chunk, idx, name,
+                )));
             }
         } else {
             let mut all_vars = self.visible_variables();
@@ -95,35 +103,41 @@ impl super::super::Vm {
             candidates.extend(self.async_builtins.keys().cloned());
             candidates.extend(self.deferred_builtin_registrars.keys().cloned());
             if let Some(suggestion) =
-                crate::value::closest_match(&name, candidates.iter().map(|s| s.as_str()))
+                crate::value::closest_match(name, candidates.iter().map(|s| s.as_str()))
             {
                 return Err(VmError::Runtime(format!(
                     "Undefined variable: {name} (did you mean `{suggestion}`?)"
                 )));
             }
-            return Err(VmError::UndefinedVariable(name));
+            return Err(VmError::UndefinedVariable(name.to_string()));
         }
         Ok(())
     }
 
     pub(super) fn execute_def_let(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let name = Self::const_string(&frame.chunk.constants[idx])?;
+        let (chunk, idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), idx)
+        };
+        let name = Self::const_str(&chunk.constants[idx])?;
         let val = self.pop()?;
         self.sync_current_frame_locals_to_env();
-        self.env.define(&name, val, false)
+        self.env.define(name, val, false)
     }
 
     pub(super) fn execute_def_var(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let name = Self::const_string(&frame.chunk.constants[idx])?;
+        let (chunk, idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), idx)
+        };
+        let name = Self::const_str(&chunk.constants[idx])?;
         let val = self.pop()?;
         self.sync_current_frame_locals_to_env();
-        self.env.define(&name, val, true)
+        self.env.define(name, val, true)
     }
 
     pub(super) fn execute_push_scope(&mut self) {
@@ -214,32 +228,35 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_set_var(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let name = Self::const_string(&frame.chunk.constants[idx])?;
+        let (chunk, idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Rc::clone(&frame.chunk), idx)
+        };
+        let name = Self::const_str(&chunk.constants[idx])?;
         let val = self.pop()?;
         // Local scope wins; otherwise route to the closure's shared
         // module_state. Fall through to env.assign only when neither
         // has it, so UndefinedVariable / ImmutableAssignment surface.
-        if self.assign_active_local_slot(&name, val.clone(), false)? {
+        if self.assign_active_local_slot(name, val.clone(), false)? {
             // Slot locals are the active binding for compiler-resolved names.
-        } else if self.env.get(&name).is_some() {
-            self.env.assign(&name, val)?;
+        } else if self.env.get(name).is_some() {
+            self.env.assign(name, val)?;
         } else if let Some(ms) = self
             .frames
             .last()
             .and_then(|f| f.module_state.as_ref())
             .cloned()
         {
-            if ms.borrow().get(&name).is_some() {
-                ms.borrow_mut().assign(&name, val)?;
+            if ms.borrow().get(name).is_some() {
+                ms.borrow_mut().assign(name, val)?;
             } else {
                 // Neither has it: let env.assign produce the diagnostic.
-                self.env.assign(&name, val)?;
+                self.env.assign(name, val)?;
             }
         } else {
-            self.env.assign(&name, val)?;
+            self.env.assign(name, val)?;
         }
         Ok(())
     }
