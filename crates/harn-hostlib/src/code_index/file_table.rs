@@ -11,9 +11,10 @@
 /// without invalidating string keys.
 pub type FileId = u32;
 
-/// Outline-style symbol entry. Reserved for AST integration; the code-index
-/// importer leaves `IndexedFile::symbols` empty, but the shape is kept stable
-/// so storage upgrades won't have to re-key.
+/// Outline-style symbol entry. Populated during the index rebuild from
+/// the same tree-sitter parse that backs the typed symbol graph (issue
+/// #2456); files whose extension doesn't map to a known grammar leave
+/// `IndexedFile::symbols` empty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexedSymbol {
     /// Symbol name (e.g. `"helper"`).
@@ -47,7 +48,9 @@ pub struct IndexedFile {
     pub content_hash: u64,
     /// Last-modified time in milliseconds since the Unix epoch.
     pub mtime_ms: i64,
-    /// Outline symbols supplied by callers that have richer syntax context.
+    /// Outline symbols extracted from the tree-sitter parse driven by
+    /// [`super::IndexState::rebuild_symbol_graph_for`]. Empty for files
+    /// without a recognised grammar.
     pub symbols: Vec<IndexedSymbol>,
     /// Raw import statement strings extracted from the file.
     pub imports: Vec<String>,
