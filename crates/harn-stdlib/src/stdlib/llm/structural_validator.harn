@@ -262,7 +262,14 @@ fn __sv_registry_tool_entry(registry, name) {
   let tools = __sv_dict(registry)
   let entries = __sv_list(tools?.tools)
   for entry in entries {
-    if __sv_string(entry?.name) == name {
+    let direct_name = __sv_string(entry?.name)
+    let function = entry?.function
+    let function_name = if type_of(function) == "dict" {
+      __sv_string(function?.name)
+    } else {
+      ""
+    }
+    if direct_name == name || function_name == name {
       return entry
     }
   }
@@ -348,6 +355,190 @@ fn __sv_join_messages(values) -> string {
   return join(__sv_string_list(values), "; ")
 }
 
+fn __sv_tool_call_name(call) -> string {
+  return trim(__sv_string(call?.name ?? call?.tool_name))
+}
+
+fn __sv_tool_call_arguments(call) {
+  let raw = call?.arguments ?? call?.tool_args ?? {}
+  if type_of(raw) == "dict" {
+    return raw
+  }
+  return nil
+}
+
+fn __sv_tool_entry_parameters(entry) {
+  let function = entry?.function
+  if type_of(function) == "dict" && type_of(function?.parameters) == "dict" {
+    return function.parameters
+  }
+  if type_of(entry?.parameters) == "dict" {
+    return entry.parameters
+  }
+  if type_of(entry?.input_schema) == "dict" {
+    return entry.input_schema
+  }
+  if type_of(entry?.inputSchema) == "dict" {
+    return entry.inputSchema
+  }
+  return {}
+}
+
+fn __sv_parameter_entries(parameters) {
+  if type_of(parameters?.properties) == "dict" {
+    return parameters.properties
+  }
+  var entries = {}
+  for name in __sv_dict(parameters).keys() {
+    if !contains(
+      ["type", "properties", "required", "additionalProperties", "description", "title", "$schema"],
+      name,
+    ) {
+      entries = entries + {[name]: parameters[name]}
+    }
+  }
+  return entries
+}
+
+fn __sv_param_is_required(parameters, name, schema) -> bool {
+  if type_of(parameters?.properties) == "dict" {
+    return contains(__sv_string_list(parameters?.required), name)
+  }
+  if type_of(schema) == "dict" {
+    if schema?.default != nil {
+      return false
+    }
+    if type_of(schema?.required) == "bool" {
+      return schema.required
+    }
+    if type_of(schema?.optional) == "bool" {
+      return !schema.optional
+    }
+  }
+  return true
+}
+
+fn __sv_schema_type_names(schema) {
+  var raw = nil
+  if type_of(schema) == "string" {
+    raw = schema
+  } else if type_of(schema) == "dict" {
+    raw = schema?.type
+  }
+  var names = []
+  if type_of(raw) == "list" {
+    for item in raw {
+      let name = lowercase(trim(__sv_string(item)))
+      if name != "" {
+        names = names.push(name)
+      }
+    }
+  } else {
+    let name = lowercase(trim(__sv_string(raw)))
+    if name != "" {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+fn __sv_value_matches_schema_type(value, type_name) -> bool {
+  let actual = type_of(value)
+  if type_name == "any" || type_name == "unknown" {
+    return true
+  }
+  if type_name == "string" {
+    return actual == "string"
+  }
+  if type_name == "integer" || type_name == "int" {
+    return actual == "int"
+  }
+  if type_name == "number" || type_name == "float" {
+    return actual == "int" || actual == "float"
+  }
+  if type_name == "boolean" || type_name == "bool" {
+    return actual == "bool"
+  }
+  if type_name == "array" || type_name == "list" {
+    return actual == "list"
+  }
+  if type_name == "object" || type_name == "dict" {
+    return actual == "dict"
+  }
+  return true
+}
+
+fn __sv_type_violation(tool_name, arg_name, value, schema) {
+  if value == nil {
+    return nil
+  }
+  let expected = __sv_schema_type_names(schema)
+  if len(expected) == 0 {
+    return nil
+  }
+  for type_name in expected {
+    if __sv_value_matches_schema_type(value, type_name) {
+      return nil
+    }
+  }
+  return "Tool '"
+    + tool_name
+    + "' parameter '"
+    + arg_name
+    + "' expected "
+    + join(expected, "|")
+    + " but got "
+    + type_of(value)
+    + "."
+}
+
+fn __sv_tool_schema_violations(payload) {
+  var violations = []
+  let registry = payload?.tools
+  for call in __sv_list(payload?.tool_calls) {
+    let tool_name = __sv_tool_call_name(call)
+    if tool_name == "" {
+      violations = violations.push("Tool call is missing a tool name.")
+      continue
+    }
+    let entry = __sv_registry_tool_entry(registry, tool_name)
+    if entry == nil {
+      violations = violations.push("Unknown tool '" + tool_name + "'.")
+      continue
+    }
+    let args = __sv_tool_call_arguments(call)
+    if args == nil {
+      violations = violations.push("Tool '" + tool_name + "' arguments must be a dict.")
+      continue
+    }
+    let parameters = __sv_tool_entry_parameters(entry)
+    let entries = __sv_parameter_entries(parameters)
+    var missing = []
+    for name in entries.keys() {
+      let schema = entries[name]
+      if __sv_param_is_required(parameters, name, schema) && args[name] == nil {
+        missing = missing.push(name)
+      } else {
+        let type_error = __sv_type_violation(tool_name, name, args[name], schema)
+        if type_error != nil {
+          violations = violations.push(type_error)
+        }
+      }
+    }
+    if len(missing) > 0 {
+      violations = violations
+        .push(
+        "Tool '"
+          + tool_name
+          + "' is missing required parameter(s): "
+          + join(missing, ", ")
+          + ". Provide all required parameters and try again.",
+      )
+    }
+  }
+  return violations
+}
+
 fn __sv_tool_calls_well_formed(payload) {
   let is_text_tool_format = lowercase(__sv_string(payload?.tool_format)) == "text"
   let should_enforce_text_protocol = is_text_tool_format && __sv_has_non_structural_tools(payload)
@@ -361,10 +552,11 @@ fn __sv_tool_calls_well_formed(payload) {
   } else {
     []
   }
-  if len(parse_errors) == 0 && len(protocol_violations) == 0 {
+  let schema_violations = __sv_tool_schema_violations(payload)
+  if len(parse_errors) == 0 && len(protocol_violations) == 0 && len(schema_violations) == 0 {
     return nil
   }
-  let details = __sv_join_messages(protocol_violations + parse_errors)
+  let details = __sv_join_messages(protocol_violations + parse_errors + schema_violations)
   return {
     rule: "tool_calls_well_formed",
     diagnostic: "Assistant emitted malformed tool calls: " + details,

@@ -42,6 +42,11 @@ condensed series summaries instead of full per-patch history.
   `already_decided` rejects. Session cancel and pending-inject controls now
   return stable lifecycle outcomes, carry actor metadata, and emit
   audit-visible `control_outcome` events.
+- **Structural validator schema prechecks (#2365).** The
+  `tool_calls_well_formed` rule now validates model-emitted native and text
+  tool calls against the bound tool registry before dispatch, catching unknown
+  tools, missing required arguments, and simple argument type mismatches in the
+  deterministic pre-dispatch feedback path.
 
 ## v0.8.37
 
