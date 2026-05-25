@@ -4,16 +4,18 @@
   "version": "0.0.0",
   "description": "Local development tooling for the Harn repository",
   "scripts": {
+    "eval:librarian-nl": "cargo run --quiet --bin harn -- run evals/librarian_nl/recall_eval.harn",
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
-    "portal:ensure-deps": "./scripts/ensure_portal_deps.sh",
     "portal": "cargo run --bin harn -- portal",
-    "portal:server": "cargo run --bin harn -- portal --open false --port 4721",
-    "portal:ui": "npm run portal:ensure-deps && npm --prefix crates/harn-cli/portal run dev",
-    "portal:dev": "concurrently -k -n server,ui -c blue,magenta \"npm:portal:server\" \"npm:portal:ui\"",
     "portal:build": "npm run portal:ensure-deps && npm --prefix crates/harn-cli/portal run build",
+    "portal:demo": "./scripts/portal_demo.sh",
+    "portal:dev": "concurrently -k -n server,ui -c blue,magenta \"npm:portal:server\" \"npm:portal:ui\"",
+    "portal:ensure-deps": "./scripts/ensure_portal_deps.sh",
     "portal:lint": "npm run portal:ensure-deps && npm --prefix crates/harn-cli/portal run lint",
+    "portal:server": "cargo run --bin harn -- portal --open false --port 4721",
     "portal:test": "npm run portal:ensure-deps && npm --prefix crates/harn-cli/portal test",
-    "portal:demo": "./scripts/portal_demo.sh"
+    "portal:ui": "npm run portal:ensure-deps && npm --prefix crates/harn-cli/portal run dev",
+    "test:harn": "cargo run --quiet --bin harn -- test tests/code_librarian/query_nl_test.harn --filter"
   },
   "overrides": {
     "react": "19.2.6",

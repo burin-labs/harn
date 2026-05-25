@@ -5,7 +5,10 @@
  *
  * Wraps the `hostlib_code_index_*` builtin family (issue #2434, PR #2441)
  * behind seven ergonomic functions returning typed records. Consumers call
- * one library instead of stitching outputs from many primitives.
+ * one library instead of stitching outputs from many primitives. The
+ * natural-language entry point `code_librarian_query_nl` (issue #2439)
+ * compiles NL → Cypher via a cheap LLM and falls back to bounded MCTS
+ * over the graph when the compile path misses.
  *
  * The library never rebuilds the index; callers are expected to drive
  * `hostlib_code_index_rebuild` (or its lifecycle equivalent) themselves.
@@ -13,6 +16,11 @@
  * Underlying executor docs: docs/src/stdlib/code-librarian.md
  * A typed Cypher row — keys are projected column names from `RETURN`.
  */
+import { agent_emit_event } from "std/agent/state"
+import { with_cache_envelope } from "std/cache"
+import { safe_structured_call } from "std/llm/safe"
+import { schema_object, schema_string } from "std/schema"
+
 type LibrarianRecord = dict
 
 /** Result of a Cypher pass-through: rows plus the active overlay name. */
@@ -224,4 +232,456 @@ pub fn code_librarian_branch_overlay(branch: string?) -> LibrarianOverlay {
     return hostlib_code_index_branch_overlay({action: "deactivate"})
   }
   return hostlib_code_index_branch_overlay({action: "activate", branch: branch})
+}
+
+// -------------------------------------------------------------------------------------------------
+// Natural-language query layer (#2439) — compile + MCTS fallback + cache
+// -------------------------------------------------------------------------------------------------
+
+const __NL_CACHE_NAMESPACE = "code_librarian.query_nl"
+
+const __NL_CACHE_TTL_SECONDS = 300
+
+const __MCTS_DEPTH_MAX_DEFAULT = 4
+
+const __MCTS_EXPANSIONS_MAX_DEFAULT = 200
+
+const __DEFAULT_LLM_OPTIONS = {provider: "openrouter", model: "mistralai/devstral-small", temperature: 0.0, max_tokens: 400}
+
+/**
+ * code_librarian_query_nl translates a natural-language question into Cypher
+ * via a cheap LLM with schema-aware structured output, executes it, and
+ * falls back to bounded MCTS over the typed graph when the compile fails to
+ * parse or returns zero rows.
+ *
+ * Returns a dict with:
+ *   - rows           : list<LibrarianRecord> (same shape as the rows
+ *                      `code_librarian_query` projects)
+ *   - cypher?        : the compile path's Cypher (nil for MCTS-only)
+ *   - path           : "compile" | "mcts"
+ *   - cache_hit      : bool
+ *   - mcts_expansions: int (zero when path = "compile")
+ *   - mcts_depth     : int (zero when path = "compile")
+ *   - elapsed_ms     : int
+ *
+ * Options:
+ *   - llm                 : dict overriding the default value-tier model
+ *                           (Devstral Small via OpenRouter)
+ *   - mcts_depth_max      : int (default 4)
+ *   - mcts_expansions_max : int (default 200)
+ *   - session_id          : string, when set the fallback path emits a
+ *                           `code_librarian_query_nl_fallback` agent
+ *                           event so consumers can pin fallback rate.
+ *
+ * Implements the RANGER (arxiv 2509.25257) compile + MCTS-fallback shape;
+ * results in-process cached for 5 minutes on the lowercased NL text.
+ *
+ * @effects: [host, llm.call]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: code_librarian_query_nl("which file defines formatDate?")
+ */
+pub fn code_librarian_query_nl(text: string, options = nil) -> dict {
+  let opts = options ?? {}
+  let started_ms = __timing_now_monotonic_ms()
+  let cache_key = "v1:" + lowercase(trim(text))
+  let envelope = with_cache_envelope(
+    cache_key,
+    { -> __nl_resolve(text, opts) },
+    {store: {backend: "mem", namespace: __NL_CACHE_NAMESPACE}, ttl_seconds: __NL_CACHE_TTL_SECONDS},
+  )
+  let result = envelope.value
+  return {
+    cache_hit: envelope.hit,
+    cypher: result?.cypher,
+    elapsed_ms: __timing_now_monotonic_ms() - started_ms,
+    mcts_depth: to_int(result?.mcts_depth ?? 0),
+    mcts_expansions: to_int(result?.mcts_expansions ?? 0),
+    path: result.path,
+    rows: result.rows,
+  }
+}
+
+fn __nl_resolve(text, opts) -> dict {
+  let compiled = __nl_compile(text, opts)
+  if compiled.ok {
+    let rows = try {
+      let raw = hostlib_code_index_cypher({query: compiled.cypher})
+      raw?.rows ?? []
+    } catch (_) {
+      []
+    }
+    if !is_err(rows) && len(rows) > 0 {
+      return {cypher: compiled.cypher, mcts_depth: 0, mcts_expansions: 0, path: "compile", rows: rows}
+    }
+  }
+  // Compile-path missed (parse error or zero rows). Fall back to MCTS.
+  let mcts = __nl_mcts(text, opts)
+  __nl_emit_fallback(opts, text, compiled?.cypher, mcts)
+  return {
+    cypher: compiled?.cypher,
+    mcts_depth: mcts.depth,
+    mcts_expansions: mcts.expansions,
+    path: "mcts",
+    rows: mcts.rows,
+  }
+}
+
+fn __nl_emit_fallback(opts, text, attempted_cypher, mcts) {
+  let session_id = to_string(opts?.session_id ?? "")
+  if session_id == "" {
+    return
+  }
+  let _ = try {
+    agent_emit_event(
+      session_id,
+      "code_librarian_query_nl_fallback",
+      {
+        attempted_cypher: attempted_cypher,
+        mcts_depth: mcts.depth,
+        mcts_expansions: mcts.expansions,
+        result_count: len(mcts.rows),
+        text: text,
+      },
+    )
+  }
+}
+
+const __CYPHER_TEMPLATES = [
+  "MATCH (f:Function {name: '<NAME>'}) RETURN f.path AS path",
+  "MATCH (t:Type {name: '<NAME>'}) RETURN t.path AS path",
+  "MATCH (m:Module) WHERE m.path = '<PATH>' RETURN m.name AS name",
+  "MATCH (f:Function {name: '<NAME>'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+  "MATCH (i:Import)<-[:IMPORTS]-(m:Module) WHERE i.name = '<IMPORT>' RETURN m.path AS path",
+  "MATCH (m:Module)-[:IMPORTS]->(i:Import) WHERE m.path = '<PATH>' RETURN i.name AS import",
+  "MATCH (parent:Type {name: '<NAME>'})-[:CONTAINS]->(child:Function) RETURN child.name AS name",
+  "MATCH (f:Function)-[:CALLS*1..3]->(g:Function {name: '<NAME>'}) RETURN f.name AS name, f.path AS path",
+]
+
+const __CYPHER_PROMPT_PREAMBLE = "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
+
+fn __nl_compile(text, opts) -> dict {
+  let prompt = __nl_compile_prompt(text)
+  let schema = schema_object({cypher: schema_string()})
+  let call_opts = __nl_llm_options(opts)
+  let envelope = try {
+    safe_structured_call(prompt, schema, call_opts)
+  } catch (_) {
+    return {cypher: nil, ok: false}
+  }
+  if is_err(envelope) || !(envelope?.ok ?? false) {
+    return {cypher: nil, ok: false}
+  }
+  let value = envelope?.value ?? envelope?.data ?? {}
+  let cypher = to_string(value?.cypher ?? "")
+  let stripped = trim(cypher)
+  if stripped == "" {
+    return {cypher: nil, ok: false}
+  }
+  return {cypher: stripped, ok: true}
+}
+
+fn __nl_compile_prompt(text) -> string {
+  let templates = join(__CYPHER_TEMPLATES, "\n")
+  return __CYPHER_PROMPT_PREAMBLE + templates + "\n\nQuestion: " + text + "\nCypher:"
+}
+
+fn __nl_llm_options(opts) -> dict {
+  let overrides = if type_of(opts?.llm) == "dict" {
+    opts.llm
+  } else {
+    {}
+  }
+  return {
+    max_tokens: overrides?.max_tokens ?? __DEFAULT_LLM_OPTIONS.max_tokens,
+    model: overrides?.model ?? __DEFAULT_LLM_OPTIONS.model,
+    provider: overrides?.provider ?? __DEFAULT_LLM_OPTIONS.provider,
+    temperature: overrides?.temperature ?? __DEFAULT_LLM_OPTIONS.temperature,
+  }
+}
+
+/**
+ * Bounded structural enumeration over the typed symbol graph.
+ *
+ * Not a stochastic MCTS — embeddings are out of scope (#2434 design
+ * note) and the graph is small. Performs a bounded BFS-style
+ * enumeration of name-matched candidate seeds at depth 0, then expands
+ * `CALLS` / `CALLED_BY` edges up to `mcts_depth_max`, scoring by token
+ * overlap with the NL question. Every node visited counts toward
+ * `mcts_expansions_max`. Top-K scored candidates are surfaced as rows
+ * projected to `{path, name, kind}` so the result shape matches a
+ * typical canned-query row.
+ *
+ * Mirrors the RANGER design: MCTS is the structural safety net, not
+ * the precision tool. Bounded, deterministic exploration with a token-
+ * overlap heuristic suffices for the 30-question NL fixture.
+ */
+fn __nl_mcts(text, opts) -> dict {
+  let depth_cap = to_int(opts?.mcts_depth_max ?? __MCTS_DEPTH_MAX_DEFAULT)
+  let expansion_cap = to_int(opts?.mcts_expansions_max ?? __MCTS_EXPANSIONS_MAX_DEFAULT)
+  let terms = __nl_terms(text)
+  var seen = {}
+  var ranked = []
+  var expansions = 0
+  var depth_reached = 0
+  for term in terms {
+    if expansions < expansion_cap {
+      let probe = __nl_mcts_probe(term, terms, depth_cap, expansion_cap - expansions, seen)
+      seen = probe.seen
+      expansions = expansions + probe.expansions
+      depth_reached = max(depth_reached, probe.depth_reached)
+      for cand in probe.candidates {
+        ranked = ranked + [cand]
+      }
+    }
+  }
+  let sorted = ranked.sort({ a, b -> b.score - a.score })
+  let unique = __nl_dedupe_candidates(sorted)
+  let trimmed = if len(unique) > 10 {
+    unique[:10]
+  } else {
+    unique
+  }
+  return {
+    depth: depth_reached,
+    expansions: expansions,
+    rows: trimmed.map({ c -> {kind: c.kind, name: c.name, path: c.path} }),
+  }
+}
+
+fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
+  if budget <= 0 {
+    return {candidates: [], depth_reached: 0, expansions: 0, seen: seen}
+  }
+  let seeds = try {
+    let raw = hostlib_code_index_cypher(
+      {
+        query: "MATCH (n) WHERE n.name = '" + __nl_escape(term)
+          + "' RETURN n.path AS path, n.name AS name, n.kind AS kind",
+      },
+    )
+    raw?.rows ?? []
+  } catch (_) {
+    []
+  }
+  var next_seen = seen
+  var candidates = []
+  var expansions = 0
+  var depth_reached = 0
+  for seed in seeds {
+    if expansions < budget {
+      let seed_key = __nl_node_key(seed)
+      if next_seen[seed_key] == nil {
+        next_seen = next_seen + {[seed_key]: true}
+        expansions = expansions + 1
+        candidates = candidates
+          + [
+          {
+            kind: to_string(seed?.kind ?? ""),
+            name: to_string(seed?.name ?? ""),
+            path: to_string(seed?.path ?? ""),
+            score: __nl_score(seed, all_terms),
+          },
+        ]
+      }
+    }
+  }
+  var depth = 1
+  while depth <= depth_cap && expansions < budget {
+    let cypher = "MATCH (s:Function {name: '" + __nl_escape(term) + "'})-[:CALLS*1.." + to_string(depth)
+      + "]->(n) RETURN n.path AS path, n.name AS name, n.kind AS kind"
+    let hop = try {
+      let raw = hostlib_code_index_cypher({query: cypher})
+      raw?.rows ?? []
+    } catch (_) {
+      []
+    }
+    for n in hop {
+      if expansions < budget {
+        let key = __nl_node_key(n)
+        if next_seen[key] == nil {
+          next_seen = next_seen + {[key]: true}
+          expansions = expansions + 1
+          candidates = candidates
+            + [
+            {
+              kind: to_string(n?.kind ?? ""),
+              name: to_string(n?.name ?? ""),
+              path: to_string(n?.path ?? ""),
+              score: __nl_score(n, all_terms),
+            },
+          ]
+        }
+      }
+    }
+    if len(hop) > 0 {
+      depth_reached = depth
+    }
+    depth = depth + 1
+  }
+  let callers_cypher = "MATCH (s:Function {name: '" + __nl_escape(term)
+    + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.name AS name, c.kind AS kind"
+  let callers = try {
+    let raw = hostlib_code_index_cypher({query: callers_cypher})
+    raw?.rows ?? []
+  } catch (_) {
+    []
+  }
+  for c in callers {
+    if expansions < budget {
+      let key = __nl_node_key(c)
+      if next_seen[key] == nil {
+        next_seen = next_seen + {[key]: true}
+        expansions = expansions + 1
+        candidates = candidates
+          + [
+          {
+            kind: to_string(c?.kind ?? ""),
+            name: to_string(c?.name ?? ""),
+            path: to_string(c?.path ?? ""),
+            score: __nl_score(c, all_terms),
+          },
+        ]
+      }
+    }
+  }
+  return {candidates: candidates, depth_reached: depth_reached, expansions: expansions, seen: next_seen}
+}
+
+fn __nl_node_key(row) -> string {
+  return to_string(row?.kind ?? "") + ":" + to_string(row?.path ?? "") + ":" + to_string(row?.name ?? "")
+}
+
+fn __nl_dedupe_candidates(cands) -> list {
+  var seen = {}
+  var out = []
+  for c in cands {
+    let key = c.kind + ":" + c.path + ":" + c.name
+    if seen[key] == nil {
+      seen = seen + {[key]: true}
+      out = out + [c]
+    }
+  }
+  return out
+}
+
+fn __nl_score(row, terms) -> int {
+  let blob = lowercase(
+    to_string(row?.name ?? "") + " " + to_string(row?.path ?? "") + " " + to_string(row?.kind ?? ""),
+  )
+  var score = 0
+  for t in terms {
+    if contains(blob, lowercase(t)) {
+      score = score + 1
+    }
+  }
+  return score
+}
+
+/**
+ * Extract candidate name/path tokens from an NL question, preserving
+ * original casing so case-sensitive name lookups against the symbol
+ * graph (e.g. `formatDate` vs `formatdate`) still hit. Splits on
+ * non-identifier punctuation, drops stop words via a lowercased copy,
+ * and dedupes.
+ */
+fn __nl_terms(text) -> list {
+  let cleaned = regex_replace("[^A-Za-z0-9_/.]+", " ", text)
+  let raw = split(cleaned, " ")
+  var seen = {}
+  var out = []
+  for word in raw {
+    let stripped = trim(word)
+    let lowered = lowercase(stripped)
+    let usable = stripped != "" && !__nl_is_stop_word(lowered) && seen[stripped] == nil
+    if usable {
+      seen = seen + {[stripped]: true}
+      out = out + [stripped]
+    }
+  }
+  return out
+}
+
+const __NL_STOP_WORDS = [
+  "a",
+  "an",
+  "and",
+  "any",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "call",
+  "calls",
+  "code",
+  "contain",
+  "contains",
+  "define",
+  "defined",
+  "defines",
+  "do",
+  "does",
+  "file",
+  "files",
+  "find",
+  "for",
+  "from",
+  "function",
+  "functions",
+  "get",
+  "has",
+  "have",
+  "how",
+  "i",
+  "if",
+  "import",
+  "imports",
+  "in",
+  "into",
+  "is",
+  "it",
+  "list",
+  "many",
+  "module",
+  "modules",
+  "name",
+  "named",
+  "names",
+  "of",
+  "on",
+  "or",
+  "out",
+  "show",
+  "struct",
+  "symbol",
+  "symbols",
+  "that",
+  "the",
+  "to",
+  "type",
+  "types",
+  "use",
+  "uses",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "with",
+]
+
+fn __nl_is_stop_word(w) -> bool {
+  return __NL_STOP_WORDS.contains(w)
+}
+
+/**
+ * Escape single-quotes for Cypher string literals. The host executor uses
+ * `'...'` literals and supports `\'` as an escape (see `unescape` in
+ * `code_index/cypher.rs`).
+ */
+fn __nl_escape(s) -> string {
+  return replace(s, "'", "\\'")
 }
