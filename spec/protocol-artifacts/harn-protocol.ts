@@ -121,6 +121,8 @@ export const HARN_AGENT_EVENT_KINDS = [
   "composition_start",
   "daemon_watchdog_tripped",
   "feedback_injected",
+  "iteration_end",
+  "iteration_start",
   "judge_decision",
   "loop_control_decision",
   "loop_stuck",
@@ -131,8 +133,6 @@ export const HARN_AGENT_EVENT_KINDS = [
   "tool_call_audit",
   "tool_format_override",
   "typed_checkpoint",
-  "turn_end",
-  "turn_start",
 ] as const
 export type HarnAgentEventKind = (typeof HARN_AGENT_EVENT_KINDS)[number]
 

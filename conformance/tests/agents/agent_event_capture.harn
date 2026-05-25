@@ -15,5 +15,5 @@ pipeline default() {
   let types = captured.events.map({ event -> event.type })
   __io_println(captured.result.status)
   __io_println(len(captured.events) > 0)
-  __io_println(contains(types, "turn_start"))
+  __io_println(contains(types, "iteration_start"))
 }

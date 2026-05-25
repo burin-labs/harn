@@ -83,10 +83,10 @@ The transcript loader accepts either:
 Each line is a `PersistedAgentEvent` envelope:
 
 ```json
-{"index":0,"emitted_at_ms":1735000000000,"frame_depth":0,"type":"turn_start","session_id":"…","iteration":1}
+{"index":0,"emitted_at_ms":1735000000000,"frame_depth":0,"type":"iteration_start","session_id":"…","iteration":1}
 ```
 
-The `type` field is the AgentEvent variant (`turn_start`,
+The `type` field is the AgentEvent variant (`iteration_start`,
 `tool_call`, `tool_call_update`, `plan`, `handoff`,
 `feedback_injected`, …) flattened from `AgentEvent`.
 

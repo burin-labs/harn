@@ -1330,7 +1330,7 @@ pub(crate) fn extract_llm_options(
     let rendered_reminders = render_pending_reminders(&caps, &pending_reminders);
     let reminder_lifecycle = rendered_reminder_lifecycle(
         session_id.as_deref(),
-        opt_int(&options, "_turn_iteration").unwrap_or(0),
+        opt_int(&options, "_iteration").unwrap_or(0),
         &pending_reminders,
         &rendered_reminders,
     );

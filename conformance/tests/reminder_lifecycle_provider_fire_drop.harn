@@ -48,7 +48,7 @@ pipeline main() {
       model: "o3",
       messages: agent_session_messages(session),
       session_id: session,
-      _turn_iteration: 4,
+      _iteration: 4,
     },
   )
   agent_session_reset(session)

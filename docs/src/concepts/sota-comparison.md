@@ -96,9 +96,9 @@ we speak ACP natively.
 **Read this carefully if you're writing ACP integrations:** ACP's `prompt_turn`
 is the *outer* concept (one user request → final response with stop reason).
 Harn's loop counts *iterations*, which are model round-trips inside the prompt
-turn. Don't confuse the two — see
-[terminology epic #2209](https://github.com/burin-labs/harn/issues/2209) for
-the in-progress vocabulary cleanup.
+turn — the transcript events fire as `iteration_start` / `iteration_end`, and
+the steering seams use the same names. One `agent_turn(...)` invocation maps
+to one ACP `prompt_turn` and contains many `iteration_*` events.
 
 ## A2A — Agent2Agent Protocol
 

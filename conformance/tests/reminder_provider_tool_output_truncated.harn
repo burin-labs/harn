@@ -44,7 +44,7 @@ pipeline main() {
   let dispatch = agent_dispatch_tool_call(
     {id: "large_1", name: "large_output", arguments: {}},
     truncating_tools(),
-    {session_id: dispatch_session, _turn_iteration: 1},
+    {session_id: dispatch_session, _iteration: 1},
   )
   let dispatch_reminders = transcript_events_by_kind(agent_session_snapshot(dispatch_session), "system_reminder")
   let same_turn_ttl = agent_session_apply_reminder_post_turn(dispatch_session, 0)

@@ -9,7 +9,7 @@ pipeline main() {
   llm_mock_clear()
   let observed = shared_cell({scope: "task_group", key: "checkpoint-kinds", initial: ""})
   register_checkpoint_hook(
-    ["turn_start", "pre_tool_dispatch", "loop_exit"],
+    ["iteration_start", "pre_tool_dispatch", "loop_exit"],
     { event ->
       let snap = shared_snapshot(observed)
       shared_set(observed, snap.value + event.kind + ",")

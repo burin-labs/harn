@@ -1413,21 +1413,21 @@ fn build_agent_event(
             .filter(|s| !s.is_empty())
     };
     match event_type {
-        "turn_start" => Ok(AgentEvent::TurnStart {
+        "iteration_start" => Ok(AgentEvent::IterationStart {
             session_id: session_id.to_string(),
             iteration: get_usize("iteration"),
             provider: get_string("provider"),
             model: get_string("model"),
         }),
-        "turn_end" => {
-            let turn_info = payload_obj
-                .and_then(|m| m.get("turn_info"))
+        "iteration_end" => {
+            let iteration_info = payload_obj
+                .and_then(|m| m.get("iteration_info"))
                 .cloned()
                 .unwrap_or(serde_json::Value::Null);
-            Ok(AgentEvent::TurnEnd {
+            Ok(AgentEvent::IterationEnd {
                 session_id: session_id.to_string(),
                 iteration: get_usize("iteration"),
-                turn_info,
+                iteration_info,
             })
         }
         "judge_decision" => Ok(AgentEvent::JudgeDecision {

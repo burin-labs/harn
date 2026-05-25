@@ -113,7 +113,7 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("register_checkpoint_hook", register_checkpoint_hook_builtin)
         .signature("register_checkpoint_hook(kinds, handler)")
         .arity(VmBuiltinArity::Exact(2))
-        .doc("Register a hook covering one or more agent-loop checkpoint seams. `kinds` is a list of seam names (turn_start, pre_tool_dispatch, post_tool_dispatch, turn_end, pre_compact, post_compact, daemon_idle_pre, daemon_idle_post, loop_exit), a single name, or `*` / nil for every seam."),
+        .doc("Register a hook covering one or more agent-loop checkpoint seams. `kinds` is a list of seam names (iteration_start, pre_tool_dispatch, post_tool_dispatch, iteration_end, pre_compact, post_compact, daemon_idle_pre, daemon_idle_post, loop_exit), a single name, or `*` / nil for every seam."),
     SyncBuiltin::new("register_reminder_provider", register_reminder_provider_builtin)
         .signature("register_reminder_provider(config)")
         .arity(VmBuiltinArity::Exact(1))

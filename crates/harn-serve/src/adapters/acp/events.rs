@@ -858,7 +858,7 @@ impl AgentEventSink for AcpAgentEventSink {
             // for genuinely new events. Clients that don't know the method
             // SHOULD ignore it (per the spec); clients that do know it
             // discover the contract through `agentCapabilities._meta.harn`.
-            AgentEvent::TurnStart {
+            AgentEvent::IterationStart {
                 session_id,
                 iteration,
                 provider,
@@ -871,17 +871,17 @@ impl AgentEventSink for AcpAgentEventSink {
                 if !model.is_empty() {
                     payload["model"] = serde_json::Value::String(model.clone());
                 }
-                self.emit_agent_event_ext("turn_start", session_id, payload);
+                self.emit_agent_event_ext("iteration_start", session_id, payload);
             }
-            AgentEvent::TurnEnd {
+            AgentEvent::IterationEnd {
                 session_id,
                 iteration,
-                turn_info,
+                iteration_info,
             } => {
                 self.emit_agent_event_ext(
-                    "turn_end",
+                    "iteration_end",
                     session_id,
-                    serde_json::json!({"iteration": iteration, "turnInfo": turn_info}),
+                    serde_json::json!({"iteration": iteration, "iterationInfo": iteration_info}),
                 );
             }
             AgentEvent::SessionClosed {

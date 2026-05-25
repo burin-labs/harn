@@ -495,7 +495,7 @@ mod tests {
     fn sink_skips_non_worker_events() {
         let tracker = SubagentTracker::new();
         let sink = SubagentEventSink::new(tracker.clone());
-        sink.handle_event(&AgentEvent::TurnStart {
+        sink.handle_event(&AgentEvent::IterationStart {
             session_id: "s".to_string(),
             iteration: 1,
             provider: String::new(),

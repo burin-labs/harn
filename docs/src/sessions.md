@@ -165,7 +165,7 @@ stream before the session is removed.
 ## Subscribers
 
 `agent_subscribe(id, closure)` appends `closure` to the session's
-`subscribers` list. The agent loop fires `turn_end` (and other)
+`subscribers` list. The agent loop fires `iteration_end` (and other)
 events through every subscriber for that session id. Subscribers are
 not copied by `agent_session_fork` — a fork is a conversation branch,
 not an event fanout.

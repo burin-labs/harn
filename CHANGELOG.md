@@ -8,6 +8,40 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Changed
+
+- **Iteration-boundary event and seam names (#2209).** Agent-loop boundary
+  events and steering-seam checkpoints renamed from `turn_*` to `iteration_*`
+  so the names match the inner-loop unit they describe and stop colliding
+  with ACP's outer `prompt_turn`. Migration map:
+  - Transcript events `turn_start` / `turn_end` → `iteration_start` /
+    `iteration_end` (`AgentEvent::TurnStart` / `TurnEnd` Rust variants
+    likewise renamed, with the wire `type` tag tracking the rename).
+  - `turn_end.turn_info` payload field → `iteration_end.iteration_info`.
+  - Steering seam kinds drained by `__agent_loop_checkpoint` and accepted
+    by `register_checkpoint_hook(kinds, ...)`: `turn_start` / `turn_end`
+    → `iteration_start` / `iteration_end`. The other seams (`pre_compact`,
+    `post_compact`, `pre_tool_dispatch`, `post_tool_dispatch`,
+    `daemon_idle_pre`, `daemon_idle_post`, `loop_exit`) are unchanged.
+  - ACP `_harn/agentEvent` extension stream emits `iteration_start` /
+    `iteration_end` (with camelCase `iterationInfo` on the end event).
+    The protocol-artifact schema (`acp-session-update.schema.json`) and
+    the published TypeScript / Swift / Python / Go bindings reflect the
+    new vocabulary.
+  - Internal `_turn_iteration` agent-loop option key renamed to
+    `_iteration`. Callers that build llm-caller / tool-caller envelopes
+    by hand must update the key name; the `call.turn.iteration` /
+    `envelope.turn.iteration` middleware contract (the grouping field
+    name `turn`) is unchanged.
+  - The agent-loop's per-iteration local counter `turn_index` is now
+    `iteration_index`. This is an internal rename, but anyone reading
+    `loop.harn` source will see the new name.
+
+  The doc-level glossary aliasing (`iteration` preferred over
+  `turn`/`round-trip` for the inner unit, `prompt turn` reserved for the
+  ACP outer cycle) was already shipped with #2231; this release brings
+  the implementation in line with that vocabulary.
+
 ### Fixed
 
 - **Step judges now skip when regeneration budget is exhausted (#2369).**
