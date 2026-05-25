@@ -15,7 +15,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use tree_sitter::{Node as TsNode, Tree};
 
-use crate::ast::{api as ast_api, Language, SymbolKind};
+use crate::ast::{api as ast_api, Language, Symbol, SymbolKind};
 
 use super::file_table::FileId;
 
@@ -160,6 +160,19 @@ pub struct Edge {
     pub kind: EdgeKind,
 }
 
+/// Result of [`SymbolGraph::rebuild_file`]. Exposes the flat symbol list
+/// produced by the tree-sitter parse so callers can populate sibling
+/// indexes (e.g. `IndexedFile::symbols`) without re-parsing.
+#[derive(Debug, Clone, Default)]
+pub struct RebuildOutcome {
+    /// Number of nodes installed for this file, including the Module
+    /// node. Matches the previous `usize` return value.
+    pub node_count: usize,
+    /// Flat symbol list extracted from the parse. Empty when the
+    /// grammar didn't recognise the source.
+    pub symbols: Vec<Symbol>,
+}
+
 /// Typed symbol graph for a single workspace.
 #[derive(Debug, Default, Clone)]
 pub struct SymbolGraph {
@@ -284,7 +297,10 @@ impl SymbolGraph {
 
     /// Replace every node + edge belonging to `file_id` with the freshly
     /// parsed set derived from `source`. Returns the count of nodes
-    /// installed (including the per-file Module node).
+    /// installed (including the per-file Module node) along with the
+    /// flat symbol list that was extracted from the parse — callers
+    /// (notably [`super::IndexState`]) reuse the symbol list to populate
+    /// `IndexedFile::symbols` without re-parsing.
     pub fn rebuild_file(
         &mut self,
         file_id: FileId,
@@ -292,7 +308,7 @@ impl SymbolGraph {
         language: Language,
         source: &str,
         import_strings: &[String],
-    ) -> usize {
+    ) -> RebuildOutcome {
         self.remove_file(file_id);
         let module_id = self.add_module_for_file(file_id, path, &language);
 
@@ -400,7 +416,11 @@ impl SymbolGraph {
             self.add_edge(module_id, target, EdgeKind::Refs);
         }
 
-        self.by_file.get(&file_id).map(Vec::len).unwrap_or_default()
+        let node_count = self.by_file.get(&file_id).map(Vec::len).unwrap_or_default();
+        RebuildOutcome {
+            node_count,
+            symbols,
+        }
     }
 
     /// Resolve every IMPORTS edge whose target is currently an `Import`
@@ -587,8 +607,16 @@ mod tests {
     #[test]
     fn add_and_remove_round_trip() {
         let mut g = SymbolGraph::new();
-        let count = g.rebuild_file(1, "src/a.rs", Language::Rust, "fn foo() {}\n", &[]);
-        assert!(count >= 2, "module + function expected, got {count}");
+        let outcome = g.rebuild_file(1, "src/a.rs", Language::Rust, "fn foo() {}\n", &[]);
+        assert!(
+            outcome.node_count >= 2,
+            "module + function expected, got {}",
+            outcome.node_count
+        );
+        assert!(
+            outcome.symbols.iter().any(|s| s.name == "foo"),
+            "rebuild_file should surface the parsed `foo` symbol"
+        );
         assert!(!g.nodes_named("foo").is_empty());
         g.remove_file(1);
         assert_eq!(g.node_count(), 0);
@@ -599,8 +627,12 @@ mod tests {
     fn rebuild_file_emits_function_module_and_call_nodes() {
         let mut g = SymbolGraph::new();
         let src = "fn alpha() {}\nfn beta() { alpha(); }\n";
-        let count = g.rebuild_file(7, "src/x.rs", Language::Rust, src, &[]);
-        assert!(count >= 3, "expected module + 2 functions, got {count}");
+        let outcome = g.rebuild_file(7, "src/x.rs", Language::Rust, src, &[]);
+        assert!(
+            outcome.node_count >= 3,
+            "expected module + 2 functions, got {}",
+            outcome.node_count
+        );
         let alpha_funcs: Vec<_> = g
             .iter_nodes()
             .filter(|n| n.kind == NodeKind::Function && n.name == "alpha")

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::agents::AgentRegistry;
-use super::file_table::{fnv1a64, FileId, IndexedFile};
+use super::file_table::{fnv1a64, FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
 use super::imports;
 use super::overlay::OverlayState;
@@ -25,7 +25,7 @@ use super::versions::VersionLog;
 use super::walker::{is_indexable_file, language_for_extension, walk_indexable, MAX_FILE_BYTES};
 use super::words::WordIndex;
 
-use crate::ast::Language as AstLanguage;
+use crate::ast::{Language as AstLanguage, Symbol as AstSymbol};
 
 /// In-memory index for one workspace. Composed from the per-file table,
 /// the trigram + word sub-indexes, the dep graph, the append-only version
@@ -238,7 +238,11 @@ impl IndexState {
     /// graph in [`Self::symbols`]. Cheap to call after a single-file
     /// reindex; the full-rebuild loop calls this once per file. Files
     /// with no recognised tree-sitter grammar (the index also handles
-    /// `.md`, `.json`, …) are skipped silently.
+    /// `.md`, `.json`, …) are skipped silently — `IndexedFile::symbols`
+    /// stays empty for those files. For grammar-recognised files the
+    /// same parse populates `IndexedFile::symbols` so the
+    /// `outline_get` builtin doesn't have to re-parse on every call
+    /// (issue #2456).
     pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId) {
         let Some(file) = self.files.get(&id).cloned() else {
             return;
@@ -251,8 +255,16 @@ impl IndexState {
         else {
             return;
         };
-        self.symbols
-            .rebuild_file(id, &file.relative_path, language, &source, &file.imports);
+        let outcome =
+            self.symbols
+                .rebuild_file(id, &file.relative_path, language, &source, &file.imports);
+        if let Some(file_mut) = self.files.get_mut(&id) {
+            file_mut.symbols = outcome
+                .symbols
+                .iter()
+                .map(indexed_symbol_from_ast)
+                .collect();
+        }
     }
 
     /// Walk every file's import-resolution table and add the
@@ -341,6 +353,20 @@ impl IndexState {
     /// Restore the `next_id` counter from a serialised snapshot.
     pub(crate) fn set_next_file_id(&mut self, id: FileId) {
         self.next_id = id.max(1);
+    }
+}
+
+/// Map an AST-level [`AstSymbol`] (0-based tree-sitter coordinates) into
+/// the flat [`IndexedSymbol`] (1-based outline coordinates) that the
+/// `outline_get` builtin returns. Pure, used by
+/// [`IndexState::rebuild_symbol_graph_for`].
+fn indexed_symbol_from_ast(sym: &AstSymbol) -> IndexedSymbol {
+    IndexedSymbol {
+        name: sym.name.clone(),
+        kind: sym.kind.as_str().to_string(),
+        start_line: sym.start_row.saturating_add(1),
+        end_line: sym.end_row.saturating_add(1),
+        signature: sym.signature.clone(),
     }
 }
 

@@ -501,6 +501,51 @@ fn outline_get_returns_empty_for_unknown_id() {
     assert!(extract_list(&outline).is_empty());
 }
 
+#[test]
+fn outline_get_populates_symbols_after_rebuild() {
+    // Issue #2456: rebuild used to leave `IndexedFile::symbols` empty
+    // even though the typed symbol graph did parse the file. Now the
+    // same parse populates both; `outline_get` must surface the
+    // resulting flat outline.
+    let dir = workspace();
+    let (registry, _) = build();
+    rebuild_in(dir.path(), &registry);
+
+    let util_id = extract_int(&call(
+        &registry,
+        "hostlib_code_index_path_to_id",
+        dict(&[("path", VmValue::String(Rc::from("src/util.ts")))]),
+    ));
+    let outline = call(
+        &registry,
+        "hostlib_code_index_outline_get",
+        dict(&[("file_id", VmValue::Int(util_id))]),
+    );
+    let entries = extract_list(&outline);
+    assert!(
+        !entries.is_empty(),
+        "outline_get should return at least one symbol for src/util.ts after rebuild"
+    );
+    let helper = entries
+        .iter()
+        .find(|v| {
+            let d = extract_dict(v);
+            matches!(d.get("name"), Some(VmValue::String(s)) if s.as_ref() == "helper")
+        })
+        .expect("expected a `helper` symbol in src/util.ts");
+    let helper_dict = extract_dict(helper);
+    let kind = match helper_dict.get("kind") {
+        Some(VmValue::String(s)) => s.to_string(),
+        other => panic!("expected string kind, got {other:?}"),
+    };
+    assert_eq!(kind, "function", "`helper` should be a function symbol");
+    let start_line = extract_int(helper_dict.get("start_line").expect("start_line"));
+    assert!(
+        start_line >= 1,
+        "start_line should be 1-based, got {start_line}"
+    );
+}
+
 // === Change log ===
 
 #[test]
