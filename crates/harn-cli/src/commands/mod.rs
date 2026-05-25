@@ -64,6 +64,7 @@ pub(crate) mod test;
 pub mod test_bench;
 pub mod time;
 pub(crate) mod tool;
+pub(crate) mod tool_mode_parity;
 pub(crate) mod trace;
 pub mod trigger;
 pub(crate) mod trust;

@@ -92,8 +92,33 @@ fn test_parses_provider_capabilities_audit_json() {
         panic!("expected provider command");
     };
     let ProviderCommand::Capabilities(capabilities) = args.command;
-    let ProviderCapabilitiesCommand::Audit(audit) = capabilities.command;
+    let ProviderCapabilitiesCommand::Audit(audit) = capabilities.command else {
+        panic!("expected audit command");
+    };
     assert!(audit.json);
+}
+
+#[test]
+fn test_parses_provider_capabilities_promote_from_eval() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider",
+        "capabilities",
+        "promote-from-eval",
+        "overlay.toml",
+        "--catalog",
+        "custom-capabilities.toml",
+    ]);
+
+    let Command::Provider(args) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::Capabilities(capabilities) = args.command;
+    let ProviderCapabilitiesCommand::PromoteFromEval(promote) = capabilities.command else {
+        panic!("expected promote-from-eval command");
+    };
+    assert_eq!(promote.overlay_path, PathBuf::from("overlay.toml"));
+    assert_eq!(promote.catalog, PathBuf::from("custom-capabilities.toml"));
 }
 
 #[test]

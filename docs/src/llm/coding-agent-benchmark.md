@@ -19,6 +19,8 @@ Artifacts are written to `.harn-runs/coding-agent-bench/latest/` by default:
 - `local_readiness.json`: local-provider recommendation evidence derived from
   local runs, with provider transport failures, unsupported capability
   failures, and behavioral task failures separated.
+- `tool_mode_parity_overlay.toml`: generated `(provider, model)` parity verdicts
+  with pass-rate, divergence, confidence, and evidence metadata for catalog promotion.
 - `<run_id>/summary.json`: the Harn harness result for one run.
 - `<run_id>/transcript_events.jsonl`: canonical transcript events from `transcript_events(...)`.
 - `summary.md`: a readable table for sharing results.
@@ -97,6 +99,13 @@ harn providers support \
 
 The checked-in page stays deterministic when no empirical input is supplied, so
 CI can run `make check-provider-support` without depending on local API keys.
+
+To promote the latest parity verdicts into the provider capability matrix:
+
+```sh
+harn provider capabilities promote-from-eval \
+  .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml
+```
 
 ## Reading Results
 
