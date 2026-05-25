@@ -43,6 +43,22 @@ suite. `all` is the default.
 | `read-only-audit` | one-tool read-only audit with no edits |
 | `no-tool-diagnosis` | prompt-only diagnosis with no tools |
 
+## Structural Validator and Step Judge
+
+The suite runs with the 4-rule structural validator by default. The validator
+checks for empty replies when writes are expected, phantom completion, malformed
+tool-call text, and suspiciously large prose-only output before a turn is
+accepted. Use `--structural-validator off` to disable it for an ablation, or
+`--structural-validator custom:<json>` to pass a literal
+`with_structural_validator(...)` config.
+
+`step_judge` remains opt-in for this benchmark. Pass `--step-judge
+symmetric-cheap`, `--step-judge asymmetric`, `--step-judge symmetric-strong`,
+or `--step-judge custom:<json>` when intentionally measuring an LLM judge. The
+validator-vs-judge ablation in `experiments/step-judge/REPORT.md` found that
+the validator catches useful text-format drift but does not replace the old
+judge-on-text lift, so the benchmark default is validator-on and judge-off.
+
 ## Provider Matrix
 
 Pass model selectors with repeated or comma-separated `--model` flags. Selectors

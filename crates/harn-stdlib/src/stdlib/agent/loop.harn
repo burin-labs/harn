@@ -37,6 +37,7 @@ import {
   agent_session_finalize,
   agent_session_init,
   agent_session_inject_feedback,
+  agent_session_messages,
   agent_session_pop_last_assistant,
   agent_session_record_assistant,
   agent_session_record_tool_results,
@@ -378,6 +379,7 @@ fn __run_structural_validator(
       parsed_done_marker: parsed?.done_marker ?? "",
       tool_parse_errors: parsed?.tool_parse_errors ?? [],
       protocol_violations: parsed?.protocol_violations ?? [],
+      tool_format: turn_opts?.tool_format ?? llm_opts?.tool_format ?? "",
       output_tokens: llm_result?.output_tokens ?? 0,
       max_output_tokens: llm_opts?.max_tokens ?? turn_opts?.max_tokens ?? 0,
       provider: llm_result?.provider ?? "",
@@ -1186,6 +1188,18 @@ fn __agent_loop_fire_resume_continuity(session, opts) {
   return omit(opts, ["_resume_continuity"])
 }
 
+fn __agent_loop_pop_structural_veto_turn(session_id) {
+  let messages = agent_session_messages(session_id)
+  if len(messages) == 0 {
+    return false
+  }
+  let last = messages[len(messages) - 1]
+  if last?.role != "assistant" {
+    return false
+  }
+  return agent_session_pop_last_assistant(session_id)
+}
+
 @complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
@@ -1356,7 +1370,7 @@ fn __agent_loop_run(message, session, initial_opts) {
             ?? "structural validator rejected assistant turn"
         }
         structural_validator_attempts = structural_validator_attempts + 1
-        agent_session_pop_last_assistant(session.session_id)
+        __agent_loop_pop_structural_veto_turn(session.session_id)
         let feedback = to_string(structural_verdict?.feedback ?? "")
         if feedback != "" {
           agent_session_inject_feedback(session.session_id, "structural_validator", feedback)

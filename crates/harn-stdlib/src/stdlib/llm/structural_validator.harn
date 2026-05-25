@@ -288,6 +288,9 @@ fn __sv_non_empty_when_writes_expected(payload) {
   if len(__sv_list(payload?.tool_calls)) > 0 {
     return nil
   }
+  if __sv_any_prior_write_tools(payload) {
+    return nil
+  }
   if __sv_done_marker_present(payload) {
     return nil
   }
@@ -323,8 +326,17 @@ fn __sv_join_messages(values) -> string {
 }
 
 fn __sv_tool_calls_well_formed(payload) {
-  let parse_errors = __sv_string_list(payload?.tool_parse_errors)
-  let protocol_violations = __sv_string_list(payload?.protocol_violations)
+  let is_text_tool_format = lowercase(__sv_string(payload?.tool_format)) == "text"
+  let parse_errors = if is_text_tool_format {
+    __sv_string_list(payload?.tool_parse_errors)
+  } else {
+    []
+  }
+  let protocol_violations = if is_text_tool_format {
+    __sv_string_list(payload?.protocol_violations)
+  } else {
+    []
+  }
   if len(parse_errors) == 0 && len(protocol_violations) == 0 {
     return nil
   }
