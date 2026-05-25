@@ -136,9 +136,7 @@ impl Compiler {
             "__select_list"
         };
 
-        let name_idx = self
-            .chunk
-            .add_constant(Constant::String(builtin_name.into()));
+        let name_idx = self.string_constant(builtin_name);
         self.chunk.emit_u16(Op::Constant, name_idx, self.line);
 
         for case in cases {
@@ -162,7 +160,7 @@ impl Compiler {
 
         for (i, case) in cases.iter().enumerate() {
             self.emit_get_binding(&result_name);
-            let idx_prop = self.chunk.add_constant(Constant::String("index".into()));
+            let idx_prop = self.string_constant("index");
             self.chunk.emit_u16(Op::GetProperty, idx_prop, self.line);
             let case_i = self.chunk.add_constant(Constant::Int(i as i64));
             self.chunk.emit_u16(Op::Constant, case_i, self.line);
@@ -172,7 +170,7 @@ impl Compiler {
             self.begin_scope();
 
             self.emit_get_binding(&result_name);
-            let val_prop = self.chunk.add_constant(Constant::String("value".into()));
+            let val_prop = self.string_constant("value");
             self.chunk.emit_u16(Op::GetProperty, val_prop, self.line);
             self.emit_define_binding(&case.variable, false);
 

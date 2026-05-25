@@ -91,8 +91,8 @@ pub(crate) struct ExceptionHandler {
     pub(crate) stack_depth: usize,
     pub(crate) frame_depth: usize,
     pub(crate) env_scope_depth: usize,
-    /// If non-empty, this catch only handles errors whose enum_name matches.
-    pub(crate) error_type: String,
+    /// When present, this catch only handles errors whose enum_name matches.
+    pub(crate) error_type: Option<Rc<str>>,
 }
 
 /// Iterator state for for-in loops.
@@ -821,13 +821,6 @@ impl Vm {
 
     pub(crate) fn peek(&self) -> Result<&VmValue, VmError> {
         self.stack.last().ok_or(VmError::StackUnderflow)
-    }
-
-    pub(crate) fn const_string(c: &Constant) -> Result<String, VmError> {
-        match c {
-            Constant::String(s) => Ok(s.clone()),
-            _ => Err(VmError::TypeError("expected string constant".into())),
-        }
     }
 
     pub(crate) fn const_str(c: &Constant) -> Result<&str, VmError> {

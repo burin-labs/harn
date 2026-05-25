@@ -63,6 +63,21 @@ impl VmHotPathFixture {
     }
 }
 
+struct CompilerHotPathFixture {
+    name: &'static str,
+    source: String,
+}
+
+impl CompilerHotPathFixture {
+    fn new(name: &'static str, source: String) -> Self {
+        Self { name, source }
+    }
+
+    fn compile(&self) {
+        black_box(harn_vm::compile_source(&self.source).expect("compiler fixture should compile"));
+    }
+}
+
 struct BytecodeCacheFixture {
     source: String,
     source_path: PathBuf,
@@ -312,7 +327,66 @@ pipeline default(task) {
 "#,
             runtime,
         ),
+        VmHotPathFixture::new(
+            "string_interpolation_many_parts",
+            r#"
+pipeline default(task) {
+  let a = "alpha"
+  let b = "beta"
+  let c = "gamma"
+  let d = "delta"
+  var i = 0
+  var total = 0
+  while i < 2500 {
+    let text = "${a}:${b}:${c}:${d}:${a}:${b}:${c}:${d}"
+    total = total + len(text)
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}
+"#,
+            runtime,
+        ),
+        VmHotPathFixture::new(
+            "builtin_reference_lookup",
+            r#"
+pipeline default(task) {
+  let input = ["a", "bb", "ccc", "dddd"]
+  var i = 0
+  var total = 0
+  while i < 1500 {
+    let counts = input.map(len)
+    total = total + counts[0] + counts[1] + counts[2] + counts[3]
+    i = i + 1
+  }
+  if total < 0 {
+    log("unreachable")
+  }
+}
+"#,
+            runtime,
+        ),
     ]
+}
+
+fn compiler_fixtures() -> Vec<CompilerHotPathFixture> {
+    let mut repeated_constants = String::from("pipeline default(task) {\n  var total = 0\n");
+    for i in 0..400 {
+        repeated_constants.push_str(&format!(
+            "  let row{i} = {{status: \"open\", repo: \"harn\", kind: \"issue\", label: \"perf\"}}\n"
+        ));
+        repeated_constants.push_str(&format!(
+            "  total = total + len(row{i}.status) + len(row{i}.repo) + len(row{i}.kind) + len(row{i}.label)\n"
+        ));
+    }
+    repeated_constants.push_str("  if total < 0 { log(\"unreachable\") }\n}\n");
+
+    vec![CompilerHotPathFixture::new(
+        "repeated_string_constants",
+        repeated_constants,
+    )]
 }
 
 fn timed_vm_runs(runtime: &Runtime, fixture: &VmHotPathFixture, iterations: u64) -> Duration {
@@ -321,6 +395,16 @@ fn timed_vm_runs(runtime: &Runtime, fixture: &VmHotPathFixture, iterations: u64)
         let vm = fixture.setup_vm();
         let started = Instant::now();
         fixture.execute(runtime, vm);
+        total += started.elapsed();
+    }
+    total
+}
+
+fn timed_compiler_runs(fixture: &CompilerHotPathFixture, iterations: u64) -> Duration {
+    let mut total = Duration::ZERO;
+    for _ in 0..iterations {
+        let started = Instant::now();
+        fixture.compile();
         total += started.elapsed();
     }
     total
@@ -345,6 +429,31 @@ fn bench_vm_hot_paths(c: &mut Criterion) {
             fixture,
             |b, fixture| {
                 b.iter_custom(|iterations| timed_vm_runs(&runtime, black_box(fixture), iterations));
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_compiler_hot_paths(c: &mut Criterion) {
+    let filters = criterion_filters();
+    let fixtures = compiler_fixtures();
+    let mut group = c.benchmark_group("compiler_hot_paths");
+    for fixture in &fixtures {
+        if matches_criterion_filter(&filters, "compiler_hot_paths", fixture.name) {
+            let stats = allocation_stats_per_iteration(ALLOCATION_SAMPLES, || fixture.compile());
+            emit_allocation_jsonl(
+                "compiler_hot_paths",
+                fixture.name,
+                ALLOCATION_SAMPLES,
+                stats,
+            );
+        }
+        group.bench_with_input(
+            BenchmarkId::from_parameter(fixture.name),
+            fixture,
+            |b, fixture| {
+                b.iter_custom(|iterations| timed_compiler_runs(black_box(fixture), iterations));
             },
         );
     }
@@ -389,6 +498,6 @@ fn bench_bytecode_cache(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default().sample_size(10);
-    targets = bench_vm_hot_paths, bench_bytecode_cache
+    targets = bench_vm_hot_paths, bench_compiler_hot_paths, bench_bytecode_cache
 }
 criterion_main!(benches);

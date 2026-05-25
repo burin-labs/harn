@@ -39,7 +39,7 @@ impl Compiler {
         }
         self.handler_depth += 1;
         let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-        let empty_type = self.chunk.add_constant(Constant::String(String::new()));
+        let empty_type = self.string_constant("");
         self.emit_type_name_extra(empty_type);
 
         self.compile_node(operand)?;
@@ -81,16 +81,16 @@ impl Compiler {
         // Extract the type name for typed catch (e.g., "AppError")
         let type_name = error_type.as_ref().and_then(|te| {
             if let harn_parser::TypeExpr::Named(name) = te {
-                Some(name.clone())
+                Some(name.as_str())
             } else {
                 None
             }
         });
 
-        let type_name_idx = if let Some(ref tn) = type_name {
-            self.chunk.add_constant(Constant::String(tn.clone()))
+        let type_name_idx = if let Some(tn) = type_name {
+            self.string_constant(tn)
         } else {
-            self.chunk.add_constant(Constant::String(String::new()))
+            self.string_constant("")
         };
 
         let has_catch = !catch_body.is_empty() || error_var.is_some();
@@ -133,7 +133,7 @@ impl Compiler {
             // rethrow (finally already fired via the body's throw).
             self.handler_depth += 1;
             let rethrow_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-            let empty_type = self.chunk.add_constant(Constant::String(String::new()));
+            let empty_type = self.string_constant("");
             self.emit_type_name_extra(empty_type);
 
             self.compile_try_body(catch_body)?;
@@ -162,7 +162,7 @@ impl Compiler {
 
             self.handler_depth += 1;
             let error_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-            let empty_type = self.chunk.add_constant(Constant::String(String::new()));
+            let empty_type = self.string_constant("");
             self.emit_type_name_extra(empty_type);
 
             self.compile_try_body(body)?;
@@ -213,7 +213,7 @@ impl Compiler {
         // `try { body }` returns Result.Ok(value) or Result.Err(error).
         self.handler_depth += 1;
         let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-        let empty_type = self.chunk.add_constant(Constant::String(String::new()));
+        let empty_type = self.string_constant("");
         self.emit_type_name_extra(empty_type);
 
         self.compile_try_body(body)?;
@@ -230,7 +230,7 @@ impl Compiler {
         // Error path: wrap in Result.Err.
         self.chunk.patch_jump(catch_jump);
 
-        let err_idx = self.chunk.add_constant(Constant::String("Err".to_string()));
+        let err_idx = self.string_constant("Err");
         self.chunk.emit_u16(Op::Constant, err_idx, self.line);
         self.chunk.emit(Op::Swap, self.line);
         self.chunk.emit_u8(Op::Call, 1, self.line);
@@ -257,7 +257,7 @@ impl Compiler {
 
         let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
         // Empty type name → untyped catch.
-        let empty_type = self.chunk.add_constant(Constant::String(String::new()));
+        let empty_type = self.string_constant("");
         let hi = (empty_type >> 8) as u8;
         let lo = empty_type as u8;
         self.chunk.code.push(hi);

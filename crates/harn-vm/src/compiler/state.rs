@@ -31,6 +31,7 @@ impl Compiler {
             scope_depth: 0,
             type_aliases: std::collections::HashMap::new(),
             type_scopes: vec![std::collections::HashMap::new()],
+            string_constants: std::collections::HashMap::new(),
             local_scopes: vec![std::collections::HashMap::new()],
             module_level: true,
         }
@@ -59,6 +60,25 @@ impl Compiler {
         names.sort();
         names.dedup();
         names
+    }
+
+    pub(super) fn string_constant(&mut self, value: &str) -> u16 {
+        if let Some(idx) = self.string_constants.get(value) {
+            return *idx;
+        }
+        let owned = value.to_string();
+        let idx = self.chunk.add_constant(Constant::String(owned.clone()));
+        self.string_constants.insert(owned, idx);
+        idx
+    }
+
+    pub(super) fn owned_string_constant(&mut self, value: String) -> u16 {
+        if let Some(idx) = self.string_constants.get(value.as_str()) {
+            return *idx;
+        }
+        let idx = self.chunk.add_constant(Constant::String(value.clone()));
+        self.string_constants.insert(value, idx);
+        idx
     }
 
     /// Populate `type_aliases` from a program's top-level `type T = ...`
@@ -229,7 +249,7 @@ impl Compiler {
             // global. The typechecker rejects every other signature with
             // HARN-NAM-101 so we don't need to re-validate the shape here.
             if Self::has_top_level_fn_main(program) {
-                let harness_name = self.chunk.add_constant(Constant::String("harness".into()));
+                let harness_name = self.string_constant("harness");
                 self.chunk.emit_u16(Op::GetVar, harness_name, self.line);
                 self.emit_named_call("main", 1);
                 pipeline_emits_value = true;
@@ -369,19 +389,15 @@ impl Compiler {
 
                 if let harn_parser::TypeExpr::Named(name) = &check_type {
                     if let Some(methods) = self.interface_methods.get(name).cloned() {
-                        let fn_idx = self
-                            .chunk
-                            .add_constant(Constant::String("__assert_interface".into()));
+                        let fn_idx = self.string_constant("__assert_interface");
                         self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
                         self.emit_get_binding(&param.name);
-                        let name_idx = self
-                            .chunk
-                            .add_constant(Constant::String(param.name.clone()));
+                        let name_idx = self.string_constant(&param.name);
                         self.chunk.emit_u16(Op::Constant, name_idx, self.line);
-                        let iface_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                        let iface_idx = self.string_constant(name);
                         self.chunk.emit_u16(Op::Constant, iface_idx, self.line);
                         let methods_str = methods.join(",");
-                        let methods_idx = self.chunk.add_constant(Constant::String(methods_str));
+                        let methods_idx = self.owned_string_constant(methods_str);
                         self.chunk.emit_u16(Op::Constant, methods_idx, self.line);
                         self.chunk.emit_u8(Op::Call, 4, self.line);
                         self.chunk.emit(Op::Pop, self.line);
@@ -420,14 +436,10 @@ impl Compiler {
     }
 
     fn emit_schema_assert_call(&mut self, param: &TypedParam, schema: &VmValue) {
-        let fn_idx = self
-            .chunk
-            .add_constant(Constant::String("__assert_schema".into()));
+        let fn_idx = self.string_constant("__assert_schema");
         self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
         self.emit_get_binding(&param.name);
-        let name_idx = self
-            .chunk
-            .add_constant(Constant::String(param.name.clone()));
+        let name_idx = self.string_constant(&param.name);
         self.chunk.emit_u16(Op::Constant, name_idx, self.line);
         self.emit_vm_value_literal(schema);
         self.chunk.emit_u8(Op::Call, 3, self.line);
@@ -577,7 +589,7 @@ impl Compiler {
     pub(super) fn emit_vm_value_literal(&mut self, value: &VmValue) {
         match value {
             VmValue::String(text) => {
-                let idx = self.chunk.add_constant(Constant::String(text.to_string()));
+                let idx = self.string_constant(text);
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             VmValue::Int(number) => {
@@ -602,7 +614,7 @@ impl Compiler {
             }
             VmValue::Dict(entries) => {
                 for (key, item) in entries.iter() {
-                    let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+                    let key_idx = self.string_constant(key);
                     self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                     self.emit_vm_value_literal(item);
                 }
@@ -769,7 +781,7 @@ impl Compiler {
             self.chunk
                 .emit_u16(Op::GetLocalSlot, binding.slot, self.line);
         } else {
-            let idx = self.chunk.add_constant(Constant::String(name.to_string()));
+            let idx = self.string_constant(name);
             self.chunk.emit_u16(Op::GetVar, idx, self.line);
         }
     }
@@ -778,7 +790,7 @@ impl Compiler {
         if let Some(slot) = self.define_local_slot(name, mutable) {
             self.chunk.emit_u16(Op::DefLocalSlot, slot, self.line);
         } else {
-            let idx = self.chunk.add_constant(Constant::String(name.to_string()));
+            let idx = self.string_constant(name);
             let op = if mutable { Op::DefVar } else { Op::DefLet };
             self.chunk.emit_u16(op, idx, self.line);
         }
@@ -799,7 +811,7 @@ impl Compiler {
             self.chunk
                 .emit_u16(Op::SetLocalSlot, binding.slot, self.line);
         } else {
-            let idx = self.chunk.add_constant(Constant::String(name.to_string()));
+            let idx = self.string_constant(name);
             self.chunk.emit_u16(Op::SetVar, idx, self.line);
         }
     }

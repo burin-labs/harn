@@ -174,12 +174,10 @@ impl Vm {
         };
 
         if let Some(handler) = self.exception_handlers.pop() {
-            if !handler.error_type.is_empty() {
+            if let Some(error_type) = handler.error_type.as_deref() {
                 // Typed catch: only match when the thrown enum's type equals the declared type.
                 let matches = match &thrown_value {
-                    VmValue::EnumVariant(enum_variant) => {
-                        enum_variant.has_enum_name(&handler.error_type)
-                    }
+                    VmValue::EnumVariant(enum_variant) => enum_variant.has_enum_name(error_type),
                     _ => false,
                 };
                 if !matches {

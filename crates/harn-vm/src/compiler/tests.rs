@@ -25,6 +25,14 @@ fn disasm_opcodes(disasm: &str) -> Vec<&str> {
         .collect()
 }
 
+fn string_constant_count(chunk: &Chunk, value: &str) -> usize {
+    chunk
+        .constants
+        .iter()
+        .filter(|constant| matches!(constant, Constant::String(text) if text == value))
+        .count()
+}
+
 #[test]
 fn test_compile_arithmetic() {
     let chunk = compile_source_with_options(
@@ -154,6 +162,42 @@ fn test_optimizer_folds_literal_collections_and_strings() {
         .contains(&Constant::String("haha".to_string())));
     assert!(!opcodes.contains(&"ADD"));
     assert!(!opcodes.contains(&"MUL"));
+}
+
+#[test]
+fn test_compiler_reuses_string_constants_within_chunk() {
+    let chunk = compile_source(
+        r#"pipeline test(task) {
+  log("same")
+  log("same")
+  let row = {status: "same"}
+  log(row.status)
+}"#,
+    );
+
+    assert_eq!(string_constant_count(&chunk, "same"), 1);
+    assert_eq!(string_constant_count(&chunk, "status"), 1);
+}
+
+#[test]
+fn test_compiler_reuses_string_constants_per_nested_chunk() {
+    let chunk = compile_source(
+        r#"fn inner() {
+  log("nested")
+  log("nested")
+}
+
+pipeline test(task) {
+  inner()
+}"#,
+    );
+    let function = chunk
+        .functions
+        .iter()
+        .find(|function| function.name == "inner")
+        .expect("inner function should compile");
+
+    assert_eq!(string_constant_count(&function.chunk, "nested"), 1);
 }
 
 #[test]

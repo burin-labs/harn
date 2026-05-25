@@ -386,15 +386,16 @@ impl super::super::Vm {
     }
 
     pub(super) async fn execute_sync_mutex_enter(&mut self) -> Result<(), VmError> {
-        let key = {
+        let (chunk, idx) = {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            Self::const_string(&frame.chunk.constants[idx])?
+            (Rc::clone(&frame.chunk), idx)
         };
+        let key = Self::const_str(&chunk.constants[idx])?;
         let permit = self
             .sync_runtime
-            .acquire("mutex", &key, 1, 1, None, self.cancel_token.clone())
+            .acquire("mutex", key, 1, 1, None, self.cancel_token.clone())
             .await?
             .ok_or_else(|| VmError::Runtime(format!("mutex '{key}' timed out")))?;
         self.held_sync_guards

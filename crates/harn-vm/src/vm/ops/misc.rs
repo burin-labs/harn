@@ -1,22 +1,18 @@
-use crate::chunk::Constant;
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
     pub(super) fn execute_check_type(&mut self) -> Result<(), VmError> {
-        let frame = self.frames.last_mut().unwrap();
-        let var_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let type_idx = frame.chunk.read_u16(frame.ip) as usize;
-        frame.ip += 2;
-        let var_name = match &frame.chunk.constants[var_idx] {
-            Constant::String(s) => s.clone(),
-            _ => return Err(VmError::TypeError("expected string constant".into())),
+        let (chunk, var_idx, type_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let var_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let type_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (std::rc::Rc::clone(&frame.chunk), var_idx, type_idx)
         };
-        let expected_type = match &frame.chunk.constants[type_idx] {
-            Constant::String(s) => s.clone(),
-            _ => return Err(VmError::TypeError("expected string constant".into())),
-        };
-        if let Some(val) = self.env.get(&var_name) {
+        let var_name = Self::const_str(&chunk.constants[var_idx])?;
+        let expected_type = Self::const_str(&chunk.constants[type_idx])?;
+        if let Some(val) = self.env.get(var_name) {
             let actual_type = val.type_name();
             let compatible = actual_type == expected_type
                 || (expected_type == "float" && actual_type == "int")
