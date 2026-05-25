@@ -557,9 +557,13 @@ fn verify_trajectory_candidate_with_tolerance(
 /// surface.
 ///
 /// Returns `Ok(None)` when no segments cleared `min_segment_len`. When
-/// only a single segment is produced, falls back to
-/// [`synthesize_candidate_from_trace`] so a one-session trajectory
-/// still yields a candidate.
+/// fewer than `min_examples` segments are produced, falls back to
+/// [`synthesize_candidate_from_trace`] using the first trace so a
+/// short trajectory still yields a candidate. Any additional segments
+/// not picked up by synthesis are still returned in
+/// [`TrajectoryIngestResult::traces`] so callers / verifiers / bundle
+/// builders can see them, and a `tracing::warn!` is emitted listing the
+/// ids of the traces the synthesis path did not consume.
 pub fn ingest_agent_loop_trajectory(
     tap: &TrajectoryTap,
     turns: &[AgentTurnRecord],
@@ -571,10 +575,28 @@ pub fn ingest_agent_loop_trajectory(
     }
     let needs_synthesis = traces.len() < options.min_examples.max(2);
     let (mut artifacts, trace_pool) = if needs_synthesis {
-        let trace = traces.into_iter().next().expect("non-empty by check above");
-        let artifacts =
-            synthesize_candidate_from_trace(trace.clone(), options, Vec::new(), None, None)?;
-        (artifacts, vec![trace])
+        // Synthesis builds a single-trace candidate, but we must not
+        // silently discard the other traces — they still belong to
+        // the result so the bundle pipeline, verifier, and any
+        // downstream auditor can observe the full ingested set.
+        let trace_pool = traces.clone();
+        let mut iter = traces.into_iter();
+        let primary = iter.next().expect("non-empty by check above");
+        let dropped_from_synthesis: Vec<String> = iter.map(|t| t.id).collect();
+        if !dropped_from_synthesis.is_empty() {
+            tracing::warn!(
+                target: "harn_vm::crystallize::trajectory",
+                primary_trace_id = %primary.id,
+                dropped_trace_ids = ?dropped_from_synthesis,
+                min_examples = options.min_examples,
+                segment_count = trace_pool.len(),
+                "trajectory synthesis kept only the first trace; \
+                 remaining traces are surfaced via TrajectoryIngestResult.traces \
+                 but are not part of the synthesized candidate"
+            );
+        }
+        let artifacts = synthesize_candidate_from_trace(primary, options, Vec::new(), None, None)?;
+        (artifacts, trace_pool)
     } else {
         let trace_pool = traces.clone();
         let artifacts = crystallize_traces(traces, options)?;

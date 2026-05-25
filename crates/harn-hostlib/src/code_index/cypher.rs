@@ -23,6 +23,19 @@
 //! Read-only; no MERGE/CREATE/SET. The result is a flat
 //! [`Vec<CypherRow>`] where each row maps the projected aliases to
 //! [`CypherValue`]s.
+//!
+//! Execution is bounded by two budgets enforced inside [`exec`] and
+//! [`parse`]:
+//! * [`MAX_ROWS`] — maximum number of intermediate bindings *and*
+//!   projected rows. The executor returns [`CypherError::ExecError`] as
+//!   soon as it tries to push past the cap, so a degenerate
+//!   `MATCH (a),(b),(c) RETURN ...` query cannot lock the symbol-graph
+//!   index for arbitrarily long.
+//! * [`MAX_PATTERNS`] — maximum number of comma-separated disjoint
+//!   patterns in one query. Beyond this, the parser raises
+//!   [`CypherError::ParseError`]; richer joins should use the edge
+//!   syntax (`-[:CALLS]->`) which is bounded by [`MAX_ROWS`] but does
+//!   not multiply pattern counts.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -31,6 +44,22 @@ use std::rc::Rc;
 use harn_vm::VmValue;
 
 use super::symbol_graph::{EdgeKind, NodeId, NodeKind, SymbolGraph};
+
+/// Hard upper bound on the number of rows the executor will materialize
+/// before raising [`CypherError::ExecError`]. A query like
+/// `MATCH (a),(b),(c),(d) RETURN ...` over a workspace symbol graph can
+/// produce N⁴ rows in the worst case; without a cap a single Cypher call
+/// can lock the host's symbol-graph index for many seconds. This budget
+/// matches the schema description (`code_index/cypher.request.json`).
+pub const MAX_ROWS: usize = 10_000;
+
+/// Hard upper bound on the number of comma-separated `MATCH` patterns in
+/// one query. Each additional pattern multiplies the row count, so we
+/// refuse to even start enumerating beyond three disjoint patterns —
+/// scripts that need a richer join should chain patterns through the
+/// edge syntax (`-[:CALLS]->`) rather than relying on a cartesian
+/// product. Enforced at parse time so the executor never sees one.
+pub const MAX_PATTERNS: usize = 3;
 
 /// Error variants the parser/executor raise. The host wraps these in
 /// [`crate::error::HostlibError`] before surfacing to scripts. Each
@@ -397,7 +426,15 @@ enum Literal {
 #[derive(Debug, Clone)]
 struct Projection {
     operand: Operand,
+    /// Final alias used in the projected row. Empty during parsing
+    /// when no explicit `AS` clause was supplied; filled in after the
+    /// query is fully parsed by [`resolve_projection_aliases`].
     alias: String,
+    /// `true` if the user supplied an `AS <name>` clause for this
+    /// projection. Used to disambiguate default-alias collisions
+    /// (e.g. `RETURN 1, 2` would otherwise project two `value` keys
+    /// into the same `BTreeMap`).
+    explicit_alias: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +504,14 @@ impl<'a> Parser<'a> {
         while matches!(self.peek(), Some(Token::Comma)) {
             self.advance();
             matches.push(self.parse_pattern()?);
+            if matches.len() > MAX_PATTERNS {
+                return Err(CypherError::ParseError(format!(
+                    "too many disjoint MATCH patterns (got {}, cap is {}); \
+                     join through edge syntax (`-[:KIND]->`) instead of a cartesian product",
+                    matches.len(),
+                    MAX_PATTERNS
+                )));
+            }
         }
         let where_clause = if self.match_keyword("WHERE") {
             Some(self.parse_expr()?)
@@ -479,6 +524,7 @@ impl<'a> Parser<'a> {
             self.advance();
             projections.push(self.parse_projection()?);
         }
+        resolve_projection_aliases(&mut projections)?;
         Ok(Query {
             matches,
             where_clause,
@@ -729,7 +775,7 @@ impl<'a> Parser<'a> {
         let operand = self.parse_operand()?;
         let alias = if self.match_keyword("AS") {
             match self.advance() {
-                Some(Token::Ident(s)) => s.clone(),
+                Some(Token::Ident(s)) => Some(s.clone()),
                 other => {
                     return Err(CypherError::ParseError(format!(
                         "expected alias after AS, got {other:?}"
@@ -737,9 +783,14 @@ impl<'a> Parser<'a> {
                 }
             }
         } else {
-            default_alias(&operand)
+            None
         };
-        Ok(Projection { operand, alias })
+        let explicit_alias = alias.is_some();
+        Ok(Projection {
+            operand,
+            alias: alias.unwrap_or_default(),
+            explicit_alias,
+        })
     }
 }
 
@@ -755,6 +806,59 @@ fn default_alias(operand: &Operand) -> String {
         } => format!("{var}.{p}"),
         Operand::Literal(_) => "value".to_string(),
     }
+}
+
+/// Assign default aliases to every projection that didn't get an
+/// explicit `AS <name>`. Default aliases for literal operands all start
+/// as `"value"`, so without deduplication a query like `RETURN 1, 2`
+/// would silently overwrite the first column. We resolve the collision
+/// deterministically by suffixing the second, third, … occurrence with
+/// `_2`, `_3`, … For non-literal default aliases (`var` or
+/// `var.property`) we leave names unchanged because they are already
+/// disambiguated by the underlying path. If a default-derived alias
+/// collides with an explicit alias, the default is suffixed; an
+/// explicit alias colliding with another explicit alias raises a
+/// `ParseError::ParseError` because that is a user authoring mistake.
+fn resolve_projection_aliases(projections: &mut [Projection]) -> Result<(), CypherError> {
+    use std::collections::HashSet;
+
+    // First pass: collect explicit aliases and detect duplicates among them.
+    let mut seen: HashSet<String> = HashSet::new();
+    for proj in projections.iter() {
+        if proj.explicit_alias && !seen.insert(proj.alias.clone()) {
+            return Err(CypherError::ParseError(format!(
+                "duplicate alias `{}` in RETURN clause",
+                proj.alias
+            )));
+        }
+    }
+
+    // Second pass: fill in default aliases with collision-suffixing.
+    let mut literal_count: usize = 0;
+    for proj in projections.iter_mut() {
+        if proj.explicit_alias {
+            continue;
+        }
+        let base = default_alias(&proj.operand);
+        let is_literal_default = matches!(proj.operand, Operand::Literal(_));
+        let mut candidate = base.clone();
+        if is_literal_default {
+            literal_count += 1;
+            if literal_count >= 2 {
+                candidate = format!("{base}_{literal_count}");
+            }
+        }
+        // Guard against any other accidental collision (default path
+        // alias clashing with an explicit alias or another default).
+        let mut bump: usize = 2;
+        while seen.contains(&candidate) {
+            candidate = format!("{base}_{bump}");
+            bump += 1;
+        }
+        seen.insert(candidate.clone());
+        proj.alias = candidate;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +877,17 @@ fn exec(query: &Query, graph: &SymbolGraph) -> Result<Vec<CypherRow>, CypherErro
                     merged.insert(k, v);
                 }
                 new_rows.push(merged);
+                // Pre-projection budget: a cartesian explosion can
+                // balloon `new_rows` long before we ever start
+                // building projected rows, so we cap intermediate
+                // bindings too.
+                if new_rows.len() > MAX_ROWS {
+                    return Err(CypherError::ExecError(format!(
+                        "row budget exceeded ({} > {}); narrow the MATCH or add a WHERE clause",
+                        new_rows.len(),
+                        MAX_ROWS
+                    )));
+                }
             }
         }
         all_rows = new_rows;
@@ -791,6 +906,16 @@ fn exec(query: &Query, graph: &SymbolGraph) -> Result<Vec<CypherRow>, CypherErro
             row.insert(proj.alias.clone(), v);
         }
         out.push(row);
+        // Post-WHERE budget: even if intermediate bindings stayed
+        // under the cap, a permissive projection on a wide graph can
+        // still hand back too many rows.
+        if out.len() > MAX_ROWS {
+            return Err(CypherError::ExecError(format!(
+                "row budget exceeded ({} > {}); narrow the MATCH or add a WHERE clause",
+                out.len(),
+                MAX_ROWS
+            )));
+        }
     }
     Ok(out)
 }
@@ -1108,6 +1233,71 @@ mod tests {
         assert_eq!(
             rows[0].get("path"),
             Some(&CypherValue::String("src/a.rs".into()))
+        );
+    }
+
+    #[test]
+    fn literal_default_aliases_do_not_collide() {
+        // `RETURN 1, 2, 3` previously projected all three literals under
+        // the same `"value"` key, silently overwriting earlier columns.
+        // The deduplicator suffixes the 2nd/3rd literals as `value_2`
+        // / `value_3` so every literal makes it into the row.
+        let g = fixture();
+        let rows = execute("MATCH (f:Function {name: 'start'}) RETURN 1, 2, 3", &g).unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.get("value"), Some(&CypherValue::Int(1)));
+        assert_eq!(row.get("value_2"), Some(&CypherValue::Int(2)));
+        assert_eq!(row.get("value_3"), Some(&CypherValue::Int(3)));
+    }
+
+    #[test]
+    fn duplicate_explicit_aliases_are_rejected() {
+        let g = fixture();
+        let err = execute("MATCH (f:Function) RETURN f.name AS n, f.path AS n", &g).unwrap_err();
+        assert!(
+            matches!(err, CypherError::ParseError(_)),
+            "expected ParseError for duplicate explicit alias, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_disjoint_patterns() {
+        // Four disjoint patterns is one more than `MAX_PATTERNS`; the
+        // parser refuses before the executor ever sees the cartesian
+        // explosion.
+        let g = fixture();
+        let err = execute(
+            "MATCH (a:Function),(b:Function),(c:Function),(d:Function) RETURN a.name",
+            &g,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, CypherError::ParseError(msg) if msg.contains("too many disjoint MATCH patterns")),
+            "expected ParseError for too many patterns, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn enforces_row_budget_on_cartesian_explosion() {
+        // Build a synthetic graph with enough Function nodes that even
+        // a three-pattern cartesian product blows the row budget.
+        // 25 * 25 * 25 = 15,625 > MAX_ROWS (10,000).
+        let mut g = SymbolGraph::new();
+        let mut source = String::new();
+        for i in 0..25 {
+            source.push_str(&format!("fn f{i}() {{}}\n"));
+        }
+        g.rebuild_file(1, "src/big.rs", Language::Rust, &source, &[]);
+
+        let err = execute(
+            "MATCH (a:Function),(b:Function),(c:Function) RETURN a.name AS n",
+            &g,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, CypherError::ExecError(msg) if msg.contains("row budget exceeded")),
+            "expected ExecError for row budget, got {err:?}"
         );
     }
 
