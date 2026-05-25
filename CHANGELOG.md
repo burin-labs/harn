@@ -6,6 +6,24 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.8.39
+
+### Added
+
+- **Workflow state channels design (#2219).** Added the v0 design record for
+  typed workflow state channels with deterministic reducers, including the
+  adoption boundary relative to artifacts, transcripts, map/join/reduce nodes,
+  replay, and resume.
+
+### Fixed
+
+- **Release gate fresh-worktree bootstrapping.** `release_gate.sh audit` now
+  installs the tree-sitter CLI before grammar checks, and `smoke-audit`
+  respects `CARGO_TARGET_DIR` when locating the debug `harn` binary.
+- **Windows merge-queue secret-store flake.** The Windows CI unit slice now
+  forces the deterministic file backend for secret-store tests so hosted
+  Credential Manager transient misses do not block unrelated releases.
+
 ## v0.8.38
 
 ### Added

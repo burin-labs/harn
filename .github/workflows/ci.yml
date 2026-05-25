@@ -251,6 +251,12 @@ jobs:
       # coverage while the filter limits the tests that actually execute.
       - name: Compile workspace tests and run Windows unit slice
         shell: bash
+        env:
+          # Hosted Windows runners can return transient misses from the live
+          # Credential Manager. The file-backend tests cover deterministic
+          # secret-store behavior; this lane is for compile plus core unit
+          # coverage.
+          HARN_SECRET_STORE_BACKEND: file
         run: |
           windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-fmt) or package(harn-lint) or package(harn-modules)'
           if command -v cargo-nextest >/dev/null 2>&1; then

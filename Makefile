@@ -246,7 +246,7 @@ release-smoke:
 # prebuild already populated target/debug; rebuilding release would
 # fight the cargo lock with rust-audit's clippy + nextest.
 smoke-audit:
-	HARN_BINARY=target/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,) ./scripts/release_smoke.sh
+	HARN_BINARY=$(or $(CARGO_TARGET_DIR),target)/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,) ./scripts/release_smoke.sh
 
 # Build-verify the portal frontend (TypeScript type check + Vite bundle).
 # The repo-root npm scripts bootstrap portal dependencies when needed so this

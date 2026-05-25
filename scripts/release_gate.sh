@@ -146,6 +146,7 @@ run_grammar_audit() {
     echo "warning: tree-sitter-harn not present; skipping tree-sitter grammar audit"
     return 0
   fi
+  time_phase "tree-sitter npm ci" bash -c "cd tree-sitter-harn && npm ci"
   time_phase "verify_tree_sitter_parse" ./scripts/verify_tree_sitter_parse.py --strict
   time_phase "tree-sitter npm test" bash -c "cd tree-sitter-harn && npm test"
 }
