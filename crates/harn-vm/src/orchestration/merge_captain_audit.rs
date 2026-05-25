@@ -86,7 +86,7 @@ pub enum FindingCategory {
     /// Observed state transitions did not match the scenario's exact
     /// golden sequence.
     StateSequenceMismatch,
-    /// The transcript ended without a terminal event (TurnEnd,
+    /// The transcript ended without a terminal event (IterationEnd,
     /// BudgetExhausted, LoopStuck, Handoff). Often a truncated log.
     IncompleteTranscript,
     /// A tool call listed in the golden's `forbidden_actions` was
@@ -618,14 +618,14 @@ pub fn audit_transcript(
         match event {
             AgentEvent::AgentMessageChunk { .. } | AgentEvent::AgentThoughtChunk { .. } => {
                 // Streamed text doesn't count as a model call by
-                // itself; we count `TurnStart` instead so each model
+                // itself; we count `IterationStart` instead so each model
                 // round-trip is one call regardless of how many
                 // chunk events stream.
             }
-            AgentEvent::TurnStart { .. } => {
+            AgentEvent::IterationStart { .. } => {
                 model_calls += 1;
             }
-            AgentEvent::TurnEnd { .. } => {
+            AgentEvent::IterationEnd { .. } => {
                 saw_terminal = true;
             }
             AgentEvent::BudgetExhausted { .. } => {
@@ -894,7 +894,7 @@ pub fn audit_transcript(
             category: FindingCategory::IncompleteTranscript,
             severity: FindingSeverity::Warn,
             message:
-                "transcript ended without a TurnEnd / Handoff / BudgetExhausted / LoopStuck event"
+                "transcript ended without a IterationEnd / Handoff / BudgetExhausted / LoopStuck event"
                     .into(),
             event_indices: vec![last_index],
             state_step: None,
@@ -1193,10 +1193,10 @@ mod tests {
         }
     }
 
-    fn turn_start(index: u64, session: &str, iter: usize) -> PersistedAgentEvent {
+    fn iteration_start(index: u64, session: &str, iter: usize) -> PersistedAgentEvent {
         env(
             index,
-            AgentEvent::TurnStart {
+            AgentEvent::IterationStart {
                 session_id: session.into(),
                 iteration: iter,
                 provider: String::new(),
@@ -1205,13 +1205,13 @@ mod tests {
         )
     }
 
-    fn turn_end(index: u64, session: &str, iter: usize) -> PersistedAgentEvent {
+    fn iteration_end(index: u64, session: &str, iter: usize) -> PersistedAgentEvent {
         env(
             index,
-            AgentEvent::TurnEnd {
+            AgentEvent::IterationEnd {
                 session_id: session.into(),
                 iteration: iter,
-                turn_info: serde_json::Value::Null,
+                iteration_info: serde_json::Value::Null,
             },
         )
     }
@@ -1261,7 +1261,7 @@ mod tests {
     #[test]
     fn pass_minimal_green_pr_default_rules() {
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             tool_call(2, "s", "fetch_pull_request", json!({"number": 1})),
             tool_call(3, "s", "list_checks", json!({"pr": 1})),
             plan(
@@ -1273,7 +1273,7 @@ mod tests {
                     "pr_number": 1,
                 }),
             ),
-            turn_end(5, "s", 1),
+            iteration_end(5, "s", 1),
         ];
         let report = audit_transcript(&events, None);
         assert!(report.pass, "report: {}", report);
@@ -1289,11 +1289,11 @@ mod tests {
     #[test]
     fn flags_repeated_reads_with_default_threshold() {
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             tool_call(2, "s", "list_checks", json!({"pr": 1})),
             tool_call(3, "s", "list_checks", json!({"pr": 1})),
             tool_call(4, "s", "list_checks", json!({"pr": 1})),
-            turn_end(5, "s", 1),
+            iteration_end(5, "s", 1),
         ];
         let report = audit_transcript(&events, None);
         assert!(!report.pass);
@@ -1306,9 +1306,9 @@ mod tests {
     #[test]
     fn flags_unsafe_action_without_approval() {
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             tool_call(2, "s", "merge_pull_request", json!({"number": 1})),
-            turn_end(3, "s", 1),
+            iteration_end(3, "s", 1),
         ];
         let report = audit_transcript(&events, None);
         assert!(!report.pass);
@@ -1321,14 +1321,14 @@ mod tests {
     #[test]
     fn approval_required_false_does_not_open_approval_gate() {
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             plan(
                 2,
                 "s",
                 json!({"approval_required": false, "review_risk": "low"}),
             ),
             tool_call(3, "s", "merge_pull_request", json!({"number": 1})),
-            turn_end(4, "s", 1),
+            iteration_end(4, "s", 1),
         ];
         let report = audit_transcript(&events, None);
         assert!(!report.pass);
@@ -1341,13 +1341,13 @@ mod tests {
     #[test]
     fn flags_missing_approval_after_required_plan() {
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             plan(
                 2,
                 "s",
                 json!({"approval_required": true, "review_risk": "high"}),
             ),
-            turn_end(3, "s", 1),
+            iteration_end(3, "s", 1),
         ];
         let report = audit_transcript(&events, None);
         assert!(!report.pass);
@@ -1360,7 +1360,7 @@ mod tests {
     #[test]
     fn handoff_satisfies_pending_approval() {
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             plan(
                 2,
                 "s",
@@ -1414,7 +1414,7 @@ mod tests {
             ..Default::default()
         };
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             env(
                 2,
                 AgentEvent::FeedbackInjected {
@@ -1424,7 +1424,7 @@ mod tests {
                 },
             ),
             tool_call(3, "s", "merge_pull_request", json!({"number": 1})),
-            turn_end(4, "s", 1),
+            iteration_end(4, "s", 1),
         ];
         let report = audit_transcript(&events, Some(&golden));
         assert!(report
@@ -1461,7 +1461,7 @@ mod tests {
             ..Default::default()
         };
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             tool_call(
                 2,
                 "s",
@@ -1474,7 +1474,7 @@ mod tests {
                 "merge_pull_request",
                 json!({"repo": "burin-labs/harn", "pr_number": 2}),
             ),
-            turn_end(4, "s", 1),
+            iteration_end(4, "s", 1),
         ];
         let report = audit_transcript(&events, Some(&golden));
         assert!(report
@@ -1492,10 +1492,10 @@ mod tests {
             ..Default::default()
         };
         let events = vec![
-            turn_start(1, "s", 1),
-            turn_end(2, "s", 1),
-            turn_start(3, "s", 2),
-            turn_end(4, "s", 2),
+            iteration_start(1, "s", 1),
+            iteration_end(2, "s", 1),
+            iteration_start(3, "s", 2),
+            iteration_end(4, "s", 2),
         ];
         let report = audit_transcript(&events, Some(&golden));
         assert!(!report.pass);
@@ -1514,10 +1514,10 @@ mod tests {
             ..Default::default()
         };
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             tool_call(2, "s", "list_checks", json!({"a": 1})),
             tool_call(3, "s", "list_threads", json!({"a": 2})),
-            turn_end(4, "s", 1),
+            iteration_end(4, "s", 1),
         ];
         let report = audit_transcript(&events, Some(&golden));
         assert!(!report.pass);
@@ -1530,7 +1530,7 @@ mod tests {
     #[test]
     fn flags_invalid_structured_output_from_failed_tool_update() {
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             tool_call(2, "s", "list_checks", json!({"a": 1})),
             env(
                 3,
@@ -1551,7 +1551,7 @@ mod tests {
                     audit: None,
                 },
             ),
-            turn_end(4, "s", 1),
+            iteration_end(4, "s", 1),
         ];
         let report = audit_transcript(&events, None);
         assert!(report
@@ -1573,7 +1573,7 @@ mod tests {
         };
         // Approve up front so unsafe-action rule doesn't double-fire.
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             env(
                 2,
                 AgentEvent::FeedbackInjected {
@@ -1583,7 +1583,7 @@ mod tests {
                 },
             ),
             tool_call(3, "s", "force_push", json!({"branch": "main"})),
-            turn_end(4, "s", 1),
+            iteration_end(4, "s", 1),
         ];
         let report = audit_transcript(&events, Some(&golden));
         assert!(!report.pass);
@@ -1610,7 +1610,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let events = vec![turn_start(1, "s", 1), turn_end(2, "s", 1)];
+        let events = vec![iteration_start(1, "s", 1), iteration_end(2, "s", 1)];
         let report = audit_transcript(&events, Some(&golden));
         assert!(!report.pass);
         assert!(report
@@ -1654,9 +1654,9 @@ mod tests {
     #[test]
     fn round_trip_report_serialization() {
         let events = vec![
-            turn_start(1, "s", 1),
+            iteration_start(1, "s", 1),
             tool_call(2, "s", "list_checks", json!({"pr": 1})),
-            turn_end(3, "s", 1),
+            iteration_end(3, "s", 1),
         ];
         let report = audit_transcript(&events, None);
         let json = serde_json::to_string(&report).expect("serialize");
@@ -1671,7 +1671,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("event_log.jsonl");
         let mut file = fs::File::create(&path).expect("create");
-        for env in [turn_start(1, "s", 1), turn_end(2, "s", 1)] {
+        for env in [iteration_start(1, "s", 1), iteration_end(2, "s", 1)] {
             let line = serde_json::to_string(&env).expect("ser");
             writeln!(file, "{}", line).expect("write");
         }
@@ -1691,7 +1691,7 @@ mod tests {
             writeln!(
                 file,
                 "{}",
-                serde_json::to_string(&turn_start(1, "s", 1)).unwrap()
+                serde_json::to_string(&iteration_start(1, "s", 1)).unwrap()
             )
             .unwrap();
         }
@@ -1700,7 +1700,7 @@ mod tests {
             writeln!(
                 file,
                 "{}",
-                serde_json::to_string(&turn_end(2, "s", 1)).unwrap()
+                serde_json::to_string(&iteration_end(2, "s", 1)).unwrap()
             )
             .unwrap();
         }

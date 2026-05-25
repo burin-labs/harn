@@ -246,7 +246,7 @@ pub(super) fn clear_session_hooks_builtin(
 
 /// Register a checkpoint hook covering one or more agent-loop seams.
 /// Sugar over `register_session_hook("loop_checkpoint", pattern, handler)`:
-/// `kinds` is a list of seam names (e.g. `["turn_start", "pre_tool_dispatch"]`)
+/// `kinds` is a list of seam names (e.g. `["iteration_start", "pre_tool_dispatch"]`)
 /// or the wildcard `"*"` / `nil` to subscribe to every seam. The handler
 /// receives the `LoopCheckpoint` payload `{session_id, iteration, kind,
 /// delivered, inbox_delivered, dispatch_skipped}`.
@@ -328,10 +328,10 @@ fn checkpoint_pattern_from_kinds(value: &VmValue) -> Result<String, VmError> {
 }
 
 const CHECKPOINT_KINDS: &[&str] = &[
-    "turn_start",
+    "iteration_start",
     "pre_tool_dispatch",
     "post_tool_dispatch",
-    "turn_end",
+    "iteration_end",
     "pre_compact",
     "post_compact",
     "daemon_idle_pre",

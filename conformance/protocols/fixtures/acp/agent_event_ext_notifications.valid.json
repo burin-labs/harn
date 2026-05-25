@@ -9,7 +9,7 @@
       "method": "_harn/agentEvent",
       "params": {
         "iteration": 0,
-        "kind": "turn_start",
+        "kind": "iteration_start",
         "sessionId": "session-1"
       }
     },
@@ -18,12 +18,12 @@
       "method": "_harn/agentEvent",
       "params": {
         "iteration": 0,
-        "kind": "turn_end",
-        "sessionId": "session-1",
-        "turnInfo": {
+        "iterationInfo": {
           "tool_calls": 2,
           "tool_names": ["read_file", "grep"]
-        }
+        },
+        "kind": "iteration_end",
+        "sessionId": "session-1"
       }
     },
     {

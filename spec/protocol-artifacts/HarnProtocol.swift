@@ -79,6 +79,8 @@ public enum HarnProtocolConstants {
         "composition_start",
         "daemon_watchdog_tripped",
         "feedback_injected",
+        "iteration_end",
+        "iteration_start",
         "judge_decision",
         "loop_control_decision",
         "loop_stuck",
@@ -89,8 +91,6 @@ public enum HarnProtocolConstants {
         "tool_call_audit",
         "tool_format_override",
         "typed_checkpoint",
-        "turn_end",
-        "turn_start",
     ]
     public static let toolLifecycleExtensionFields: [String] = [
         "audit",

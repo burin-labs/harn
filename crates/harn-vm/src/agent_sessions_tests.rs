@@ -749,7 +749,7 @@ async fn open_or_create_registers_event_log_sink_when_active_log_is_installed() 
     let log = active_event_log().expect("active event log");
     let mut stream = log.clone().subscribe(&topic, None).await.unwrap();
 
-    emit_event(&AgentEvent::TurnStart {
+    emit_event(&AgentEvent::IterationStart {
         session_id: session.clone(),
         iteration: 0,
         provider: String::new(),
@@ -761,11 +761,11 @@ async fn open_or_create_registers_event_log_sink_when_active_log_is_installed() 
         .await
         .expect("event log stream should receive emitted event")
         .expect("event log stream item");
-    assert_eq!(emitted.1.kind, "turn_start");
+    assert_eq!(emitted.1.kind, "iteration_start");
 
     let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].1.kind, "turn_start");
+    assert_eq!(events[0].1.kind, "iteration_start");
 
     crate::event_log::reset_active_event_log();
     reset_all_sinks();

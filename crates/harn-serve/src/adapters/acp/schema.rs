@@ -59,6 +59,8 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "composition_start",
     "daemon_watchdog_tripped",
     "feedback_injected",
+    "iteration_end",
+    "iteration_start",
     "judge_decision",
     "loop_control_decision",
     "loop_stuck",
@@ -69,8 +71,6 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "tool_call_audit",
     "tool_format_override",
     "typed_checkpoint",
-    "turn_end",
-    "turn_start",
 ];
 
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[

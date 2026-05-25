@@ -144,7 +144,7 @@ fn __invoke_llm(message, turn_system, llm_opts) {
     prompt: message,
     system: turn_system,
     opts: llm_opts,
-    turn: {iteration: llm_opts?._turn_iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
+    turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
   }
   let result = try {
     caller(call)
@@ -268,7 +268,7 @@ fn __tool_envelope(call, tools, options) {
     annotations: annotations,
     description: description,
     turn: {
-      iteration: options?._turn_iteration ?? 0,
+      iteration: options?._iteration ?? 0,
       session_id: to_string(options?.session_id ?? ""),
       run_id: options?.run_id ?? options?._run_id,
       model: options?.model,
@@ -368,7 +368,7 @@ fn __run_structural_validator(
     tool_name: __structural_validator_tool_name(),
     tool_args: {
       session_id: session_id,
-      iteration: turn_opts?._turn_iteration ?? 0,
+      iteration: turn_opts?._iteration ?? 0,
       attempts: attempts,
       tool_calls: tool_calls,
       tools: turn_opts?.tools,
@@ -385,13 +385,13 @@ fn __run_structural_validator(
       prior_successful_tools: prior_successful_tools,
       prior_rejected_tools: prior_rejected_tools,
     },
-    call_id: "structural-validator-turn-" + to_string(turn_opts?._turn_iteration ?? 0),
+    call_id: "structural-validator-turn-" + to_string(turn_opts?._iteration ?? 0),
     declared_executor: "harn",
     schema: nil,
     annotations: nil,
     description: "Internal structural validator probe",
     turn: {
-      iteration: turn_opts?._turn_iteration ?? 0,
+      iteration: turn_opts?._iteration ?? 0,
       session_id: session_id,
       run_id: turn_opts?.run_id ?? turn_opts?._run_id,
       model: turn_opts?.model,
@@ -603,7 +603,14 @@ fn __native_fallback_feedback(policy, fallback_index) {
   return native_tool_contract_feedback_prompt({policy: policy, fallback_index: fallback_index})
 }
 
-fn __detect_native_fallback(llm_result, parsed, turn_opts, fallback_index, session_id, turn_index) {
+fn __detect_native_fallback(
+  llm_result,
+  parsed,
+  turn_opts,
+  fallback_index,
+  session_id,
+  iteration_index,
+) {
   let native_calls = llm_result?.native_tool_calls ?? []
   let parsed_calls = parsed?.calls ?? []
   let format = turn_opts?.tool_format ?? ""
@@ -622,7 +629,7 @@ fn __detect_native_fallback(llm_result, parsed, turn_opts, fallback_index, sessi
   agent_record_native_tool_fallback(
     session_id,
     {
-      iteration: turn_index + 1,
+      iteration: iteration_index + 1,
       accepted: accepted,
       policy: policy,
       fallback_index: new_index,
@@ -760,7 +767,7 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     command_policy: turn_opts?.command_policy,
     permissions: turn_opts?.permissions,
     reminders: turn_opts?.reminders,
-    _turn_iteration: turn_opts?._turn_iteration ?? 0,
+    _iteration: turn_opts?._iteration ?? 0,
     _tool_caller: turn_opts?._tool_caller,
     _max_concurrent_tools: cap,
     _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
@@ -944,15 +951,15 @@ fn __next_text_only_count(tool_count, consecutive_text_only) {
 }
 
 /**
- * Build the `turn_info` payload for the `turn_end` event from the LLM
- * result plus the loop's per-turn aggregates. Carries `provider`,
+ * Build the `iteration_info` payload for the `iteration_end` event from
+ * the LLM result plus the loop's per-iteration aggregates. Carries `provider`,
  * `model`, `response_ms`, token counts, and `thinking_chars` so live
  * pulse-check consumers (fleet hooks, ACP clients) can attribute
  * latency and surface "still working" indicators without re-parsing
  * the transcript JSONL. Empty/missing fields are dropped so the event
  * stays small for providers that don't report telemetry.
  */
-fn __turn_info_payload(llm_result, tool_count, visible_text) {
+fn __iteration_info_payload(llm_result, tool_count, visible_text) {
   let telemetry = llm_result?.provider_telemetry ?? {}
   let thinking = llm_result?.thinking ?? ""
   let thinking_chars = if type_of(thinking) == "string" {
@@ -1051,7 +1058,7 @@ fn __agent_loop_suspend_checkpoint(session, iteration) {
  * invariant for one seam: which bridge modes are eligible to drain, and
  * whether the host should pull the agent_inbox feedback queue.
  *
- *   turn_start, post_tool_dispatch, turn_end → drain `interrupt_immediate`
+ *   iteration_start, post_tool_dispatch, iteration_end → drain `interrupt_immediate`
  *     and `finish_step`; the model will see whatever lands on its next
  *     prompt build, so both modes get the same opportunity here.
  *   pre_tool_dispatch → drain `interrupt_immediate` only. This is the
@@ -1070,13 +1077,13 @@ fn __agent_loop_suspend_checkpoint(session, iteration) {
  *     prompt — no further LLM call runs after `loop_exit` (harn#2212).
  *     Hosts that need the model to see a reminder before the agent
  *     terminates must use `finish_step` (drained at every iteration
- *     boundary, including the last `turn_end` before the loop breaks).
+ *     boundary, including the last `iteration_end` before the loop breaks).
  */
 fn __agent_loop_checkpoint_modes(kind) {
   if kind == "pre_tool_dispatch" || kind == "daemon_idle_pre" || kind == "daemon_idle_post" {
     return {immediate: true, finish_step: false, audit_only: false, inbox: false}
   }
-  if kind == "turn_start" || kind == "post_tool_dispatch" || kind == "turn_end" {
+  if kind == "iteration_start" || kind == "post_tool_dispatch" || kind == "iteration_end" {
     return {immediate: true, finish_step: true, audit_only: false, inbox: false}
   }
   if kind == "pre_compact" || kind == "post_compact" {
@@ -1241,25 +1248,25 @@ fn __agent_loop_run(message, session, initial_opts) {
         final_status = "budget_exhausted"
         break
       }
-      let turn_index = iteration
+      let iteration_index = iteration
       agent_emit_event(
         session.session_id,
-        "turn_start",
-        {iteration: turn_index + 1, provider: opts?.provider ?? "", model: opts?.model ?? ""},
+        "iteration_start",
+        {iteration: iteration_index + 1, provider: opts?.provider ?? "", model: opts?.model ?? ""},
       )
       try {
         __host_drain_file_edits(session.session_id)
       } catch (e) {
         nil
       }
-      __agent_loop_checkpoint(session.session_id, "turn_start", {iteration: turn_index + 1})
-      var turn_opts = agent_skills_match(session, opts, turn_index)
+      __agent_loop_checkpoint(session.session_id, "iteration_start", {iteration: iteration_index + 1})
+      var turn_opts = agent_skills_match(session, opts, iteration_index)
       turn_opts = agent_tool_search_inject_if_needed(turn_opts)
-      __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: turn_index + 1})
+      __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
       agent_autocompact_if_needed(session, turn_opts)
-      __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: turn_index + 1})
-      let turn_system = agent_build_turn_system(session, turn_opts, turn_index)
-      let turn_messages = agent_build_turn_messages(session, turn_opts, turn_index)
+      __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: iteration_index + 1})
+      let turn_system = agent_build_turn_system(session, turn_opts, iteration_index)
+      let turn_messages = agent_build_turn_messages(session, turn_opts, iteration_index)
       let llm_overrides = turn_opts?.llm_options ?? {}
       let base_opts = turn_opts + llm_overrides
       let llm_opts = base_opts
@@ -1267,7 +1274,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         messages: turn_messages,
         session_id: session.session_id,
         tool_format: turn_opts.tool_format,
-        _turn_iteration: turn_index + 1,
+        _iteration: iteration_index + 1,
       }
       let call = __invoke_llm(message, turn_system, llm_opts)
       if !call.ok {
@@ -1288,7 +1295,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         turn_opts,
         fallback_index,
         session.session_id,
-        turn_index,
+        iteration_index,
       )
       fallback_index = fallback_outcome.fallback_index
       let tool_calls = if fallback_outcome.triggered {
@@ -1305,24 +1312,24 @@ fn __agent_loop_run(message, session, initial_opts) {
       let await_call = __agent_await_resumption_call(tool_calls)
       if await_call != nil {
         suspend_result = __agent_loop_await_resumption(session, iteration, await_call, opts)
-        let _totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, turn_index + 1)
+        let _totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
         agent_emit_event(
           session.session_id,
-          "turn_end",
+          "iteration_end",
           {
-            iteration: turn_index + 1,
-            turn_info: __turn_info_payload(llm_result, len(tool_calls), visible_text),
+            iteration: iteration_index + 1,
+            iteration_info: __iteration_info_payload(llm_result, len(tool_calls), visible_text),
           },
         )
         final_status = "suspended"
         stop_reason = "suspended"
         break
       }
-      let stall_judge_due = agent_stall_done_judge_due(turn_opts, done_judge_invocations, turn_index + 1)
+      let stall_judge_due = agent_stall_done_judge_due(turn_opts, done_judge_invocations, iteration_index + 1)
       let stall_observation = agent_stall_observe_tool_calls(
         session.session_id,
         tool_calls,
-        turn_index + 1,
+        iteration_index + 1,
         turn_opts?.stall_diagnostics,
         stall_state,
         stall_judge_due,
@@ -1356,10 +1363,10 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
         agent_emit_event(
           session.session_id,
-          "turn_end",
+          "iteration_end",
           {
-            iteration: turn_index + 1,
-            turn_info: __turn_info_payload(llm_result, 0, visible_text)
+            iteration: iteration_index + 1,
+            iteration_info: __iteration_info_payload(llm_result, 0, visible_text)
               + {
               dispatch_skipped: true,
               skip_reason: "structural_validator_revise",
@@ -1375,7 +1382,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       if stall_judge_due && stall_warning != nil {
         let stall_verify_opts = turn_opts
           + {_done_judge_due: true, _done_judge_trigger: "stalled"}
-        let stall_verdict = agent_verify_or_continue(session, stall_verify_opts, "stalled", visible_text, turn_index + 1)
+        let stall_verdict = agent_verify_or_continue(session, stall_verify_opts, "stalled", visible_text, iteration_index + 1)
         if stall_verdict?.done_judge_invoked ?? false {
           done_judge_invocations = done_judge_invocations + 1
         }
@@ -1389,14 +1396,17 @@ fn __agent_loop_run(message, session, initial_opts) {
             )
           }
         } else {
-          agent_session_record_usage(session.session_id, llm_result, turn_opts, turn_index + 1)
+          agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
           let tool_count = len(tool_calls)
           agent_emit_event(
             session.session_id,
-            "turn_end",
-            {iteration: turn_index + 1, turn_info: __turn_info_payload(llm_result, tool_count, visible_text)},
+            "iteration_end",
+            {
+              iteration: iteration_index + 1,
+              iteration_info: __iteration_info_payload(llm_result, tool_count, visible_text),
+            },
           )
-          let stalled_done_checkpoint = __agent_loop_checkpoint(session.session_id, "turn_end", {iteration: turn_index + 1})
+          let stalled_done_checkpoint = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
           if stalled_done_checkpoint.delivered > 0 {
             continue
           }
@@ -1406,12 +1416,12 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
       }
       if turn_opts?.step_judge != nil {
-        let remaining_iterations = current_max - turn_index
+        let remaining_iterations = current_max - iteration_index
         let step_verdict = agent_step_judge(
           session,
           llm_result,
           turn_opts,
-          turn_index + 1,
+          iteration_index + 1,
           stall_warning,
           step_judge_attempts,
           remaining_iterations,
@@ -1428,10 +1438,10 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
           agent_emit_event(
             session.session_id,
-            "turn_end",
+            "iteration_end",
             {
-              iteration: turn_index + 1,
-              turn_info: __turn_info_payload(llm_result, 0, visible_text)
+              iteration: iteration_index + 1,
+              iteration_info: __iteration_info_payload(llm_result, 0, visible_text)
                 + {
                 dispatch_skipped: true,
                 skip_reason: "step_judge_revise",
@@ -1445,16 +1455,16 @@ fn __agent_loop_run(message, session, initial_opts) {
           step_judge_attempts = 0
         }
       }
-      let pre_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "pre_tool_dispatch", {iteration: turn_index + 1})
+      let pre_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "pre_tool_dispatch", {iteration: iteration_index + 1})
       if pre_dispatch_checkpoint.dispatch_skipped {
         let tool_count_skipped = len(tool_calls)
-        let totals_skipped = agent_session_record_usage(session.session_id, llm_result, turn_opts, turn_index + 1)
+        let totals_skipped = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
         agent_emit_event(
           session.session_id,
-          "turn_end",
+          "iteration_end",
           {
-            iteration: turn_index + 1,
-            turn_info: __turn_info_payload(llm_result, tool_count_skipped, visible_text)
+            iteration: iteration_index + 1,
+            iteration_info: __iteration_info_payload(llm_result, tool_count_skipped, visible_text)
               + {dispatch_skipped: true, skip_reason: "interrupt_immediate"},
           },
         )
@@ -1469,21 +1479,24 @@ fn __agent_loop_run(message, session, initial_opts) {
       let dispatched = __dispatch_tool_calls(
         session.session_id,
         tool_calls,
-        turn_opts + {_turn_iteration: turn_index + 1, _tool_caller: opts?._tool_caller},
+        turn_opts + {_iteration: iteration_index + 1, _tool_caller: opts?._tool_caller},
       )
       let dispatch = dispatched.dispatch
       audit_background_tasks = __spawn_audit_flushes(audit_background_tasks, dispatched.audit_flushes)
       opts = __sync_tool_search_state(opts, dispatched.turn_opts)
       successful_tools_seen = __merge_tool_names(successful_tools_seen, __tool_names_by_status(dispatch, true))
       rejected_tools_seen = __merge_tool_names(rejected_tools_seen, __tool_names_by_status(dispatch, false))
-      let totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, turn_index + 1)
+      let totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
       let tool_count = len(tool_calls)
       agent_emit_event(
         session.session_id,
-        "turn_end",
-        {iteration: turn_index + 1, turn_info: __turn_info_payload(llm_result, tool_count, visible_text)},
+        "iteration_end",
+        {
+          iteration: iteration_index + 1,
+          iteration_info: __iteration_info_payload(llm_result, tool_count, visible_text),
+        },
       )
-      let post_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "post_tool_dispatch", {iteration: turn_index + 1})
+      let post_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "post_tool_dispatch", {iteration: iteration_index + 1})
       let bridge_step_delivered = post_dispatch_checkpoint.delivered
       if agent_budget_post_call_blocked(totals, turn_opts) {
         final_status = "budget_exhausted"
@@ -1532,7 +1545,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
         dispatch,
         post_turn_opts,
-        turn_index,
+        iteration_index,
       )
       opts = __apply_post_turn_options(opts, outcome)
       var should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
@@ -1549,7 +1562,13 @@ fn __agent_loop_run(message, session, initial_opts) {
             break
           }
           let verify_opts = turn_opts + {_done_judge_due: outcome?.done_judge_due ?? true}
-          let verdict = agent_verify_or_continue(session, verify_opts, outcome.stop_reason, llm_result.text, turn_index)
+          let verdict = agent_verify_or_continue(
+            session,
+            verify_opts,
+            outcome.stop_reason,
+            llm_result.text,
+            iteration_index,
+          )
           verdict_record = verdict
           if verdict?.done_judge_invoked ?? false {
             done_judge_invocations = done_judge_invocations + 1

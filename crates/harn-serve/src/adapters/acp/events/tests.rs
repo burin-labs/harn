@@ -303,16 +303,16 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     failed_error.duration_ms = Some(3);
 
     vec![
-        AgentEvent::TurnStart {
+        AgentEvent::IterationStart {
             session_id: "session-1".to_string(),
             iteration: 0,
             provider: String::new(),
             model: String::new(),
         },
-        AgentEvent::TurnEnd {
+        AgentEvent::IterationEnd {
             session_id: "session-1".to_string(),
             iteration: 0,
-            turn_info: serde_json::json!({
+            iteration_info: serde_json::json!({
                 "tool_calls": 2,
                 "tool_names": ["read_file", "grep"]
             }),
@@ -1655,7 +1655,7 @@ fn internal_agent_events_never_emit_session_updates() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
 
-    sink.handle_event(&AgentEvent::TurnStart {
+    sink.handle_event(&AgentEvent::IterationStart {
         session_id: "session-1".to_string(),
         iteration: 1,
         provider: String::new(),
@@ -1665,10 +1665,10 @@ fn internal_agent_events_never_emit_session_updates() {
         session_id: "session-1".to_string(),
         max_iterations: 3,
     });
-    sink.handle_event(&AgentEvent::TurnEnd {
+    sink.handle_event(&AgentEvent::IterationEnd {
         session_id: "session-1".to_string(),
         iteration: 1,
-        turn_info: serde_json::json!({}),
+        iteration_info: serde_json::json!({}),
     });
     sink.handle_event(&AgentEvent::FeedbackInjected {
         session_id: "session-1".to_string(),

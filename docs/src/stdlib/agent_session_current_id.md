@@ -31,10 +31,10 @@ let session = "support-thread"
 agent_subscribe(
   session,
   { ev ->
-  if ev?.type == "turn_end" {
+  if ev?.type == "iteration_end" {
     let current = agent_session_current_id()
     if current != nil {
-      agent_inject_feedback(current, "turn_marker", "just finished a turn")
+      agent_inject_feedback(current, "iteration_marker", "just finished an iteration")
     }
   }
 },

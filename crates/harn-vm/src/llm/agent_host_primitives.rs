@@ -896,7 +896,7 @@ async fn host_agent_dispatch_tool_call(
             let reminder_payload = serde_json::json!({
                 "event": crate::orchestration::HookEvent::PostToolUse.as_str(),
                 "session": {"id": &session_id},
-                "iteration": agent_primitive_option_int(options, "_turn_iteration").unwrap_or(0),
+                "iteration": agent_primitive_option_int(options, "_iteration").unwrap_or(0),
                 "tool": {"name": &tool_name, "args": &tool_args},
                 "tool_name": &tool_name,
                 "result": {

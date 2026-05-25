@@ -157,6 +157,8 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"composition_start",
 	"daemon_watchdog_tripped",
 	"feedback_injected",
+	"iteration_end",
+	"iteration_start",
 	"judge_decision",
 	"loop_control_decision",
 	"loop_stuck",
@@ -167,8 +169,6 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"tool_call_audit",
 	"tool_format_override",
 	"typed_checkpoint",
-	"turn_end",
-	"turn_start",
 }
 
 // ACPContentBlockType is the typed alias for the ACPContentBlockTypes wire vocabulary.

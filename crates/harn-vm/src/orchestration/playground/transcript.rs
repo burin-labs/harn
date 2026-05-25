@@ -51,7 +51,7 @@ pub fn synthesize_sweep(
     events.push(envelope(
         i,
         now,
-        AgentEvent::TurnStart {
+        AgentEvent::IterationStart {
             session_id: session_id.clone(),
             iteration: 1,
             provider: String::new(),

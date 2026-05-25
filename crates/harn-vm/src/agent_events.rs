@@ -1,10 +1,16 @@
 //! Agent event stream — the ACP-aligned observation surface for the
 //! agent loop.
 //!
-//! Every phase of the turn loop emits an `AgentEvent`. The canonical
+//! Every phase of the agent loop emits an `AgentEvent`. The canonical
 //! variants map 1:1 onto ACP `SessionUpdate` values; three internal
-//! variants (`TurnStart`, `TurnEnd`, `FeedbackInjected`) let pipelines
-//! react to loop milestones that don't have a direct ACP counterpart.
+//! variants (`IterationStart`, `IterationEnd`, `FeedbackInjected`) let
+//! pipelines react to loop milestones that don't have a direct ACP
+//! counterpart.
+//!
+//! `iteration_*` event names refer to one model round-trip inside the
+//! loop (Harn's "iteration"), not to ACP's outer `prompt_turn`. See
+//! `docs/src/concepts/glossary.md` for the canonical vocabulary and
+//! `docs/src/concepts/sota-comparison.md` for the ACP mapping.
 //!
 //! There are two subscription paths, both keyed on session id so two
 //! concurrent sessions never cross-talk:
@@ -413,7 +419,11 @@ pub enum AgentEvent {
         replace: bool,
         metadata: serde_json::Value,
     },
-    TurnStart {
+    /// Fires at the top of every model round-trip inside an
+    /// `agent_loop` invocation. Maps to the `iteration_start` steering
+    /// seam. Not the same as ACP's outer `prompt_turn` boundary; an
+    /// `agent_turn`/`prompt_turn` cycle contains many of these.
+    IterationStart {
         session_id: String,
         iteration: usize,
         /// Configured provider for the impending LLM call. Empty when the
@@ -421,14 +431,17 @@ pub enum AgentEvent {
         /// Surfaces here so observers can show "about to call X/Y" before
         /// the call returns — previously this only landed in the
         /// transcript after the response, leaving live pulse-check
-        /// consumers without a model attribution for in-flight turns.
+        /// consumers without a model attribution for in-flight iterations.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         provider: String,
         /// Configured model id. Same semantics as `provider`.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         model: String,
     },
-    TurnEnd {
+    /// Fires at the bottom of every model round-trip, after tool
+    /// dispatch (or after the dispatch was skipped). Sibling of
+    /// `IterationStart`.
+    IterationEnd {
         session_id: String,
         iteration: usize,
         /// Free-form dict carrying the post-call snapshot. Stable keys
@@ -437,7 +450,7 @@ pub enum AgentEvent {
         /// `input_tokens`, `output_tokens`, `thinking_chars`. Hosts that
         /// surface latency/cost panes key off these without re-parsing
         /// the transcript JSONL.
-        turn_info: serde_json::Value,
+        iteration_info: serde_json::Value,
     },
     /// Emitted when a first-class agent session is explicitly closed by
     /// `agent_session_close`. This gives event-log consumers a typed
@@ -521,7 +534,7 @@ pub enum AgentEvent {
         max_iterations: usize,
     },
     /// Emitted when the loop breaks because consecutive text-only turns
-    /// hit `max_nudges`. Parity with `BudgetExhausted` / `TurnEnd` for
+    /// hit `max_nudges`. Parity with `BudgetExhausted` / `IterationEnd` for
     /// hosts that key off agent-terminal events.
     LoopStuck {
         session_id: String,
@@ -831,8 +844,8 @@ pub enum AgentEvent {
     /// loop check for steering at the expected boundary" without having
     /// to grep the loop body for inline drain calls.
     ///
-    /// `kind` is one of the documented seam names: `turn_start`,
-    /// `pre_tool_dispatch`, `post_tool_dispatch`, `turn_end`,
+    /// `kind` is one of the documented seam names: `iteration_start`,
+    /// `pre_tool_dispatch`, `post_tool_dispatch`, `iteration_end`,
     /// `pre_compact`, `post_compact`, `daemon_idle_pre`,
     /// `daemon_idle_post`, `loop_exit`. `delivered` is the count of
     /// bridge injections drained at this seam (inbox drains are
@@ -865,8 +878,8 @@ impl AgentEvent {
             | Self::ToolCallUpdate { session_id, .. }
             | Self::Plan { session_id, .. }
             | Self::ProgressReported { session_id, .. }
-            | Self::TurnStart { session_id, .. }
-            | Self::TurnEnd { session_id, .. }
+            | Self::IterationStart { session_id, .. }
+            | Self::IterationEnd { session_id, .. }
             | Self::SessionClosed { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
             | Self::StepJudgeDecision { session_id, .. }
@@ -1476,7 +1489,7 @@ mod tests {
         let b = Arc::new(AtomicUsize::new(0));
         multi.push(Arc::new(CountingSink(a.clone())));
         multi.push(Arc::new(CountingSink(b.clone())));
-        let event = AgentEvent::TurnStart {
+        let event = AgentEvent::IterationStart {
             session_id: "s1".into(),
             iteration: 1,
             provider: String::new(),
@@ -1494,7 +1507,7 @@ mod tests {
         let b = Arc::new(AtomicUsize::new(0));
         register_sink("session-a", Arc::new(CountingSink(a.clone())));
         register_sink("session-b", Arc::new(CountingSink(b.clone())));
-        emit_event(&AgentEvent::TurnStart {
+        emit_event(&AgentEvent::IterationStart {
             session_id: "session-a".into(),
             iteration: 0,
             provider: String::new(),
@@ -1502,10 +1515,10 @@ mod tests {
         });
         assert_eq!(a.load(Ordering::SeqCst), 1);
         assert_eq!(b.load(Ordering::SeqCst), 0);
-        emit_event(&AgentEvent::TurnEnd {
+        emit_event(&AgentEvent::IterationEnd {
             session_id: "session-b".into(),
             iteration: 0,
-            turn_info: serde_json::json!({}),
+            iteration_info: serde_json::json!({}),
         });
         assert_eq!(a.load(Ordering::SeqCst), 1);
         assert_eq!(b.load(Ordering::SeqCst), 1);
@@ -1524,7 +1537,7 @@ mod tests {
             let _guard = crate::agent_sessions::enter_current_session("outer-session");
             let inner = crate::agent_sessions::open_or_create(None);
             assert_ne!(inner, "outer-session");
-            emit_event(&AgentEvent::TurnStart {
+            emit_event(&AgentEvent::IterationStart {
                 session_id: inner,
                 iteration: 0,
                 provider: String::new(),
@@ -1543,7 +1556,7 @@ mod tests {
         let path = dir.join("event_log.jsonl");
         let sink = JsonlEventSink::open(&path).unwrap();
         for i in 0..5 {
-            sink.handle_event(&AgentEvent::TurnStart {
+            sink.handle_event(&AgentEvent::IterationStart {
                 session_id: "s".into(),
                 iteration: i,
                 provider: String::new(),
@@ -1567,7 +1580,7 @@ mod tests {
             last_idx = idx;
             last_ts = ts;
             // Event payload flattened — type tag must survive.
-            assert_eq!(val["type"], "turn_start");
+            assert_eq!(val["type"], "iteration_start");
         }
         assert_eq!(last_idx, 4);
         let _ = std::fs::remove_file(&path);
@@ -2322,20 +2335,20 @@ mod tests {
         reset_wildcard_sinks();
         let counter = Arc::new(AtomicUsize::new(0));
         let handle = register_wildcard_sink(Arc::new(CountingSink(counter.clone())));
-        emit_event(&AgentEvent::TurnStart {
+        emit_event(&AgentEvent::IterationStart {
             session_id: "session-w".into(),
             iteration: 0,
             provider: String::new(),
             model: String::new(),
         });
-        emit_event(&AgentEvent::TurnEnd {
+        emit_event(&AgentEvent::IterationEnd {
             session_id: "session-w-other".into(),
             iteration: 0,
-            turn_info: serde_json::json!({}),
+            iteration_info: serde_json::json!({}),
         });
         assert_eq!(counter.load(Ordering::SeqCst), 2);
         unregister_wildcard_sink(handle);
-        emit_event(&AgentEvent::TurnStart {
+        emit_event(&AgentEvent::IterationStart {
             session_id: "session-w".into(),
             iteration: 1,
             provider: String::new(),
@@ -2360,7 +2373,7 @@ mod tests {
         // And a completely-made-up handle is also a no-op.
         let bogus = WildcardSinkHandle(u64::MAX);
         unregister_wildcard_sink(bogus);
-        emit_event(&AgentEvent::TurnStart {
+        emit_event(&AgentEvent::IterationStart {
             session_id: "s".into(),
             iteration: 0,
             provider: String::new(),

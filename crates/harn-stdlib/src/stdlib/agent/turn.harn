@@ -77,40 +77,40 @@ fn __agent_turn_judge_decisions(events) {
 }
 
 fn __agent_turn_iteration_summaries(events) {
-  var turns = {}
+  var iterations = {}
   var order = []
   for event in events {
-    if event?.type == "turn_start" {
+    if event?.type == "iteration_start" {
       let key = to_string(event.iteration)
-      if turns[key] == nil {
-        turns[key] = {iteration: event.iteration}
+      if iterations[key] == nil {
+        iterations[key] = {iteration: event.iteration}
         order = order.push(key)
       }
-      var entry = turns[key]
+      var entry = iterations[key]
       entry["started"] = true
-      turns[key] = entry
+      iterations[key] = entry
     }
-    if event?.type == "turn_end" {
+    if event?.type == "iteration_end" {
       let key = to_string(event.iteration)
-      if turns[key] == nil {
-        turns[key] = {iteration: event.iteration}
+      if iterations[key] == nil {
+        iterations[key] = {iteration: event.iteration}
         order = order.push(key)
       }
-      var entry = turns[key]
+      var entry = iterations[key]
       entry["ended"] = true
-      let info = event?.turn_info ?? {}
+      let info = event?.iteration_info ?? {}
       if info?.tool_count != nil {
         entry["tool_count"] = info.tool_count
       }
       if info?.text != nil {
         entry["prose_chars"] = len(info.text)
       }
-      turns[key] = entry
+      iterations[key] = entry
     }
   }
   var out = []
   for key in order {
-    out = out.push(turns[key])
+    out = out.push(iterations[key])
   }
   return out
 }

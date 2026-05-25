@@ -233,7 +233,7 @@ impl InProcessHost {
 /// the transcript audit but are **never rendered into a model prompt**.
 /// Hosts that want the model to react to the reminder on its final
 /// iteration should use `FinishStep` instead, which drains at every
-/// `turn_start` / `post_tool_dispatch` / `turn_end` checkpoint.
+/// `iteration_start` / `post_tool_dispatch` / `iteration_end` checkpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueuedUserMessageMode {
     InterruptImmediate,
@@ -1665,9 +1665,9 @@ mod tests {
             assert_eq!(finish_step.len(), 1);
             assert_eq!(finish_step[0].content, "first");
 
-            let turn_end = bridge.take_queued_user_messages(false, false, true).await;
-            assert_eq!(turn_end.len(), 1);
-            assert_eq!(turn_end[0].content, "second");
+            let audit_only = bridge.take_queued_user_messages(false, false, true).await;
+            assert_eq!(audit_only.len(), 1);
+            assert_eq!(audit_only[0].content, "second");
         });
     }
 

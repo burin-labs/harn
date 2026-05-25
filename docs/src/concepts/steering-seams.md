@@ -34,11 +34,11 @@ this order, per iteration:
 
 | Kind | Where | Bridge modes drained | Inbox? |
 |---|---|---|---|
-| `turn_start` | Top of each iteration, after `turn_start` event | `interrupt_immediate`, `finish_step` | no |
+| `iteration_start` | Top of each iteration, after `iteration_start` event | `interrupt_immediate`, `finish_step` | no |
 | `pre_compact` | Just before `agent_autocompact_if_needed` | — | yes |
 | `post_compact` | Just after `agent_autocompact_if_needed` | — | yes |
 | `pre_tool_dispatch` | After `__invoke_llm` returns, before `__dispatch_tool_calls` | `interrupt_immediate` only | no |
-| `turn_end` | Stalled-done-judge "done" path, before the loop falls through to terminal | `interrupt_immediate`, `finish_step` | no |
+| `iteration_end` | Stalled-done-judge "done" path, before the loop falls through to terminal | `interrupt_immediate`, `finish_step` | no |
 | `post_tool_dispatch` | After every successful turn dispatch | `interrupt_immediate`, `finish_step` | no |
 | `daemon_idle_pre` | Daemon idle wait, before sleep | `interrupt_immediate` only | no |
 | `daemon_idle_post` | Daemon idle wait, after sleep | `interrupt_immediate` only | no |
@@ -60,7 +60,7 @@ The loop:
 
 1. Skips `__dispatch_tool_calls` entirely — the tool batch does not run.
 2. Records usage for the iteration so cost/token accounting stays honest.
-3. Emits `turn_end` with `dispatch_skipped: true` and `skip_reason:
+3. Emits `iteration_end` with `dispatch_skipped: true` and `skip_reason:
    "interrupt_immediate"` in the turn info.
 4. Continues to the next iteration, where the injected reminder is already in
    the transcript and visible to the model on its next prompt build.
@@ -68,7 +68,7 @@ The loop:
 In other words, `interrupt_immediate` finally means *"stop before the next
 tool fires"*, not *"land at the next iteration boundary anyway."*
 
-The same `interrupt_immediate` injection arriving at `turn_start` or
+The same `interrupt_immediate` injection arriving at `iteration_start` or
 `post_tool_dispatch` is still drained, but those seams sit between iterations
 where no tool is pending — there's nothing to skip, the injection just lands in
 the transcript and the next prompt sees it.
@@ -78,7 +78,7 @@ the transcript and the next prompt sees it.
 Plugin authors observe seams through one canonical builtin:
 
 ```harn,ignore
-register_checkpoint_hook(["pre_tool_dispatch", "turn_end"], { event ->
+register_checkpoint_hook(["pre_tool_dispatch", "iteration_end"], { event ->
   log("seam fired:", event.kind, "delivered:", event.delivered)
 })
 ```
@@ -89,7 +89,7 @@ every seam. The handler receives the `LoopCheckpoint` payload directly.
 Under the hood this registers a `loop_checkpoint` session hook with a
 pattern derived from `kinds` — `register_session_hook("loop_checkpoint", ...)`
 works too, with explicit pattern syntax (`kind=="pre_tool_dispatch"`,
-`kind=~"^(turn_start|loop_exit)$"`).
+`kind=~"^(iteration_start|loop_exit)$"`).
 
 ## Migration from the old drain sites
 
@@ -100,11 +100,10 @@ checkpoint helper is implemented on top of them — but they bypass the
 `__agent_loop_checkpoint` inside the loop body and `register_checkpoint_hook`
 outside it.
 
-The legacy `register_session_hook("turn_start", ...)` /
-`register_session_hook("post_compact", ...)` triple-registration pattern
-still works for backward compatibility, but `register_checkpoint_hook` covers
-every seam in one call and exposes the `dispatch_skipped` signal that
-turn-level hooks never see.
+For one-off hooks on a single seam the
+`register_session_hook("loop_checkpoint", pattern, ...)` plumbing is still
+available, but `register_checkpoint_hook` covers every seam in one call and
+exposes the `dispatch_skipped` signal that per-event hooks never see.
 
 ## Mid-tool preemption
 

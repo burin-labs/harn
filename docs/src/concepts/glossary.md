@@ -70,8 +70,8 @@ parent/child lineage, a pinned system prompt, and a pinned model. Created by
 off a session. `messages` are durable conversational turns; `events` are an
 audit trail; `assets` are large or non-text payloads.
 
-**Transcript event.** One entry in the `events` log. Includes `turn_start`,
-`turn_end`, tool dispatch events, reminder events, and lifecycle events.
+**Transcript event.** One entry in the `events` log. Includes `iteration_start`,
+`iteration_end`, tool dispatch events, reminder events, and lifecycle events.
 
 **Snapshot.** A frozen, serializable copy of a session or worker state, used for
 resume-after-suspend and for replay.
