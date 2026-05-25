@@ -91,14 +91,51 @@ pub(crate) fn parse_duration_arg(raw: &str) -> Result<StdDuration, String> {
     match unit {
         "ms" => Ok(StdDuration::from_millis(value)),
         "s" => Ok(StdDuration::from_secs(value)),
-        "m" => Ok(StdDuration::from_secs(value.saturating_mul(60))),
-        "h" => Ok(StdDuration::from_secs(value.saturating_mul(60 * 60))),
-        "d" => Ok(StdDuration::from_secs(value.saturating_mul(60 * 60 * 24))),
-        "w" => Ok(StdDuration::from_secs(
-            value.saturating_mul(60 * 60 * 24 * 7),
-        )),
+        "m" => Ok(StdDuration::from_secs(checked_duration_product(
+            raw, value, 60,
+        )?)),
+        "h" => Ok(StdDuration::from_secs(checked_duration_product(
+            raw,
+            value,
+            60 * 60,
+        )?)),
+        "d" => Ok(StdDuration::from_secs(checked_duration_product(
+            raw,
+            value,
+            60 * 60 * 24,
+        )?)),
+        "w" => Ok(StdDuration::from_secs(checked_duration_product(
+            raw,
+            value,
+            60 * 60 * 24 * 7,
+        )?)),
         _ => Err(format!(
             "unsupported duration unit '{unit}'; expected ms, s, m, h, d, or w"
         )),
+    }
+}
+
+fn checked_duration_product(raw: &str, value: u64, multiplier: u64) -> Result<u64, String> {
+    value
+        .checked_mul(multiplier)
+        .ok_or_else(|| format!("duration '{raw}' is too large"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_duration_arg_rejects_unit_overflow() {
+        let err = parse_duration_arg("18446744073709551615w").unwrap_err();
+        assert!(err.contains("too large"), "{err}");
+    }
+
+    #[test]
+    fn parse_duration_arg_accepts_large_millisecond_value() {
+        assert_eq!(
+            parse_duration_arg("18446744073709551615ms").unwrap(),
+            StdDuration::from_millis(u64::MAX)
+        );
     }
 }

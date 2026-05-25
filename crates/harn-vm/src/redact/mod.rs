@@ -349,17 +349,12 @@ fn default_safe_headers() -> BTreeSet<String> {
         "request-id".to_string(),
         "user-agent".to_string(),
         "x-a2a-delivery".to_string(),
-        "x-a2a-signature".to_string(),
         "x-correlation-id".to_string(),
         "x-github-delivery".to_string(),
         "x-github-event".to_string(),
         "x-github-hook-id".to_string(),
-        "x-hub-signature-256".to_string(),
-        "x-linear-signature".to_string(),
-        "x-notion-signature".to_string(),
         "x-request-id".to_string(),
         "x-slack-request-timestamp".to_string(),
-        "x-slack-signature".to_string(),
     ])
 }
 
@@ -368,20 +363,21 @@ fn default_deny_header_substrings() -> BTreeSet<String> {
         "authorization".to_string(),
         "cookie".to_string(),
         "secret".to_string(),
+        "signature".to_string(),
         "token".to_string(),
         "key".to_string(),
     ])
 }
 
 fn is_default_sensitive_url_param(lower: &str) -> bool {
+    let compact = compact_secret_name(lower);
     matches!(
-        lower,
-        "api_key"
-            | "apikey"
-            | "access_token"
-            | "refresh_token"
-            | "id_token"
-            | "client_secret"
+        compact.as_str(),
+        "apikey"
+            | "accesstoken"
+            | "refreshtoken"
+            | "idtoken"
+            | "clientsecret"
             | "password"
             | "secret"
             | "token"
@@ -389,41 +385,46 @@ fn is_default_sensitive_url_param(lower: &str) -> bool {
             | "bearer"
             | "sig"
             | "signature"
-    ) || lower.ends_with("_token")
-        || lower.ends_with("_secret")
-        || lower.ends_with("_password")
+    ) || compact.ends_with("token")
+        || compact.ends_with("secret")
+        || compact.ends_with("password")
 }
 
 fn is_default_sensitive_field(lower: &str) -> bool {
+    let compact = compact_secret_name(lower);
     matches!(
-        lower,
+        compact.as_str(),
         "authorization"
-            | "proxy-authorization"
+            | "proxyauthorization"
             | "cookie"
-            | "set-cookie"
-            | "api_key"
+            | "setcookie"
             | "apikey"
-            | "api-key"
-            | "x-amz-security-token"
-            | "x-api-key"
-            | "x-auth-token"
-            | "x-csrf-token"
-            | "x-xsrf-token"
-            | "access_token"
-            | "refresh_token"
-            | "id_token"
-            | "bearer_token"
-            | "client_secret"
-            | "secret"
+            | "xamzsecuritytoken"
+            | "xapikey"
+            | "xauthtoken"
+            | "xcsrftoken"
+            | "xxsrftoken"
+            | "accesstoken"
+            | "refreshtoken"
+            | "idtoken"
+            | "bearertoken"
+            | "clientsecret"
             | "password"
+            | "secret"
             | "passwd"
-            | "private_key"
-            | "session_token"
-    ) || lower.ends_with("_token")
-        || lower.ends_with("_secret")
-        || lower.ends_with("_password")
-        || lower.ends_with("_apikey")
-        || lower.ends_with("_api_key")
+            | "privatekey"
+            | "sessiontoken"
+    ) || compact.ends_with("token")
+        || compact.ends_with("secret")
+        || compact.ends_with("password")
+        || compact.ends_with("apikey")
+}
+
+fn compact_secret_name(lower: &str) -> String {
+    lower
+        .chars()
+        .filter(|ch| *ch != '_' && *ch != '-')
+        .collect()
 }
 
 thread_local! {
@@ -500,6 +501,10 @@ mod tests {
             ("Cookie".to_string(), "session=abc".to_string()),
             ("Content-Type".to_string(), "application/json".to_string()),
             ("X-Webhook-Token".to_string(), "tok-xyz".to_string()),
+            (
+                "X-Slack-Signature".to_string(),
+                "v0=abcdef123456".to_string(),
+            ),
             ("User-Agent".to_string(), "Harn/1.0".to_string()),
             ("X-GitHub-Delivery".to_string(), "delivery-123".to_string()),
         ])
@@ -516,6 +521,10 @@ mod tests {
         assert_eq!(redacted.get("Cookie").unwrap(), REDACTED_HEADER_VALUE);
         assert_eq!(
             redacted.get("X-Webhook-Token").unwrap(),
+            REDACTED_HEADER_VALUE
+        );
+        assert_eq!(
+            redacted.get("X-Slack-Signature").unwrap(),
             REDACTED_HEADER_VALUE
         );
         assert_eq!(redacted.get("User-Agent").unwrap(), "Harn/1.0");
@@ -547,9 +556,11 @@ mod tests {
     #[test]
     fn redact_url_strips_userinfo_and_sensitive_query_params() {
         let policy = RedactionPolicy::default();
-        let redacted =
-            policy.redact_url("https://user:pw@api.example.com/v1?api_key=abcdef&page=2");
+        let redacted = policy.redact_url(
+            "https://user:pw@api.example.com/v1?api_key=abcdef&clientSecret=hidden&page=2",
+        );
         assert!(redacted.contains("api_key=%5Bredacted%5D"));
+        assert!(redacted.contains("clientSecret=%5Bredacted%5D"));
         assert!(redacted.contains("page=2"));
         assert!(!redacted.contains("user:pw@"));
     }
@@ -571,9 +582,10 @@ mod tests {
                 "x-trace-id": "trace_1",
             },
             "list": [
-                { "auth_token": "tok_secret", "name": "alice" },
+                { "auth_token": "tok_secret", "accessToken": "camel", "name": "alice" },
                 { "name": "bob" },
             ],
+            "clientSecret": "camel-secret",
             "free_form": "Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD",
             "url": "https://api.example.com/v1?api_key=hideme",
         });
@@ -585,7 +597,9 @@ mod tests {
         );
         assert_eq!(value["headers"]["x-trace-id"], "trace_1");
         assert_eq!(value["list"][0]["auth_token"], REDACTED_PLACEHOLDER);
+        assert_eq!(value["list"][0]["accessToken"], REDACTED_PLACEHOLDER);
         assert_eq!(value["list"][0]["name"], "alice");
+        assert_eq!(value["clientSecret"], REDACTED_PLACEHOLDER);
         let free_form = value["free_form"].as_str().unwrap();
         // Free-form pattern matches now produce the OA-06 named
         // placeholder `<redacted:<pattern>:<len>>` so audit logs can
