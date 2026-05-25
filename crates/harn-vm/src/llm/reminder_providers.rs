@@ -18,6 +18,7 @@ const TOOL_OUTPUT_TRUNCATED_ID: &str = "tool_output_truncated";
 const POST_COMPACT_RECAP_ID: &str = "post_compact_recap";
 const RESUME_CONTINUITY_ID: &str = "resume_continuity";
 const PROJECT_FACTS_ID: &str = "project_facts";
+const WORKSPACE_ANCHOR_ID: &str = "workspace_anchor";
 
 const TOKEN_PRESSURE_EVENTS: &[HookEvent] = &[HookEvent::OnBudgetThreshold];
 const IDLE_NUDGE_EVENTS: &[HookEvent] = &[HookEvent::SessionIdle];
@@ -25,6 +26,8 @@ const TOOL_OUTPUT_TRUNCATED_EVENTS: &[HookEvent] = &[HookEvent::PostToolUse];
 const POST_COMPACT_RECAP_EVENTS: &[HookEvent] = &[HookEvent::PostCompact];
 const RESUME_CONTINUITY_EVENTS: &[HookEvent] = &[HookEvent::WorkerResumed];
 const PROJECT_FACTS_EVENTS: &[HookEvent] = &[HookEvent::SessionStart, HookEvent::OnBudgetThreshold];
+const WORKSPACE_ANCHOR_EVENTS: &[HookEvent] =
+    &[HookEvent::SessionStart, HookEvent::OnBudgetThreshold];
 
 const PROJECT_FACTS_DEFAULT_NAMESPACE: &str = "project/facts";
 const PROJECT_FACTS_DEFAULT_MAX: i64 = 5;
@@ -67,6 +70,7 @@ struct ToolOutputTruncatedProvider;
 struct PostCompactRecapProvider;
 struct ResumeContinuityProvider;
 struct ProjectFactsProvider;
+struct WorkspaceAnchorProvider;
 
 impl ReminderProvider for TokenPressureProvider {
     fn id(&self) -> &'static str {
@@ -348,6 +352,55 @@ impl ReminderProvider for ProjectFactsProvider {
     }
 }
 
+impl ReminderProvider for WorkspaceAnchorProvider {
+    fn id(&self) -> &'static str {
+        WORKSPACE_ANCHOR_ID
+    }
+
+    fn subscribes_to(&self) -> &'static [HookEvent] {
+        WORKSPACE_ANCHOR_EVENTS
+    }
+
+    fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
+        let anchor = crate::agent_sessions::workspace_anchor(&ctx.session_id)?;
+        let mut reminder = provider_reminder(
+            format_workspace_anchor_body(&anchor),
+            WORKSPACE_ANCHOR_ID,
+            ctx,
+        );
+        reminder.tags = vec![WORKSPACE_ANCHOR_ID.to_string()];
+        reminder.dedupe_key = Some(WORKSPACE_ANCHOR_ID.to_string());
+        reminder.ttl_turns = Some(1);
+        reminder.preserve_on_compact = false;
+        reminder.propagate = ReminderPropagate::Session;
+        reminder.role_hint = ReminderRoleHint::System;
+        Some(reminder)
+    }
+}
+
+fn format_workspace_anchor_body(anchor: &crate::workspace_anchor::WorkspaceAnchor) -> String {
+    let mut body = format!(
+        "<workspace-anchor>\nprimary: {}",
+        anchor.primary.to_string_lossy()
+    );
+    if anchor.additional_roots.is_empty() {
+        body.push_str("\nadditional_roots: []");
+    } else {
+        body.push_str("\nadditional_roots:");
+        for root in &anchor.additional_roots {
+            body.push_str("\n  - ");
+            body.push_str(&root.path.to_string_lossy());
+            body.push_str(" (mount_mode: ");
+            body.push_str(root.mount_mode.as_str());
+            body.push_str(", mounted_at: ");
+            body.push_str(&root.mounted_at);
+            body.push(')');
+        }
+    }
+    body.push_str("\n</workspace-anchor>");
+    body
+}
+
 pub fn parse_provider_event(name: &str) -> Result<HookEvent, String> {
     match name.trim() {
         "PostToolUse" | "post_tool_use" => Ok(HookEvent::PostToolUse),
@@ -449,7 +502,7 @@ pub async fn evaluate_and_inject(
     }))
 }
 
-fn canonical_providers() -> [&'static dyn ReminderProvider; 6] {
+fn canonical_providers() -> [&'static dyn ReminderProvider; 7] {
     [
         &TokenPressureProvider,
         &IdleNudgeProvider,
@@ -457,6 +510,7 @@ fn canonical_providers() -> [&'static dyn ReminderProvider; 6] {
         &PostCompactRecapProvider,
         &ResumeContinuityProvider,
         &ProjectFactsProvider,
+        &WorkspaceAnchorProvider,
     ]
 }
 
@@ -523,7 +577,7 @@ fn enabled_provider_ids(
     enabled
 }
 
-fn canonical_provider_ids() -> [&'static str; 6] {
+fn canonical_provider_ids() -> [&'static str; 7] {
     [
         TOKEN_PRESSURE_ID,
         IDLE_NUDGE_ID,
@@ -531,6 +585,7 @@ fn canonical_provider_ids() -> [&'static str; 6] {
         POST_COMPACT_RECAP_ID,
         RESUME_CONTINUITY_ID,
         PROJECT_FACTS_ID,
+        WORKSPACE_ANCHOR_ID,
     ]
 }
 
@@ -1065,5 +1120,43 @@ mod tests {
         let payload_mid = json!({"tokens_used": 80, "context_window": 100});
         let mid = ctx(HookEvent::OnBudgetThreshold, payload_mid, JsonValue::Null);
         assert!(!under_budget_pressure(&mid, Some(&custom_ratio)));
+    }
+
+    #[test]
+    fn workspace_anchor_provider_formats_primary_and_mounted_roots() {
+        crate::agent_sessions::reset_session_store();
+        let session_id =
+            crate::agent_sessions::open_or_create(Some("workspace-anchor-reminder".into()));
+        crate::agent_sessions::set_workspace_anchor(
+            &session_id,
+            Some(crate::workspace_anchor::WorkspaceAnchor {
+                primary: std::path::PathBuf::from("/workspace/main"),
+                additional_roots: vec![crate::workspace_anchor::MountedRoot {
+                    path: std::path::PathBuf::from("/workspace/lib"),
+                    mount_mode: crate::workspace_anchor::MountMode::Extend,
+                    mounted_at: "2026-05-24T00:00:01Z".to_string(),
+                }],
+                anchored_at: "2026-05-24T00:00:00Z".to_string(),
+            }),
+        )
+        .expect("set anchor");
+        let ctx = ProviderContext {
+            event: HookEvent::SessionStart,
+            session_id,
+            payload: json!({}),
+            options: JsonValue::Null,
+        };
+
+        let reminder = WorkspaceAnchorProvider
+            .evaluate(&ctx)
+            .expect("workspace reminder");
+
+        assert_eq!(reminder.dedupe_key.as_deref(), Some("workspace_anchor"));
+        assert_eq!(reminder.ttl_turns, Some(1));
+        assert!(reminder.body.contains("<workspace-anchor>"));
+        assert!(reminder.body.contains("primary: /workspace/main"));
+        assert!(reminder
+            .body
+            .contains("/workspace/lib (mount_mode: extend, mounted_at: 2026-05-24T00:00:01Z)"));
     }
 }
