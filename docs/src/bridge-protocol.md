@@ -545,6 +545,19 @@ payload is validated as a reminder spec; non-standard host metadata belongs unde
 `_meta`. Malformed reminder payloads are rejected with `HARN-RMD-002`; unknown
 top-level reminder options are rejected with `HARN-RMD-001`.
 
+Hosts that need an operator-facing queue can call
+`session/pending_injections` with `{ "sessionId": "..." }`. The response is
+`{pendingCount, injections}` in FIFO order, with `kind: "user"` rows for
+pending `session/inject` messages and `kind: "reminder"` rows for pending
+`session/remind` reminders. Reminder rows include `reminderId`, `mode`, `body`,
+`tags`, `dedupeKey`, `ttlTurns`, `roleHint`, and `source`.
+
+Queued reminders can be revoked before delivery with
+`session/revoke_reminder` and `{ "sessionId": "...", "reminderId": "..." }`.
+Successful revocation returns `{reminderId, status: "revoked"}`; repeated
+revocation returns `status: "already_revoked"`. Races after a checkpoint drains
+the reminder return a structured `already_delivered` error.
+
 ## Client-executed tool search
 
 When a Harn script opts into `tool_search` against a provider that lacks

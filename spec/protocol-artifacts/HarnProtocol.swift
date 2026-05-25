@@ -134,6 +134,8 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case sessionRevokeInject = "session/revoke_inject"
     case sessionTruncate = "session/truncate"
     case sessionRemind = "session/remind"
+    case sessionPendingInjections = "session/pending_injections"
+    case sessionRevokeReminder = "session/revoke_reminder"
     case sessionCancelToolCall = "session/cancel_tool_call"
     case sessionClose = "session/close"
     @available(*, deprecated, message: "Use session/close; session/stop will be removed after one release.")
@@ -150,6 +152,8 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
         "session/revoke_inject",
         "session/truncate",
         "session/remind",
+        "session/pending_injections",
+        "session/revoke_reminder",
         "session/cancel_tool_call",
         "session/close",
         "session/stop",

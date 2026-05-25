@@ -337,6 +337,8 @@ defaults, safe, prompts, catalog).
 - ACP pending user-message injects for agent execution: accept with a stable
   `messageId`, optionally replace or revoke while pending, steer after the
   current operation, or queue until the agent yields back to the human.
+- ACP pending reminder controls for operator UIs: inspect the bridge queue and
+  revoke queued `session/remind` reminders before a checkpoint drains them.
 - Remote MCP over stdio and HTTP, including OAuth metadata discovery, stored
   bearer tokens for standalone CLI use, and automatic token reuse for HTTP MCP
   servers declared in `harn.toml`.

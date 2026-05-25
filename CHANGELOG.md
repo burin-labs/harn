@@ -6,6 +6,16 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Pending bridge reminder controls.** ACP clients and Harn scripts can now
+  inspect queued bridge injections with `session/pending_injections` /
+  `agent_session_pending_injections(session_id)` and revoke queued reminders
+  before delivery with `session/revoke_reminder` /
+  `agent_session_revoke_reminder(session_id, reminder_id)`.
+
 ## v0.8.39
 
 ### Added

@@ -1926,6 +1926,8 @@ fn role_may_send_method(role: AcpAttachRole, method: &str) -> bool {
                 | "session/replace_inject"
                 | "session/truncate"
                 | "session/remind"
+                | "session/pending_injections"
+                | "session/revoke_reminder"
                 | "session/set_mode"
                 | "session/set_config_option"
         ),

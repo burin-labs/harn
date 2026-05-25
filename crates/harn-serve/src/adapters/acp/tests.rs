@@ -192,6 +192,137 @@ async fn session_remind_accepts_typed_reminder_payload() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn session_reminder_pending_list_and_revoke_controls() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    let bridge = attach_test_host_bridge(&mut server, &session_id);
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/remind",
+            "params": {
+                "sessionId": session_id,
+                "id": "rem-acp",
+                "body": "Host reminder",
+                "tags": ["host"],
+                "dedupe_key": "host-reminder",
+                "ttl_turns": 2,
+                "mode": "finish_step",
+            },
+        }))
+        .await;
+    let reminded = recv_json(&mut rx).await;
+    assert_eq!(reminded["result"]["reminderId"], "rem-acp");
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/pending_injections",
+            "params": {"sessionId": session_id},
+        }))
+        .await;
+    let pending = recv_json(&mut rx).await;
+    assert_eq!(pending["result"]["pendingCount"], 1);
+    assert_eq!(pending["result"]["injections"][0]["kind"], "reminder");
+    assert_eq!(pending["result"]["injections"][0]["reminderId"], "rem-acp");
+    assert_eq!(pending["result"]["injections"][0]["mode"], "finish_step");
+    assert_eq!(pending["result"]["injections"][0]["body"], "Host reminder");
+
+    for id in [4, 5] {
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "session/revoke_reminder",
+                "params": {
+                    "sessionId": session_id,
+                    "reminderId": "rem-acp",
+                },
+            }))
+            .await;
+        let revoke = recv_json(&mut rx).await;
+        assert_eq!(revoke["result"]["reminderId"], "rem-acp");
+        assert_eq!(
+            revoke["result"]["status"],
+            if id == 4 {
+                "revoked"
+            } else {
+                "already_revoked"
+            }
+        );
+    }
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "session/pending_injections",
+            "params": {"sessionId": session_id},
+        }))
+        .await;
+    let empty = recv_json(&mut rx).await;
+    assert_eq!(empty["result"]["pendingCount"], 0);
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "session/remind",
+            "params": {
+                "sessionId": session_id,
+                "id": "rem-delivered",
+                "body": "Delivered reminder",
+                "mode": "finish_step",
+            },
+        }))
+        .await;
+    let reminded = recv_json(&mut rx).await;
+    assert_eq!(reminded["result"]["reminderId"], "rem-delivered");
+
+    let delivered = bridge
+        .take_queued_transcript_injections_for(
+            harn_vm::bridge::DeliveryCheckpoint::AfterCurrentOperation,
+        )
+        .await;
+    assert_eq!(delivered.len(), 1);
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "session/revoke_reminder",
+            "params": {
+                "sessionId": session_id,
+                "reminderId": "rem-delivered",
+            },
+        }))
+        .await;
+    let delivered_revoke = recv_json(&mut rx).await;
+    assert_eq!(delivered_revoke["error"]["code"], -32602);
+    assert_eq!(
+        delivered_revoke["error"]["data"]["reason"],
+        "already_delivered"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn session_remind_rejects_user_message_payload() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
@@ -1199,6 +1330,13 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
         serde_json::json!({
             "modes": ["queue", "steer"],
             "pending": {"replace": true},
+        })
+    );
+    assert_eq!(
+        capabilities["session"]["remind"],
+        serde_json::json!({
+            "modes": ["interrupt_immediate", "finish_step", "audit_only"],
+            "pending": {"list": true, "revoke": true},
         })
     );
     assert_eq!(

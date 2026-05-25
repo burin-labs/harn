@@ -36,6 +36,8 @@ const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
 const HOST_SESSION_DRAIN_BRIDGE_INJECTIONS: &str = "__host_agent_session_drain_bridge_injections";
 const HOST_SESSION_PUSH_BRIDGE_INJECTION: &str = "__host_agent_session_push_bridge_injection";
+const HOST_SESSION_PENDING_INJECTIONS: &str = "__host_agent_session_pending_injections";
+const HOST_SESSION_REVOKE_REMINDER: &str = "__host_agent_session_revoke_reminder";
 const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
 const HOST_SESSION_INJECT_FEEDBACK: &str = "__host_agent_session_inject_feedback";
 const HOST_SESSION_POST_EVENT: &str = "__host_agent_session_post_event";
@@ -2109,6 +2111,53 @@ async fn host_agent_session_push_bridge_injection(args: Vec<VmValue>) -> Result<
     Ok(VmValue::String(Rc::from(reminder_id)))
 }
 
+async fn host_agent_session_pending_injections(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    if session_id.trim().is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PENDING_INJECTIONS}: session_id must be a non-empty string"
+        )));
+    }
+    let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_PENDING_INJECTIONS) else {
+        return Ok(json_to_vm(&serde_json::json!({
+            "pendingCount": 0,
+            "injections": [],
+        })));
+    };
+    Ok(json_to_vm(&bridge.pending_injections_json().await))
+}
+
+async fn host_agent_session_revoke_reminder(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    if session_id.trim().is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_REVOKE_REMINDER}: session_id must be a non-empty string"
+        )));
+    }
+    let reminder_id = args.get(1).map(|v| v.display()).unwrap_or_default();
+    if reminder_id.trim().is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_REVOKE_REMINDER}: reminder_id must be a non-empty string"
+        )));
+    }
+    let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_REVOKE_REMINDER) else {
+        return Ok(json_to_vm(&serde_json::json!({
+            "status": "unknown_reminder_id",
+            "reminderId": reminder_id,
+        })));
+    };
+    let status = match bridge.revoke_pending_reminder(&reminder_id).await {
+        crate::bridge::PendingReminderMutationResult::Mutated => "revoked",
+        crate::bridge::PendingReminderMutationResult::AlreadyRevoked => "already_revoked",
+        crate::bridge::PendingReminderMutationResult::AlreadyDelivered => "already_delivered",
+        crate::bridge::PendingReminderMutationResult::UnknownReminderId => "unknown_reminder_id",
+    };
+    Ok(json_to_vm(&serde_json::json!({
+        "status": status,
+        "reminderId": reminder_id,
+    })))
+}
+
 async fn host_agent_session_drain_bridge_injections(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -2561,6 +2610,8 @@ pub fn register_deferred_agent_session_host_primitives(vm: &mut Vm, registrar: f
         HOST_AUTONOMY_BUDGET_CHECK,
         HOST_SESSION_DRAIN_BRIDGE_INJECTIONS,
         HOST_SESSION_PUSH_BRIDGE_INJECTION,
+        HOST_SESSION_PENDING_INJECTIONS,
+        HOST_SESSION_REVOKE_REMINDER,
         HOST_DAEMON_WAIT,
         HOST_SESSION_PROJECT_TURN,
     ] {
@@ -2638,6 +2689,26 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
         );
     vm.register_async_builtin_with_metadata(push_bridge_injection, |args| {
         Box::pin(async move { host_agent_session_push_bridge_injection(args).await })
+    });
+
+    let pending_injections = VmBuiltinMetadata::async_static(HOST_SESSION_PENDING_INJECTIONS)
+        .signature_static("__host_agent_session_pending_injections(session_id)")
+        .arity(VmBuiltinArity::Exact(1))
+        .category_static("agent.host")
+        .doc_static(
+            "Return a FIFO snapshot of pending bridge user-message and reminder injections.",
+        );
+    vm.register_async_builtin_with_metadata(pending_injections, |args| {
+        Box::pin(async move { host_agent_session_pending_injections(args).await })
+    });
+
+    let revoke_reminder = VmBuiltinMetadata::async_static(HOST_SESSION_REVOKE_REMINDER)
+        .signature_static("__host_agent_session_revoke_reminder(session_id, reminder_id)")
+        .arity(VmBuiltinArity::Exact(2))
+        .category_static("agent.host")
+        .doc_static("Revoke a queued bridge reminder before an agent checkpoint drains it.");
+    vm.register_async_builtin_with_metadata(revoke_reminder, |args| {
+        Box::pin(async move { host_agent_session_revoke_reminder(args).await })
     });
 
     let daemon_wait = VmBuiltinMetadata::async_static(HOST_DAEMON_WAIT)

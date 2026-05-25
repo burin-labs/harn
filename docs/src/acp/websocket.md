@@ -101,6 +101,8 @@ surface as stdio ACP:
 - `session/truncate`
 - `session/close`
 - `session/remind`
+- `session/pending_injections`
+- `session/revoke_reminder`
 - `session/fork`
 - `session/set_mode`
 - `session/set_config_option`
@@ -158,7 +160,8 @@ metadata is available. `liveState` is one of:
 - `controller` clients may send bounded session controls such as
   `session/cancel`, `session/inject`, `session/revoke_inject`,
   `session/replace_inject`, `session/truncate`, `session/remind`,
-  `session/set_mode`, and `session/set_config_option`. General host requests
+  `session/pending_injections`, `session/revoke_reminder`, `session/set_mode`,
+  and `session/set_config_option`. General host requests
   are still delivered only to the `host_owner`; `session/request_permission`
   is also delivered to controllers so an attached control surface can answer
   approval prompts.
