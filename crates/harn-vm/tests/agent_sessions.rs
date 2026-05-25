@@ -34,6 +34,10 @@ fn out(source: &str) -> Vec<String> {
         .collect()
 }
 
+fn harn_string(value: &str) -> String {
+    serde_json::to_string(value).expect("string literal")
+}
+
 #[test]
 fn open_mints_and_is_idempotent() {
     let lines = out(r#"
@@ -467,17 +471,19 @@ fn add_root_uses_default_mount_mode_emits_event_and_removes_cleanly() {
         .expect("canonical mounted tempdir")
         .display()
         .to_string();
+    let primary_literal = harn_string(&primary_path);
+    let mounted_literal = harn_string(&mounted_path);
     let lines = out(&format!(
         r#"
 pipeline main(task) {{
   let s = agent_session_open("anchor-roots", {{
     workspace_policy: {{default_mount_mode: "extend"}},
     workspace_anchor: {{
-      primary: "{primary_path}",
+      primary: {primary_literal},
       anchored_at: "2026-05-24T00:00:00Z",
     }},
   }})
-  let added = agent_session_add_root(s, "{mounted_path}", {{reason: "shared"}})
+  let added = agent_session_add_root(s, {mounted_literal}, {{reason: "shared"}})
   log(added.ok)
   log(added.mounted_at != nil)
   let roots = agent_session_list_roots(s)
@@ -490,15 +496,15 @@ pipeline main(task) {{
   log(mounted_events[0]["metadata"]["mount_mode"])
   log(mounted_events[0]["metadata"]["reason"])
 
-  let updated = agent_session_add_root(s, "{mounted_path}", {{mount_mode: "sandboxed"}})
+  let updated = agent_session_add_root(s, {mounted_literal}, {{mount_mode: "sandboxed"}})
   log(updated.ok)
   log(agent_session_list_roots(s)["additional"][0]["mount_mode"])
   log(len(agent_session_list_roots(s)["additional"]))
 
-  let removed = agent_session_remove_root(s, "{mounted_path}")
+  let removed = agent_session_remove_root(s, {mounted_literal})
   log(removed.ok)
   log(len(agent_session_list_roots(s)["additional"]))
-  let missing = agent_session_remove_root(s, "{mounted_path}")
+  let missing = agent_session_remove_root(s, {mounted_literal})
   log(missing.ok)
 }}
 "#
@@ -531,16 +537,18 @@ fn add_root_reports_missing_directory_in_result_envelope() {
     let missing = primary.path().join("missing-root");
     let primary_path = primary.path().display().to_string();
     let missing_path = missing.display().to_string();
+    let primary_literal = harn_string(&primary_path);
+    let missing_literal = harn_string(&missing_path);
     let lines = out(&format!(
         r#"
 pipeline main(task) {{
   let s = agent_session_open("anchor-roots-missing", {{
     workspace_anchor: {{
-      primary: "{primary_path}",
+      primary: {primary_literal},
       anchored_at: "2026-05-24T00:00:00Z",
     }},
   }})
-  let added = agent_session_add_root(s, "{missing_path}")
+  let added = agent_session_add_root(s, {missing_literal})
   log(added.ok)
   log(contains(added.error ?? "", "must exist"))
 }}
