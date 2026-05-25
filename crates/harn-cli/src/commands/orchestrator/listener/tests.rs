@@ -523,6 +523,78 @@ async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_activ
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd() {
+    let _guard = lock_harn_state();
+    reset_active_event_log();
+
+    let dir = tempdir().expect("tempdir");
+    let cwd = dir.path().display().to_string();
+    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+        ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
+    )
+    .await;
+    let (mut owner, _) =
+        tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+            .await
+            .expect("owner connect");
+    let created = acp_request(&mut owner, 1, "session/new", json!({"cwd": cwd.clone()})).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let (mut observer, _) =
+        tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))
+            .await
+            .expect("observer connect");
+    let listed = acp_request(
+        &mut observer,
+        2,
+        "session/list",
+        json!({"cwd": cwd.clone()}),
+    )
+    .await;
+    assert_eq!(
+        listed["result"]["sessions"][0]["sessionId"],
+        json!(session_id)
+    );
+    assert_eq!(listed["result"]["sessions"][0]["liveState"], json!("live"));
+    assert_eq!(
+        listed["result"]["sessions"][0]["attachableRoles"],
+        json!([])
+    );
+
+    owner.close(None).await.expect("close owner");
+    drop(owner);
+    wait_for_acp_session_detached(&listener, &session_id).await;
+
+    let detached = acp_request(
+        &mut observer,
+        3,
+        "session/list",
+        json!({
+            "cwd": cwd,
+            "liveState": "detached_retained",
+        }),
+    )
+    .await;
+    assert_eq!(
+        detached["result"]["sessions"][0]["sessionId"],
+        json!(session_id)
+    );
+    assert_eq!(
+        detached["result"]["sessions"][0]["attachableRoles"],
+        json!(["host_owner"])
+    );
+
+    listener
+        .shutdown(Duration::from_secs(5))
+        .await
+        .expect("shutdown listener");
+    reset_active_event_log();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_rejects_duplicate_attach_to_live_session() {
     let _guard = lock_harn_state();
     reset_active_event_log();
@@ -697,17 +769,21 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
     .await;
 
     let mut saw_persisted_replay = false;
-    let mut saw_expired_session_error = false;
+    let mut saw_expired_session_load = false;
     tokio::time::timeout(Duration::from_secs(10), async {
-        while !(saw_persisted_replay && saw_expired_session_error) {
+        while !(saw_persisted_replay && saw_expired_session_load) {
             let message = next_acp_text(&mut reconnected).await;
             if message["_harn"]["replayed"] == json!(true) {
                 assert_eq!(message["result"]["sessionId"], json!(session_id));
                 saw_persisted_replay = true;
             }
             if message.get("id").and_then(JsonValue::as_u64) == Some(4) {
-                assert_eq!(message["error"]["code"], json!(-32004));
-                saw_expired_session_error = true;
+                assert_eq!(
+                    message["result"]["session"]["liveState"],
+                    json!("expired_replay_only")
+                );
+                assert_eq!(message["result"]["session"]["attachableRoles"], json!([]));
+                saw_expired_session_load = true;
             }
         }
     })

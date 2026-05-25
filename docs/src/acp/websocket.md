@@ -125,7 +125,31 @@ event id:
 ```
 
 Clients should persist the highest `_harn.eventId` they have durably processed.
-On reconnect, call `session/load` with that cursor:
+Before reconnecting a specific session, clients can discover attachable sessions
+with `session/list`. Harn accepts `workspaceAnchor` as the preferred project key
+and `cwd` as a compatibility fallback:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "session/list",
+  "params": {
+    "workspaceAnchor": { "primary": "/workspace/harn" },
+    "liveState": ["live", "detached_retained"]
+  }
+}
+```
+
+Each result includes `sessionId`, `cwd` when known, `workspaceAnchor` when the
+session has one, `liveState`, `attachableRoles`, and `lastEventId` when replay
+metadata is available. `liveState` is one of:
+
+- `live`: a retained worker is still running.
+- `detached_retained`: a retained worker is waiting for a host owner reconnect.
+- `expired_replay_only`: only serialized audit/replay frames remain.
+
+On reconnect, call `session/load` with the selected session id and cursor:
 
 ```json
 {
@@ -151,7 +175,8 @@ can tune that window for controlled deployments and tests. After expiry, or
 after an orchestrator process restart, Harn can still replay serialized outbound
 frames from the EventLog topic `acp.session.<session-id>`, but it cannot resume
 an in-flight VM stack that was waiting inside the expired process. In that case
-the host should treat replay as recovery/audit state and start a new prompt.
+`session/load` returns `liveState: "expired_replay_only"` and the host should
+treat replay as recovery/audit state before starting a new prompt.
 
 ## Example
 

@@ -28,6 +28,10 @@ condensed series summaries instead of full per-patch history.
   - `sub_agent_run` accepts an `anchor` option. The runtime rejects a child
     anchor that escapes the parent's anchor + mounted roots and applies the
     anchor to the child session on spawn.
+- **ACP attach discovery by workspace anchor (#2413).** `session/list` now
+  accepts workspace-anchor, cwd, and live-state filters, returns attach metadata
+  for live, detached-retained, and replay-only sessions, and `session/load`
+  reports replay-only state after retained WebSocket workers expire.
 
 ## v0.8.37
 
