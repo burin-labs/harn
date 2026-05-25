@@ -1,0 +1,227 @@
+/**
+ * std/code_librarian — typed code-graph + Cypher surface for Harn scripts.
+ *
+ * Import: import "std/code_librarian"
+ *
+ * Wraps the `hostlib_code_index_*` builtin family (issue #2434, PR #2441)
+ * behind seven ergonomic functions returning typed records. Consumers call
+ * one library instead of stitching outputs from many primitives.
+ *
+ * The library never rebuilds the index; callers are expected to drive
+ * `hostlib_code_index_rebuild` (or its lifecycle equivalent) themselves.
+ *
+ * Underlying executor docs: docs/src/stdlib/code-librarian.md
+ * A typed Cypher row — keys are projected column names from `RETURN`.
+ */
+type LibrarianRecord = dict
+
+/** Result of a Cypher pass-through: rows plus the active overlay name. */
+type LibrarianCypherResult = {rows: list<LibrarianRecord>, overlay: string?}
+
+/** One symbol entry from the file outline, as returned by outline_get. */
+type LibrarianOutlineSymbol = {
+  name: string,
+  kind: string,
+  start_line: int,
+  end_line: int,
+  signature: string,
+}
+
+/** A file outline plus its declared and reverse import edges. */
+type LibrarianOutline = {
+  path: string,
+  file_id: int,
+  known: bool,
+  symbols: list<LibrarianOutlineSymbol>,
+  imports: list<dict>,
+  importers: list<string>,
+}
+
+/** A single caller site for a target symbol. */
+type LibrarianCallSite = {caller: string?, path: string, symbol: string}
+
+/** A single import edge into a target path. */
+type LibrarianImport = {importer: string, kind: string}
+
+/** One entry from the change log for a recent-changes window. */
+type LibrarianFileChange = {
+  path: string,
+  seq: int,
+  agent_id: int,
+  op: string,
+  hash: string,
+  size: int,
+  timestamp_ms: int,
+}
+
+/** Freshness signal: indexed vs on-disk state for a known or unknown path. */
+type LibrarianFreshness = {
+  path: string,
+  known: bool,
+  stale: bool,
+  indexed_hash: string?,
+  indexed_mtime_ms: int?,
+  disk_hash: string?,
+  disk_mtime_ms: int?,
+}
+
+/** Overlay activation result: branch name (or nil when deactivated) + reuse fraction. */
+type LibrarianOverlay = {active: string?, reuse_fraction: float}
+
+/**
+ * Pass a Cypher query straight through to the typed symbol graph executor.
+ * Returns the row list plus the active overlay name (nil when on base).
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: code_librarian_query("MATCH (f:Function {name: 'main'}) RETURN f.path AS path")
+ */
+pub fn code_librarian_query(cypher: string) -> LibrarianCypherResult {
+  let raw = hostlib_code_index_cypher({query: cypher})
+  return {rows: raw?.rows ?? [], overlay: raw?.overlay}
+}
+
+/**
+ * Outline a file: symbols plus the import edges in and out of it. `depth`
+ * is reserved for future graph-aware traversal (currently 1: the file
+ * itself); values >= 1 still return the immediate outline so the call
+ * shape is stable for richer expansions later.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: code_librarian_outline("src/util.ts")
+ */
+pub fn code_librarian_outline(path: string, depth: int = 1) -> LibrarianOutline {
+  if depth < 1 {
+    throw "code_librarian_outline: depth must be >= 1"
+  }
+  let file_id = hostlib_code_index_path_to_id({path: path})
+  if file_id == nil || file_id == 0 {
+    return {file_id: 0, importers: [], imports: [], known: false, path: path, symbols: []}
+  }
+  let symbols = hostlib_code_index_outline_get({file_id: file_id})
+  let imps = hostlib_code_index_imports_for({path: path})
+  let users = hostlib_code_index_importers_of({module: path})
+  return {
+    file_id: file_id,
+    importers: users?.importers ?? [],
+    imports: imps?.imports ?? [],
+    known: true,
+    path: path,
+    symbols: symbols ?? [],
+  }
+}
+
+/**
+ * Resolve every call site that targets `symbol`, walking up to
+ * `max_hops` chained CALLS edges (currently 1 hop — the direct callers).
+ * Higher hop budgets are reserved for the upcoming transitive query
+ * shape; the return type stays the same.
+ *
+ * Canned query: `MATCH (f:Function {name: $name})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.caller AS caller, f.name AS symbol`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: code_librarian_who_calls("formatDate")
+ */
+pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<LibrarianCallSite> {
+  if max_hops < 1 {
+    throw "code_librarian_who_calls: max_hops must be >= 1"
+  }
+  let cypher = "MATCH (f:Function {name: '" + symbol
+    + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.caller AS caller, f.name AS symbol"
+  let raw = hostlib_code_index_cypher({query: cypher})
+  let rows = raw?.rows ?? []
+  var out: list<LibrarianCallSite> = []
+  for row in rows {
+    out = out + [{caller: row?.caller, path: row?.path ?? "", symbol: row?.symbol ?? symbol}]
+  }
+  return out
+}
+
+/**
+ * Resolve every file that imports `path`. Combines the direct importers
+ * edge (used by Cypher) with the legacy importers_of view so connectors
+ * that haven't migrated still surface here.
+ *
+ * Canned query: `MATCH (m:Module {path: $path})<-[:IMPORTS]-(s:Module) RETURN s.path AS importer, 'import' AS kind`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: code_librarian_what_imports("src/util.ts")
+ */
+pub fn code_librarian_what_imports(path: string) -> list<LibrarianImport> {
+  let users = hostlib_code_index_importers_of({module: path})
+  let importers = users?.importers ?? []
+  var out: list<LibrarianImport> = []
+  for item in importers {
+    out = out + [{importer: item, kind: "import"}]
+  }
+  return out
+}
+
+/**
+ * Recent changes since `since_seq` in the version log. The issue spec
+ * names this `recent_changes(window: Duration)`; Harn has no native
+ * Duration primitive yet, so the library accepts the same monotonic
+ * sequence number used by `hostlib_code_index_current_seq` /
+ * `changes_since`. `since_seq = 0` returns every recorded change.
+ *
+ * Pair with `hostlib_code_index_current_seq({})` to checkpoint and
+ * resume.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: code_librarian_recent_changes(0)
+ */
+pub fn code_librarian_recent_changes(since_seq: int = 0) -> list<LibrarianFileChange> {
+  if since_seq < 0 {
+    throw "code_librarian_recent_changes: since_seq must be >= 0"
+  }
+  let raw = hostlib_code_index_changes_since({seq: since_seq})
+  return raw ?? []
+}
+
+/**
+ * Staleness signal for `path`: did the on-disk content drift away from
+ * the indexed snapshot? Wraps `hostlib_code_index_freshness` directly,
+ * preserving the `{known, stale, indexed_hash, disk_hash, ...}` shape.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: code_librarian_freshness("src/util.ts")
+ */
+pub fn code_librarian_freshness(path: string) -> LibrarianFreshness {
+  return hostlib_code_index_freshness({path: path})
+}
+
+/**
+ * Activate a per-branch CDC overlay. If the overlay doesn't exist yet
+ * it's created as an empty pass-through so the base graph serves it
+ * untouched (100% reuse baseline). Passing `branch = nil` deactivates
+ * the active overlay and returns to the base graph.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ * @example: code_librarian_branch_overlay("topic/cypher")
+ */
+pub fn code_librarian_branch_overlay(branch: string?) -> LibrarianOverlay {
+  if branch == nil {
+    return hostlib_code_index_branch_overlay({action: "deactivate"})
+  }
+  return hostlib_code_index_branch_overlay({action: "activate", branch: branch})
+}
