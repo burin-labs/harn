@@ -50,6 +50,8 @@ struct AcpWorker {
     clients: Mutex<BTreeMap<String, AcpClient>>,
     host_owner_client_id: Mutex<Option<String>>,
     pending_client_requests: Mutex<BTreeMap<String, String>>,
+    pending_host_requests: Mutex<BTreeMap<String, AcpHostRequest>>,
+    decided_host_requests: Mutex<BTreeMap<String, AcpHostDecision>>,
     sessions: Mutex<BTreeMap<String, AcpSessionSummary>>,
     replay_buffer: Mutex<VecDeque<AcpReplayEvent>>,
     next_event_id: AtomicU64,
@@ -116,13 +118,51 @@ enum AcpAttachError {
 enum AcpClientRequestError {
     Disconnected,
     DuplicateRequestId,
-    Forbidden { method: String, role: AcpAttachRole },
+    UnknownHostRequest {
+        request_id: String,
+    },
+    IdempotentHostDecision {
+        decision: AcpHostDecision,
+    },
+    AlreadyDecided {
+        decision: AcpHostDecision,
+        attempted_actor: AcpControlActor,
+        attempted_payload: JsonValue,
+    },
+    Forbidden {
+        method: String,
+        role: AcpAttachRole,
+    },
 }
 
 enum AcpOutboundRoute {
-    HostRequest,
+    HostRequest { id_key: String, method: String },
     Response(Option<String>),
     Broadcast,
+}
+
+#[derive(Clone, Debug)]
+struct AcpHostRequest {
+    method: String,
+    session_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct AcpControlActor {
+    client_id: String,
+    connection_id: Option<String>,
+    role: AcpAttachRole,
+    source: String,
+}
+
+#[derive(Clone, Debug)]
+struct AcpHostDecision {
+    request_id: String,
+    method: String,
+    session_id: Option<String>,
+    actor: AcpControlActor,
+    payload: JsonValue,
+    decided_at_ms: u128,
 }
 
 struct PersistedAcpReplay {
@@ -152,6 +192,8 @@ impl AcpWebSocketHub {
             clients: Mutex::new(BTreeMap::new()),
             host_owner_client_id: Mutex::new(None),
             pending_client_requests: Mutex::new(BTreeMap::new()),
+            pending_host_requests: Mutex::new(BTreeMap::new()),
+            decided_host_requests: Mutex::new(BTreeMap::new()),
             sessions: Mutex::new(BTreeMap::new()),
             replay_buffer: Mutex::new(VecDeque::new()),
             next_event_id: AtomicU64::new(1),
@@ -456,6 +498,40 @@ impl AcpAttachRole {
     }
 }
 
+impl AcpControlActor {
+    fn to_json(&self) -> JsonValue {
+        let mut value = json!({
+            "clientId": self.client_id,
+            "role": self.role.as_str(),
+            "source": self.source,
+        });
+        if let Some(connection_id) = self.connection_id.as_ref() {
+            value["connectionId"] = json!(connection_id);
+        }
+        value
+    }
+}
+
+impl AcpHostDecision {
+    fn error_data(&self, reason: &str, attempted_actor: Option<&AcpControlActor>) -> JsonValue {
+        let mut data = json!({
+            "reason": reason,
+            "requestId": self.request_id,
+            "method": self.method,
+            "decidedBy": self.actor.to_json(),
+            "decidedAtMs": self.decided_at_ms,
+            "decision": self.payload,
+        });
+        if let Some(session_id) = self.session_id.as_ref() {
+            data["sessionId"] = json!(session_id);
+        }
+        if let Some(actor) = attempted_actor {
+            data["attemptedBy"] = actor.to_json();
+        }
+        data
+    }
+}
+
 impl AcpWorker {
     fn attach(
         &self,
@@ -531,12 +607,88 @@ impl AcpWorker {
         Some((client_id, role))
     }
 
-    fn send_client_request(
+    fn client_actor(&self, client_id: &str, role: AcpAttachRole) -> AcpControlActor {
+        let connection_id = self
+            .clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(client_id)
+            .map(|client| client.connection_id.clone());
+        AcpControlActor {
+            client_id: client_id.to_string(),
+            connection_id,
+            role,
+            source: "websocket".to_string(),
+        }
+    }
+
+    fn pending_host_request(&self, id_key: &str) -> Option<AcpHostRequest> {
+        self.pending_host_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id_key)
+            .cloned()
+    }
+
+    fn annotate_control_actor(&self, value: &mut JsonValue, actor: &AcpControlActor) {
+        let Some(params) = value.get_mut("params") else {
+            return;
+        };
+        let Some(params) = params.as_object_mut() else {
+            return;
+        };
+        let harn = params
+            .entry("_harn".to_string())
+            .or_insert_with(|| json!({}));
+        if let Some(harn) = harn.as_object_mut() {
+            harn.insert("actor".to_string(), actor.to_json());
+            harn.entry("clientId".to_string())
+                .or_insert_with(|| json!(actor.client_id));
+            harn.entry("role".to_string())
+                .or_insert_with(|| json!(actor.role.as_str()));
+            harn.entry("source".to_string())
+                .or_insert_with(|| json!(actor.source));
+            if let Some(connection_id) = actor.connection_id.as_ref() {
+                harn.entry("connectionId".to_string())
+                    .or_insert_with(|| json!(connection_id));
+            }
+        }
+    }
+
+    fn decision_payload(value: &JsonValue) -> JsonValue {
+        if let Some(error) = value.get("error") {
+            json!({"error": error})
+        } else {
+            json!({"result": value.get("result").cloned().unwrap_or(JsonValue::Null)})
+        }
+    }
+
+    async fn append_control_outcome(&self, decision: &AcpHostDecision, status: &str, reason: &str) {
+        let topic_id = decision.session_id.as_deref().unwrap_or(&self.id);
+        append_acp_event(
+            &self.event_log,
+            topic_id,
+            "control_outcome",
+            json!({
+                "request_id": decision.request_id,
+                "method": decision.method,
+                "status": status,
+                "reason": reason,
+                "actor": decision.actor.to_json(),
+                "decision": decision.payload,
+                "decided_at_ms": decision.decided_at_ms,
+            }),
+        )
+        .await;
+    }
+
+    async fn send_client_request(
         &self,
         client_id: &str,
         role: AcpAttachRole,
-        value: JsonValue,
+        mut value: JsonValue,
     ) -> Result<(), AcpClientRequestError> {
+        let actor = self.client_actor(client_id, role);
         if let Some(method) = value.get("method").and_then(JsonValue::as_str) {
             if !role_may_send_method(role, method) {
                 return Err(AcpClientRequestError::Forbidden {
@@ -544,7 +696,78 @@ impl AcpWorker {
                     role,
                 });
             }
-        } else if role != AcpAttachRole::HostOwner {
+            self.annotate_control_actor(&mut value, &actor);
+        } else if let Some(id_key) = jsonrpc_id_key(&value) {
+            if let Some(decision) = self
+                .decided_host_requests
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&id_key)
+                .cloned()
+            {
+                let attempted_payload = Self::decision_payload(&value);
+                if decision.actor.client_id == actor.client_id
+                    && decision.payload == attempted_payload
+                {
+                    return Err(AcpClientRequestError::IdempotentHostDecision { decision });
+                }
+                return Err(AcpClientRequestError::AlreadyDecided {
+                    decision,
+                    attempted_actor: actor,
+                    attempted_payload,
+                });
+            }
+
+            let Some(host_request) = self.pending_host_request(&id_key) else {
+                return Err(AcpClientRequestError::UnknownHostRequest { request_id: id_key });
+            };
+            if role != AcpAttachRole::HostOwner
+                && !(role == AcpAttachRole::Controller
+                    && host_request.method == "session/request_permission")
+            {
+                return Err(AcpClientRequestError::Forbidden {
+                    method: host_request.method,
+                    role,
+                });
+            }
+
+            self.request_tx
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .ok_or(AcpClientRequestError::Disconnected)?
+                .send(value.clone())
+                .map_err(|_| AcpClientRequestError::Disconnected)?;
+
+            self.pending_host_requests
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id_key);
+            let decision = AcpHostDecision {
+                request_id: id_key.clone(),
+                method: host_request.method,
+                session_id: host_request.session_id,
+                actor,
+                payload: Self::decision_payload(&value),
+                decided_at_ms: unix_epoch_ms(),
+            };
+            {
+                let mut decided = self
+                    .decided_host_requests
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                decided.insert(id_key, decision.clone());
+                while decided.len() > ACP_REPLAY_BUFFER_LIMIT {
+                    let Some(first_key) = decided.keys().next().cloned() else {
+                        break;
+                    };
+                    decided.remove(&first_key);
+                }
+            }
+            self.append_control_outcome(&decision, "accepted", "first_valid_response")
+                .await;
+            return Ok(());
+        } else {
             return Err(AcpClientRequestError::Forbidden {
                 method: "<response>".to_string(),
                 role,
@@ -589,6 +812,14 @@ impl AcpWorker {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
+        self.pending_host_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.decided_host_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     fn is_expired(&self, retention: Duration) -> bool {
@@ -702,6 +933,19 @@ impl AcpWorker {
         )
         .await;
 
+        if let AcpOutboundRoute::HostRequest { id_key, method } = acp_outbound_route(&line) {
+            self.pending_host_requests
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    id_key,
+                    AcpHostRequest {
+                        method,
+                        session_id: session_id.clone(),
+                    },
+                );
+        }
+
         self.deliver_output(&line, annotated);
     }
 
@@ -775,7 +1019,13 @@ impl AcpWorker {
 
     fn deliver_output(&self, original_line: &str, annotated: String) {
         match acp_outbound_route(original_line) {
-            AcpOutboundRoute::HostRequest => self.send_to_host_owner(annotated),
+            AcpOutboundRoute::HostRequest { method, .. } => {
+                if method == "session/request_permission" {
+                    self.send_to_control_actors(annotated);
+                } else {
+                    self.send_to_host_owner(annotated);
+                }
+            }
             AcpOutboundRoute::Response(id_key) => {
                 let target = id_key.and_then(|id_key| {
                     self.pending_client_requests
@@ -803,6 +1053,25 @@ impl AcpWorker {
             .clone();
         if let Some(client_id) = host_owner {
             let _ = self.send_to_client(&client_id, line);
+        }
+    }
+
+    fn send_to_control_actors(&self, line: String) {
+        let clients: Vec<mpsc::UnboundedSender<String>> = self
+            .clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .filter(|client| {
+                matches!(
+                    client.role,
+                    AcpAttachRole::HostOwner | AcpAttachRole::Controller
+                )
+            })
+            .map(|client| client.socket_tx.clone())
+            .collect();
+        for socket_tx in clients {
+            let _ = socket_tx.send(line.clone());
         }
     }
 
@@ -1070,7 +1339,10 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                 };
                                 let request_id =
                                     value.get("id").cloned().unwrap_or(JsonValue::Null);
-                                match worker.send_client_request(&client_id, client_role, value) {
+                                match worker
+                                    .send_client_request(&client_id, client_role, value)
+                                    .await
+                                {
                                     Ok(()) => {}
                                     Err(AcpClientRequestError::Forbidden { method, role }) => {
                                         send_socket_jsonrpc_error_with_data(
@@ -1083,6 +1355,67 @@ async fn run_acp_websocket(socket: WebSocket, state: Arc<AcpWebSocketState>) {
                                                 "role": role.as_str(),
                                                 "reason": "role_not_authorized",
                                             }),
+                                        );
+                                    }
+                                    Err(AcpClientRequestError::UnknownHostRequest {
+                                        request_id: unknown_request_id,
+                                    }) => {
+                                        send_socket_jsonrpc_error_with_data(
+                                            &socket_tx,
+                                            &request_id,
+                                            -32014,
+                                            "ACP host request is not pending",
+                                            json!({
+                                                "requestId": unknown_request_id,
+                                                "reason": "unknown_request_id",
+                                            }),
+                                        );
+                                    }
+                                    Err(AcpClientRequestError::IdempotentHostDecision {
+                                        decision,
+                                    }) => {
+                                        worker
+                                            .append_control_outcome(
+                                                &decision,
+                                                "idempotent",
+                                                "same_actor_same_decision",
+                                            )
+                                            .await;
+                                        send_socket_jsonrpc_result(
+                                            &socket_tx,
+                                            &request_id,
+                                            json!({
+                                                "status": "already_applied",
+                                                "_meta": {
+                                                    "harn": decision.error_data(
+                                                        "same_actor_same_decision",
+                                                        None,
+                                                    ),
+                                                },
+                                            }),
+                                        );
+                                    }
+                                    Err(AcpClientRequestError::AlreadyDecided {
+                                        decision,
+                                        attempted_actor,
+                                        attempted_payload,
+                                    }) => {
+                                        worker
+                                            .append_control_outcome(
+                                                &decision,
+                                                "rejected",
+                                                "already_decided",
+                                            )
+                                            .await;
+                                        let mut data = decision
+                                            .error_data("already_decided", Some(&attempted_actor));
+                                        data["attemptedDecision"] = attempted_payload;
+                                        send_socket_jsonrpc_error_with_data(
+                                            &socket_tx,
+                                            &request_id,
+                                            -32013,
+                                            "ACP host request already has a decision",
+                                            data,
                                         );
                                     }
                                     Err(AcpClientRequestError::DuplicateRequestId) => {
@@ -1604,12 +1937,15 @@ fn acp_outbound_route(line: &str) -> AcpOutboundRoute {
     let Ok(value) = serde_json::from_str::<JsonValue>(line) else {
         return AcpOutboundRoute::Broadcast;
     };
-    let has_method = value.get("method").and_then(JsonValue::as_str).is_some();
+    let method = value.get("method").and_then(JsonValue::as_str);
     let id_key = jsonrpc_id_key(&value);
-    match (has_method, id_key) {
-        (true, Some(_)) => AcpOutboundRoute::HostRequest,
-        (false, id_key) => AcpOutboundRoute::Response(id_key),
-        (true, None) => AcpOutboundRoute::Broadcast,
+    match (method, id_key) {
+        (Some(method), Some(id_key)) => AcpOutboundRoute::HostRequest {
+            id_key,
+            method: method.to_string(),
+        },
+        (None, id_key) => AcpOutboundRoute::Response(id_key),
+        (Some(_), None) => AcpOutboundRoute::Broadcast,
     }
 }
 
@@ -1624,6 +1960,13 @@ fn jsonrpc_id_key(value: &JsonValue) -> Option<String> {
     value
         .get("id")
         .and_then(|id| serde_json::to_string(id).ok())
+}
+
+fn unix_epoch_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 fn annotate_acp_line(
@@ -1764,4 +2107,185 @@ fn session_id_from_acp_message(line: &str) -> Option<String> {
                 })
                 .map(ToString::to_string)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_vm::event_log::{AnyEventLog, MemoryEventLog};
+    use std::collections::{BTreeMap, VecDeque};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::{Arc, Mutex, Weak};
+    use tokio::sync::mpsc;
+
+    type TestWorkerChannels = (
+        Arc<AcpWorker>,
+        mpsc::UnboundedReceiver<JsonValue>,
+        mpsc::UnboundedReceiver<String>,
+        mpsc::UnboundedReceiver<String>,
+        mpsc::UnboundedReceiver<String>,
+    );
+
+    fn test_worker() -> TestWorkerChannels {
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (owner_tx, owner_rx) = mpsc::unbounded_channel();
+        let (controller_tx, controller_rx) = mpsc::unbounded_channel();
+        let (observer_tx, observer_rx) = mpsc::unbounded_channel();
+        let worker = Arc::new(AcpWorker {
+            id: "worker-test".to_string(),
+            request_tx: Mutex::new(Some(request_tx)),
+            clients: Mutex::new(BTreeMap::from([
+                (
+                    "owner".to_string(),
+                    AcpClient {
+                        connection_id: "owner-conn".to_string(),
+                        role: AcpAttachRole::HostOwner,
+                        socket_tx: owner_tx,
+                    },
+                ),
+                (
+                    "controller".to_string(),
+                    AcpClient {
+                        connection_id: "controller-conn".to_string(),
+                        role: AcpAttachRole::Controller,
+                        socket_tx: controller_tx,
+                    },
+                ),
+                (
+                    "observer".to_string(),
+                    AcpClient {
+                        connection_id: "observer-conn".to_string(),
+                        role: AcpAttachRole::Observer,
+                        socket_tx: observer_tx,
+                    },
+                ),
+            ])),
+            host_owner_client_id: Mutex::new(Some("owner".to_string())),
+            pending_client_requests: Mutex::new(BTreeMap::new()),
+            pending_host_requests: Mutex::new(BTreeMap::new()),
+            decided_host_requests: Mutex::new(BTreeMap::new()),
+            sessions: Mutex::new(BTreeMap::new()),
+            replay_buffer: Mutex::new(VecDeque::new()),
+            next_event_id: AtomicU64::new(1),
+            detached_at: Mutex::new(None),
+            event_log: Arc::new(AnyEventLog::Memory(MemoryEventLog::new(64))),
+            hub: Weak::new(),
+        });
+        (worker, request_rx, owner_rx, controller_rx, observer_rx)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_hub_arbitrates_permission_responses() {
+        let (worker, mut request_rx, mut owner_rx, mut controller_rx, mut observer_rx) =
+            test_worker();
+        worker
+            .handle_output(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 77,
+                    "method": "session/request_permission",
+                    "params": {
+                        "sessionId": "session-1",
+                        "toolCallId": "tool-1",
+                        "toolName": "edit"
+                    },
+                })
+                .to_string(),
+            )
+            .await;
+
+        let owner_request: JsonValue =
+            serde_json::from_str(&owner_rx.recv().await.expect("owner request")).unwrap();
+        let controller_request: JsonValue =
+            serde_json::from_str(&controller_rx.recv().await.expect("controller request")).unwrap();
+        assert_eq!(owner_request["method"], "session/request_permission");
+        assert_eq!(controller_request["method"], "session/request_permission");
+        assert!(observer_rx.try_recv().is_err());
+
+        worker
+            .send_client_request(
+                "controller",
+                AcpAttachRole::Controller,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 77,
+                    "result": {"outcome": "approved"},
+                }),
+            )
+            .await
+            .expect("first controller decision wins");
+        let forwarded = request_rx.recv().await.expect("forwarded response");
+        assert_eq!(forwarded["id"], 77);
+        assert_eq!(forwarded["result"]["outcome"], "approved");
+
+        let duplicate = worker
+            .send_client_request(
+                "controller",
+                AcpAttachRole::Controller,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 77,
+                    "result": {"outcome": "approved"},
+                }),
+            )
+            .await
+            .expect_err("same actor duplicate should be idempotent");
+        assert!(matches!(
+            duplicate,
+            AcpClientRequestError::IdempotentHostDecision { .. }
+        ));
+
+        let conflict = worker
+            .send_client_request(
+                "owner",
+                AcpAttachRole::HostOwner,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 77,
+                    "result": {"outcome": "denied"},
+                }),
+            )
+            .await
+            .expect_err("late conflicting decision should be rejected");
+        match conflict {
+            AcpClientRequestError::AlreadyDecided {
+                decision,
+                attempted_actor,
+                attempted_payload,
+            } => {
+                assert_eq!(decision.actor.client_id, "controller");
+                assert_eq!(attempted_actor.client_id, "owner");
+                assert_eq!(attempted_payload["result"]["outcome"], "denied");
+            }
+            other => panic!("expected AlreadyDecided, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn acp_hub_adds_actor_metadata_to_controller_controls() {
+        let (worker, mut request_rx, _owner_rx, _controller_rx, _observer_rx) = test_worker();
+        worker
+            .send_client_request(
+                "controller",
+                AcpAttachRole::Controller,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "session/cancel",
+                    "params": {"sessionId": "session-1"},
+                }),
+            )
+            .await
+            .expect("controller cancel forwards");
+        let forwarded = request_rx.recv().await.expect("forwarded cancel");
+        assert_eq!(
+            forwarded["params"]["_harn"]["actor"],
+            json!({
+                "clientId": "controller",
+                "connectionId": "controller-conn",
+                "role": "controller",
+                "source": "websocket",
+            })
+        );
+    }
 }

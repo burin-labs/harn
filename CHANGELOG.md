@@ -37,6 +37,11 @@ condensed series summaries instead of full per-patch history.
   `host_owner`. Harn routes host JSON-RPC requests only to the host owner,
   broadcasts session notifications and presence updates, and rejects read-only
   observer controls with structured role errors.
+- **ACP control arbitration (#2412).** ACP WebSocket permission responses are
+  first-valid-response-wins with idempotent same-actor replays and structured
+  `already_decided` rejects. Session cancel and pending-inject controls now
+  return stable lifecycle outcomes, carry actor metadata, and emit
+  audit-visible `control_outcome` events.
 
 ## v0.8.37
 

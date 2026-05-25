@@ -456,6 +456,53 @@ async fn session_inject_requires_active_prompt_bridge() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn session_cancel_is_idempotent_and_actor_attributed() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    for (id, expected) in [(2, "cancelled"), (3, "already_cancelled")] {
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "session/cancel",
+                "params": {
+                    "sessionId": session_id,
+                    "_harn": {
+                        "actor": {
+                            "clientId": "controller-a",
+                            "connectionId": "conn-a",
+                            "role": "controller",
+                            "source": "ide"
+                        }
+                    }
+                },
+            }))
+            .await;
+        let response = recv_json(&mut rx).await;
+        assert_eq!(response["result"]["status"], expected);
+        assert_eq!(
+            response["result"]["_meta"]["harn"]["actor"]["clientId"],
+            "controller-a"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn session_prompt_compile_error_clears_active_inject_bridge() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
@@ -572,21 +619,30 @@ async fn session_inject_revoke_and_replace_pending_messages() {
         .await;
     let replace = recv_json(&mut rx).await;
     assert_eq!(replace["result"]["messageId"], first_id);
+    assert_eq!(replace["result"]["status"], "replaced");
 
     for id in [5, 6] {
         server
             .handle_incoming_message(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "session/revoke_inject",
-                "params": {
-                    "sessionId": session_id,
-                    "messageId": second_id,
-                },
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "session/revoke_inject",
+                    "params": {
+                        "sessionId": session_id,
+                        "messageId": second_id,
+                    },
             }))
             .await;
         let revoke = recv_json(&mut rx).await;
-        assert_eq!(revoke["result"], serde_json::json!({}));
+        assert_eq!(revoke["result"]["messageId"], second_id);
+        assert_eq!(
+            revoke["result"]["status"],
+            if id == 5 {
+                "revoked"
+            } else {
+                "already_revoked"
+            }
+        );
     }
 
     let delivered = bridge
@@ -655,6 +711,7 @@ async fn session_inject_state_survives_prompt_bridge_replacement() {
         .await;
     let replace = recv_json(&mut rx).await;
     assert_eq!(replace["result"]["messageId"], message_id);
+    assert_eq!(replace["result"]["status"], "replaced");
 
     let replacement_bridge = Rc::new(
         harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
@@ -749,6 +806,79 @@ async fn session_inject_reports_unknown_and_already_delivered_ids() {
     assert_eq!(
         already_delivered["error"]["data"]["reason"],
         "already_delivered"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_inject_rejects_cross_actor_mutation() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    attach_test_host_bridge(&mut server, &session_id);
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/inject",
+            "params": {
+                "sessionId": session_id,
+                "mode": "queue",
+                "content": "owned pending message",
+                "_harn": {
+                    "actor": {
+                        "clientId": "controller-a",
+                        "role": "controller",
+                        "source": "ide"
+                    }
+                }
+            },
+        }))
+        .await;
+    let accepted = recv_json(&mut rx).await;
+    let message_id = accepted["result"]["messageId"].as_str().unwrap();
+    assert_eq!(accepted["result"]["status"], "accepted");
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/replace_inject",
+            "params": {
+                "sessionId": session_id,
+                "messageId": message_id,
+                "content": "stolen edit",
+                "_harn": {
+                    "actor": {
+                        "clientId": "controller-b",
+                        "role": "controller",
+                        "source": "ide"
+                    }
+                }
+            },
+        }))
+        .await;
+    let rejected = recv_json(&mut rx).await;
+    assert_eq!(
+        rejected["error"]["data"]["reason"],
+        "not_owner_or_not_authorized"
+    );
+    assert_eq!(
+        rejected["error"]["data"]["owner"]["clientId"],
+        "controller-a"
     );
 }
 

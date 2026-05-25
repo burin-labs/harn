@@ -119,6 +119,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "composition_error",
   "composition_finish",
   "composition_start",
+  "control_outcome",
   "daemon_watchdog_tripped",
   "feedback_injected",
   "iteration_end",

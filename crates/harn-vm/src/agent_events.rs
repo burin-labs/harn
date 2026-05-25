@@ -673,6 +673,22 @@ pub enum AgentEvent {
         pending_count: usize,
         total_bytes: u64,
     },
+    /// ACP control-plane arbitration outcome. Emitted for accepted,
+    /// idempotent, and rejected controls so replay/audit consumers can show
+    /// who acted and why a late or unauthorized action lost.
+    ControlOutcome {
+        session_id: String,
+        control_id: String,
+        method: String,
+        outcome: String,
+        status: String,
+        actor: serde_json::Value,
+        target: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        metadata: serde_json::Value,
+    },
     /// Lifecycle update for a delegated/background worker. Carries the
     /// canonical typed `event` variant alongside the worker's current
     /// `status` string and the structured `metadata` payload that
@@ -913,6 +929,7 @@ impl AgentEvent {
             | Self::Handoff { session_id, .. }
             | Self::FsWatch { session_id, .. }
             | Self::StagedWritesPending { session_id, .. }
+            | Self::ControlOutcome { session_id, .. }
             | Self::WorkerUpdate { session_id, .. }
             | Self::HitlRequested { session_id, .. }
             | Self::HitlResolved { session_id, .. }

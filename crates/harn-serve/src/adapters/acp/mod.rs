@@ -38,7 +38,7 @@ pub use schema::{
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use sessions::{
-    mark_cancelled_session, preempt_session_interruption, prepare_session_prompt, Session,
+    lookup_session_cancellation, preempt_session_interruption, prepare_session_prompt, Session,
     SessionCancellation, SessionInfo,
 };
 pub use transport::{run_acp_channel_server, run_acp_server};
@@ -70,12 +70,102 @@ use io::send_json_response;
 
 const ACP_AUTH_REQUIRED_CODE: i64 = -32000;
 
+#[derive(Clone)]
+struct InjectControlRecord {
+    owner: serde_json::Value,
+    status: String,
+}
+
 fn session_id_param(params: &serde_json::Value) -> Option<String> {
     params
         .get("sessionId")
         .or_else(|| params.get("session_id"))
         .and_then(|value| value.as_str())
         .map(str::to_string)
+}
+
+fn harn_meta(params: &serde_json::Value) -> Option<&serde_json::Map<String, serde_json::Value>> {
+    params
+        .get("_harn")
+        .and_then(serde_json::Value::as_object)
+        .or_else(|| {
+            params
+                .get("_meta")
+                .and_then(|meta| meta.get("harn"))
+                .and_then(serde_json::Value::as_object)
+        })
+}
+
+fn string_meta_field(
+    meta: &serde_json::Map<String, serde_json::Value>,
+    camel: &str,
+    snake: &str,
+) -> Option<String> {
+    meta.get(camel)
+        .or_else(|| meta.get(snake))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn control_actor_from_params(params: &serde_json::Value) -> serde_json::Value {
+    let Some(meta) = harn_meta(params) else {
+        return serde_json::json!({
+            "clientId": "legacy-acp-client",
+            "role": "host_owner",
+            "source": "acp",
+        });
+    };
+    if let Some(actor) = meta.get("actor").and_then(serde_json::Value::as_object) {
+        let mut actor = actor.clone();
+        actor
+            .entry("source".to_string())
+            .or_insert_with(|| serde_json::json!("acp"));
+        actor
+            .entry("role".to_string())
+            .or_insert_with(|| serde_json::json!("host_owner"));
+        actor
+            .entry("clientId".to_string())
+            .or_insert_with(|| serde_json::json!("legacy-acp-client"));
+        return serde_json::Value::Object(actor);
+    }
+
+    let mut actor = serde_json::Map::new();
+    actor.insert(
+        "clientId".to_string(),
+        serde_json::json!(string_meta_field(meta, "clientId", "client_id")
+            .unwrap_or_else(|| "legacy-acp-client".to_string())),
+    );
+    if let Some(connection_id) = string_meta_field(meta, "connectionId", "connection_id") {
+        actor.insert("connectionId".to_string(), serde_json::json!(connection_id));
+    }
+    if let Some(display_name) = string_meta_field(meta, "displayName", "display_name") {
+        actor.insert("displayName".to_string(), serde_json::json!(display_name));
+    }
+    actor.insert(
+        "role".to_string(),
+        serde_json::json!(
+            string_meta_field(meta, "role", "role").unwrap_or_else(|| "host_owner".to_string())
+        ),
+    );
+    actor.insert(
+        "source".to_string(),
+        serde_json::json!(
+            string_meta_field(meta, "source", "source").unwrap_or_else(|| { "acp".to_string() })
+        ),
+    );
+    serde_json::Value::Object(actor)
+}
+
+fn actor_is_host_owner(actor: &serde_json::Value) -> bool {
+    actor
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|role| role == "host_owner" || role == "hostOwner" || role == "owner")
+}
+
+fn control_id() -> String {
+    format!("ctrl_{}", uuid::Uuid::now_v7().simple())
 }
 
 fn session_list_filter<'a>(
@@ -370,6 +460,9 @@ pub struct AcpServer {
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
     /// Active sessions keyed by session ID.
     sessions: HashMap<String, Session>,
+    /// ACP control-plane ownership for pending injected messages, keyed by
+    /// session id then message id.
+    inject_controls: HashMap<String, BTreeMap<String, InjectControlRecord>>,
     /// Monotonically increasing JSON-RPC request ID for outgoing requests.
     next_id: AtomicU64,
     /// Pending outgoing request waiters, keyed by JSON-RPC id.
@@ -409,6 +502,7 @@ impl AcpServer {
             authenticated_principal: None,
             runtime_configurator: config.runtime_configurator,
             sessions: HashMap::new(),
+            inject_controls: HashMap::new(),
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
             session_cancellations: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -572,6 +666,29 @@ impl AcpServer {
         if let Ok(line) = serde_json::to_string(&response) {
             self.write_line(&line);
         }
+    }
+
+    fn emit_control_outcome(
+        &self,
+        session_id: &str,
+        method: &str,
+        outcome: &str,
+        status: &str,
+        actor: serde_json::Value,
+        target: serde_json::Value,
+        reason: Option<&str>,
+    ) {
+        harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
+            session_id: session_id.to_string(),
+            control_id: control_id(),
+            method: method.to_string(),
+            outcome: outcome.to_string(),
+            status: status.to_string(),
+            actor,
+            target,
+            reason: reason.map(str::to_string),
+            metadata: serde_json::Value::Null,
+        });
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).
@@ -1336,8 +1453,56 @@ impl AcpServer {
         }
     }
 
-    fn handle_session_cancel(&mut self, params: &serde_json::Value) {
-        mark_cancelled_session(&self.session_cancellations, params);
+    fn handle_session_cancel(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = session_id_param(params) else {
+            if !id.is_null() {
+                self.send_error(id, -32602, "session/cancel requires sessionId");
+            }
+            return;
+        };
+        let Some(cancellation) =
+            lookup_session_cancellation(&self.session_cancellations, &session_id)
+        else {
+            if !id.is_null() {
+                self.send_error(id, -32004, &format!("Session not found: {session_id}"));
+            }
+            return;
+        };
+
+        let actor = control_actor_from_params(params);
+        let newly_cancelled = if cancellation.take_routed_cancel_ack() {
+            true
+        } else {
+            cancellation.cancel()
+        };
+        let status = if newly_cancelled {
+            "cancelled"
+        } else {
+            "already_cancelled"
+        };
+        self.emit_control_outcome(
+            &session_id,
+            "session/cancel",
+            status,
+            "accepted",
+            actor.clone(),
+            serde_json::json!({"sessionId": session_id}),
+            None,
+        );
+        if !id.is_null() {
+            self.send_response(
+                id,
+                serde_json::json!({
+                    "sessionId": session_id,
+                    "status": status,
+                    "_meta": {
+                        "harn": {
+                            "actor": actor,
+                        }
+                    }
+                }),
+            );
+        }
     }
 
     /// Targeted preemption: stop one in-flight tool call without tearing
@@ -1407,6 +1572,7 @@ impl AcpServer {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(session_id);
+        self.inject_controls.remove(session_id);
         clear_session_sinks(session_id);
         #[cfg(feature = "hostlib")]
         {
@@ -1425,15 +1591,29 @@ impl AcpServer {
         self.send_response(id, serde_json::json!({}));
     }
 
-    async fn handle_session_inject(&self, id: &serde_json::Value, params: &serde_json::Value) {
+    async fn handle_session_inject(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "session/inject requires sessionId");
+            return;
+        };
         let Some(inject_state) = self.session_inject_state(id, params, "session/inject", true)
         else {
             return;
         };
+        let actor = control_actor_from_params(params);
         let mode = match bridge_mode_for_session_inject(params) {
             Ok(mode) => mode,
             Err(message) => {
                 self.send_error(id, -32602, &message);
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/inject",
+                    "rejected",
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id}),
+                    Some("invalid_mode"),
+                );
                 return;
             }
         };
@@ -1442,13 +1622,52 @@ impl AcpServer {
                 Ok(content) => content,
                 Err(message) => {
                     self.send_error(id, -32602, &message);
+                    self.emit_control_outcome(
+                        &session_id,
+                        "session/inject",
+                        "rejected",
+                        "rejected",
+                        actor,
+                        serde_json::json!({"sessionId": session_id}),
+                        Some("invalid_content"),
+                    );
                     return;
                 }
             };
         let message_id = inject_state
             .push_pending_user_message(content, transcript_content, mode)
             .await;
-        self.send_response(id, serde_json::json!({ "messageId": message_id }));
+        self.inject_controls
+            .entry(session_id.clone())
+            .or_default()
+            .insert(
+                message_id.clone(),
+                InjectControlRecord {
+                    owner: actor.clone(),
+                    status: "pending".to_string(),
+                },
+            );
+        self.emit_control_outcome(
+            &session_id,
+            "session/inject",
+            "accepted",
+            "accepted",
+            actor.clone(),
+            serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+            None,
+        );
+        self.send_response(
+            id,
+            serde_json::json!({
+                "messageId": message_id,
+                "status": "accepted",
+                "_meta": {
+                    "harn": {
+                        "actor": actor,
+                    }
+                }
+            }),
+        );
     }
 
     fn clear_active_prompt_transport(&mut self, session_id: &str) {
@@ -1459,10 +1678,14 @@ impl AcpServer {
     }
 
     async fn handle_session_revoke_inject(
-        &self,
+        &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "session/revoke_inject requires sessionId");
+            return;
+        };
         let Some(inject_state) =
             self.session_inject_state(id, params, "session/revoke_inject", false)
         else {
@@ -1473,12 +1696,91 @@ impl AcpServer {
         else {
             return;
         };
+        let actor = control_actor_from_params(params);
+        if let Some(owner) = self
+            .inject_controls
+            .get(&session_id)
+            .and_then(|records| records.get(message_id))
+            .map(|record| record.owner.clone())
+        {
+            if owner != actor && !actor_is_host_owner(&actor) {
+                self.send_pending_inject_error_with_data(
+                    id,
+                    message_id,
+                    "not_owner_or_not_authorized",
+                    "pending inject is owned by another ACP actor",
+                    serde_json::json!({
+                        "actor": actor,
+                        "owner": owner,
+                    }),
+                );
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/revoke_inject",
+                    "rejected",
+                    "rejected",
+                    control_actor_from_params(params),
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    Some("not_owner_or_not_authorized"),
+                );
+                return;
+            }
+        }
         match inject_state.revoke_pending_user_message(message_id).await {
-            harn_vm::bridge::PendingUserMessageMutationResult::Mutated
-            | harn_vm::bridge::PendingUserMessageMutationResult::AlreadyRevoked => {
-                self.send_response(id, serde_json::json!({}));
+            harn_vm::bridge::PendingUserMessageMutationResult::Mutated => {
+                if let Some(record) = self
+                    .inject_controls
+                    .get_mut(&session_id)
+                    .and_then(|records| records.get_mut(message_id))
+                {
+                    record.status = "revoked".to_string();
+                }
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/revoke_inject",
+                    "revoked",
+                    "accepted",
+                    actor.clone(),
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    None,
+                );
+                self.send_response(
+                    id,
+                    serde_json::json!({"messageId": message_id, "status": "revoked"}),
+                );
+            }
+            harn_vm::bridge::PendingUserMessageMutationResult::AlreadyRevoked => {
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/revoke_inject",
+                    "already_revoked",
+                    "idempotent",
+                    actor.clone(),
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    None,
+                );
+                self.send_response(
+                    id,
+                    serde_json::json!({"messageId": message_id, "status": "already_revoked"}),
+                );
             }
             harn_vm::bridge::PendingUserMessageMutationResult::AlreadyDelivered => {
+                if let Some(record) = self
+                    .inject_controls
+                    .get_mut(&session_id)
+                    .and_then(|records| records.get_mut(message_id))
+                {
+                    record.status = "delivered".to_string();
+                }
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/revoke_inject",
+                    "already_delivered",
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    Some("already_delivered"),
+                );
                 self.send_pending_inject_error(
                     id,
                     message_id,
@@ -1487,6 +1789,15 @@ impl AcpServer {
                 );
             }
             harn_vm::bridge::PendingUserMessageMutationResult::UnknownMessageId => {
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/revoke_inject",
+                    "unknown_message_id",
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    Some("unknown_message_id"),
+                );
                 self.send_pending_inject_error(
                     id,
                     message_id,
@@ -1498,10 +1809,14 @@ impl AcpServer {
     }
 
     async fn handle_session_replace_inject(
-        &self,
+        &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "session/replace_inject requires sessionId");
+            return;
+        };
         let Some(inject_state) =
             self.session_inject_state(id, params, "session/replace_inject", false)
         else {
@@ -1512,11 +1827,50 @@ impl AcpServer {
         else {
             return;
         };
+        let actor = control_actor_from_params(params);
+        if let Some(owner) = self
+            .inject_controls
+            .get(&session_id)
+            .and_then(|records| records.get(message_id))
+            .map(|record| record.owner.clone())
+        {
+            if owner != actor && !actor_is_host_owner(&actor) {
+                self.send_pending_inject_error_with_data(
+                    id,
+                    message_id,
+                    "not_owner_or_not_authorized",
+                    "pending inject is owned by another ACP actor",
+                    serde_json::json!({
+                        "actor": actor,
+                        "owner": owner,
+                    }),
+                );
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/replace_inject",
+                    "rejected",
+                    "rejected",
+                    control_actor_from_params(params),
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    Some("not_owner_or_not_authorized"),
+                );
+                return;
+            }
+        }
         let (content, transcript_content) =
             match normalize_session_inject_content("session/replace_inject", params) {
                 Ok(content) => content,
                 Err(message) => {
                     self.send_error(id, -32602, &message);
+                    self.emit_control_outcome(
+                        &session_id,
+                        "session/replace_inject",
+                        "rejected",
+                        "rejected",
+                        actor,
+                        serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                        Some("invalid_content"),
+                    );
                     return;
                 }
             };
@@ -1525,9 +1879,30 @@ impl AcpServer {
             .await
         {
             harn_vm::bridge::PendingUserMessageMutationResult::Mutated => {
-                self.send_response(id, serde_json::json!({ "messageId": message_id }));
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/replace_inject",
+                    "replaced",
+                    "accepted",
+                    actor.clone(),
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    None,
+                );
+                self.send_response(
+                    id,
+                    serde_json::json!({ "messageId": message_id, "status": "replaced" }),
+                );
             }
             harn_vm::bridge::PendingUserMessageMutationResult::AlreadyRevoked => {
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/replace_inject",
+                    "already_revoked",
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    Some("already_revoked"),
+                );
                 self.send_pending_inject_error(
                     id,
                     message_id,
@@ -1536,6 +1911,22 @@ impl AcpServer {
                 );
             }
             harn_vm::bridge::PendingUserMessageMutationResult::AlreadyDelivered => {
+                if let Some(record) = self
+                    .inject_controls
+                    .get_mut(&session_id)
+                    .and_then(|records| records.get_mut(message_id))
+                {
+                    record.status = "delivered".to_string();
+                }
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/replace_inject",
+                    "already_delivered",
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    Some("already_delivered"),
+                );
                 self.send_pending_inject_error(
                     id,
                     message_id,
@@ -1544,6 +1935,15 @@ impl AcpServer {
                 );
             }
             harn_vm::bridge::PendingUserMessageMutationResult::UnknownMessageId => {
+                self.emit_control_outcome(
+                    &session_id,
+                    "session/replace_inject",
+                    "unknown_message_id",
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+                    Some("unknown_message_id"),
+                );
                 self.send_pending_inject_error(
                     id,
                     message_id,
@@ -1608,15 +2008,32 @@ impl AcpServer {
         reason: &str,
         message: &str,
     ) {
-        self.send_error_with_data(
+        self.send_pending_inject_error_with_data(
             id,
-            -32602,
+            message_id,
+            reason,
             message,
-            serde_json::json!({
-                "reason": reason,
-                "messageId": message_id,
-            }),
+            serde_json::Value::Null,
         );
+    }
+
+    fn send_pending_inject_error_with_data(
+        &self,
+        id: &serde_json::Value,
+        message_id: &str,
+        reason: &str,
+        message: &str,
+        extra: serde_json::Value,
+    ) {
+        let mut data = serde_json::Map::new();
+        data.insert("reason".to_string(), serde_json::json!(reason));
+        data.insert("messageId".to_string(), serde_json::json!(message_id));
+        if let Some(extra) = extra.as_object() {
+            for (key, value) in extra {
+                data.insert(key.clone(), value.clone());
+            }
+        }
+        self.send_error_with_data(id, -32602, message, serde_json::Value::Object(data));
     }
 
     async fn handle_session_remind(&self, id: &serde_json::Value, params: &serde_json::Value) {
@@ -2621,7 +3038,7 @@ impl AcpServer {
                 self.handle_session_prompt(&id, &params).await;
             }
             "session/cancel" => {
-                self.handle_session_cancel(&params);
+                self.handle_session_cancel(&id, &params);
             }
             "session/cancel_tool_call" => {
                 if self.reject_unauthenticated(&id) {

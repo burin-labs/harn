@@ -749,6 +749,33 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::ControlOutcome {
+                session_id,
+                control_id,
+                method,
+                outcome,
+                status,
+                actor,
+                target,
+                reason,
+                metadata,
+            } => {
+                let mut payload = serde_json::json!({
+                    "controlId": control_id,
+                    "method": method,
+                    "outcome": outcome,
+                    "status": status,
+                    "actor": actor,
+                    "target": target,
+                });
+                if let Some(reason) = reason {
+                    payload["reason"] = serde_json::Value::String(reason.clone());
+                }
+                if !metadata.is_null() {
+                    payload["metadata"] = metadata.clone();
+                }
+                self.emit_agent_event_ext("control_outcome", session_id, payload);
+            }
             AgentEvent::WorkerUpdate {
                 session_id,
                 worker_id,
