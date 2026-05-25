@@ -11,28 +11,48 @@
 //      `task_plan_compile`
 //
 // Emits one JSONL record per (task, strategy, trial) with parse +
-// structural metrics, token counts, and wall-clock latency. The records
-// are deliberately judge-free: every field is computed deterministically
-// from the model output and the validator state. The doc page derives
-// recommendation from the aggregated numbers, not from prose review.
+// structural metrics, token counts, cost estimates, retry history, and
+// wall-clock latency. The records are deliberately judge-free: every
+// field is computed deterministically from the model output and the
+// validator state. The doc page derives recommendation from the
+// aggregated numbers, not from prose review.
 //
 // Usage:
 //   harn run examples/task_plan/compare_strategies.harn -- \
 //     --out=examples/task_plan/results/runs.jsonl
 //   harn run examples/task_plan/compare_strategies.harn -- \
 //     --model=qwen3.6-coding --trials=2 --out=runs/comparison.jsonl
+//   harn run examples/task_plan/compare_strategies.harn -- \
+//     --model=qwen3.6-coding \
+//     --max-tokens-baseline=1800 \
+//     --max-tokens-burin=2400 \
+//     --max-tokens-typed-ir=6000 \
+//     --structured-output \
+//     --retry-on-length \
+//     --retry-on-schema-error \
+//     --out=examples/task_plan/results/v2/runs_qwen35b_local.jsonl
 //
 // Default model is `qwen3.6-coding` (Ollama, ~$0 cost per call). Override
 // with --model=<alias> when re-running against a different provider; the
 // driver itself does not depend on the model choice.
-import { task_plan_compile, task_plan_validate } from "std/agent/task_plan"
+import { task_plan_compile, task_plan_schema, task_plan_validate } from "std/agent/task_plan"
+import { estimate_call_cost } from "std/llm/economics"
 import { plan_from } from "std/plan"
 
 const __DEFAULT_MODEL: string = "qwen3.6-coding"
 
 const __DEFAULT_TRIALS: int = 1
 
-const __DEFAULT_MAX_TOKENS: int = 1800
+// The three strategies do not have comparable output density. `typed_ir`
+// carries explicit capabilities, effects, graph edges, and verification
+// contracts, so a single global output cap creates false truncation failures.
+const __DEFAULT_MAX_TOKENS_BASELINE: int = 1800
+
+const __DEFAULT_MAX_TOKENS_BURIN: int = 2400
+
+const __DEFAULT_MAX_TOKENS_TYPED_IR: int = 6000
+
+const __OUTPUT_TEXT_TRUNCATE_CHARS: int = 4096
 
 const __TASKS = [
   {
@@ -69,6 +89,30 @@ fn __parse_arg(args, prefix) {
     }
   }
   return nil
+}
+
+fn __has_flag(args, name) {
+  for arg in args ?? [] {
+    if arg == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn __parse_int_arg(args, prefix, fallback) {
+  let raw = __parse_arg(args, prefix)
+  if raw == nil || raw == "" {
+    return fallback
+  }
+  return to_int(raw)
+}
+
+fn __truncated_text(text, limit) {
+  if len(text) <= limit {
+    return text
+  }
+  return substring(text, 0, limit)
 }
 
 fn __baseline_system() {
@@ -120,15 +164,44 @@ fn __typed_ir_prompt(task) {
 }
 
 fn __extract_json(text) {
-  var t = trim(text)
-  if starts_with(t, "```json") {
-    t = substring(t, 7, len(t))
-  } else if starts_with(t, "```") {
-    t = substring(t, 3, len(t))
+  let t = trim(text)
+  var start = -1
+  for i in range(0, len(t)) {
+    if substring(t, i, i + 1) == "{" {
+      start = i
+      break
+    }
   }
-  t = trim(t)
-  if ends_with(t, "```") {
-    t = trim(substring(t, 0, len(t) - 3))
+  if start < 0 {
+    return t
+  }
+  var depth = 0
+  var in_string = false
+  var escaped = false
+  for i in range(start, len(t)) {
+    let ch = substring(t, i, i + 1)
+    if escaped {
+      escaped = false
+      continue
+    }
+    if in_string {
+      if ch == "\\" {
+        escaped = true
+      } else if ch == "\"" {
+        in_string = false
+      }
+      continue
+    }
+    if ch == "\"" {
+      in_string = true
+    } else if ch == "{" {
+      depth = depth + 1
+    } else if ch == "}" {
+      depth = depth - 1
+      if depth == 0 {
+        return substring(t, start, i + 1)
+      }
+    }
   }
   return t
 }
@@ -205,6 +278,7 @@ fn __score_baseline(call) {
     workflow_validate_ok: false,
     success: success,
     output_chars: chars,
+    validate_error_messages: [],
   }
 }
 
@@ -238,12 +312,15 @@ fn __score_burin(call) {
       workflow_validate_ok: false,
       success: false,
       output_chars: len(text),
+      validate_error_messages: [parsed.error],
     }
   }
   let raw = parsed.value
+  var artifact_error = nil
   let artifact = try {
     plan_from(raw)
   } catch (e) {
+    artifact_error = to_string(e)
     nil
   }
   let steps = __plan_steps_len(raw)
@@ -281,6 +358,11 @@ fn __score_burin(call) {
     workflow_validate_ok: false,
     success: success,
     output_chars: len(text),
+    validate_error_messages: if artifact_error == nil {
+      []
+    } else {
+      [artifact_error]
+    },
   }
 }
 
@@ -361,6 +443,7 @@ fn __score_typed(call) {
       workflow_validate_ok: false,
       success: false,
       output_chars: len(text),
+      validate_error_messages: [parsed.error],
     }
   }
   let plan = parsed.value
@@ -395,31 +478,241 @@ fn __score_typed(call) {
     workflow_validate_ok: wf_report?.valid ?? false,
     success: success,
     output_chars: len(text),
+    validate_error_messages: __validation_messages(report, wf_report, compiled),
   }
 }
 
-fn __call_model(model, prompt, system, max_tokens) {
-  let resp = llm_call(prompt, system, {model: model, temperature: 0.0, max_tokens: max_tokens})
-  let telemetry = resp?.provider_telemetry ?? {}
+fn __validation_messages(report, wf_report, compiled) {
+  var messages = []
+  for error in report?.errors ?? [] {
+    messages = messages
+      + [to_string(error?.code ?? "validate_error") + ": " + to_string(error?.message ?? error)]
+  }
+  if !compiled?.ok {
+    for error in compiled?.errors ?? [] {
+      messages = messages + ["compile_error: " + to_string(error)]
+    }
+  }
+  if !wf_report?.valid {
+    for error in wf_report?.errors ?? [] {
+      messages = messages + ["workflow_error: " + to_string(error)]
+    }
+  }
+  return messages
+}
+
+fn __burin_plan_schema() {
   return {
-    text: resp.text ?? "",
-    input_tokens: resp.input_tokens ?? 0,
-    output_tokens: resp.output_tokens ?? 0,
+    type: "object",
+    required: ["steps"],
+    additionalProperties: true,
+    properties: {
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "content", "status"],
+          additionalProperties: true,
+          properties: {id: {type: "string"}, content: {type: "string"}, status: {type: "string"}, priority: {}},
+        },
+      },
+      assumptions: {type: "array", items: {type: "string"}},
+      open_questions: {type: "array", items: {type: "string"}},
+      verification_commands: {type: "array", items: {type: "string"}},
+    },
+  }
+}
+
+fn __schema_for_strategy(strategy) {
+  if strategy == "burin_plan" {
+    return __burin_plan_schema()
+  }
+  if strategy == "typed_ir" {
+    return schema_to_json_schema(task_plan_schema())
+  }
+  return nil
+}
+
+fn __model_capabilities(model) {
+  let info = try {
+    llm_model_info(model)
+  } catch (e) {
+    nil
+  }
+  if info?.capabilities != nil {
+    return info.capabilities
+  }
+  let resolved = try {
+    llm_resolve_model(model)
+  } catch (e) {
+    nil
+  }
+  if resolved != nil {
+    return provider_capabilities(resolved.provider, resolved.id)
+  }
+  return {}
+}
+
+fn __structured_output_supported(caps) {
+  if caps?.json_schema != nil || caps?.structured_output != nil {
+    return true
+  }
+  let mode = caps?.structured_output_mode
+  return mode != nil && mode != "" && mode != "none"
+}
+
+fn __llm_options(model, max_tokens, schema, use_structured_output) {
+  var opts = {model: model, temperature: 0.0, max_tokens: max_tokens}
+  if use_structured_output && schema != nil {
+    opts = opts
+      + {
+      response_format: "json",
+      json_schema: schema,
+      output_schema: schema,
+      output_format: {kind: "json_schema", schema: schema, strict: true},
+      output_validation: "warn",
+      schema_retries: 0,
+    }
+  }
+  return opts
+}
+
+fn __call_model_once(model, prompt, system, max_tokens, schema, use_structured_output) {
+  let opts = __llm_options(model, max_tokens, schema, use_structured_output)
+  var used_structured_output = use_structured_output
+  let resp = try {
+    llm_call(prompt, system, opts)
+  } catch (e) {
+    if use_structured_output {
+      used_structured_output = false
+      llm_call(prompt, system, __llm_options(model, max_tokens, nil, false))
+    } else {
+      throw e
+    }
+  }
+  let telemetry = resp?.provider_telemetry ?? {}
+  let text = resp.text ?? ""
+  let input_tokens = resp.input_tokens ?? 0
+  let output_tokens = resp.output_tokens ?? 0
+  let cost = estimate_call_cost(
+    {
+      provider: resp.provider ?? "unknown",
+      model: resp.model ?? model,
+      input_tokens: input_tokens,
+      output_tokens: output_tokens,
+    },
+  )
+  return {
+    text: text,
+    input_tokens: input_tokens,
+    output_tokens: output_tokens,
     wall_ms: telemetry?.client_wall_ms ?? 0,
     server_load_ms: telemetry?.server_load_ms ?? 0,
     model: resp.model ?? model,
     provider: resp.provider ?? "unknown",
+    finish_reason: resp?.finish_reason ?? resp?.stop_reason,
+    cost_usd: cost?.cost_usd,
+    input_cost_usd: cost?.breakdown?.input_usd,
+    output_cost_usd: cost?.breakdown?.output_usd,
+    pricing_known: cost?.pricing_known ?? false,
+    structured_output_used: used_structured_output,
   }
 }
 
-fn __strategy_call(strategy, task, model, max_tokens) {
+fn __is_length_finish(reason) {
+  return reason == "length" || reason == "max_tokens" || reason == "MAX_TOKENS"
+}
+
+fn __merge_calls(first, second, text, retry_history) {
+  return first
+    + {
+    text: text,
+    input_tokens: first.input_tokens + second.input_tokens,
+    output_tokens: first.output_tokens + second.output_tokens,
+    wall_ms: first.wall_ms + second.wall_ms,
+    server_load_ms: first.server_load_ms + second.server_load_ms,
+    finish_reason: second.finish_reason ?? first.finish_reason,
+    cost_usd: if first.cost_usd == nil || second.cost_usd == nil {
+      nil
+    } else {
+      first.cost_usd + second.cost_usd
+    },
+    input_cost_usd: if first.input_cost_usd == nil || second.input_cost_usd == nil {
+      nil
+    } else {
+      first.input_cost_usd + second.input_cost_usd
+    },
+    output_cost_usd: if first.output_cost_usd == nil || second.output_cost_usd == nil {
+      nil
+    } else {
+      first.output_cost_usd + second.output_cost_usd
+    },
+    pricing_known: first.pricing_known && second.pricing_known,
+    retry_history: retry_history,
+  }
+}
+
+fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_length) {
+  if !retry_on_length || !__is_length_finish(call.finish_reason) {
+    return call + {retry_history: call?.retry_history ?? []}
+  }
+  let continuation_prompt = "Original task:\n"
+    + prompt
+    + "\n\nThe previous response stopped because it reached the output budget. Previous response prefix:\n"
+    + call.text
+    + "\n\nContinue exactly where you left off. Do not add preamble, markdown fences, or a fresh opening object."
+  let continuation = __call_model_once(model, continuation_prompt, system, max_tokens, nil, false)
+  return __merge_calls(
+    call,
+    continuation,
+    call.text + continuation.text,
+    call?.retry_history ?? [] + ["length_continuation"],
+  )
+}
+
+fn __strategy_call(strategy, task, model, max_tokens, opts) {
+  let schema = __schema_for_strategy(strategy)
+  let use_structured = opts.structured_output && strategy != "baseline"
+    && __structured_output_supported(opts.capabilities)
+  var call = nil
   if strategy == "baseline" {
-    return __call_model(model, __baseline_prompt(task), __baseline_system(), max_tokens)
+    call = __call_model_once(model, __baseline_prompt(task), __baseline_system(), max_tokens, nil, false)
+    return __maybe_continue_length(
+      call,
+      model,
+      __baseline_prompt(task),
+      __baseline_system(),
+      max_tokens,
+      opts.retry_on_length,
+    )
   }
   if strategy == "burin_plan" {
-    return __call_model(model, __burin_prompt(task), __burin_system(), max_tokens)
+    call = __call_model_once(model, __burin_prompt(task), __burin_system(), max_tokens, schema, use_structured)
+    return __maybe_continue_length(
+      call,
+      model,
+      __burin_prompt(task),
+      __burin_system(),
+      max_tokens,
+      opts.retry_on_length,
+    )
   }
-  return __call_model(model, __typed_ir_prompt(task), __typed_ir_system(), max_tokens)
+  call = __call_model_once(
+    model,
+    __typed_ir_prompt(task),
+    __typed_ir_system(),
+    max_tokens,
+    schema,
+    use_structured,
+  )
+  return __maybe_continue_length(
+    call,
+    model,
+    __typed_ir_prompt(task),
+    __typed_ir_system(),
+    max_tokens,
+    opts.retry_on_length,
+  )
 }
 
 fn __strategy_score(strategy, call) {
@@ -432,9 +725,56 @@ fn __strategy_score(strategy, call) {
   return __score_typed(call)
 }
 
-fn __run_cell(strategy, task, trial, model, max_tokens) {
-  let call = __strategy_call(strategy, task, model, max_tokens)
-  let score = __strategy_score(strategy, call)
+fn __needs_schema_repair(score) {
+  return !score.parse_ok || !score.validate_ok || !score.compile_ok || !score.workflow_validate_ok
+}
+
+fn __repair_prompt(strategy, task, call, score) {
+  var messages = score.validate_error_messages
+  if len(messages) == 0 && score.parse_error != nil {
+    messages = [score.parse_error]
+  }
+  if len(messages) == 0 {
+    messages = ["the response did not satisfy the " + strategy + " schema"]
+  }
+  return "Your previous response for this planning task failed validation.\n\nTask:\n"
+    + task.prompt
+    + "\n\nValidation errors:\n- "
+    + messages.join("\n- ")
+    + "\n\nPrevious response:\n"
+    + call.text
+    + "\n\nReply with the corrected JSON object only. No prose, no markdown fences."
+}
+
+fn __maybe_repair_schema(strategy, task, model, max_tokens, opts, call, score) {
+  if strategy == "baseline" || !opts.retry_on_schema_error || !__needs_schema_repair(score) {
+    return {call: call, score: score}
+  }
+  let schema = __schema_for_strategy(strategy)
+  let use_structured = opts.structured_output && __structured_output_supported(opts.capabilities)
+  let system = if strategy == "burin_plan" {
+    __burin_system()
+  } else {
+    __typed_ir_system()
+  }
+  let repair = __call_model_once(
+    model,
+    __repair_prompt(strategy, task, call, score),
+    system,
+    max_tokens,
+    schema,
+    use_structured,
+  )
+  let repaired = __merge_calls(call, repair, repair.text, call?.retry_history ?? [] + ["schema_repair"])
+  return {call: repaired, score: __strategy_score(strategy, repaired)}
+}
+
+fn __run_cell(strategy, task, trial, model, max_tokens, opts) {
+  let initial_call = __strategy_call(strategy, task, model, max_tokens, opts)
+  let initial_score = __strategy_score(strategy, initial_call)
+  let repaired = __maybe_repair_schema(strategy, task, model, max_tokens, opts, initial_call, initial_score)
+  let call = repaired.call
+  let score = repaired.score
   return {
     task_id: task.id,
     task_label: task.label,
@@ -444,8 +784,16 @@ fn __run_cell(strategy, task, trial, model, max_tokens) {
     provider: call.provider,
     input_tokens: call.input_tokens,
     output_tokens: call.output_tokens,
+    input_cost_usd: call.input_cost_usd,
+    output_cost_usd: call.output_cost_usd,
+    cost_usd: call.cost_usd,
+    pricing_known: call.pricing_known,
     wall_ms: call.wall_ms,
     server_load_ms: call.server_load_ms,
+    finish_reason: call.finish_reason,
+    retry_history: call?.retry_history ?? [],
+    structured_output_used: call?.structured_output_used ?? false,
+    output_text_truncated: __truncated_text(call.text, __OUTPUT_TEXT_TRUNCATE_CHARS),
     output_chars: score.output_chars,
     parse_ok: score.parse_ok,
     parse_error: score.parse_error,
@@ -460,6 +808,7 @@ fn __run_cell(strategy, task, trial, model, max_tokens) {
     mentions_verify: score.mentions_verify,
     validate_ok: score.validate_ok,
     validate_errors: score.validate_errors,
+    validate_error_messages: score.validate_error_messages,
     validate_warnings: score.validate_warnings,
     compile_ok: score.compile_ok,
     workflow_validate_ok: score.workflow_validate_ok,
@@ -474,11 +823,41 @@ fn main(harness: Harness) -> int {
   } else {
     to_int(trials_arg)
   }
-  let max_tokens_arg = __parse_arg(argv, "--max-tokens=")
-  let max_tokens = if max_tokens_arg == nil {
-    __DEFAULT_MAX_TOKENS
-  } else {
-    to_int(max_tokens_arg)
+  let global_max_tokens = __parse_arg(argv, "--max-tokens=")
+  let max_tokens = {
+    baseline: __parse_int_arg(
+      argv,
+      "--max-tokens-baseline=",
+      if global_max_tokens == nil {
+        __DEFAULT_MAX_TOKENS_BASELINE
+      } else {
+        to_int(global_max_tokens)
+      },
+    ),
+    burin_plan: __parse_int_arg(
+      argv,
+      "--max-tokens-burin=",
+      if global_max_tokens == nil {
+        __DEFAULT_MAX_TOKENS_BURIN
+      } else {
+        to_int(global_max_tokens)
+      },
+    ),
+    typed_ir: __parse_int_arg(
+      argv,
+      "--max-tokens-typed-ir=",
+      if global_max_tokens == nil {
+        __DEFAULT_MAX_TOKENS_TYPED_IR
+      } else {
+        to_int(global_max_tokens)
+      },
+    ),
+  }
+  let opts = {
+    structured_output: __has_flag(argv, "--structured-output"),
+    retry_on_length: __has_flag(argv, "--retry-on-length"),
+    retry_on_schema_error: __has_flag(argv, "--retry-on-schema-error"),
+    capabilities: __model_capabilities(model),
   }
   let out_path = __parse_arg(argv, "--out=")
   let strategies = ["baseline", "burin_plan", "typed_ir"]
@@ -487,7 +866,7 @@ fn main(harness: Harness) -> int {
     for strategy in strategies {
       for trial in range(1, trials + 1) {
         harness.stdio.println("[run ] " + task.id + " / " + strategy + " / trial " + to_string(trial))
-        let record = __run_cell(strategy, task, trial, model, max_tokens)
+        let record = __run_cell(strategy, task, trial, model, max_tokens[strategy], opts)
         records = records + [record]
         harness.stdio
           .println(

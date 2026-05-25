@@ -47,6 +47,11 @@ condensed series summaries instead of full per-patch history.
   tool calls against the bound tool registry before dispatch, catching unknown
   tools, missing required arguments, and simple argument type mismatches in the
   deterministic pre-dispatch feedback path.
+- **Task-plan IR comparison v2 controls (#2403).** The head-to-head eval driver
+  now defaults to per-strategy output budgets, can opt into provider-native
+  structured output, records finish reasons, bounded retry history, truncated
+  raw output, and cost telemetry, and can run one length continuation plus one
+  schema-repair retry for fairer typed-IR comparisons.
 
 ## v0.8.37
 
