@@ -1,0 +1,31 @@
+/**
+ * Verifier-signal escalation: the cheap link returns text containing a
+ * forbidden pattern, so the lint verifier escalates to the frontier
+ * link. The frontier candidate passes verification and is returned.
+ */
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({text: "answer: TODO finish later", model: "mock", provider: "mock"})
+  llm_mock({text: "answer: 42", model: "mock-strong", provider: "mock"})
+  let policy = routing_policy(
+    {
+      chain: [
+        {provider: "mock", model: "mock", label: "cheap"},
+        {provider: "mock", model: "mock-strong", label: "frontier"},
+      ],
+      escalate_on: [{kind: "lint", forbidden_patterns: ["TODO"], on_fail: "escalate"}],
+      label: "verifier-escalate",
+    },
+  )
+  let result = llm_call("question", nil, {routing: policy})
+  __io_println(result.text)
+  let attempts = result.routing.attempts
+  __io_println(len(attempts))
+  __io_println(attempts[0].label)
+  __io_println(attempts[0].verifier_outcome)
+  __io_println(attempts[0].verifier_signals[0].kind)
+  __io_println(attempts[0].verifier_signals[0].signal)
+  __io_println(attempts[1].label)
+  __io_println(attempts[1].verifier_outcome)
+  __io_println(result.routing.selected)
+}

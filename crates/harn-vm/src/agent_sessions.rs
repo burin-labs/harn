@@ -412,8 +412,7 @@ pub fn snapshot(id: &str) -> Option<VmValue> {
     SESSIONS.with(|s| s.borrow().get(id).map(session_snapshot))
 }
 
-/// Return the canonical transcript surface for APIs whose result field is
-/// named `transcript`. Session-only fields stay on `agent_session_snapshot`.
+/// Session-only fields stay on `agent_session_snapshot`.
 pub fn transcript(id: &str) -> Option<VmValue> {
     SESSIONS.with(|s| {
         s.borrow()
@@ -815,8 +814,6 @@ pub fn pop_last_if_assistant(id: &str) -> Result<bool, String> {
     })
 }
 
-/// Retain only the last `keep_last` messages in the session transcript.
-/// Returns the kept count (<= keep_last).
 pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
@@ -2227,7 +2224,6 @@ pub fn remove_workspace_root(id: &str, root: &str) -> Result<bool, String> {
     })
 }
 
-/// Return the anchored primary path plus the mounted additional roots.
 pub fn list_workspace_roots(id: &str) -> Result<(PathBuf, Vec<MountedRoot>), String> {
     SESSIONS.with(|s| {
         let map = s.borrow();

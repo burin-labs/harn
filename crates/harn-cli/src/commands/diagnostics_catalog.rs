@@ -120,8 +120,10 @@ impl Renderer {
         };
         // Pretty-print so diffs are reviewable; trailing newline matches
         // POSIX file convention.
+        // CatalogEnvelope and CatalogEntry are tagged-string serde shapes —
+        // no infallible path inputs, no skip_serializing_if blowups.
         let mut out = serde_json::to_string_pretty(&envelope)
-            .expect("catalog envelope serialises with serde_json");
+            .expect("CatalogEnvelope contains only String/u8/enum fields");
         out.push('\n');
         out
     }
@@ -143,7 +145,7 @@ impl Renderer {
                     entry.summary,
                     repair,
                 )
-                .expect("writing to string never fails");
+                .ok();
             }
         }
         out
@@ -205,7 +207,7 @@ impl Renderer {
                 category_title(*category),
                 entries.len(),
             )
-            .expect("writing to string never fails");
+            .ok();
         }
         out.push('\n');
 
@@ -216,7 +218,7 @@ impl Renderer {
                 category.as_str(),
                 category_title(*category)
             )
-            .expect("write");
+            .ok();
             out.push('\n');
             if let Some(intro) = category_intro(*category) {
                 out.push_str(intro);
@@ -242,7 +244,7 @@ impl Renderer {
                     repair_cell,
                     safety_cell,
                 )
-                .expect("write");
+                .ok();
             }
             out.push('\n');
         }
@@ -250,7 +252,7 @@ impl Renderer {
         out.push_str("## Code reference\n\n");
         for (_, entries) in self.ordered_categories() {
             for entry in entries {
-                writeln!(out, "### `{}`", entry.identifier).expect("write");
+                writeln!(out, "### `{}`", entry.identifier).ok();
                 out.push('\n');
                 writeln!(
                     out,
@@ -258,9 +260,9 @@ impl Renderer {
                     entry.category,
                     category_title(entry.category),
                 )
-                .expect("write");
+                .ok();
                 out.push('\n');
-                writeln!(out, "{}", entry.summary).expect("write");
+                writeln!(out, "{}", entry.summary).ok();
                 out.push('\n');
 
                 if let Some(template) = entry.code.repair_template() {
@@ -269,8 +271,8 @@ impl Renderer {
                         "- **Repair:** `{}` &nbsp;·&nbsp; **Safety:** `{}`",
                         template.id, template.safety
                     )
-                    .expect("write");
-                    writeln!(out, "- {}", template.summary).expect("write");
+                    .ok();
+                    writeln!(out, "- {}", template.summary).ok();
                 }
                 let related = entry.code.related();
                 if !related.is_empty() {
@@ -285,9 +287,9 @@ impl Renderer {
                             other.as_str(),
                             code_anchor(other.as_str())
                         )
-                        .expect("write");
+                        .ok();
                     }
-                    writeln!(out, "- **See also:** {links}").expect("write");
+                    writeln!(out, "- **See also:** {links}").ok();
                 }
                 out.push('\n');
 

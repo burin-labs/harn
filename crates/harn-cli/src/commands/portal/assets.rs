@@ -36,10 +36,10 @@ fn is_safe_asset_path(path: &str) -> bool {
 
 pub(super) fn asset_response(body: &'static [u8], content_type: &'static str) -> Response {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        content_type.parse().expect("content type"),
-    );
+    let header_value = content_type
+        .parse()
+        .unwrap_or_else(|_| header::HeaderValue::from_static("application/octet-stream"));
+    headers.insert(header::CONTENT_TYPE, header_value);
     (headers, body).into_response()
 }
 

@@ -137,7 +137,10 @@ impl ObservabilityGuard {
         }
 
         #[cfg(not(feature = "otel"))]
-        if std::env::var("HARN_OTEL_ENDPOINT").is_ok_and(|value| !value.trim().is_empty()) {
+        if std::env::var("HARN_OTEL_ENDPOINT")
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
             return Err(
                 "HARN_OTEL_ENDPOINT is set, but this build was compiled without the `otel` feature"
                     .to_string(),

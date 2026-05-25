@@ -41,6 +41,7 @@ pub mod reasoning_policy;
 pub(crate) mod reminder_providers;
 mod rerank;
 pub(crate) mod routing;
+pub(crate) mod routing_verifier;
 pub(crate) mod schema_recover;
 pub(crate) mod skill_score;
 mod stream_builtins;

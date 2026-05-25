@@ -164,7 +164,9 @@ impl OrchestratorHarness {
         // Signal the background runtime to start graceful shutdown.
         let _ = self.shutdown_tx.send(true);
         // Wait for the background thread to finish (graceful shutdown runs there).
-        let join = self.join.take().expect("join handle");
+        let Some(join) = self.join.take() else {
+            return Err(HarnessError("harness already shut down".to_string()));
+        };
         tokio::task::spawn_blocking(move || join.join())
             .await
             .map_err(|_| HarnessError("spawn_blocking join failed".to_string()))?

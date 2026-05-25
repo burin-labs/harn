@@ -73,12 +73,10 @@ impl TypeChecker {
         }
     }
 
-    /// Check whether a single statement definitely exits (delegates to the free function).
     fn stmt_definitely_exits(stmt: &SNode) -> bool {
         stmt_definitely_exits(stmt)
     }
 
-    /// Define variables from a destructuring pattern in the given scope (as unknown type).
     fn define_pattern_vars(pattern: &BindingPattern, scope: &mut TypeScope, mutable: bool) {
         let define = |scope: &mut TypeScope, name: &str| {
             if mutable {
@@ -110,7 +108,6 @@ impl TypeChecker {
         }
     }
 
-    /// Type-check default value expressions within a destructuring pattern.
     fn check_pattern_defaults(&mut self, pattern: &BindingPattern, scope: &mut TypeScope) {
         match pattern {
             BindingPattern::Identifier(_) => {}

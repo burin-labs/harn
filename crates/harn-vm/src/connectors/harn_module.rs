@@ -399,10 +399,22 @@ fn worker_send_error(error: mpsc::SendError<WorkerCommand>) -> ConnectorError {
 }
 
 fn run_worker_loop(module_path: PathBuf, rx: mpsc::Receiver<WorkerCommand>) {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .expect("current-thread runtime");
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            // Log + bail. The mpsc::Receiver drops with the thread, so the
+            // first command send from the caller will surface a clean
+            // channel-closed ConnectorError rather than a thread panic.
+            crate::events::log_warn(
+                "connector.worker.runtime_init_failed",
+                &format!("tokio current-thread runtime build failed: {error}"),
+            );
+            return;
+        }
+    };
     let local = tokio::task::LocalSet::new();
     let mut state: Option<LocalHarnConnectorRuntime> = None;
     while let Ok(command) = rx.recv() {
@@ -642,7 +654,11 @@ impl Connector for HarnConnector {
             .worker()?
             .call_export("normalize_inbound", vec![raw_json], true)
             .await?
-            .expect("required export returns a value");
+            .ok_or_else(|| {
+                ConnectorError::HarnRuntime(
+                    "connector module 'normalize_inbound' export returned no value".to_string(),
+                )
+            })?;
         parse_normalize_result(&self.provider_id, &raw, value)
     }
 
@@ -1260,7 +1276,11 @@ async fn run_poll_tick(
     let raw_result = worker
         .call_export("poll_tick", vec![input], true)
         .await?
-        .expect("required export returns a value");
+        .ok_or_else(|| {
+            ConnectorError::HarnRuntime(
+                "connector module 'poll_tick' export returned no value".to_string(),
+            )
+        })?;
     if shutdown.is_stopped() {
         return Ok(());
     }

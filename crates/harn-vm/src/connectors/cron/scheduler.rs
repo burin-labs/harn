@@ -102,19 +102,29 @@ fn schedule_error(error: impl std::fmt::Display) -> ConnectorError {
 }
 
 fn offset_to_utc(ts: OffsetDateTime) -> DateTime<Utc> {
+    // UTC has no DST gaps or ambiguous times, so timestamp_opt(seconds, nanos)
+    // always returns Single for any valid OffsetDateTime.
     Utc.timestamp_opt(ts.unix_timestamp(), ts.nanosecond())
         .single()
-        .expect("offset timestamp is representable in chrono")
+        .unwrap_or_else(|| {
+            // Defensive: clamp to epoch rather than crash if some future
+            // OffsetDateTime ever overflows i64 seconds.
+            Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now)
+        })
 }
 
 fn chrono_to_offset<TzImpl: TimeZone>(
     value: DateTime<TzImpl>,
 ) -> Result<OffsetDateTime, time::error::ComponentRange> {
-    OffsetDateTime::from_unix_timestamp_nanos(i128::from(
-        value
-            .timestamp_nanos_opt()
-            .expect("chrono timestamp fits in i64"),
-    ))
+    // `timestamp_nanos_opt` returns None for dates outside ~1677-2262.
+    // Cron schedules theoretically can compute far-future ticks; on overflow,
+    // return the largest representable OffsetDateTime so the scheduler stops
+    // rather than panics.
+    let nanos = match value.timestamp_nanos_opt() {
+        Some(nanos) => i128::from(nanos),
+        None => i128::from(i64::MAX),
+    };
+    OffsetDateTime::from_unix_timestamp_nanos(nanos)
 }
 
 #[async_trait]
