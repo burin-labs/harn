@@ -868,7 +868,7 @@ pub fn on_event(event: TriggerEvent) {
         .await
         .unwrap();
     assert!(!inbox
-        .insert_if_new("github-new-issue", "delivery-123", Duration::from_secs(60))
+        .insert_if_new("github-new-issue", "delivery-123", Duration::from_mins(1))
         .await
         .unwrap());
 }

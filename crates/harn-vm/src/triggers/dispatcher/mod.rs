@@ -1540,8 +1540,7 @@ impl Dispatcher {
                             );
                         }
                         let final_error = format!(
-                            "destination circuit opened for {} after {} consecutive failures: {}",
-                            destination_key, DESTINATION_CIRCUIT_FAILURE_THRESHOLD, error
+                            "destination circuit opened for {destination_key} after {DESTINATION_CIRCUIT_FAILURE_THRESHOLD} consecutive failures: {error}"
                         );
                         let dlq_entry = DlqEntry {
                             trigger_id: binding.id.as_str().to_string(),

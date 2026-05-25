@@ -888,8 +888,7 @@ fn collect_nested_run_commands(
     while let Some((value, depth)) = stack.pop() {
         if depth > PROJECT_ENRICH_YAML_MAX_DEPTH {
             return Err(format!(
-                "YAML traversal depth exceeded ({} levels)",
-                PROJECT_ENRICH_YAML_MAX_DEPTH
+                "YAML traversal depth exceeded ({PROJECT_ENRICH_YAML_MAX_DEPTH} levels)"
             ));
         }
 
@@ -1828,7 +1827,7 @@ mod tests {
         command.args(args).current_dir(root);
         clear_git_env(&mut command);
         let status = command.status().expect("run git");
-        assert!(status.success(), "git {:?} should succeed", args);
+        assert!(status.success(), "git {args:?} should succeed");
     }
 
     fn install_mock_gh(path: &Path) {
@@ -1868,7 +1867,7 @@ exit 1
     #[test]
     fn lefthook_run_collection_preserves_sorted_depth_first_order() {
         let value: YamlValue = serde_yml::from_str(
-            r#"
+            r"
 commands:
   z:
     run: echo z
@@ -1876,7 +1875,7 @@ commands:
     run: echo a
   list:
     - run: echo list
-"#,
+",
         )
         .expect("yaml");
         let mut commands = Vec::new();
@@ -1957,7 +1956,7 @@ commands:
         let dir = temp_dir("operator-meta");
         write_file(
             &dir.path().join(".github/workflows/ci.yml"),
-            r#"name: CI
+            r"name: CI
 jobs:
   fmt:
     name: Format check
@@ -1972,7 +1971,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo nextest run --workspace
       - run: cargo clippy --workspace -- -D warnings
-"#,
+",
         );
         write_file(
             &dir.path().join(".githooks/pre-commit"),
@@ -1984,22 +1983,22 @@ jobs:
         );
         write_file(
             &dir.path().join(".pre-commit-config.yaml"),
-            r#"repos:
+            r"repos:
   - repo: local
     hooks:
       - id: lint
         name: local lint
         entry: cargo clippy
         stages: [pre-commit, pre-push]
-"#,
+",
         );
         write_file(
             &dir.path().join("lefthook.yml"),
-            r#"pre-push:
+            r"pre-push:
   commands:
     tests:
       run: cargo test --workspace
-"#,
+",
         );
         write_file(
             &dir.path().join(".github/CODEOWNERS"),

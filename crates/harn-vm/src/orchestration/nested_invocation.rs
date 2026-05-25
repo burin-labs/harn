@@ -42,7 +42,7 @@ pub enum NestedInvocationTarget<'a> {
     BurinHarness { manifest: &'a serde_json::Value },
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NestedInvocationCeilingReport {
     pub target_kind: String,
     pub target_label: String,

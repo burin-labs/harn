@@ -57,7 +57,7 @@ async fn slack_webhook_acknowledges_before_handler_finishes() {
             .send(),
     )
     .await
-    .unwrap_or_else(|_| panic!("slack ack path exceeded {:?}", SLACK_ACK_TIMEOUT))
+    .unwrap_or_else(|_| panic!("slack ack path exceeded {SLACK_ACK_TIMEOUT:?}"))
     .unwrap();
     assert_status(response, StatusCode::OK).await;
     assert!(

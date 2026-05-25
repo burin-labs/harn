@@ -29,7 +29,7 @@ use self::{callback::*, github::*, linear::*, oauth::*, status::*};
 
 const MANIFEST: &str = "harn.toml";
 const DEFAULT_LINEAR_API_BASE_URL: &str = "https://api.linear.app/graphql";
-const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_mins(5);
 const CONNECT_INDEX_NAMESPACE: &str = "connect";
 const CONNECT_INDEX_NAME: &str = "index";
 

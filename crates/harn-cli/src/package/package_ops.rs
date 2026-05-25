@@ -865,7 +865,7 @@ fn prepare_publish_plan(
     ensure_changelog_entry(&ctx.dir.join("CHANGELOG.md"), &version)?;
 
     let (updated_index_content, index_diff) = if options.skip_index_pr {
-        (index_content.clone(), String::new())
+        (index_content, String::new())
     } else {
         let entry = render_registry_version_entry(&version, &git, &tag, &sha, &package_name)?;
         let updated = add_registry_version_entry(
@@ -1163,8 +1163,7 @@ fn ensure_changelog_entry(path: &Path, version: &str) -> Result<(), PackageError
 fn changelog_has_nonempty_entry(content: &str, version: &str) -> bool {
     let escaped = regex::escape(version);
     let heading = Regex::new(&format!(
-        r"(?m)^#{{1,6}}\s+(?:\[?v?{}\]?)(?:\s|$|[-(])",
-        escaped
+        r"(?m)^#{{1,6}}\s+(?:\[?v?{escaped}\]?)(?:\s|$|[-(])"
     ))
     .expect("valid changelog heading regex");
     let Some(found) = heading.find(content) else {
@@ -1518,7 +1517,7 @@ pub(crate) fn load_manifest_context_for_anchor(
     let manifest_path = if anchor.is_dir() {
         anchor.join(MANIFEST)
     } else if anchor.file_name() == Some(OsStr::new(MANIFEST)) {
-        anchor.clone()
+        anchor
     } else {
         let (_, dir) = find_nearest_manifest(&anchor)
             .ok_or_else(|| format!("no {MANIFEST} found from {}", anchor.display()))?;
@@ -2018,7 +2017,7 @@ fn validate_package_skill_path(
     let skill_file = if path.is_dir() {
         path.join("SKILL.md")
     } else {
-        path.clone()
+        path
     };
     if skill_file.file_name() != Some(OsStr::new("SKILL.md")) {
         push_error(

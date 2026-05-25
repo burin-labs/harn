@@ -238,10 +238,11 @@ fn canonicalize_schema_dict(
         _ => {}
     }
 
-    if let Some(VmValue::Bool(true)) = schema.get("uniqueItems") {
-        if schema_type_name(&out) == Some("list") && !out.contains_key("x-harn-type") {
-            out.insert("x-harn-type".to_string(), VmValue::String(Rc::from("set")));
-        }
+    if matches!(schema.get("uniqueItems"), Some(VmValue::Bool(true)))
+        && schema_type_name(&out) == Some("list")
+        && !out.contains_key("x-harn-type")
+    {
+        out.insert("x-harn-type".to_string(), VmValue::String(Rc::from("set")));
     }
 
     if out.get("x-harn-type").map(|v| v.display()) == Some("set".to_string()) {
@@ -616,7 +617,7 @@ fn canonical_to_json_schema_with(
             if openapi_style && branches.len() == 2 {
                 let null_index = branches.iter().position(|value| value == "null");
                 if let Some(null_index) = null_index {
-                    let other_index = if null_index == 0 { 1 } else { 0 };
+                    let other_index = usize::from(null_index == 0);
                     if let Some(other_type) = branches[other_index].as_object_mut() {
                         other_type.insert("nullable".to_string(), serde_json::Value::Bool(true));
                         return Ok(serde_json::Value::Object(other_type.clone()));

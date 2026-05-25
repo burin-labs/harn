@@ -105,7 +105,7 @@ impl RateLimiter {
         if let Some(last_tick) = self.last_tick {
             let elapsed = last_tick.elapsed();
             if elapsed < interval {
-                tokio::time::sleep(interval - elapsed).await;
+                tokio::time::sleep(interval.checked_sub(elapsed).unwrap()).await;
             }
         }
         self.last_tick = Some(Instant::now());
@@ -353,22 +353,22 @@ fn build_bulk_target(
             "binding": {
                 "id": record.binding_id.clone(),
                 "version": record.binding_version,
-                "key": binding_key.clone(),
-                "handler_kind": handler_kind.clone(),
-                "handler": handler.clone(),
-                "target_uri": target_uri.clone(),
+                "key": binding_key,
+                "handler_kind": handler_kind,
+                "handler": handler,
+                "target_uri": target_uri,
             },
             "attempt": {
-                "status": latest_status.clone(),
+                "status": latest_status,
                 "attempt": state.attempt_count,
                 "count": state.attempt_count,
-                "handler": handler.clone(),
-                "handler_kind": handler_kind.clone(),
-                "target_uri": target_uri.clone(),
-                "error": error.clone(),
-                "started_at": state.started_at.clone(),
-                "completed_at": state.completed_at.clone(),
-                "failed_at": state.failed_at.clone(),
+                "handler": handler,
+                "handler_kind": handler_kind,
+                "target_uri": target_uri,
+                "error": error,
+                "started_at": state.started_at,
+                "completed_at": state.completed_at,
+                "failed_at": state.failed_at,
                 "terminal": state.terminal,
                 "cancellable": cancellable,
                 "cancel_requested": state.cancel_requested,

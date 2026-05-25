@@ -395,7 +395,7 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         let mut options = parse_artifact_helper_options(args.get(2))?;
         options
             .metadata
-            .insert("path".to_string(), serde_json::json!(path.clone()));
+            .insert("path".to_string(), serde_json::json!(path));
         let artifact = build_helper_artifact(
             "workspace_file",
             Some(path.clone()),
@@ -431,7 +431,7 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         let mut options = parse_artifact_helper_options(args.get(2))?;
         options
             .metadata
-            .insert("path".to_string(), serde_json::json!(path.clone()));
+            .insert("path".to_string(), serde_json::json!(path));
         let artifact = build_helper_artifact(
             "editor_selection",
             Some(format!("selection {path}")),
@@ -476,7 +476,7 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         let mut options = parse_artifact_helper_options(args.get(2))?;
         options
             .metadata
-            .insert("command".to_string(), serde_json::json!(command.clone()));
+            .insert("command".to_string(), serde_json::json!(command));
         let artifact = build_helper_artifact(
             "command_result",
             Some(command.clone()),
@@ -497,7 +497,7 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         let mut options = parse_artifact_helper_options(args.get(3))?;
         options
             .metadata
-            .insert("path".to_string(), serde_json::json!(path.clone()));
+            .insert("path".to_string(), serde_json::json!(path));
         let artifact = build_helper_artifact(
             "diff",
             Some(format!("diff {path}")),
@@ -530,12 +530,11 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         options.lineage.push(target.id.clone());
         options.metadata.insert(
             "target_artifact_id".to_string(),
-            serde_json::json!(target.id.clone()),
+            serde_json::json!(target.id),
         );
-        options.metadata.insert(
-            "target_kind".to_string(),
-            serde_json::json!(target.kind.clone()),
-        );
+        options
+            .metadata
+            .insert("target_kind".to_string(), serde_json::json!(target.kind));
         let artifact = build_helper_artifact(
             "diff_review",
             Some(format!(
@@ -559,15 +558,14 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         options.lineage.push(target.id.clone());
         options.metadata.insert(
             "target_artifact_id".to_string(),
-            serde_json::json!(target.id.clone()),
-        );
-        options.metadata.insert(
-            "target_kind".to_string(),
-            serde_json::json!(target.kind.clone()),
+            serde_json::json!(target.id),
         );
         options
             .metadata
-            .insert("decision".to_string(), serde_json::json!(decision.clone()));
+            .insert("target_kind".to_string(), serde_json::json!(target.kind));
+        options
+            .metadata
+            .insert("decision".to_string(), serde_json::json!(decision));
         let artifact = build_helper_artifact(
             "review_decision",
             Some(format!(
@@ -596,12 +594,11 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         options.lineage.push(target.id.clone());
         options.metadata.insert(
             "target_artifact_id".to_string(),
-            serde_json::json!(target.id.clone()),
+            serde_json::json!(target.id),
         );
-        options.metadata.insert(
-            "target_kind".to_string(),
-            serde_json::json!(target.kind.clone()),
-        );
+        options
+            .metadata
+            .insert("target_kind".to_string(), serde_json::json!(target.kind));
         let artifact = build_helper_artifact(
             "patch_proposal",
             Some(format!(
@@ -647,12 +644,11 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         options.lineage.push(target.id.clone());
         options.metadata.insert(
             "target_artifact_id".to_string(),
-            serde_json::json!(target.id.clone()),
+            serde_json::json!(target.id),
         );
-        options.metadata.insert(
-            "target_kind".to_string(),
-            serde_json::json!(target.kind.clone()),
-        );
+        options
+            .metadata
+            .insert("target_kind".to_string(), serde_json::json!(target.kind));
         let artifact = build_helper_artifact(
             "apply_intent",
             Some(format!(

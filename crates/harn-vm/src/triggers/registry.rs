@@ -1160,8 +1160,7 @@ pub async fn install_manifest_triggers(
             let spec_id = spec.id.clone();
             if spec.source != TriggerBindingSource::Manifest {
                 return Err(TriggerRegistryError::InvalidSpec(format!(
-                    "manifest install received non-manifest trigger '{}'",
-                    spec_id
+                    "manifest install received non-manifest trigger '{spec_id}'"
                 )));
             }
             if spec_id.trim().is_empty() {
@@ -1357,13 +1356,11 @@ fn pin_trigger_binding_inner(
         })?;
         match binding.state_snapshot() {
             TriggerState::Paused => Err(TriggerRegistryError::InvalidSpec(format!(
-                "trigger binding '{}' version {} is paused",
-                id, version
+                "trigger binding '{id}' version {version} is paused"
             ))),
             TriggerState::Terminated if !allow_terminated => {
                 Err(TriggerRegistryError::InvalidSpec(format!(
-                    "trigger binding '{}' version {} is terminated",
-                    id, version
+                    "trigger binding '{id}' version {version} is terminated"
                 )))
             }
             _ => {
@@ -1390,8 +1387,7 @@ pub async fn unpin_trigger_binding(id: &str, version: u32) -> Result<(), Trigger
         let current = binding.in_flight.load(Ordering::Relaxed);
         if current == 0 {
             return Err(TriggerRegistryError::InvalidSpec(format!(
-                "trigger binding '{}' version {} has no in-flight events",
-                id, version
+                "trigger binding '{id}' version {version} has no in-flight events"
             )));
         }
         binding.in_flight.fetch_sub(1, Ordering::Relaxed);
@@ -1453,8 +1449,7 @@ pub async fn finish_in_flight(
         let current = binding.in_flight.load(Ordering::Relaxed);
         if current == 0 {
             return Err(TriggerRegistryError::InvalidSpec(format!(
-                "trigger binding '{}' version {} has no in-flight events",
-                id, version
+                "trigger binding '{id}' version {version} has no in-flight events"
             )));
         }
         match outcome {

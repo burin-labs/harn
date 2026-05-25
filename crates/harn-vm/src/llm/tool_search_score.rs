@@ -183,9 +183,9 @@ fn score_bm25(query: &str, candidates: &[Candidate], max_results: usize) -> Vec<
                 if f == 0.0 {
                     continue;
                 }
-                let idf = ((n - n_qi + 0.5) / (n_qi + 0.5) + 1.0).ln();
-                let norm = 1.0 - B + B * (dl / avgdl.max(1e-9));
-                score += idf * ((f * (K1 + 1.0)) / (f + K1 * norm));
+                let idf = ((n - n_qi + 0.5) / (n_qi + 0.5)).ln_1p();
+                let norm = B.mul_add(dl / avgdl.max(1e-9), 1.0 - B);
+                score += idf * ((f * (K1 + 1.0)) / K1.mul_add(norm, f));
             }
             (index, score)
         })

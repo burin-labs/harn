@@ -314,7 +314,7 @@ fn load_prompt_file(
     let relative_stem = relative_prompt_stem(root, path);
     let fallback_name = match package_alias {
         Some(alias) => format!("{alias}/{relative_stem}"),
-        None => relative_stem.clone(),
+        None => relative_stem,
     };
     let preferred = meta
         .name
@@ -323,7 +323,7 @@ fn load_prompt_file(
         .filter(|value| !value.trim().is_empty())
         .map(|value| match package_alias {
             Some(alias) => format!("{alias}/{value}"),
-            None => value.to_string(),
+            None => value.clone(),
         })
         .unwrap_or_else(|| fallback_name.clone());
 

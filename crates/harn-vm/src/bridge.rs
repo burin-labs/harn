@@ -25,7 +25,7 @@ use crate::visible_text::VisibleTextState;
 use crate::vm::Vm;
 
 /// Default timeout for bridge calls (5 minutes).
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
+const DEFAULT_TIMEOUT: Duration = Duration::from_mins(5);
 
 pub type HostBridgeWriter = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 

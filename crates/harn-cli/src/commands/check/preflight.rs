@@ -376,8 +376,7 @@ fn scan_static_tool_surface_preflight(
                     source: source.to_string(),
                     span: harn_lexer::Span::with_offsets(0, 0, 1, 1),
                     message: format!(
-                        "preflight: TOOL_SURFACE_UNKNOWN_PROMPT_TOOL: prompt asset '{}' references tool '{}' which is not declared in this module's literal tool surface",
-                        prompt_target, reference
+                        "preflight: TOOL_SURFACE_UNKNOWN_PROMPT_TOOL: prompt asset '{prompt_target}' references tool '{reference}' which is not declared in this module's literal tool surface"
                     ),
                     help: Some(
                         "declare the tool with tool_define(...), remove the reference, or mark examples with `harn-tool-surface: ignore-line` / `ignore-next-line`"
@@ -392,8 +391,7 @@ fn scan_static_tool_surface_preflight(
                     source: source.to_string(),
                     span: harn_lexer::Span::with_offsets(0, 0, 1, 1),
                     message: format!(
-                        "preflight: TOOL_SURFACE_DEFERRED_TOOL_PROMPT_REFERENCE: prompt asset '{}' references deferred tool '{}' but no literal tool_search option is active",
-                        prompt_target, reference
+                        "preflight: TOOL_SURFACE_DEFERRED_TOOL_PROMPT_REFERENCE: prompt asset '{prompt_target}' references deferred tool '{reference}' but no literal tool_search option is active"
                     ),
                     help: Some(
                         "enable tool_search for the agent loop, make the tool eager, or mark historical/example text as ignored"
@@ -1059,8 +1057,7 @@ fn scan_node_preflight(
                                 source: source.to_string(),
                                 span: args[0].span,
                                 message: format!(
-                                    "preflight: template '{}' has a syntax error: {err}",
-                                    template_path
+                                    "preflight: template '{template_path}' has a syntax error: {err}"
                                 ),
                                 help: Some(
                                     "see docs/src/prompt-templating.md for supported directives"

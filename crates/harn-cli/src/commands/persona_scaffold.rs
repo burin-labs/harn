@@ -117,9 +117,9 @@ pipeline test_{{persona_ident}}_smoke(task) {
 }
 "#;
 
-const SMOKE_EXPECTED_TEMPLATE: &str = r#"[harn] true
+const SMOKE_EXPECTED_TEMPLATE: &str = r"[harn] true
 [harn] harn.receipt.v1
-"#;
+";
 
 const FIXTURE_TEMPLATE: &str = r#"{
   "items": [
@@ -130,14 +130,14 @@ const FIXTURE_TEMPLATE: &str = r#"{
 }
 "#;
 
-const PROMPT_TEMPLATE: &str = r#"You are {{persona_title}}, a Harn persona.
+const PROMPT_TEMPLATE: &str = r"You are {{persona_title}}, a Harn persona.
 
 Use the fixture request and typed step metadata to produce a bounded, auditable decision.
 
 Persona: {{persona_name}}
 Template: {{template_kind}}
 Request: {{request}}
-"#;
+";
 
 const EVAL_TEMPLATE: &str = r#"{
   "_type": "eval_pack_manifest",
@@ -150,7 +150,7 @@ const EVAL_TEMPLATE: &str = r#"{
 }
 "#;
 
-const README_TEMPLATE: &str = r#"# {{persona_title}}
+const README_TEMPLATE: &str = r"# {{persona_title}}
 
 Generated from the `{{template_kind}}` persona template.
 
@@ -172,7 +172,7 @@ harn test tests/{{persona_name}}_smoke.harn
 - `src/{{persona_name}}.harn` contains the `@persona` function and typed `@step` DAG skeleton.
 - `prompts/system.harn.prompt` keeps model-facing instructions as a prompt asset.
 - `fixtures/happy_path.json`, `tests/{{persona_name}}_smoke.harn`, and `tests/{{persona_name}}_smoke.expected` form the first eval-ready fixture pair.
-"#;
+";
 
 pub(crate) fn scaffold_persona(args: &PersonaNewArgs) -> Result<PersonaScaffoldResult, String> {
     let name = normalize_name(&args.name)?;

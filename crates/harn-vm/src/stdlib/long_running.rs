@@ -74,7 +74,7 @@ where
         store.insert(
             handle_id.clone(),
             HandleEntry {
-                session_id: session_id.clone(),
+                session_id,
                 cancel: cancel.clone(),
             },
         );

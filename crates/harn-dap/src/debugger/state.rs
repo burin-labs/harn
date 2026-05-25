@@ -9,7 +9,7 @@ use super::subagents::{SubagentSinkRegistration, SubagentTracker};
 use crate::host_bridge::DapHostBridge;
 
 /// Execution state for stepping.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepMode {
     /// Run until a breakpoint or end.
     Continue,

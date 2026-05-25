@@ -6,12 +6,12 @@ use super::*;
 #[test]
 fn test_clean_code() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 let x = 1
 log(x)
 }
-"#,
+",
     );
     // x is used, task is a pipeline param -- should be clean.
     assert!(

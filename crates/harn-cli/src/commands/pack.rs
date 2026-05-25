@@ -1344,7 +1344,7 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
     if let Some(signature) = manifest.signature.as_ref() {
         key_id = signature.key_id.clone();
         verify_workflow_bundle_signature(manifest, contents)
-            .map_err(|err| PackError::new("verify.signature_failed", err.message.clone()))?;
+            .map_err(|err| PackError::new("verify.signature_failed", err.message))?;
         if args.require_trusted_signer {
             let signer_fingerprint = bundle_signer_fingerprint(signature).map_err(|err| {
                 PackError::new(

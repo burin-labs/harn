@@ -80,7 +80,7 @@ pub struct PersonaRuntimeBinding {
 /// allowlist is `allowed_tools` (when set) and whose side-effect ceiling is
 /// `side_effect_level` (when set). Both narrow the ambient policy — the
 /// existing ceiling still applies, this just adds a tighter scope.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StageDecl {
     pub name: String,
     /// Tool allowlist for the stage. `None` (omitted) inherits the
@@ -102,7 +102,7 @@ pub struct StageDecl {
     pub on_exit: Option<StageExit>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StageExit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_complete: Option<String>,
@@ -112,7 +112,7 @@ pub struct StageExit {
     pub policy_override: Option<crate::orchestration::CapabilityPolicy>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaLease {
     pub id: String,
     pub holder: String,
@@ -165,7 +165,7 @@ pub struct PersonaStatus {
     pub paused_event_policy: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaAssignmentStatus {
     pub work_key: String,
     pub lease_id: String,
@@ -174,7 +174,7 @@ pub struct PersonaAssignmentStatus {
     pub expires_at: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaQueuedWork {
     pub work_key: String,
     pub provider: String,
@@ -186,7 +186,7 @@ pub struct PersonaQueuedWork {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaHandoffInboxItem {
     pub work_key: String,
     pub handoff_id: Option<String>,
@@ -209,7 +209,7 @@ pub struct PersonaValueReceipt {
     pub metadata: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaTriggerEnvelope {
     pub provider: String,
     pub kind: String,
@@ -222,7 +222,7 @@ pub struct PersonaTriggerEnvelope {
     pub raw: serde_json::Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaRunReceipt {
     pub status: String,
     pub persona: String,
@@ -301,7 +301,7 @@ pub trait PersonaValueSink: Send + Sync {
 /// `checkpoint` (restore-ack) variants; supervisor-sourced variants
 /// (`control`, `feedback`, `approval`, `handoff`, and checkpoint writes)
 /// originate on the hosted side and aren't routed here.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "update_kind", rename_all = "snake_case")]
 pub enum PersonaSupervisionEvent {
     QueuePosition(PersonaQueuePositionUpdate),
@@ -348,7 +348,7 @@ impl PersonaSupervisionEvent {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaQueuePositionUpdate {
     pub persona_id: String,
     #[serde(default)]
@@ -387,7 +387,7 @@ impl PersonaRepairWorkerLifecycle {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaRepairWorkerStatusUpdate {
     pub persona_id: String,
     #[serde(default)]
@@ -404,7 +404,7 @@ pub struct PersonaRepairWorkerStatusUpdate {
     pub occurred_at_ms: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaReceiptUpdate {
     pub persona_id: String,
     #[serde(default)]
@@ -413,7 +413,7 @@ pub struct PersonaReceiptUpdate {
     pub occurred_at_ms: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaCheckpointUpdate {
     pub persona_id: String,
     #[serde(default)]
@@ -442,7 +442,7 @@ impl PersonaCheckpointAction {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaCheckpointResume {
     pub run_id: Option<Uuid>,
     pub lease_id: Option<String>,
@@ -967,7 +967,7 @@ pub async fn restore_persona_checkpoint(
     })
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaCheckpointRestoreRequest {
     pub checkpoint_id: String,
     #[serde(default)]
@@ -976,7 +976,7 @@ pub struct PersonaCheckpointRestoreRequest {
     pub resumed_from: Option<PersonaCheckpointResume>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaCheckpointRestoreOutcome {
     pub acked: bool,
     pub update: PersonaCheckpointUpdate,

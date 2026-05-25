@@ -836,7 +836,7 @@ mod tests {
 
         let stats = collect_stats(
             &log,
-            StdDuration::from_secs(24 * 60 * 60),
+            StdDuration::from_hours(24),
             10,
             Some("tenant-a".to_string()),
         )

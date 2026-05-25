@@ -27,14 +27,14 @@ fn ambient_clock_call_inside_main_emits_lint_and_fixes_to_harness_clock() {
 
 #[test]
 fn ambient_clock_lints_all_five_names_inside_main() {
-    let source = r#"fn main(harness: Harness) {
+    let source = r"fn main(harness: Harness) {
   let a = now_ms()
   let b = monotonic_ms()
   let c = timestamp()
   let d = elapsed()
   sleep_ms(0)
 }
-"#;
+";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-clock-builtin"),

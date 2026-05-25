@@ -59,7 +59,7 @@ fn bench_parse_file_warm(c: &mut Criterion) {
             let result = (entry.handler)(std::slice::from_ref(black_box(&payload)))
                 .expect("parse_file succeeds");
             black_box(result);
-        })
+        });
     });
 }
 

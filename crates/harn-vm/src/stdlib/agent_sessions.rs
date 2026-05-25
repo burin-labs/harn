@@ -424,8 +424,7 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         ),
     };
     let default_mount_mode = workspace_policy
-        .as_ref()
-        .cloned()
+        .clone()
         .or_else(|| id.as_deref().and_then(agent_sessions::workspace_policy))
         .unwrap_or_default()
         .default_mount_mode;
@@ -871,9 +870,9 @@ fn agent_session_seed_from_jsonl_builtin(
             "source_format": seeded.source_format.as_str(),
             "partial": seeded.partial,
             "truncated": seeded.truncated,
-            "provider": seeded.provider.clone(),
-            "model": seeded.model.clone(),
-            "tool_format": seeded.tool_format.clone(),
+            "provider": seeded.provider,
+            "model": seeded.model,
+            "tool_format": seeded.tool_format,
         }
     });
     let session_id = match agent_sessions::seed_from_messages(

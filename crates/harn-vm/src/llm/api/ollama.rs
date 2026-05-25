@@ -129,7 +129,7 @@ const OLLAMA_UNLOAD_GRACE_MS_ENV_KEYS: [&str; 2] =
     [HARN_OLLAMA_UNLOAD_GRACE_MS_ENV, OLLAMA_UNLOAD_GRACE_MS_ENV];
 const OLLAMA_DEFAULT_BASE_URL: &str = "http://localhost:11434";
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OllamaRuntimeSettings {
     pub num_ctx: u64,
     pub keep_alive: Value,

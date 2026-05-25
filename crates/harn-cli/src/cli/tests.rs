@@ -1858,7 +1858,7 @@ fn test_parses_orchestrator_recover_args() {
     };
     assert_eq!(recover.local.config, PathBuf::from("workspace/harn.toml"));
     assert_eq!(recover.local.state_dir, PathBuf::from("state/orchestrator"));
-    assert_eq!(recover.envelope_age, StdDuration::from_secs(15 * 60));
+    assert_eq!(recover.envelope_age, StdDuration::from_mins(15));
     assert!(recover.dry_run);
     assert!(!recover.yes);
 }

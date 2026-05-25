@@ -318,7 +318,7 @@ impl fmt::Display for AuditReport {
             self.model_call_count
         )?;
         if let Some(path) = &self.source_path {
-            writeln!(f, "  transcript: {}", path)?;
+            writeln!(f, "  transcript: {path}")?;
         }
         if !self.state_transitions.is_empty() {
             writeln!(f, "  state transitions:")?;
@@ -338,7 +338,7 @@ impl fmt::Display for AuditReport {
                 let step = finding
                     .state_step
                     .as_deref()
-                    .map(|s| format!(" step={}", s))
+                    .map(|s| format!(" step={s}"))
                     .unwrap_or_default();
                 let tools = if finding.tools.is_empty() {
                     String::new()
@@ -769,8 +769,7 @@ pub fn audit_transcript(
                             category: FindingCategory::BadWait,
                             severity: FindingSeverity::Warn,
                             message: format!(
-                                "wait/poll tool `{}` invoked without progress predicate (until/condition/subscription_id)",
-                                tool_name
+                                "wait/poll tool `{tool_name}` invoked without progress predicate (until/condition/subscription_id)"
                             ),
                             event_indices: vec![env.index],
                             state_step: None,
@@ -796,8 +795,7 @@ pub fn audit_transcript(
                         category: FindingCategory::UnsafeAttemptedAction,
                         severity: FindingSeverity::Error,
                         message: format!(
-                            "tool `{}` requires prior approval gate, but none observed",
-                            tool_name
+                            "tool `{tool_name}` requires prior approval gate, but none observed"
                         ),
                         event_indices: vec![env.index],
                         state_step: None,
@@ -933,7 +931,7 @@ pub fn audit_transcript(
                 findings.push(AuditFinding {
                     category: FindingCategory::StateOutOfOrder,
                     severity: FindingSeverity::Warn,
-                    message: format!("state step `{}` fired after a later step", step),
+                    message: format!("state step `{step}` fired after a later step"),
                     event_indices: vec![],
                     state_step: Some(step.clone()),
                     tools: vec![],
@@ -975,10 +973,7 @@ pub fn audit_transcript(
                 findings.push(AuditFinding {
                     category: FindingCategory::NonMinimalToolUsage,
                     severity: FindingSeverity::Error,
-                    message: format!(
-                        "tool calls ({}) exceeded scenario budget ({})",
-                        tool_calls, max
-                    ),
+                    message: format!("tool calls ({tool_calls}) exceeded scenario budget ({max})"),
                     event_indices: vec![],
                     state_step: None,
                     tools: vec![],
@@ -991,8 +986,7 @@ pub fn audit_transcript(
                     category: FindingCategory::ExtraModelCall,
                     severity: FindingSeverity::Error,
                     message: format!(
-                        "model calls ({}) exceeded scenario budget ({})",
-                        model_calls, max
+                        "model calls ({model_calls}) exceeded scenario budget ({max})"
                     ),
                     event_indices: vec![],
                     state_step: None,
@@ -1226,7 +1220,7 @@ mod tests {
             index,
             AgentEvent::ToolCall {
                 session_id: session.into(),
-                tool_call_id: format!("call_{}", index),
+                tool_call_id: format!("call_{index}"),
                 tool_name: tool.into(),
                 kind: None,
                 status: ToolCallStatus::Pending,
@@ -1276,7 +1270,7 @@ mod tests {
             iteration_end(5, "s", 1),
         ];
         let report = audit_transcript(&events, None);
-        assert!(report.pass, "report: {}", report);
+        assert!(report.pass, "report: {report}");
         assert_eq!(report.tool_call_count, 2);
         assert_eq!(report.model_call_count, 1);
         assert!(
@@ -1673,7 +1667,7 @@ mod tests {
         let mut file = fs::File::create(&path).expect("create");
         for env in [iteration_start(1, "s", 1), iteration_end(2, "s", 1)] {
             let line = serde_json::to_string(&env).expect("ser");
-            writeln!(file, "{}", line).expect("write");
+            writeln!(file, "{line}").expect("write");
         }
         drop(file);
         let loaded = load_transcript_jsonl(&path).expect("load");

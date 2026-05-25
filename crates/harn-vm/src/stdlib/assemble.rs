@@ -61,7 +61,7 @@ async fn assemble_context_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 
 fn parse_assemble_options(dict: &BTreeMap<String, VmValue>) -> Result<AssembleOptions, VmError> {
     let defaults = AssembleOptions::default();
-    let mut options = defaults.clone();
+    let mut options = defaults;
     if let Some(value) = dict.get("budget_tokens").and_then(VmValue::as_int) {
         if value < 0 {
             return Err(VmError::Runtime(

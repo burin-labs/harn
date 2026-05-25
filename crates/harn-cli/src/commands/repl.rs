@@ -379,9 +379,7 @@ pub(crate) async fn run_repl() {
                 let emitted_line = if is_bare_expression {
                     result_counter += 1;
                     format!(
-                        "let _{n} = {expr}\n__io_println(to_string(_{n}))",
-                        n = result_counter,
-                        expr = line
+                        "let _{result_counter} = {line}\n__io_println(to_string(_{result_counter}))"
                     )
                 } else {
                     line.clone()
@@ -482,6 +480,7 @@ mod tests {
 
     #[test]
     fn validator_type_exists_for_reedline_integration() {
+        #[allow(clippy::no_effect_underscore_binding)]
         let _validator = HarnValidator;
     }
 

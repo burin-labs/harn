@@ -57,7 +57,7 @@ fn malformed_retry_after_returns_none() {
 fn retry_delay_honors_retry_after_floor() {
     let delay = compute_retry_delay(0, 1, Some(Duration::from_millis(250)));
     assert!(delay >= Duration::from_millis(250));
-    assert!(delay <= Duration::from_secs(60));
+    assert!(delay <= Duration::from_mins(1));
 }
 
 #[tokio::test]

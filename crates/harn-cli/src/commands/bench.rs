@@ -300,7 +300,7 @@ fn percentile_sorted(sorted: &[f64], percentile: f64) -> f64 {
         sorted[lower]
     } else {
         let weight = rank - lower as f64;
-        sorted[lower] * (1.0 - weight) + sorted[upper] * weight
+        sorted[lower].mul_add(1.0 - weight, sorted[upper] * weight)
     }
 }
 

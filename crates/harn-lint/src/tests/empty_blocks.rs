@@ -5,12 +5,12 @@ use super::*;
 #[test]
 fn test_empty_block_if() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 if true {
 }
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "empty-block"),

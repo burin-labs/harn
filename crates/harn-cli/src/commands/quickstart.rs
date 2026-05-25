@@ -426,7 +426,7 @@ fn write_or_update_harn_toml(
         harn_vm::atomic_io::atomic_write(path, content.as_bytes())
             .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
         return Ok(FileAction {
-            path: path.to_path_buf(),
+            path: path.clone(),
             status: "create",
             detail: "starter project manifest".to_string(),
         });
@@ -438,7 +438,7 @@ fn write_or_update_harn_toml(
         .map_err(|error| format!("{} is not valid TOML: {error}", path.display()))?;
     if parsed.get("llm").is_some() {
         return Ok(FileAction {
-            path: path.to_path_buf(),
+            path: path.clone(),
             status: "skip",
             detail: "already has [llm] config".to_string(),
         });
@@ -453,7 +453,7 @@ fn write_or_update_harn_toml(
     harn_vm::atomic_io::atomic_write(path, content.as_bytes())
         .map_err(|error| format!("failed to update {}: {error}", path.display()))?;
     Ok(FileAction {
-        path: path.to_path_buf(),
+        path: path.clone(),
         status: "update",
         detail: "added [llm] defaults".to_string(),
     })

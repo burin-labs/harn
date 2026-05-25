@@ -26,7 +26,7 @@ use serde_json::Value;
 /// Default cache TTL (5 minutes) — long enough to avoid thundering
 /// herds when a skill activation probes several cards in sequence,
 /// short enough that an updated card reaches users within a coffee break.
-const DEFAULT_TTL: Duration = Duration::from_secs(300);
+const DEFAULT_TTL: Duration = Duration::from_mins(5);
 
 /// Well-known path a compliant MCP server publishes its card at (per the
 /// 2026 roadmap). Harn's consumer tries this suffix when given a bare
@@ -285,21 +285,21 @@ mod tests {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap().to_string();
         std::fs::write(&path, r#"{"name":"cached"}"#).unwrap();
-        let card1 = fetch_server_card(&path, Some(Duration::from_secs(60)))
+        let card1 = fetch_server_card(&path, Some(Duration::from_mins(1)))
             .await
             .unwrap();
         assert_eq!(card1.get("name").and_then(|v| v.as_str()), Some("cached"));
 
         // Overwrite — cache should still serve the old value.
         std::fs::write(&path, r#"{"name":"updated"}"#).unwrap();
-        let card2 = fetch_server_card(&path, Some(Duration::from_secs(60)))
+        let card2 = fetch_server_card(&path, Some(Duration::from_mins(1)))
             .await
             .unwrap();
         assert_eq!(card2.get("name").and_then(|v| v.as_str()), Some("cached"));
 
         // After invalidate, the new value shows up.
         invalidate_cached(&path);
-        let card3 = fetch_server_card(&path, Some(Duration::from_secs(60)))
+        let card3 = fetch_server_card(&path, Some(Duration::from_mins(1)))
             .await
             .unwrap();
         assert_eq!(card3.get("name").and_then(|v| v.as_str()), Some("updated"));

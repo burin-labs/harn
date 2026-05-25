@@ -874,7 +874,7 @@ fn score_correctness(
     } else if expected.required_terms.is_empty() || expected.expected_artifact_ids.is_empty() {
         term_score.max(artifact_score)
     } else {
-        (term_score + artifact_score) / 2.0
+        f64::midpoint(term_score, artifact_score)
     };
     ContextEvalCorrectness {
         passed: missing_terms.is_empty() && missing_artifacts.is_empty(),

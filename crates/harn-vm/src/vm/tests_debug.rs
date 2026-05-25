@@ -33,8 +33,8 @@ fn run_until_paused(vm: &mut Vm, chunk: &Chunk) {
                 }
                 panic!("run_until_paused: step budget exceeded");
             })
-            .await
-    })
+            .await;
+    });
 }
 
 /// Synchronously evaluate an expression on an already-paused VM.
@@ -365,7 +365,7 @@ fn test_function_breakpoint_unknown_name_does_not_fire() {
                 }
                 panic!("step budget exceeded");
             })
-            .await
+            .await;
     });
     assert!(vm.take_pending_function_bp().is_none());
 }

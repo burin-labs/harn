@@ -260,10 +260,10 @@ require_file_header = true
         write_file(
             tmp.path(),
             "harn.toml",
-            r#"
+            r"
 [fmt]
 line_width = 80
-"#,
+",
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
         let cfg = load_for_path(&harn_file).expect("load");
@@ -294,10 +294,10 @@ line_width = 80
         write_file(
             root,
             "harn.toml",
-            r#"
+            r"
 [fmt]
 separator_width = 42
-"#,
+",
         );
         let sub = root.join("a").join("b");
         std::fs::create_dir_all(&sub).unwrap();
@@ -315,14 +315,14 @@ separator_width = 42
         write_file(
             tmp.path(),
             "harn.toml",
-            r#"
+            r"
 [fmt]
 line-width = 110
 separator-width = 72
 
 [lint]
 require-file-header = true
-"#,
+",
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
         let cfg = load_for_path(&harn_file).expect("load");
@@ -342,10 +342,10 @@ require-file-header = true
         write_file(
             outer,
             "harn.toml",
-            r#"
+            r"
 [fmt]
 line_width = 999
-"#,
+",
         );
         let project = outer.join("project");
         std::fs::create_dir_all(&project).unwrap();

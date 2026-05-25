@@ -313,9 +313,8 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             // a specific backend.
             Err(VmError::CategorizedError {
                 message: format!(
-                    "Tool '{}' is not available in the current environment. \
-                     Use only the tools listed in the tool-calling contract.",
-                    tool_name
+                    "Tool '{tool_name}' is not available in the current environment. \
+                     Use only the tools listed in the tool-calling contract."
                 ),
                 category: ErrorCategory::ToolRejected,
             })

@@ -33,7 +33,7 @@ pub const WORKFLOW_PATCH_SCHEMA_VERSION: u32 = 1;
 /// Patches are flat lists of [`WorkflowPatchOperation`]s applied in
 /// order. An empty operations list is rejected by [`apply_workflow_patch`]
 /// — silent no-ops would let agents claim work they did not do.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct WorkflowPatch {
     pub schema_version: u32,
@@ -48,7 +48,7 @@ pub struct WorkflowPatch {
 /// Only the operations called out in #1423 are exposed: insert node,
 /// add edge, upsert prompt capsule, update node policy, update bundle
 /// policy. New operations require a deliberate contract bump.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum WorkflowPatchOperation {
     /// Insert a new workflow node. Fails if `node_id` already exists or
@@ -94,7 +94,7 @@ pub enum WorkflowPatchOperation {
 
 /// Shape used by [`WorkflowPatchOperation::InsertNode`]. Mirrors the
 /// editable fields on [`WorkflowNode`] without exposing every tunable.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct WorkflowPatchNodeBody {
     pub kind: Option<String>,
@@ -111,7 +111,7 @@ pub struct WorkflowPatchNodeBody {
 /// Shape used by [`WorkflowPatchOperation::UpdateNodePolicy`]. Each
 /// field maps to the same-named field on [`WorkflowNode`] and is
 /// merged in place (set when `Some`, left alone when `None`).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct WorkflowPatchNodePolicyBody {
     pub task_label: Option<String>,
@@ -126,7 +126,7 @@ pub struct WorkflowPatchNodePolicyBody {
 /// Shape used by [`WorkflowPatchOperation::UpsertPromptCapsule`]. The
 /// patch always sets `id` to match `capsule_id` so the bundle invariant
 /// (`capsule.id == map_key`) holds without callers needing to repeat it.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct WorkflowPatchPromptCapsuleBody {
     pub node_id: String,
@@ -141,7 +141,7 @@ pub struct WorkflowPatchPromptCapsuleBody {
 /// `Some`. The `tool_policy` and `approval_required` lists replace
 /// rather than merge to keep the contract obvious — agents that want a
 /// merge should compute and submit the full list.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct WorkflowPatchBundlePolicyBody {
     pub autonomy_tier: Option<String>,
@@ -152,7 +152,7 @@ pub struct WorkflowPatchBundlePolicyBody {
 }
 
 /// What a host renders when it shows the result of validating a patch.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowPatchValidationReport {
     pub schema_version: u32,
     pub patch_id: String,
@@ -205,7 +205,7 @@ pub struct WorkflowPatchEdgeRef {
 /// for *more* than the parent ceiling (or the original bundle, when no
 /// parent is supplied). The patch is rejected when this list is
 /// non-empty — agents must not be able to expand permissions.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowPatchCapabilityDelta {
     pub before: CapabilityPolicy,
     pub after: CapabilityPolicy,

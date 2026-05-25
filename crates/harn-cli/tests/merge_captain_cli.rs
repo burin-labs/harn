@@ -262,12 +262,7 @@ fn run_mock_playground_once_writes_receipt_and_summary() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "stdout={}\nstderr={}",
-        stdout,
-        stderr
-    );
+    assert!(output.status.success(), "stdout={stdout}\nstderr={stderr}");
     assert!(transcript.exists());
     assert!(receipt.metadata().unwrap().len() > 0);
     let parsed: serde_json::Value =

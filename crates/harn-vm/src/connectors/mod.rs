@@ -139,7 +139,7 @@ pub trait Connector: Send + Sync {
 }
 
 /// Provider-supplied HTTP response returned before or instead of trigger dispatch.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectorHttpResponse {
     pub status: u16,
     pub headers: BTreeMap<String, String>,
@@ -1379,7 +1379,7 @@ fn prometheus_float(value: f64) -> String {
 }
 
 /// Provider payload schema metadata exposed by a connector.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderPayloadSchema {
     pub harn_schema_name: String,
     #[serde(default)]
@@ -1433,7 +1433,7 @@ impl From<String> for TriggerKind {
 }
 
 /// Future trigger manifest binding routed to a connector activation.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerBinding {
     pub provider: ProviderId,
     pub kind: TriggerKind,
@@ -1510,7 +1510,7 @@ impl ActivationHandle {
 }
 
 /// Provider-native inbound request payload preserved as raw bytes.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RawInbound {
     pub kind: String,
     pub headers: BTreeMap<String, String>,
@@ -1577,7 +1577,9 @@ impl TokenBucket {
         let interval = config.refill_interval.as_secs_f64().max(f64::EPSILON);
         let rate = config.refill_tokens.max(1) as f64 / interval;
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
-        self.tokens = (self.tokens + elapsed * rate).min(config.capacity.max(1) as f64);
+        self.tokens = elapsed
+            .mul_add(rate, self.tokens)
+            .min(config.capacity.max(1) as f64);
         self.last_refill = now;
     }
 
@@ -2022,7 +2024,7 @@ mod tests {
         let factory = RateLimiterFactory::new(RateLimitConfig {
             capacity: 1,
             refill_tokens: 1,
-            refill_interval: StdDuration::from_secs(60),
+            refill_interval: StdDuration::from_mins(1),
         });
 
         assert!(factory.try_acquire(&ProviderId::from("github"), "org:1"));

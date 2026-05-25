@@ -894,7 +894,7 @@ pub(crate) fn system_prompt_metadata(system: &str) -> serde_json::Value {
     let fingerprint = system_prompt_fingerprint(system);
     serde_json::json!({
         "content": system,
-        "hash": fingerprint.clone(),
+        "hash": fingerprint,
         "sha256": fingerprint,
         "bytes": system.len(),
     })
@@ -903,7 +903,7 @@ pub(crate) fn system_prompt_metadata(system: &str) -> serde_json::Value {
 pub(crate) fn system_prompt_event_metadata(system: &str) -> serde_json::Value {
     let fingerprint = system_prompt_fingerprint(system);
     serde_json::json!({
-        "hash": fingerprint.clone(),
+        "hash": fingerprint,
         "sha256": fingerprint,
         "bytes": system.len(),
     })
@@ -2211,7 +2211,7 @@ fn parse_tool_search_option(
                         "tool_search.always_loaded: expected a list of tool names",
                     ))));
                 }
-            };
+            }
             let custom_strategy = match d.get("strategy") {
                 Some(VmValue::String(s)) => {
                     validate_strategy(s.as_ref())?;
@@ -3115,7 +3115,7 @@ mod routing_tests {
         ));
         crate::agent_sessions::set_pinned_reasoning_policy(&session_id, Some("high".to_string()))
             .expect("set policy");
-        let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+        let _session_guard = crate::agent_sessions::enter_current_session(session_id);
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
@@ -3153,7 +3153,7 @@ mod routing_tests {
         ));
         crate::agent_sessions::set_pinned_reasoning_policy(&session_id, Some("high".to_string()))
             .expect("set policy");
-        let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+        let _session_guard = crate::agent_sessions::enter_current_session(session_id);
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
@@ -3294,7 +3294,7 @@ thinking_modes = ["effort"]
             ("role".to_string(), VmValue::String(Rc::from("user"))),
             (
                 "content".to_string(),
-                VmValue::List(Rc::new(vec![image_block.clone()])),
+                VmValue::List(Rc::new(vec![image_block])),
             ),
         ])));
         let options = VmValue::Dict(Rc::new(BTreeMap::from([

@@ -487,7 +487,7 @@ pub fn on_new_issue(event: TriggerEvent) -> string {
     );
     assert_eq!(
         flow.throttle.as_ref().map(|config| config.period),
-        Some(std::time::Duration::from_secs(60))
+        Some(std::time::Duration::from_mins(1))
     );
     assert_eq!(flow.throttle.as_ref().map(|config| config.max), Some(30));
     assert!(flow
@@ -496,7 +496,7 @@ pub fn on_new_issue(event: TriggerEvent) -> string {
         .is_some_and(|config| config.key.is_none()));
     assert_eq!(
         flow.rate_limit.as_ref().map(|config| config.period),
-        Some(std::time::Duration::from_secs(60 * 60))
+        Some(std::time::Duration::from_hours(1))
     );
     assert_eq!(
         flow.rate_limit.as_ref().map(|config| config.max),

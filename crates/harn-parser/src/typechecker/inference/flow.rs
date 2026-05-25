@@ -105,7 +105,7 @@ fn discriminant_value_from_node(node: &SNode) -> Option<DiscriminantValue> {
 
 fn format_discriminant(v: &DiscriminantValue) -> String {
     match v {
-        DiscriminantValue::Str(s) => format!("\"{}\"", s),
+        DiscriminantValue::Str(s) => format!("\"{s}\""),
         DiscriminantValue::Int(v) => v.to_string(),
     }
 }
@@ -336,7 +336,7 @@ impl TypeChecker {
                     truthy: vec![(var_name.clone(), Some(TypeExpr::Named(type_name.clone())))],
                     falsy: vec![],
                     truthy_ruled_out: vec![],
-                    falsy_ruled_out: vec![(var_name.clone(), type_name)],
+                    falsy_ruled_out: vec![(var_name, type_name)],
                 };
                 return if op == "==" {
                     eq_refs
@@ -424,8 +424,8 @@ impl TypeChecker {
 
         let truthy = vec![(var_name.clone(), Some(matched))];
         let falsy = match residual {
-            TypeExpr::Never => vec![(var_name.clone(), Some(TypeExpr::Never))],
-            other => vec![(var_name.clone(), Some(other))],
+            TypeExpr::Never => vec![(var_name, Some(TypeExpr::Never))],
+            other => vec![(var_name, Some(other))],
         };
 
         let eq_refs = Refinements {
@@ -595,14 +595,11 @@ impl TypeChecker {
             .collect();
         if !missing.is_empty() {
             let missing_literals: Vec<String> =
-                missing.iter().map(|s| format!("\"{}\"", s)).collect();
+                missing.iter().map(|s| format!("\"{s}\"")).collect();
             let missing_str = missing_literals.join(", ");
             self.exhaustiveness_error_with_missing(
                 Code::NonExhaustiveMatch,
-                format!(
-                    "Non-exhaustive match on enum {}: missing variants {}",
-                    enum_name, missing_str
-                ),
+                format!("Non-exhaustive match on enum {enum_name}: missing variants {missing_str}"),
                 span,
                 missing_literals,
             );
@@ -777,10 +774,7 @@ impl TypeChecker {
                 .join(", ");
             self.exhaustiveness_error_at(
                 Code::NonExhaustiveMatch,
-                format!(
-                    "Non-exhaustive match on union type: missing {}",
-                    missing_str
-                ),
+                format!("Non-exhaustive match on union type: missing {missing_str}"),
                 span,
             );
         }
@@ -880,10 +874,7 @@ impl TypeChecker {
                 .join(", ");
             self.warning_at(Code::NonExhaustiveMatch,
                 format!(
-                    "`{site}` reached but `{var}: unknown` was not fully narrowed — uncovered concrete type(s): {missing}",
-                    site = site_label,
-                    var = var_name,
-                    missing = missing_str,
+                    "`{site_label}` reached but `{var_name}: unknown` was not fully narrowed — uncovered concrete type(s): {missing_str}",
                 ),
                 span,
             );

@@ -928,7 +928,7 @@ mod tests {
     fn preserve_on_compact_reminder_survives_lifecycle() {
         let preserved = reminder_event_value("keep me", true, None);
         let droppable = reminder_event_value("drop me", false, None);
-        let report = compact_reminder_events(vec![preserved.clone(), droppable]);
+        let report = compact_reminder_events(vec![preserved, droppable]);
         assert_eq!(report.preserved_count, 1);
         assert_eq!(report.compacted.len(), 1);
         assert_eq!(report.preserved_events.len(), 1);

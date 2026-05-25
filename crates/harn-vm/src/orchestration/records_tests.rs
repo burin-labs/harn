@@ -123,12 +123,12 @@ fn eval_pack_manifest_runs_persona_ladder() {
             r#"
 version = 1
 id = "merge-captain-ladders"
-base_dir = {}
+base_dir = {base_dir}
 
 [[ladders]]
 id = "merge-captain-timeout"
 persona = "merge_captain"
-artifact-root = {}
+artifact-root = {artifact_root}
 
 [ladders.backend]
 kind = "replay"
@@ -149,8 +149,7 @@ max-tool-calls = 1
 id = "balanced"
 max-tool-calls = 4
 max-model-calls = 1
-"#,
-            base_dir, artifact_root
+"#
         ),
     )
     .unwrap();

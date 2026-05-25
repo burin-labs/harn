@@ -883,7 +883,7 @@ mod tests {
         let sig_path = signature_path_for(&skill);
         let mut envelope: SkillSignatureEnvelope =
             serde_json::from_str(&fs::read_to_string(&sig_path).unwrap()).unwrap();
-        envelope.signer_fingerprint = trusted_keys.fingerprint.clone();
+        envelope.signer_fingerprint = trusted_keys.fingerprint;
         fs::write(&sig_path, serde_json::to_string_pretty(&envelope).unwrap()).unwrap();
 
         let report = verify_skill(&skill, &VerifyOptions::default()).unwrap();
@@ -939,7 +939,7 @@ mod tests {
         let report = verify_skill(
             &skill,
             &VerifyOptions {
-                allowed_signers: vec![keys.fingerprint.clone()],
+                allowed_signers: vec![keys.fingerprint],
                 allowed_endorsers: vec!["not-the-endorser".to_string()],
                 ..Default::default()
             },

@@ -164,7 +164,7 @@ fn run_log(
         "--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1e".to_string(),
     ];
     if max_count > 0 {
-        argv.push(format!("-{}", max_count));
+        argv.push(format!("-{max_count}"));
     }
     if let Some(rev) = rev {
         validate_rev(rev)?;

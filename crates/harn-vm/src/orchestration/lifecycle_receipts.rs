@@ -767,7 +767,7 @@ mod tests {
             .verify_signature()
             .expect("signed timestamp verifies");
 
-        let mut tampered = receipt.clone();
+        let mut tampered = receipt;
         tampered.suspended_at.at_ms += 1;
         assert!(matches!(
             tampered.verify_signature(),
@@ -792,7 +792,7 @@ mod tests {
         );
 
         let cached = replay_resume_input(&receipt, Some(&original)).expect("matches");
-        assert_eq!(cached, Some(original.clone()));
+        assert_eq!(cached, Some(original));
 
         let drift = json!({"approved": false, "comment": "ship it"});
         let mismatch = replay_resume_input(&receipt, Some(&drift));

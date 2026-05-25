@@ -38,9 +38,9 @@ thread_local! {
 
 const HARN_CONNECTOR_POLL_STATE_TOPIC: &str = "connectors.harn.poll.state";
 const HARN_CONNECTOR_POLL_STATE_KIND: &str = "harn.poll.state";
-const DEFAULT_POLL_INTERVAL: StdDuration = StdDuration::from_secs(300);
+const DEFAULT_POLL_INTERVAL: StdDuration = StdDuration::from_mins(5);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HarnConnectorContract {
     pub module_path: PathBuf,
     pub provider_id: ProviderId,
@@ -1736,7 +1736,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        fn namespace(&self) -> &str {
+        fn namespace(&self) -> &'static str {
             "test"
         }
 
@@ -1776,7 +1776,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        fn namespace(&self) -> &str {
+        fn namespace(&self) -> &'static str {
             "test"
         }
 

@@ -110,13 +110,13 @@ fn entry_has_inline_body(entry: &BTreeMap<String, VmValue>) -> bool {
     entry
         .get("body")
         .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .is_some()
+        .as_ref()
+        .is_some_and(|value| !value.is_empty())
         || entry
             .get("prompt")
             .map(|value| value.display())
-            .filter(|value| !value.is_empty())
-            .is_some()
+            .as_ref()
+            .is_some_and(|value| !value.is_empty())
 }
 
 fn body_from_entry(entry: &BTreeMap<String, VmValue>) -> String {

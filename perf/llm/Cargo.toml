@@ -14,3 +14,6 @@ criterion = "0.8"
 name = "bench_llm_options_roundtrip"
 path = "bench_llm_options_roundtrip.rs"
 harness = false
+
+[lints]
+workspace = true

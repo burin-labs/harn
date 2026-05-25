@@ -206,10 +206,8 @@ impl TypeChecker {
             if known.contains(key.as_str()) {
                 continue;
             }
-            let mut message = format!(
-                "{}: unknown option `{}`; expected one of {}",
-                context, key, expected_list
-            );
+            let mut message =
+                format!("{context}: unknown option `{key}`; expected one of {expected_list}");
             if let Some(candidate) =
                 crate::diagnostic::find_closest_match(key, known.iter().copied(), 3)
             {
@@ -237,10 +235,7 @@ impl TypeChecker {
             if !sig.is_generic() {
                 self.error_at(
                     Code::GenericTypeArgumentUnsupported,
-                    format!(
-                        "Builtin function '{}' does not declare type parameters",
-                        name
-                    ),
+                    format!("Builtin function '{name}' does not declare type parameters"),
                     span,
                 );
             } else if type_args.len() != sig.type_params.len() {
@@ -379,8 +374,7 @@ impl TypeChecker {
                     let Some(base_type_name) = Self::base_type_name(concrete_type) else {
                         self.error_at(Code::WhereConstraintMismatch,
                             format!(
-                                "Type '{}' does not satisfy interface '{}': only named types can satisfy interfaces (required by constraint `where {}: {}`)",
-                                concrete_name, bound, type_param, bound
+                                "Type '{concrete_name}' does not satisfy interface '{bound}': only named types can satisfy interfaces (required by constraint `where {type_param}: {bound}`)"
                             ),
                             span,
                         );
@@ -395,9 +389,8 @@ impl TypeChecker {
                         self.error_at(
                             Code::WhereConstraintMismatch,
                             format!(
-                                "Type '{}' does not satisfy interface '{}': {} \
-                                 (required by constraint `where {}: {}`)",
-                                concrete_name, bound, reason, type_param, bound
+                                "Type '{concrete_name}' does not satisfy interface '{bound}': {reason} \
+                                 (required by constraint `where {type_param}: {bound}`)"
                             ),
                             span,
                         );
@@ -979,7 +972,7 @@ impl TypeChecker {
                 self.visit_for_deprecation(false_expr);
             }
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                self.visit_for_deprecation(object)
+                self.visit_for_deprecation(object);
             }
             Node::SubscriptAccess { object, index }
             | Node::OptionalSubscriptAccess { object, index } => {
@@ -1187,7 +1180,7 @@ impl TypeChecker {
         // signal "this path claims exhaustiveness" — apply the same check.
         if let Some(sig) = scope.get_fn(name).cloned() {
             if matches!(sig.return_type, Some(TypeExpr::Never)) {
-                self.check_unknown_exhaustiveness(scope, span, &format!("{}()", name));
+                self.check_unknown_exhaustiveness(scope, span, &format!("{name}()"));
             }
         }
 
@@ -1198,7 +1191,7 @@ impl TypeChecker {
                 if sig.type_param_names.is_empty() {
                     self.error_at(
                         Code::GenericTypeArgumentUnsupported,
-                        format!("Function '{}' does not declare type parameters", name),
+                        format!("Function '{name}' does not declare type parameters"),
                         span,
                     );
                 } else if type_args.len() != sig.type_param_names.len() {
@@ -1326,8 +1319,7 @@ impl TypeChecker {
                         let Some(base_type_name) = Self::base_type_name(concrete_type) else {
                             self.error_at(Code::WhereConstraintMismatch,
                                 format!(
-                                    "Type '{}' does not satisfy interface '{}': only named types can satisfy interfaces (required by constraint `where {}: {}`)",
-                                    concrete_name, bound, type_param, bound
+                                    "Type '{concrete_name}' does not satisfy interface '{bound}': only named types can satisfy interfaces (required by constraint `where {type_param}: {bound}`)"
                                 ),
                                 span,
                             );
@@ -1342,9 +1334,8 @@ impl TypeChecker {
                             self.error_at(
                                 Code::WhereConstraintMismatch,
                                 format!(
-                                    "Type '{}' does not satisfy interface '{}': {} \
-                                     (required by constraint `where {}: {}`)",
-                                    concrete_name, bound, reason, type_param, bound
+                                    "Type '{concrete_name}' does not satisfy interface '{bound}': {reason} \
+                                     (required by constraint `where {type_param}: {bound}`)"
                                 ),
                                 span,
                             );

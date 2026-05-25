@@ -41,7 +41,7 @@ impl TypeChecker {
     ) -> Option<String> {
         let interface_info = match scope.get_interface(interface_name) {
             Some(info) => info,
-            None => return Some(format!("interface '{}' not found", interface_name)),
+            None => return Some(format!("interface '{interface_name}' not found")),
         };
         let impl_methods = match scope.get_impl_methods(type_name) {
             Some(methods) => methods,

@@ -428,7 +428,7 @@ fn deduplicate_violations(violations: Vec<BootstrapViolation>) -> Vec<BootstrapV
     let mut out = Vec::with_capacity(violations.len());
     for violation in violations {
         let key = (
-            violation.code.to_string(),
+            violation.code.clone(),
             violation.message.clone(),
             violation.predicate.clone(),
         );
@@ -623,16 +623,16 @@ fn _meta_invariants_marker() {
             Some(&policy),
         );
         assert!(matches!(result.verdict, Verdict::Allow));
-        assert_eq!(result.previous_policy_hash, Some(policy.hash.clone()));
+        assert_eq!(result.previous_policy_hash, Some(policy.hash));
     }
 
     #[test]
     fn validate_predicate_edit_blocks_when_archivist_provenance_missing() {
-        let source = r#"
+        let source = r"
 @invariant
 @deterministic
 fn no_provenance(slice) { return true }
-"#;
+";
         let result = validate_predicate_edit(source, &EditAuthor::Archivist, None);
         assert!(result.is_blocked());
         let codes: Vec<&str> = result.violations.iter().map(|v| v.code.as_str()).collect();

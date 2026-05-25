@@ -61,7 +61,7 @@ impl HandoffTargetRecord {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct HandoffRouteTargetConfig {
     pub id: Option<String>,
@@ -94,7 +94,7 @@ impl HandoffRouteTargetConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct HandoffRouteConfig {
     pub id: Option<String>,
@@ -125,7 +125,7 @@ impl HandoffRouteConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct HandoffRouteDecisionRecord {
     pub route_id: Option<String>,
@@ -461,7 +461,7 @@ fn dedup_handoffs(handoffs: Vec<HandoffArtifact>) -> Vec<HandoffArtifact> {
         by_id
             .entry(handoff.id.clone())
             .and_modify(|existing: &mut HandoffArtifact| {
-                *existing = merge_handoffs(existing.clone(), handoff.clone())
+                *existing = merge_handoffs(existing.clone(), handoff.clone());
             })
             .or_insert(handoff);
     }
@@ -765,7 +765,7 @@ pub fn sync_run_handoffs(run: &mut RunRecord) {
             by_id
                 .entry(handoff.id.clone())
                 .and_modify(|existing| {
-                    *existing = merge_handoffs(existing.clone(), handoff.clone())
+                    *existing = merge_handoffs(existing.clone(), handoff.clone());
                 })
                 .or_insert(handoff);
         }

@@ -44,7 +44,7 @@ fn assert_stack_overflow(error: &VmError) {
 fn non_tail_recursion_fails_with_bounded_vm_stack_trace() {
     let limits = limits_with_max_frames(16);
     let (vm, result) = execute_with_limits(
-        r#"
+        r"
 pipeline main() {
   fn dive(n: int) -> int {
     if n <= 0 {
@@ -54,7 +54,7 @@ pipeline main() {
   }
   dive(128)
 }
-"#,
+",
         limits,
     );
 
@@ -77,7 +77,7 @@ pipeline main() {
 #[test]
 fn tail_recursive_countdown_runs_beyond_frame_limit() {
     let (vm, result) = execute_with_limits(
-        r#"
+        r"
 pipeline main() {
   fn countdown(n: int, acc: int) -> int {
     if n <= 0 {
@@ -87,7 +87,7 @@ pipeline main() {
   }
   log(countdown(200, 0))
 }
-"#,
+",
         limits_with_max_frames(8),
     );
 
@@ -128,7 +128,7 @@ pipeline main() {
 #[test]
 fn callback_methods_do_not_accumulate_frames_per_item() {
     let (vm, result) = execute_with_limits(
-        r#"
+        r"
 pipeline main() {
   let xs = range(0, 256).to_list()
   let mapped = xs.map({ x -> x + 1 })
@@ -145,7 +145,7 @@ pipeline main() {
   log(dict.count())
   log(set_out.count())
 }
-"#,
+",
         limits_with_max_frames(8),
     );
 
@@ -159,7 +159,7 @@ pipeline main() {
 #[test]
 fn recursive_callback_body_uses_same_frame_budget() {
     let (_vm, result) = execute_with_limits(
-        r#"
+        r"
 pipeline main() {
   fn recurse(n: int) -> int {
     if n <= 0 {
@@ -169,7 +169,7 @@ pipeline main() {
   }
   range(0, 3).to_list().map({ x -> recurse(64) })
 }
-"#,
+",
         limits_with_max_frames(12),
     );
 

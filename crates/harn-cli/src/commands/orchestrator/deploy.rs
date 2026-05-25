@@ -301,7 +301,7 @@ fn render_render_yaml(
         })
         .collect::<String>();
     format!(
-        r#"services:
+        r"services:
   - type: web
     name: {name}
     runtime: image
@@ -314,7 +314,7 @@ fn render_render_yaml(
     envVars:
 {env_vars}      - fromGroup: harn-secrets
     healthCheckPath: /healthz
-"#,
+",
         name = yaml_plain(&args.name),
         image = yaml_plain(&args.image),
         data_dir = yaml_plain(&args.data_dir),
@@ -622,9 +622,9 @@ fn sync_railway_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), Or
         .map(|(key, value)| (key.clone(), JsonValue::String(value.clone())))
         .collect::<serde_json::Map<_, _>>();
     let body = serde_json::json!({
-        "query": r#"mutation variableCollectionUpsert($input: VariableCollectionUpsertInput!) {
+        "query": r"mutation variableCollectionUpsert($input: VariableCollectionUpsertInput!) {
   variableCollectionUpsert(input: $input)
-}"#,
+}",
         "variables": {
             "input": {
                 "projectId": project_id,
@@ -759,7 +759,7 @@ impl PlannedCommand {
             let display_arg = if self.sensitive_args.contains(&index) {
                 redact_arg(arg)
             } else {
-                arg.to_string()
+                arg.clone()
             };
             rendered.push_str(&shell_quote(&display_arg));
         }

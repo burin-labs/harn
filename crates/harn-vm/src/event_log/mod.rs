@@ -118,7 +118,7 @@ impl FromStr for EventLogBackendKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogEvent {
     pub kind: String,
     pub payload: serde_json::Value,
@@ -208,7 +208,7 @@ pub struct CompactReport {
     pub checkpointed: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppendOutcome {
     pub event_id: EventId,
     pub event: LogEvent,
@@ -1638,7 +1638,7 @@ impl EventLog for SqliteEventLog {
         tx.commit()
             .map_err(|error| LogError::Sqlite(format!("event log commit error: {error}")))?;
         self.broadcasts
-            .publish(topic, self.queue_depth, (event_id, event.clone()));
+            .publish(topic, self.queue_depth, (event_id, event));
         Ok(event_id)
     }
 

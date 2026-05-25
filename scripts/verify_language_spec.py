@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import json
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -122,7 +121,7 @@ def main() -> int:
             path.write_text(normalize_snippet(snippet))
             manifest_lines.append(f"{path.name}: {heading} (spec line {line_no})")
 
-        cmd = harn_check_command() + [str(tmpdir)]
+        cmd = [*harn_check_command(), str(tmpdir)]
         result = subprocess.run(
             cmd,
             cwd=ROOT,
@@ -132,14 +131,14 @@ def main() -> int:
 
         if result.returncode != 0:
             print("language spec verification failed", file=sys.stderr)
-            print("", file=sys.stderr)
+            print(file=sys.stderr)
             print("Extracted examples:", file=sys.stderr)
             print("\n".join(manifest_lines), file=sys.stderr)
             if result.stdout:
-                print("", file=sys.stderr)
+                print(file=sys.stderr)
                 print(result.stdout, file=sys.stderr, end="")
             if result.stderr:
-                print("", file=sys.stderr)
+                print(file=sys.stderr)
                 print(result.stderr, file=sys.stderr, end="")
             return result.returncode
 

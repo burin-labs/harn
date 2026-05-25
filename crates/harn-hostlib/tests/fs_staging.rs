@@ -176,7 +176,7 @@ fn staged_overlay_uses_current_agent_session_when_args_omit_session_id() {
     ]))
     .unwrap();
 
-    let _session_guard = harn_vm::agent_sessions::enter_current_session(session.clone());
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session);
     (reg.find("hostlib_tools_write_file").unwrap().handler)(&dict_arg(&[
         ("path", vm_string(&path_str(&file))),
         ("content", vm_string("implicit")),

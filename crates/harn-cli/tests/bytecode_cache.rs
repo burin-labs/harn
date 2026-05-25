@@ -260,7 +260,7 @@ fn precompiled_imported_module_uses_adjacent_artifact() {
     .unwrap();
 
     run_in_harn_runtime({
-        let target = lib.clone();
+        let target = lib;
         move || async move {
             let _env_guard = env_lock::lock_env().lock().await;
             harn_vm::reset_thread_local_state();
@@ -298,7 +298,6 @@ fn disabled_cache_does_not_write_files() {
     let script = workdir.path().join("entry.harn");
     fs::write(&script, "__io_println(\"no cache\")\n").unwrap();
 
-    let script = script.clone();
     let cache_dir = cache.path().to_path_buf();
     let outcome = run_in_harn_runtime(move || async move {
         let _env_guard = env_lock::lock_env().lock().await;

@@ -2618,12 +2618,12 @@ fn main(harness: Harness) {
     #[test]
     fn harness_llm_method_calls_are_attributed_to_llm_catalog_builtins() {
         let report = analyze(
-            r#"
+            r"
 fn main(harness: Harness) {
   harness.llm.catalog()
   harness.llm.providers()
 }
-"#,
+",
         );
 
         let calls = handler_call_names(&report);

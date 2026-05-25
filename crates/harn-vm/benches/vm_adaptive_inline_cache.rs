@@ -20,7 +20,7 @@ fn run_chunk(rt: &tokio::runtime::Runtime, chunk: &Chunk) -> String {
 
 fn bench_stable_integer_add_and_closure_call(c: &mut Criterion) {
     let chunk = compile_source(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 fn erase(x) {
   return x
 }
@@ -31,7 +31,7 @@ while i < erase(200) {
   i = i + erase(1)
 }
 return total
-}"#,
+}",
     )
     .expect("compile stable adaptive cache fixture");
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -40,13 +40,13 @@ return total
         .expect("runtime");
 
     c.bench_function("vm_adaptive_cache_stable_int_add_and_call", |b| {
-        b.iter(|| black_box(run_chunk(&rt, &chunk)))
+        b.iter(|| black_box(run_chunk(&rt, &chunk)));
     });
 }
 
 fn bench_mixed_numeric_add_deopt(c: &mut Criterion) {
     let chunk = compile_source(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
 fn erase(x) {
   return x
 }
@@ -60,7 +60,7 @@ while i < 40 {
   i = i + 1
 }
 return total
-}"#,
+}",
     )
     .expect("compile mixed adaptive cache fixture");
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -69,7 +69,7 @@ return total
         .expect("runtime");
 
     c.bench_function("vm_adaptive_cache_mixed_numeric_deopt", |b| {
-        b.iter(|| black_box(run_chunk(&rt, &chunk)))
+        b.iter(|| black_box(run_chunk(&rt, &chunk)));
     });
 }
 

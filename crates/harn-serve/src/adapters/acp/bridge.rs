@@ -20,9 +20,9 @@ pub(super) fn host_call_timeout(method: &str) -> std::time::Duration {
         return std::time::Duration::from_secs(seconds);
     }
     if method == "host/call" {
-        return std::time::Duration::from_secs(300);
+        return std::time::Duration::from_mins(5);
     }
-    std::time::Duration::from_secs(60)
+    std::time::Duration::from_mins(1)
 }
 
 pub(super) fn suppress_default_info_log(message: &str) -> bool {

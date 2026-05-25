@@ -14,7 +14,7 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 
 def current_version() -> str:
     text = CARGO.read_text()
-    match = re.search(r'^version = "([^"]+)"', text, re.M)
+    match = re.search(r'^version = "([^"]+)"', text, re.MULTILINE)
     if not match:
         raise SystemExit("error: missing workspace version in Cargo.toml")
     return match.group(1)
@@ -22,7 +22,7 @@ def current_version() -> str:
 
 def changelog_versions() -> list[str]:
     text = CHANGELOG.read_text()
-    return re.findall(r"^## v([0-9]+\.[0-9]+\.[0-9]+)$", text, re.M)
+    return re.findall(r"^## v([0-9]+\.[0-9]+\.[0-9]+)$", text, re.MULTILINE)
 
 
 def changelog_section_body(version: str) -> str:

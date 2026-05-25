@@ -58,11 +58,11 @@ fn assert_current_agent_card_shape(card: &JsonValue, public_url: &str) {
 #[tokio::test]
 async fn agent_card_advertises_exported_functions() {
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
 
     let card = server.agent_card("http://localhost:8080");
@@ -73,11 +73,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn adapter_agent_card_protocol_fixture_matches_checked_in_matrix() {
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let actual = vec![server.agent_card("http://localhost:8080")];
     crate::protocol_fixture_tests::assert_fixture_documents_match(
@@ -89,11 +89,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn discovery_paths_serve_current_agent_card_shape() {
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let public_url = "http://localhost:8080";
     let router = A2aServer::http_router(HttpState {
@@ -129,11 +129,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn legacy_jsonrpc_methods_emit_deprecation_header() {
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let router = A2aServer::http_router(HttpState {
         server,
@@ -181,11 +181,11 @@ async fn unknown_a2a_version_header_no_longer_rejects_request() {
     // carries an unknown `a2a-version` value must still dispatch; the
     // adapter records only a soft-deprecation warning.
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let router = A2aServer::http_router(HttpState {
         server,
@@ -241,11 +241,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn canonical_push_notification_config_methods_round_trip() {
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let send = harn_vm::jsonrpc::request(
         "send-1",
@@ -339,11 +339,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn rest_v1_full_task_lifecycle_uses_canonical_paths() {
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let public_url = "http://localhost:8080";
     let router = A2aServer::http_router(HttpState {
@@ -534,11 +534,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn rest_v1_card_unauthenticated_returns_401_with_www_authenticate() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
     let router = A2aServer::http_router(HttpState {
@@ -570,11 +570,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn rest_v1_unknown_task_action_returns_404() {
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let router = A2aServer::http_router(HttpState {
         server,
@@ -597,11 +597,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn rest_legacy_message_send_emits_deprecation_advisory() {
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let router = A2aServer::http_router(HttpState {
         server,
@@ -650,11 +650,11 @@ async fn push_notification_configs_survive_server_restart() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     )
     .expect("write script");
 
@@ -795,11 +795,11 @@ fn assert_unauthorized_processed(processed: ProcessedRpc) -> JsonValue {
 #[tokio::test]
 async fn protected_message_send_requires_auth_before_task_state_is_created() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
     let request = harn_vm::jsonrpc::request(
@@ -836,11 +836,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn protected_task_management_requires_auth() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
     let send = harn_vm::jsonrpc::request(
@@ -902,11 +902,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn protected_rest_task_management_requires_auth() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
     let send = harn_vm::jsonrpc::request(
@@ -990,11 +990,11 @@ async fn extended_card_unauthenticated_when_no_auth_configured_returns_not_confi
     // configured (i.e., no auth scheme is wired in), the server
     // MUST return ExtendedAgentCardNotConfiguredError (-32007).
     let (_dir, server) = test_server(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
     );
     let request =
         harn_vm::jsonrpc::request("card-1", "agent/getAuthenticatedExtendedCard", json!({}));
@@ -1016,11 +1016,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn extended_card_without_token_returns_401_with_challenge() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
     let request =
@@ -1050,11 +1050,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn extended_card_with_valid_bearer_returns_extended_payload() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
     let request =
@@ -1101,11 +1101,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn public_card_advertises_extended_support_when_auth_configured() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
 
@@ -1123,11 +1123,11 @@ async fn http_extended_card_unauthenticated_returns_401_with_www_authenticate() 
     // agent/getAuthenticatedExtendedCard yields HTTP 401 plus a
     // WWW-Authenticate header.
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
     let public_url = "https://agent.example";
@@ -1171,11 +1171,11 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn http_extended_card_authenticated_returns_extended_payload() {
     let (_dir, server) = server_with_api_key_policy(
-        r#"
+        r"
 pub fn triage(task: string) -> string {
   return task
 }
-"#,
+",
         "secret",
     );
     let public_url = "https://agent.example";

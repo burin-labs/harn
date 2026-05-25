@@ -82,7 +82,7 @@ pub(super) fn register_tool_hook_builtin(
         crate::orchestration::register_vm_hook(
             crate::orchestration::HookEvent::PreToolUse,
             pattern.clone(),
-            format!("tool_hook::{}::pre", pattern),
+            format!("tool_hook::{pattern}::pre"),
             handler,
         );
     }
@@ -90,7 +90,7 @@ pub(super) fn register_tool_hook_builtin(
         crate::orchestration::register_vm_hook(
             crate::orchestration::HookEvent::PostToolUse,
             pattern.clone(),
-            format!("tool_hook::{}::post", pattern),
+            format!("tool_hook::{pattern}::post"),
             handler,
         );
     }

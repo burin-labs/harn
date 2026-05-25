@@ -498,7 +498,7 @@ pub(crate) fn resolve_path_dependency_source(
 pub(crate) fn path_source_uri(path: &Path) -> Result<String, PackageError> {
     let url = Url::from_file_path(path)
         .map_err(|_| format!("failed to convert {} to file:// URL", path.display()))?;
-    Ok(format!("path+{}", url))
+    Ok(format!("path+{url}"))
 }
 
 pub(crate) fn path_from_source_uri(source: &str) -> Result<PathBuf, PackageError> {
@@ -1006,7 +1006,7 @@ pub(crate) fn registry_dependency_from_spec_in(
             // Store the canonical scoped registry name (e.g. `@burin/notion-sdk`)
             // even when the user typed the bare alias (`notion-sdk-harn`) so
             // re-resolves stay anchored to the same registry row.
-            registry_name: Some(info.package.name.clone()),
+            registry_name: Some(info.package.name),
             registry_version: Some(resolved_version),
             ..DepTable::default()
         })),
@@ -1069,9 +1069,9 @@ pub(crate) fn normalize_git_url(raw: &str) -> Result<String, PackageError> {
     if candidate_path.exists() {
         let canonical = candidate_path
             .canonicalize()
-            .map_err(|error| format!("failed to canonicalize {}: {error}", trimmed))?;
+            .map_err(|error| format!("failed to canonicalize {trimmed}: {error}"))?;
         let url = Url::from_file_path(canonical)
-            .map_err(|_| format!("failed to convert {} to file:// URL", trimmed))?;
+            .map_err(|_| format!("failed to convert {trimmed} to file:// URL"))?;
         return Ok(url.to_string().trim_end_matches('/').to_string());
     }
 
@@ -1285,7 +1285,7 @@ pub(crate) fn resolve_git_commit(
     let output = git_output(
         std::iter::once("ls-remote".to_string())
             .chain(std::iter::once(url.to_string()))
-            .chain(refs.clone()),
+            .chain(refs),
         None,
     )?;
     if !output.status.success() {
@@ -1472,8 +1472,7 @@ pub(crate) fn ensure_git_cache_populated_in(
         if let Some(expected) = expected_hash {
             if hash != expected {
                 return Err(format!(
-                    "content hash mismatch for {} at {}: expected {}, got {}",
-                    source, commit, expected, hash
+                    "content hash mismatch for {source} at {commit}: expected {expected}, got {hash}"
                 )
                 .into());
             }
@@ -1738,12 +1737,8 @@ pub(crate) fn clean_package_cache_in(
     }
 
     let ctx = workspace.load_manifest_context()?;
-    let lock = LockFile::load(&ctx.lock_path())?.ok_or_else(|| {
-        format!(
-            "{} is missing; pass --all to clean every cache entry",
-            LOCK_FILE
-        )
-    })?;
+    let lock = LockFile::load(&ctx.lock_path())?
+        .ok_or_else(|| format!("{LOCK_FILE} is missing; pass --all to clean every cache entry"))?;
     validate_lock_matches_manifest(workspace, &ctx, &lock)?;
     let keep = locked_git_cache_paths_in(workspace, &lock)?;
     let mut removed = 0usize;

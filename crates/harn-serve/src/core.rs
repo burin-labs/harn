@@ -43,7 +43,7 @@ fn install_scoped_event_log(log: Arc<AnyEventLog>) -> ActiveEventLogGuard {
     ActiveEventLogGuard { previous }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CallArguments {
     Named(BTreeMap<String, serde_json::Value>),
     Positional(Vec<serde_json::Value>),
@@ -77,7 +77,7 @@ pub struct CallRequest {
     pub progress: Option<ProgressContext>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallResponse {
     pub function: String,
     pub value: serde_json::Value,
@@ -595,11 +595,11 @@ mod tests {
         let script = dir.path().join("server.harn");
         std::fs::write(
             &script,
-            r#"
+            r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
         )
         .expect("write script");
 
@@ -635,11 +635,11 @@ pub fn greet(name: string) -> string {
         let script = dir.path().join("server.harn");
         std::fs::write(
             &script,
-            r#"
+            r"
 pipeline default(task) {
   __io_println(json_stringify({task: task}))
 }
-"#,
+",
         )
         .expect("write script");
 
@@ -732,11 +732,11 @@ pub fn greet(name: string) -> string {
         let script = dir.path().join("server.harn");
         std::fs::write(
             &script,
-            r#"
+            r"
 pub fn inspect(upload: string) -> string {
   return upload
 }
-"#,
+",
         )
         .expect("write script");
 
@@ -779,11 +779,11 @@ pub fn inspect(upload: string) -> string {
         let script = dir.path().join("server.harn");
         std::fs::write(
             &script,
-            r#"
+            r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
         )
         .expect("write script");
 

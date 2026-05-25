@@ -70,9 +70,9 @@ fn forward_event_to_log(event: &RedactionEvent) {
         "bytes_redacted": event.bytes_redacted,
     });
     let log_event = LogEvent::new("token_redaction", payload);
-    let log_ref = log.clone();
-    let topic_clone = topic.clone();
-    let owned = log_event.clone();
+    let log_ref = log;
+    let topic_clone = topic;
+    let owned = log_event;
     let task = async move {
         if let Err(error) = log_ref.append(&topic_clone, owned).await {
             crate::events::log_warn(

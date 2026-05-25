@@ -232,7 +232,7 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     insert_string(&mut values, "run_id", run_id);
     insert_string(&mut values, "stage_id", stage_id);
     insert_string(&mut values, "worker_id", worker_id);
-    insert_string(&mut values, "agent_session_id", agent_session_id.clone());
+    insert_string(&mut values, "agent_session_id", agent_session_id);
     insert_string(
         &mut values,
         "parent_agent_session_id",

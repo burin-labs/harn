@@ -112,7 +112,7 @@ pub struct PersonaStepMetadata {
     pub line: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonaStepRetry {
     pub max_attempts: u64,
 }
@@ -261,7 +261,7 @@ pub struct ResolvedPersonaManifest {
     pub personas: Vec<PersonaManifestEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PersonaValidationError {
     pub manifest_path: PathBuf,
     pub field_path: String,

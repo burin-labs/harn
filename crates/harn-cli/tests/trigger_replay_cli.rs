@@ -272,7 +272,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 "#;
     write_lib(&workspace_root, lib_v1);
 
-    let workspace_root_clone = workspace_root.clone();
+    let workspace_root_clone = workspace_root;
     let report = run_in_harn_runtime(move || async move {
         let _state_guard = harn_state_lock::lock_harn_state();
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
@@ -335,7 +335,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 "#,
     );
 
-    let workspace_root_clone = workspace_root.clone();
+    let workspace_root_clone = workspace_root;
     let (acme_event_id, value) = run_in_harn_runtime(move || async move {
         let _state_guard = harn_state_lock::lock_harn_state();
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
@@ -390,7 +390,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 "#,
     );
 
-    let workspace_root_clone = workspace_root.clone();
+    let workspace_root_clone = workspace_root;
     let (event_id, report) = run_in_harn_runtime(move || async move {
         let _state_guard = harn_state_lock::lock_harn_state();
         let _cwd_guard = cwd_lock::lock_cwd_async().await;

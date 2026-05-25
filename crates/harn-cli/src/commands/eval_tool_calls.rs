@@ -239,11 +239,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
     };
     println!("{summary_line}");
 
-    if had_infra_error {
-        1
-    } else {
-        0
-    }
+    i32::from(had_infra_error)
 }
 
 fn legacy_summary_line(summary: &EvalSummary) -> String {
@@ -421,7 +417,8 @@ fn phase_report(model: ModelSelector, output: RawPhaseOutput) -> PhaseReport {
     let pricing = harn_vm::llm::llm_pricing_per_1k(provider, model_id);
     let cost_usd = pricing
         .map(|(input, output)| {
-            (input_tokens.max(0) as f64 * input + output_tokens.max(0) as f64 * output) / 1000.0
+            (input_tokens.max(0) as f64).mul_add(input, output_tokens.max(0) as f64 * output)
+                / 1000.0
         })
         .unwrap_or(0.0);
     PhaseReport {
@@ -802,8 +799,7 @@ fn predicate_judge_prompt(case: &ToolCallEvalCase, observed: &ObservedToolCallOu
     };
     let observed = serde_json::to_string_pretty(observed).unwrap_or_default();
     format!(
-        "{}\n\nRubric:\n{}\n\nObserved tool decision:\n{}\n\nReturn JSON with passed and reason.",
-        judge_prompt, description, observed
+        "{judge_prompt}\n\nRubric:\n{description}\n\nObserved tool decision:\n{observed}\n\nReturn JSON with passed and reason."
     )
 }
 
@@ -1001,8 +997,7 @@ fn legacy_regression_render(
     let drop_pp = (baseline.pass_rate - current.pass_rate) * 100.0;
     if drop_pp > max_drop_pp {
         eprintln!(
-            "error: {label} pass rate dropped by {:.2} pp, above max {:.2} pp",
-            drop_pp, max_drop_pp
+            "error: {label} pass rate dropped by {drop_pp:.2} pp, above max {max_drop_pp:.2} pp"
         );
         return 1;
     }

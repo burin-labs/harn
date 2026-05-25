@@ -115,7 +115,7 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                             .map(|e| {
                                 let name = e.file_name().to_string_lossy().into_owned();
                                 if e.path().is_dir() {
-                                    format!("{}/", name)
+                                    format!("{name}/")
                                 } else {
                                     name
                                 }
@@ -124,7 +124,7 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                         names.sort();
                         Some(names.join("\n"))
                     }
-                    Err(e) => Some(format!("Error: cannot list directory '{}': {}", path, e)),
+                    Err(e) => Some(format!("Error: cannot list directory '{path}': {e}")),
                 };
             }
             let offset = args
@@ -158,7 +158,7 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                     }
                     Some(numbered)
                 }
-                Err(e) => Some(format!("Error: cannot read file '{}': {}", path, e)),
+                Err(e) => Some(format!("Error: cannot read file '{path}': {e}")),
             }
         }
         "list_directory" => {
@@ -171,7 +171,7 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                         .map(|e| {
                             let name = e.file_name().to_string_lossy().into_owned();
                             if e.path().is_dir() {
-                                format!("{}/", name)
+                                format!("{name}/")
                             } else {
                                 name
                             }
@@ -180,7 +180,7 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                     names.sort();
                     Some(names.join("\n"))
                 }
-                Err(e) => Some(format!("Error: cannot list directory '{}': {}", path, e)),
+                Err(e) => Some(format!("Error: cannot list directory '{path}': {e}")),
             }
         }
         _ => None,

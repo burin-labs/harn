@@ -1133,7 +1133,7 @@ impl Chunk {
         while ip < self.code.len() {
             let op = self.code[ip];
             let line = self.lines.get(ip).copied().unwrap_or(0);
-            out.push_str(&format!("{:04} [{:>4}] ", ip, line));
+            out.push_str(&format!("{ip:04} [{line:>4}] "));
             ip += 1;
 
             match op {
@@ -1141,7 +1141,7 @@ impl Chunk {
                     let idx = self.read_u16(ip);
                     ip += 2;
                     let val = &self.constants[idx as usize];
-                    out.push_str(&format!("CONSTANT {:>4} ({})\n", idx, val));
+                    out.push_str(&format!("CONSTANT {idx:>4} ({val})\n"));
                 }
                 x if x == Op::Nil as u8 => out.push_str("NIL\n"),
                 x if x == Op::True as u8 => out.push_str("TRUE\n"),
@@ -1181,7 +1181,7 @@ impl Chunk {
                 x if x == Op::GetLocalSlot as u8 => {
                     let slot = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("GET_LOCAL_SLOT {:>4}", slot));
+                    out.push_str(&format!("GET_LOCAL_SLOT {slot:>4}"));
                     if let Some(info) = self.local_slots.get(slot as usize) {
                         out.push_str(&format!(" ({})", info.name));
                     }
@@ -1190,7 +1190,7 @@ impl Chunk {
                 x if x == Op::DefLocalSlot as u8 => {
                     let slot = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("DEF_LOCAL_SLOT {:>4}", slot));
+                    out.push_str(&format!("DEF_LOCAL_SLOT {slot:>4}"));
                     if let Some(info) = self.local_slots.get(slot as usize) {
                         out.push_str(&format!(" ({})", info.name));
                     }
@@ -1199,7 +1199,7 @@ impl Chunk {
                 x if x == Op::SetLocalSlot as u8 => {
                     let slot = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("SET_LOCAL_SLOT {:>4}", slot));
+                    out.push_str(&format!("SET_LOCAL_SLOT {slot:>4}"));
                     if let Some(info) = self.local_slots.get(slot as usize) {
                         out.push_str(&format!(" ({})", info.name));
                     }
@@ -1225,44 +1225,44 @@ impl Chunk {
                 x if x == Op::Jump as u8 => {
                     let target = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("JUMP {:>4}\n", target));
+                    out.push_str(&format!("JUMP {target:>4}\n"));
                 }
                 x if x == Op::JumpIfFalse as u8 => {
                     let target = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("JUMP_IF_FALSE {:>4}\n", target));
+                    out.push_str(&format!("JUMP_IF_FALSE {target:>4}\n"));
                 }
                 x if x == Op::JumpIfTrue as u8 => {
                     let target = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("JUMP_IF_TRUE {:>4}\n", target));
+                    out.push_str(&format!("JUMP_IF_TRUE {target:>4}\n"));
                 }
                 x if x == Op::Pop as u8 => out.push_str("POP\n"),
                 x if x == Op::Call as u8 => {
                     let argc = self.code[ip];
                     ip += 1;
-                    out.push_str(&format!("CALL {:>4}\n", argc));
+                    out.push_str(&format!("CALL {argc:>4}\n"));
                 }
                 x if x == Op::TailCall as u8 => {
                     let argc = self.code[ip];
                     ip += 1;
-                    out.push_str(&format!("TAIL_CALL {:>4}\n", argc));
+                    out.push_str(&format!("TAIL_CALL {argc:>4}\n"));
                 }
                 x if x == Op::Return as u8 => out.push_str("RETURN\n"),
                 x if x == Op::Closure as u8 => {
                     let idx = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("CLOSURE {:>4}\n", idx));
+                    out.push_str(&format!("CLOSURE {idx:>4}\n"));
                 }
                 x if x == Op::BuildList as u8 => {
                     let count = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("BUILD_LIST {:>4}\n", count));
+                    out.push_str(&format!("BUILD_LIST {count:>4}\n"));
                 }
                 x if x == Op::BuildDict as u8 => {
                     let count = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("BUILD_DICT {:>4}\n", count));
+                    out.push_str(&format!("BUILD_DICT {count:>4}\n"));
                 }
                 x if x == Op::Subscript as u8 => out.push_str("SUBSCRIPT\n"),
                 x if x == Op::SubscriptOpt as u8 => out.push_str("SUBSCRIPT_OPT\n"),
@@ -1322,19 +1322,19 @@ impl Chunk {
                 x if x == Op::Concat as u8 => {
                     let count = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("CONCAT {:>4}\n", count));
+                    out.push_str(&format!("CONCAT {count:>4}\n"));
                 }
                 x if x == Op::IterInit as u8 => out.push_str("ITER_INIT\n"),
                 x if x == Op::IterNext as u8 => {
                     let target = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("ITER_NEXT {:>4}\n", target));
+                    out.push_str(&format!("ITER_NEXT {target:>4}\n"));
                 }
                 x if x == Op::Throw as u8 => out.push_str("THROW\n"),
                 x if x == Op::TryCatchSetup as u8 => {
                     let target = self.read_u16(ip);
                     ip += 2;
-                    out.push_str(&format!("TRY_CATCH_SETUP {:>4}\n", target));
+                    out.push_str(&format!("TRY_CATCH_SETUP {target:>4}\n"));
                 }
                 x if x == Op::PopHandler as u8 => out.push_str("POP_HANDLER\n"),
                 x if x == Op::Pipe as u8 => out.push_str("PIPE\n"),
@@ -1464,7 +1464,7 @@ impl Chunk {
                 x if x == Op::NotEqualString as u8 => out.push_str("NOT_EQUAL_STRING\n"),
                 x if x == Op::Yield as u8 => out.push_str("YIELD\n"),
                 _ => {
-                    out.push_str(&format!("UNKNOWN(0x{:02x})\n", op));
+                    out.push_str(&format!("UNKNOWN(0x{op:02x})\n"));
                 }
             }
         }

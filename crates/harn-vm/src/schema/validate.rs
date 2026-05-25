@@ -584,7 +584,7 @@ fn first_param_validation_error_inner(
     context: &mut ValidationContext,
 ) -> Option<String> {
     if let Err(error) = context.traversal.enter_schema() {
-        return Some(format!("parameter '{}': {}", param_name, error));
+        return Some(format!("parameter '{param_name}': {error}"));
     }
     let result =
         first_param_validation_error_body(value, schema, root_schema, param_name, options, context);
@@ -602,14 +602,13 @@ fn first_param_validation_error_body(
 ) -> Option<String> {
     if let Some(VmValue::String(pointer)) = schema.get("$ref") {
         if let Err(error) = context.traversal.expand_ref() {
-            return Some(format!("parameter '{}': {}", param_name, error));
+            return Some(format!("parameter '{param_name}': {error}"));
         }
         let Some((resolved_pointer, resolved)) =
             resolve_canonical_ref_with_path(root_schema, pointer)
         else {
             return Some(format!(
-                "parameter '{}': unresolved schema reference '{}'",
-                param_name, pointer
+                "parameter '{param_name}': unresolved schema reference '{pointer}'"
             ));
         };
         if let Some(index) = context
@@ -727,7 +726,7 @@ fn first_param_validation_error_body(
             })
             .collect::<Vec<_>>()
             .join("; ");
-        Some(format!("parameter '{}': {}", param_name, joined))
+        Some(format!("parameter '{param_name}': {joined}"))
     }
 }
 
@@ -764,13 +763,11 @@ fn first_object_param_error(
                 let actual_summary = crate::stdlib::shapes::format_available_fields(&actual_keys);
                 if let Some(suggestion) = suggestion {
                     return Some(format!(
-                        "parameter '{}': missing field '{}' ({}), did you mean '{}'? — {}",
-                        param_name, key, expected, suggestion, actual_summary
+                        "parameter '{param_name}': missing field '{key}' ({expected}), did you mean '{suggestion}'? — {actual_summary}"
                     ));
                 }
                 return Some(format!(
-                    "parameter '{}': missing field '{}' ({}) — {}",
-                    param_name, key, expected, actual_summary
+                    "parameter '{param_name}': missing field '{key}' ({expected}) — {actual_summary}"
                 ));
             }
         }
@@ -844,8 +841,7 @@ fn first_object_param_error(
             for key in fields.keys() {
                 if !known_keys.contains(key) {
                     return Some(format!(
-                        "parameter '{}': unexpected field '{}'",
-                        param_name, key
+                        "parameter '{param_name}': unexpected field '{key}'"
                     ));
                 }
             }

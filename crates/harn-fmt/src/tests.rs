@@ -76,13 +76,13 @@ fn test_roundtrip_zero_arg_closure_as_arg() {
 
 #[test]
 fn test_roundtrip_zero_arg_closure_multiline() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let f = { ->
     let x = 1
     x + 1
   }
   log(f())
-}"#;
+}";
     let formatted = format_source(source).unwrap();
     assert!(
         formatted.contains("{ ->"),
@@ -116,12 +116,12 @@ fn test_roundtrip_for_in() {
 
 #[test]
 fn test_roundtrip_discard_bindings() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let _ = 1
   let _ = 2
   let [_, keep, _] = [10, 20, 30]
   __io_println(keep)
-}"#;
+}";
     let formatted = format_source(source).unwrap();
     assert!(formatted.contains("let _ = 1\n"));
     assert!(formatted.contains("let _ = 2\n"));
@@ -207,10 +207,10 @@ fn test_format_let_var() {
 
 #[test]
 fn test_format_binary_ops() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = 1 + 2
   let y = a * b
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("1 + 2"));
     assert!(result.contains("a * b"));
@@ -268,22 +268,22 @@ fn test_format_if_else() {
 
 #[test]
 fn test_format_for_in() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   for i in [1, 2, 3] {
     log(i)
   }
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("for i in [1, 2, 3] {"));
 }
 
 #[test]
 fn test_format_fn() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   fn add(a, b) {
     return a + b
   }
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("fn add(a, b) {"));
     assert!(result.contains("return a + b"));
@@ -291,7 +291,7 @@ fn test_format_fn() {
 
 #[test]
 fn test_format_semicolon_separated_statements_to_newlines() {
-    let source = r#"pipeline default(task) { let x = 1; let y = 2; return; }"#;
+    let source = r"pipeline default(task) { let x = 1; let y = 2; return; }";
     let result = format_source(source).unwrap();
     assert_eq!(
         result,
@@ -349,17 +349,16 @@ fn test_no_trailing_whitespace() {
         assert_eq!(
             line,
             line.trim_end(),
-            "Line has trailing whitespace: {:?}",
-            line
+            "Line has trailing whitespace: {line:?}"
         );
     }
 }
 
 #[test]
 fn test_wraps_long_function_call_arguments() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = some_call(with_a_really_long_argument_name_one, with_a_really_long_argument_name_two, with_a_really_long_argument_name_three, with_a_really_long_argument_name_four, with_a_really_long_argument_name_five)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("some_call(\n"));
     assert!(result.contains("with_a_really_long_argument_name_five,\n"));
@@ -382,9 +381,9 @@ fn test_removes_single_line_trailing_commas() {
 
 #[test]
 fn test_wraps_long_method_call_arguments() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = some_really_long_receiver_name.with_a_very_long_prefix().and_another_segment().call_some_extremely_long_method_name(with_a_really_long_argument_name_one, with_a_really_long_argument_name_two, with_a_really_long_argument_name_three, with_a_really_long_argument_name_four, with_a_really_long_argument_name_five)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains(".call_some_extremely_long_method_name(\n"));
     assert!(result.contains("with_a_really_long_argument_name_five,\n"));
@@ -392,9 +391,9 @@ fn test_wraps_long_method_call_arguments() {
 
 #[test]
 fn test_wraps_long_list_literals() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = [with_a_really_long_item_name_one, with_a_really_long_item_name_two, with_a_really_long_item_name_three, with_a_really_long_item_name_four, with_a_really_long_item_name_five]
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("[\n"));
     assert!(result.contains("with_a_really_long_item_name_five,\n"));
@@ -402,7 +401,7 @@ fn test_wraps_long_list_literals() {
 
 #[test]
 fn test_adds_trailing_commas_when_wrapping_existing_multiline_sequences() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let xs = [
     with_a_really_long_item_name_one,
     with_a_really_long_item_name_two
@@ -411,7 +410,7 @@ fn test_adds_trailing_commas_when_wrapping_existing_multiline_sequences() {
     with_a_really_long_argument_name_one,
     with_a_really_long_argument_name_two
   )
-}"#;
+}";
     let result = fmt_opts(source, 60);
     assert!(
         result.contains("with_a_really_long_item_name_two,\n"),
@@ -426,9 +425,9 @@ fn test_adds_trailing_commas_when_wrapping_existing_multiline_sequences() {
 
 #[test]
 fn test_wraps_long_dict_literals() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = {first_really_long_key_name: with_a_really_long_value_name_one, second_really_long_key_name: with_a_really_long_value_name_two, third_really_long_key_name: with_a_really_long_value_name_three}
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("{\n"));
     assert!(result.contains("third_really_long_key_name: with_a_really_long_value_name_three,\n"));
@@ -498,7 +497,7 @@ fn test_indents_nested_collection_inside_pipeline_body() {
 
 #[test]
 fn test_wraps_long_struct_construction() {
-    let source = r#"struct BuildPlan {
+    let source = r"struct BuildPlan {
   first_really_long_key_name: string
   second_really_long_key_name: string
   third_really_long_key_name: string
@@ -506,7 +505,7 @@ fn test_wraps_long_struct_construction() {
 
 pipeline default(task) {
   let x = BuildPlan {first_really_long_key_name: with_a_really_long_value_name_one, second_really_long_key_name: with_a_really_long_value_name_two, third_really_long_key_name: with_a_really_long_value_name_three}
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("BuildPlan {\n"));
     assert!(result.contains("third_really_long_key_name: with_a_really_long_value_name_three,\n"));
@@ -514,9 +513,9 @@ pipeline default(task) {
 
 #[test]
 fn test_wraps_long_enum_constructor_arguments() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = BuildPlan.Step(with_a_really_long_argument_name_one, with_a_really_long_argument_name_two, with_a_really_long_argument_name_three, with_a_really_long_argument_name_four)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("BuildPlan.Step(\n"));
     assert!(result.contains("with_a_really_long_argument_name_four,\n"));
@@ -524,11 +523,11 @@ fn test_wraps_long_enum_constructor_arguments() {
 
 #[test]
 fn test_wraps_long_fn_decl_params() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   fn process(first_really_long_param_name: string, second_really_long_param_name: int, third_really_long_param_name: bool) {
     log(1)
   }
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("fn process(\n"),
@@ -557,9 +556,9 @@ pipeline default(task) { log(1) }"#;
 fn test_adds_parens_for_mixed_and_or() {
     // a && b || c — the AST is BinaryOp("||", BinaryOp("&&", a, b), c)
     // Formatter should add parens for clarity: (a && b) || c
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a && b || c
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a && b) || c"),
@@ -571,9 +570,9 @@ fn test_adds_parens_for_mixed_and_or() {
 #[test]
 fn test_preserves_parens_or_inside_and() {
     // (a || b) && c — without parens this would change semantics
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (a || b) && c
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a || b) && c"),
@@ -585,9 +584,9 @@ fn test_preserves_parens_or_inside_and() {
 #[test]
 fn test_preserves_parens_lower_precedence_right() {
     // a * (b + c) — without parens this becomes a * b + c
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a * (b + c)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a * (b + c)"),
@@ -599,9 +598,9 @@ fn test_preserves_parens_lower_precedence_right() {
 #[test]
 fn test_preserves_parens_right_subtraction() {
     // a - (b - c) — without parens this becomes a - b - c which differs
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a - (b - c)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a - (b - c)"),
@@ -612,9 +611,9 @@ fn test_preserves_parens_right_subtraction() {
 
 #[test]
 fn test_long_binary_chain_wraps() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = first_really_long_variable_name + second_really_long_variable_name + third_really_long_variable_name + fourth_really_long_variable_name
-}"#;
+}";
     let result = format_source(source).unwrap();
     // Should break and be idempotent
     assert_roundtrip(source);
@@ -627,9 +626,9 @@ fn test_long_binary_chain_wraps() {
 
 #[test]
 fn test_subtraction_uses_backslash_continuation() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = first_really_long_variable_name + second_really_long_variable_name + third_really_long_variable_name - fourth_really_long_variable_name
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert_roundtrip(source);
     // The `-` operator needs `\` continuation
@@ -644,10 +643,10 @@ fn test_subtraction_uses_backslash_continuation() {
 
 #[test]
 fn test_line_leading_safe_operators_do_not_use_backslash_continuation() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let fallback = first_really_long_variable_name ?? second_really_long_variable_name
   let same = first_really_long_variable_name == second_really_long_variable_name
-}"#;
+}";
     let result = fmt_opts(source, 40);
     assert!(
         result.contains("\n    ?? ") && result.contains("\n    == "),
@@ -671,17 +670,17 @@ fn test_line_leading_safe_operators_do_not_use_backslash_continuation() {
 
 #[test]
 fn test_nested_function_call_wrapping() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = outer_function(inner_function(very_long_argument_name_one, very_long_argument_name_two, very_long_argument_name_three), another_really_long_argument_name)
-}"#;
+}";
     assert_roundtrip(source);
 }
 
 #[test]
 fn test_nested_list_in_dict_wrapping() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = {key_one: [really_long_element_one, really_long_element_two, really_long_element_three, really_long_element_four], key_two: value}
-}"#;
+}";
     assert_roundtrip(source);
 }
 
@@ -689,9 +688,9 @@ fn test_nested_list_in_dict_wrapping() {
 fn test_nil_coalescing_with_logical_ops() {
     // `??` binds tighter than `||`/`&&`/comparisons/additive, so
     // `a ?? b || c` parses naturally as `(a ?? b) || c` (no parens needed).
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a ?? b || c
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a ?? b || c"),
@@ -700,9 +699,9 @@ fn test_nil_coalescing_with_logical_ops() {
     assert_roundtrip(source);
     // The opposite shape `a ?? (b || c)` must keep its parens — stripping them
     // would regroup to `(a ?? b) || c` and lose the `b || c` sub-expression.
-    let source2 = r#"pipeline default(task) {
+    let source2 = r"pipeline default(task) {
   let x = a ?? (b || c)
-}"#;
+}";
     let result2 = format_source(source2).unwrap();
     assert!(
         result2.contains("a ?? (b || c)"),
@@ -714,9 +713,9 @@ fn test_nil_coalescing_with_logical_ops() {
 #[test]
 fn test_division_right_associativity_preserved() {
     // a / (b / c) — must keep parens, otherwise becomes (a / b) / c
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a / (b / c)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a / (b / c)"),
@@ -727,9 +726,9 @@ fn test_division_right_associativity_preserved() {
 
 #[test]
 fn test_exponentiation_formats_with_natural_right_associativity() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a ** b ** c
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a ** b ** c"),
@@ -740,9 +739,9 @@ fn test_exponentiation_formats_with_natural_right_associativity() {
 
 #[test]
 fn test_exponentiation_preserves_left_grouping_when_forced() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (a ** b) ** c
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a ** b) ** c"),
@@ -753,9 +752,9 @@ fn test_exponentiation_preserves_left_grouping_when_forced() {
 
 #[test]
 fn test_exponentiation_binds_tighter_than_multiplication() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a * b ** c
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a * b ** c"),
@@ -767,9 +766,9 @@ fn test_exponentiation_binds_tighter_than_multiplication() {
 #[test]
 fn test_multiplication_of_addition() {
     // a * (b + c) must not lose parens
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a * (b + c)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(result.contains("a * (b + c)"), "got:\n{result}");
     assert_roundtrip(source);
@@ -778,9 +777,9 @@ fn test_multiplication_of_addition() {
 #[test]
 fn test_no_unnecessary_parens_same_op() {
     // a + b + c — all same associative op, no parens needed
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a + b + c
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a + b + c"),
@@ -792,9 +791,9 @@ fn test_no_unnecessary_parens_same_op() {
 #[test]
 fn test_preserves_parens_right_grouped_addition() {
     // a + (b + c) must keep its explicit rhs grouping.
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a + (b + c)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a + (b + c)"),
@@ -806,9 +805,9 @@ fn test_preserves_parens_right_grouped_addition() {
 #[test]
 fn test_preserves_parens_right_grouped_multiplication() {
     // a * (b * c) must keep its explicit rhs grouping.
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a * (b * c)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a * (b * c)"),
@@ -820,9 +819,9 @@ fn test_preserves_parens_right_grouped_multiplication() {
 #[test]
 fn test_preserves_parens_right_grouped_nil_coalescing() {
     // a ?? (b ?? c) must keep its explicit rhs grouping.
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a ?? (b ?? c)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a ?? (b ?? c)"),
@@ -834,9 +833,9 @@ fn test_preserves_parens_right_grouped_nil_coalescing() {
 #[test]
 fn test_no_parens_for_natural_precedence() {
     // a + b * c — * binds tighter, no parens needed
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = a + b * c
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a + b * c"),
@@ -850,7 +849,7 @@ fn test_no_parens_for_natural_precedence() {
 #[test]
 fn test_already_wrapped_fn_params_stable() {
     // Input that's already wrapped should not change
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   fn process(
     first_really_long_param_name: string,
     second_really_long_param_name: int,
@@ -858,7 +857,7 @@ fn test_already_wrapped_fn_params_stable() {
   ) {
     log(1)
   }
-}"#;
+}";
     assert_roundtrip(source);
 }
 
@@ -877,10 +876,10 @@ pipeline default(task) { log(1) }"#;
 #[test]
 fn test_backslash_continuation_roundtrip() {
     // Source with backslash continuation should format and re-format stably
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = first_really_long_variable_name + second_really_long_variable_name \
     == third_really_long_variable_name
-}"#;
+}";
     assert_roundtrip(source);
 }
 
@@ -897,9 +896,9 @@ fn fmt_opts(source: &str, line_width: usize) -> String {
 #[test]
 fn test_custom_line_width_wraps_earlier() {
     // "really_long_function_name(" = 26 chars; "alpha, beta, gamma" = 18; 26+18+1 = 45 > 40
-    let source = r#"pipeline default() {
+    let source = r"pipeline default() {
   let x = really_long_function_name(alpha, beta, gamma)
-}"#;
+}";
     let result = fmt_opts(source, 40);
     assert!(
         result.contains("really_long_function_name(\n"),
@@ -914,9 +913,9 @@ fn test_custom_line_width_wraps_earlier() {
 #[test]
 fn test_custom_line_width_stays_inline_at_default() {
     // Same call should NOT wrap at default width 100.
-    let source = r#"pipeline default() {
+    let source = r"pipeline default() {
   let x = really_long_function_name(alpha, beta, gamma)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("really_long_function_name(alpha, beta, gamma)"),
@@ -927,9 +926,9 @@ fn test_custom_line_width_stays_inline_at_default() {
 #[test]
 fn test_custom_line_width_wraps_list() {
     // "item_one, item_two, item_three, item_four" = 41 chars; with "[" prefix=1 → 42+1 > 40
-    let source = r#"pipeline default() {
+    let source = r"pipeline default() {
   let x = [item_one, item_two, item_three, item_four]
-}"#;
+}";
     let result = fmt_opts(source, 40);
     assert!(
         result.contains("[\n"),
@@ -939,9 +938,9 @@ fn test_custom_line_width_wraps_list() {
 
 #[test]
 fn test_custom_line_width_stays_inline_when_fits() {
-    let source = r#"pipeline default() {
+    let source = r"pipeline default() {
   let x = foo(a, b)
-}"#;
+}";
     let result = fmt_opts(source, 40);
     assert!(
         result.contains("foo(a, b)"),
@@ -951,9 +950,9 @@ fn test_custom_line_width_stays_inline_when_fits() {
 
 #[test]
 fn test_default_opts_matches_format_source() {
-    let source = r#"pipeline default() {
+    let source = r"pipeline default() {
   let x = compute(some_arg, another_arg)
-}"#;
+}";
     let default_result = format_source(source).unwrap();
     let opts_result = format_source_opts(source, &FmtOptions::default()).unwrap();
     assert_eq!(default_result, opts_result);
@@ -962,11 +961,11 @@ fn test_default_opts_matches_format_source() {
 #[test]
 fn test_custom_line_width_wraps_fn_params() {
     // "  fn process(" = 14 chars; "input: string, options: dict" = 28; 14+28+1 = 43 > 40
-    let source = r#"pipeline default() {
+    let source = r"pipeline default() {
   fn process(input: string, options: dict) -> string {
     return input
   }
-}"#;
+}";
     let result = fmt_opts(source, 40);
     assert!(
         result.contains("fn process(\n"),
@@ -976,9 +975,9 @@ fn test_custom_line_width_wraps_fn_params() {
 
 #[test]
 fn test_custom_line_width_idempotent() {
-    let source = r#"pipeline default() {
+    let source = r"pipeline default() {
   let x = really_long_function_name(alpha, beta, gamma)
-}"#;
+}";
     let opts = FmtOptions {
         line_width: 40,
         separator_width: AUTO_SEPARATOR_WIDTH,
@@ -1018,9 +1017,9 @@ fn test_parens_binary_op_method_call() {
 
 #[test]
 fn test_parens_binary_op_property_access() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (a + b).length
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a + b).length"),
@@ -1031,9 +1030,9 @@ fn test_parens_binary_op_property_access() {
 
 #[test]
 fn test_parens_binary_op_subscript() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (a ?? b)[0]
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a ?? b)[0]"),
@@ -1044,9 +1043,9 @@ fn test_parens_binary_op_subscript() {
 
 #[test]
 fn test_parens_unary_op_method_call() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (-a).abs()
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(-a).abs()"),
@@ -1057,9 +1056,9 @@ fn test_parens_unary_op_method_call() {
 
 #[test]
 fn test_parens_unary_op_property_access() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (!flag).description
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(!flag).description"),
@@ -1070,9 +1069,9 @@ fn test_parens_unary_op_property_access() {
 
 #[test]
 fn test_parens_ternary_method_call() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (a ? b : c).method()
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a ? b : c).method()"),
@@ -1083,9 +1082,9 @@ fn test_parens_ternary_method_call() {
 
 #[test]
 fn test_parens_unary_binary_operand() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = !(a + b)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("!(a + b)"),
@@ -1097,9 +1096,9 @@ fn test_parens_unary_binary_operand() {
 #[test]
 fn test_parens_chained_unary_method_on_binary() {
     // !(a ?? b).trim() — the unary wraps a method call whose object is a binary op
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = !(a ?? b).trim()
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("!(a ?? b).trim()"),
@@ -1110,9 +1109,9 @@ fn test_parens_chained_unary_method_on_binary() {
 
 #[test]
 fn test_parens_chained_postfix_on_binary() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (a + b)[0].method()
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a + b)[0].method()"),
@@ -1123,9 +1122,9 @@ fn test_parens_chained_postfix_on_binary() {
 
 #[test]
 fn test_parens_binary_op_optional_method() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (a ?? b)?.method()
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a ?? b)?.method()"),
@@ -1136,9 +1135,9 @@ fn test_parens_binary_op_optional_method() {
 
 #[test]
 fn test_parens_binary_op_optional_property() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = (a ?? b)?.length
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("(a ?? b)?.length"),
@@ -1175,11 +1174,11 @@ fn test_no_unnecessary_parens_on_simple_method_call() {
 
 #[test]
 fn test_short_fn_params_stay_inline() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   fn add(a: int, b: int) -> int {
     return a + b
   }
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("fn add(a: int, b: int) -> int {"),
@@ -1584,9 +1583,9 @@ fn test_multi_nil_coalescing_chain_wraps_each_operand() {
     // A chain of ≥3 `??` operators must wrap with each operator at
     // line start and a +2-space continuation indent relative to the
     // owning statement (body indent 2 → continuation indent 4).
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = first_long_name ?? second_long_name ?? third_long_name ?? fourth_long_name
-}"#;
+}";
     let result = fmt_opts(source, 30);
     for expected in [
         "\n    ?? second_long_name",
@@ -1614,9 +1613,9 @@ fn test_nil_coalescing_chained_with_method_call_wraps() {
     // A method chain + trailing `??` must place the `??` on its own
     // line (continuation-indented) while the method chain stays intact
     // when it fits.
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = source.filter(keep).map(transform).collect() ?? fallback_sentinel
-}"#;
+}";
     let result = fmt_opts(source, 40);
     assert!(
         result.contains("\n    ?? fallback_sentinel"),
@@ -1742,10 +1741,10 @@ fn test_method_call_args_dont_overcount_multiline_receiver() {
     // method-call args should be laid out based on the new line's column,
     // not the receiver's total byte length. With short args, they should
     // stay on the same line as the `.method(`.
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(arg_one, arg_two, arg_three)
     .map(item)
-}"#;
+}";
     let result = format_source(source).unwrap();
     // Short args list (just `item`) must NOT wrap onto its own line just
     // because the receiver wrapped onto multiple lines above.
@@ -1758,10 +1757,10 @@ fn test_method_call_args_dont_overcount_multiline_receiver() {
 
 #[test]
 fn test_optional_method_call_args_dont_overcount_multiline_receiver() {
-    let source = r#"pipeline default(task) {
+    let source = r"pipeline default(task) {
   let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(arg_one, arg_two, arg_three)
     ?.map(item)
-}"#;
+}";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("?.map(item)"),

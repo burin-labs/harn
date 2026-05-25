@@ -41,7 +41,7 @@ pub(super) fn compact_json(value: &serde_json::Value) -> String {
         serde_json::Value::Null => "null".to_string(),
         serde_json::Value::Bool(value) => value.to_string(),
         serde_json::Value::Number(value) => value.to_string(),
-        serde_json::Value::String(value) => value.to_string(),
+        serde_json::Value::String(value) => value.clone(),
         serde_json::Value::Array(values) => format!("{} items", values.len()),
         serde_json::Value::Object(values) => format!("{} fields", values.len()),
     }

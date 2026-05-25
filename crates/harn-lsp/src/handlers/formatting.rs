@@ -491,12 +491,11 @@ mod tests {
         let _ = end;
         let edit = build_missing_arms_edit(source, &span, &missing)
             .expect("expected edit for well-formed match");
-        assert!(edit.new_text.contains("\"fail\" -> "), "{:?}", edit);
-        assert!(edit.new_text.contains("\"skip\" -> "), "{:?}", edit);
+        assert!(edit.new_text.contains("\"fail\" -> "), "{edit:?}");
+        assert!(edit.new_text.contains("\"skip\" -> "), "{edit:?}");
         assert!(
             edit.new_text.contains("unreachable"),
-            "edit should scaffold with unreachable: {:?}",
-            edit
+            "edit should scaffold with unreachable: {edit:?}"
         );
         // Indent should be 4 spaces for arms (brace at col 2 + 2).
         assert!(

@@ -36,14 +36,14 @@ fn test_redundant_clone_dropped_autofix() {
 #[test]
 fn test_redundant_clone_ignores_named_clone_binding() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let data = [1, 2]
   let copied = data.clone()
   log(copied)
   log(data)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "redundant-clone"),
@@ -69,13 +69,13 @@ fn test_pointless_self_comparison_autofix() {
 #[test]
 fn test_pointless_if_constant_condition() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   if false {
     log(task)
   }
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "pointless-comparison"),
@@ -103,12 +103,12 @@ pipeline default(task) {
 #[test]
 fn test_unused_pattern_binding_for_destructuring() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let { a, b } = { a: 1, b: 2 }
   log(a)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "unused-pattern-binding"),
@@ -123,12 +123,12 @@ pipeline default(task) {
 #[test]
 fn test_unused_pattern_binding_underscore_ignored() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   let { a, b: _b } = { a: 1, b: 2 }
   log(a)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-pattern-binding"),
@@ -158,7 +158,7 @@ fn test_let_then_return_autofix() {
 #[test]
 fn test_let_then_return_ignores_typed_binding() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
   fn answer() {
     let value: int = 1 + 2
@@ -166,7 +166,7 @@ pipeline default(task) {
   }
   log(answer())
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "let-then-return"),

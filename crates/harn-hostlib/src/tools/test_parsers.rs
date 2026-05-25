@@ -360,12 +360,12 @@ mod tests {
 
     #[test]
     fn parses_junit_single_quoted_attrs_and_unescapes_text() {
-        let xml = r#"<testsuite>
+        let xml = r"<testsuite>
   <testcase classname = 'pkg.Suite' name = 'actual' time = '0.003'>
     <failure message = 'a &amp; b'>left &lt; right</failure>
     <system-out>hello &amp; goodbye</system-out>
   </testcase>
-</testsuite>"#;
+</testsuite>";
         let records = parse_junit_xml(xml.as_bytes()).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].name, "pkg.Suite::actual");

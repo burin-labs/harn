@@ -140,11 +140,7 @@ fn aggregate_report(args: &EvalContextArgs) -> Result<ContextEvalReport, i32> {
 }
 
 fn post_render_exit_code(report: &ContextEvalReport) -> i32 {
-    if report.pass {
-        0
-    } else {
-        1
-    }
+    i32::from(!report.pass)
 }
 
 fn announce_output_paths(output_dir: &Path) {

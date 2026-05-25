@@ -632,7 +632,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        fn namespace(&self) -> &str {
+        fn namespace(&self) -> &'static str {
             "test"
         }
 

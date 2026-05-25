@@ -469,7 +469,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         } else {
             print_summary_legacy(&summary);
         }
-        return if had_error { 1 } else { 0 };
+        return i32::from(had_error);
     }
 
     if let Err(code) = write_markdown_artifacts_dispatch(&output_dir, &summary).await {
@@ -484,11 +484,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         return code;
     }
 
-    if had_error {
-        1
-    } else {
-        0
-    }
+    i32::from(had_error)
 }
 
 async fn run_matrix_entry(
@@ -634,7 +630,8 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
     let pricing = harn_vm::llm::llm_pricing_per_1k(&ctx.selector.provider, &ctx.selector.model);
     let cost_usd = pricing
         .map(|(input, output)| {
-            (input_tokens.max(0) as f64 * input + output_tokens.max(0) as f64 * output) / 1000.0
+            (input_tokens.max(0) as f64).mul_add(input, output_tokens.max(0) as f64 * output)
+                / 1000.0
         })
         .unwrap_or(0.0);
     let status = if passed {

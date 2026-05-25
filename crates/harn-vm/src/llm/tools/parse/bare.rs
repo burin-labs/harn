@@ -168,9 +168,40 @@ pub(crate) fn parse_bare_calls_in_body(
                         let object_arg_start = has_object_literal_arg_start(text, k + name_len + 1);
                         if known.contains(name_str) {
                             if !object_arg_start {
+                                if bytes.get(k + name_len) == Some(&b'{') {
+                                    let name = name_str.to_string();
+                                    match parse_object_literal_from(&text[k + name_len..], &name) {
+                                        Ok((arguments, consumed)) => {
+                                            calls.push(serde_json::json!({
+                                                "id": format!("tc_{}", calls.len()),
+                                                "name": name,
+                                                "arguments": arguments,
+                                            }));
+                                            let mut end = k + name_len + consumed;
+                                            while end < bytes.len()
+                                                && (bytes[end] == b' ' || bytes[end] == b'\t')
+                                            {
+                                                end += 1;
+                                            }
+                                            if end < bytes.len() && bytes[end] == b'>' {
+                                                end += 1;
+                                            }
+                                            call_ranges.push((j, end));
+                                            i = end;
+                                            at_line_start =
+                                                bytes.get(i.saturating_sub(1)) == Some(&b'\n');
+                                            continue;
+                                        }
+                                        Err(msg) => {
+                                            errors.push(msg);
+                                            i = k + name_len + 1;
+                                            at_line_start = false;
+                                            continue;
+                                        }
+                                    }
+                                }
                                 errors.push(format!(
-                                    "Tool '{}' must be called with an object literal argument like {}({{ ... }}).",
-                                    name_str, name_str
+                                    "Tool '{name_str}' must be called with an object literal argument like {name_str}({{ ... }})."
                                 ));
                                 i = k + name_len + 1;
                                 at_line_start = false;

@@ -305,11 +305,11 @@ mod tests {
         let ctx_b = ProgressContext::new(bus, json!("b"));
         let task_a = scope_context(Some(ctx_a), async {
             tokio::task::yield_now().await;
-            current_context().unwrap().token.clone()
+            current_context().unwrap().token
         });
         let task_b = scope_context(Some(ctx_b), async {
             tokio::task::yield_now().await;
-            current_context().unwrap().token.clone()
+            current_context().unwrap().token
         });
         let (a, b) = tokio::join!(task_a, task_b);
         assert_eq!(a, json!("a"));

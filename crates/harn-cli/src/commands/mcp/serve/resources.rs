@@ -431,8 +431,7 @@ impl McpOrchestratorService {
         let outcome = if result.is_ok() { "success" } else { "error" };
 
         eprintln!(
-            "[harn] mcp: client={} tool={} status={} trace_id={}",
-            client_identity, tool_name, status, trace_id
+            "[harn] mcp: client={client_identity} tool={tool_name} status={status} trace_id={trace_id}"
         );
 
         let ctx = load_local_runtime(&self.local_args()).await?;

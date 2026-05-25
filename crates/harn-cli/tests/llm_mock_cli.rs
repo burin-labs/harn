@@ -449,7 +449,7 @@ fn playground_llm_mock_sub_agent_tool_calls_mutate_host_workspace() {
     let host = write_file(
         temp.path(),
         "host.harn",
-        r#"
+        r"
 pub fn workspace_root() {
   return source_dir()
 }
@@ -463,7 +463,7 @@ pub fn write_workspace(path, content) {
   write_file(resolved, content)
   return resolved
 }
-"#,
+",
     );
     let script = write_file(
         temp.path(),
@@ -539,7 +539,7 @@ fn playground_llm_mock_sub_agent_handles_multiple_tool_calls_in_one_turn() {
     let host = write_file(
         temp.path(),
         "host.harn",
-        r#"
+        r"
 pub fn workspace_root() {
   return source_dir()
 }
@@ -553,7 +553,7 @@ pub fn write_workspace(path, content) {
   write_file(resolved, content)
   return resolved
 }
-"#,
+",
     );
     let script = write_file(
         temp.path(),
@@ -638,7 +638,7 @@ fn playground_llm_mock_consume_match_advances_between_identical_patterns() {
     let host = write_file(
         temp.path(),
         "host.harn",
-        r#"
+        r"
 pub fn workspace_root() {
   return source_dir()
 }
@@ -648,7 +648,7 @@ pub fn write_workspace(path, content) {
   write_file(resolved, content)
   return resolved
 }
-"#,
+",
     );
     let script = write_file(
         temp.path(),

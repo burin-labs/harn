@@ -1698,7 +1698,7 @@ impl<'a> Linter<'a> {
                 }
             }
             Node::AttributedDecl { inner, .. } => {
-                self.collect_persona_calls_node(persona_name, inner)
+                self.collect_persona_calls_node(persona_name, inner);
             }
             _ => {}
         }

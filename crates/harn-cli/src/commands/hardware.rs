@@ -132,7 +132,7 @@ fn parse_linux_meminfo(text: &str) -> Option<RamSnapshot> {
         match parts.next() {
             Some("MemTotal:") => total_kib = parts.next().and_then(|value| value.parse().ok()),
             Some("MemAvailable:") => {
-                available_kib = parts.next().and_then(|value| value.parse().ok())
+                available_kib = parts.next().and_then(|value| value.parse().ok());
             }
             _ => {}
         }

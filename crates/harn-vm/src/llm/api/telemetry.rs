@@ -55,7 +55,7 @@ pub(crate) fn elapsed_ms(started: std::time::Instant) -> u64 {
 /// All fields default to `None` / empty. Producers fill in what they can
 /// extract and leave the rest absent; consumers must treat missing fields as
 /// "not reported by this provider", not "zero".
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderTelemetry {
     /// Wire format the values came from (`ollama_chat`, `openai_usage`, ...).
     /// See [`source`] for the canonical strings. Empty when no telemetry was
@@ -347,7 +347,7 @@ impl ProviderTelemetry {
 
 /// Loaded-model snapshot from Ollama's `/api/ps`. Shared with the CLI's
 /// `harn local` family so we don't duplicate the response shape.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OllamaPsModel {
     pub name: Option<String>,
     pub size_bytes: Option<u64>,

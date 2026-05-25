@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+from collections.abc import Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -45,11 +46,11 @@ def main() -> int:
     fixture_path = ARTIFACTS / "fixtures" / "round_trip.json"
     fixture = json.loads(fixture_path.read_text())
 
-    if hp.HARN_PROTOCOL_ARTIFACT_VERSION != fixture["artifactVersion"]:
+    if fixture["artifactVersion"] != hp.HARN_PROTOCOL_ARTIFACT_VERSION:
         raise AssertionError(
             f"version drift: bindings={hp.HARN_PROTOCOL_ARTIFACT_VERSION} fixture={fixture['artifactVersion']}"
         )
-    if hp.HARN_AGENT_EVENT_METHOD != fixture["harnAgentEventMethod"]:
+    if fixture["harnAgentEventMethod"] != hp.HARN_AGENT_EVENT_METHOD:
         raise AssertionError(
             f"agent-event method drift: bindings={hp.HARN_AGENT_EVENT_METHOD} fixture={fixture['harnAgentEventMethod']}"
         )

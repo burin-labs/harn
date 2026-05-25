@@ -55,8 +55,7 @@ fn eval_context_summary_md_is_byte_identical_between_impls() {
     let rust_md = fs::read_to_string(rust_dir.path().join("summary.md")).expect("rust summary.md");
     assert_eq!(
         harn_md, rust_md,
-        "summary.md diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust_md, harn_md
+        "summary.md diverged\n--- rust ---\n{rust_md}\n--- harn ---\n{harn_md}"
     );
 }
 

@@ -757,10 +757,7 @@ pub(super) async fn drain_pump_best_effort(
             .await
         }
         Err(_) => {
-            eprintln!(
-                "[harn] warning: pump drain timed out for {topic_name} after {:?}",
-                budget
-            );
+            eprintln!("[harn] warning: pump drain timed out for {topic_name} after {budget:?}");
             best_effort_pump_report(
                 log,
                 &topic,

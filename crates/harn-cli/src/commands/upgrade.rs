@@ -59,7 +59,7 @@ pub(crate) enum UpgradeMode {
 const REPO: &str = "burin-labs/harn";
 const RELEASES_BASE: &str = "https://github.com/burin-labs/harn/releases";
 const USER_AGENT: &str = concat!("harn-cli/", env!("CARGO_PKG_VERSION"));
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// `harn upgrade` lives on tokio's blocking pool so the synchronous
 /// `reqwest::blocking` / `tar::Archive` / `fs::rename` calls below can
@@ -142,7 +142,7 @@ fn run_blocking(args: UpgradeArgs) -> Result<(), String> {
 
     install_binaries(staging.path(), &install_dir)?;
 
-    println!("Upgraded harn to {target}. Re-run your last command to use the new binary.",);
+    println!("Upgraded harn to {target}. Re-run your last command to use the new binary.");
     Ok(())
 }
 
@@ -431,6 +431,8 @@ fn verify_checksum(checksums_url: &str, asset: &str, path: &Path) -> Result<(), 
     let mut file = fs::File::open(path)
         .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
     let mut hasher = Sha256::new();
+    // 64 KiB I/O buffer — fine on the stack on every platform we ship to.
+    #[allow(clippy::large_stack_arrays)]
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = file
@@ -547,7 +549,7 @@ fn atomic_replace(src: &Path, dest: &Path) -> Result<(), String> {
     }
     if let Err(error) = fs::rename(&temp_in_dest, dest) {
         let _ = fs::remove_file(&temp_in_dest);
-        return Err(format!("failed to replace {}: {error}", dest.display(),));
+        return Err(format!("failed to replace {}: {error}", dest.display()));
     }
     Ok(())
 }

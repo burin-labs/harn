@@ -370,7 +370,7 @@ preferred_tool_format = "native"
         .expect("write overlay");
 
         run_promote_from_eval(&ProviderCapabilitiesPromoteFromEvalArgs {
-            overlay_path: overlay_path.clone(),
+            overlay_path,
             catalog: catalog.clone(),
         })
         .expect("promote");

@@ -255,7 +255,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
     println!("Opening browser for OAuth authorization...");
 
     if webbrowser::open(auth_url.as_str()).is_err() {
-        println!("Open this URL manually:\n{}", auth_url);
+        println!("Open this URL manually:\n{auth_url}");
     }
 
     let callback = wait_for_oauth_response(callback_listener, &options.redirect_uri, &state)?;
@@ -787,12 +787,7 @@ p {{ margin: 0; color: #c6cfdb; font-size: 15px; line-height: 1.55; }}
 <p class="hint">You can close this tab and return to Harn.</p>
 </main>
 </body>
-</html>"#,
-        status_line = status_line,
-        title = title,
-        accent = accent,
-        badge = badge,
-        message = message
+</html>"#
     )
 }
 

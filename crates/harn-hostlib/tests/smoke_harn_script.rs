@@ -56,7 +56,7 @@ fn end_to_end_deterministic_tools_via_harn_script() {
     fs::write(nested.join("c.txt"), "another\n").unwrap();
 
     let root_str = root.to_string_lossy().replace('\\', "/");
-    let new_file = format!("{}/created.txt", root_str);
+    let new_file = format!("{root_str}/created.txt");
 
     // The script:
     // 1. Enables the deterministic tools surface.
@@ -66,17 +66,17 @@ fn end_to_end_deterministic_tools_via_harn_script() {
         r#"
 let _enable = hostlib_enable("tools:deterministic")
 
-let listed = hostlib_tools_list_directory({{ path: "{root}" }})
-let read = hostlib_tools_read_file({{ path: "{root}/readable.txt" }})
+let listed = hostlib_tools_list_directory({{ path: "{root_str}" }})
+let read = hostlib_tools_read_file({{ path: "{root_str}/readable.txt" }})
 let searched = hostlib_tools_search({{
     pattern: "fn",
-    path: "{root}",
+    path: "{root_str}",
     glob: "*.rs",
     fixed_strings: true
 }})
-let outlined = hostlib_tools_get_file_outline({{ path: "{root}/a.rs" }})
-let wrote = hostlib_tools_write_file({{ path: "{new_path}", content: "ok" }})
-let deleted = hostlib_tools_delete_file({{ path: "{new_path}" }})
+let outlined = hostlib_tools_get_file_outline({{ path: "{root_str}/a.rs" }})
+let wrote = hostlib_tools_write_file({{ path: "{new_file}", content: "ok" }})
+let deleted = hostlib_tools_delete_file({{ path: "{new_file}" }})
 
 return {{
     enable: _enable,
@@ -89,8 +89,6 @@ return {{
     removed: deleted.removed,
 }}
 "#,
-        root = root_str,
-        new_path = new_file,
     );
 
     let (result, _stdout) = run_harn(&source);
@@ -135,7 +133,6 @@ try {{
     return err
 }}
 "#,
-        root = root,
     );
 
     let (result, _) = run_harn(&source);
@@ -197,15 +194,14 @@ fn end_to_end_git_via_harn_script() {
     let source = format!(
         r#"
 let _ = hostlib_enable("tools:deterministic")
-let log = hostlib_tools_git({{ operation: "log", repo: "{repo}" }})
-let branch = hostlib_tools_git({{ operation: "current_branch", repo: "{repo}" }})
+let log = hostlib_tools_git({{ operation: "log", repo: "{repo_str}" }})
+let branch = hostlib_tools_git({{ operation: "current_branch", repo: "{repo_str}" }})
 return {{
     log_count: len(log.data),
     log_subject: log.data[0].subject,
     branch: branch.data,
 }}
 "#,
-        repo = repo_str,
     );
 
     let (result, _) = run_harn(&source);
@@ -241,7 +237,7 @@ fn end_to_end_fs_snapshot_and_auto_restore_via_harn_script() {
     fs::write(root.join("target.txt"), original).unwrap();
 
     let root_str = root.to_string_lossy().replace('\\', "/");
-    let target = format!("{}/target.txt", root_str);
+    let target = format!("{root_str}/target.txt");
 
     // The script opens an auto-on-write snapshot keyed by the tool-call id,
     // performs a destructive `hostlib_tools_write_file`, then asks
@@ -252,7 +248,7 @@ let _enable = hostlib_enable("tools:deterministic")
 let snap = hostlib_fs_snapshot({{
     session_id: "{session}",
     scope_id: "{scope}",
-    root: "{root}",
+    root: "{root_str}",
 }})
 let _wrote = hostlib_tools_write_file({{ path: "{target}", content: "clobbered" }})
 let before_restore = hostlib_tools_read_file({{ path: "{target}" }})
@@ -277,10 +273,6 @@ return {{
     listed_after_count: len(listed_after.snapshots),
 }}
 "#,
-        root = root_str,
-        target = target,
-        session = session,
-        scope = scope,
     );
 
     let (result, _) = run_harn(&source);
@@ -318,7 +310,7 @@ fn end_to_end_code_index_via_harn_script() {
 
     let source = format!(
         r#"
-let rebuild = hostlib_code_index_rebuild({{ root: "{root}" }})
+let rebuild = hostlib_code_index_rebuild({{ root: "{root_str}" }})
 let stats = hostlib_code_index_stats({{}})
 let q = hostlib_code_index_query({{ needle: "ZetaToken", max_results: 10 }})
 let imps = hostlib_code_index_imports_for({{ path: "src/index.ts" }})
@@ -332,7 +324,6 @@ return {{
     importer: users.importers[0],
 }}
 "#,
-        root = root_str,
     );
 
     let (result, _) = run_harn(&source);

@@ -1600,21 +1600,24 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           </div>
           <div className="child-list">
             {detail.child_runs.length ? (
-              detail.child_runs.map((child) => (
-                <div className="child-item" key={`${child.worker_name}-${child.started_at}`}>
-                  <div className="row">
-                    <strong>{child.worker_name}</strong>
-                    <span className={`pill ${statusClass(child.status)}`}>{child.status}</span>
+              detail.child_runs.map((child) => {
+                const runPath = child.run_path
+                return (
+                  <div className="child-item" key={`${child.worker_name}-${child.started_at}`}>
+                    <div className="row">
+                      <strong>{child.worker_name}</strong>
+                      <span className={`pill ${statusClass(child.status)}`}>{child.status}</span>
+                    </div>
+                    <div className="meta">{child.task}</div>
+                    <div className="meta">{runPath ?? child.run_id ?? "No persisted child run path"}</div>
+                    {runPath ? (
+                      <button className="run-card-link" onClick={() => onSelectRun(runPath)} type="button">
+                        {intl.formatMessage(messages.openChildRun)}
+                      </button>
+                    ) : null}
                   </div>
-                  <div className="meta">{child.task}</div>
-                  <div className="meta">{child.run_path ?? child.run_id ?? "No persisted child run path"}</div>
-                  {child.run_path ? (
-                    <button className="run-card-link" onClick={() => onSelectRun(child.run_path!)} type="button">
-                      {intl.formatMessage(messages.openChildRun)}
-                    </button>
-                  ) : null}
-                </div>
-              ))
+                )
+              })
             ) : (
               <div className="muted">{intl.formatMessage(messages.noChildren)}</div>
             )}

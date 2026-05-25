@@ -186,11 +186,9 @@ async fn fetch_spec_url(url: &Url) -> Result<(String, Vec<u8>), PackageError> {
         .content_length()
         .is_some_and(|length| length > MAX_SPEC_BYTES)
     {
-        return Err(format!(
-            "OpenAPI spec {url} is larger than the {} byte limit",
-            MAX_SPEC_BYTES
-        )
-        .into());
+        return Err(
+            format!("OpenAPI spec {url} is larger than the {MAX_SPEC_BYTES} byte limit").into(),
+        );
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response
@@ -201,8 +199,7 @@ async fn fetch_spec_url(url: &Url) -> Result<(String, Vec<u8>), PackageError> {
         let next_len = bytes.len().saturating_add(chunk.len());
         if next_len > MAX_SPEC_BYTES as usize {
             return Err(format!(
-                "OpenAPI spec {url} is larger than the {} byte limit",
-                MAX_SPEC_BYTES
+                "OpenAPI spec {url} is larger than the {MAX_SPEC_BYTES} byte limit"
             )
             .into());
         }
@@ -532,7 +529,7 @@ harn-openapi = {dependency}
         ("LICENSE", "MIT OR Apache-2.0\n".to_string()),
         (
             ".github/workflows/harn-package.yml",
-            r#"name: Harn OpenAPI SDK package
+            r"name: Harn OpenAPI SDK package
 
 on:
   pull_request:
@@ -552,7 +549,7 @@ jobs:
       - run: harn package check
       - run: harn package docs --check
       - run: harn package pack --dry-run
-"#
+"
             .to_string(),
         ),
     ])
@@ -794,7 +791,7 @@ fn find_smoke_operation(value: &Value) -> Option<SmokeOperation> {
             return Some(SmokeOperation {
                 function_name,
                 method: method.to_ascii_uppercase(),
-                path: path.to_string(),
+                path: path.clone(),
             });
         }
     }
@@ -975,12 +972,12 @@ mod tests {
         let spec = tmp.path().join("openapi.yaml");
         fs::write(
             &spec,
-            r#"openapi: 3.1.0
+            r"openapi: 3.1.0
 info:
   title: Tiny
   version: 1.0.0
 paths: {}
-"#,
+",
         )
         .unwrap();
 

@@ -80,7 +80,7 @@ pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> Wor
         .filter(|root| !root.is_empty());
 
     if !is_absolute_str(trimmed) {
-        let workspace_path = normalized_input.clone();
+        let workspace_path = normalized_input;
         if escapes_workspace(&workspace_path) {
             let host_path = root_path.as_ref().map(|root| {
                 normalize_host_path(&root.join(PathBuf::from(workspace_path.as_str())))
@@ -109,7 +109,7 @@ pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> Wor
         };
     }
 
-    let host_path = normalized_input.clone();
+    let host_path = normalized_input;
     if let Some(root_norm) = root_norm.as_deref() {
         if let Some(workspace_path) = workspace_relative_from_absolute(&host_path, root_norm) {
             return WorkspacePathInfo {

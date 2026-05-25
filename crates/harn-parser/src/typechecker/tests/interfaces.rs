@@ -17,7 +17,7 @@ fn size(self) -> string { return "nope" }
   measure(Box({width: 3}))
 }"#,
     );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
     assert!(
         warns[0].contains("method 'size' returns 'string', expected 'int'"),
         "unexpected message: {}",
@@ -40,7 +40,7 @@ fn process(self, x: string) -> string { return x }
   run_proc(MyProc({name: "a"}))
 }"#,
     );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
     assert!(
         warns[0].contains("method 'process' parameter 1 has type 'string', expected 'int'"),
         "unexpected message: {}",
@@ -51,7 +51,7 @@ fn process(self, x: string) -> string { return x }
 #[test]
 fn test_interface_constraint_missing_method() {
     let warns = iface_errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   interface Sizable {
 fn size(self) -> int
   }
@@ -61,9 +61,9 @@ fn area(self) -> int { return self.width }
   }
   fn measure<T>(item: T) where T: Sizable { log(item.size()) }
   measure(Box({width: 3}))
-}"#,
+}",
     );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
     assert!(
         warns[0].contains("missing method 'size'"),
         "unexpected message: {}",
@@ -74,7 +74,7 @@ fn area(self) -> int { return self.width }
 #[test]
 fn test_interface_constraint_param_count_mismatch() {
     let warns = iface_errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   interface Doubler {
 fn double(self, x: int) -> int
   }
@@ -84,9 +84,9 @@ fn double(self) -> int { return self.v * 2 }
   }
   fn run_double<T>(d: T) where T: Doubler { log(d.double(3)) }
   run_double(Bad({v: 5}))
-}"#,
+}",
     );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
     assert!(
         warns[0].contains("method 'double' has 0 parameter(s), expected 1"),
         "unexpected message: {}",
@@ -97,7 +97,7 @@ fn double(self) -> int { return self.v * 2 }
 #[test]
 fn test_interface_constraint_satisfied() {
     let warns = iface_errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   interface Sizable {
 fn size(self) -> int
   }
@@ -107,16 +107,16 @@ fn size(self) -> int { return self.width * self.height }
   }
   fn measure<T>(item: T) where T: Sizable { log(item.size()) }
   measure(Box({width: 3, height: 4}))
-}"#,
+}",
     );
-    assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    assert!(warns.is_empty(), "expected no warnings, got: {warns:?}");
 }
 
 #[test]
 fn test_interface_constraint_untyped_impl_compatible() {
     // Gradual typing: untyped impl return should not trigger warning
     let warns = iface_errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   interface Sizable {
 fn size(self) -> int
   }
@@ -126,16 +126,16 @@ fn size(self) { return self.width }
   }
   fn measure<T>(item: T) where T: Sizable { log(item.size()) }
   measure(Box({width: 3}))
-}"#,
+}",
     );
-    assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    assert!(warns.is_empty(), "expected no warnings, got: {warns:?}");
 }
 
 #[test]
 fn test_interface_constraint_int_float_covariance() {
     // int is compatible with float (covariance)
     let warns = iface_errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   interface Measurable {
 fn value(self) -> float
   }
@@ -145,9 +145,9 @@ fn value(self) -> int { return self.v }
   }
   fn read_val<T>(g: T) where T: Measurable { log(g.value()) }
   read_val(Gauge({v: 42}))
-}"#,
+}",
     );
-    assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    assert!(warns.is_empty(), "expected no warnings, got: {warns:?}");
 }
 
 #[test]
@@ -168,7 +168,7 @@ log(collection.get(0))
   first(Names {})
 }"#,
     );
-    assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    assert!(warns.is_empty(), "expected no warnings, got: {warns:?}");
 }
 
 #[test]
@@ -189,7 +189,7 @@ log(collection.get(0))
   first(Labels {})
 }"#,
     );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
     assert!(
         warns[0].contains("associated type 'Item' resolves to 'string', expected 'int'"),
         "unexpected message: {}",

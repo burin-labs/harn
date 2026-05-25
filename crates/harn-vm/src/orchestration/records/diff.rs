@@ -45,12 +45,17 @@ pub(crate) fn myers_diff(a: &[&str], b: &[&str]) -> Vec<(DiffOp, usize)> {
         let mut new_v = v.clone();
         for k in (-d..=d).step_by(2) {
             let ki = (k + offset) as usize;
+            // Myers diff: `k == -d` is the bottom boundary, `k != d` is the
+            // top boundary — they're distinct edge cases, not a typo. Same
+            // story for `x < n && y < m`: `n` bounds `a`, `m` bounds `b`.
+            #[allow(clippy::suspicious_operation_groupings)]
             let mut x = if k == -d || (k != d && v[ki - 1] < v[ki + 1]) {
                 v[ki + 1]
             } else {
                 v[ki - 1] + 1
             };
             let mut y = x - k;
+            #[allow(clippy::suspicious_operation_groupings)]
             while x < n && y < m && a[x as usize] == b[y as usize] {
                 x += 1;
                 y += 1;
@@ -409,8 +414,7 @@ pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
                     .unwrap_or_default();
                 if left_deliverables != right_deliverables {
                     details.push(format!(
-                        "deliverables: {:?} -> {:?}",
-                        left_deliverables, right_deliverables
+                        "deliverables: {left_deliverables:?} -> {right_deliverables:?}"
                     ));
                 }
                 if left_round.successful_tools != right_round.successful_tools {

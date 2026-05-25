@@ -81,12 +81,13 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, FormatError> {
     // Preserve a shebang line (`#!...`) at offset 0 — the lexer skips it
     // entirely, so without explicit reattachment the formatter would drop it.
-    let (shebang, source_for_lex) = match source.starts_with("#!") {
-        true => match source.find('\n') {
+    let (shebang, source_for_lex) = if source.starts_with("#!") {
+        match source.find('\n') {
             Some(i) => (Some(&source[..=i]), &source[i + 1..]),
             None => (Some(source), ""),
-        },
-        false => (None, source),
+        }
+    } else {
+        (None, source)
     };
 
     // Lex with comments preserved, then split into (comments by line, parser tokens).

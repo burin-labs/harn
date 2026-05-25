@@ -885,7 +885,7 @@ pub(crate) async fn panic_suspend_worker(
     worker_id: &str,
     reason: &str,
 ) -> Result<PanicSuspendOutcome, VmError> {
-    let Ok(state) = with_worker_state(worker_id, |state| Ok(state.clone())) else {
+    let Ok(state) = with_worker_state(worker_id, Ok) else {
         return Ok(PanicSuspendOutcome::Unknown);
     };
 
@@ -1495,7 +1495,7 @@ fn install_resume_continuity_payload(
         initiator
     };
     let payload = serde_json::json!({
-        "session_id": session_id.clone(),
+        "session_id": session_id,
         "session": {"id": session_id},
         "worker": {
             "id": worker_id,
@@ -1503,7 +1503,7 @@ fn install_resume_continuity_payload(
             "mode": worker_mode,
         },
         "suspension": {
-            "reason": reason.clone(),
+            "reason": reason,
             "initiator": suspension_initiator,
             "suspended_at": suspended_at,
             "snapshot_ref": snapshot_ref,
@@ -1513,9 +1513,9 @@ fn install_resume_continuity_payload(
         "reason": reason,
         "suspended_at_turn": suspended_turn.unwrap_or(0),
         "resume": {
-            "initiator": resume_initiator.clone(),
-            "input": input_json.clone(),
-            "input_rendered": input_rendered.clone(),
+            "initiator": resume_initiator,
+            "input": input_json,
+            "input_rendered": input_rendered,
             "input_present": options.resume_input.is_some(),
             "continue_transcript": options.continue_transcript,
             "digest": digest,
@@ -1749,7 +1749,7 @@ pub(crate) async fn resume_worker_from_auto_resume_trigger(
         ),
         trigger_event: Some(serde_json::to_value(event).unwrap_or(serde_json::Value::Null)),
     };
-    let state = with_worker_state(worker_id, |state| Ok(state.clone()))?;
+    let state = with_worker_state(worker_id, Ok)?;
     warm_resume_worker(state, options).await
 }
 
@@ -1771,7 +1771,7 @@ fn auto_resume_timeout_action(payload: &serde_json::Value) -> Option<String> {
 async fn fail_suspended_worker_from_auto_resume_timeout(
     worker_id: &str,
 ) -> Result<VmValue, VmError> {
-    let state = with_worker_state(worker_id, |state| Ok(state.clone()))?;
+    let state = with_worker_state(worker_id, Ok)?;
     let (snapshot, summary, suspension) = {
         let mut worker = state.borrow_mut();
         if worker.status != "suspended" {
@@ -1853,7 +1853,7 @@ async fn close_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .first()
         .ok_or_else(|| VmError::Runtime("close_agent: missing worker handle".to_string()))?;
     let worker_id = worker_id_from_value(target)?;
-    let state = with_worker_state(&worker_id, |state| Ok(state.clone()))?;
+    let state = with_worker_state(&worker_id, Ok)?;
     let (snapshot, summary, suspension) = {
         let mut worker = state.borrow_mut();
         worker.cancel_token.store(true, Ordering::SeqCst);
@@ -2858,7 +2858,7 @@ mod suspend_tests {
                 let trigger_id = auto_resume_trigger_id(&suspended);
 
                 tokio::task::yield_now().await;
-                clock.advance_std(std::time::Duration::from_secs(60)).await;
+                clock.advance_std(std::time::Duration::from_mins(1)).await;
                 tokio::task::yield_now().await;
                 tokio::task::yield_now().await;
 
@@ -3463,7 +3463,7 @@ mod suspend_tests {
     async fn concurrent_warm_resume_reports_sus_006() {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-concurrent-resume");
-        let state = with_worker_state(&worker_id, |state| Ok(state.clone())).unwrap();
+        let state = with_worker_state(&worker_id, Ok).unwrap();
 
         let err = warm_resume_worker(state, WorkerResumeOptions::default())
             .await

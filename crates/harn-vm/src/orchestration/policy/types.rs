@@ -75,8 +75,7 @@ pub fn enforce_tool_arg_constraints(
                 crate::events::log_warn(
                     "policy.constraint_unresolved",
                     &format!(
-                        "tool_arg_constraint for tool '{}' has no arg_key and tool_annotations.arg_schema.path_params is empty; skipping (policy author should declare arg_key on the constraint or path_params in the tool's annotations)",
-                        tool_name
+                        "tool_arg_constraint for tool '{tool_name}' has no arg_key and tool_annotations.arg_schema.path_params is empty; skipping (policy author should declare arg_key on the constraint or path_params in the tool's annotations)"
                     ),
                 );
                 continue;
@@ -365,7 +364,7 @@ fn min_side_effect<'a>(a: &'a str, b: &'a str) -> &'a str {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct TurnPolicy {
     /// When true, text-only responses in a tool-capable stage are treated as
@@ -558,7 +557,7 @@ pub struct RetryPolicy {
     pub backoff_multiplier: Option<f64>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct StageContract {
     pub input_kinds: Vec<String>,
@@ -583,7 +582,7 @@ pub struct BranchSemantics {
     pub escalation: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct MapPolicy {
     pub items: Vec<serde_json::Value>,

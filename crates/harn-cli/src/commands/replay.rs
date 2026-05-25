@@ -125,7 +125,7 @@ pub(crate) fn run_json(path: &str) -> i32 {
             warnings: Vec::new(),
         }
     };
-    let exit = if envelope.ok { 0 } else { 1 };
+    let exit = i32::from(!envelope.ok);
     println!("{}", json_envelope::to_string_pretty(&envelope));
     exit
 }

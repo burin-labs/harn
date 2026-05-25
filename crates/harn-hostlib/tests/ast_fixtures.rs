@@ -46,13 +46,12 @@ fn every_language_fixture_matches_its_golden() {
         }
     }
 
-    if !failures.is_empty() {
-        panic!(
-            "{} fixture(s) failed:\n  - {}\n\nRe-run with {UPDATE_GOLDEN_ENV}=1 to regenerate goldens.",
-            failures.len(),
-            failures.join("\n  - "),
-        );
-    }
+    assert!(
+        failures.is_empty(),
+        "{} fixture(s) failed:\n  - {}\n\nRe-run with {UPDATE_GOLDEN_ENV}=1 to regenerate goldens.",
+        failures.len(),
+        failures.join("\n  - "),
+    );
 }
 
 /// Every shipped language must have a fixture. Catches "I added a new

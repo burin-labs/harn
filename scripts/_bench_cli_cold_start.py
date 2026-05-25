@@ -237,7 +237,7 @@ def _measure_with_hyperfine(
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".json", delete=False
     ) as result_file:
-        result_path = result_file.name
+        result_path = Path(result_file.name)
 
     prepare_cmd = (
         f"rm -rf {shlex.quote(str(cache_dir))} && "
@@ -266,7 +266,7 @@ def _measure_with_hyperfine(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
-        with open(result_path, "r", encoding="utf-8") as fh:
+        with result_path.open(encoding="utf-8") as fh:
             payload = json.load(fh)
         results = payload.get("results", [])
         if not results:
@@ -283,7 +283,7 @@ def _measure_with_hyperfine(
         return float(seconds) * 1000.0
     finally:
         try:
-            os.unlink(result_path)
+            result_path.unlink()
         except FileNotFoundError:
             pass
 
@@ -445,7 +445,7 @@ def main() -> int:
     baseline[sha] = {
         "host": existing_entry.get("host", host_label()),
         "harn_version": existing_entry.get("harn_version", harn_version()),
-        "captured_at": _dt.datetime.now(_dt.timezone.utc).isoformat(
+        "captured_at": _dt.datetime.now(_dt.UTC).isoformat(
             timespec="seconds"
         ),
         "commands": merged_commands,

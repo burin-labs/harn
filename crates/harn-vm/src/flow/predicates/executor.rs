@@ -1298,8 +1298,8 @@ mod tests {
 
         assert_eq!(audit.provider_id.as_deref(), Some("mock-provider"));
         assert_eq!(audit.model_id.as_deref(), Some("mock-model-1"));
-        assert_eq!(audit.prompt_hash, stable_hash("judge the case".as_bytes()));
-        let expected_evidence_hash = stable_hash("pre-baked evidence".as_bytes());
+        assert_eq!(audit.prompt_hash, stable_hash(b"judge the case"));
+        let expected_evidence_hash = stable_hash(b"pre-baked evidence");
         assert_eq!(
             audit.evidence_hashes.get("case").map(String::as_str),
             Some(expected_evidence_hash.as_str())
@@ -1389,7 +1389,7 @@ mod tests {
             scheduler: PredicateSchedulerConfig {
                 max_semantic_lanes: 1,
                 max_semantic_lanes_per_slice: 1,
-                slice_semantic_envelope: Duration::from_secs(60),
+                slice_semantic_envelope: Duration::from_mins(1),
                 ..PredicateSchedulerConfig::default()
             },
             ..PredicateExecutorConfig::default()
@@ -1461,7 +1461,7 @@ mod tests {
             scheduler: PredicateSchedulerConfig {
                 max_semantic_lanes: 1,
                 max_semantic_lanes_per_slice: 1,
-                slice_semantic_envelope: Duration::from_secs(60),
+                slice_semantic_envelope: Duration::from_mins(1),
                 ..PredicateSchedulerConfig::default()
             },
             ..PredicateExecutorConfig::default()

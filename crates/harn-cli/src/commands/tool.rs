@@ -298,7 +298,7 @@ import {{ tools }} from "{package_name}/tools"
         ("LICENSE", "MIT OR Apache-2.0\n".to_string()),
         (
             ".github/workflows/harn-package.yml",
-            r#"name: Harn tool package
+            r"name: Harn tool package
 
 on:
   pull_request:
@@ -317,7 +317,7 @@ jobs:
       - run: harn package check
       - run: harn package docs --check
       - run: harn package pack --dry-run
-"#
+"
             .to_string(),
         ),
     ])

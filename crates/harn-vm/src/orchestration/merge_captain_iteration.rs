@@ -6,7 +6,7 @@
 //! normal transcript/receipt/summary artifacts under one shareable iteration
 //! directory.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -42,7 +42,7 @@ pub struct MergeCaptainIterationManifest {
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct MergeCaptainIterationScenario {
     pub id: String,
@@ -166,7 +166,7 @@ pub struct MergeCaptainIterationRanking {
     pub latency_ms: u64,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct MergeCaptainIterationDiffReport {
     #[serde(rename = "_type")]
@@ -183,7 +183,7 @@ pub struct MergeCaptainIterationDiffReport {
     pub entries: Vec<MergeCaptainIterationDiffEntry>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct MergeCaptainIterationDiffEntry {
     pub scenario_id: String,
@@ -507,8 +507,7 @@ fn resolve_iteration_backend(
         }
         "live" => Ok(MergeCaptainDriverBackend::Live),
         other => Err(VmError::Runtime(format!(
-            "unsupported merge-captain iteration backend '{}'",
-            other
+            "unsupported merge-captain iteration backend '{other}'"
         ))),
     }
 }
@@ -620,8 +619,7 @@ fn budget_exhausted(
     if let Some(max_cost_usd) = budget.max_cost_usd {
         if total_cost_usd > max_cost_usd {
             return Some(format!(
-                "cost budget ${:.6} reached (spent ${:.6})",
-                max_cost_usd, total_cost_usd
+                "cost budget ${max_cost_usd:.6} reached (spent ${total_cost_usd:.6})"
             ));
         }
     }
@@ -750,12 +748,12 @@ pub fn diff_merge_captain_iterations(
 ) -> Result<MergeCaptainIterationDiffReport, VmError> {
     let baseline = load_merge_captain_iteration_report(baseline_path)?;
     let candidate = load_merge_captain_iteration_report(candidate_path)?;
-    let mut keys = BTreeMap::new();
+    let mut keys = BTreeSet::new();
     for run in &baseline.runs {
-        keys.insert((run.scenario_id.clone(), run.variant_id.clone()), ());
+        keys.insert((run.scenario_id.clone(), run.variant_id.clone()));
     }
     for run in &candidate.runs {
-        keys.insert((run.scenario_id.clone(), run.variant_id.clone()), ());
+        keys.insert((run.scenario_id.clone(), run.variant_id.clone()));
     }
 
     let mut entries = Vec::new();
@@ -763,7 +761,7 @@ pub fn diff_merge_captain_iterations(
     let mut regressed = 0;
     let mut unchanged = 0;
     let mut missing = 0;
-    for ((scenario_id, variant_id), ()) in keys {
+    for (scenario_id, variant_id) in keys {
         let before = baseline
             .runs
             .iter()

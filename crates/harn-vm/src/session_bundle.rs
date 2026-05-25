@@ -122,7 +122,7 @@ pub struct BundleProducer {
     pub schema_id: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleSource {
     pub kind: String,
@@ -204,13 +204,13 @@ impl From<&WorkspaceAnchor> for BundleWorkspace {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleTranscript {
     pub sections: Vec<BundleTranscriptSection>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleTranscriptSection {
     pub id: String,
@@ -224,14 +224,14 @@ pub struct BundleTranscriptSection {
     pub metadata: BTreeMap<String, JsonValue>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleTools {
     pub schemas: Vec<BundleJsonEntry>,
     pub calls: Vec<BundleToolCall>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleJsonEntry {
     pub source: String,
@@ -267,7 +267,7 @@ impl From<&ToolCallRecord> for BundleToolCall {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundlePermission {
     pub kind: String,
@@ -277,7 +277,7 @@ pub struct BundlePermission {
     pub payload: JsonValue,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleReplay {
     pub replay_fixture: Option<ReplayFixture>,
@@ -299,7 +299,7 @@ pub struct BundleEventLogPointer {
     pub available: bool,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RedactionManifest {
     pub mode: String,
@@ -318,7 +318,7 @@ pub struct RedactionEntry {
     pub replacement: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleAttachment {
     pub id: String,

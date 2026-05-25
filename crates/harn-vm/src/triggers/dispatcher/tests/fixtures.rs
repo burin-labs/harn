@@ -437,8 +437,8 @@ impl crate::a2a::A2aClient for InProcessMockA2aClient {
         });
 
         let endpoint = crate::a2a::ResolvedA2aEndpoint {
-            card_url: format!("https://{}/.well-known/agent-card.json", target),
-            rpc_url: format!("https://{}/rpc", target),
+            card_url: format!("https://{target}/.well-known/agent-card.json"),
+            rpc_url: format!("https://{target}/rpc"),
             agent_id: Some(format!("agent:{target}")),
             target_agent: crate::a2a::target_agent_label(target),
         };

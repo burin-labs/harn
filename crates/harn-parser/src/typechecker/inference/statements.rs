@@ -204,8 +204,7 @@ impl TypeChecker {
         self.warning_at(
             Code::UnknownMethod,
             format!(
-                "Method '{}' not found in interface '{}' (constraint on '{}')",
-                method, iface_name, type_name
+                "Method '{method}' not found in interface '{iface_name}' (constraint on '{type_name}')"
             ),
             span,
         );
@@ -624,16 +623,16 @@ impl TypeChecker {
                                 err.span,
                             ),
                             K::StepLimit => {
-                                self.error_at(Code::ConstEvalStepLimit, message, err.span)
+                                self.error_at(Code::ConstEvalStepLimit, message, err.span);
                             }
                             K::RecursionLimit => {
-                                self.error_at(Code::ConstEvalRecursionLimit, message, err.span)
+                                self.error_at(Code::ConstEvalRecursionLimit, message, err.span);
                             }
                             K::SandboxViolation => {
-                                self.error_at(Code::ConstEvalSandboxViolation, message, err.span)
+                                self.error_at(Code::ConstEvalSandboxViolation, message, err.span);
                             }
                             K::RuntimeError => {
-                                self.error_at(Code::ConstEvalRuntimeError, message, err.span)
+                                self.error_at(Code::ConstEvalRuntimeError, message, err.span);
                             }
                         }
                     }
@@ -668,7 +667,7 @@ impl TypeChecker {
                         .collect(),
                     has_rest: params.last().is_some_and(|p| p.rest),
                 };
-                scope.define_fn(name, sig.clone());
+                scope.define_fn(name, sig);
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
                 self.check_fn_decl_variance(type_params, params, return_type.as_ref(), name, span);
@@ -926,8 +925,7 @@ impl TypeChecker {
                     if scope.get_var(name).is_some() && !scope.is_mutable(name) {
                         self.warning_at(Code::ImmutableAssignment,
                             format!(
-                                "Cannot assign to '{}': variable is immutable (declared with 'let')",
-                                name
+                                "Cannot assign to '{name}': variable is immutable (declared with 'let')"
                             ),
                             span,
                         );
@@ -1153,8 +1151,7 @@ impl TypeChecker {
                                 };
                                 self.warning_at(Code::InvalidMatchPattern,
                                     format!(
-                                        "Match pattern type mismatch: matching {} against {} literal",
-                                        value_type_name, pattern_type
+                                        "Match pattern type mismatch: matching {value_type_name} against {pattern_type} literal"
                                     ),
                                     leaf.span,
                                 );
@@ -1238,8 +1235,7 @@ impl TypeChecker {
                                 self.error_at(
                                     Code::InvalidBinaryOperator,
                                     format!(
-                                        "can't use '{}' on {} and {} (needs numeric operands)",
-                                        op, l, r
+                                        "can't use '{op}' on {l} and {r} (needs numeric operands)"
                                     ),
                                     span,
                                 );
@@ -1254,7 +1250,7 @@ impl TypeChecker {
                             if !is_numeric && !is_string_repeat {
                                 self.error_at(
                                     Code::InvalidBinaryOperator,
-                                    format!("can't multiply {} and {} (try string * int)", l, r),
+                                    format!("can't multiply {l} and {r} (try string * int)"),
                                     span,
                                 );
                             }
@@ -1268,7 +1264,7 @@ impl TypeChecker {
                                     | ("dict", "dict")
                             );
                             if !valid {
-                                let msg = format!("can't add {} and {}", l, r);
+                                let msg = format!("can't add {l} and {r}");
                                 // Offer interpolation fix when one side is string
                                 let fix = if l == "string" || r == "string" {
                                     self.build_interpolation_fix(left, right, l == "string", span)
@@ -1295,16 +1291,14 @@ impl TypeChecker {
                                 self.warning_at(
                                     Code::InvalidBinaryOperator,
                                     format!(
-                                        "Comparison '{}' may not be meaningful for types {} and {}",
-                                        op, l, r
+                                        "Comparison '{op}' may not be meaningful for types {l} and {r}"
                                     ),
                                     span,
                                 );
                             } else if (l == "string") != (r == "string") {
                                 self.warning_at(Code::InvalidBinaryOperator,
                                     format!(
-                                        "Comparing {} with {} using '{}' may give unexpected results",
-                                        l, r, op
+                                        "Comparing {l} with {r} using '{op}' may give unexpected results"
                                     ),
                                     span,
                                 );
@@ -1631,7 +1625,7 @@ impl TypeChecker {
                             if !struct_info.fields.iter().any(|field| field.name == *key) {
                                 self.warning_at(
                                     Code::UnknownField,
-                                    format!("Unknown field '{}' in struct '{}'", key, struct_name),
+                                    format!("Unknown field '{key}' in struct '{struct_name}'"),
                                     entry.key.span,
                                 );
                             }
@@ -1733,7 +1727,7 @@ impl TypeChecker {
                     else {
                         self.warning_at(
                             Code::InvalidEnumConstruct,
-                            format!("Unknown variant '{}' in enum '{}'", variant, enum_name),
+                            format!("Unknown variant '{variant}' in enum '{enum_name}'"),
                             span,
                         );
                         return;
@@ -1899,7 +1893,7 @@ impl TypeChecker {
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,
-                        format!("unknown attribute `@{}`", other),
+                        format!("unknown attribute `@{other}`"),
                         attr.span,
                     );
                 }
@@ -2139,7 +2133,7 @@ impl TypeChecker {
                     &["required", "optional"],
                 ),
                 "receipt" => {
-                    self.expect_one_of("@step", name, &arg.value, arg.span, &["audit", "none"])
+                    self.expect_one_of("@step", name, &arg.value, arg.span, &["audit", "none"]);
                 }
                 "error_boundary" => self.expect_one_of(
                     "@step",
@@ -2242,10 +2236,10 @@ impl TypeChecker {
             }
             match name {
                 "triggers" | "schedules" => {
-                    self.expect_list_of_trigger_specs("@persona", name, &arg.value, arg.span)
+                    self.expect_list_of_trigger_specs("@persona", name, &arg.value, arg.span);
                 }
                 "tools" | "handoffs" | "context_packs" | "evals" => {
-                    self.expect_list_of_symbols("@persona", name, &arg.value, arg.span)
+                    self.expect_list_of_symbols("@persona", name, &arg.value, arg.span);
                 }
                 "budget" => self.expect_budget_dict("@persona", name, &arg.value, arg.span),
                 "stages" => self.expect_persona_stages("@persona", &arg.value, arg.span),

@@ -390,8 +390,7 @@ impl HarnessSidecar {
             let actual = harness.captured_stdio();
             if &actual != expected {
                 errors.push(format!(
-                    "harness captured stdio differed: expected {:?}, actual {:?}",
-                    expected, actual
+                    "harness captured stdio differed: expected {expected:?}, actual {actual:?}"
                 ));
             }
         }
@@ -399,8 +398,7 @@ impl HarnessSidecar {
             let actual = harness.captured_stderr();
             if &actual != expected {
                 errors.push(format!(
-                    "harness captured stderr differed: expected {:?}, actual {:?}",
-                    expected, actual
+                    "harness captured stderr differed: expected {expected:?}, actual {actual:?}"
                 ));
             }
         }

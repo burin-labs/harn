@@ -418,8 +418,10 @@ pub fn calculate_cost(model: &str, input_tokens: i64, output_tokens: i64) -> f64
     let Some(pricing) = crate::llm_config::model_pricing_per_mtok(model) else {
         return 0.0;
     };
-    (input_tokens as f64 * pricing.input_per_mtok + output_tokens as f64 * pricing.output_per_mtok)
-        / 1_000_000.0
+    (input_tokens as f64).mul_add(
+        pricing.input_per_mtok,
+        output_tokens as f64 * pricing.output_per_mtok,
+    ) / 1_000_000.0
 }
 
 /// Calculate cost using catalog model pricing first, then provider catalog
@@ -434,8 +436,10 @@ pub fn calculate_cost_for_provider(
     let Some(detail) = pricing_detail_for(provider, model) else {
         return 0.0;
     };
-    (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
-        / 1000.0
+    (input_tokens as f64).mul_add(
+        detail.input_per_1k,
+        output_tokens as f64 * detail.output_per_1k,
+    ) / 1000.0
 }
 
 pub(crate) fn cache_hit_ratio(
@@ -500,8 +504,7 @@ pub(crate) fn accumulate_cost_for_provider(
             let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
             if total > max {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "LLM budget exceeded: spent ${:.4} of ${:.4} budget",
-                    total, max
+                    "LLM budget exceeded: spent ${total:.4} of ${max:.4} budget"
                 )))));
             }
         }
@@ -944,11 +947,16 @@ pub(crate) fn project_call_cost(
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
     let cache_write_rate = detail.cache_write_per_1k.unwrap_or(detail.input_per_1k);
     let billable_input = (input_tokens - cache_read_tokens - cache_write_tokens).max(0);
-    (billable_input as f64 * detail.input_per_1k
-        + output_tokens as f64 * detail.output_per_1k
-        + cache_read_tokens as f64 * cache_read_rate
-        + cache_write_tokens as f64 * cache_write_rate)
-        / 1000.0
+    (cache_write_tokens as f64).mul_add(
+        cache_write_rate,
+        (cache_read_tokens as f64).mul_add(
+            cache_read_rate,
+            (billable_input as f64).mul_add(
+                detail.input_per_1k,
+                output_tokens as f64 * detail.output_per_1k,
+            ),
+        ),
+    ) / 1000.0
 }
 
 fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerInfo) -> VmValue {
@@ -1033,7 +1041,7 @@ mod tests {
             calculate_cost_for_provider("openai", "some-bespoke-openai-deployment", 1_000, 1_000);
         let (input_per_1k, output_per_1k, _) = crate::llm_config::provider_economics("openai");
         let expected =
-            (1_000.0 * input_per_1k.unwrap() + 1_000.0 * output_per_1k.unwrap()) / 1_000.0;
+            1_000.0f64.mul_add(input_per_1k.unwrap(), 1_000.0 * output_per_1k.unwrap()) / 1_000.0;
         assert!(
             (cost - expected).abs() < 1e-9,
             "cost={cost}, expected={expected}"

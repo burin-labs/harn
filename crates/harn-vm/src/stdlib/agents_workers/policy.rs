@@ -283,7 +283,7 @@ pub(in super::super) async fn compact_worker_transcript(
     let mut next = dict.clone();
     next.insert(
         "messages".to_string(),
-        VmValue::List(std::rc::Rc::new(vm_messages.clone())),
+        VmValue::List(std::rc::Rc::new(vm_messages)),
     );
     next.insert(
         "events".to_string(),

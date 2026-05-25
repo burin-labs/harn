@@ -442,7 +442,7 @@ impl VmValue {
                 } else if abs_ms >= 1000 && abs_ms % 1000 == 0 {
                     let _ = write!(out, "{}{}s", sign, abs_ms / 1000);
                 } else {
-                    let _ = write!(out, "{}{}ms", sign, abs_ms);
+                    let _ = write!(out, "{sign}{abs_ms}ms");
                 }
             }
             VmValue::EnumVariant(enum_variant) => {

@@ -303,13 +303,11 @@ fn coding_agent_suite_default_structural_validator_vetoes_phantom_completion() {
         .expect("transcript events exist");
     assert!(
         transcript.contains("<runtime_feedback kind=\\\"structural_validator\\\">"),
-        "default validator should inject runtime feedback; got:\n{}",
-        transcript
+        "default validator should inject runtime feedback; got:\n{transcript}"
     );
     assert!(
         transcript.contains("\\\"rule\\\":\\\"non_empty_when_writes_expected\\\""),
-        "phantom completion should trip the write-expected rule; got:\n{}",
-        transcript
+        "phantom completion should trip the write-expected rule; got:\n{transcript}"
     );
 }
 
@@ -364,12 +362,10 @@ fn coding_agent_suite_records_tool_format_override_transcript_event() {
         .expect("transcript events exist");
     assert!(
         transcript.contains("\"kind\":\"tool_format_override\""),
-        "transcript should record the override event; got:\n{}",
-        transcript
+        "transcript should record the override event; got:\n{transcript}"
     );
     assert!(
         transcript.contains("\"recommended_format\":\"native\""),
-        "transcript should preserve the catalog recommendation; got:\n{}",
-        transcript
+        "transcript should preserve the catalog recommendation; got:\n{transcript}"
     );
 }

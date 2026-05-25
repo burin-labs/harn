@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 
 import json
-import os
 import socket
 import sys
+from pathlib import Path
 
 
 def main() -> int:
     if len(sys.argv) != 2:
         raise SystemExit("usage: http_proxy_server.py <state_dir>")
 
-    state_dir = sys.argv[1]
-    os.makedirs(state_dir, exist_ok=True)
-    port_path = os.path.join(state_dir, "port")
-    state_path = os.path.join(state_dir, "state.json")
+    state_dir = Path(sys.argv[1])
+    state_dir.mkdir(parents=True, exist_ok=True)
+    port_path = state_dir / "port"
+    state_path = state_dir / "state.json"
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
-    with open(port_path, "w", encoding="utf-8") as handle:
+    with port_path.open("w", encoding="utf-8") as handle:
         handle.write(str(listener.getsockname()[1]))
 
     conn, _ = listener.accept()
@@ -46,7 +46,7 @@ def main() -> int:
             raise RuntimeError("request closed before body")
         body += chunk
 
-    with open(state_path, "w", encoding="utf-8") as handle:
+    with state_path.open("w", encoding="utf-8") as handle:
         json.dump(
             {
                 "method": method,
@@ -60,7 +60,7 @@ def main() -> int:
     payload = b"proxied"
     response = (
         b"HTTP/1.1 200 OK\r\n"
-        + f"content-length: {len(payload)}\r\n".encode("utf-8")
+        + f"content-length: {len(payload)}\r\n".encode()
         + b"content-type: text/plain\r\n"
         + b"connection: close\r\n\r\n"
         + payload

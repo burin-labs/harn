@@ -77,15 +77,15 @@ pipeline t(task) {
 #[test]
 fn imported_structs_allow_field_access() {
     let imported = parse_program(
-        r#"
+        r"
 struct HeaderRecord {
   name: string,
   value: string,
 }
-"#,
+",
     );
     let program = parse_program(
-        r#"
+        r"
 fn use_header(header: HeaderRecord) {
   let value: string = header.value
 }
@@ -93,7 +93,7 @@ fn use_header(header: HeaderRecord) {
 pipeline t(task) {
   return
 }
-"#,
+",
     );
 
     let diagnostics = TypeChecker::new()
@@ -110,20 +110,20 @@ pipeline t(task) {
 #[test]
 fn imported_callable_signatures_check_arguments() {
     let imported = parse_program(
-        r#"
+        r"
 type PickOptions = {drop_nil?: bool}
 
 pub fn pick(options: PickOptions = {}) -> nil {
   return nil
 }
-"#,
+",
     );
     let program = parse_program(
-        r#"
+        r"
 pipeline t(task) {
   pick({dropnil: true})
 }
-"#,
+",
     );
 
     let diagnostics = TypeChecker::new()

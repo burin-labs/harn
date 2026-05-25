@@ -80,7 +80,7 @@ pub struct CrystallizationAction {
     pub metadata: BTreeMap<String, JsonValue>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct CrystallizationSideEffect {
     pub kind: String,
@@ -140,7 +140,7 @@ pub struct WorkflowCandidateParameter {
     pub required: bool,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct WorkflowCandidateStep {
     pub index: usize,
@@ -212,7 +212,7 @@ pub enum PromotionStatus {
     Ready,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct PromotionDivergenceRecord {
     pub trace_id: String,
@@ -243,7 +243,7 @@ pub struct SavingsEstimate {
     pub remaining_model_calls: i64,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ShadowTraceResult {
     pub trace_id: String,
@@ -254,7 +254,7 @@ pub struct ShadowTraceResult {
     pub replay_oracle: Option<ReplayOracleReport>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ShadowRunReport {
     pub pass: bool,

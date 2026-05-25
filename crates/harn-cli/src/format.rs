@@ -83,16 +83,10 @@ mod tests {
     fn coarse_duration_picks_a_unit() {
         assert_eq!(format_duration_coarse(StdDuration::from_millis(0)), "0ms");
         assert_eq!(format_duration_coarse(StdDuration::from_secs(5)), "5s");
-        assert_eq!(format_duration_coarse(StdDuration::from_secs(120)), "2m");
-        assert_eq!(format_duration_coarse(StdDuration::from_secs(7200)), "2h");
-        assert_eq!(
-            format_duration_coarse(StdDuration::from_secs(86_400 * 3)),
-            "3d"
-        );
-        assert_eq!(
-            format_duration_coarse(StdDuration::from_secs(86_400 * 14)),
-            "2w"
-        );
+        assert_eq!(format_duration_coarse(StdDuration::from_mins(2)), "2m");
+        assert_eq!(format_duration_coarse(StdDuration::from_hours(2)), "2h");
+        assert_eq!(format_duration_coarse(StdDuration::from_hours(72)), "3d");
+        assert_eq!(format_duration_coarse(StdDuration::from_hours(336)), "2w");
     }
 
     #[test]

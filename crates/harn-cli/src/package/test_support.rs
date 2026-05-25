@@ -56,13 +56,12 @@ pub(crate) fn write_trigger_project(
 
 pub(crate) fn run_git(repo: &Path, args: &[&str]) -> String {
     let output = test_git_command(repo).args(args).output().unwrap();
-    if !output.status.success() {
-        panic!(
-            "git {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 

@@ -317,7 +317,7 @@ pub enum TriggerDispatchPriority {
     Low,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TriggerPriorityField {
     Dispatch(TriggerDispatchPriority),
@@ -354,14 +354,14 @@ pub struct TriggerWhenBudgetSpec {
     pub timeout: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerConcurrencyManifestSpec {
     #[serde(default)]
     pub key: Option<String>,
     pub max: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerThrottleManifestSpec {
     #[serde(default)]
     pub key: Option<String>,
@@ -369,7 +369,7 @@ pub struct TriggerThrottleManifestSpec {
     pub max: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerRateLimitManifestSpec {
     #[serde(default)]
     pub key: Option<String>,
@@ -377,19 +377,19 @@ pub struct TriggerRateLimitManifestSpec {
     pub max: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerDebounceManifestSpec {
     pub key: String,
     pub period: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerSingletonManifestSpec {
     #[serde(default)]
     pub key: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerBatchManifestSpec {
     #[serde(default)]
     pub key: Option<String>,
@@ -397,7 +397,7 @@ pub struct TriggerBatchManifestSpec {
     pub timeout: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerPriorityManifestSpec {
     pub key: String,
     #[serde(default)]
@@ -412,7 +412,7 @@ pub enum TriggerStreamWindowMode {
     Session,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerStreamWindowManifestSpec {
     pub mode: TriggerStreamWindowMode,
     #[serde(default)]
@@ -443,7 +443,7 @@ pub struct TriggerDlqAlertThreshold {
     pub percent_of_dispatches: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TriggerDlqAlertDestination {
     Slack {

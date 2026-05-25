@@ -99,7 +99,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         stdout: outcome.stdout.clone(),
         stderr: outcome.stderr.clone(),
         exit_code: outcome.exit_code,
-        junit_path: junit_tmp.clone(),
+        junit_path: junit_tmp,
         ecosystem: plan.ecosystem_name(),
         argv,
     };

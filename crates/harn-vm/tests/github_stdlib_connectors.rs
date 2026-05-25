@@ -20,7 +20,7 @@ impl ConnectorClient for RecordingClient {
         self.calls
             .lock()
             .expect("recording client calls lock")
-            .push((method.to_string(), args.clone()));
+            .push((method.to_string(), args));
         Ok(match method {
             "github.actions.workflow_dispatch" => json!({"workflow_run_id": 123}),
             "github.actions.runs" => json!({"workflow_runs": [{"id": 123}]}),

@@ -10,3 +10,6 @@ description = "Code formatter for the Harn programming language"
 [dependencies]
 harn-lexer = { path = "../harn-lexer", version = "0.8" }
 harn-parser = { path = "../harn-parser", version = "0.8" }
+
+[lints]
+workspace = true

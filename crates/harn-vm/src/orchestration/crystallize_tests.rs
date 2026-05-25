@@ -64,7 +64,7 @@ fn version_trace(id: &str, version: &str, side_target: &str, fuzzy: bool) -> Cry
                 fuzzy: Some(fuzzy),
                 deterministic: Some(!fuzzy),
                 cost: CrystallizationCost {
-                    model_calls: if fuzzy { 1 } else { 0 },
+                    model_calls: i64::from(fuzzy),
                     input_tokens: if fuzzy { 1200 } else { 0 },
                     output_tokens: if fuzzy { 250 } else { 0 },
                     total_cost_usd: if fuzzy { 0.01 } else { 0.0 },
@@ -203,7 +203,7 @@ fn composition_replay_receipts_distinguish_parent_and_child_drift() {
     let oracle = ReplayOracleTrace {
         name: "composition_child_drift".to_string(),
         expect: ReplayExpectation::Match,
-        first_run: first.replay_run.clone().unwrap(),
+        first_run: first.replay_run.unwrap(),
         second_run: replay.clone(),
         ..ReplayOracleTrace::default()
     };

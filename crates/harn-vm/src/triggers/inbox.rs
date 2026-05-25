@@ -283,7 +283,7 @@ mod tests {
         ));
         let first = InboxIndex::new(first_log, metrics.clone()).await.unwrap();
         assert!(first
-            .insert_if_new("binding", "delivery-1", StdDuration::from_secs(60))
+            .insert_if_new("binding", "delivery-1", StdDuration::from_mins(1))
             .await
             .unwrap());
 
@@ -292,7 +292,7 @@ mod tests {
         ));
         let second = InboxIndex::new(second_log, metrics.clone()).await.unwrap();
         assert!(!second
-            .insert_if_new("binding", "delivery-1", StdDuration::from_secs(60))
+            .insert_if_new("binding", "delivery-1", StdDuration::from_mins(1))
             .await
             .unwrap());
 
@@ -326,11 +326,11 @@ mod tests {
         let metrics = Arc::new(MetricsRegistry::default());
         let index = InboxIndex::new(log.clone(), metrics.clone()).await.unwrap();
         assert!(index
-            .insert_if_new("binding", "delivery-1", StdDuration::from_secs(60))
+            .insert_if_new("binding", "delivery-1", StdDuration::from_mins(1))
             .await
             .unwrap());
         assert!(!index
-            .insert_if_new("binding", "delivery-1", StdDuration::from_secs(60))
+            .insert_if_new("binding", "delivery-1", StdDuration::from_mins(1))
             .await
             .unwrap());
 
@@ -362,7 +362,7 @@ mod tests {
 
         let index = InboxIndex::new(log.clone(), metrics.clone()).await.unwrap();
         assert!(!index
-            .insert_if_new("binding", "delivery-1", StdDuration::from_secs(60))
+            .insert_if_new("binding", "delivery-1", StdDuration::from_mins(1))
             .await
             .unwrap());
 

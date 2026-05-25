@@ -31,7 +31,7 @@ use tokio::sync::oneshot;
 // previously used here was tight enough that it tripped intermittently, even
 // when the binary itself eventually came up healthy. Keep the protocol-level
 // budget tight so logic regressions surface quickly.
-const PROCESS_READY_TIMEOUT: Duration = Duration::from_secs(60);
+const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
 const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn lock_harn_serve_mcp_tests() -> mcp_support::HarnProcessTestNoLock {

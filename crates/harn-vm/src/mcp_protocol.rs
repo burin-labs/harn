@@ -628,11 +628,7 @@ pub fn completion_payload(candidates: Vec<String>, value: &str) -> JsonValue {
             if !needle.is_empty() && !haystack.contains(&needle) {
                 return None;
             }
-            let rank = if needle.is_empty() || haystack.starts_with(&needle) {
-                0
-            } else {
-                1
-            };
+            let rank = i32::from(!(needle.is_empty() || haystack.starts_with(&needle)));
             Some((rank, haystack, candidate))
         })
         .collect::<Vec<_>>();

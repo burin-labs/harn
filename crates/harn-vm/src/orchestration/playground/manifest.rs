@@ -466,13 +466,13 @@ mod tests {
     #[test]
     fn parses_yaml_manifest() {
         let m = yaml(
-            r#"_type: merge_captain_playground_scenario
+            r"_type: merge_captain_playground_scenario
 scenario: x
 owner: burin-labs
 repos:
   - name: alpha
     default_branch: main
-"#,
+",
         );
         assert_eq!(m.scenario, "x");
         assert_eq!(m.repos[0].name, "alpha");

@@ -130,7 +130,7 @@ impl AzureOpenAiProvider {
 }
 
 impl LlmProvider for AzureOpenAiProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "azure_openai"
     }
 }

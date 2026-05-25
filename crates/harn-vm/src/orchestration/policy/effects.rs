@@ -999,7 +999,7 @@ mod tests {
 
     #[test]
     fn harness_stdio_read_line_yields_stdio_read_effect() {
-        let source = r#"fn main(harness: Harness) { harness.stdio.read_line() }"#;
+        let source = r"fn main(harness: Harness) { harness.stdio.read_line() }";
         let effects = compute_handoff_effects(source, None);
         assert!(
             effects
@@ -1029,10 +1029,10 @@ mod tests {
 
     #[test]
     fn harness_llm_catalog_yields_read_effect() {
-        let source = r#"fn main(harness: Harness) {
+        let source = r"fn main(harness: Harness) {
             harness.llm.catalog()
             harness.llm.providers()
-        }"#;
+        }";
         let effects = compute_handoff_effects(source, None);
         assert!(
             effects

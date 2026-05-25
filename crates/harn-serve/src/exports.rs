@@ -15,7 +15,7 @@ pub struct ExportedParam {
     pub rest: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExportedCallableKind {
     Function,
     Pipeline,
@@ -197,11 +197,11 @@ pub fn greet(name: string, excited: bool = false) -> string {
         let path = dir.path().join("server.harn");
         std::fs::write(
             &path,
-            r#"
+            r"
 pipeline default(task) {
   __io_println(task)
 }
-"#,
+",
         )
         .expect("write script");
 

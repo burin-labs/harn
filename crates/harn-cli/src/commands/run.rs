@@ -1600,7 +1600,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 harn_vm::tracing::peek_spans().len() as u64,
                 cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
                 "attestation",
-                error.to_string(),
+                error,
             );
         }
         harn_vm::event_log::reset_active_event_log();
@@ -2356,7 +2356,7 @@ pub(crate) fn render_trace_summary() -> String {
     }
     let total_tokens = total_input + total_output;
     // Rough cost estimate using Sonnet 4 pricing ($3/MTok in, $15/MTok out).
-    let cost = (total_input as f64 * 3.0 + total_output as f64 * 15.0) / 1_000_000.0;
+    let cost = (total_input as f64).mul_add(3.0, total_output as f64 * 15.0) / 1_000_000.0;
     let _ = writeln!(
         out,
         "  \x1b[1m{} call{}, {} tokens ({}in + {}out), {} ms, ~${:.4}\x1b[0m",
@@ -2788,11 +2788,11 @@ pipeline main() {
         let script = temp.path().join("main.harn");
         std::fs::write(
             &script,
-            r#"
+            r"
 pipeline main() {
   __io_println(sandbox_active_profile())
 }
-"#,
+",
         )
         .expect("write script");
 
@@ -2830,10 +2830,9 @@ pipeline main() {
                 r#"
 pipeline main() {{
   __io_println(sandbox_active_profile())
-  let _ = read_file("{}")
+  let _ = read_file("{outside_literal}")
 }}
-"#,
-                outside_literal
+"#
             ),
         )
         .expect("write script");
@@ -2875,10 +2874,9 @@ pipeline main() {{
                 r#"
 pipeline main() {{
   __io_println(sandbox_active_profile())
-  __io_println(read_file("{}"))
+  __io_println(read_file("{outside_literal}"))
 }}
-"#,
-                outside_literal
+"#
             ),
         )
         .expect("write script");

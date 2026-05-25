@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_version(version: str) -> str:
-    return version[1:] if version.startswith("v") else version
+    return version.removeprefix("v")
 
 
 def load_changelog() -> str:

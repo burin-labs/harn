@@ -392,13 +392,13 @@ fn read_external_config(path: &str, verbose: bool) -> Option<ProvidersConfig> {
                 Some(config)
             }
             Err(error) => {
-                eprintln!("[llm_config] TOML parse error in {}: {}", path, error);
+                eprintln!("[llm_config] TOML parse error in {path}: {error}");
                 None
             }
         },
         Err(error) => {
             if verbose {
-                eprintln!("[llm_config] Cannot read {}: {}", path, error);
+                eprintln!("[llm_config] Cannot read {path}: {error}");
             }
             None
         }

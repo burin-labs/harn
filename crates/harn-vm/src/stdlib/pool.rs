@@ -1337,7 +1337,7 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         space_waiters: Vec::new(),
         config: ordered_pool_config(&opts),
         scope,
-        scope_id: scope_id.clone(),
+        scope_id,
         idempotency_index: HashMap::new(),
         stale_after_ms,
         store: store.clone(),
@@ -1347,7 +1347,7 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     // races a `pool_get` on the same registry sees a populated pool.
     if let (Some(persisted), Some(store_ref)) = (persisted, store.clone()) {
         rehydrate_persisted_state(&entry, &store_ref, persisted, stale_after_ms)?;
-    } else if let Some(store_ref) = store.clone() {
+    } else if let Some(store_ref) = store {
         // Fresh pipeline-scope pool: stamp the header so reloads find a
         // well-formed log even if no tasks have been submitted yet.
         let meta = persisted_meta_from_entry(&entry.borrow());
@@ -2029,7 +2029,7 @@ fn rehydrate_persisted_state(
 
     {
         let mut pool = entry.borrow_mut();
-        for (_, task) in persisted.tasks.into_iter() {
+        for (_, task) in persisted.tasks {
             let live = task_state_from_persisted(&pool, &task, now, stale_after_ms);
             let (task_id, idem) = {
                 let borrowed = live.borrow();
@@ -2451,7 +2451,7 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     }
     let dequeue_receipt = {
         let mut pool_ref = pool.borrow_mut();
-        pool_ref.active.insert(task_id.clone(), state.clone());
+        pool_ref.active.insert(task_id, state.clone());
         let slot_index = pool_ref.active.len().saturating_sub(1);
         let receipt = pool_dequeue_receipt(&pool_ref, &state.borrow(), slot_index);
         persist_task_if_durable(&pool_ref, &state.borrow());

@@ -592,7 +592,7 @@ pub fn validate_against_tape(
                         problems.push(AnnotationProblem::FrictionKindUnknown {
                             annotation_id: id_for_report.clone(),
                             friction_kind: kind.to_string(),
-                        })
+                        });
                     }
                     Some(_) => {}
                 }

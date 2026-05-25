@@ -457,14 +457,14 @@ pub fn load_crystallization_trace(path: &Path) -> Result<CrystallizationTrace, V
     })?;
 
     let mut trace = if value.get("actions").is_some() {
-        serde_json::from_value::<CrystallizationTrace>(value.clone()).map_err(|error| {
+        serde_json::from_value::<CrystallizationTrace>(value).map_err(|error| {
             VmError::Runtime(format!(
                 "failed to decode crystallization trace {}: {error}",
                 path.display()
             ))
         })?
     } else if value.get("stages").is_some() || value.get("_type") == Some(&json!("workflow_run")) {
-        let run: RunRecord = serde_json::from_value(value.clone()).map_err(|error| {
+        let run: RunRecord = serde_json::from_value(value).map_err(|error| {
             VmError::Runtime(format!(
                 "failed to decode run record {} as crystallization input: {error}",
                 path.display()
@@ -660,7 +660,7 @@ fn trace_from_run_record(run: RunRecord) -> CrystallizationTrace {
                 wall_ms: usage.total_duration_ms,
             })
             .unwrap_or_default(),
-        metadata: run.metadata.clone(),
+        metadata: run.metadata,
         ..CrystallizationTrace::default()
     }
 }

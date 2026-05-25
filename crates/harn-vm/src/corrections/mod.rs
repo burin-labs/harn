@@ -42,7 +42,7 @@ impl CorrectionScope {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectionRecord {
     pub schema: String,
     pub correction_id: String,
@@ -102,7 +102,7 @@ impl CorrectionRecord {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CorrectionQueryFilters {
     pub actor_id: Option<String>,
@@ -226,13 +226,7 @@ pub fn correction_record_from_json(value: serde_json::Value) -> Result<Correctio
         .transpose()?
         .unwrap_or_default();
 
-    let mut record = CorrectionRecord::new(
-        from_decision.clone(),
-        to_decision.clone(),
-        reason,
-        applied_by,
-        scope,
-    );
+    let mut record = CorrectionRecord::new(from_decision, to_decision, reason, applied_by, scope);
     if let Some(actor_id) = optional_string(object, "actor_id")
         .or_else(|| optional_string(object, "actor"))
         .or_else(|| optional_string(object, "agent"))

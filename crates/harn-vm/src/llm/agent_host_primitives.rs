@@ -917,11 +917,8 @@ async fn host_agent_dispatch_tool_call(
             )
             .await?;
             let denied = agent_tools::is_denied_tool_result(&raw_result);
-            let observation = format!(
-                "[result of {name}]\n{result}\n[end of {name} result]\n",
-                name = tool_name,
-                result = rendered
-            );
+            let observation =
+                format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
             let error = denied.then(|| rendered.clone());
             let result = serde_json::json!({
                 "ok": !denied,
@@ -951,11 +948,8 @@ async fn host_agent_dispatch_tool_call(
                 return Err(error);
             }
             let error_text = error.to_string();
-            let observation = format!(
-                "[error from {name}]\n{error}\n[end of {name} error]\n",
-                name = tool_name,
-                error = error_text
-            );
+            let observation =
+                format!("[error from {tool_name}]\n{error_text}\n[end of {tool_name} error]\n");
             let result = serde_json::json!({
                 "ok": false,
                 "status": "error",

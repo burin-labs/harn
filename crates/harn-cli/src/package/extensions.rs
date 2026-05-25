@@ -127,8 +127,7 @@ pub async fn install_manifest_hooks(
             .expect("manifest hook exports cached");
         let Some(closure) = exports.get(function_name) else {
             return Err(format!(
-                "hook handler '{}' is not exported by module '{}'",
-                function_name, module_name
+                "hook handler '{function_name}' is not exported by module '{module_name}'"
             )
             .into());
         };
@@ -762,8 +761,8 @@ pub fn collect_persona_trigger_binding_specs(
         .clone()
         .or_else(|| manifest_path.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."));
-    let resolved = validate_and_resolve_personas(manifest, manifest_path.clone(), manifest_dir)
-        .map_err(|errors| {
+    let resolved =
+        validate_and_resolve_personas(manifest, manifest_path, manifest_dir).map_err(|errors| {
             errors
                 .iter()
                 .map(ToString::to_string)

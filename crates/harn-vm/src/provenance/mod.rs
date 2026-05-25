@@ -19,7 +19,7 @@ pub const HEADER_RECORD_HASH: &str = "harn.provenance.record_hash";
 const SIGNATURE_DOMAIN: &[u8] = b"harn provenance receipt v1\n";
 const DEFAULT_AGENT_ID: &str = "harn-cli";
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProvenanceReceipt {
     pub schema: String,
     pub receipt_id: String,
@@ -33,13 +33,13 @@ pub struct ProvenanceReceipt {
     pub signatures: Vec<ReceiptSignature>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptProducer {
     pub name: String,
     pub version: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptRun {
     pub pipeline: String,
     pub status: String,
@@ -48,14 +48,14 @@ pub struct ReceiptRun {
     pub exit_code: i32,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptEventLog {
     pub backend: String,
     pub topics: Vec<String>,
     pub events: Vec<ReceiptEvent>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptEvent {
     pub topic: String,
     pub event_id: EventId,
@@ -67,7 +67,7 @@ pub struct ReceiptEvent {
     pub record_hash: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptChain {
     pub algorithm: String,
     pub event_root_hash: String,

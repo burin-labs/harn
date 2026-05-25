@@ -258,8 +258,7 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
                 VmValue::Dict(map) => match map.get(&k) {
                     Some(val) => Ok(val.clone()),
                     None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "json_extract: key '{}' not found",
-                        k
+                        "json_extract: key '{k}' not found"
                     ))))),
                 },
                 _ => Err(VmError::Thrown(VmValue::String(Rc::from(

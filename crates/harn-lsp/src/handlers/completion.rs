@@ -500,7 +500,7 @@ where
             visit_node(value, visitor);
         }
         Node::ReturnStmt { value: Some(v) } | Node::YieldExpr { value: Some(v) } => {
-            visit_node(v, visitor)
+            visit_node(v, visitor);
         }
         Node::EmitExpr { value } => visit_node(value, visitor),
         Node::AttributedDecl { inner, .. } => visit_node(inner, visitor),
@@ -593,13 +593,13 @@ mod tests {
     #[test]
     fn dot_completion_includes_enum_variants_with_field_details() {
         let items = completion_items_at(
-            r#"pipeline test() {
+            r"pipeline test() {
   enum Event {
     Click(x: int, y: int),
     Quit,
   }
   Event.Click
-}"#,
+}",
             "Event.",
         );
         assert!(

@@ -83,7 +83,7 @@ def iter_literals(path: Path) -> list[Literal]:
         )
 
     for match in NORMAL_STRING_RE.finditer(source):
-        start, end = match.span()
+        start, _end = match.span()
         if any(raw_start <= start < raw_end for raw_start, raw_end in raw_spans):
             continue
         literals.append(
@@ -103,9 +103,8 @@ def protected_files(root: Path, paths: list[Path]) -> list[Path]:
                 if "tests" not in path.relative_to(root).parts
                 and path.relative_to(root) not in EXCLUDED_PROTECTED_FILES
             )
-        elif full.exists():
-            if full.relative_to(root) not in EXCLUDED_PROTECTED_FILES:
-                files.append(full)
+        elif full.exists() and full.relative_to(root) not in EXCLUDED_PROTECTED_FILES:
+            files.append(full)
     return files
 
 

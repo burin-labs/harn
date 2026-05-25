@@ -26,14 +26,14 @@ fn test_type_mismatch_let() {
 #[test]
 fn test_cyclic_type_aliases_do_not_recurse_forever() {
     let errs = errors(
-        r#"
+        r"
 type A = B
 type B = A
 
 pipeline t(task) {
   let x: A = 1
 }
-"#,
+",
     );
     assert_eq!(errs.len(), 1, "expected one mismatch, got: {errs:?}");
     assert!(errs[0].contains("found int"), "{errs:?}");
@@ -90,13 +90,13 @@ fn test_match_expression_mixed_arms_infer_union() {
 #[test]
 fn test_match_expression_infers_list_pattern_binding_type() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   let pair = [10, 20]
   let value: string = match pair {
     [_, item] -> { item }
     _ -> { 0 }
   }
-}"#,
+}",
     );
     assert_eq!(errs.len(), 1);
     assert!(errs[0].contains("expected string"));
@@ -127,11 +127,11 @@ fn test_rest_param_type_checks_each_argument() {
 #[test]
 fn test_rest_param_binding_is_list_of_declared_type() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn collect(...nums: int) {
     let values: list<int> = nums
   }
-}"#,
+}",
     );
     assert!(errs.is_empty(), "unexpected errors: {errs:?}");
 }
@@ -186,7 +186,7 @@ pipeline t(task) {
 #[test]
 fn test_unnecessary_safe_navigation_respects_nullable_and_unsupported_property() {
     let diagnostics = check_source_with_source(
-        r#"
+        r"
 type User = {name: string}
 pipeline t(task) {
   let maybe: User? = nil
@@ -198,7 +198,7 @@ pipeline t(task) {
   let union_value: dict | list = broad
   log(union_value?.dynamic_field)
 }
-"#,
+",
     );
     assert!(
         diagnostics.iter().all(|diagnostic| !matches!(
@@ -249,13 +249,13 @@ pipeline t(task) {
 #[test]
 fn test_optional_access_on_dynamic_dict_union_stays_unknown() {
     let errs = errors(
-        r#"
+        r"
 pipeline t(task) {
   fn needs_string(target: string) {}
   let worker_summary: dict | list = {}
   needs_string(worker_summary?.snapshot_path)
 }
-"#,
+",
     );
     assert!(
         errs.is_empty(),
@@ -282,13 +282,13 @@ pipeline t(task) {
 #[test]
 fn test_flow_predicate_mode_attributes_are_recognized_on_functions() {
     let warns = warnings(
-        r#"
+        r"
 @deterministic
 fn pure_check(slice) -> bool { return true }
 
 @semantic
 fn semantic_check(slice) -> bool { return true }
-"#,
+",
     );
     assert!(
         warns
@@ -516,10 +516,10 @@ fn review_branch(task) {}
 #[test]
 fn test_flow_predicate_mode_attributes_warn_off_functions() {
     let warns = warnings(
-        r#"
+        r"
 @deterministic
 pipeline invalid(task) {}
-"#,
+",
     );
     assert!(
         warns
@@ -551,10 +551,10 @@ fn complete_predicate(slice) -> bool { return true }
 #[test]
 fn test_flow_invariant_requires_kind_and_archivist() {
     let warns = warnings(
-        r#"
+        r"
 @invariant
 fn bare_predicate(slice) -> bool { return true }
-"#,
+",
     );
     assert!(
         warns.iter().any(|w| w.contains("requires exactly one of")),
@@ -571,11 +571,11 @@ fn bare_predicate(slice) -> bool { return true }
 #[test]
 fn test_flow_invariant_with_kind_only_still_warns_about_archivist() {
     let warns = warnings(
-        r#"
+        r"
 @invariant
 @deterministic
 fn kinded_predicate(slice) -> bool { return true }
-"#,
+",
     );
     assert!(
         warns
@@ -690,7 +690,7 @@ add("hello", 2) }"#,
 #[test]
 fn test_option_bag_literal_rejects_unknown_field() {
     let errs = errors(
-        r#"type PickOptions = {drop_nil?: bool}
+        r"type PickOptions = {drop_nil?: bool}
 
 fn pick(options: PickOptions = {}) -> nil {
   return nil
@@ -698,7 +698,7 @@ fn pick(options: PickOptions = {}) -> nil {
 
 pipeline t(task) {
   pick({dropnil: true})
-}"#,
+}",
     );
     assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
     assert!(
@@ -736,13 +736,13 @@ fn test_return_type_mismatch() {
 
 #[test]
 fn test_union_type_compatible() {
-    let errs = errors(r#"pipeline t(task) { let x: string | nil = nil }"#);
+    let errs = errors(r"pipeline t(task) { let x: string | nil = nil }");
     assert!(errs.is_empty());
 }
 
 #[test]
 fn test_union_type_mismatch() {
-    let errs = errors(r#"pipeline t(task) { let x: string | nil = 42 }"#);
+    let errs = errors(r"pipeline t(task) { let x: string | nil = 42 }");
     assert_eq!(errs.len(), 1);
     // Type-checker errors print the canonical sugared form for
     // `T | nil` unions; the source can use either spelling.
@@ -807,10 +807,10 @@ fn test_explicit_nil_var_does_not_widen() {
 #[test]
 fn test_type_inference_propagation() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn add(a: int, b: int) -> int { return a + b }
   let result: string = add(1, 2)
-}"#,
+}",
     );
     assert_eq!(errs.len(), 1);
     assert!(errs[0].contains("expected string"));
@@ -873,30 +873,28 @@ fn test_generic_type_param_must_bind_consistently() {
   keep(1, "x")
 }"#,
     );
-    assert_eq!(errs.len(), 2, "expected 2 errors, got: {:?}", errs);
+    assert_eq!(errs.len(), 2, "expected 2 errors, got: {errs:?}");
     assert!(
         errs.iter()
             .any(|err| err.contains("type parameter 'T' was inferred as both int and string")),
-        "missing generic binding conflict error: {:?}",
-        errs
+        "missing generic binding conflict error: {errs:?}"
     );
     assert!(
         errs.iter()
             .any(|err| err.contains("argument 2 `b`: expected int, found string")),
-        "missing instantiated argument mismatch error: {:?}",
-        errs
+        "missing instantiated argument mismatch error: {errs:?}"
     );
 }
 
 #[test]
 fn test_generic_list_binding_propagates_element_type() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   fn first<T>(items: list<T>) -> T { return items[0] }
   let bad: string = first([1, 2, 3])
-}"#,
+}",
     );
-    assert_eq!(errs.len(), 1, "expected 1 error, got: {:?}", errs);
+    assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
     assert!(errs[0].contains("expected string, found int"));
 }
 
@@ -932,9 +930,9 @@ fn test_attributed_struct_forward_reference_is_registered() {
 #[test]
 fn test_unknown_struct_literal_reports_error() {
     let diagnostics = check_source(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   let p = Point {x: 3, y: 4}
-}"#,
+}",
     );
     let errors: Vec<_> = diagnostics
         .into_iter()
@@ -947,14 +945,14 @@ fn test_unknown_struct_literal_reports_error() {
 #[test]
 fn test_unknown_struct_literal_suggests_close_match() {
     let diagnostics = check_source(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   struct Point {
     x: int
     y: int
   }
 
   let p = Piont {x: 3, y: 4}
-}"#,
+}",
     );
     let errors: Vec<_> = diagnostics
         .into_iter()
@@ -974,13 +972,13 @@ fn test_unknown_struct_literal_suggests_close_match() {
 #[test]
 fn test_generic_enum_construct_instantiates_type_arguments() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   enum Option<T> {
 Some(value: T),
 None
   }
   let value: Option<int> = Option.Some(42)
-}"#,
+}",
     );
     assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
@@ -999,9 +997,9 @@ fn test_result_generic_type_compatibility() {
 #[test]
 fn test_result_generic_type_mismatch_reports_error() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   let bad: Result<int, string> = Result.Err(42)
-}"#,
+}",
     );
     assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
     assert!(errs[0].contains("Result<int, string>"));
@@ -1032,7 +1030,7 @@ fn test_harness_crypto_sha256_type_inference() {
 
 #[test]
 fn test_builtin_arg_type_mismatch() {
-    let errs = errors(r#"pipeline t(task) { len(42) }"#);
+    let errs = errors(r"pipeline t(task) { len(42) }");
     assert_eq!(errs.len(), 1);
     assert!(errs[0].contains("argument 1 `value`"));
     assert!(errs[0].contains("expected"));
@@ -1053,9 +1051,9 @@ fn test_harness_fs_method_return_type_inference() {
 #[test]
 fn test_harness_fs_method_arg_type_mismatch() {
     let errs = errors(
-        r#"fn main(harness: Harness) {
+        r"fn main(harness: Harness) {
   harness.fs.mkdtemp(42)
-}"#,
+}",
     );
     assert_eq!(errs.len(), 1, "expected one error, got: {errs:?}");
     assert!(errs[0].contains("argument 1 `prefix`"), "{errs:?}");
@@ -1065,10 +1063,10 @@ fn test_harness_fs_method_arg_type_mismatch() {
 #[test]
 fn test_harness_llm_method_return_type_inference() {
     let errs = errors(
-        r#"fn main(harness: Harness) {
+        r"fn main(harness: Harness) {
   let catalog: list = harness.llm.catalog()
   let providers: list = harness.llm.providers()
-}"#,
+}",
     );
     assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
@@ -1089,7 +1087,7 @@ fn test_harness_llm_method_arg_type_mismatch() {
 
 #[test]
 fn test_len_accepts_nil_like_runtime() {
-    let errs = errors(r#"pipeline t(task) { let n: int = len(nil) }"#);
+    let errs = errors(r"pipeline t(task) { let n: int = len(nil) }");
     assert!(errs.is_empty(), "got errors: {errs:?}");
 }
 
@@ -1351,10 +1349,10 @@ fn test_type_alias() {
 #[test]
 fn test_type_alias_mismatch() {
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
   type Name = string
   let x: Name = 42
-}"#,
+}",
     );
     assert_eq!(errs.len(), 1);
 }
@@ -1374,14 +1372,14 @@ fn test_assignment_type_check() {
 #[test]
 fn test_type_mismatch_render_snapshot_with_coercion_help() {
     std::env::set_var("NO_COLOR", "1");
-    let source = r#"pipeline t(task) {
+    let source = r"pipeline t(task) {
   let label: string = 42
-}"#;
+}";
     let diags = check_source_with_source(source);
     let rendered = crate::diagnostic::render_type_diagnostic(source, "test.harn", &diags[0]);
     assert_eq!(
         rendered,
-        r#"error[HARN-TYP-007]: let binding `label`: expected string, found int
+        r"error[HARN-TYP-007]: let binding `label`: expected string, found int
   --> test.harn:2:23
    |
  2 |   let label: string = 42
@@ -1393,21 +1391,21 @@ fn test_type_mismatch_render_snapshot_with_coercion_help() {
    |
  2 |   let label: string = 42
    |   ^^^^^^^^^^^^^^^^^^^^^^ expected type declared here
-"#
+"
     );
 }
 
 #[test]
 fn test_type_mismatch_render_snapshot_with_nested_note() {
     std::env::set_var("NO_COLOR", "1");
-    let source = r#"pipeline t(task) {
+    let source = r"pipeline t(task) {
   let item: {name: string, count: int} = {name: 1, count: 2}
-}"#;
+}";
     let diags = check_source_with_source(source);
     let rendered = crate::diagnostic::render_type_diagnostic(source, "test.harn", &diags[0]);
     assert_eq!(
         rendered,
-        r#"error[HARN-TYP-007]: let binding `item`: expected {name: string, count: int}, found {name: int, count: int} (field 'name' has type int, expected string)
+        r"error[HARN-TYP-007]: let binding `item`: expected {name: string, count: int}, found {name: int, count: int} (field 'name' has type int, expected string)
   --> test.harn:2:42
    |
  2 |   let item: {name: string, count: int} = {name: 1, count: 2}
@@ -1423,7 +1421,7 @@ fn test_type_mismatch_render_snapshot_with_nested_note() {
    |
  2 |   let item: {name: string, count: int} = {name: 1, count: 2}
    |                                          ^^^^^^^^^^^^^^^^^^^ nested mismatch: field `name` expected string, found int
-"#
+"
     );
 }
 
@@ -1454,10 +1452,10 @@ fn test_fn_param_contravariance_positive() {
     // stand in for an expected `fn(int) -> int`: anything the
     // caller hands in (an int) the closure can still accept.
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
             let wide = fn(x: float) { return 0 }
             let cb: fn(int) -> int = wide
-        }"#,
+        }",
     );
     assert!(
         errs.is_empty(),
@@ -1471,10 +1469,10 @@ fn test_fn_param_contravariance_negative() {
     // expected `fn(float) -> int`: the caller may hand it a
     // float, which it is not prepared to receive.
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
             let narrow = fn(x: int) { return 0 }
             let cb: fn(float) -> int = narrow
-        }"#,
+        }",
     );
     assert!(
         !errs.is_empty(),
@@ -1487,10 +1485,10 @@ fn test_list_invariant_int_to_float_rejected() {
     // `list<int>` must not flow into `list<float>` — lists are
     // mutable, so a covariant assignment is unsound.
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
             let xs: list<int> = [1, 2, 3]
             let ys: list<float> = xs
-        }"#,
+        }",
     );
     assert!(
         !errs.is_empty(),
@@ -1502,10 +1500,10 @@ fn test_list_invariant_int_to_float_rejected() {
 fn test_iter_covariant_int_to_float_accepted() {
     // Iterators are read-only, so element-type widening is sound.
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
             fn sink(ys: iter<float>) -> int { return 0 }
             fn pipe(xs: iter<int>) -> int { return sink(xs) }
-        }"#,
+        }",
     );
     assert!(
         errs.is_empty(),
@@ -1519,9 +1517,9 @@ fn test_decl_site_out_used_in_contravariant_position_rejected() {
     // but appears only as an input (contravariant). Must be
     // rejected at declaration time.
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
             type Box<out T> = fn(T) -> int
-        }"#,
+        }",
     );
     assert!(
         errs.iter().any(|e| e.contains("declared 'out'")),
@@ -1534,9 +1532,9 @@ fn test_decl_site_in_used_in_covariant_position_rejected() {
     // `interface Producer<in T> { fn next() -> T }` — T is declared
     // contravariant but appears only in output position.
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
             interface Producer<in T> { fn next() -> T }
-        }"#,
+        }",
     );
     assert!(
         errs.iter().any(|e| e.contains("declared 'in'")),
@@ -1549,9 +1547,9 @@ fn test_decl_site_out_in_covariant_position_ok() {
     // `type Reader<out T> = fn() -> T` — T appears in a covariant
     // position, consistent with `out T`.
     let errs = errors(
-        r#"pipeline t(task) {
+        r"pipeline t(task) {
             type Reader<out T> = fn() -> T
-        }"#,
+        }",
     );
     assert!(
         errs.iter().all(|e| !e.contains("declared 'out'")),
@@ -1602,13 +1600,13 @@ fn test_bare_function_reference_infers_fn_type() {
     // `nil` when placed into a dict literal. That silently broke
     // assignability against any typed `fn(...) -> R` slot.
     let errs = errors(
-        r#"
+        r"
 fn process(a: string) -> string { return a }
 
 pipeline t(task) {
     let slot: fn(string) -> string = process
     let d: { handler: fn(string) -> string } = { handler: process }
-}"#,
+}",
     );
     assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
@@ -1656,26 +1654,26 @@ fn test_generic_alias_distribution_preserves_non_union_arg() {
     // distribution. A `fn(int) -> nil` handler fits; a `fn(string) -> nil`
     // does not.
     let ok_errs = errors(
-        r#"
+        r"
 type ActionContainer<T> = { action: T, process_action: fn(T) -> nil }
 
 fn process_int(a: int) {}
 
 pipeline t(task) {
     let c: ActionContainer<int> = {action: 7, process_action: process_int}
-}"#,
+}",
     );
     assert!(ok_errs.is_empty(), "expected no errors: {ok_errs:?}");
 
     let bad_errs = errors(
-        r#"
+        r"
 type ActionContainer<T> = { action: T, process_action: fn(T) -> nil }
 
 fn process_string(a: string) {}
 
 pipeline t(task) {
     let c: ActionContainer<int> = {action: 7, process_action: process_string}
-}"#,
+}",
     );
     assert!(
         !bad_errs.is_empty(),

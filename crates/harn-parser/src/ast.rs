@@ -1,7 +1,7 @@
 use harn_lexer::{Span, StringSegment};
 
 /// A node wrapped with source location information.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Spanned<T> {
     pub node: T,
     pub span: Span,
@@ -512,7 +512,7 @@ pub struct HitlArg {
 }
 
 /// Parallel execution mode.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ParallelMode {
     /// `parallel N { i -> ... }` — run N concurrent tasks.
     Count,
@@ -688,7 +688,7 @@ pub enum Variance {
 }
 
 /// A generic type parameter on a function or pipeline declaration.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TypeParam {
     pub name: String,
     pub variance: Variance,
@@ -706,7 +706,7 @@ impl TypeParam {
 }
 
 /// A where-clause constraint on a generic type parameter.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct WhereClause {
     pub type_name: String,
     pub bound: String,

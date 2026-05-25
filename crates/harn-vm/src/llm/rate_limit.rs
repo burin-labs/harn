@@ -36,7 +36,7 @@ impl SlidingWindow {
     /// Returns `Some(wait_duration)` if the window is full, `None` if OK.
     fn check(&mut self) -> Option<Duration> {
         let now = Instant::now();
-        let cutoff = now - self.window;
+        let cutoff = now.checked_sub(self.window).unwrap();
         while self.timestamps.front().is_some_and(|t| *t < cutoff) {
             self.timestamps.pop_front();
         }

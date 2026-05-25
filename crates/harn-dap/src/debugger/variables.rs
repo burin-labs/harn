@@ -446,8 +446,8 @@ impl Debugger {
     }
 
     /// Resolve an expression string against the current variable state.
-    /// Supports: variable names ("x"), dot-access ("x.foo.bar"),
-    /// subscript access ("x[0]", "x[\"key\"]"), len(x), type_of(x).
+    /// Supports: variable names (`x`), dot-access (`x.foo.bar`),
+    /// subscript access (`x[0]`, `x["key"]`), `len(x)`, `type_of(x)`.
     fn resolve_expression(&self, expression: &str) -> Option<VmValue> {
         let expr = expression.trim();
 

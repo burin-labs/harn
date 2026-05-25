@@ -157,7 +157,7 @@ fn apply_action(
             }
             Ok(Some((
                 pr.key(),
-                format!("set check {name}={status} on {}#{}", repo, pr_number),
+                format!("set check {name}={status} on {repo}#{pr_number}"),
             )))
         }
         ScenarioAction::AddPullRequest { pr } => {
@@ -167,7 +167,7 @@ fn apply_action(
             let pr_state = PlaygroundPullRequest::from_manifest_pr(pr);
             let key = pr_state.key();
             if state.pull_requests.contains_key(&key) {
-                return Err(VmError::Runtime(format!("PR {key} already exists",)));
+                return Err(VmError::Runtime(format!("PR {key} already exists")));
             }
             // Resolve head_sha if the head branch exists on the remote.
             let working = working_path(dir, &pr.repo);
@@ -209,7 +209,7 @@ fn apply_action(
             let pr = require_pr_mut(state, repo, *pr_number)?;
             pr.state = "merged".to_string();
             pr.merged_at = Some(format_clock(now_ms));
-            pr.head_sha = Some(merge_sha.clone());
+            pr.head_sha = Some(merge_sha);
             pr.mergeable_state = "clean".to_string();
             pr.mergeable = Some(true);
             pr.merge_queue_status = match merge_method.as_deref() {
@@ -248,7 +248,7 @@ fn apply_action(
             pr.labels = labels.clone();
             Ok(Some((
                 pr.key(),
-                format!("labels={:?} on {repo}#{pr_number}", labels),
+                format!("labels={labels:?} on {repo}#{pr_number}"),
             )))
         }
         ScenarioAction::SetMergeQueueStatus {

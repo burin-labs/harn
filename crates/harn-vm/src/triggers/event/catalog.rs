@@ -66,7 +66,7 @@ pub enum ProviderRuntimeMetadata {
     Placeholder,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProviderMetadata {
     pub provider: String,
     #[serde(default)]

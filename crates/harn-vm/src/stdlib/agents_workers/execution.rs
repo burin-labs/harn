@@ -73,7 +73,7 @@ fn ensure_worker_stage_session_id(
     }
     node.metadata.insert(
         WORKER_SESSION_ID_METADATA_KEY.to_string(),
-        serde_json::json!(session_id.clone()),
+        serde_json::json!(session_id),
     );
     let mut raw_model_policy = node
         .raw_model_policy
@@ -98,16 +98,13 @@ pub(in super::super) fn ensure_worker_config_session_ids(
             for (node_id, node) in &mut graph.nodes {
                 ensure_worker_stage_session_id(
                     node,
-                    format!("worker_session_{}_{}", worker_id, node_id),
+                    format!("worker_session_{worker_id}_{node_id}"),
                 );
             }
         }
         WorkerConfig::Stage { node, .. } => {
             let node_id = node.id.clone().unwrap_or_else(|| "stage".to_string());
-            ensure_worker_stage_session_id(
-                node,
-                format!("worker_session_{}_{}", worker_id, node_id),
-            );
+            ensure_worker_stage_session_id(node, format!("worker_session_{worker_id}_{node_id}"));
         }
         WorkerConfig::SubAgent { .. } => {}
     }

@@ -214,7 +214,7 @@ impl AcpWebSocketHub {
             }
         });
 
-        let worker_name = worker_id.clone();
+        let worker_name = worker_id;
         std::thread::Builder::new()
             .name(format!("harn-acp-ws-{worker_name}"))
             .spawn(move || {

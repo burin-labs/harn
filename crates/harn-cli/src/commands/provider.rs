@@ -74,7 +74,7 @@ pub(crate) async fn run_provider_probe(args: ProviderProbeArgs) {
 
 async fn dispatch_provider_probe(args: ProviderProbeArgs) -> i32 {
     let probe = aggregate_provider_probe(&args).await;
-    let exit_code = if probe.readiness.ok { 0 } else { 1 };
+    let exit_code = i32::from(!probe.readiness.ok);
     let payload_json = match serde_json::to_string(&probe) {
         Ok(json) => json,
         Err(error) => {
@@ -161,7 +161,7 @@ async fn aggregate_provider_probe(args: &ProviderProbeArgs) -> ProviderProbe {
 /// harness (#2299) until C1 (#2314) deletes it.
 async fn run_provider_probe_legacy(args: ProviderProbeArgs) {
     let probe = aggregate_provider_probe(&args).await;
-    let exit_code = if probe.readiness.ok { 0 } else { 1 };
+    let exit_code = i32::from(!probe.readiness.ok);
 
     if args.json {
         match serde_json::to_string_pretty(&probe) {
@@ -241,11 +241,7 @@ async fn dispatch_provider_tool_probe(args: ProviderToolProbeArgs) -> i32 {
     if outcome.exit_code != 0 {
         return outcome.exit_code;
     }
-    if fallback_disabled {
-        1
-    } else {
-        0
-    }
+    i32::from(fallback_disabled)
 }
 
 async fn aggregate_tool_conformance_report(

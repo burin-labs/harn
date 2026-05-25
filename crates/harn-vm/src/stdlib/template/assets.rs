@@ -58,7 +58,7 @@ impl TemplateAsset {
         let base = base.map(Path::to_path_buf);
         let include_root = base
             .as_ref()
-            .map(|path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+            .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()));
         let uri = source_path
             .as_deref()
             .and_then(|path| path.to_str().map(str::to_string))
@@ -108,7 +108,7 @@ impl TemplateAsset {
         let base = path.parent().map(Path::to_path_buf);
         let include_root = base
             .as_ref()
-            .map(|path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+            .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()));
         let uri = path.display().to_string();
         Self {
             id: format!("file:{}", canonical_path.display()),

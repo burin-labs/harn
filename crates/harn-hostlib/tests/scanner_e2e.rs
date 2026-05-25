@@ -55,7 +55,7 @@ edition = "2024"
     write(
         root,
         "src/main.rs",
-        r#"use crate::routes::accounts;
+        r"use crate::routes::accounts;
 
 pub struct App;
 
@@ -64,35 +64,35 @@ impl App {
 }
 
 pub fn entry() {}
-"#,
+",
     );
     write(
         root,
         "src/routes/accounts.rs",
-        r#"use std::collections::HashMap;
+        r"use std::collections::HashMap;
 
 pub struct AccountsService;
 
 impl AccountsService {
     pub fn lookup(&self, id: u64) -> Option<()> { None }
 }
-"#,
+",
     );
     write(
         root,
         "src/routes/accounts_test.rs",
-        r#"use super::accounts::AccountsService;
-"#,
+        r"use super::accounts::AccountsService;
+",
     );
     write(
         root,
         "src/lib/helpers.ts",
-        r#"export function paginatedResponse<T>(items: T[], total: number) {
+        r"export function paginatedResponse<T>(items: T[], total: number) {
   return { items, total, page: 1 };
 }
 
 export function asyncHandler(fn: any) { return fn; }
-"#,
+",
     );
     write(
         root,
@@ -260,7 +260,7 @@ fn scan_project_uses_injected_git_capabilities() {
             "src/routes/accounts.rs".to_string(),
             "target/debug/junk.txt".to_string(),
         ]),
-        churn: [("src/main.rs".to_string(), 0.75)].into_iter().collect(),
+        churn: std::iter::once(("src/main.rs".to_string(), 0.75)).collect(),
     };
     let result = scan_project_with_git(tmp.path(), ScanProjectOptions::default(), &git);
     let paths: Vec<&str> = result
@@ -342,7 +342,7 @@ fn scan_incremental_modifies_via_explicit_changed_paths() {
     build_fixture(tmp.path());
 
     let initial = scan_project(tmp.path(), ScanProjectOptions::default());
-    let token = initial.snapshot_token.clone();
+    let token = initial.snapshot_token;
 
     // Replace the contents of an existing file.
     write(

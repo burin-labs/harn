@@ -416,11 +416,11 @@ fn run_emit_summary_json_reports_compile_failure_exit_code() {
     let script = write_script(
         tmp.path(),
         "summary_compile_failure.harn",
-        r#"
+        r"
 pipeline main(_) {
     let =
 }
-"#,
+",
     );
 
     let output = Command::new(binary_path())

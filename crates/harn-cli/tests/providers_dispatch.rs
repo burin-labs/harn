@@ -175,8 +175,7 @@ fn provider_catalog_available_only_includes_local_provider_family() {
         let always_on = ["ollama", "mlx", "llamacpp", "local"];
         assert!(
             always_on.iter().any(|p| provider_names.contains(*p)),
-            "{name} --available-only missing every local provider: {:?}",
-            provider_names
+            "{name} --available-only missing every local provider: {provider_names:?}"
         );
     }
 }

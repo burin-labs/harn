@@ -2228,7 +2228,6 @@ dependencies = [
 name = "harn-hostlib"
 version = "0.8.39"
 dependencies = [
- "anyhow",
  "base64",
  "criterion",
  "filetime",
@@ -2242,7 +2241,6 @@ dependencies = [
  "hex",
  "ignore",
  "notify",
- "once_cell",
  "regex",
  "security-framework 3.7.0",
  "serde",
@@ -2333,7 +2331,6 @@ name = "harn-mcp-rc-compat"
 version = "0.8.39"
 dependencies = [
  "axum",
- "futures",
  "harn-serve",
  "harn-vm",
  "jsonschema",

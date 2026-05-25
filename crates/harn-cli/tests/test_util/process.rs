@@ -64,7 +64,7 @@ use tokio::process::Command as TokioCommand;
 /// into double-digit seconds. Shorter would let environmental noise
 /// turn the architectural fix into a flake source. A hung pre-warm
 /// still surfaces as an actionable panic, not a silent hang.
-const PREWARM_TIMEOUT: Duration = Duration::from_secs(60);
+const PREWARM_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Resolved path to the `harn` debug binary, with the dyld + AMFI
 /// caches warmed on first access. E2E subprocess tests should go through

@@ -537,10 +537,7 @@ async fn load_secret(
         std::str::from_utf8(bytes)
             .map(|value| value.to_string())
             .map_err(|error| {
-                HttpError::internal(format!(
-                    "secret '{}' is not valid UTF-8: {error}",
-                    secret_id
-                ))
+                HttpError::internal(format!("secret '{secret_id}' is not valid UTF-8: {error}"))
             })
     })
 }

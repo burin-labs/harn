@@ -26,7 +26,7 @@ pub struct ResolvedA2aEndpoint {
     pub target_agent: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DispatchAck {
     InlineResult {
         task_id: String,

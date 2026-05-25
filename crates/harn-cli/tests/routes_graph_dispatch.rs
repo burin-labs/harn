@@ -331,9 +331,9 @@ pub fn format_title(value: string) -> string {
     .unwrap();
     fs::write(
         root.join("types.harn"),
-        r#"
+        r"
 type Thing = {name: string}
-"#,
+",
     )
     .unwrap();
 }

@@ -1156,7 +1156,7 @@ pub fn lock_packages() {
     })();
 
     match result {
-        Ok(count) => println!("Wrote {} with {count} package(s).", LOCK_FILE),
+        Ok(count) => println!("Wrote {LOCK_FILE} with {count} package(s)."),
         Err(error) => {
             eprintln!("error: {error}");
             process::exit(1);
@@ -1420,7 +1420,7 @@ pub fn add_package(
         branch,
         local_path,
         None,
-    )
+    );
 }
 
 pub fn add_package_with_registry(

@@ -1062,7 +1062,7 @@ fn collect_type_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
 fn collect_callable_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
     match &snode.node {
         Node::FnDecl { .. } | Node::Pipeline { .. } | Node::ToolDecl { .. } => {
-            decls.push(snode.clone())
+            decls.push(snode.clone());
         }
         Node::AttributedDecl { inner, .. } => collect_callable_declarations(inner, decls),
         _ => {}
@@ -1548,8 +1548,7 @@ mod tests {
         assert_eq!(
             conflicts.len(),
             1,
-            "expected exactly one re-export conflict, got {:?}",
-            conflicts
+            "expected exactly one re-export conflict, got {conflicts:?}"
         );
         assert_eq!(conflicts[0].name, "shared");
         assert_eq!(conflicts[0].sources.len(), 2);

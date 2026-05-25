@@ -488,7 +488,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         let mut compacted = match rebuild_transcript(
             transcript,
             retained,
-            Some(result.text.clone()),
+            Some(result.text),
             transcript_asset_list(transcript)?,
             Vec::new(),
             transcript_state(transcript),

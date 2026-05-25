@@ -740,7 +740,7 @@ fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErr
     let status = extract_status_code(error);
     let snapshot = RoutingErrorSnapshot {
         category: category.as_str().to_string(),
-        message: message.clone(),
+        message,
         status,
     };
 
@@ -848,7 +848,7 @@ fn emit_routing_event(
     event: &str,
     metadata: serde_json::Map<String, serde_json::Value>,
 ) {
-    let category = format!("{}.{}", dispatch, event);
+    let category = format!("{dispatch}.{event}");
     let mut meta: BTreeMap<String, serde_json::Value> = metadata.into_iter().collect();
     meta.entry("event".to_string())
         .or_insert_with(|| serde_json::Value::String(event.to_string()));

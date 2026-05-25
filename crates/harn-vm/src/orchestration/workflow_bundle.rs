@@ -39,8 +39,7 @@ fn decompress_harnpack_zstd(bytes: &[u8]) -> Result<Vec<u8>, WorkflowBundleError
         return Err(WorkflowBundleError::new(
             WorkflowBundleErrorKind::InvalidArchive,
             format!(
-                "harnpack zstd payload decompressed past max size ({} bytes); refusing to extract",
-                MAX_HARNPACK_DECOMPRESSED_BYTES
+                "harnpack zstd payload decompressed past max size ({MAX_HARNPACK_DECOMPRESSED_BYTES} bytes); refusing to extract"
             ),
         ));
     }
@@ -174,7 +173,7 @@ pub struct WorkflowBundleTrigger {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct PromptCapsule {
     pub id: String,
@@ -185,7 +184,7 @@ pub struct PromptCapsule {
     pub context: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct WorkflowBundlePolicy {
     pub autonomy_tier: String,
@@ -296,7 +295,7 @@ pub struct WorkflowBundleValidationReport {
     pub warnings: Vec<WorkflowBundleDiagnostic>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowBundlePreview {
     pub schema_version: u32,
     pub bundle_id: String,
@@ -324,7 +323,7 @@ pub struct WorkflowBundlePreviewNode {
     pub outgoing: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowBundleGraphExport {
     pub schema_version: u32,
     pub graph_id: String,
@@ -336,7 +335,7 @@ pub struct WorkflowBundleGraphExport {
     pub mermaid: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowBundleGraphNode {
     pub id: String,
     pub node_type: String,
@@ -382,7 +381,7 @@ pub struct WorkflowBundleRunRequest {
     pub event_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowBundleRunReceipt {
     pub schema_version: u32,
     pub receipt_type: String,
@@ -470,8 +469,7 @@ impl WorkflowBundleError {
                 expected: WORKFLOW_BUNDLE_SCHEMA_VERSION,
             },
             format!(
-                "unsupported workflow bundle schema_version {actual}; expected {}",
-                WORKFLOW_BUNDLE_SCHEMA_VERSION
+                "unsupported workflow bundle schema_version {actual}; expected {WORKFLOW_BUNDLE_SCHEMA_VERSION}"
             ),
         )
     }
@@ -573,8 +571,7 @@ pub fn parse_workflow_bundle_manifest(bytes: &[u8]) -> Result<WorkflowBundle, Wo
                 expected: WORKFLOW_BUNDLE_SCHEMA_VERSION,
             },
             format!(
-                "unsupported workflow bundle schema_version {schema_version}; expected {}",
-                WORKFLOW_BUNDLE_SCHEMA_VERSION
+                "unsupported workflow bundle schema_version {schema_version}; expected {WORKFLOW_BUNDLE_SCHEMA_VERSION}"
             ),
         )
     })?;
@@ -1054,7 +1051,7 @@ pub fn export_workflow_bundle_graph(
     let catchup_fields = catchup_editable_fields();
     let retry_fields = retry_editable_fields();
     if catchup_enabled {
-        let node_fields = catchup_fields.clone();
+        let node_fields = catchup_fields;
         editable_fields.extend(node_fields.clone());
         nodes.push(WorkflowBundleGraphNode {
             id: catchup_graph_id(),
@@ -1073,7 +1070,7 @@ pub fn export_workflow_bundle_graph(
         editable_fields.extend(catchup_fields);
     }
     if retry_can_dlq {
-        let node_fields = retry_fields.clone();
+        let node_fields = retry_fields;
         editable_fields.extend(node_fields.clone());
         nodes.push(WorkflowBundleGraphNode {
             id: dlq_graph_id(),

@@ -70,7 +70,7 @@ pub struct RunStageRecord {
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RunStageAttemptRecord {
     pub attempt: usize,
@@ -439,7 +439,7 @@ pub struct EvalPackDefaults {
     pub judge: Option<EvalPackJudgeConfig>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct EvalPackFixtureRef {
     pub id: String,
@@ -468,7 +468,7 @@ pub struct EvalPackRubric {
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct EvalPackAssertion {
     pub kind: String,

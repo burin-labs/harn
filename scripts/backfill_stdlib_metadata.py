@@ -166,7 +166,7 @@ def process_file(text: str, path: Path) -> tuple[str, dict[str, int]]:
             i += 1
             continue
 
-        body, next_i = collect_body(lines, i)
+        body, _next_i = collect_body(lines, i)
         signature, _ = collect_signature(lines, i)
         missing = [k for k in all_keys if k not in existing]
         inferred = build_inferred(

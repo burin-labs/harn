@@ -320,6 +320,7 @@ impl TestbenchSession {
         // LLM state is *not* installed here — the caller owns the
         // CliLlmMockMode channel. Reading bench.llm just keeps the
         // declarative config visible to test inspection.
+        #[allow(clippy::no_effect_underscore_binding)]
         let _llm_config = bench.llm;
 
         #[cfg(feature = "testbench-wasi")]
@@ -601,7 +602,7 @@ mod tests {
                 .build();
             let session = bench.activate().expect("activate");
             assert_eq!(crate::clock_mock::now_ms(), 1_700_000_000_000);
-            crate::clock_mock::advance(std::time::Duration::from_secs(60));
+            crate::clock_mock::advance(std::time::Duration::from_mins(1));
             assert_eq!(crate::clock_mock::now_ms(), 1_700_000_060_000);
             drop(session);
             // After drop the override is gone; no assertion on real time.

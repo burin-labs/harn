@@ -153,7 +153,7 @@ impl BedrockProvider {
 }
 
 impl LlmProvider for BedrockProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "bedrock"
     }
 }
@@ -507,13 +507,13 @@ mod tests {
 
     #[test]
     fn ini_parser_reads_profile_values() {
-        let text = r#"
+        let text = r"
 [default]
 aws_access_key_id = default-key
 
 [dev]
 aws_secret_access_key = dev-secret
-"#;
+";
         assert_eq!(
             parse_ini_value(text, "dev", "aws_secret_access_key").as_deref(),
             Some("dev-secret")

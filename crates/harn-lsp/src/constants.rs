@@ -763,6 +763,9 @@ pub(crate) const TYPE_NAMES: &[&str] = &[
     "closure",
 ];
 
+// Doc strings contain literal `${name}` and `$1` regex/template syntax that
+// clippy mistakes for unused format args.
+#[allow(clippy::literal_string_with_formatting_args)]
 pub(crate) fn builtin_doc(name: &str) -> Option<String> {
     let doc = match name {
         "log" => "**log(value)** — Print value to stdout with `[harn]` prefix",

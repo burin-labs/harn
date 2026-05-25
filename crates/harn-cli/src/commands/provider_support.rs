@@ -921,7 +921,7 @@ fn render_bullets(out: &mut String, title: &str, items: &[String]) {
     }
     out.push_str(&format!("\n{title}:\n\n"));
     for item in items {
-        out.push_str(&format!("- {}\n", item));
+        out.push_str(&format!("- {item}\n"));
     }
 }
 

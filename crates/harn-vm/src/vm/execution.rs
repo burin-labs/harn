@@ -633,13 +633,12 @@ impl crate::vm::Vm {
             let popped_frame = self.frames.pop().unwrap();
             if self.frames.is_empty() {
                 return Ok(Some((val, false)));
-            } else {
-                self.iterators.truncate(popped_frame.saved_iterator_depth);
-                self.env = popped_frame.saved_env;
-                self.stack.truncate(popped_frame.stack_base);
-                self.stack.push(val);
-                return Ok(None);
             }
+            self.iterators.truncate(popped_frame.saved_iterator_depth);
+            self.env = popped_frame.saved_env;
+            self.stack.truncate(popped_frame.stack_base);
+            self.stack.push(val);
+            return Ok(None);
         }
 
         let op = frame.chunk.code[frame.ip];

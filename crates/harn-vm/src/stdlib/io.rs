@@ -492,7 +492,7 @@ impl TerminalModeGuard {
             updated.c_cc[libc::VMIN] = 0;
             updated.c_cc[libc::VTIME] = 0;
         }
-        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &updated) } != 0 {
+        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw const updated) } != 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
         Ok(Self {
@@ -547,7 +547,7 @@ fn read_line_from_fd_unix(fd: libc::c_int, options: &ReadLineOptions) -> ReadLin
             events: libc::POLLIN,
             revents: 0,
         };
-        let ready = unsafe { libc::poll(&mut pollfd, 1, poll_timeout(options, start)) };
+        let ready = unsafe { libc::poll(&raw mut pollfd, 1, poll_timeout(options, start)) };
         if ready == 0 {
             return ReadLineOutcome::Timeout;
         }
@@ -965,8 +965,7 @@ fn log_set_level_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             Ok(VmValue::Nil)
         }
         None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "log_set_level: invalid level '{}'. Expected debug, info, warn, or error",
-            level_str
+            "log_set_level: invalid level '{level_str}'. Expected debug, info, warn, or error"
         ))))),
     }
 }

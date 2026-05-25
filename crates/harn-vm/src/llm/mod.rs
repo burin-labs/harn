@@ -79,7 +79,7 @@ pub(crate) fn shared_blocking_client() -> &'static reqwest::Client {
         client_builder_for_tests(
             reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(30))
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_mins(2))
                 .pool_max_idle_per_host(4),
         )
         .build()

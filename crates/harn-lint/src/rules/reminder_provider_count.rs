@@ -195,11 +195,11 @@ pipeline default(task) {
     #[test]
     fn skips_disabled_reminders() {
         let diags = lint(
-            r#"
+            r"
 pipeline default(task) {
   agent_loop(task, nil, {reminders: false})
 }
-"#,
+",
         );
         assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
     }

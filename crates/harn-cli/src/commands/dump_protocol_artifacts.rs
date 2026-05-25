@@ -424,11 +424,11 @@ fn generate_readme() -> String {
          - `manifest.json`: deterministic summary of protocol versions, advertised Harn\n\
            extension fields, and generated binding vocabulary.\n\
          - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema\n\
-           profile (`{acp}`).\n\
-         - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`{a2a}`).\n\
-         - `schemas/mcp-2025-11-25.schema.json`: Harn's MCP schema profile (`{mcp}`).\n\
+           profile (`{ACP_SCHEMA_COMPATIBILITY}`).\n\
+         - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`{A2A_PROTOCOL_VERSION}`).\n\
+         - `schemas/mcp-2025-11-25.schema.json`: Harn's MCP schema profile (`{MCP_PROTOCOL_VERSION}`).\n\
          - `schemas/mcp-draft-2026-v1.schema.json`: Harn's opt-in MCP RC schema\n\
-           profile (`{mcp_draft}`), pinned beside the stable profile until the\n\
+           profile (`{MCP_DRAFT_PROTOCOL_VERSION}`), pinned beside the stable profile until the\n\
            final `2026-07-28` specification lands.\n\
          - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\
            `ToolCallReceipt` schema for audited tool calls.\n\
@@ -450,10 +450,6 @@ fn generate_readme() -> String {
          Compatibility rule: additive enum values and optional fields are minor-version\n\
          compatible; removing or renaming a wire value requires a Harn minor-version\n\
          migration note and a regenerated artifact diff.\n",
-        acp = ACP_SCHEMA_COMPATIBILITY,
-        a2a = A2A_PROTOCOL_VERSION,
-        mcp = MCP_PROTOCOL_VERSION,
-        mcp_draft = MCP_DRAFT_PROTOCOL_VERSION,
     )
 }
 
@@ -1076,8 +1072,7 @@ fn generate_swift() -> String {
         ));
     }
     out.push_str(&format!(
-        "    public static let mcpUnsupportedProtocolVersionErrorCode = {}\n",
-        MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE
+        "    public static let mcpUnsupportedProtocolVersionErrorCode = {MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE}\n"
     ));
     out.push_str(&format!(
         "    public static let mcpUnsupportedProtocolVersionErrorMessage = {}\n",
@@ -2084,8 +2079,7 @@ fn generate_python() -> String {
         out.push_str(&format!("{name}: str = {}\n", json_string_literal(value)));
     }
     out.push_str(&format!(
-        "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: int = {}\n",
-        MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE
+        "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: int = {MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE}\n"
     ));
     out.push('\n');
 
@@ -2800,8 +2794,7 @@ fn generate_go() -> String {
         ));
     }
     out.push_str(&format!(
-        "// MCPUnsupportedProtocolVersionErrorCode is the JSON-RPC server error for unsupported versions.\nconst MCPUnsupportedProtocolVersionErrorCode = {}\n\n",
-        MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE
+        "// MCPUnsupportedProtocolVersionErrorCode is the JSON-RPC server error for unsupported versions.\nconst MCPUnsupportedProtocolVersionErrorCode = {MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE}\n\n"
     ));
 
     out.push_str(&go_typed_array(
@@ -3654,9 +3647,9 @@ fn swift_case_name(value: &str) -> String {
     if out.is_empty() {
         "unknown".to_string()
     } else if out.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
-        format!("_{}", out)
+        format!("_{out}")
     } else if SWIFT_RESERVED_KEYWORDS.contains(&out.as_str()) {
-        format!("`{}`", out)
+        format!("`{out}`")
     } else {
         out
     }

@@ -129,7 +129,7 @@ pub(crate) fn lint_fix_file(
         }
     }
 
-    let mut result = source.clone();
+    let mut result = source;
     for edit in &accepted {
         let before = &result[..edit.span.start];
         let after = &result[edit.span.end..];

@@ -22,7 +22,7 @@ const INTROSPECTION_TOKEN_ENV: &str = "HARN_MCP_OAUTH_INTROSPECTION_TOKEN";
 const JWKS_URL_ENV: &str = "HARN_MCP_OAUTH_JWKS_URL";
 const ISSUER_ENV: &str = "HARN_MCP_OAUTH_ISSUER";
 const AUDIENCE_ENV: &str = "HARN_MCP_OAUTH_AUDIENCE";
-const JWKS_REFRESH: Duration = Duration::from_secs(5 * 60);
+const JWKS_REFRESH: Duration = Duration::from_mins(5);
 const OAUTH_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]

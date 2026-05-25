@@ -563,9 +563,7 @@ pub(crate) fn build_bundle_manifest(
     let mut visited = HashSet::new();
     let mut manifest = BundleManifestBuilder::default();
     for target in targets {
-        let canonical = target
-            .canonicalize()
-            .unwrap_or_else(|_| target.to_path_buf());
+        let canonical = target.canonicalize().unwrap_or_else(|_| target.clone());
         manifest.add_module(&canonical, "entry");
         let target_str = canonical.to_string_lossy().into_owned();
         let (source, program) = parse_source_file(&target_str);

@@ -83,11 +83,7 @@ pub(crate) fn run_driver(args: &MergeCaptainRunArgs) -> i32 {
         },
     }
 
-    if output.summary.pass {
-        0
-    } else {
-        1
-    }
+    i32::from(!output.summary.pass)
 }
 
 pub(crate) fn run_ladder(args: &MergeCaptainLadderArgs) -> i32 {
@@ -131,11 +127,7 @@ pub(crate) fn run_ladder(args: &MergeCaptainLadderArgs) -> i32 {
         MergeCaptainLadderFormat::Text => print_ladder_report(&report),
     }
 
-    if report.pass {
-        0
-    } else {
-        1
-    }
+    i32::from(!report.pass)
 }
 
 pub(crate) fn run_iterate(args: &MergeCaptainIterateArgs) -> i32 {
@@ -197,11 +189,7 @@ pub(crate) fn run_iterate(args: &MergeCaptainIterateArgs) -> i32 {
         MergeCaptainIterateFormat::Text => print!("{markdown}"),
     }
 
-    if report.budget_exhausted || report.completed == 0 {
-        1
-    } else {
-        0
-    }
+    i32::from(report.budget_exhausted || report.completed == 0)
 }
 
 fn run_iteration_diff(args: &MergeCaptainIterateArgs) -> i32 {
@@ -373,7 +361,7 @@ fn print_ladder_report(report: &PersonaEvalLadderReport) {
         );
         if !tier.degradation_reasons.is_empty() {
             for reason in &tier.degradation_reasons {
-                println!("  {}", reason);
+                println!("  {reason}");
             }
         }
         println!(
@@ -424,7 +412,7 @@ pub(crate) fn run_audit(args: &MergeCaptainAuditArgs) -> i32 {
             print_json(&report);
         }
         MergeCaptainAuditFormat::Text => {
-            print!("{}", report);
+            print!("{report}");
         }
     }
 
@@ -486,7 +474,7 @@ fn audit_output_format(args: &MergeCaptainAuditArgs) -> Option<MergeCaptainAudit
 
 fn print_json_value<T: serde::Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
-        Ok(text) => println!("{}", text),
+        Ok(text) => println!("{text}"),
         Err(error) => {
             eprintln!("error: failed to serialize JSON output: {error}");
         }

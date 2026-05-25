@@ -93,7 +93,7 @@ pub enum TenantStatus {
     Suspended,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TenantApiKeyRecord {
     pub id: ApiKeyId,
     pub hash_sha256: String,
@@ -155,7 +155,7 @@ impl TenantStore {
         std::fs::create_dir_all(&dir)
             .map_err(|error| format!("failed to create {}: {error}", dir.display()))?;
         let snapshot = TenantRegistrySnapshot {
-            tenants: self.list().to_vec(),
+            tenants: self.list(),
         };
         let encoded = serde_json::to_string_pretty(&snapshot).map_err(|error| error.to_string())?;
         let path = registry_path(&self.state_dir);

@@ -60,8 +60,7 @@ fn summary_md_is_byte_identical_between_impls_after_normalizing_metrics() {
     let rust_md = normalize_summary_markdown_metrics(&rust_md);
     assert_eq!(
         harn_md, rust_md,
-        "summary.md diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust_md, harn_md
+        "summary.md diverged\n--- rust ---\n{rust_md}\n--- harn ---\n{harn_md}"
     );
 }
 
@@ -80,8 +79,7 @@ fn followups_md_is_byte_identical_between_impls() {
 
     assert_eq!(
         harn_md, rust_md,
-        "followups.md diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust_md, harn_md
+        "followups.md diverged\n--- rust ---\n{rust_md}\n--- harn ---\n{harn_md}"
     );
 }
 

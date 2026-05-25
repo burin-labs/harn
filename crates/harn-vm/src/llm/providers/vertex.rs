@@ -200,7 +200,7 @@ impl VertexProvider {
 }
 
 impl LlmProvider for VertexProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "vertex"
     }
 }

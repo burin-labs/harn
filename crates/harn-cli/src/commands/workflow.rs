@@ -37,7 +37,7 @@ pub(crate) fn handle(args: WorkflowArgs) -> Result<i32, String> {
                     println!("warning {}: {}", diagnostic.path, diagnostic.message);
                 }
             }
-            Ok(if report.valid { 0 } else { 1 })
+            Ok(i32::from(!report.valid))
         }
         WorkflowCommand::Preview(args) => {
             let bundle = harn_vm::orchestration::load_workflow_bundle(Path::new(&args.bundle))
@@ -57,7 +57,7 @@ pub(crate) fn handle(args: WorkflowArgs) -> Result<i32, String> {
                 println!("triggers: {}", preview.triggers.len());
                 println!("connectors: {}", preview.connectors.len());
             }
-            Ok(if preview.validation.valid { 0 } else { 1 })
+            Ok(i32::from(!preview.validation.valid))
         }
         WorkflowCommand::Run(args) => {
             let bundle = harn_vm::orchestration::load_workflow_bundle(Path::new(&args.bundle))
@@ -130,7 +130,7 @@ fn handle_patch_validate(args: WorkflowPatchValidateArgs) -> Result<i32, String>
     } else {
         print_patch_report(&report);
     }
-    Ok(if report.valid { 0 } else { 1 })
+    Ok(i32::from(!report.valid))
 }
 
 fn handle_patch_apply(args: WorkflowPatchApplyArgs) -> Result<i32, String> {
@@ -186,7 +186,7 @@ fn handle_patch_preview(args: WorkflowPatchPreviewArgs) -> Result<i32, String> {
     } else {
         print_patch_report(&report);
     }
-    Ok(if report.bundle_validation.valid { 0 } else { 1 })
+    Ok(i32::from(!report.bundle_validation.valid))
 }
 
 fn handle_function_tools(args: WorkflowFunctionToolsArgs) -> Result<i32, String> {
@@ -234,7 +234,7 @@ fn handle_nested_ceiling(args: WorkflowNestedCeilingArgs) -> Result<i32, String>
             println!("  [{}] {}", violation.kind, violation.detail);
         }
     }
-    Ok(if report.allowed() { 0 } else { 1 })
+    Ok(i32::from(!report.allowed()))
 }
 
 fn load_patch(path: &str) -> Result<WorkflowPatch, String> {

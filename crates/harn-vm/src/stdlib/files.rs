@@ -142,7 +142,7 @@ async fn upload_anthropic(
     let url = format!("{}/files", resolved.base_url.trim_end_matches('/'));
     let req = crate::llm::shared_blocking_client()
         .post(url)
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_mins(2))
         .multipart(form)
         .header("anthropic-beta", ANTHROPIC_FILES_API_BETA);
     let response = resolved
@@ -191,7 +191,7 @@ async fn upload_gemini(
     });
     let start_req = crate::llm::shared_blocking_client()
         .post(start_url)
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_mins(2))
         .header("Content-Type", "application/json")
         .header("X-Goog-Upload-Protocol", "resumable")
         .header("X-Goog-Upload-Command", "start")
@@ -225,7 +225,7 @@ async fn upload_gemini(
 
     let upload_response = crate::llm::shared_blocking_client()
         .post(upload_url)
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_mins(2))
         .header("Content-Length", bytes.len().to_string())
         .header("X-Goog-Upload-Offset", "0")
         .header("X-Goog-Upload-Command", "upload, finalize")

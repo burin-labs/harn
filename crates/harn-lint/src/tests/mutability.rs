@@ -5,12 +5,12 @@ use super::*;
 #[test]
 fn test_mutable_never_reassigned() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 var x = 1
 log(x)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "mutable-never-reassigned"),
@@ -21,13 +21,13 @@ log(x)
 #[test]
 fn test_mutable_reassigned_ok() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 var x = 1
 x = 2
 log(x)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "mutable-never-reassigned"),

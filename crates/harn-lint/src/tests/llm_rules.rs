@@ -22,12 +22,12 @@ pipeline default(task) {
 #[test]
 fn test_untyped_dict_access_json_parse_property() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
     let x = json_parse(task).name
     log(x)
 }
-"#,
+",
     );
     assert!(
         has_rule(&diags, "untyped-dict-access"),

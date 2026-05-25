@@ -25,14 +25,14 @@ log("hello")
 #[test]
 fn test_used_function_no_warning() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 fn helper() {
     return 42
 }
 log(helper())
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-function"),
@@ -59,10 +59,10 @@ return "ok"
 #[test]
 fn test_main_function_exempt() {
     let diags = lint_source(
-        r#"
+        r"
 fn main(_harness: Harness) {
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-function"),
@@ -77,7 +77,7 @@ fn main(_harness: Harness) {
 #[test]
 fn test_function_passed_as_value() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 fn transformer(x) {
     return x * 2
@@ -85,7 +85,7 @@ fn transformer(x) {
 let f = transformer
 log(f(5))
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-function"),
@@ -96,7 +96,7 @@ log(f(5))
 #[test]
 fn test_function_called_from_another_function() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 fn inner() {
     return 42
@@ -106,7 +106,7 @@ fn outer() {
 }
 log(outer())
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-function"),
@@ -132,7 +132,7 @@ log("hello")
 #[test]
 fn test_impl_methods_exempt() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 struct Point {
     x: int
@@ -146,7 +146,7 @@ impl Point {
 let p = Point({x: 3, y: 4})
 log(p)
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-function"),
@@ -157,7 +157,7 @@ log(p)
 #[test]
 fn test_recursive_function_called_externally() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 fn factorial(n) {
     if n <= 1 {
@@ -167,7 +167,7 @@ fn factorial(n) {
 }
 log(factorial(5))
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-function"),
@@ -178,7 +178,7 @@ log(factorial(5))
 #[test]
 fn test_mutually_recursive_functions_one_called() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 fn is_even(n) {
     if n == 0 { return true }
@@ -190,7 +190,7 @@ fn is_odd(n) {
 }
 log(is_even(4))
 }
-"#,
+",
     );
     assert!(
         !has_rule(&diags, "unused-function"),
@@ -239,14 +239,14 @@ log("hello")
 #[test]
 fn test_multiple_unused_functions() {
     let diags = lint_source(
-        r#"
+        r"
 pipeline default(task) {
 fn helper1() { return 1 }
 fn helper2() { return 2 }
 fn used() { return 3 }
 log(used())
 }
-"#,
+",
     );
     assert_eq!(
         count_rule(&diags, "unused-function"),

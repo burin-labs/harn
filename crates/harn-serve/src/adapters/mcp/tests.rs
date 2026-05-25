@@ -9,11 +9,11 @@ async fn tools_list_exposes_public_functions() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -32,11 +32,11 @@ async fn initialize_and_resources_expose_server_card() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -102,11 +102,11 @@ Review {{ language }}: {{ code }}
     .expect("write prompt");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -233,11 +233,11 @@ async fn protocol_context_requires_configured_auth() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
     )
     .expect("write script");
     let mut config = DispatchCoreConfig::for_script(&script);
@@ -294,11 +294,11 @@ async fn sampling_and_elicitation_requests_return_boundary_errors() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -335,11 +335,11 @@ async fn adapter_protocol_fixture_matches_checked_in_matrix() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
@@ -401,11 +401,11 @@ async fn tool_call_rejects_task_augmentation() {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
-        r#"
+        r"
 pub fn greet(name: string) -> string {
   return name
 }
-"#,
+",
     )
     .expect("write script");
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");

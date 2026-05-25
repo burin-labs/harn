@@ -330,7 +330,7 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
     spawn_list_notification_forwarder(state.service.clone(), tx.clone());
     spawn_resource_notification_forwarder(state.service.clone(), tx.clone(), session.clone());
     spawn_task_notification_forwarder(state.service.clone(), tx.clone(), session.clone());
-    spawn_log_notification_forwarder(state.service.clone(), tx, session.clone());
+    spawn_log_notification_forwarder(state.service.clone(), tx, session);
     let mut response = sse_response(rx).into_response();
     attach_streamable_headers(&mut response, None, negotiated_version);
     response

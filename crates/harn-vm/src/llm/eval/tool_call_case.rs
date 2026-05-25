@@ -23,7 +23,7 @@ pub struct ToolCallEvalCase {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolDef {
     pub name: String,
     #[serde(default)]
@@ -44,7 +44,7 @@ pub struct ToolDef {
     pub defer_loading: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExpectedToolCall {
     Exact {
@@ -60,14 +60,14 @@ pub enum ExpectedToolCall {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ObservedToolCall {
     pub name: String,
     #[serde(default)]
     pub args: JsonValue,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ObservedToolCallOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call: Option<ObservedToolCall>,
@@ -75,14 +75,14 @@ pub struct ObservedToolCallOutcome {
     pub final_text: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PredicateJudgeVerdict {
     pub passed: bool,
     #[serde(default)]
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolCallScore {
     pub passed: bool,
     pub reason: String,

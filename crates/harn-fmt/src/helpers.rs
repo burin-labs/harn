@@ -41,7 +41,7 @@ pub(crate) fn format_attributes(attrs: &[Attribute]) -> String {
 fn format_attribute_arg(arg: &AttributeArg) -> String {
     let value = format_attribute_value(&arg.value);
     match &arg.name {
-        Some(k) => format!("{}: {}", k, value),
+        Some(k) => format!("{k}: {value}"),
         None => value,
     }
 }
@@ -210,7 +210,7 @@ pub(crate) fn format_pattern(pattern: &BindingPattern) -> String {
                         }
                         if let Some(default) = &f.default_value {
                             let default_str = format_default_expr(default);
-                            s = format!("{} = {}", s, default_str);
+                            s = format!("{s} = {default_str}");
                         }
                         s
                     }
@@ -234,7 +234,7 @@ pub(crate) fn format_pattern(pattern: &BindingPattern) -> String {
                 .collect();
             format!("[{}]", parts.join(", "))
         }
-        BindingPattern::Pair(a, b) => format!("({}, {})", a, b),
+        BindingPattern::Pair(a, b) => format!("({a}, {b})"),
     }
 }
 

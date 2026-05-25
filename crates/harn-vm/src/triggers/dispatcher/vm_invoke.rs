@@ -49,7 +49,7 @@ impl Dispatcher {
         let effective_policy = match crate::orchestration::current_execution_policy() {
             Some(parent) => parent
                 .intersect(&tier_policy)
-                .map_err(|error| DispatchError::Local(error.to_string()))?,
+                .map_err(DispatchError::Local)?,
             None => tier_policy,
         };
         let _execution_context_guard = DispatchProcessContextGuard::install(&vm);
@@ -188,10 +188,10 @@ impl DispatchProcessContextGuard {
         let next = match prior.clone() {
             Some(mut context) => {
                 if context.cwd.is_none() {
-                    context.cwd = fallback_cwd.clone();
+                    context.cwd = fallback_cwd;
                 }
                 if context.source_dir.is_none() {
-                    context.source_dir = execution_source_dir.clone();
+                    context.source_dir = execution_source_dir;
                 }
                 Some(context)
             }

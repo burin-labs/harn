@@ -437,7 +437,7 @@ pub(super) fn extracted_priority_value(value: serde_json::Value) -> Option<i64> 
     match value {
         serde_json::Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
         serde_json::Value::String(s) => s.trim().parse::<i64>().ok(),
-        serde_json::Value::Bool(b) => Some(if b { 1 } else { 0 }),
+        serde_json::Value::Bool(b) => Some(i64::from(b)),
         _ => None,
     }
 }

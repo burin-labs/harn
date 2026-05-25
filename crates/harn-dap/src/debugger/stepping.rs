@@ -143,7 +143,7 @@ impl Debugger {
         // spec: progressStart/progressUpdate/progressEnd, identified by
         // a stable progressId we hold for the lifetime of the run.
         let progress_seq = self.next_seq();
-        self.active_progress_id = Some(format!("run-{}", progress_seq));
+        self.active_progress_id = Some(format!("run-{progress_seq}"));
         let progress = DapResponse::event(
             progress_seq,
             "progressStart",

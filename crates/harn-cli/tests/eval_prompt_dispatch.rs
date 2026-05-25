@@ -149,8 +149,7 @@ fn out_file_writes_match_between_impls() {
     let rust_bytes = fs::read_to_string(&rust_out).expect("rust out_file");
     assert_eq!(
         harn_bytes, rust_bytes,
-        "out_file contents diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust_bytes, harn_bytes
+        "out_file contents diverged\n--- rust ---\n{rust_bytes}\n--- harn ---\n{harn_bytes}"
     );
 }
 

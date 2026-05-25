@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn parses_match_expression_with_let_in_arm_body() {
-        let source = r#"
+        let source = r"
 pipeline p() {
   let x = match 1 {
     1 -> {
@@ -133,7 +133,7 @@ pipeline p() {
     _ -> { 0 }
   }
 }
-"#;
+";
 
         assert!(parse_source(source).is_ok());
     }
@@ -293,7 +293,7 @@ let first = xs?[0]
 
     #[test]
     fn parses_public_declarations_and_generic_interfaces() {
-        let source = r#"
+        let source = r"
 pub pipeline build(task) extends base {
   return
 }
@@ -313,7 +313,7 @@ interface Repository<T> {
   fn get(id: string) -> T
   fn map<U>(value: T, f: fn(T) -> U) -> U
 }
-"#;
+";
 
         let program = parse_source(source).expect("should parse");
         assert!(matches!(
@@ -411,7 +411,7 @@ fn plan_step(ctx) {
 
     #[test]
     fn parses_generic_structs_and_enums() {
-        let source = r#"
+        let source = r"
 struct Pair<A, B> {
   first: A
   second: B
@@ -421,7 +421,7 @@ enum Option<T> {
   Some(value: T)
   None
 }
-"#;
+";
 
         let program = parse_source(source).expect("should parse");
         assert!(matches!(
@@ -475,18 +475,18 @@ pipeline test(task) {
 
     #[test]
     fn rejects_empty_generic_call_type_args() {
-        let source = r#"
+        let source = r"
 pipeline test(task) {
   let n = identity<>(42)
 }
-"#;
+";
 
         assert!(parse_source(source).is_err());
     }
 
     #[test]
     fn parses_struct_literal_syntax_for_known_structs() {
-        let source = r#"
+        let source = r"
 struct Point {
   x: int
   y: int
@@ -495,7 +495,7 @@ struct Point {
 pipeline test(task) {
   let point = Point { x: 3, y: 4 }
 }
-"#;
+";
 
         let program = parse_source(source).expect("should parse");
         let pipeline = program
@@ -519,11 +519,11 @@ pipeline test(task) {
 
     #[test]
     fn parses_struct_literal_syntax_without_prior_struct_decl() {
-        let source = r#"
+        let source = r"
 pipeline test(task) {
   let point = Point { x: 3, y: 4 }
 }
-"#;
+";
 
         let program = parse_source(source).expect("should parse");
         let pipeline = program
@@ -591,11 +591,11 @@ pipeline test(task) {
 
     #[test]
     fn parses_semicolon_separated_statements_in_block() {
-        let source = r#"
+        let source = r"
 pipeline p(task) {
   let x = 1; let y = 2
 }
-"#;
+";
 
         let program = parse_source(source).expect("should parse");
         let pipeline = program
@@ -611,7 +611,7 @@ pipeline p(task) {
 
     #[test]
     fn parses_semicolon_separated_top_level_items() {
-        let source = r#"fn first() {} ; fn second() {}"#;
+        let source = r"fn first() {} ; fn second() {}";
         let program = parse_source(source).expect("should parse");
         assert_eq!(
             program.len(),
@@ -661,12 +661,12 @@ pipeline p(task) {
 
     #[test]
     fn parses_trailing_semicolons_before_brace_and_eof() {
-        let block_source = r#"
+        let block_source = r"
 pipeline p(task) {
   log(1);
 }
-"#;
-        let eof_source = r#"fn only() {};"#;
+";
+        let eof_source = r"fn only() {};";
 
         assert!(parse_source(block_source).is_ok());
         assert!(parse_source(eof_source).is_ok());
@@ -674,7 +674,7 @@ pipeline p(task) {
 
     #[test]
     fn rejects_same_line_statements_without_separator() {
-        let source = r#"pipeline p(task) { let x = 1 let y = 2 }"#;
+        let source = r"pipeline p(task) { let x = 1 let y = 2 }";
         let err = parse_source(source).expect_err("missing separator should fail");
         assert!(
             err.to_string().contains("separator"),
@@ -684,14 +684,14 @@ pipeline p(task) {
 
     #[test]
     fn rejects_semicolon_before_else_and_catch() {
-        let if_err = parse_source(r#"pipeline p(task) { if true { log(1) }; else { log(2) } }"#)
+        let if_err = parse_source(r"pipeline p(task) { if true { log(1) }; else { log(2) } }")
             .expect_err("semicolon before else should fail");
         assert!(
             if_err.to_string().contains("separator") || if_err.to_string().contains("else"),
             "unexpected if error: {if_err}"
         );
 
-        let try_err = parse_source(r#"pipeline p(task) { try { log(1) }; catch { log(2) } }"#)
+        let try_err = parse_source(r"pipeline p(task) { try { log(1) }; catch { log(2) } }")
             .expect_err("semicolon before catch should fail");
         assert!(
             try_err.to_string().contains("separator") || try_err.to_string().contains("catch"),
@@ -701,7 +701,7 @@ pipeline p(task) {
 
     #[test]
     fn rejects_empty_statement_from_double_semicolon() {
-        let source = r#"pipeline p(task) { log(1);; log(2) }"#;
+        let source = r"pipeline p(task) { log(1);; log(2) }";
         assert!(
             parse_source(source).is_err(),
             "double semicolon should fail"

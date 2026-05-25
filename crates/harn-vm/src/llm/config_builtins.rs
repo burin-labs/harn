@@ -346,10 +346,7 @@ fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
     let mut dict = BTreeMap::new();
     dict.insert("id".to_string(), VmValue::String(Rc::from(id.clone())));
-    dict.insert(
-        "provider".to_string(),
-        VmValue::String(Rc::from(provider.clone())),
-    );
+    dict.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
     dict.insert(
         "tier".to_string(),
         VmValue::String(Rc::from(llm_config::model_tier(&id))),
