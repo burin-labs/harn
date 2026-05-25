@@ -137,6 +137,68 @@ mod tests {
     }
 
     #[test]
+    fn catalog_known_model_beats_local_base_url_fast_path() {
+        // Regression: when LOCAL_LLM_BASE_URL is set (e.g. an Ollama
+        // server running on the dev box), an explicit `model:` option
+        // that names a catalog-known cross-provider alias must route
+        // to the catalog provider, not silently fall into the
+        // `local` fast-path. Otherwise a call like
+        // `llm_call(..., {model: "anthropic/claude-sonnet-4-6"})`
+        // ends up at the local Ollama endpoint and returns a 404
+        // `model_unavailable`.
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
+        let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+
+        unsafe {
+            std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434");
+            std::env::remove_var("LOCAL_LLM_MODEL");
+            std::env::remove_var("HARN_LLM_PROVIDER");
+            std::env::remove_var("HARN_LLM_MODEL");
+        }
+        reset_provider_key_cache();
+
+        // `anthropic/claude-sonnet-4-6` is a catalog alias that resolves
+        // to the openrouter provider. With LOCAL_LLM_BASE_URL set the
+        // pre-fix code would have returned "local".
+        let opts = Some(BTreeMap::from([(
+            "model".to_string(),
+            VmValue::String(Rc::from("anthropic/claude-sonnet-4-6")),
+        )]));
+        assert_eq!(vm_resolve_provider(&opts), "openrouter");
+
+        // An unknown id with no catalog hit still falls into "local"
+        // so users with a custom local server keep working.
+        let opts_unknown = Some(BTreeMap::from([(
+            "model".to_string(),
+            VmValue::String(Rc::from("my-custom-local-tag")),
+        )]));
+        assert_eq!(vm_resolve_provider(&opts_unknown), "local");
+
+        unsafe {
+            match prev_base {
+                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
+                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
+            }
+            match prev_local_model {
+                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
+                None => std::env::remove_var("LOCAL_LLM_MODEL"),
+            }
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+        }
+        reset_provider_key_cache();
+    }
+
+    #[test]
     fn vm_messages_to_json_preserves_tool_message_fields() {
         let message = VmValue::Dict(Rc::new(BTreeMap::from([
             ("role".to_string(), VmValue::String(Rc::from("tool"))),
