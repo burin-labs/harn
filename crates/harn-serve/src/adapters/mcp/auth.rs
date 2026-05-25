@@ -131,11 +131,7 @@ pub(super) fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Re
     else {
         return Ok(());
     };
-    // Accept the stable version, the RC profile, and the prior stable
-    // (`2025-03-26`) for clients still in the lifecycle's compatibility
-    // window. Anything else is a hard 400 so a fuzzed or wrong-product
-    // header never falls through.
-    if value == "2025-03-26" || mcp_protocol::is_supported_protocol_version(value) {
+    if mcp_protocol::is_supported_protocol_version(value) {
         Ok(())
     } else {
         Err(Box::new(StatusCode::BAD_REQUEST.into_response()))

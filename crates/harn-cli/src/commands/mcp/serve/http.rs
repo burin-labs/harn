@@ -669,13 +669,7 @@ fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
     else {
         return Ok(());
     };
-    // Accept the stable production version, the prior `2025-03-26`
-    // shipping version (still in the wild), and the RC profile both
-    // sides opt into per request.
-    if value == MCP_PROTOCOL_VERSION
-        || value == "2025-03-26"
-        || value == mcp_protocol::DRAFT_PROTOCOL_VERSION
-    {
+    if mcp_protocol::is_supported_protocol_version(value) {
         Ok(())
     } else {
         Err(Box::new(StatusCode::BAD_REQUEST.into_response()))

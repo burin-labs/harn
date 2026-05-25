@@ -25,7 +25,7 @@ pub(crate) mod serve;
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
 const KEYRING_SERVICE: &str = "dev.harn.mcp";
 const TOKEN_REFRESH_SKEW_SECS: i64 = 60;
-const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+use harn_vm::mcp_protocol::PROTOCOL_VERSION as MCP_PROTOCOL_VERSION;
 
 #[derive(Clone)]
 pub(crate) struct ResolvedMcpServer {

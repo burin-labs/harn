@@ -20,7 +20,9 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 use crate::mcp_protocol::{
-    DRAFT_PROTOCOL_VERSION, PROTOCOL_VERSION, RC_META_KEY_CLIENT_CAPABILITIES,
+    cache_hints_to_json, rc_name_header_value, McpCacheHint, McpProtocolMode,
+    DRAFT_PROTOCOL_VERSION, MCP_SESSION_HEADER_LEGACY, PROTOCOL_VERSION, RC_HEADER_METHOD,
+    RC_HEADER_NAME, RC_HEADER_PROTOCOL_VERSION, RC_META_KEY_CLIENT_CAPABILITIES,
     RC_META_KEY_CLIENT_INFO, RC_META_KEY_PROTOCOL_VERSION, RESULT_TYPE_INPUT_REQUIRED,
     UNSUPPORTED_PROTOCOL_VERSION_CODE,
 };
@@ -91,18 +93,6 @@ struct HttpMcpClientInner {
     proxy_server_name: Option<String>,
     get_stream_task: Option<tokio::task::JoinHandle<()>>,
     tool_headers: BTreeMap<String, Vec<McpToolHeader>>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum McpProtocolMode {
-    Legacy,
-    Modern,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct McpCacheHint {
-    ttl_ms: Option<u64>,
-    cache_scope: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -287,7 +277,7 @@ impl VmMcpClientHandle {
     }
 
     async fn record_cache_hint(&self, method: &str, result: &serde_json::Value) {
-        let Some(hint) = parse_cache_hint(result) else {
+        let Some(hint) = McpCacheHint::from_result(result) else {
             return;
         };
         self.cache_hints
@@ -635,7 +625,7 @@ async fn send_http_request(
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         if let Some(protocol_version) = headers
-            .get("MCP-Protocol-Version")
+            .get(RC_HEADER_PROTOCOL_VERSION)
             .and_then(|v| v.to_str().ok())
         {
             inner.protocol_version = protocol_version.to_string();
@@ -886,20 +876,22 @@ fn apply_http_headers(
     params: Option<&serde_json::Value>,
     tool_headers: &BTreeMap<String, Vec<McpToolHeader>>,
 ) -> reqwest::RequestBuilder {
-    request = request.header("MCP-Protocol-Version", protocol_version);
+    request = request.header(RC_HEADER_PROTOCOL_VERSION, protocol_version);
     if let Some(token) = auth_token {
         request = request.header("Authorization", format!("Bearer {token}"));
     }
     if protocol_mode == McpProtocolMode::Legacy {
         if let Some(session_id) = session_id {
-            request = request.header("MCP-Session-Id", session_id);
+            request = request.header(MCP_SESSION_HEADER_LEGACY, session_id);
         }
     }
     if protocol_mode == McpProtocolMode::Modern {
         if let Some(method) = method {
-            request = request.header("Mcp-Method", method);
-            if let Some(name) = mcp_standard_name_header(method, params) {
-                request = request.header("Mcp-Name", name);
+            request = request.header(RC_HEADER_METHOD, method);
+            if let Some(params) = params {
+                if let Some(name) = rc_name_header_value(method, params) {
+                    request = request.header(RC_HEADER_NAME, name);
+                }
             }
             if method == "tools/call" {
                 request = apply_mcp_tool_parameter_headers(request, params, tool_headers);
@@ -913,21 +905,6 @@ fn legacy_session_id(inner: &HttpMcpClientInner) -> Option<&str> {
     (inner.protocol_mode == McpProtocolMode::Legacy)
         .then_some(inner.session_id.as_deref())
         .flatten()
-}
-
-fn mcp_standard_name_header(method: &str, params: Option<&serde_json::Value>) -> Option<String> {
-    let params = params?;
-    match method {
-        "tools/call" | "prompts/get" => params
-            .get("name")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
-        "resources/read" => params
-            .get("uri")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
-        _ => None,
-    }
 }
 
 fn apply_mcp_tool_parameter_headers(
@@ -993,7 +970,7 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
     .await?;
     if let Some(protocol_version) = initialize
         .headers()
-        .get("MCP-Protocol-Version")
+        .get(RC_HEADER_PROTOCOL_VERSION)
         .and_then(|v| v.to_str().ok())
     {
         inner.protocol_version = protocol_version.to_string();
@@ -1001,7 +978,7 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
     if inner.protocol_mode == McpProtocolMode::Legacy {
         if let Some(session_id) = initialize
             .headers()
-            .get("MCP-Session-Id")
+            .get(MCP_SESSION_HEADER_LEGACY)
             .and_then(|v| v.to_str().ok())
         {
             inner.session_id = Some(session_id.to_string());
@@ -1027,7 +1004,7 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
     let status = response.status().as_u16();
     if let Some(protocol_version) = response
         .headers()
-        .get("MCP-Protocol-Version")
+        .get(RC_HEADER_PROTOCOL_VERSION)
         .and_then(|v| v.to_str().ok())
     {
         inner.protocol_version = protocol_version.to_string();
@@ -1035,7 +1012,7 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
     if inner.protocol_mode == McpProtocolMode::Legacy {
         if let Some(session_id) = response
             .headers()
-            .get("MCP-Session-Id")
+            .get(MCP_SESSION_HEADER_LEGACY)
             .and_then(|v| v.to_str().ok())
         {
             inner.session_id = Some(session_id.to_string());
@@ -1155,14 +1132,11 @@ fn jsonrpc_error_to_vm_error(error: &serde_json::Value) -> VmError {
 fn client_request_rejection(msg: &serde_json::Value) -> Option<serde_json::Value> {
     let request_id = msg.get("id")?.clone();
     let method = msg.get("method").and_then(|value| value.as_str())?;
-    crate::mcp_protocol::unsupported_latest_spec_method_response(request_id.clone(), method)
-        .or_else(|| {
-            Some(crate::jsonrpc::error_response(
-                request_id,
-                -32601,
-                &format!("Method not found: {method}"),
-            ))
-        })
+    Some(crate::jsonrpc::error_response(
+        request_id,
+        -32601,
+        &format!("Method not found: {method}"),
+    ))
 }
 
 fn harn_roots_list_response(id: serde_json::Value) -> serde_json::Value {
@@ -1593,40 +1567,6 @@ fn is_method_not_found_response(msg: &serde_json::Value) -> bool {
         == Some(-32601)
 }
 
-fn parse_cache_hint(result: &serde_json::Value) -> Option<McpCacheHint> {
-    let ttl_ms = result.get("ttlMs").and_then(|value| value.as_u64());
-    let cache_scope = result
-        .get("cacheScope")
-        .and_then(|value| value.as_str())
-        .filter(|value| matches!(*value, "public" | "private"))
-        .map(str::to_string);
-    if ttl_ms.is_none() && cache_scope.is_none() {
-        return None;
-    }
-    Some(McpCacheHint {
-        ttl_ms,
-        cache_scope,
-    })
-}
-
-fn cache_hints_json(hints: &BTreeMap<String, McpCacheHint>) -> serde_json::Value {
-    let mut object = serde_json::Map::new();
-    for (method, hint) in hints {
-        let mut entry = serde_json::Map::new();
-        if let Some(ttl_ms) = hint.ttl_ms {
-            entry.insert("ttlMs".to_string(), serde_json::json!(ttl_ms));
-        }
-        if let Some(cache_scope) = hint.cache_scope.as_ref() {
-            entry.insert(
-                "cacheScope".to_string(),
-                serde_json::Value::String(cache_scope.clone()),
-            );
-        }
-        object.insert(method.clone(), serde_json::Value::Object(entry));
-    }
-    serde_json::Value::Object(object)
-}
-
 fn extract_tool_headers(tool: &serde_json::Value) -> Result<Vec<McpToolHeader>, String> {
     let Some(properties) = tool
         .get("inputSchema")
@@ -1998,23 +1938,6 @@ async fn resolve_input_required_result(
     }))
 }
 
-pub async fn connect_mcp_server(
-    name: &str,
-    command: &str,
-    args: &[String],
-) -> Result<VmMcpClientHandle, VmError> {
-    let mut handle = mcp_connect_stdio_impl(
-        command,
-        args,
-        &BTreeMap::new(),
-        McpProtocolMode::Legacy,
-        PROTOCOL_VERSION.to_string(),
-    )
-    .await?;
-    handle.name = name.to_string();
-    Ok(handle)
-}
-
 pub async fn connect_mcp_server_from_spec(
     spec: &McpServerSpec,
 ) -> Result<VmMcpClientHandle, VmError> {
@@ -2319,7 +2242,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         if !cache_hints.is_empty() {
             info.insert(
                 "cache_hints".to_string(),
-                json_to_vm_value(&cache_hints_json(&cache_hints)),
+                json_to_vm_value(&cache_hints_to_json(cache_hints.iter())),
             );
         }
         Ok(VmValue::Dict(Rc::new(info)))
@@ -2738,7 +2661,7 @@ print(json.dumps({
                     handle.cache_hints.lock().await.get("tools/list"),
                     Some(&McpCacheHint {
                         ttl_ms: Some(300_000),
-                        cache_scope: Some("public".to_string()),
+                        scope: Some("public"),
                     })
                 );
 

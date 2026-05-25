@@ -94,6 +94,25 @@ async fn orchestrator_modern_tools_list_carries_rc_envelope_and_cache_hint() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn orchestrator_modern_non_list_methods_carry_result_type_envelope() {
+    let _guard = lock_harn_state();
+    let (service, _temp) = fresh_service().await;
+    let mut session = ConnectionState::default();
+    for method in ["ping", "tasks/list"] {
+        let request = rc_request(1, method, json!({}), "harn-rc-compat-client");
+        let response = service.handle_request(&mut session, request).await;
+        let result = response
+            .get("result")
+            .unwrap_or_else(|| panic!("{method} should return result, got {response:?}"));
+        assert_eq!(
+            result["resultType"],
+            json!("complete"),
+            "{method} modern response must carry RC envelope"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn orchestrator_unsupported_meta_version_returns_minus_32004() {
     let _guard = lock_harn_state();
     let (service, _temp) = fresh_service().await;
