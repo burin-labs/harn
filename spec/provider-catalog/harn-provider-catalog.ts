@@ -1693,62 +1693,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
-      "id": "qwen-3-coder-480b",
-      "name": "Qwen3 Coder 480B (Cerebras)",
-      "provider": "cerebras",
-      "aliases": [],
-      "context_window": 131072,
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "none"
-      },
-      "reasoning": {
-        "modes": [],
-        "effort_supported": false,
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": false,
-      "pricing": {
-        "input_per_mtok": 2.0,
-        "output_per_mtok": 2.0,
-        "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "structured_output"
-      ]
-    },
-    {
       "id": "gemini-2.5-flash",
       "name": "Gemini 2.5 Flash",
       "provider": "gemini",
