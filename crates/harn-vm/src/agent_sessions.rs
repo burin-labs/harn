@@ -21,12 +21,15 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::VmValue;
-use crate::workspace_anchor::{WorkspaceAnchor, WorkspacePolicy, WORKSPACE_ANCHOR_METADATA_KEY};
+use crate::workspace_anchor::{
+    MountMode, MountedRoot, WorkspaceAnchor, WorkspacePolicy, WORKSPACE_ANCHOR_METADATA_KEY,
+};
 
 /// Default cap on concurrent sessions per VM thread. Beyond this the
 /// least-recently-accessed session is evicted on the next `open`.
@@ -1707,29 +1710,37 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
                 "agent_session_append_event: unknown session id '{id}'"
             ));
         };
-        let dict = state
-            .transcript
-            .as_dict()
-            .cloned()
-            .unwrap_or_else(BTreeMap::new);
-        let mut events: Vec<VmValue> = match dict.get("events") {
-            Some(VmValue::List(list)) => list.iter().cloned().collect(),
-            _ => dict
-                .get("messages")
-                .and_then(|value| match value {
-                    VmValue::List(list) => Some(list.iter().cloned().collect::<Vec<_>>()),
-                    _ => None,
-                })
-                .map(|messages| crate::llm::helpers::transcript_events_from_messages(&messages))
-                .unwrap_or_default(),
-        };
-        events.push(event);
-        let mut next = dict;
-        next.insert("events".to_string(), VmValue::List(Rc::new(events)));
-        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "append_event")?;
+        append_event_to_state(state, event, "append_event")?;
         state.last_accessed = Instant::now();
         Ok(())
     })
+}
+
+fn append_event_to_state(
+    state: &mut SessionState,
+    event: VmValue,
+    action: &str,
+) -> Result<(), String> {
+    let dict = state
+        .transcript
+        .as_dict()
+        .cloned()
+        .unwrap_or_else(BTreeMap::new);
+    let mut events: Vec<VmValue> = match dict.get("events") {
+        Some(VmValue::List(list)) => list.iter().cloned().collect(),
+        _ => dict
+            .get("messages")
+            .and_then(|value| match value {
+                VmValue::List(list) => Some(list.iter().cloned().collect::<Vec<_>>()),
+                _ => None,
+            })
+            .map(|messages| crate::llm::helpers::transcript_events_from_messages(&messages))
+            .unwrap_or_default(),
+    };
+    events.push(event);
+    let mut next = dict;
+    next.insert("events".to_string(), VmValue::List(Rc::new(events)));
+    apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), action)
 }
 
 /// Replace the transcript's message list wholesale. Used by the
@@ -1995,6 +2006,9 @@ pub fn set_workspace_anchor(id: &str, anchor: Option<WorkspaceAnchor>) -> Result
         };
         let changed = state.workspace_anchor != anchor;
         state.workspace_anchor = anchor;
+        if changed {
+            crate::llm::permissions::clear_session_grants(id);
+        }
         state.last_accessed = Instant::now();
         Ok(changed)
     })
@@ -2031,6 +2045,118 @@ pub fn workspace_policy(id: &str) -> Option<WorkspacePolicy> {
             .get(id)
             .map(|state| state.workspace_policy.clone())
     })
+}
+
+/// Validate and mount an additional workspace root on an anchored
+/// session. When the path is already mounted, updates its mount mode
+/// in place and refreshes its `mounted_at` timestamp.
+pub fn add_workspace_root(
+    id: &str,
+    root: &str,
+    mount_mode: Option<MountMode>,
+    reason: Option<String>,
+) -> Result<String, String> {
+    let normalized_root = validate_workspace_root_path(root)?;
+    let mounted_at = crate::orchestration::now_rfc3339();
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let default_mount_mode = state.workspace_policy.default_mount_mode;
+        let Some(anchor) = state.workspace_anchor.as_mut() else {
+            return Err(format!("agent session '{id}' has no workspace anchor"));
+        };
+        let resolved_mount_mode = mount_mode.unwrap_or(default_mount_mode);
+        if let Some(existing) = anchor
+            .additional_roots
+            .iter_mut()
+            .find(|entry| entry.path == normalized_root)
+        {
+            existing.mount_mode = resolved_mount_mode;
+            existing.mounted_at = mounted_at.clone();
+        } else {
+            anchor.additional_roots.push(MountedRoot {
+                path: normalized_root.clone(),
+                mount_mode: resolved_mount_mode,
+                mounted_at: mounted_at.clone(),
+            });
+        }
+        let event = crate::llm::helpers::transcript_event(
+            "RootMounted",
+            "system",
+            "internal",
+            "",
+            Some(serde_json::json!({
+                "path": normalized_root.to_string_lossy(),
+                "mount_mode": resolved_mount_mode.as_str(),
+                "mounted_at": mounted_at.clone(),
+                "reason": reason,
+            })),
+        );
+        append_event_to_state(state, event, "add_workspace_root")?;
+        crate::llm::permissions::clear_session_grants(id);
+        state.last_accessed = Instant::now();
+        Ok(mounted_at.clone())
+    })
+}
+
+/// Remove one mounted root from an anchored session. Returns whether an
+/// existing mount entry was deleted. Removing an absent root is a no-op.
+pub fn remove_workspace_root(id: &str, root: &str) -> Result<bool, String> {
+    let normalized_root = normalize_workspace_root_path(root);
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let Some(anchor) = state.workspace_anchor.as_mut() else {
+            return Err(format!("agent session '{id}' has no workspace anchor"));
+        };
+        let before = anchor.additional_roots.len();
+        anchor
+            .additional_roots
+            .retain(|entry| entry.path != normalized_root);
+        let removed = anchor.additional_roots.len() != before;
+        if removed {
+            crate::llm::permissions::clear_session_grants(id);
+        }
+        state.last_accessed = Instant::now();
+        Ok(removed)
+    })
+}
+
+/// Return the anchored primary path plus the mounted additional roots.
+pub fn list_workspace_roots(id: &str) -> Result<(PathBuf, Vec<MountedRoot>), String> {
+    SESSIONS.with(|s| {
+        let map = s.borrow();
+        let Some(state) = map.get(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let Some(anchor) = state.workspace_anchor.as_ref() else {
+            return Err(format!("agent session '{id}' has no workspace anchor"));
+        };
+        Ok((anchor.primary.clone(), anchor.additional_roots.clone()))
+    })
+}
+
+fn validate_workspace_root_path(root: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_workspace_root_path(root);
+    let canonical = std::fs::canonicalize(&normalized)
+        .map_err(|error| format!("workspace root '{root}' must exist and be readable: {error}"))?;
+    let metadata = std::fs::metadata(&canonical)
+        .map_err(|error| format!("workspace root '{root}' must exist and be readable: {error}"))?;
+    if !metadata.is_dir() {
+        return Err(format!("workspace root '{root}' must be a directory"));
+    }
+    std::fs::read_dir(&canonical)
+        .map_err(|error| format!("workspace root '{root}' must be readable: {error}"))?;
+    Ok(canonical)
+}
+
+fn normalize_workspace_root_path(root: &str) -> PathBuf {
+    let absolute = crate::stdlib::process::normalize_context_path(Path::new(root));
+    std::fs::canonicalize(&absolute).unwrap_or(absolute)
 }
 
 fn empty_transcript(id: &str) -> VmValue {

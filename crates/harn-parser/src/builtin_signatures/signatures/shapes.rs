@@ -367,6 +367,25 @@ pub(crate) const WORKSPACE_POLICY: Ty = Ty::Shape(&[ShapeFieldDescriptor::option
     TY_STRING,
 )]);
 
+/// `agent_session_add_root(id, root, opts?)` opts argument shape.
+pub(crate) const AGENT_SESSION_ADD_ROOT_OPTS: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::optional("mount_mode", TY_STRING),
+    ShapeFieldDescriptor::optional("reason", TY_STRING),
+]);
+
+/// `{ok, mounted_at?, error?}` envelope returned by root mutation builtins.
+pub(crate) const AGENT_SESSION_ROOT_MUTATION_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("ok", TY_BOOL),
+    ShapeFieldDescriptor::optional("mounted_at", TY_STRING),
+    ShapeFieldDescriptor::optional("error", TY_STRING),
+]);
+
+/// `agent_session_list_roots(id)` result shape.
+pub(crate) const AGENT_SESSION_LIST_ROOTS_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("primary", TY_STRING),
+    ShapeFieldDescriptor::new("additional", TY_LIST),
+]);
+
 /// `agent_session_open(id?, opts?)` opts argument shape.
 pub(crate) const AGENT_SESSION_OPEN_OPTS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("workspace_anchor", WORKSPACE_ANCHOR_INPUT),

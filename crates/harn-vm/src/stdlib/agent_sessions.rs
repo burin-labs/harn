@@ -103,6 +103,27 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     .signature("agent_session_set_workspace_policy(id, policy)")
     .arity(VmBuiltinArity::Exact(2))
     .doc("Set the session workspace policy defaults. Returns true when changed."),
+    SyncBuiltin::new("agent_session_add_root", agent_session_add_root_builtin)
+        .signature("agent_session_add_root(id, root, opts?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .doc(
+            "Mount an additional workspace root on an anchored session. Returns \
+             `{ok, mounted_at?, error?}`.",
+        ),
+    SyncBuiltin::new(
+        "agent_session_remove_root",
+        agent_session_remove_root_builtin,
+    )
+    .signature("agent_session_remove_root(id, root)")
+    .arity(VmBuiltinArity::Exact(2))
+    .doc(
+        "Remove one additional workspace root from an anchored session. Returns \
+         `{ok, error?}`.",
+    ),
+    SyncBuiltin::new("agent_session_list_roots", agent_session_list_roots_builtin)
+        .signature("agent_session_list_roots(id)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Return `{primary, additional}` for the session's mounted roots."),
     SyncBuiltin::new(
         "agent_session_claim_tool_format",
         agent_session_claim_tool_format_builtin,
@@ -311,6 +332,15 @@ fn seed_result_error(message: impl Into<String>) -> VmValue {
     }))
 }
 
+fn ok_result(fields: &[(&str, serde_json::Value)]) -> VmValue {
+    let mut result =
+        serde_json::Map::from_iter([("ok".to_string(), serde_json::Value::Bool(true))]);
+    for (key, value) in fields {
+        result.insert((*key).to_string(), value.clone());
+    }
+    crate::stdlib::json_to_vm_value(&serde_json::Value::Object(result))
+}
+
 fn dict_string_field(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
     match dict.get(key) {
         Some(VmValue::String(value)) if !value.trim().is_empty() => Some(value.to_string()),
@@ -357,6 +387,7 @@ fn close_status_arg(args: &[VmValue]) -> Result<(String, String, serde_json::Val
 }
 
 const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor", "workspace_policy"];
+const AGENT_SESSION_ADD_ROOT_OPT_KEYS: &[&str] = &["mount_mode", "reason"];
 
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
@@ -483,6 +514,56 @@ fn agent_session_set_workspace_policy_builtin(
     let changed = agent_sessions::set_workspace_policy(&id, policy)
         .map_err(|message| err(format!("agent_session_set_workspace_policy: {message}")))?;
     Ok(VmValue::Bool(changed))
+}
+
+fn agent_session_add_root_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_add_root", "id")?;
+    let root = arg_string_required(args, 1, "agent_session_add_root", "root")?;
+    let opts = opts_dict_arg(args, 2, "agent_session_add_root")?;
+    for key in opts.keys() {
+        if !AGENT_SESSION_ADD_ROOT_OPT_KEYS.contains(&key.as_str()) {
+            let expected = AGENT_SESSION_ADD_ROOT_OPT_KEYS.join(", ");
+            return Err(err(format!(
+                "agent_session_add_root: unknown option key '{key}' (expected one of: {expected})"
+            )));
+        }
+    }
+    let mount_mode = opt_string(&opts, "agent_session_add_root", "mount_mode")?
+        .map(|value| crate::workspace_anchor::MountMode::parse(&value))
+        .transpose()
+        .map_err(|message| err(format!("agent_session_add_root: {message}")))?;
+    let reason = opt_string(&opts, "agent_session_add_root", "reason")?;
+    Ok(
+        match agent_sessions::add_workspace_root(&id, &root, mount_mode, reason) {
+            Ok(mounted_at) => ok_result(&[("mounted_at", serde_json::Value::String(mounted_at))]),
+            Err(message) => seed_result_error(message),
+        },
+    )
+}
+
+fn agent_session_remove_root_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_remove_root", "id")?;
+    let root = arg_string_required(args, 1, "agent_session_remove_root", "root")?;
+    Ok(match agent_sessions::remove_workspace_root(&id, &root) {
+        Ok(_) => ok_result(&[]),
+        Err(message) => seed_result_error(message),
+    })
+}
+
+fn agent_session_list_roots_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_list_roots", "id")?;
+    let (primary, additional) = agent_sessions::list_workspace_roots(&id)
+        .map_err(|message| err(format!("agent_session_list_roots: {message}")))?;
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "primary": primary,
+        "additional": additional,
+    })))
 }
 
 fn agent_session_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

@@ -43,30 +43,40 @@ fn run_one(session, tool_name, path, permissions) {
   )
 }
 
-pipeline main() {
+fn main(harness: Harness) {
+  let root = path_join(harness.fs.temp_dir(), "harn-path-scope-" + uuid())
+  let primary = path_join(root, "primary")
+  let mounted = path_join(root, "mounted")
+  let outside_path = path_join(root, "outside")
+  harness.fs.mkdir(primary, true)
+  harness.fs.mkdir(mounted, true)
+  harness.fs.mkdir(outside_path, true)
   let outside = agent_session_open(
     "path-scope-outside",
-    {workspace_anchor: {primary: "/tmp/harn-anchor-a", anchored_at: "2026-05-24T00:00:00Z"}},
+    {workspace_anchor: {primary: primary, anchored_at: "2026-05-24T00:00:00Z"}},
   )
-  let denied = run_one(outside, "Read", "/tmp/harn-anchor-b/file.txt", {allow: {Read: path_scope()}})
+  let denied = run_one(outside, "Read", path_join(outside_path, "file.txt"), {allow: {Read: path_scope()}})
   let denied_events = transcript_events_by_kind(denied?.transcript, "PermissionDeny")
   assert(len(denied_events) == 1, "outside path is denied")
   assert(
     json_stringify(denied_events)
-      .contains("path '/tmp/harn-anchor-b/file.txt' is outside anchor /tmp/harn-anchor-a"),
+      .contains("path '" + path_join(outside_path, "file.txt") + "' is outside anchor " + primary),
     "denial reason names the path and anchor",
   )
   let extended = agent_session_open(
     "path-scope-extend",
-    {
-      workspace_anchor: {
-        primary: "/tmp/harn-anchor-a",
-        additional_roots: [{path: "/tmp/harn-anchor-b", mount_mode: "extend"}],
-        anchored_at: "2026-05-24T00:00:00Z",
-      },
-    },
+    {workspace_anchor: {primary: primary, anchored_at: "2026-05-24T00:00:00Z"}},
   )
-  let allowed = run_one(extended, "Read", "/tmp/harn-anchor-b/file.txt", {allow: {Read: path_scope()}})
+  let mounted_result = agent_session_add_root(extended, mounted, {mount_mode: "extend", reason: "shared"})
+  assert(mounted_result.ok, "extend mount succeeds")
+  let extend_roots = agent_session_list_roots(extended)
+  let extend_path = extend_roots.additional[0].path
+  let mounted_events = transcript_events_by_kind(agent_session_snapshot(extended), "RootMounted")
+  assert(len(mounted_events) == 1, "RootMounted event emitted")
+  assert(mounted_events[0].metadata?.path == extend_path, "event includes mounted path")
+  assert(mounted_events[0].metadata?.mount_mode == "extend", "event includes mount mode")
+  assert(mounted_events[0].metadata?.reason == "shared", "event includes reason")
+  let allowed = run_one(extended, "Read", path_join(extend_path, "file.txt"), {allow: {Read: path_scope()}})
   assert(
     len(transcript_events_by_kind(allowed?.transcript, "PermissionGrant")) == 1,
     "extend mount allows read",
@@ -75,14 +85,16 @@ pipeline main() {
   let read_only = agent_session_open(
     "path-scope-read-only",
     {
-      workspace_anchor: {
-        primary: "/tmp/harn-anchor-a",
-        additional_roots: [{path: "/tmp/harn-anchor-b"}],
-        anchored_at: "2026-05-24T00:00:00Z",
-      },
+      workspace_policy: {default_mount_mode: "read_only"},
+      workspace_anchor: {primary: primary, anchored_at: "2026-05-24T00:00:00Z"},
     },
   )
-  let read_allowed = run_one(read_only, "Read", "/tmp/harn-anchor-b/file.txt", {allow: {Read: path_scope()}})
+  let read_only_mount = agent_session_add_root(read_only, mounted)
+  assert(read_only_mount.ok, "default-policy mount succeeds")
+  let roots = agent_session_list_roots(read_only)
+  let read_only_path = roots.additional[0].path
+  assert(roots.additional[0].mount_mode == "read_only", "default mount mode follows session policy")
+  let read_allowed = run_one(read_only, "Read", path_join(read_only_path, "file.txt"), {allow: {Read: path_scope()}})
   assert(
     len(transcript_events_by_kind(read_allowed?.transcript, "PermissionGrant")) == 1,
     "read-only mount allows Read",
@@ -90,7 +102,7 @@ pipeline main() {
   let write_denied = run_one(
     read_only,
     "Write",
-    "/tmp/harn-anchor-b/file.txt",
+    path_join(read_only_path, "file.txt"),
     {allow: {Write: path_scope({mount_modes: ["extend"]})}},
   )
   assert(
@@ -98,5 +110,9 @@ pipeline main() {
     "read-only mount denies Write when only extend mounts are writable",
   )
   assert(write_denied?.tools?.rejected[0] == "Write", "write call is rejected")
+  let removed = agent_session_remove_root(read_only, mounted)
+  assert(removed.ok, "remove_root succeeds")
+  let removed_access = run_one(read_only, "Read", path_join(read_only_path, "file.txt"), {allow: {Read: path_scope()}})
+  assert(removed_access?.tools?.rejected[0] == "Read", "removing the mount restores denial")
   log("agent_path_scope_permissions tests passed")
 }

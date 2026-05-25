@@ -75,6 +75,8 @@ the "one-shot" call shape.
 | `agent_session_seed_from_jsonl(jsonl_path, opts?)` | `dict` | Creates a new session from a replayable `llm_transcript.jsonl` sidecar. |
 | `agent_session_workspace_anchor(id)` / `agent_session_set_workspace_anchor(id, anchor)` | `dict` / `bool` | Read or replace the typed workspace anchor. |
 | `agent_session_workspace_policy(id)` / `agent_session_set_workspace_policy(id, policy)` | `dict` / `bool` | Read or update workspace defaults, including the `default_mount_mode` used for mounted roots that omit `mount_mode`. |
+| `agent_session_add_root(id, root, opts?)` / `agent_session_remove_root(id, root)` | `dict` | Mount or unmount additional workspace roots. `add_root` returns `{ok, mounted_at?, error?}` and defaults `mount_mode` from the session workspace policy. |
+| `agent_session_list_roots(id)` | `dict` | Returns `{primary, additional}` for the session's current mounted roots. |
 | `agent_session_close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
 
 ### `agent_session_compact` options

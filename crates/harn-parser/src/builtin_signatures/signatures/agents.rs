@@ -1,7 +1,8 @@
 //! Agent / orchestration / sub-agent builtin signatures.
 
 use super::shapes::{
-    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_OPEN_OPTS, AGENT_SESSION_SEED_OPTS,
+    AGENT_SESSION_ADD_ROOT_OPTS, AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_LIST_ROOTS_RESULT,
+    AGENT_SESSION_OPEN_OPTS, AGENT_SESSION_ROOT_MUTATION_RESULT, AGENT_SESSION_SEED_OPTS,
     AGENT_SPAWN_CONFIG, CANCEL_IN_FLIGHT_TOOL_CALL_OPTS, LLM_CALL_OPTIONS, LLM_CALL_RESULT,
     LLM_CALL_SAFE_RESULT, RESUME_CONDITIONS_OR_NIL, SESSION_ANCESTRY, SESSION_SNAPSHOT,
     SUB_AGENT_OPTIONS, SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY, WORKSPACE_ANCHOR_INPUT,
@@ -323,6 +324,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple(
+        "agent_session_add_root",
+        &[
+            Param::new("id", TY_STRING),
+            Param::new("root", TY_STRING),
+            Param::optional("opts", AGENT_SESSION_ADD_ROOT_OPTS),
+        ],
+        AGENT_SESSION_ROOT_MUTATION_RESULT,
+    ),
+    BuiltinSignature::simple(
         "agent_session_close",
         &[
             Param::new("id", TY_STRING),
@@ -396,12 +406,22 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_INT,
     ),
     BuiltinSignature::simple(
+        "agent_session_list_roots",
+        &[Param::new("id", TY_STRING)],
+        AGENT_SESSION_LIST_ROOTS_RESULT,
+    ),
+    BuiltinSignature::simple(
         "agent_session_open",
         &[
             Param::optional("id", TY_STRING),
             Param::optional("opts", AGENT_SESSION_OPEN_OPTS),
         ],
         TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_remove_root",
+        &[Param::new("id", TY_STRING), Param::new("root", TY_STRING)],
+        AGENT_SESSION_ROOT_MUTATION_RESULT,
     ),
     BuiltinSignature::simple(
         "agent_session_set_workspace_anchor",
