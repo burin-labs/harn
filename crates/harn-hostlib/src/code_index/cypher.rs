@@ -16,9 +16,11 @@
 //! ```
 //!
 //! Variable-length traversal up to depth 4 is supported via `*1..N` or
-//! the shorthand `*` (defaults to `1..3`). The executor implements
-//! depth-first enumeration with a per-step visited set so cycles can't
-//! infinite-loop.
+//! the shorthand `*` (defaults to `1..3`). When the upper bound is
+//! omitted (e.g. `*1..` or `*2..`), it defaults to the executor depth
+//! cap (4) — matching the usual Cypher "open upper bound = capped by
+//! engine" semantics. The executor implements depth-first enumeration
+//! with a per-step visited set so cycles can't infinite-loop.
 //!
 //! Read-only; no MERGE/CREATE/SET. The result is a flat
 //! [`Vec<CypherRow>`] where each row maps the projected aliases to
@@ -60,6 +62,11 @@ pub const MAX_ROWS: usize = 10_000;
 /// edge syntax (`-[:CALLS]->`) rather than relying on a cartesian
 /// product. Enforced at parse time so the executor never sees one.
 pub const MAX_PATTERNS: usize = 3;
+
+/// Maximum traversal depth for variable-length patterns (`*lo..hi`).
+/// Also used as the implicit upper bound when the high end is omitted
+/// (e.g. `*1..`), matching standard "open upper bound" Cypher semantics.
+const VAR_LENGTH_MAX_DEPTH: u32 = 4;
 
 /// Error variants the parser/executor raise. The host wraps these in
 /// [`crate::error::HostlibError`] before surfacing to scripts. Each
@@ -575,7 +582,11 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    (lo.unwrap_or(1) as u32, hi.unwrap_or(3) as u32)
+                    // `*lo..` with no upper bound: default to the executor
+                    // depth cap so users opt into the maximum traversal
+                    // length without naming it explicitly.
+                    let hi_v = hi.map(|n| n as u32).unwrap_or(VAR_LENGTH_MAX_DEPTH);
+                    (lo.unwrap_or(1) as u32, hi_v)
                 } else {
                     // bare `*`: 1..3
                     let lo_v = lo.unwrap_or(1) as u32;
@@ -965,9 +976,9 @@ fn extend_steps(
     // Pattern arrow direction XOR label inversion = effective direction.
     let forward = step.forward ^ label_reversed;
     let (lo, hi) = step.var_length.unwrap_or((1, 1));
-    if hi > 4 {
+    if hi > VAR_LENGTH_MAX_DEPTH {
         return Err(CypherError::ExecError(format!(
-            "variable-length traversal capped at depth 4 (got `*{lo}..{hi}`)"
+            "variable-length traversal capped at depth {VAR_LENGTH_MAX_DEPTH} (got `*{lo}..{hi}`)"
         )));
     }
     let lo = lo.max(1);
@@ -1299,6 +1310,21 @@ mod tests {
             matches!(&err, CypherError::ExecError(msg) if msg.contains("row budget exceeded")),
             "expected ExecError for row budget, got {err:?}"
         );
+    }
+
+    #[test]
+    fn open_upper_bound_defaults_to_depth_cap() {
+        // `*1..` (no hi) should fall back to VAR_LENGTH_MAX_DEPTH, not 3.
+        let toks = lex("MATCH (a:Function)-[:CALLS*1..]->(b:Function) RETURN a.name AS n").unwrap();
+        let q = parse(&toks).unwrap();
+        let step = &q.matches[0].steps[0];
+        assert_eq!(step.var_length, Some((1, VAR_LENGTH_MAX_DEPTH)));
+
+        // `*2..` likewise.
+        let toks = lex("MATCH (a:Function)-[:CALLS*2..]->(b:Function) RETURN a.name AS n").unwrap();
+        let q = parse(&toks).unwrap();
+        let step = &q.matches[0].steps[0];
+        assert_eq!(step.var_length, Some((2, VAR_LENGTH_MAX_DEPTH)));
     }
 
     #[test]

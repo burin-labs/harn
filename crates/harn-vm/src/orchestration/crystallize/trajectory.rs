@@ -167,6 +167,12 @@ pub struct TrajectoryTap {
     similarity_threshold: f64,
     min_segment_len: usize,
     max_segment_len: usize,
+    /// Caller-supplied replay allowlist. When `None` we fall back to
+    /// [`default_trajectory_allowlist`]; when `Some` the caller-supplied
+    /// value is honored verbatim. This lets richer policies (e.g. extra
+    /// per-receipt id paths) flow through without being silently dropped
+    /// by the trace builder.
+    replay_allowlist: Option<Vec<ReplayAllowlistRule>>,
 }
 
 impl TrajectoryTap {
@@ -177,6 +183,7 @@ impl TrajectoryTap {
             similarity_threshold: DEFAULT_SIMILARITY_THRESHOLD,
             min_segment_len: DEFAULT_MIN_SEGMENT_LEN,
             max_segment_len: DEFAULT_MAX_SEGMENT_LEN,
+            replay_allowlist: None,
         }
     }
 
@@ -193,6 +200,14 @@ impl TrajectoryTap {
     pub fn with_segment_len(mut self, min: usize, max: usize) -> Self {
         self.min_segment_len = min.max(1);
         self.max_segment_len = max.max(self.min_segment_len);
+        self
+    }
+
+    /// Override the replay allowlist applied to traces produced by this
+    /// tap. Pass the full set of rules — the default rules are not
+    /// implicitly merged in.
+    pub fn with_replay_allowlist(mut self, rules: Vec<ReplayAllowlistRule>) -> Self {
+        self.replay_allowlist = Some(rules);
         self
     }
 
@@ -273,6 +288,10 @@ impl TrajectoryTap {
         metadata.insert("turn_count".to_string(), json!(turns.len()));
 
         let payload = serde_json::to_vec(&actions).unwrap_or_default();
+        let replay_allowlist = self
+            .replay_allowlist
+            .clone()
+            .unwrap_or_else(default_trajectory_allowlist);
         CrystallizationTrace {
             version: 1,
             id,
@@ -282,7 +301,7 @@ impl TrajectoryTap {
             started_at,
             finished_at,
             actions,
-            replay_allowlist: default_trajectory_allowlist(),
+            replay_allowlist,
             metadata,
             ..CrystallizationTrace::default()
         }
@@ -777,6 +796,42 @@ mod tests {
         let turns = vec![turn(1, vec![call("git_status", &[("path", json!("."))])])];
         let tap = TrajectoryTap::new("s3");
         assert!(tap.collect(&turns).is_empty());
+    }
+
+    #[test]
+    fn collect_honors_custom_replay_allowlist() {
+        let turns = vec![
+            turn(1, vec![call("git_status", &[("path", json!("."))])]),
+            turn(2, vec![call("git_status", &[("path", json!("."))])]),
+        ];
+        let custom = vec![
+            ReplayAllowlistRule {
+                path: "/effect_receipts/*/timestamp".to_string(),
+                reason: "test override".to_string(),
+                replacement: None,
+            },
+            ReplayAllowlistRule {
+                path: "/custom_field".to_string(),
+                reason: "test override".to_string(),
+                replacement: None,
+            },
+        ];
+        let tap = TrajectoryTap::new("s-allowlist").with_replay_allowlist(custom.clone());
+        let traces = tap.collect(&turns);
+        assert_eq!(traces.len(), 1);
+        assert_eq!(
+            traces[0].replay_allowlist, custom,
+            "custom allowlist should be honored verbatim, not overridden by the default"
+        );
+
+        // Sanity: with no override the default is still used.
+        let default_tap = TrajectoryTap::new("s-default");
+        let default_traces = default_tap.collect(&turns);
+        assert_eq!(default_traces.len(), 1);
+        assert_eq!(
+            default_traces[0].replay_allowlist,
+            default_trajectory_allowlist()
+        );
     }
 
     #[test]
