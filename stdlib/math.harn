@@ -1,7 +1,8 @@
-// std/math — Extended math utilities
-//
-// Import with: import "std/math"
-
+/**
+ * std/math — Extended math utilities
+ *
+ * Import with: import "std/math"
+ */
 fn _is_number(value) {
   let t = type_of(value)
   return t == "int" || t == "float"
@@ -144,11 +145,7 @@ fn _rank_items(items, score_fn = nil, descending = false) {
   var ranked = []
   var idx = 0
   while idx < len(items) {
-    let entry = {
-      index: idx,
-      item: items[idx],
-      score: _score_item(items[idx], score_fn)
-    }
+    let entry = {index: idx, item: items[idx], score: _score_item(items[idx], score_fn)}
     ranked = _insert_ranked(ranked, entry, descending)
     idx = idx + 1
   }
@@ -238,7 +235,6 @@ fn _recompute_centroids(points, assignments, k, dims, errors) {
     counts = counts.push(0)
     idx = idx + 1
   }
-
   idx = 0
   while idx < len(points) {
     let cluster = assignments[idx]
@@ -252,7 +248,6 @@ fn _recompute_centroids(points, assignments, k, dims, errors) {
     }
     idx = idx + 1
   }
-
   var centroids = []
   idx = 0
   while idx < k {
@@ -270,14 +265,17 @@ fn _recompute_centroids(points, assignments, k, dims, errors) {
     }
     idx = idx + 1
   }
-
   return {centroids: centroids, counts: counts}
 }
 
 /** Clamp a value between min and max. */
 fn clamp(value, lo, hi) {
-  if value < lo { return lo }
-  if value > hi { return hi }
+  if value < lo {
+    return lo
+  }
+  if value > hi {
+    return hi
+  }
   return value
 }
 
@@ -311,7 +309,9 @@ fn sum(items) {
 /** Average of a list of numbers. */
 fn avg(items) {
   _require_numeric_list(items)
-  if len(items) == 0 { return 0 }
+  if len(items) == 0 {
+    return 0
+  }
   return sum(items) / (len(items) * 1.0)
 }
 
@@ -336,7 +336,9 @@ fn percentile(items, p) {
   let sorted = _require_non_empty_numeric_list(items).sort()
   _require_number(p, "percentile")
   require p >= 0 && p <= 100, "percentile must be between 0 and 100"
-  if len(sorted) == 1 { return sorted[0] }
+  if len(sorted) == 1 {
+    return sorted[0]
+  }
   let n = len(sorted)
   let h = 1 + (n - 1) * (p / 100.0)
   let lower = floor(h)
@@ -373,7 +375,11 @@ fn variance(items, sample = false) {
     let delta = x - mu
     total = total + delta * delta
   }
-  let denom = if sample { len(xs) - 1 } else { len(xs) }
+  let denom = if sample {
+    len(xs) - 1
+  } else {
+    len(xs)
+  }
   return total / denom
 }
 
@@ -472,7 +478,11 @@ fn normal_cdf(x, mu = 0, sigma = 1) {
   _require_number(mu, "mean")
   _require_positive_number(sigma, "stddev")
   let z = (x - mu) / sigma
-  let sign = if z < 0 { -1 } else { 1 }
+  let sign = if z < 0 {
+    -1
+  } else {
+    1
+  }
   let az = abs(z) / sqrt(2)
   let t = 1 / (1 + 0.3275911 * az)
   let a1 = 0.254829592
@@ -480,7 +490,7 @@ fn normal_cdf(x, mu = 0, sigma = 1) {
   let a3 = 1.421413741
   let a4 = -1.453152027
   let a5 = 1.061405429
-  let erf = sign * (1 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * exp(-az * az)))
+  let erf = sign * (1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * exp(-az * az))
   return 0.5 * (1 + erf)
 }
 
@@ -489,7 +499,6 @@ fn normal_quantile(prob, mu = 0, sigma = 1) {
   let p = _require_probability(prob)
   _require_number(mu, "mean")
   _require_positive_number(sigma, "stddev")
-
   let a1 = -39.69683028665376
   let a2 = 220.9460984245205
   let a3 = -275.9285104469687
@@ -513,26 +522,24 @@ fn normal_quantile(prob, mu = 0, sigma = 1) {
   let d4 = 3.754408661907416
   let plow = 0.02425
   let phigh = 1 - plow
-
   var x = 0.0
   if p < plow {
     let q = sqrt(-2 * ln(p))
-    let num = (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6)
-    let den = ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
+    let num = ((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6
+    let den = (((d1 * q + d2) * q + d3) * q + d4) * q + 1
     x = num / den
   } else if p <= phigh {
     let q = p - 0.5
     let r = q * q
     let num = (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q
-    let den = (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1)
+    let den = ((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1
     x = num / den
   } else {
     let q = sqrt(-2 * ln(1 - p))
-    let num = (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6)
-    let den = ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
+    let num = ((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6
+    let den = (((d1 * q + d2) * q + d3) * q + d4) * q + 1
     x = -(num / den)
   }
-
   return mu + sigma * x
 }
 
@@ -616,7 +623,11 @@ fn covariance(xs, ys, sample = false) {
     total = total + (xs[idx] - mu_x) * (ys[idx] - mu_y)
     idx = idx + 1
   }
-  let denom = if sample { len(xs) - 1 } else { len(xs) }
+  let denom = if sample {
+    len(xs) - 1
+  } else {
+    len(xs)
+  }
   return total / denom
 }
 
@@ -667,21 +678,18 @@ fn kmeans(points, k, options = nil) {
   _require_non_negative_int(k, "k")
   require k >= 1, "k must be at least 1"
   require k <= len(points), "k must not exceed the number of points"
-
   let max_iterations = if options != nil && options.max_iterations != nil {
     options.max_iterations
   } else {
     100
   }
   _require_positive_int(max_iterations, "max_iterations")
-
   var centroids = _init_kmeans_centroids(points, k)
   var assignments = []
   var counts = []
   var iterations = 0
   var converged = false
   var inertia = 0.0
-
   while iterations < max_iterations {
     let assigned = _assign_points(points, centroids)
     let next_assignments = assigned.assignments
@@ -697,7 +705,6 @@ fn kmeans(points, k, options = nil) {
     }
     assignments = next_assignments
   }
-
   if !converged {
     let assigned = _assign_points(points, centroids)
     assignments = assigned.assignments
@@ -713,13 +720,12 @@ fn kmeans(points, k, options = nil) {
     }
     counts = final_counts
   }
-
   return {
     centroids: centroids,
     assignments: assignments,
     counts: counts,
     iterations: iterations,
     converged: converged,
-    inertia: inertia
+    inertia: inertia,
   }
 }

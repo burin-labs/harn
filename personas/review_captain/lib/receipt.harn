@@ -21,12 +21,10 @@ pub fn build_review_receipt(args) {
   let blocking = _has_blocking(combined_findings)
   let verdict = if blocking {
     "blocking"
+  } else if len(combined_findings) > 0 || len(missing_tests) > 0 || len(risky_hits) > 0 {
+    "needs_follow_up"
   } else {
-    if len(combined_findings) > 0 || len(missing_tests) > 0 || len(risky_hits) > 0 {
-      "needs_follow_up"
-    } else {
-      "approve"
-    }
+    "approve"
   }
   let summary = _summary(combined_findings, llm_summary, blocking, missing_tests, risky_hits)
   return {

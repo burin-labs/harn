@@ -373,24 +373,24 @@ pub fn prompt_fragment(id, body, config = nil) {
   }
   return filter_nil(
     {
-    id: id,
-    title: config?.title ?? id,
-    tags: config?.tags ?? [],
-    token_budget: config?.token_budget ?? __estimate_tokens_text(body),
-    cache_ttl: config?.cache_ttl ?? "5m",
-    cache_control: config?.cache_control ?? {type: "ephemeral"},
-    body: body,
-    path: config?.path,
-    source_path: config?.source_path,
-    provenance: provenance,
-    status: status,
-    tenant_id: config?.tenant_id,
-    score: config?.score,
-    members: config?.members,
-    support: config?.support,
-    tokens_saved: config?.tokens_saved,
-    monthly_savings_usd: config?.monthly_savings_usd,
-  },
+      id: id,
+      title: config?.title ?? id,
+      tags: config?.tags ?? [],
+      token_budget: config?.token_budget ?? __estimate_tokens_text(body),
+      cache_ttl: config?.cache_ttl ?? "5m",
+      cache_control: config?.cache_control ?? {type: "ephemeral"},
+      body: body,
+      path: config?.path,
+      source_path: config?.source_path,
+      provenance: provenance,
+      status: status,
+      tenant_id: config?.tenant_id,
+      score: config?.score,
+      members: config?.members,
+      support: config?.support,
+      tokens_saved: config?.tokens_saved,
+      monthly_savings_usd: config?.monthly_savings_usd,
+    },
   )
 }
 
@@ -525,15 +525,15 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
       records = records
         .push(
         {
-        id: __conversation_id(conversation, index),
-        tenant_id: if type_of(conversation) == "dict" {
-        conversation?.tenant_id
-      } else {
-        nil
-      },
-        snippet: snippet,
-        embedding: __conversation_embedding(conversation, snippet),
-      },
+          id: __conversation_id(conversation, index),
+          tenant_id: if type_of(conversation) == "dict" {
+            conversation?.tenant_id
+          } else {
+            nil
+          },
+          snippet: snippet,
+          embedding: __conversation_embedding(conversation, snippet),
+        },
       )
       points = points.push(records[-1].embedding)
     }
@@ -573,22 +573,22 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
           proposals = proposals
             .push(
             prompt_fragment(
-            id,
-            prefix.text,
-            {
-            title: "K-means hotspot " + to_string(cluster_id),
-            tags: options?.tags ?? ["hotspot"],
-            token_budget: prefix.tokens,
-            provenance: "kmeans",
-            tenant_id: tenant,
-            status: "pending_review",
-            score: chosen.silhouette,
-            members: members_by_cluster[cluster_id],
-            support: prefix.support,
-            tokens_saved: tokens_saved,
-            monthly_savings_usd: monthly,
-          },
-          ),
+              id,
+              prefix.text,
+              {
+                title: "K-means hotspot " + to_string(cluster_id),
+                tags: options?.tags ?? ["hotspot"],
+                token_budget: prefix.tokens,
+                provenance: "kmeans",
+                tenant_id: tenant,
+                status: "pending_review",
+                score: chosen.silhouette,
+                members: members_by_cluster[cluster_id],
+                support: prefix.support,
+                tokens_saved: tokens_saved,
+                monthly_savings_usd: monthly,
+              },
+            ),
           )
         }
       }
@@ -608,17 +608,17 @@ pub fn prompt_library_review_queue(library, filters = nil) {
     queue = queue
       .push(
       {
-      id: fragment.id,
-      title: fragment.title,
-      tenant_id: fragment?.tenant_id,
-      text: fragment.body,
-      token_budget: fragment?.token_budget,
-      support: fragment?.support,
-      members: fragment?.members ?? [],
-      tokens_saved: fragment?.tokens_saved ?? 0,
-      monthly_savings_usd: fragment?.monthly_savings_usd ?? 0.0,
-      status: fragment.status,
-    },
+        id: fragment.id,
+        title: fragment.title,
+        tenant_id: fragment?.tenant_id,
+        text: fragment.body,
+        token_budget: fragment?.token_budget,
+        support: fragment?.support,
+        members: fragment?.members ?? [],
+        tokens_saved: fragment?.tokens_saved ?? 0,
+        monthly_savings_usd: fragment?.monthly_savings_usd ?? 0.0,
+        status: fragment.status,
+      },
     )
   }
   return queue
