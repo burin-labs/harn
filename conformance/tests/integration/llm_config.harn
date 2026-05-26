@@ -1,12 +1,15 @@
 pipeline test(task) {
-  // Test model tier detection
+  // Test model tier detection. Tier is now self-declared on each
+  // catalog row (#2463); unknown model ids fall through to the
+  // tier_defaults.default ("mid"), so look up models that exist in
+  // the bundled catalog instead of un-versioned aliases.
   let tier1 = llm_model_tier("claude-sonnet-4-20250514")
   assert_eq(tier1, "frontier")
   let tier2 = llm_model_tier("gpt-4o")
   assert_eq(tier2, "frontier")
-  let tier3 = llm_model_tier("Qwen3.5-9B")
+  let tier3 = llm_model_tier("Qwen/Qwen3.5-9B")
   assert_eq(tier3, "small")
-  let tier4 = llm_model_tier("deepseek-v3")
+  let tier4 = llm_model_tier("deepseek-v4-flash")
   assert_eq(tier4, "mid")
   // Test provider inference
   let p1 = llm_infer_provider("claude-sonnet-4-20250514")
