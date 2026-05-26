@@ -10,7 +10,11 @@ import { agent_daemon_snapshot, agent_daemon_step } from "std/agent/daemon"
 import { agent_verify_or_continue } from "std/agent/judge"
 import { agent_mcp_bootstrap_if_needed } from "std/agent/mcp"
 import { agent_loop_options } from "std/agent/options"
-import { agent_compute_post_turn } from "std/agent/postturn"
+import {
+  agent_apply_tool_surface_narrowing,
+  agent_compute_post_turn,
+  agent_reset_tool_surface_narrowing,
+} from "std/agent/postturn"
 import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
 import { agent_dispatch_tool_batch, agent_dispatch_tool_call } from "std/agent/primitives"
 import { agent_progress_apply_options } from "std/agent/progress"
@@ -934,6 +938,14 @@ fn __apply_post_turn_options(opts, outcome) {
   var updated = opts
   let next_patch = __strip_internal_keys(outcome?.next_options)
   updated = __merge_hook_dict(updated, next_patch, "next_options")
+  let narrowing = outcome?.narrowing
+  if narrowing != nil {
+    updated = updated
+      + {
+      _tool_surface_narrowing_history: narrowing?.history ?? [],
+      _tool_surface_narrowed_tools: narrowing?.narrowed_tools,
+    }
+  }
   let llm_patch = outcome?.llm_options
   if llm_patch != nil {
     if type_of(llm_patch) != "dict" {
@@ -1526,7 +1538,12 @@ fn __agent_loop_run(message, session, initial_opts) {
       }
       __agent_loop_checkpoint(session.session_id, "iteration_start", {iteration: iteration_index + 1})
       var turn_opts = agent_skills_match(session, opts, iteration_index)
+      if turn_opts?._skill_activated_this_turn ?? false {
+        opts = agent_reset_tool_surface_narrowing(opts)
+        turn_opts = agent_reset_tool_surface_narrowing(turn_opts)
+      }
       turn_opts = agent_tool_search_inject_if_needed(turn_opts)
+      turn_opts = agent_apply_tool_surface_narrowing(turn_opts)
       __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
       agent_autocompact_if_needed(session, turn_opts)
       __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: iteration_index + 1})

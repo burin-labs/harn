@@ -149,6 +149,12 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
             skill_name: "rust".to_string(),
             allowed_tools: vec!["read".to_string()],
         },
+        AgentEvent::SkillNarrow {
+            session_id: "session-1".to_string(),
+            reason: "unused across 5 turns".to_string(),
+            removed_tools: vec!["write".to_string()],
+            remaining_tools: vec!["read".to_string()],
+        },
         AgentEvent::ToolSearchQuery {
             session_id: "session-1".to_string(),
             tool_use_id: "search-1".to_string(),
@@ -892,6 +898,12 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             skill_name: "rust".to_string(),
             allowed_tools: vec!["read".to_string()],
         },
+        AgentEvent::SkillNarrow {
+            session_id: "session-1".to_string(),
+            reason: "unused across 5 turns".to_string(),
+            removed_tools: vec!["write".to_string()],
+            remaining_tools: vec!["read".to_string()],
+        },
         AgentEvent::ToolSearchQuery {
             session_id: "session-1".to_string(),
             tool_use_id: "search-1".to_string(),
@@ -954,6 +966,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
         "skill_activated",
         "skill_deactivated",
         "skill_scope_tools",
+        "skill_narrow",
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
@@ -1419,6 +1432,10 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
         ("skill_activated", &["skillName", "iteration", "reason"]),
         ("skill_deactivated", &["skillName", "iteration"]),
         ("skill_scope_tools", &["skillName", "allowedTools"]),
+        (
+            "skill_narrow",
+            &["reason", "removedTools", "remainingTools"],
+        ),
         (
             "tool_search_query",
             &["toolUseId", "name", "query", "strategy", "mode"],

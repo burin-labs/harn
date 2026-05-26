@@ -21,6 +21,13 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Agent-loop tool-surface narrowing (#2473).** `agent_loop` now narrows
+  model-visible tools between turns after a rolling five-turn inactivity
+  window. The `tool_surface_narrowing` option accepts `enabled`,
+  `window_turns`, and `hard_keep`; explicit skill activation widens back
+  to the skill-scoped surface. Narrowing emits `skill_narrow` agent
+  events and ACP `session/update` extensions carrying `reason`,
+  `removedTools`, and `remainingTools`.
 - **`std/semver` stdlib module.** Promotes semver helpers that every
   release-tooling repo reinvents (`harn-bump-fleet/lib/semver.harn`,
   `harn/scripts/detect_bump_type.harn`) into one canonical surface:

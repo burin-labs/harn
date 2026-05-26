@@ -580,6 +580,59 @@ fn __validate_prefetch_next_turn(value) {
   }
 }
 
+fn __validate_string_list(label, value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "list" {
+    throw label + " must be a list of strings or nil; got " + type_of(value)
+  }
+  for item in value {
+    if type_of(item) != "string" || item == "" {
+      throw label + " entries must be non-empty strings"
+    }
+  }
+}
+
+fn __default_tool_surface_hard_keep() {
+  return [
+    "look",
+    "search",
+    "lookup",
+    "replace_symbol",
+    "done_sentinel",
+    "load_skill",
+    "agent_await_resumption",
+  ]
+}
+
+fn __normalize_tool_surface_narrowing(value) {
+  let defaults = {enabled: true, window_turns: 5, hard_keep: __default_tool_surface_hard_keep()}
+  if value == nil {
+    return defaults
+  }
+  if type_of(value) == "bool" {
+    return defaults + {enabled: value}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `tool_surface_narrowing` must be a dict, bool, or nil; got " + type_of(value)
+  }
+  let enabled = value?.enabled ?? defaults.enabled
+  if type_of(enabled) != "bool" {
+    throw "agent_loop: `tool_surface_narrowing.enabled` must be a bool"
+  }
+  let window_turns = value?.window_turns ?? value?.narrow_window_turns ?? defaults.window_turns
+  if type_of(window_turns) != "int" {
+    throw "agent_loop: `tool_surface_narrowing.window_turns` must be an integer"
+  }
+  if window_turns < 1 {
+    throw "agent_loop: `tool_surface_narrowing.window_turns` must be >= 1"
+  }
+  let hard_keep = value?.hard_keep ?? defaults.hard_keep
+  __validate_string_list("agent_loop: `tool_surface_narrowing.hard_keep`", hard_keep)
+  return defaults + value + {enabled: enabled, window_turns: window_turns, hard_keep: hard_keep}
+}
+
 fn __validate_removed_agent_loop_options(opts) {
   if __has_key(opts, "persistent") {
     throw "agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence"
@@ -664,6 +717,9 @@ fn __validate_agent_loop_callback_options(opts) {
   }
   if __has_key(opts, "prefetch_next_turn") {
     __validate_prefetch_next_turn(opts.prefetch_next_turn)
+  }
+  if __has_key(opts, "tool_surface_narrowing") {
+    __normalize_tool_surface_narrowing(opts.tool_surface_narrowing)
   }
   if __has_key(opts, "transcript_projection") {
     __validate_transcript_projection(opts.transcript_projection)
@@ -861,7 +917,12 @@ pub fn agent_loop_options(options = nil) {
   }
   opts = __with_task_ledger_shorthand(opts)
   let budget = __normalize_iteration_budget(opts)
-  opts = opts + {iteration_budget: budget, max_iterations: budget.max}
+  opts = opts
+    + {
+    iteration_budget: budget,
+    max_iterations: budget.max,
+    tool_surface_narrowing: __normalize_tool_surface_narrowing(opts?.tool_surface_narrowing),
+  }
   opts = agent_reasoning_apply(opts)
   opts = __normalize_reminder_provider_options(opts)
   opts = opts

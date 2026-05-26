@@ -2701,6 +2701,21 @@ logged; error diagnostics abort the loop before the first model call.
 `workflow_validate` and `workflow_policy_report` include the same
 diagnostics for workflow and stage surfaces.
 
+#### Agent loop tool narrowing
+
+`agent_loop` narrows the model-visible tool surface between turns by
+default. The `tool_surface_narrowing` option accepts `false` to disable,
+`true` to use defaults, or a dict with `enabled`, `window_turns`, and
+`hard_keep`. After `window_turns` observed turns, tools that were not
+attempted in that rolling window are removed from the next model call
+unless listed in `hard_keep`. The default window is five turns.
+
+Narrowing is usage-based only; it does not inspect file extensions,
+languages, or project metadata. Explicit skill activation widens back to
+the skill-scoped surface, after which narrowing may run again. Every
+narrowing step emits a `skill_narrow` agent event with `reason`,
+`removed_tools`, and `remaining_tools`.
+
 #### Agent loop completion gates
 
 `agent_loop` may gate a pending stop with `verify_completion`,

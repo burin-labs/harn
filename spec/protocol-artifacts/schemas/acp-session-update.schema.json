@@ -158,6 +158,7 @@
         { "$ref": "#/$defs/SkillActivated" },
         { "$ref": "#/$defs/SkillDeactivated" },
         { "$ref": "#/$defs/SkillScopeTools" },
+        { "$ref": "#/$defs/SkillNarrow" },
         { "$ref": "#/$defs/ToolSearchQuery" },
         { "$ref": "#/$defs/ToolSearchResult" },
         { "$ref": "#/$defs/TranscriptCompacted" },
@@ -401,6 +402,23 @@
         }
       }
     },
+    "SkillNarrow": {
+      "type": "object",
+      "required": ["sessionUpdate", "removedTools", "remainingTools"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "skill_narrow" },
+        "reason": { "type": "string" },
+        "removedTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "remainingTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "ToolSearchQuery": {
       "type": "object",
       "required": ["sessionUpdate", "toolUseId", "name", "query"],
@@ -532,6 +550,7 @@
             "progress",
             "skill_activated",
             "skill_deactivated",
+            "skill_narrow",
             "skill_scope_tools",
             "tool_search_query",
             "tool_search_result",

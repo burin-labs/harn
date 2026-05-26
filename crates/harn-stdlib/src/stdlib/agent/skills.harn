@@ -549,6 +549,17 @@ fn __allowed_union(active) {
   return allowed
 }
 
+fn __has_new_skill(prev, active) {
+  let prev_ids = __skill_ids(prev)
+  for entry in active {
+    let id = __skill_id(entry)
+    if id != "" && !contains(prev_ids, id) {
+      return true
+    }
+  }
+  return false
+}
+
 fn __tool_name(tool_entry) {
   return tool_entry?.name ?? tool_entry?.function?.name ?? ""
 }
@@ -600,9 +611,9 @@ fn __skill_scoped_tools(opts, active) {
   return registry + {tools: kept}
 }
 
-fn __opts_with_active_skills(opts, registry, active) {
+fn __opts_with_active_skills(opts, registry, active, activated_this_turn = false) {
   let scoped_tools = __skill_scoped_tools(opts, active)
-  var next = opts + {active_skills: active}
+  var next = opts + {active_skills: active, _skill_activated_this_turn: activated_this_turn}
   if scoped_tools != nil {
     next = next + {tools: scoped_tools}
   }
@@ -646,5 +657,6 @@ pub fn agent_skills_match(session, opts, iteration) {
     __record_activations(session, prev, active, iteration)
     agent_session_set_active_skills(session.session_id, active)
   }
-  return __opts_with_active_skills(tool_opts, registry, active)
+  let activated_this_turn = __has_new_skill(prev, active)
+  return __opts_with_active_skills(tool_opts, registry, active, activated_this_turn)
 }
