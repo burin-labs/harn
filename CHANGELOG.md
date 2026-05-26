@@ -62,6 +62,23 @@ condensed series summaries instead of full per-patch history.
   (#2463).** Registered as sync + async builtins, method-dispatched
   on lists (`xs.take_while(...)`), and signed up in the parser
   builtin signature table so the typechecker can reason about them.
+- **`release-harn` is now a first-class embedded skill (#2463).**
+  `harn skills list` and `harn skills get release-harn --full`
+  resolve the merge-queue-safe release workflow alongside
+  `harn-agent` / `harn-language` / `harn-providers` / etc. The body
+  documents the one-PR-carries-everything shape, recovery entry
+  points (`release_ship.sh --finalize`, `gh workflow run
+  publish-release.yml`), and the hard rules around never pushing to
+  a PR already in the merge queue. Previously the workflow was
+  Claude Code session-skill-only and invisible to direct CLI users.
+- **Provider catalog refresh schema carries v0.8.42 fields (#2463).**
+  `observation()` in `scripts/provider_catalog_refresh.harn` now
+  threads `benchmarks`, `strengths`, and `open_weight` through the
+  refresh pipeline so a future live source adapter
+  (`artificialanalysis.ai`, `swebench.com`) can refresh them
+  alongside pricing and context window. Existing adapters that
+  don't populate the new fields keep working — the helper reads
+  them through `fields?.<key>` and stores nil when absent.
 
 ### Changed
 
