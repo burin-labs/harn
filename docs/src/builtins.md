@@ -1638,7 +1638,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
-| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, retry_after_ms?} or nil}`. `error.category` is one of `ErrorCategory`'s canonical strings (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`, `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`, `"circuit_open"`, `"budget_exceeded"`, `"tool_error"`, `"tool_rejected"`, `"egress_blocked"`, `"cancelled"`, `"generic"`) |
+| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of `ErrorCategory`'s canonical strings (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`, `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`, `"circuit_open"`, `"budget_exceeded"`, `"tool_error"`, `"tool_rejected"`, `"egress_blocked"`, `"cancelled"`, `"generic"`) |
 | `llm_stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, finish_reason}>`; dropping the stream cancels the background request. Uses the same options as `llm_call`; the `stream` option remains the transport toggle |
 | `with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `llm_call` |
@@ -1701,7 +1701,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
 | `tiktoken_tokenizer_info(model)` | model: string | dict | Return `{model, model_family, source, exact, known_model_family, encoder}` for the encoder or heuristic fallback used by a model ID |
-| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message}` (short-circuits the call and surfaces as `VmError::CategorizedError` — useful for testing `llm_call_safe` envelopes and `with_rate_limit` retry loops) |
+| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}` (short-circuits the call and surfaces the same structured error dict as live provider failures — useful for testing `llm_call_safe` envelopes and retry loops) |
 | `llm_mock_calls()` | — | list | Return list of `{messages, system, tools}` for all calls made to the mock provider |
 | `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
 
@@ -1747,6 +1747,7 @@ llm_mock({text: "step 2", match: "*planner*", consume_match: true})
 // `try { ... } catch`, `llm_call_safe`, and `with_rate_limit` all see
 // it the same way they would a live provider failure.
 llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
+llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
 
 // Inspect what was sent
 let calls = llm_mock_calls()

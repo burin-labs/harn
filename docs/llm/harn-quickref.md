@@ -3389,7 +3389,7 @@ without string-sniffing:
 try {
   let r = llm_call(user_prompt, nil, opts)
 } catch (e) {
-  // e is {kind, reason, category, message, retry_after_ms?, provider, model}
+  // e is {kind, reason, category, message, status?, retry_after_ms?, provider, model}
   if e.kind == "transient" && e.reason == "rate_limit" {
     sleep(e.retry_after_ms ?? 1000)
     continue
@@ -3447,8 +3447,10 @@ terminal reasons are `"auth_failure"`, `"context_overflow"`,
 `"unknown"`. `llm_call` and `agent_loop` spend their retry budget only
 when `kind == "transient"`.
 
-Pair with `llm_mock({error: {category, message, retry_after_ms?}})` to
-write deterministic tests for either helper's error path:
+Pair with `llm_mock({error: {category, message, retry_after_ms?}})` or
+the provider-envelope form
+`llm_mock({error: {status, kind, reason?, message?, retry_after_ms?}})`
+to write deterministic tests for either helper's error path:
 
 ```harn
 llm_mock({error: {category: "rate_limit", message: "429", retry_after_ms: 2500}})
@@ -3465,6 +3467,13 @@ llm_mock({error: {category: "rate_limit", message: "429"}})
 let r = llm_call_safe("hi", nil, {provider: "mock", llm_retries: 0})
 assert(!r.ok)
 assert(r.error.category == "rate_limit")
+
+llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+let recovered = llm_call_safe("hi", nil, {provider: "mock"})
+assert(!recovered.ok)
+assert(recovered.error.status == 503)
+assert(recovered.error.kind == "transient")
+assert(recovered.error.reason == "upstream_unavailable")
 ```
 
 ## Composable LLM callers

@@ -6,8 +6,7 @@
 
 use std::path::Path;
 
-use crate::llm::mock::{LlmMock, MockError};
-use crate::value::ErrorCategory;
+use crate::llm::mock::{self, LlmMock, MockError};
 
 /// Parse a JSONL fixture file into a vector of [`LlmMock`] entries.
 /// Empty lines are skipped; every other line must be a JSON object.
@@ -184,13 +183,36 @@ pub fn serialize_llm_mock(mock: LlmMock) -> Result<String, String> {
         );
     }
     if let Some(error) = mock.error {
-        object.insert(
-            "error".to_string(),
-            serde_json::json!({
-                "category": error.category.as_str(),
-                "message": error.message,
-            }),
+        let mut error_object = serde_json::Map::new();
+        error_object.insert(
+            "category".to_string(),
+            serde_json::Value::String(error.category.as_str().to_string()),
         );
+        if !error.message.is_empty() {
+            error_object.insert(
+                "message".to_string(),
+                serde_json::Value::String(error.message),
+            );
+        }
+        if let Some(status) = error.status {
+            error_object.insert(
+                "status".to_string(),
+                serde_json::Value::Number(status.into()),
+            );
+        }
+        if let Some(kind) = error.kind {
+            error_object.insert("kind".to_string(), serde_json::Value::String(kind));
+        }
+        if let Some(reason) = error.reason {
+            error_object.insert("reason".to_string(), serde_json::Value::String(reason));
+        }
+        if let Some(retry_after_ms) = error.retry_after_ms {
+            error_object.insert(
+                "retry_after_ms".to_string(),
+                serde_json::Value::Number(retry_after_ms.into()),
+            );
+        }
+        object.insert("error".to_string(), serde_json::Value::Object(error_object));
     }
     serde_json::to_string(&serde_json::Value::Object(object))
         .map_err(|error| format!("failed to serialize recorded fixture: {error}"))
@@ -241,21 +263,53 @@ fn parse_llm_mock_error(value: Option<&serde_json::Value>) -> Result<Option<Mock
         return Ok(None);
     }
     let object = value.as_object().ok_or_else(|| {
-        "error must be an object {category, message, retry_after_ms?}".to_string()
+        "error must be an object {category?, message?, status?, kind?, reason?, retry_after_ms?}"
+            .to_string()
     })?;
-    let category_str = object
+    let category = object
         .get("category")
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| "error.category is required".to_string())?;
-    let category = ErrorCategory::parse(category_str);
-    if category.as_str() != category_str {
-        return Err(format!("unknown error category `{category_str}`"));
-    }
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "error.category must be a string".to_string())
+        })
+        .transpose()?;
     let message = object
         .get("message")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string();
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "error.message must be a string".to_string())
+        })
+        .transpose()?;
+    let status = match object.get("status") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Number(n)) => match n.as_i64() {
+            Some(v) => Some(mock::validate_mock_error_status(v)?),
+            None => return Err("error.status must be an HTTP status code".to_string()),
+        },
+        Some(_) => return Err("error.status must be an HTTP status code".to_string()),
+    };
+    let kind = object
+        .get("kind")
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "error.kind must be a string".to_string())
+        })
+        .transpose()?;
+    let reason = object
+        .get("reason")
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "error.reason must be a string".to_string())
+        })
+        .transpose()?;
     let retry_after_ms = match object.get("retry_after_ms") {
         None | Some(serde_json::Value::Null) => None,
         Some(serde_json::Value::Number(n)) => match n.as_u64() {
@@ -264,11 +318,7 @@ fn parse_llm_mock_error(value: Option<&serde_json::Value>) -> Result<Option<Mock
         },
         Some(_) => return Err("error.retry_after_ms must be a non-negative integer".to_string()),
     };
-    Ok(Some(MockError {
-        category,
-        message,
-        retry_after_ms,
-    }))
+    mock::build_mock_error(category, message, status, kind, reason, retry_after_ms).map(Some)
 }
 
 fn optional_string_field(
@@ -336,6 +386,72 @@ mod tests {
         match result {
             Err(err) => assert!(err.contains("unknown error category"), "{err}"),
             Ok(_) => panic!("expected parse failure for unknown error category"),
+        }
+    }
+
+    #[test]
+    fn parses_explicit_generic_error_category() {
+        let mock = parse_llm_mock_value(&serde_json::json!({
+            "error": { "category": "generic", "message": "x" }
+        }))
+        .expect("parse generic error");
+        let error = mock.error.expect("error");
+        assert_eq!(error.category.as_str(), "generic");
+        assert_eq!(error.message, "x");
+    }
+
+    #[test]
+    fn parses_provider_error_envelope() {
+        let mock = parse_llm_mock_value(&serde_json::json!({
+            "error": {
+                "status": 503,
+                "kind": "transient",
+                "reason": "upstream_unavailable",
+                "message": "upstream unavailable",
+                "retry_after_ms": 250
+            }
+        }))
+        .expect("parse provider envelope");
+        let error = mock.error.expect("error");
+        assert_eq!(error.category.as_str(), "overloaded");
+        assert_eq!(error.status, Some(503));
+        assert_eq!(error.kind.as_deref(), Some("transient"));
+        assert_eq!(error.reason.as_deref(), Some("upstream_unavailable"));
+        assert_eq!(error.retry_after_ms, Some(250));
+    }
+
+    #[test]
+    fn roundtrip_preserves_provider_error_envelope() {
+        let mock = parse_llm_mock_value(&serde_json::json!({
+            "match": "*retry*",
+            "error": {
+                "status": 503,
+                "kind": "transient",
+                "reason": "upstream_unavailable",
+                "retry_after_ms": 250
+            }
+        }))
+        .expect("parse provider envelope");
+        let line = serialize_llm_mock(mock).expect("serialize");
+        let value: serde_json::Value = serde_json::from_str(&line).expect("reparse json");
+        let reparsed = parse_llm_mock_value(&value).expect("reparse mock");
+        let error = reparsed.error.expect("error");
+        assert_eq!(reparsed.match_pattern.as_deref(), Some("*retry*"));
+        assert_eq!(error.category.as_str(), "overloaded");
+        assert_eq!(error.status, Some(503));
+        assert_eq!(error.kind.as_deref(), Some("transient"));
+        assert_eq!(error.reason.as_deref(), Some("upstream_unavailable"));
+        assert_eq!(error.retry_after_ms, Some(250));
+    }
+
+    #[test]
+    fn parse_rejects_unknown_error_kind() {
+        let result = parse_llm_mock_value(&serde_json::json!({
+            "error": { "status": 503, "kind": "maybe" }
+        }));
+        match result {
+            Err(err) => assert!(err.contains("unknown error kind"), "{err}"),
+            Ok(_) => panic!("expected parse failure for unknown error kind"),
         }
     }
 }

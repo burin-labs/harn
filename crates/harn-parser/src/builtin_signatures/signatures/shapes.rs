@@ -765,6 +765,7 @@ pub(crate) const LLM_CALL_ERROR: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("kind", TY_STRING),
     ShapeFieldDescriptor::new("reason", TY_STRING),
     ShapeFieldDescriptor::new("message", TY_STRING),
+    ShapeFieldDescriptor::optional("status", TY_INT),
     ShapeFieldDescriptor::optional("retry_after_ms", TY_INT),
     ShapeFieldDescriptor::optional("provider", TY_STRING),
     ShapeFieldDescriptor::optional("model", TY_STRING),

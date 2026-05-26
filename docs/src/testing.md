@@ -223,6 +223,7 @@ infrastructure from a JSONL fixture file:
 {"text":"PLAN: find the middleware module first","model":"fixture-model"}
 {"match":"*hello*","text":"matched","model":"fixture-model"}
 {"match":"*","error":{"category":"rate_limit","message":"fake rate limit"}}
+{"match":"*retry*","error":{"status":503,"kind":"transient","reason":"upstream_unavailable"}}
 ```
 
 ```bash

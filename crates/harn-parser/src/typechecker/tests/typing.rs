@@ -1237,6 +1237,7 @@ fn test_structured_stdlib_return_shapes_allow_documented_field_access() {
   let ok: bool = safe.ok
   let safe_text: string | nil = safe.response?.text
   let safe_error: string | nil = safe.error?.message
+  let safe_status: int | nil = safe.error?.status
 
   let completion = llm_completion("prefix", "suffix", "system")
   let stop: string | nil = completion.stop_reason

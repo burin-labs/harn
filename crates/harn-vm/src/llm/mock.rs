@@ -1,9 +1,10 @@
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use super::api::{LlmResult, ProviderTelemetry};
 use crate::orchestration::ToolCallRecord;
-use crate::value::{ErrorCategory, VmError};
+use crate::value::{ErrorCategory, VmError, VmValue};
 
 /// LLM replay mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,12 +29,144 @@ enum CliLlmMockMode {
 pub struct MockError {
     pub category: ErrorCategory,
     pub message: String,
-    /// Optional hint echoed into the error message as a synthetic
-    /// `retry-after:` header so the existing `extract_retry_after_ms`
-    /// parser recovers it — matches how real provider errors embed
-    /// the value. Lets tests assert that `e.retry_after_ms` flows
-    /// end-to-end on the thrown dict.
+    pub status: Option<u16>,
+    pub kind: Option<String>,
+    pub reason: Option<String>,
+    /// Optional retry hint. Provider-envelope mocks put this directly
+    /// on the thrown dict; legacy category-only mocks embed it in the
+    /// message so the live-provider parser path still exercises the
+    /// same extraction code.
     pub retry_after_ms: Option<u64>,
+}
+
+impl MockError {
+    fn has_provider_envelope(&self) -> bool {
+        self.status.is_some() || self.kind.is_some() || self.reason.is_some()
+    }
+}
+
+pub(crate) fn build_mock_error(
+    category: Option<String>,
+    message: Option<String>,
+    status: Option<u16>,
+    kind: Option<String>,
+    reason: Option<String>,
+    retry_after_ms: Option<u64>,
+) -> Result<MockError, String> {
+    if retry_after_ms.is_some_and(|ms| ms > i64::MAX as u64) {
+        return Err("error.retry_after_ms must fit in a signed 64-bit integer".to_string());
+    }
+    let kind = match kind {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            if super::api::LlmErrorKind::parse(&normalized).is_none() {
+                return Err(format!("unknown error kind `{value}`"));
+            }
+            Some(normalized)
+        }
+        None => None,
+    };
+    let reason = reason.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    let category_was_provided = category.is_some();
+    let category = match category {
+        Some(value) if value.trim().is_empty() => {
+            return Err("error.category must not be empty".to_string());
+        }
+        Some(value) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            let category = ErrorCategory::parse(&normalized);
+            if category.as_str() != normalized {
+                return Err(format!("unknown error category `{value}`"));
+            }
+            category
+        }
+        None => infer_mock_error_category(status, kind.as_deref(), reason.as_deref()),
+    };
+    if !category_was_provided && kind.is_none() && status.is_none() && reason.is_none() {
+        return Err(
+            "error.category is required unless error.status, error.kind, or error.reason is set"
+                .to_string(),
+        );
+    }
+    Ok(MockError {
+        category,
+        message: message.unwrap_or_else(|| {
+            default_mock_error_message(status, kind.as_deref(), reason.as_deref())
+        }),
+        status,
+        kind,
+        reason,
+        retry_after_ms,
+    })
+}
+
+pub(crate) fn validate_mock_error_status(status: i64) -> Result<u16, String> {
+    let status = u16::try_from(status)
+        .map_err(|_| "error.status must be an HTTP status code".to_string())?;
+    reqwest::StatusCode::from_u16(status)
+        .map_err(|_| "error.status must be an HTTP status code".to_string())?;
+    Ok(status)
+}
+
+fn infer_mock_error_category(
+    status: Option<u16>,
+    kind: Option<&str>,
+    reason: Option<&str>,
+) -> ErrorCategory {
+    if let Some(status) = status {
+        match status {
+            401 | 403 => return ErrorCategory::Auth,
+            404 | 410 => return ErrorCategory::NotFound,
+            408 | 504 | 522 | 524 => return ErrorCategory::Timeout,
+            429 => return ErrorCategory::RateLimit,
+            503 | 529 => return ErrorCategory::Overloaded,
+            500 | 502 => return ErrorCategory::ServerError,
+            _ => {}
+        }
+    }
+    if let Some(reason) = reason {
+        match reason {
+            "rate_limit" => return ErrorCategory::RateLimit,
+            "timeout" => return ErrorCategory::Timeout,
+            "network_error" | "transient_network" => return ErrorCategory::TransientNetwork,
+            "server_error" | "provider_error" | "provider_5xx" | "upstream_unavailable" => {
+                return ErrorCategory::ServerError;
+            }
+            "auth_failure" => return ErrorCategory::Auth,
+            "model_unavailable" => return ErrorCategory::NotFound,
+            _ => {}
+        }
+    }
+    if kind == Some("transient") {
+        return ErrorCategory::ServerError;
+    }
+    ErrorCategory::Generic
+}
+
+fn default_mock_error_message(
+    status: Option<u16>,
+    kind: Option<&str>,
+    reason: Option<&str>,
+) -> String {
+    match (status, kind, reason) {
+        (Some(status), Some(kind), Some(reason)) => {
+            format!("HTTP {status} mock LLM error ({kind}/{reason})")
+        }
+        (Some(status), _, Some(reason)) => format!("HTTP {status} mock LLM error ({reason})"),
+        (Some(status), _, _) => format!("HTTP {status} mock LLM error"),
+        (None, Some(kind), Some(reason)) => format!("mock LLM error ({kind}/{reason})"),
+        (None, Some(kind), None) => format!("mock LLM error ({kind})"),
+        (None, None, Some(reason)) => format!("mock LLM error ({reason})"),
+        (None, None, None) => String::new(),
+    }
 }
 
 #[derive(Clone)]
@@ -379,27 +512,66 @@ fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
 /// provider path would have raised, so classification, retry, and
 /// `error_category` all behave identically to a real failure.
 fn mock_error_to_vm_error(err: &MockError) -> VmError {
-    // Embed `retry_after_ms` as a synthetic `retry-after:` header on
-    // the message so `agent_observe::extract_retry_after_ms` — the
-    // same parser that handles real HTTP 429s — surfaces the value
-    // on the caller's thrown dict. Keeps the mock path byte-for-byte
-    // compatible with a real rate-limit response.
-    let message = match err.retry_after_ms {
-        Some(ms) => {
-            let secs = (ms as f64 / 1000.0).max(0.0);
-            let sep = if err.message.is_empty() || err.message.ends_with('\n') {
-                ""
-            } else {
-                "\n"
-            };
-            format!("{}{sep}retry-after: {secs}\n", err.message)
+    let message = mock_error_message(err);
+    if err.has_provider_envelope() {
+        let classified = super::api::classify_llm_error(err.category.clone(), &message);
+        let mut dict = BTreeMap::new();
+        dict.insert(
+            "category".to_string(),
+            VmValue::String(Rc::from(err.category.as_str())),
+        );
+        dict.insert(
+            "kind".to_string(),
+            VmValue::String(Rc::from(
+                err.kind
+                    .as_deref()
+                    .unwrap_or_else(|| classified.kind.as_str()),
+            )),
+        );
+        dict.insert(
+            "reason".to_string(),
+            VmValue::String(Rc::from(
+                err.reason
+                    .as_deref()
+                    .unwrap_or_else(|| classified.reason.as_str()),
+            )),
+        );
+        dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
+        if let Some(status) = err.status {
+            dict.insert("status".to_string(), VmValue::Int(i64::from(status)));
         }
-        None => err.message.clone(),
-    };
+        if let Some(retry_after_ms) = err.retry_after_ms {
+            dict.insert(
+                "retry_after_ms".to_string(),
+                VmValue::Int(retry_after_ms as i64),
+            );
+        }
+        return VmError::Thrown(VmValue::Dict(Rc::new(dict)));
+    }
+
     VmError::CategorizedError {
         message,
         category: err.category.clone(),
     }
+}
+
+fn mock_error_message(err: &MockError) -> String {
+    // Embed legacy category-only retry hints into the message so the
+    // same parser that handles live provider headers populates
+    // `retry_after_ms` on the final thrown dict.
+    let Some(ms) = err.retry_after_ms else {
+        return err.message.clone();
+    };
+    if err.has_provider_envelope() {
+        return err.message.clone();
+    }
+    let secs = (ms as f64 / 1000.0).max(0.0);
+    let sep = if err.message.is_empty() || err.message.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    format!("{}{sep}retry-after: {secs}\n", err.message)
 }
 
 /// Try to find and return a matching mock response. Returns
