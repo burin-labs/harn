@@ -280,26 +280,31 @@
         "DEEPSEEK_API_KEY"
       ],
       "recommended": {
-        "selector": "deepseek",
+        "selector": "deepseek:deepseek-v4-flash",
         "provider": "deepseek",
-        "model": "*",
-        "display_name": null,
-        "tool_format": "text",
+        "model": "deepseek-v4-flash",
+        "display_name": "DeepSeek V4 Flash",
+        "tool_format": "native",
         "harn_options": [
-          "provider = \"deepseek\""
+          "provider = \"deepseek\"",
+          "model = \"deepseek-v4-flash\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
-        "native_tools": false,
+        "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "auto",
+        "preferred_tool_format": "native",
         "tool_mode_parity": "unknown",
-        "structured_output_transport": "none",
-        "structured_output_mode": "none",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
         "streaming": true,
-        "reasoning_knobs": [],
-        "prompt_or_context_cache": false,
-        "usage_accounting_confidence": "provider_default"
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
       },
       "empirical": {
         "status": "not_recorded",
@@ -644,6 +649,58 @@
       "local_setup_notes": [
         "Set `LOCAL_LLM_BASE_URL` and either `LOCAL_LLM_MODEL` or an explicit Harn model selector, then run `harn provider-ready local`."
       ]
+    },
+    {
+      "id": "minimax",
+      "display_name": "Minimax",
+      "catalog_provider": "minimax",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "MINIMAX_API_KEY"
+      ],
+      "recommended": {
+        "selector": "minimax:MiniMax-M2.5-highspeed",
+        "provider": "minimax",
+        "model": "MiniMax-M2.5-highspeed",
+        "display_name": "MiniMax M2.5 (highspeed)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"minimax\"",
+          "model = \"MiniMax-M2.5-highspeed\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"delimited\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "delimited",
+        "structured_output_mode": "delimited",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
     },
     {
       "id": "mistral",
@@ -1098,6 +1155,59 @@
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "local_zero_cost"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "zai",
+      "display_name": "Zai",
+      "catalog_provider": "zai",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "ZAI_API_KEY",
+        "ZHIPU_API_KEY"
+      ],
+      "recommended": {
+        "selector": "zai:glm-5",
+        "provider": "zai",
+        "model": "glm-5",
+        "display_name": "GLM 5",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"zai\"",
+          "model = \"glm-5\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
       },
       "empirical": {
         "status": "not_recorded",

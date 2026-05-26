@@ -16,13 +16,14 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-*` | `native` | yes | yes | `none` / `xml_tagged` | none | no | `provider_default` | `not_recorded` |
 | `Cerebras` | OpenAI-compatible chat completions | `cerebras:gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
-| `Deepseek` | OpenAI-compatible chat completions | `deepseek` | `text` | no | yes | `none` / `none` | none | no | `provider_default` | `not_recorded` |
+| `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:*qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled` | yes | `medium` | `not_recorded` |
 | `Groq` | OpenAI-compatible chat completions | `groq` | `text` | no | yes | `none` / `none` | none | no | `provider_default` | `not_recorded` |
 | `Huggingface` | OpenAI-compatible chat completions | `huggingface:qwen/qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
 | `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `text` | no | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `medium` | `not_recorded` |
 | `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | no | yes | `none` / `delimited` | `enabled` | no | `low` | `not_recorded` |
+| `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | `high` | `not_recorded` |
 | `Mistral via OpenRouter` | OpenAI-compatible chat completions through OpenRouter | `openrouter:mistralai/mistral-small-2603` | `native` | yes | yes | `native` / `native_json` | none | yes | `medium` | `not_recorded` |
 | `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6-27b` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `medium` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | `high` | `not_recorded` |
@@ -32,6 +33,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Together` | OpenAI-compatible chat completions | `together:Qwen/Qwen3-Coder-Next-FP8` | `native` | yes | yes | `native` / `delimited` | none | no | `high` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | `local_zero_cost` | `not_recorded` |
+| `Zai` | OpenAI-compatible chat completions | `zai:glm-5` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 
 ## Recommended options
 
