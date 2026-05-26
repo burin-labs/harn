@@ -284,3 +284,109 @@ pub fn key_required_adapter(env, config) {
   let augmented = result.run + {requires_key: true, key_envs: key_envs}
   return {run: augmented, observations: result.observations}
 }
+
+/**
+ * Adapter: artificialanalysis.ai per-model benchmark page.
+ *
+ * Pulls AA's "intelligence" / SWE-bench Verified / SWE-bench Pro
+ * scores when `--live` runs. The page renders the numbers via
+ * `data-aa-intelligence-index` / `data-aa-swe-bench-verified` /
+ * `data-aa-swe-bench-pro` attributes that the HTML scraper extracts.
+ *
+ * config keys:
+ *   id          — `aa-<model_slug>` identifier for the run row
+ *   provider    — provider whose row this benchmark belongs to
+ *   model_id    — catalog model id to attribute the benchmark to
+ *   source_url  — full https://artificialanalysis.ai/models/<slug> URL
+ *
+ * Output: one observation with `benchmarks: {aa_intelligence_index?,
+ * swe_bench_verified?, swe_bench_pro?}` populated from whichever
+ * numeric attributes the page exposed at fetch time. Pricing and
+ * context window are deliberately NOT touched — the AA page is a
+ * secondary source for those (provider pricing pages are
+ * authoritative), so this adapter restricts itself to the benchmark
+ * surface to avoid spurious drift.
+ */
+pub fn artificialanalysis_adapter(env, config) {
+  let url = config.source_url
+  let response = web_fetch(url, env?.http_options ?? {})
+  if !response.ok {
+    return {run: __fetch_failure_run(config.id, "html", "aggregator", url, response), observations: []}
+  }
+  let doc = web_parse_html(response.body ?? "")
+  let benchmarks = __aa_extract_benchmarks(doc)
+  if len(benchmarks) == 0 {
+    return {
+      run: __build_run(
+        config.id,
+        "html",
+        "aggregator",
+        url,
+        "ok",
+        {
+          fetched_at: response.fetched_at,
+          not_modified: response?.not_modified ?? false,
+          reason: "no benchmark attributes found",
+        },
+      ),
+      observations: [],
+    }
+  }
+  let provenance = {
+    source_url: url,
+    source_kind: "html",
+    source_owner: "aggregator",
+    observed_at: env.observed_at,
+    fetched_at: response.fetched_at,
+    confidence: "medium",
+    requires_key: false,
+    terms_notes: "Benchmarks are published-snapshot at fetch time; AA refreshes monthly.",
+  }
+  let obs = observation(config.provider, config.model_id, {benchmarks: benchmarks}, provenance)
+  return {
+    run: __build_run(
+      config.id,
+      "html",
+      "aggregator",
+      url,
+      "ok",
+      {fetched_at: response.fetched_at, not_modified: response?.not_modified ?? false},
+    ),
+    observations: [obs],
+  }
+}
+
+fn __aa_extract_benchmarks(doc) {
+  // The AA page uses data-* attributes on the model overview block.
+  // We accept partial matches (any single numeric attribute is enough)
+  // so the adapter still produces observations when only one of the
+  // three benchmark surfaces is published for a given model.
+  var out = {}
+  let intel_text = doc.attr("[data-aa-intelligence-index]", "data-aa-intelligence-index")
+  let intel = __aa_to_float(intel_text)
+  if intel != nil {
+    out = out + {aa_intelligence_index: intel}
+  }
+  let verified_text = doc.attr("[data-aa-swe-bench-verified]", "data-aa-swe-bench-verified")
+  let verified = __aa_to_float(verified_text)
+  if verified != nil {
+    out = out + {swe_bench_verified: verified}
+  }
+  let pro_text = doc.attr("[data-aa-swe-bench-pro]", "data-aa-swe-bench-pro")
+  let pro = __aa_to_float(pro_text)
+  if pro != nil {
+    out = out + {swe_bench_pro: pro}
+  }
+  return out
+}
+
+fn __aa_to_float(text) {
+  if text == nil {
+    return nil
+  }
+  let stripped = regex_replace("[^0-9.\\-]", "", to_string(text))
+  if stripped == "" || stripped == "-" {
+    return nil
+  }
+  return to_float(stripped)
+}
