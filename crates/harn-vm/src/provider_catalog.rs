@@ -1172,6 +1172,10 @@ export interface HarnCatalogModel {
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
+  tier: "small" | "mid" | "frontier" | "reasoning"
+  open_weight?: boolean
+  strengths?: string[]
+  benchmarks?: Record<string, number>
 }
 
 export interface HarnToolEmpiricalParity {
@@ -1397,6 +1401,15 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let availability: String
     public let qualityTags: [String]
     public let capabilityTags: [String]
+    /// Popular-consensus tier label: "small" | "mid" | "frontier" | "reasoning".
+    public let tier: String
+    /// True when weights are downloadable / self-hostable; nil when the
+    /// catalog row predates the field.
+    public let openWeight: Bool?
+    /// Workload-shaped strength tags (`coding`, `summarization`, `vision`, ...).
+    public let strengths: [String]
+    /// Public benchmark numbers keyed by `snake_case` identifier.
+    public let benchmarks: [String: Double]
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1417,6 +1430,36 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case availability
         case qualityTags = "quality_tags"
         case capabilityTags = "capability_tags"
+        case tier
+        case openWeight = "open_weight"
+        case strengths
+        case benchmarks
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        provider = try container.decode(String.self, forKey: .provider)
+        aliases = try container.decode([String].self, forKey: .aliases)
+        contextWindow = try container.decode(Int.self, forKey: .contextWindow)
+        runtimeContextWindow = try container.decodeIfPresent(Int.self, forKey: .runtimeContextWindow)
+        streamTimeout = try container.decodeIfPresent(Double.self, forKey: .streamTimeout)
+        modalities = try container.decode(HarnModelModalities.self, forKey: .modalities)
+        toolSupport = try container.decode(HarnModelToolSupport.self, forKey: .toolSupport)
+        structuredOutput = try container.decode(String.self, forKey: .structuredOutput)
+        formatPreferences = try container.decode(HarnModelFormatPreferences.self, forKey: .formatPreferences)
+        reasoning = try container.decode(HarnModelReasoning.self, forKey: .reasoning)
+        promptCache = try container.decode(Bool.self, forKey: .promptCache)
+        pricing = try container.decodeIfPresent(HarnModelPricing.self, forKey: .pricing)
+        deprecation = try container.decode(HarnModelDeprecation.self, forKey: .deprecation)
+        availability = try container.decode(String.self, forKey: .availability)
+        qualityTags = try container.decode([String].self, forKey: .qualityTags)
+        capabilityTags = try container.decode([String].self, forKey: .capabilityTags)
+        tier = try container.decode(String.self, forKey: .tier)
+        openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
+        strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
+        benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
     }
 }
 

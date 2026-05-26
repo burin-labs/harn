@@ -100,6 +100,10 @@ export interface HarnCatalogModel {
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
+  tier: "small" | "mid" | "frontier" | "reasoning"
+  open_weight?: boolean
+  strengths?: string[]
+  benchmarks?: Record<string, number>
 }
 
 export interface HarnToolEmpiricalParity {
