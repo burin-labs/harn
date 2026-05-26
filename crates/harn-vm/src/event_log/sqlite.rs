@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use futures::stream::BoxStream;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use super::util::{
     event_id_to_sqlite_i64, now_ms, prepare_event_after, sqlite_i64_to_event_id,
@@ -77,6 +77,22 @@ impl SqliteEventLog {
                 );",
             )
             .map_err(|error| LogError::Sqlite(format!("event log schema error: {error}")))?;
+        Ok(Self {
+            path,
+            connection: Mutex::new(connection),
+            broadcasts: BroadcastMap::default(),
+            queue_depth: queue_depth.max(1),
+        })
+    }
+
+    pub fn open_read_only(path: PathBuf, queue_depth: usize) -> Result<Self, LogError> {
+        let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| {
+                LogError::Sqlite(format!("event log read-only open error: {error}"))
+            })?;
+        connection
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| LogError::Sqlite(format!("event log busy-timeout error: {error}")))?;
         Ok(Self {
             path,
             connection: Mutex::new(connection),

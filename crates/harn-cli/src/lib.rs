@@ -1122,13 +1122,9 @@ async fn async_main() {
         },
         Command::Session(args) => commands::session::run(args),
         Command::Replay(args) => {
-            if args.json {
-                let exit = commands::replay::run_json(&args.path);
-                if exit != 0 {
-                    process::exit(exit);
-                }
-            } else {
-                replay_run_record(&args.path);
+            let exit = commands::replay::run(args);
+            if exit != 0 {
+                process::exit(exit);
             }
         }
         Command::Eval(args) => match args.command {
@@ -2197,58 +2193,6 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
     if let Some(compare_path) = compare {
         let baseline = load_run_record_or_exit(Path::new(compare_path));
         print_run_diff(&harn_vm::orchestration::diff_run_records(&baseline, &run));
-    }
-}
-
-fn replay_run_record(path: &str) {
-    let run = load_run_record_or_exit(Path::new(path));
-    println!("Replay: {}", run.id);
-    for stage in &run.stages {
-        println!(
-            "[{}] status={} outcome={} branch={}",
-            stage.node_id,
-            stage.status,
-            stage.outcome,
-            stage.branch.clone().unwrap_or_else(|| "-".to_string())
-        );
-        if let Some(text) = &stage.visible_text {
-            println!("  visible: {text}");
-        }
-        if let Some(verification) = &stage.verification {
-            println!("  verification: {verification}");
-        }
-    }
-    if let Some(transcript) = &run.transcript {
-        println!(
-            "Transcript events persisted: {}",
-            transcript["events"]
-                .as_array()
-                .map(|v| v.len())
-                .unwrap_or(0)
-        );
-    }
-    let fixture = run
-        .replay_fixture
-        .clone()
-        .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(&run));
-    let report = harn_vm::orchestration::evaluate_run_against_fixture(&run, &fixture);
-    println!(
-        "Embedded replay fixture: {}",
-        if report.pass { "PASS" } else { "FAIL" }
-    );
-    for transition in &run.transitions {
-        println!(
-            "transition {} -> {} ({})",
-            transition
-                .from_node_id
-                .clone()
-                .unwrap_or_else(|| "start".to_string()),
-            transition.to_node_id,
-            transition
-                .branch
-                .clone()
-                .unwrap_or_else(|| "default".to_string())
-        );
     }
 }
 
