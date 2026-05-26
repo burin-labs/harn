@@ -1885,9 +1885,7 @@ mod tests {
         chunk.emit_call_builtin(BuiltinId::from_name("any"), 0, 1, 1);
         assert!(chunk.inline_cache_slot(0).is_some(), "Op::Call IC slot");
         assert!(
-            chunk
-                .inline_cache_slot(call_builtin_offset)
-                .is_some(),
+            chunk.inline_cache_slot(call_builtin_offset).is_some(),
             "Op::CallBuiltin IC slot"
         );
     }
@@ -1952,10 +1950,7 @@ mod tests {
         for offset in 0..chunk.code.len() {
             let from_map = chunk.inline_cache_slots.get(&offset).copied();
             let from_index = chunk.inline_cache_slot(offset);
-            assert_eq!(
-                from_index, from_map,
-                "parity broken at offset {offset}"
-            );
+            assert_eq!(from_index, from_map, "parity broken at offset {offset}");
         }
     }
 }
