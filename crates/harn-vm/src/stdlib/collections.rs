@@ -59,6 +59,30 @@ fn positive_usize_arg(args: &[VmValue], index: usize, default: usize, _builtin: 
         .max(1) as usize
 }
 
+/// Coerce a discriminator value (returned by a `group_by` / `count_by`
+/// callback) into the canonical dict-key string. Strict-string only:
+/// dict keys are intrinsically `String`, and coercing other types via
+/// `display()` silently merged collidable buckets (`Int(1)` and
+/// `String("1")` both rendered `"1"`). Callers explicitly project to
+/// string via `to_string(...)` so the discriminator is unambiguous at
+/// the call site.
+///
+/// Exposed at crate scope so the method-call path in
+/// `vm/methods/list.rs` enforces the same contract as the free
+/// builtin path here.
+pub(crate) fn string_discriminator(value: &VmValue, builtin: &str) -> Result<String, VmError> {
+    match value {
+        VmValue::String(s) => Ok((**s).to_string()),
+        VmValue::Nil => Err(VmError::TypeError(format!(
+            "{builtin}: callback returned nil; expected a string discriminator (wrap with to_string(...) if you intended a scalar)"
+        ))),
+        other => Err(VmError::TypeError(format!(
+            "{builtin}: callback must return a string discriminator, got {}; wrap with to_string(...) so the bucket key is unambiguous",
+            other.type_name()
+        ))),
+    }
+}
+
 pub(crate) fn register_collection_builtins(vm: &mut Vm) {
     vm.register_async_builtin("chunk", |args| async move {
         let items = list_arg(&args, "chunk")?;
@@ -102,7 +126,8 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
         for item in items.iter() {
             let key = vm.call_callable_one(callable, item).await?;
-            groups.entry(key.display()).or_default().push(item.clone());
+            let bucket = string_discriminator(&key, "group_by")?;
+            groups.entry(bucket).or_default().push(item.clone());
         }
         Ok(VmValue::Dict(Rc::new(
             groups
@@ -250,7 +275,8 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         let mut counts: BTreeMap<String, i64> = BTreeMap::new();
         for item in items.iter() {
             let key = vm.call_callable_one(callable, item).await?;
-            *counts.entry(key.display()).or_insert(0) += 1;
+            let bucket = string_discriminator(&key, "count_by")?;
+            *counts.entry(bucket).or_insert(0) += 1;
         }
         Ok(VmValue::Dict(Rc::new(
             counts

@@ -1,3 +1,4 @@
+import { __judge_apply_llm_overrides, __judge_classify_verdict } from "std/agent/judge_internals"
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import {
@@ -75,19 +76,17 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     required: ["verdict"],
   }
   let base = opts?.llm_options ?? {}
-  var llm_opts = base
-    + {
-    model: judge_cfg?.model ?? opts?.model,
-    provider: judge_cfg?.provider ?? opts?.provider,
-    output_schema: schema,
-    session_id: payload.session_id,
-    system: system,
-  }
-  for key in ["temperature", "max_tokens", "top_p", "tool_format", "reasoning_effort"] {
-    if judge_cfg[key] != nil {
-      llm_opts[key] = judge_cfg[key]
-    }
-  }
+  let llm_opts = __judge_apply_llm_overrides(
+    base
+      + {
+      model: judge_cfg?.model ?? opts?.model,
+      provider: judge_cfg?.provider ?? opts?.provider,
+      output_schema: schema,
+      session_id: payload.session_id,
+      system: system,
+    },
+    judge_cfg,
+  )
   let started = harness.clock.monotonic_ms()
   let checkpoint = agent_typed_output_checkpoint("agent.completion_judge", user, schema, llm_opts)
   let duration_ms = harness.clock.monotonic_ms() - started
@@ -113,20 +112,18 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     }
   }
   let result = checkpoint.data
-  let verdict = lowercase(trim(to_string(result?.verdict ?? "continue")))
   let reasoning = result?.reasoning ?? ""
   let next_step = result?.next_step ?? ""
   let done_verdicts = ["done", "pass", "passed", "safe", "true", "yes", "yield", "yield_to_user", "complete", "completed"]
-  let outcome = if contains(done_verdicts, verdict) {
-    {vetoed: false}
-  } else {
-    let feedback = result?.next_step ?? result?.reasoning
-      ?? (judge_cfg?.feedback_fallback ?? "")
-    {vetoed: true, feedback: feedback}
-  }
+  let feedback_default = judge_cfg?.feedback_fallback ?? ""
+  let outcome = __judge_classify_verdict(
+    result?.verdict ?? "continue",
+    done_verdicts,
+    [next_step, reasoning],
+    feedback_default,
+  )
   return outcome
     + {
-    verdict: verdict,
     reasoning: reasoning,
     next_step: next_step,
     judge_duration_ms: duration_ms,

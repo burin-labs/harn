@@ -215,7 +215,7 @@ STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # but were historically outside the fmt-harn gate. Keeping them in the
 # gate avoids the "I edited persona X and pre-commit reformatted three
 # unrelated files" surprise from accumulated drift.
-EXTRA_HARN_DIRS := stdlib personas tests examples evals
+EXTRA_HARN_DIRS := personas tests examples evals
 
 fmt-harn-fix:
 	@echo "=== Formatting Harn files ==="

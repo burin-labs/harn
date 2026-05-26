@@ -667,11 +667,46 @@ fn strip_comments(source: &str) -> String {
     out
 }
 
+/// Stable digest over every embedded stdlib source. Folded into the
+/// user-file cache key so that bumping a stdlib module (changing its
+/// embedded `.harn` content) invalidates cached user bytecode that may
+/// reference stale function-pool layouts from a prior stdlib snapshot.
+/// `HARN_VERSION` already busts the cache across release bumps; this
+/// closes the same gap for within-version stdlib edits (a frequent
+/// pattern during local development).
+///
+/// Cached in a `OnceLock` because `STDLIB_SOURCES` is a static `const`
+/// slice — the digest is identical for the lifetime of the process.
+fn embedded_stdlib_digest() -> &'static [u8; 32] {
+    use std::sync::OnceLock;
+    static DIGEST: OnceLock<[u8; 32]> = OnceLock::new();
+    DIGEST.get_or_init(|| {
+        let mut entries: Vec<(&'static str, &'static str)> = harn_stdlib::STDLIB_SOURCES
+            .iter()
+            .map(|src| (src.module, src.source))
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        let mut hasher = Sha256::new();
+        for (module, source) in entries {
+            hasher.update(module.as_bytes());
+            hasher.update(b"\0");
+            hasher.update(source.as_bytes());
+            hasher.update(b"\0");
+        }
+        hasher.finalize().into()
+    })
+}
+
 /// Walk the user-import graph rooted at `source_path` and produce a
 /// stable hash of every transitively-reachable file. The hash is
 /// order-independent: each visited file is keyed by canonical path and
 /// emitted in sorted order, so reordering imports inside a file does
 /// not invalidate the cache while changing any file's content does.
+///
+/// Embedded stdlib content is folded into the hash too — `collect_user_imports`
+/// deliberately skips `std/*` paths (they resolve to in-binary sources, not
+/// disk files), so without this fold a stdlib edit between development
+/// builds would leave user-file caches pinned to a stale stdlib snapshot.
 fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
     let mut visited: std::collections::BTreeMap<PathBuf, ImportNode> =
         std::collections::BTreeMap::new();
@@ -720,6 +755,9 @@ fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
     }
 
     let mut hasher = Sha256::new();
+    hasher.update(b"stdlib-digest\0");
+    hasher.update(embedded_stdlib_digest());
+    hasher.update(b"\0");
     for (path, node) in &visited {
         hasher.update(path.to_string_lossy().as_bytes());
         hasher.update(b"\0");

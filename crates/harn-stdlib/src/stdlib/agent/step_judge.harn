@@ -1,3 +1,4 @@
+import { __judge_apply_llm_overrides, __judge_classify_verdict } from "std/agent/judge_internals"
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 import { step_judge_system_prompt, step_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
@@ -73,19 +74,17 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
   let user = step_judge_user_prompt(payload)
   let schema = __step_judge_schema()
   let base = opts?.llm_options ?? {}
-  var llm_opts = base
-    + {
-    model: judge_cfg?.model ?? opts?.model,
-    provider: judge_cfg?.provider ?? opts?.provider,
-    output_schema: schema,
-    session_id: payload.session_id,
-    system: system,
-  }
-  for key in ["temperature", "max_tokens", "top_p", "tool_format", "reasoning_effort"] {
-    if judge_cfg[key] != nil {
-      llm_opts[key] = judge_cfg[key]
-    }
-  }
+  let llm_opts = __judge_apply_llm_overrides(
+    base
+      + {
+      model: judge_cfg?.model ?? opts?.model,
+      provider: judge_cfg?.provider ?? opts?.provider,
+      output_schema: schema,
+      session_id: payload.session_id,
+      system: system,
+    },
+    judge_cfg,
+  )
   let started = harness.clock.monotonic_ms()
   let checkpoint = agent_typed_output_checkpoint("agent.step_judge", user, schema, llm_opts)
   let duration_ms = harness.clock.monotonic_ms() - started
@@ -115,26 +114,19 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
     }
   }
   let result = checkpoint.data
-  let verdict = lowercase(trim(to_string(result?.verdict ?? "revise")))
   let reasoning = result?.reasoning ?? ""
   let critique = result?.critique ?? ""
   let confidence = result?.confidence ?? 1.0
   let pass_verdicts = ["pass", "yes", "ok", "advance", "proceed", "approve"]
-  let outcome = if contains(pass_verdicts, verdict) {
-    {vetoed: false}
-  } else {
-    let feedback = if critique != "" {
-      critique
-    } else if reasoning != "" {
-      reasoning
-    } else {
-      judge_cfg?.feedback_fallback ?? "The previous response should be revised."
-    }
-    {vetoed: true, feedback: feedback}
-  }
+  let feedback_default = judge_cfg?.feedback_fallback ?? "The previous response should be revised."
+  let outcome = __judge_classify_verdict(
+    result?.verdict ?? "revise",
+    pass_verdicts,
+    [critique, reasoning],
+    feedback_default,
+  )
   return outcome
     + {
-    verdict: verdict,
     reasoning: reasoning,
     critique: critique,
     confidence: confidence,

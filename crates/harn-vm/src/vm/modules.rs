@@ -180,7 +180,19 @@ impl Vm {
                 let saved_handlers = std::mem::take(&mut self.exception_handlers);
                 let saved_iterators = std::mem::take(&mut self.iterators);
                 let saved_deadlines = std::mem::take(&mut self.deadlines);
+                // STEP_STACK / PERSONA_STACK are thread-locals shared with
+                // the calling frame. Emptying `self.frames` above means
+                // any `prune_below_frame(0)` triggered while the init
+                // chunk's bytecode runs — including the inevitable
+                // frame-pop prune at end-of-chunk — would wipe active
+                // steps owned by the *caller* (e.g., a `@step`-decorated
+                // function whose body lazily imports a module). Snapshot
+                // the persona/step context here and restore it after init
+                // so module loading is invisible to the step-tracking
+                // surface.
+                let active_context = crate::step_runtime::take_active_context();
                 let init_result = self.run_chunk(&fresh_init_chunk).await;
+                crate::step_runtime::restore_active_context(active_context);
                 init_env = std::mem::replace(&mut self.env, saved_env);
                 self.frames = saved_frames;
                 self.exception_handlers = saved_handlers;
