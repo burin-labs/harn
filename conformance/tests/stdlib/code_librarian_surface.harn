@@ -26,12 +26,12 @@ pipeline default() {
   __io_println(len(cy.rows) == 1 && cy.rows[0].path == "src/a.rs")
   __io_println(cy.overlay == nil)
   // 2) outline returns typed symbols + import edges for known files.
-  //    The `symbols` channel uses `outline_get` which is populated by
-  //    language-specific extractors; assert only on the known/path
-  //    shape so the test stays robust to extractor coverage.
+  //    Since #2458, the symbol-graph rebuild also populates the flat
+  //    `IndexedFile.symbols` list that `outline_get` returns, so the
+  //    corpus's two `pub fn`s show up here.
   let outline: LibrarianOutline = code_librarian_outline("src/a.rs")
   __io_println(outline.known && outline.path == "src/a.rs")
-  __io_println(type_of(outline.symbols) == "list")
+  __io_println(len(outline.symbols) >= 2)
   // 3) outline on an unknown path returns known=false (not a throw).
   let absent: LibrarianOutline = code_librarian_outline("src/does-not-exist.rs")
   __io_println(!absent.known && len(absent.symbols) == 0)
