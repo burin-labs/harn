@@ -143,36 +143,30 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
     });
 
-    // Optional error injection: {error: {category, message,
-    // retry_after_ms?}}. When present the mock short-circuits the
-    // provider call and surfaces as `VmError::CategorizedError`,
-    // making it observable via `error_category`, the `llm_call`
-    // thrown dict, and the `llm_call_safe` envelope.
+    // Optional error injection. Category-only mocks surface as
+    // categorized provider failures; provider-envelope mocks also keep
+    // status/kind/reason on the final thrown dict.
     let error = match config.get("error") {
         None | Some(VmValue::Nil) => None,
         Some(VmValue::Dict(err_dict)) => {
-            let category_str = err_dict
-                .get("category")
-                .map(|v| v.display())
-                .unwrap_or_default();
-            if category_str.is_empty() {
-                return Err(VmError::Runtime(
-                    "llm_mock: error.category is required".to_string(),
-                ));
-            }
-            let category = crate::value::ErrorCategory::parse(&category_str);
-            // Reject typos loudly: `parse` falls back to Generic on
-            // unknown input. Let `"generic"` through; anything else
-            // that fell back is a typo.
-            if category.as_str() != category_str {
-                return Err(VmError::Runtime(format!(
-                    "llm_mock: unknown error category `{category_str}`",
-                )));
-            }
-            let message = err_dict
-                .get("message")
-                .map(|v| v.display())
-                .unwrap_or_default();
+            let category = optional_display_field(err_dict, "category");
+            let message = optional_display_field(err_dict, "message");
+            let status = match err_dict.get("status") {
+                None | Some(VmValue::Nil) => None,
+                Some(value) => match value.as_int() {
+                    Some(n) => Some(
+                        mock::validate_mock_error_status(n)
+                            .map_err(|error| VmError::Runtime(format!("llm_mock: {error}")))?,
+                    ),
+                    None => {
+                        return Err(VmError::Runtime(
+                            "llm_mock: error.status must be an HTTP status code".to_string(),
+                        ));
+                    }
+                },
+            };
+            let kind = optional_display_field(err_dict, "kind");
+            let reason = optional_display_field(err_dict, "reason");
             let retry_after_ms = match err_dict.get("retry_after_ms") {
                 None | Some(VmValue::Nil) => None,
                 Some(v) => match v.as_int() {
@@ -184,15 +178,14 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
                     }
                 },
             };
-            Some(mock::MockError {
-                category,
-                message,
-                retry_after_ms,
-            })
+            Some(
+                mock::build_mock_error(category, message, status, kind, reason, retry_after_ms)
+                    .map_err(|error| VmError::Runtime(format!("llm_mock: {error}")))?,
+            )
         }
         _ => {
             return Err(VmError::Runtime(
-                "llm_mock: error must be a dict {category, message, retry_after_ms?}".to_string(),
+                "llm_mock: error must be a dict {category?, message?, status?, kind?, reason?, retry_after_ms?}".to_string(),
             ));
         }
     };
@@ -216,6 +209,16 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         error,
     });
     Ok(VmValue::Nil)
+}
+
+fn optional_display_field(
+    dict: &std::collections::BTreeMap<String, VmValue>,
+    key: &str,
+) -> Option<String> {
+    match dict.get(key) {
+        None | Some(VmValue::Nil) => None,
+        Some(value) => Some(value.display()),
+    }
 }
 
 fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

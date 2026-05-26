@@ -596,4 +596,48 @@ pipeline default(task) {
 
         assert!(output.contains("fixture replay"));
     }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn playground_replays_cli_llm_mock_error_envelopes() {
+        let _guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = tempfile::tempdir().unwrap();
+        let host = temp.path().join("host.harn");
+        let script = temp.path().join("pipeline.harn");
+        let fixtures = temp.path().join("fixtures.jsonl");
+        write_file(&host, "");
+        write_file(
+            &script,
+            r#"
+pipeline default(task) {
+  let first = llm_call_safe("first", nil, {provider: "mock", model: "mock-model"})
+  __io_println(first.ok)
+  __io_println(first.error.status)
+  __io_println(first.error.kind)
+  __io_println(first.error.reason)
+  let second = llm_call("second", nil, {provider: "mock", model: "mock-model"})
+  __io_println(second.text)
+}
+"#,
+        );
+        write_file(
+            &fixtures,
+            r#"{"error":{"status":503,"kind":"transient","reason":"upstream_unavailable"}}
+{"text":"recovered","tool_calls":[]}
+"#,
+        );
+
+        let output = execute_playground(&PlaygroundConfig {
+            host,
+            script,
+            task: String::new(),
+            llm: None,
+            llm_mock_mode: CliLlmMockMode::Replay {
+                fixture_path: fixtures,
+            },
+        })
+        .await
+        .unwrap();
+
+        assert!(output.contains("false\n503\ntransient\nupstream_unavailable\nrecovered"));
+    }
 }

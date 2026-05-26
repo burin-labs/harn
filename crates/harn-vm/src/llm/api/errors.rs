@@ -20,6 +20,14 @@ impl LlmErrorKind {
             Self::Terminal => "terminal",
         }
     }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "transient" => Some(Self::Transient),
+            "terminal" => Some(Self::Terminal),
+            _ => None,
+        }
+    }
 }
 
 /// Canonical reason within the LLM error taxonomy.

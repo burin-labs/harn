@@ -505,6 +505,10 @@ llm_mock({text: "I don't know.", match: "*unknown*"})
 llm_mock({text: "step 1", match: "*planner*", consume_match: true})
 llm_mock({text: "step 2", match: "*planner*", consume_match: true})
 
+// Provider-style error envelopes exercise the same catch/safe-call paths
+// as live provider failures.
+llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+
 // Inspect what was sent to the mock provider
 let calls = llm_mock_calls()
 // Each entry: {messages: [...], system: "..." or nil, tools: [...] or nil}
