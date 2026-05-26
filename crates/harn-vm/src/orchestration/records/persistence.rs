@@ -114,6 +114,8 @@ pub(super) fn read_topic_records(
 #[derive(Clone, Debug)]
 pub struct AgentSessionReplayEvent {
     pub event_id: EventId,
+    pub kind: String,
+    pub occurred_at_ms: i64,
     pub event: AgentEvent,
 }
 
@@ -123,6 +125,13 @@ pub async fn load_agent_session_replay_events(
     let Some(log) = active_event_log() else {
         return Ok(Vec::new());
     };
+    load_agent_session_replay_events_from_log(log.as_ref(), session_id).await
+}
+
+pub async fn load_agent_session_replay_events_from_log(
+    log: &AnyEventLog,
+    session_id: &str,
+) -> Result<Vec<AgentSessionReplayEvent>, VmError> {
     let topic = Topic::new(format!(
         "observability.agent_events.{}",
         sanitize_topic_component(session_id)
@@ -153,7 +162,12 @@ pub async fn load_agent_session_replay_events(
                 ))
             })?;
             if event.session_id() == session_id {
-                events.push(AgentSessionReplayEvent { event_id, event });
+                events.push(AgentSessionReplayEvent {
+                    event_id,
+                    kind: record.kind,
+                    occurred_at_ms: record.occurred_at_ms,
+                    event,
+                });
             }
         }
         if batch_len < 1024 {

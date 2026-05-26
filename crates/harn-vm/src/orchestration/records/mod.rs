@@ -19,8 +19,8 @@ pub use eval_pack::{
     normalize_eval_pack_manifest_value, normalize_eval_suite_manifest, replay_fixture_from_run,
 };
 pub use persistence::{
-    load_agent_session_replay_events, load_run_record, normalize_run_record, save_run_record,
-    AgentSessionReplayEvent,
+    load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,
+    normalize_run_record, save_run_record, AgentSessionReplayEvent,
 };
 pub use types::{
     tool_fixture_hash, ClarifyingQuestionEvalSpec, CompactionEventRecord, DaemonEventKindRecord,

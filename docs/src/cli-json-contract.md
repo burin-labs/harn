@@ -155,10 +155,22 @@ of whether they invoked `check` or `lint`.
 ### `harn replay --json`
 
 Loads a persisted run record and emits a structured per-stage summary
-plus the embedded replay-fixture verdict. `ok: false` with
-`error.code: "replay_fixture_failed"` indicates the fixture did not
-pass; the same envelope still includes the full `data` payload so
-callers can diff.
+plus the embedded replay-fixture verdict. `harn replay --fixture <path>`
+accepts either a run record or a `harn.orchestration.replay_trace.v1`
+fixture. `harn replay --session-id <id> --events-db <path>` reconstructs
+the same replayable run-record shape from the SQLite EventLog
+`observability.agent_events.<id>` topic.
+
+The default `--runs 1` response keeps the original single `ReplayReport`
+payload. When `--runs N` is greater than one, the response keeps
+`schemaVersion`, `ok`, `error`, and `warnings` at the top level and also
+emits top-level `reports`, `runs`, and `determinism` fields. `reports`
+contains one `ReplayReport` per replay read, `runs` contains the
+allowlist-normalized event sequences, and `determinism` reports the
+allowlist-stripped replay comparison. `ok: false` with `error.code:
+"replay_fixture_failed"` indicates at least one fixture verdict failed;
+`error.code: "replay_determinism_failed"` indicates the per-run event
+material diverged after applying the replay allowlist.
 
 ### `harn run --emit-summary-json`
 

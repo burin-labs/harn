@@ -10,12 +10,15 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
+use crate::agent_events::AgentEvent;
+use crate::event_log::sanitize_topic_component;
 use crate::orchestration::{
-    new_id, now_rfc3339, ReplayFixture, RunCheckpointRecord, RunHitlQuestionRecord, RunRecord,
-    RunTraceSpanRecord, RunTransitionRecord, ToolCallRecord,
+    new_id, now_rfc3339, AgentSessionReplayEvent, ReplayFixture, RunCheckpointRecord,
+    RunHitlQuestionRecord, RunRecord, RunTraceSpanRecord, RunTransitionRecord, ToolCallRecord,
 };
 use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
 use crate::workspace_anchor::{anchor_from_transcript_metadata_json, MountedRoot, WorkspaceAnchor};
@@ -339,6 +342,7 @@ pub enum SessionBundleError {
     InvalidType { path: String, expected: String },
     UnsafeSecretMarker { path: String, excerpt: String },
     MissingRunRecord,
+    MissingSessionEvents { session_id: String },
 }
 
 impl fmt::Display for SessionBundleError {
@@ -361,6 +365,10 @@ impl fmt::Display for SessionBundleError {
                 "session bundle contains an unsafe unredacted secret marker at {path}: {excerpt}"
             ),
             Self::MissingRunRecord => write!(f, "session bundle does not include an importable run record"),
+            Self::MissingSessionEvents { session_id } => write!(
+                f,
+                "event log does not contain replayable events for session_id {session_id:?}"
+            ),
         }
     }
 }
@@ -552,6 +560,234 @@ pub fn import_run_record_value(bundle: &SessionBundle) -> Result<JsonValue, Sess
         }));
     }
     Err(SessionBundleError::MissingRunRecord)
+}
+
+pub fn session_bundle_from_agent_session_events(
+    session_id: &str,
+    events: &[AgentSessionReplayEvent],
+) -> Result<SessionBundle, SessionBundleError> {
+    if events.is_empty() {
+        return Err(SessionBundleError::MissingSessionEvents {
+            session_id: session_id.to_string(),
+        });
+    }
+
+    let stable_id = sanitize_topic_component(session_id);
+    let started_at = rfc3339_from_epoch_ms(events[0].occurred_at_ms);
+    let finished_at = events.iter().rev().find_map(|entry| match &entry.event {
+        AgentEvent::SessionClosed { .. } => Some(rfc3339_from_epoch_ms(entry.occurred_at_ms)),
+        _ => None,
+    });
+    let status = events
+        .iter()
+        .rev()
+        .find_map(|entry| match &entry.event {
+            AgentEvent::SessionClosed { status, .. } if !status.is_empty() => Some(status.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "completed".to_string());
+    let run_id = session_id.to_string();
+    let workflow_id = "agent_session".to_string();
+    let created_at = finished_at.clone().unwrap_or_else(|| started_at.clone());
+    let transcript_events = transcript_events_from_agent_session(events)?;
+    let transcript_messages = transcript_messages_from_agent_session(events);
+    let mut transcript_metadata = BTreeMap::new();
+    transcript_metadata.insert("session_id".to_string(), json!(session_id));
+    transcript_metadata.insert(
+        "source".to_string(),
+        json!("events.sqlite observability.agent_events topic"),
+    );
+
+    let replay_fixture = ReplayFixture {
+        type_name: "replay_fixture".to_string(),
+        id: format!("fixture_from_session_{stable_id}"),
+        source_run_id: run_id.clone(),
+        workflow_id: workflow_id.clone(),
+        workflow_name: Some(format!("Agent session {session_id}")),
+        created_at: created_at.clone(),
+        eval_kind: Some("replay".to_string()),
+        expected_status: status.clone(),
+        ..ReplayFixture::default()
+    };
+
+    Ok(SessionBundle {
+        bundle_id: format!("bundle_from_session_{stable_id}"),
+        created_at,
+        producer: BundleProducer {
+            name: "harn".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            schema_id: SESSION_BUNDLE_SCHEMA_ID.to_string(),
+        },
+        source: BundleSource {
+            kind: "event_log_session".to_string(),
+            run_record_id: run_id,
+            workflow_id,
+            workflow_name: Some(format!("Agent session {session_id}")),
+            task: task_from_agent_session(events)
+                .unwrap_or_else(|| format!("Agent session {session_id}")),
+            status,
+            started_at,
+            finished_at,
+            ..BundleSource::default()
+        },
+        runtime: BundleRuntime {
+            harn_version: env!("CARGO_PKG_VERSION").to_string(),
+            ..BundleRuntime::default()
+        },
+        transcript: BundleTranscript {
+            sections: vec![BundleTranscriptSection {
+                id: "agent_events".to_string(),
+                label: "Agent event log".to_string(),
+                scope: "session".to_string(),
+                location: format!(
+                    "observability.agent_events.{}",
+                    sanitize_topic_component(session_id)
+                ),
+                summary: None,
+                messages: transcript_messages,
+                events: transcript_events,
+                assets: Vec::new(),
+                metadata: transcript_metadata,
+            }],
+        },
+        permissions: permissions_from_agent_session(events),
+        replay: BundleReplay {
+            replay_fixture: Some(replay_fixture),
+            event_log_pointers: vec![BundleEventLogPointer {
+                kind: "agent_events".to_string(),
+                topic: Some(format!(
+                    "observability.agent_events.{}",
+                    sanitize_topic_component(session_id)
+                )),
+                path: None,
+                location: "events.sqlite".to_string(),
+                available: true,
+            }],
+            deterministic_events: deterministic_events_from_agent_session(events)?,
+            ..BundleReplay::default()
+        },
+        ..SessionBundle::default()
+    })
+}
+
+pub fn import_run_record_from_agent_session_events(
+    session_id: &str,
+    events: &[AgentSessionReplayEvent],
+) -> Result<RunRecord, SessionBundleError> {
+    let bundle = session_bundle_from_agent_session_events(session_id, events)?;
+    let run_record = import_run_record_value(&bundle)?;
+    serde_json::from_value(run_record)
+        .map_err(|error| SessionBundleError::Decode(error.to_string()))
+}
+
+fn transcript_events_from_agent_session(
+    events: &[AgentSessionReplayEvent],
+) -> Result<Vec<JsonValue>, SessionBundleError> {
+    events
+        .iter()
+        .map(|entry| {
+            let event = serde_json::to_value(&entry.event)
+                .map_err(|error| SessionBundleError::Encode(error.to_string()))?;
+            Ok(json!({
+                "event_id": entry.event_id,
+                "kind": entry.kind,
+                "occurred_at_ms": entry.occurred_at_ms,
+                "event": event,
+            }))
+        })
+        .collect()
+}
+
+fn transcript_messages_from_agent_session(events: &[AgentSessionReplayEvent]) -> Vec<JsonValue> {
+    events
+        .iter()
+        .filter_map(|entry| match &entry.event {
+            AgentEvent::UserMessage { content, .. } => Some(json!({
+                "role": "user",
+                "content": content,
+            })),
+            AgentEvent::AgentMessageChunk { content, .. } if !content.is_empty() => Some(json!({
+                "role": "assistant",
+                "content": content,
+            })),
+            _ => None,
+        })
+        .collect()
+}
+
+fn permissions_from_agent_session(events: &[AgentSessionReplayEvent]) -> Vec<BundlePermission> {
+    let mut permissions = Vec::new();
+    for entry in events {
+        if let AgentEvent::HitlRequested {
+            request_id,
+            kind,
+            payload,
+            ..
+        } = &entry.event
+        {
+            permissions.push(BundlePermission {
+                kind: "hitl_question".to_string(),
+                source: "agent_events".to_string(),
+                request_id: Some(request_id.clone()),
+                agent: None,
+                payload: json!({
+                    "kind": kind,
+                    "payload": payload,
+                    "event_id": entry.event_id,
+                    "occurred_at_ms": entry.occurred_at_ms,
+                }),
+            });
+        }
+    }
+    permissions
+}
+
+fn deterministic_events_from_agent_session(
+    events: &[AgentSessionReplayEvent],
+) -> Result<Vec<BundleJsonEntry>, SessionBundleError> {
+    transcript_events_from_agent_session(events).map(|entries| {
+        entries
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| BundleJsonEntry {
+                source: "events.sqlite.agent_events".to_string(),
+                index,
+                value,
+            })
+            .collect()
+    })
+}
+
+fn task_from_agent_session(events: &[AgentSessionReplayEvent]) -> Option<String> {
+    events.iter().find_map(|entry| match &entry.event {
+        AgentEvent::UserMessage { content, .. } => user_message_text(content),
+        _ => None,
+    })
+}
+
+fn user_message_text(content: &[JsonValue]) -> Option<String> {
+    let parts = content
+        .iter()
+        .filter_map(|value| {
+            value
+                .get("text")
+                .and_then(JsonValue::as_str)
+                .or_else(|| value.as_str())
+                .map(str::to_string)
+        })
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n"))
+    }
+}
+
+fn rfc3339_from_epoch_ms(ms: i64) -> String {
+    DateTime::<Utc>::from_timestamp_millis(ms)
+        .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).expect("unix epoch is valid"))
+        .to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 fn raw_bundle_from_run(

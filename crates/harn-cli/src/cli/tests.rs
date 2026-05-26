@@ -867,6 +867,53 @@ fn test_parses_runs_inspect_compare() {
 }
 
 #[test]
+fn test_parses_replay_sources_and_runs() {
+    let cli = Cli::parse_from(["harn", "replay", "run.json", "--json"]);
+    let Command::Replay(replay) = cli.command.unwrap() else {
+        panic!("expected replay command");
+    };
+    assert_eq!(replay.path.as_deref(), Some("run.json"));
+    assert!(replay.fixture.is_none());
+    assert!(replay.session_id.is_none());
+    assert_eq!(replay.runs, 1);
+    assert!(replay.json);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "replay",
+        "--fixture",
+        "trace.json",
+        "--runs",
+        "3",
+        "--json",
+    ]);
+    let Command::Replay(replay) = cli.command.unwrap() else {
+        panic!("expected replay command");
+    };
+    assert!(replay.path.is_none());
+    assert_eq!(replay.fixture.as_deref(), Some("trace.json"));
+    assert_eq!(replay.runs, 3);
+    assert!(replay.json);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "replay",
+        "--session-id",
+        "session-123",
+        "--events-db",
+        ".harn/events.sqlite",
+        "--runs",
+        "2",
+    ]);
+    let Command::Replay(replay) = cli.command.unwrap() else {
+        panic!("expected replay command");
+    };
+    assert_eq!(replay.session_id.as_deref(), Some("session-123"));
+    assert_eq!(replay.events_db.as_deref(), Some(".harn/events.sqlite"));
+    assert_eq!(replay.runs, 2);
+}
+
+#[test]
 fn test_parses_session_bundle_commands() {
     let cli = Cli::parse_from([
         "harn",
