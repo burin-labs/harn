@@ -185,6 +185,81 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
+    vm.register_async_builtin("take_while", |args| async move {
+        let items = list_arg(&args, "take_while")?;
+        let callable = args
+            .get(1)
+            .ok_or_else(|| VmError::Runtime("take_while: callback is required".to_string()))?;
+        if !Vm::is_callable_value(callable) {
+            return Err(VmError::TypeError(format!(
+                "take_while: callback must be callable, got {}",
+                callable.type_name()
+            )));
+        }
+        let mut vm = current_async_vm("take_while")?;
+        let mut out = Vec::new();
+        for item in items.iter() {
+            let result = vm.call_callable_one(callable, item).await?;
+            if !result.is_truthy() {
+                break;
+            }
+            out.push(item.clone());
+        }
+        Ok(VmValue::List(Rc::new(out)))
+    });
+
+    vm.register_async_builtin("drop_while", |args| async move {
+        let items = list_arg(&args, "drop_while")?;
+        let callable = args
+            .get(1)
+            .ok_or_else(|| VmError::Runtime("drop_while: callback is required".to_string()))?;
+        if !Vm::is_callable_value(callable) {
+            return Err(VmError::TypeError(format!(
+                "drop_while: callback must be callable, got {}",
+                callable.type_name()
+            )));
+        }
+        let mut vm = current_async_vm("drop_while")?;
+        let mut out = Vec::new();
+        let mut dropping = true;
+        for item in items.iter() {
+            if dropping {
+                let result = vm.call_callable_one(callable, item).await?;
+                if result.is_truthy() {
+                    continue;
+                }
+                dropping = false;
+            }
+            out.push(item.clone());
+        }
+        Ok(VmValue::List(Rc::new(out)))
+    });
+
+    vm.register_async_builtin("count_by", |args| async move {
+        let items = list_arg(&args, "count_by")?;
+        let callable = args
+            .get(1)
+            .ok_or_else(|| VmError::Runtime("count_by: callback is required".to_string()))?;
+        if !Vm::is_callable_value(callable) {
+            return Err(VmError::TypeError(format!(
+                "count_by: callback must be callable, got {}",
+                callable.type_name()
+            )));
+        }
+        let mut vm = current_async_vm("count_by")?;
+        let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+        for item in items.iter() {
+            let key = vm.call_callable_one(callable, item).await?;
+            *counts.entry(key.display()).or_insert(0) += 1;
+        }
+        Ok(VmValue::Dict(Rc::new(
+            counts
+                .into_iter()
+                .map(|(key, count)| (key, VmValue::Int(count)))
+                .collect(),
+        )))
+    });
+
     register_dict_builder_builtins(vm);
 }
 

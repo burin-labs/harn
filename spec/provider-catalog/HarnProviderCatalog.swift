@@ -573,6 +573,30 @@ public let harnProviderCatalogJSON = #"""
       "latency_p50_ms": 900
     },
     {
+      "id": "minimax",
+      "display_name": "Minimax",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.minimax.io/v1",
+        "base_url_env": "MINIMAX_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "MINIMAX_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1700
+    },
+    {
       "id": "mlx",
       "display_name": "Mlx",
       "classification": "local",
@@ -758,6 +782,31 @@ public let harnProviderCatalogJSON = #"""
       "features": [],
       "caveats": [],
       "latency_p50_ms": 800
+    },
+    {
+      "id": "zai",
+      "display_name": "Zai",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.z.ai/v1",
+        "base_url_env": "ZAI_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "ZAI_API_KEY",
+          "ZHIPU_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1900
     }
   ],
   "models": [
@@ -826,6 +875,14 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
+      ],
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "summarization",
+        "tool_use"
       ]
     },
     {
@@ -893,6 +950,14 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context"
       ]
     },
     {
@@ -960,6 +1025,14 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context"
       ]
     },
     {
@@ -1027,6 +1100,12 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "long_context"
       ]
     },
     {
@@ -1101,6 +1180,15 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "tool_use",
+        "summarization"
       ]
     },
     {
@@ -1174,7 +1262,18 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 78.9
+      }
     },
     {
       "id": "claude-opus-4-20250514",
@@ -1247,7 +1346,18 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 77.6
+      }
     },
     {
       "id": "claude-opus-4-6",
@@ -1320,7 +1430,19 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 53.4,
+        "swe_bench_verified": 80.8
+      }
     },
     {
       "id": "claude-opus-4-7",
@@ -1395,7 +1517,19 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 64.3,
+        "swe_bench_verified": 87.6
+      }
     },
     {
       "id": "claude-sonnet-4-20250514",
@@ -1468,7 +1602,19 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 49.0
+      }
     },
     {
       "id": "claude-sonnet-4-5",
@@ -1541,7 +1687,19 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 77.2
+      }
     },
     {
       "id": "claude-sonnet-4-6",
@@ -1619,7 +1777,19 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 79.6
+      }
     },
     {
       "id": "claude-sonnet-4-7",
@@ -1692,7 +1862,19 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 81.0
+      }
     },
     {
       "id": "gpt-oss-120b",
@@ -1752,6 +1934,13 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use"
       ]
     },
     {
@@ -1808,7 +1997,294 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "tool_use"
       ]
+    },
+    {
+      "id": "deepseek-chat",
+      "name": "DeepSeek Chat (legacy → V4 Flash, non-thinking)",
+      "provider": "deepseek",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 0.28,
+        "cache_read_per_mtok": 0.0028,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "deprecated",
+        "note": "Maps to deepseek-v4-flash non-thinking mode; retirement 2026-07-24 15:59 UTC per provider docs."
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "deepseek-reasoner",
+      "name": "DeepSeek Reasoner (legacy → V4 Flash, thinking)",
+      "provider": "deepseek",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 0.28,
+        "cache_read_per_mtok": 0.0028,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "deprecated",
+        "note": "Maps to deepseek-v4-flash thinking mode; retirement 2026-07-24 15:59 UTC per provider docs."
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "reasoning",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding"
+      ]
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "provider": "deepseek",
+      "aliases": [
+        "deepseek",
+        "deepseek-flash",
+        "deepseek-v4-flash"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 0.28,
+        "cache_read_per_mtok": 0.0028,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ],
+      "benchmarks": {
+        "aa_intelligence_index": 58.0
+      }
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "provider": "deepseek",
+      "aliases": [
+        "deepseek-pro",
+        "deepseek-v4-pro"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.435,
+        "output_per_mtok": 0.87,
+        "cache_read_per_mtok": 0.003625,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ],
+      "benchmarks": {
+        "aa_intelligence_index": 68.0
+      }
     },
     {
       "id": "gemini-2.5-flash",
@@ -1877,6 +2353,15 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "long_context",
+        "vision",
+        "cheap",
+        "tool_use"
       ]
     },
     {
@@ -1946,7 +2431,18 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "long_context",
+        "vision",
+        "reasoning",
+        "coding"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 63.8
+      }
     },
     {
       "id": "qwen3.6-35b-a3b",
@@ -2005,6 +2501,11 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding"
       ]
     },
     {
@@ -2066,6 +2567,11 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding"
       ]
     },
     {
@@ -2123,6 +2629,11 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding"
       ]
     },
     {
@@ -2181,6 +2692,11 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "thinking"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding"
       ]
     },
     {
@@ -2238,6 +2754,12 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "thinking"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "long_context"
       ]
     },
     {
@@ -2295,6 +2817,12 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "thinking"
+      ],
+      "tier": "small",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "speed"
       ]
     },
     {
@@ -2352,6 +2880,421 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "thinking"
+      ],
+      "tier": "small",
+      "open_weight": true,
+      "strengths": [
+        "cheap"
+      ]
+    },
+    {
+      "id": "MiniMax-M2",
+      "name": "MiniMax M2",
+      "provider": "minimax",
+      "aliases": [
+        "minimax-m2"
+      ],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.255,
+        "output_per_mtok": 1.0,
+        "cache_read_per_mtok": 0.051,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "cheap",
+        "tool_use"
+      ],
+      "benchmarks": {
+        "aa_intelligence_index": 45.0
+      }
+    },
+    {
+      "id": "MiniMax-M2.5",
+      "name": "MiniMax M2.5",
+      "provider": "minimax",
+      "aliases": [
+        "minimax-m2.5"
+      ],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.28,
+        "output_per_mtok": 1.1,
+        "cache_read_per_mtok": 0.056,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "MiniMax-M2.5-highspeed",
+      "name": "MiniMax M2.5 (highspeed)",
+      "provider": "minimax",
+      "aliases": [],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.28,
+        "output_per_mtok": 1.1,
+        "cache_read_per_mtok": 0.056,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic"
+      ]
+    },
+    {
+      "id": "MiniMax-M2.7",
+      "name": "MiniMax M2.7",
+      "provider": "minimax",
+      "aliases": [
+        "minimax",
+        "minimax-m2.7"
+      ],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.06,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ],
+      "benchmarks": {
+        "aa_intelligence_index": 50.0
+      }
+    },
+    {
+      "id": "MiniMax-M2.7-highspeed",
+      "name": "MiniMax M2.7 (highspeed)",
+      "provider": "minimax",
+      "aliases": [],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.06,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic"
+      ]
+    },
+    {
+      "id": "MiniMax-Text-01",
+      "name": "MiniMax Text 01",
+      "provider": "minimax",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.1,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "long_context"
       ]
     },
     {
@@ -2415,6 +3358,12 @@ public let harnProviderCatalogJSON = #"""
         "vision",
         "thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "vision"
       ]
     },
     {
@@ -2473,6 +3422,12 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic"
       ]
     },
     {
@@ -2531,6 +3486,12 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "vision"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "vision",
+        "tool_use"
       ]
     },
     {
@@ -2581,6 +3542,12 @@ public let harnProviderCatalogJSON = #"""
       "capability_tags": [
         "streaming",
         "tools"
+      ],
+      "tier": "small",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "speed"
       ]
     },
     {
@@ -2643,6 +3610,12 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "speed"
       ]
     },
     {
@@ -2700,6 +3673,12 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "tool_use"
       ]
     },
     {
@@ -2761,6 +3740,13 @@ public let harnProviderCatalogJSON = #"""
         "vision",
         "audio",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "vision",
+        "tool_use"
       ]
     },
     {
@@ -2826,6 +3812,14 @@ public let harnProviderCatalogJSON = #"""
         "vision",
         "audio",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "summarization",
+        "tool_use"
       ]
     },
     {
@@ -2886,6 +3880,11 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "tier": "reasoning",
+      "open_weight": false,
+      "strengths": [
+        "reasoning"
       ]
     },
     {
@@ -2946,6 +3945,12 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "tier": "reasoning",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "cheap"
       ]
     },
     {
@@ -3006,7 +4011,16 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "reasoning",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 69.1
+      }
     },
     {
       "id": "o3-mini",
@@ -3066,7 +4080,17 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "reasoning",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "cheap"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 49.3
+      }
     },
     {
       "id": "Qwen/Qwen3.5-9B",
@@ -3124,6 +4148,12 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking",
         "structured_output"
+      ],
+      "tier": "small",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "speed"
       ]
     },
     {
@@ -3184,6 +4214,15 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "tool_use",
+        "summarization"
       ]
     },
     {
@@ -3245,6 +4284,15 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
       ]
     },
     {
@@ -3308,6 +4356,154 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "cheap"
+      ]
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.435,
+        "output_per_mtok": 0.87,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
       ]
     },
     {
@@ -3376,6 +4572,143 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "long_context",
+        "vision",
+        "cheap",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "minimax/minimax-m2",
+      "name": "MiniMax M2 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.33,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "cheap"
+      ]
+    },
+    {
+      "id": "minimax/minimax-m2.7",
+      "name": "MiniMax M2.7 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.4,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
       ]
     },
     {
@@ -3432,6 +4765,13 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "long_context"
       ]
     },
     {
@@ -3488,6 +4828,13 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "coding",
+        "speed"
       ]
     },
     {
@@ -3495,7 +4842,7 @@ public let harnProviderCatalogJSON = #"""
       "name": "Kimi K2.6",
       "provider": "openrouter",
       "aliases": [],
-      "context_window": 200000,
+      "context_window": 262144,
       "modalities": {
         "input": [
           "text"
@@ -3532,8 +4879,8 @@ public let harnProviderCatalogJSON = #"""
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.55,
-        "output_per_mtok": 2.2,
+        "input_per_mtok": 0.73,
+        "output_per_mtok": 3.49,
         "cache_read_per_mtok": null,
         "cache_write_per_mtok": null
       },
@@ -3547,7 +4894,20 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking",
         "structured_output"
-      ]
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning"
+      ],
+      "benchmarks": {
+        "humanitys_last_exam_with_tools": 54.0,
+        "swe_bench_pro": 58.6
+      }
     },
     {
       "id": "openai/gpt-oss-120b",
@@ -3603,6 +4963,12 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "tool_use"
       ]
     },
     {
@@ -3660,6 +5026,206 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "long_context",
+        "agentic",
+        "tool_use"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 67.0
+      }
+    },
+    {
+      "id": "z-ai/glm-5",
+      "name": "GLM 5 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 202752,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.2,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic"
+      ]
+    },
+    {
+      "id": "z-ai/glm-5.1",
+      "name": "GLM 5.1 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 202752,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.98,
+        "output_per_mtok": 3.08,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "z-ai/glm-5v-turbo",
+      "name": "GLM 5V Turbo (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 202752,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.2,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "vision",
+        "speed"
       ]
     },
     {
@@ -3716,10 +5282,185 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "long_context",
+        "agentic"
       ]
+    },
+    {
+      "id": "glm-5",
+      "name": "GLM 5",
+      "provider": "zai",
+      "aliases": [
+        "glm-5"
+      ],
+      "context_window": 202752,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.98,
+        "output_per_mtok": 3.08,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "glm-5.1",
+      "name": "GLM 5.1",
+      "provider": "zai",
+      "aliases": [
+        "glm",
+        "glm-5.1"
+      ],
+      "context_window": 202752,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ],
+      "benchmarks": {
+        "swe_bench_pro_lead": 1.0
+      }
     }
   ],
   "aliases": [
+    {
+      "name": "deepseek",
+      "model_id": "deepseek-v4-flash",
+      "provider": "deepseek"
+    },
+    {
+      "name": "deepseek-flash",
+      "model_id": "deepseek-v4-flash",
+      "provider": "deepseek"
+    },
+    {
+      "name": "deepseek-pro",
+      "model_id": "deepseek-v4-pro",
+      "provider": "deepseek"
+    },
+    {
+      "name": "deepseek-v4-flash",
+      "model_id": "deepseek-v4-flash",
+      "provider": "deepseek"
+    },
+    {
+      "name": "deepseek-v4-pro",
+      "model_id": "deepseek-v4-pro",
+      "provider": "deepseek"
+    },
     {
       "name": "devstral-small-2",
       "model_id": "devstral-small-2:24b",
@@ -3730,6 +5471,21 @@ public let harnProviderCatalogJSON = #"""
       "name": "frontier",
       "model_id": "claude-sonnet-4-6",
       "provider": "anthropic"
+    },
+    {
+      "name": "glm",
+      "model_id": "glm-5.1",
+      "provider": "zai"
+    },
+    {
+      "name": "glm-5",
+      "model_id": "glm-5",
+      "provider": "zai"
+    },
+    {
+      "name": "glm-5.1",
+      "model_id": "glm-5.1",
+      "provider": "zai"
     },
     {
       "name": "haiku",
@@ -3802,6 +5558,26 @@ public let harnProviderCatalogJSON = #"""
       "name": "mid",
       "model_id": "gpt-4o-mini",
       "provider": "openai"
+    },
+    {
+      "name": "minimax",
+      "model_id": "MiniMax-M2.7",
+      "provider": "minimax"
+    },
+    {
+      "name": "minimax-m2",
+      "model_id": "MiniMax-M2",
+      "provider": "minimax"
+    },
+    {
+      "name": "minimax-m2.5",
+      "model_id": "MiniMax-M2.5",
+      "provider": "minimax"
+    },
+    {
+      "name": "minimax-m2.7",
+      "model_id": "MiniMax-M2.7",
+      "provider": "minimax"
     },
     {
       "name": "mlx-qwen3.6-27b",
@@ -3962,8 +5738,8 @@ public let harnProviderCatalogJSON = #"""
       "id": "cheap",
       "label": "Cheap",
       "description": "Lowest known hosted input+output token price.",
-      "model_id": "Qwen/Qwen3-Coder-Next-FP8",
-      "provider": "together",
+      "model_id": "deepseek/deepseek-v4-flash",
+      "provider": "openrouter",
       "source": "catalog"
     },
     {
@@ -3985,10 +5761,13 @@ public let harnProviderCatalogJSON = #"""
   ],
   "qc_defaults": {
     "anthropic": "claude-haiku-4-5-20251001",
+    "deepseek": "deepseek-v4-flash",
     "local": "gpt-4o",
+    "minimax": "MiniMax-M2.5-highspeed",
     "ollama": "llama3.2",
     "openai": "gpt-4o-mini",
-    "openrouter": "google/gemini-2.5-flash"
+    "openrouter": "google/gemini-2.5-flash",
+    "zai": "glm-5"
   }
 }
 """#

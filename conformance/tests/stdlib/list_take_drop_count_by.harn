@@ -1,0 +1,26 @@
+pipeline test(task) {
+  // take_while stops at the first falsy predicate result.
+  let xs = [1, 2, 3, 4, 5, 6]
+  let taken = xs.take_while({ x -> x < 4 })
+  __io_println(len(taken) == 3)
+  __io_println(taken[0] == 1 && taken[2] == 3)
+  let none_taken = xs.take_while({ x -> x > 10 })
+  __io_println(len(none_taken) == 0)
+  let all_taken = xs.take_while({ x -> x < 100 })
+  __io_println(len(all_taken) == 6)
+  // drop_while skips the leading run, keeps everything else.
+  let dropped = xs.drop_while({ x -> x < 4 })
+  __io_println(len(dropped) == 3)
+  __io_println(dropped[0] == 4 && dropped[2] == 6)
+  let nothing_dropped = xs.drop_while({ x -> x > 10 })
+  __io_println(len(nothing_dropped) == 6)
+  let all_dropped = xs.drop_while({ x -> x < 100 })
+  __io_println(len(all_dropped) == 0)
+  // count_by groups by the callback's key and tallies.
+  let words = ["apple", "ant", "banana", "blueberry", "cherry"]
+  let by_letter = words.count_by({ w -> substring(w, 0, 1) })
+  __io_println(by_letter["a"] == 2)
+  __io_println(by_letter["b"] == 2)
+  __io_println(by_letter["c"] == 1)
+  __io_println(len(by_letter.keys()) == 3)
+}

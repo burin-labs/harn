@@ -1008,6 +1008,20 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_LIST,
     ),
+    BuiltinSignature::simple(
+        "count_by",
+        // Generic shape: <T, K> List<T> -> ((T) -> K) -> Dict<K, int>.
+        // The signature surface uses TY_LIST + TY_CLOSURE because Harn's
+        // builtin signature DSL is untyped at the element layer; the
+        // typechecker layers parametric inference on top via VmValue
+        // tagging. Return type is TY_DICT — the values are integers keyed
+        // by stringified callback output.
+        &[
+            Param::new("items", TY_LIST),
+            Param::new("key_fn", TY_CLOSURE),
+        ],
+        TY_DICT,
+    ),
     BuiltinSignature::simple("delete_file", &[Param::new("path", TY_STRING)], TY_NIL),
     BuiltinSignature::simple("dim", &[Param::new("text", TY_STRING)], TY_STRING),
     BuiltinSignature::simple("dirname", &[Param::new("path", TY_STRING)], TY_STRING),
@@ -1017,6 +1031,16 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     // scope exit; callers may also invoke explicitly in user `defer { ... }`
     // blocks when they need fine-grained control.
     BuiltinSignature::simple("drop", &[Param::new("handle", TY_ANY)], TY_NIL),
+    BuiltinSignature::simple(
+        "drop_while",
+        // <T> List<T> -> ((T) -> bool) -> List<T>. Skips the leading run
+        // of items for which the predicate returns true, keeps the rest.
+        &[
+            Param::new("items", TY_LIST),
+            Param::new("predicate", TY_CLOSURE),
+        ],
+        TY_LIST,
+    ),
     BuiltinSignature::simple(
         "dual_control",
         &[
@@ -1462,6 +1486,16 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "lowercase_first",
         &[Param::new("text", TY_STRING)],
         TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "take_while",
+        // <T> List<T> -> ((T) -> bool) -> List<T>. Returns the longest
+        // prefix of items for which the predicate returns true.
+        &[
+            Param::new("items", TY_LIST),
+            Param::new("predicate", TY_CLOSURE),
+        ],
+        TY_LIST,
     ),
     BuiltinSignature::variadic("trust.policy_for", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("trust.query", &[Param::new("args", TY_ANY)], TY_LIST),

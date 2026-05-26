@@ -394,6 +394,13 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
     // providers also show up, but enrich each entry with a credential
     // probe so callers like `harn providers` and `harn doctor` can
     // render a single table without making N follow-up calls.
+    //
+    // Ensure the thread-local registered_provider_names() is populated
+    // before snapshotting: callers like the CLI `run` path may invoke
+    // this builtin before `reset_llm_state()` would have populated the
+    // default set, which would silently omit `mock` (and any other
+    // registered-only provider) from the status table.
+    super::provider::register_default_providers();
     let mut names: std::collections::BTreeSet<String> =
         llm_config::provider_names().into_iter().collect();
     names.extend(super::provider::registered_provider_names());
@@ -1072,6 +1079,24 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         "availability".to_string(),
         VmValue::String(Rc::from(model.availability.as_str())),
     );
+    dict.insert(
+        "tier".to_string(),
+        VmValue::String(Rc::from(llm_config::model_tier(id))),
+    );
+    dict.insert(
+        "open_weight".to_string(),
+        model.open_weight.map(VmValue::Bool).unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "strengths".to_string(),
+        string_list_to_vm_value(model.strengths.clone()),
+    );
+    let benchmarks: BTreeMap<String, VmValue> = model
+        .benchmarks
+        .iter()
+        .map(|(key, value)| (key.clone(), VmValue::Float(*value)))
+        .collect();
+    dict.insert("benchmarks".to_string(), VmValue::Dict(Rc::new(benchmarks)));
     VmValue::Dict(Rc::new(dict))
 }
 

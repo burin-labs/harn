@@ -12,7 +12,8 @@ impl crate::vm::Vm {
         let result = match method {
             "count" => Ok(VmValue::Int(items.len() as i64)),
             "empty" => Ok(VmValue::Bool(items.is_empty())),
-            "map" | "filter" | "find" | "flat_map" | "sort_by" | "partition" | "group_by" => {
+            "map" | "filter" | "find" | "flat_map" | "sort_by" | "partition" | "group_by"
+            | "take_while" | "drop_while" | "count_by" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
                 }
@@ -508,6 +509,54 @@ impl crate::vm::Vm {
                     }
                 }
                 Ok(best)
+            }
+            "take_while" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::List(Rc::new(items.iter().cloned().collect())));
+                };
+                let mut out = Vec::new();
+                for item in items.iter() {
+                    let result = self.call_callable_one(callable, item).await?;
+                    if !result.is_truthy() {
+                        break;
+                    }
+                    out.push(item.clone());
+                }
+                Ok(VmValue::List(Rc::new(out)))
+            }
+            "drop_while" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::List(Rc::new(items.iter().cloned().collect())));
+                };
+                let mut out = Vec::new();
+                let mut dropping = true;
+                for item in items.iter() {
+                    if dropping {
+                        let result = self.call_callable_one(callable, item).await?;
+                        if result.is_truthy() {
+                            continue;
+                        }
+                        dropping = false;
+                    }
+                    out.push(item.clone());
+                }
+                Ok(VmValue::List(Rc::new(out)))
+            }
+            "count_by" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Dict(Rc::new(BTreeMap::new())));
+                };
+                let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+                for item in items.iter() {
+                    let key = self.call_callable_one(callable, item).await?;
+                    *counts.entry(key.display()).or_insert(0) += 1;
+                }
+                Ok(VmValue::Dict(Rc::new(
+                    counts
+                        .into_iter()
+                        .map(|(k, v)| (k, VmValue::Int(v)))
+                        .collect(),
+                )))
             }
             _ => Err(VmError::Runtime(format!("list has no method `{method}`"))),
         }

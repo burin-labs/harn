@@ -2111,6 +2111,209 @@ thinking_block_style = "none"
 
 # ---------- provider_family aliases ------------------------------------------
 
+# ---------- DeepSeek V4 direct (OpenAI-compatible /v1) ------------------------
+# V4-Flash + V4-Pro support native tool calls, thinking mode, prompt
+# caching, and JSON output. `deepseek-chat`/`deepseek-reasoner` are
+# deprecated aliases mapping to V4-Flash non-thinking/thinking modes.
+
+[[provider.deepseek]]
+model_match = "deepseek-v4-pro*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+
+[[provider.deepseek]]
+model_match = "deepseek-v4-flash*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+
+[[provider.deepseek]]
+model_match = "deepseek-chat*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+prompt_caching = true
+
+[[provider.deepseek]]
+model_match = "deepseek-reasoner*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+
+# ---------- MiniMax (open-weight, OpenAI-compatible /v1) ---------------------
+# MiniMax M2 family: 230B/10B MoE with native tool calls + thinking mode.
+# Prompt caching honored on M2.7+ at 20% of input. Highspeed variants
+# share the same wire shape, just skip the thinking-mode budget.
+
+[[provider.minimax]]
+model_match = "minimax-m2.7*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+
+[[provider.minimax]]
+model_match = "minimax-m2.5*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.minimax]]
+model_match = "minimax-m2*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.minimax]]
+model_match = "minimax-text-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# ---------- Z.AI / GLM-5 family (open-weight, OpenAI-compatible /v1) ---------
+# GLM-5.1 (754B open weights, April 2026) sustains long-horizon agentic
+# tasks; tool calling is native, prompt caching is honored, structured
+# output uses JSON mode (delimited fallback).
+
+[[provider.zai]]
+model_match = "glm-5.1*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+prompt_caching = true
+
+[[provider.zai]]
+model_match = "glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# ---------- OpenRouter slugs for the new families -----------------------------
+# OpenRouter is OpenAI-compatible at the wire level, so model-specific
+# overrides only need to set `native_tools` + `preferred_tool_format`.
+# The audit test trips on missing entries because provider_family
+# inheritance does not cover specific OR slugs by itself.
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m2.7*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m2*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+
+[[provider.openrouter]]
+model_match = "z-ai/glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "native"
+
+[[provider.openrouter]]
+model_match = "deepseek/deepseek-v4*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "native"
+
 [provider_family]
 openrouter = "openai"
 together = "openai"
@@ -2124,3 +2327,10 @@ local = "openai"
 dashscope = "openai"
 llamacpp = "openai"
 mlx = "openai"
+# New 2026-05 routes (open-weight frontier additions). MiniMax + Z.AI
+# both speak the OpenAI chat-completions wire format on their
+# advertised compat endpoints, so the openai family rules cover the
+# baseline. Model-specific tweaks live in `[[provider.minimax]]` /
+# `[[provider.zai]]` blocks above.
+minimax = "openai"
+zai = "openai"

@@ -203,6 +203,12 @@
             "unknown"
           ]
         },
+        "benchmarks": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
         "capability_tags": {
           "items": {
             "type": "string"
@@ -229,6 +235,9 @@
         "name": {
           "minLength": 1,
           "type": "string"
+        },
+        "open_weight": {
+          "type": "boolean"
         },
         "pricing": {
           "$ref": "#/$defs/pricing"
@@ -257,8 +266,22 @@
           "exclusiveMinimum": 0,
           "type": "number"
         },
+        "strengths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "structured_output": {
           "type": "string"
+        },
+        "tier": {
+          "enum": [
+            "small",
+            "mid",
+            "frontier",
+            "reasoning"
+          ]
         },
         "tool_support": {
           "$ref": "#/$defs/tool_support"
@@ -279,7 +302,8 @@
         "deprecation",
         "availability",
         "quality_tags",
-        "capability_tags"
+        "capability_tags",
+        "tier"
       ],
       "type": "object"
     },
