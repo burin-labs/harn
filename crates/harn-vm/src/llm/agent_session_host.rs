@@ -1755,6 +1755,11 @@ fn host_agent_record_compaction_builtin(
         .and_then(serde_json::Value::as_str)
         .unwrap_or("auto")
         .to_string();
+    let reason = payload_json
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("threshold")
+        .to_string();
     let strategy = payload_json
         .get("strategy")
         .or_else(|| payload_json.get("engine_strategy"))
@@ -1798,6 +1803,7 @@ fn host_agent_record_compaction_builtin(
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TranscriptCompacted {
         session_id,
         mode,
+        reason,
         strategy,
         archived_messages,
         estimated_tokens_before,

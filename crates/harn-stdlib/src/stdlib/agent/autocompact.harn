@@ -405,6 +405,7 @@ pub fn agent_autocompact_if_needed(session, opts) {
   let policy_fields = __compaction_policy_event_fields(policy)
   let pre_payload = {
     session: {id: session.session_id},
+    reason: "threshold",
     strategy: if policy_label != "" {
       policy_label
     } else {
@@ -431,6 +432,7 @@ pub fn agent_autocompact_if_needed(session, opts) {
     __host_agent_session_replace_messages(session.session_id, compacted, summary)
     let metadata = {
       mode: "auto",
+      reason: "threshold",
       strategy: if policy_label != "" {
         policy_label
       } else {

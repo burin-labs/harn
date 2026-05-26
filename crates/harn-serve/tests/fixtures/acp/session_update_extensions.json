@@ -110,6 +110,7 @@
             "instructionMode": "extend",
             "instructionSource": "host",
             "mode": "auto",
+            "reason": "threshold",
             "snapshotAssetId": "asset-1",
             "strategy": "summary"
           }

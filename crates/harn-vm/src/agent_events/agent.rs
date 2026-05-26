@@ -341,6 +341,7 @@ pub enum AgentEvent {
     TranscriptCompacted {
         session_id: String,
         mode: String,
+        reason: String,
         strategy: String,
         archived_messages: usize,
         estimated_tokens_before: usize,

@@ -535,6 +535,7 @@ impl AgentEventSink for AcpAgentEventSink {
             AgentEvent::TranscriptCompacted {
                 session_id,
                 mode,
+                reason,
                 strategy,
                 archived_messages,
                 estimated_tokens_before,
@@ -549,6 +550,10 @@ impl AgentEventSink for AcpAgentEventSink {
                 });
                 let mut harn_meta = serde_json::Map::new();
                 harn_meta.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+                harn_meta.insert(
+                    "reason".to_string(),
+                    serde_json::Value::String(reason.clone()),
+                );
                 harn_meta.insert(
                     "strategy".to_string(),
                     serde_json::Value::String(strategy.clone()),

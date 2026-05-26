@@ -469,6 +469,10 @@ pub struct AutoCompactConfig {
     /// broader than the engine strategy, e.g. `hybrid` lowers to LLM
     /// summarization plus truncate fallback.
     pub policy_strategy: String,
+    /// Strategy to try when the primary strategy fails. Budget-pressure
+    /// compaction uses this to keep the session within its hard cap even when
+    /// an LLM summarizer is unavailable.
+    pub fallback_strategy: Option<CompactStrategy>,
     /// Host/user-supplied instructions that guide compaction without
     /// becoming part of the compacted transcript unless `scope` explicitly
     /// asks for model-visible policy text.
@@ -491,6 +495,7 @@ impl Default for AutoCompactConfig {
             compress_callback: None,
             summarize_prompt: None,
             policy_strategy: compact_strategy_name(&CompactStrategy::ObservationMask).to_string(),
+            fallback_strategy: None,
             policy: CompactionPolicy::default(),
         }
     }
@@ -985,6 +990,7 @@ async fn invoke_mask_callback(
         .collect())
 }
 
+#[derive(Clone, Copy)]
 struct CompactionStrategyInputs<'a> {
     strategy: &'a CompactStrategy,
     old_messages: &'a [serde_json::Value],
@@ -1056,12 +1062,39 @@ async fn apply_compaction_strategy(input: CompactionStrategyInputs<'_>) -> Resul
     }
 }
 
+async fn apply_compaction_strategy_with_fallback(
+    input: CompactionStrategyInputs<'_>,
+    fallback_strategy: Option<&CompactStrategy>,
+) -> Result<(String, CompactStrategy), VmError> {
+    match apply_compaction_strategy(input).await {
+        Ok(summary) => Ok((summary, input.strategy.clone())),
+        Err(primary_error) => {
+            let Some(fallback) = fallback_strategy.filter(|fallback| *fallback != input.strategy)
+            else {
+                return Err(primary_error);
+            };
+            let fallback_input = CompactionStrategyInputs {
+                strategy: fallback,
+                ..input
+            };
+            apply_compaction_strategy(fallback_input)
+                .await
+                .map(|summary| (summary, fallback.clone()))
+        }
+    }
+}
+
+pub(crate) struct AutoCompactResult {
+    pub summary: String,
+    pub strategy: CompactStrategy,
+}
+
 /// Auto-compact a message list in place using two-tier compaction.
-pub(crate) async fn auto_compact_messages(
+pub(crate) async fn auto_compact_messages_with_result(
     messages: &mut Vec<serde_json::Value>,
     config: &AutoCompactConfig,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
-) -> Result<Option<String>, VmError> {
+) -> Result<Option<AutoCompactResult>, VmError> {
     if config.token_threshold > 0 && estimate_message_tokens(messages) <= config.token_threshold {
         return Ok(None);
     }
@@ -1107,17 +1140,20 @@ pub(crate) async fn auto_compact_messages(
     let old_messages: Vec<_> = messages.drain(compact_start..split_at).collect();
     let archived_count = old_messages.len();
 
-    let mut summary = apply_compaction_strategy(CompactionStrategyInputs {
-        strategy: &config.compact_strategy,
-        old_messages: &old_messages,
-        archived_count,
-        llm_opts,
-        custom_compactor: config.custom_compactor.as_ref(),
-        custom_compactor_reminders: &config.custom_compactor_reminders,
-        mask_callback: config.mask_callback.as_ref(),
-        summarize_prompt: config.summarize_prompt.as_deref(),
-        policy: &config.policy,
-    })
+    let (mut summary, mut strategy) = apply_compaction_strategy_with_fallback(
+        CompactionStrategyInputs {
+            strategy: &config.compact_strategy,
+            old_messages: &old_messages,
+            archived_count,
+            llm_opts,
+            custom_compactor: config.custom_compactor.as_ref(),
+            custom_compactor_reminders: &config.custom_compactor_reminders,
+            mask_callback: config.mask_callback.as_ref(),
+            summarize_prompt: config.summarize_prompt.as_deref(),
+            policy: &config.policy,
+        },
+        config.fallback_strategy.as_ref(),
+    )
     .await?;
 
     if let Some(hard_limit) = config.hard_limit_tokens {
@@ -1130,18 +1166,24 @@ pub(crate) async fn auto_compact_messages(
                 "role": "user",
                 "content": summary,
             })];
-            summary = apply_compaction_strategy(CompactionStrategyInputs {
-                strategy: &config.hard_limit_strategy,
-                old_messages: &tier1_as_messages,
-                archived_count,
-                llm_opts,
-                custom_compactor: config.custom_compactor.as_ref(),
-                custom_compactor_reminders: &config.custom_compactor_reminders,
-                mask_callback: None,
-                summarize_prompt: config.summarize_prompt.as_deref(),
-                policy: &config.policy,
-            })
-            .await?;
+            let (hard_limit_summary, hard_limit_strategy) =
+                apply_compaction_strategy_with_fallback(
+                    CompactionStrategyInputs {
+                        strategy: &config.hard_limit_strategy,
+                        old_messages: &tier1_as_messages,
+                        archived_count,
+                        llm_opts,
+                        custom_compactor: config.custom_compactor.as_ref(),
+                        custom_compactor_reminders: &config.custom_compactor_reminders,
+                        mask_callback: None,
+                        summarize_prompt: config.summarize_prompt.as_deref(),
+                        policy: &config.policy,
+                    },
+                    config.fallback_strategy.as_ref(),
+                )
+                .await?;
+            summary = hard_limit_summary;
+            strategy = hard_limit_strategy;
         }
     }
 
@@ -1154,7 +1196,21 @@ pub(crate) async fn auto_compact_messages(
             "content": summary,
         }),
     );
-    Ok(Some(summary))
+    Ok(Some(AutoCompactResult { summary, strategy }))
+}
+
+/// Auto-compact a message list in place using two-tier compaction.
+#[cfg(test)]
+pub(crate) async fn auto_compact_messages(
+    messages: &mut Vec<serde_json::Value>,
+    config: &AutoCompactConfig,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+) -> Result<Option<String>, VmError> {
+    Ok(
+        auto_compact_messages_with_result(messages, config, llm_opts)
+            .await?
+            .map(|result| result.summary),
+    )
 }
 
 fn apply_model_visible_policy(mut summary: String, policy: &CompactionPolicy) -> String {

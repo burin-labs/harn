@@ -167,6 +167,7 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
         AgentEvent::TranscriptCompacted {
             session_id: "session-1".to_string(),
             mode: "auto".to_string(),
+            reason: "threshold".to_string(),
             strategy: "summary".to_string(),
             archived_messages: 3,
             estimated_tokens_before: 100,
@@ -910,6 +911,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
         AgentEvent::TranscriptCompacted {
             session_id: "session-1".to_string(),
             mode: "auto".to_string(),
+            reason: "threshold".to_string(),
             strategy: "summary".to_string(),
             archived_messages: 3,
             estimated_tokens_before: 100,

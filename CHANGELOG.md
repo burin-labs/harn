@@ -76,6 +76,13 @@ condensed series summaries instead of full per-patch history.
   (cerebras, dashscope, huggingface, minimax, mlx, tgi, vllm, zai)
   and pointed the inline comment at the runtime list so future
   drift is visible at the call site.
+- **Budget-pressure compaction now uses the orchestration compaction ladder
+  (#2472).** Session transcript budget enforcement now delegates through the
+  shared lifecycle path with `reason: "budget_pressure"`, tries the default LLM
+  summary strategy, and falls back to deterministic truncation within the
+  configured session budget when summarization is unavailable. Ordinary
+  threshold compactions now persist and publish `reason: "threshold"` so live
+  events and transcript metadata distinguish the trigger.
 
 ## v0.8.43
 
