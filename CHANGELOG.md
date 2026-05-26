@@ -29,6 +29,23 @@ condensed series summaries instead of full per-patch history.
   `import "std/<module>"` form, which has been the supported surface
   since v0.6.
 
+### Performance
+
+- **Closure walk-skip on pure inline callbacks (#2468).** Every
+  compiled `Chunk` now carries a `references_outer_names: bool` flag
+  set at emit time iff the bytecode emits an env-reading opcode
+  (`GetVar`, `SetVar`, `CallBuiltin`, `CallBuiltinSpread`,
+  `CallSpread`, `Call`, `TailCall`, `Pipe`, `CheckType`). The
+  closure-call hot path (`Vm::closure_call_env` +
+  `…_for_current_frame`) short-circuits both caller-scope late-bind
+  walks when the flag is false, so pure-arithmetic / comparison
+  callbacks like `{x -> x * 2}` or `{x -> x % 2 == 0}` (the hot
+  `.map` / `.filter` element shape) pay zero per-element walk cost.
+  This is the same compile-time classification V8 / SpiderMonkey use
+  to decide whether a closure needs its outer scope materialized,
+  and it's the highest-impact win still on the table after the
+  #2095 dispatch / call-flattening / inline-cache series.
+
 ### Fixed
 
 - **Bytecode cache invalidates when embedded stdlib changes.** The
