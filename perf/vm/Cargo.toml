@@ -18,6 +18,11 @@ path = "bench_vmenv_clone.rs"
 harness = false
 
 [[bench]]
+name = "bench_inline_cache_slot"
+path = "bench_inline_cache_slot.rs"
+harness = false
+
+[[bench]]
 name = "bench_vm_fixtures"
 path = "bench_vm_fixtures.rs"
 harness = false

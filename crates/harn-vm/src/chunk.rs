@@ -8,6 +8,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::runtime_guards::RuntimeParamGuard;
 
+/// Sentinel value stored in [`Chunk::inline_cache_index`] for code offsets
+/// that have no inline-cache slot registered. Chosen as `u32::MAX` so the
+/// hot dispatch path can treat the side-table as a flat `Vec<u32>` without
+/// an `Option` wrapper — the comparison against the sentinel collapses to a
+/// single integer compare. The compile-time max useful slot count is bounded
+/// by code length (one slot per cacheable opcode), so `u32::MAX` is safely
+/// out of the addressable slot range.
+pub(crate) const NO_INLINE_CACHE_SLOT: u32 = u32::MAX;
+
 /// Bytecode opcodes for the Harn VM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -600,7 +609,18 @@ pub struct Chunk {
     pub functions: Vec<CompiledFunctionRef>,
     /// Instruction offset to inline-cache slot. Slots are assigned at emit time
     /// for cacheable instructions while bytecode bytes remain immutable.
+    /// Preserved as the serialization-stable representation that round-trips
+    /// through [`CachedChunk`]; the runtime hot path reads
+    /// [`Chunk::inline_cache_index`] instead.
     inline_cache_slots: BTreeMap<usize, usize>,
+    /// Flat side-table indexed by code offset that returns the inline-cache
+    /// slot index (or [`NO_INLINE_CACHE_SLOT`] for "no slot at this offset").
+    /// Built alongside [`Chunk::inline_cache_slots`] at emit/load time so the
+    /// per-dispatch lookup that fires on every adaptive binary op, `Op::Call`,
+    /// `Op::MethodCall`, and `Op::GetProperty` is one cache-friendly `Vec`
+    /// index instead of a `BTreeMap::get` (O(1) vs O(log n) with the
+    /// associated pointer chasing). Derived; intentionally not serialized.
+    inline_cache_index: Vec<u32>,
     /// Shared cache entries so cloned chunks in call frames warm the same side
     /// table as the compiled chunk used by tests/debugging.
     inline_caches: Rc<RefCell<Vec<InlineCacheEntry>>>,
@@ -841,6 +861,7 @@ impl Chunk {
             current_col: 0,
             functions: Vec::new(),
             inline_cache_slots: BTreeMap::new(),
+            inline_cache_index: Vec::new(),
             inline_caches: Rc::new(RefCell::new(Vec::new())),
             constant_strings: Rc::new(RefCell::new(Vec::new())),
             local_slots: Vec::new(),
@@ -1063,9 +1084,44 @@ impl Chunk {
         let slot = entries.len();
         entries.push(InlineCacheEntry::Empty);
         self.inline_cache_slots.insert(op_offset, slot);
+        Self::write_inline_cache_index(&mut self.inline_cache_index, op_offset, slot);
     }
 
+    /// Fast-path side-table writer. Pulled out as an associated fn so both
+    /// the live emit path and [`Chunk::from_cached`] share the same growth
+    /// strategy. Cache slots fit comfortably in `u32` because the slot count
+    /// is bounded by the cacheable-opcode count in `code`.
+    fn write_inline_cache_index(index: &mut Vec<u32>, op_offset: usize, slot: usize) {
+        if op_offset >= index.len() {
+            index.resize(op_offset + 1, NO_INLINE_CACHE_SLOT);
+        }
+        index[op_offset] = slot as u32;
+    }
+
+    /// Look up the inline-cache slot for the opcode at `op_offset`. This is
+    /// called on every dispatch of an adaptive binary op (Add/Sub/Mul/Div/
+    /// Mod/Eq/Neq/Less/Greater/LessEq/GreaterEq), `Op::Call`, `Op::MethodCall`
+    /// (and `MethodCallOpt`/`MethodCallSpread`), and `Op::GetProperty`
+    /// (`GetPropertyOpt`). Backed by [`Chunk::inline_cache_index`] — a flat
+    /// `Vec<u32>` indexed by code offset — so the lookup is a single bounds-
+    /// checked array read instead of the prior `BTreeMap::get` which walked
+    /// internal nodes for every dispatched op.
+    #[inline]
     pub(crate) fn inline_cache_slot(&self, op_offset: usize) -> Option<usize> {
+        match self.inline_cache_index.get(op_offset).copied() {
+            None | Some(NO_INLINE_CACHE_SLOT) => None,
+            Some(slot) => Some(slot as usize),
+        }
+    }
+
+    /// Pre-optimization control path: the `BTreeMap`-backed lookup the
+    /// dispatcher used before the flat `Vec<u32>` side-table. Exposed
+    /// only behind the `vm-bench-internals` feature so the criterion
+    /// microbench can A/B the two paths inside one binary on identical
+    /// hardware. The production hot path must keep using
+    /// [`Chunk::inline_cache_slot`].
+    #[cfg(feature = "vm-bench-internals")]
+    pub fn inline_cache_slot_via_btreemap_for_bench(&self, op_offset: usize) -> Option<usize> {
         self.inline_cache_slots.get(&op_offset).copied()
     }
 
@@ -1129,6 +1185,19 @@ impl Chunk {
     pub fn from_cached(cached: &CachedChunk) -> Self {
         let inline_cache_count = cached.inline_cache_slots.len();
         let constants_count = cached.constants.len();
+        // Project the cached `BTreeMap<op_offset, slot>` into the flat
+        // dispatch-side lookup table. Sized to `code.len()` so the hottest
+        // hot opcodes (binary ops at the end of a long chunk) still hit the
+        // fast-path bounds check rather than falling through to the
+        // none-found branch. The size is bounded by code length, so the
+        // memory footprint is tiny — a few KB for typical chunks.
+        let mut inline_cache_index = Vec::new();
+        inline_cache_index.resize(cached.code.len(), NO_INLINE_CACHE_SLOT);
+        for (&op_offset, &slot) in cached.inline_cache_slots.iter() {
+            if op_offset < inline_cache_index.len() {
+                inline_cache_index[op_offset] = slot as u32;
+            }
+        }
         Self {
             code: cached.code.clone(),
             constants: cached.constants.clone(),
@@ -1142,6 +1211,7 @@ impl Chunk {
                 .map(|function| Rc::new(CompiledFunction::from_cached(function)))
                 .collect(),
             inline_cache_slots: cached.inline_cache_slots.clone(),
+            inline_cache_index,
             inline_caches: Rc::new(RefCell::new(vec![
                 InlineCacheEntry::Empty;
                 inline_cache_count
@@ -1722,5 +1792,165 @@ mod tests {
         let frozen_plain = plain.freeze_for_cache();
         let thawed_plain = Chunk::from_cached(&frozen_plain);
         assert!(!thawed_plain.references_outer_names);
+    }
+
+    // --- inline_cache_slot flat-index parity ---
+    //
+    // Slot lookups fire on every dispatch of an adaptive binary op
+    // (Add/Sub/Mul/Div/Mod/Eq/Neq/Less/Greater/LessEq/GreaterEq),
+    // every `Op::Call`, every `Op::MethodCall(Opt)`, and every
+    // `Op::GetProperty(Opt)`. The flat `Vec<u32>` index has to stay
+    // perfectly in sync with the serialization-stable BTreeMap or
+    // a cached call site would either skip its inline cache (slow
+    // path with no learning) or read a stale slot (silently
+    // mis-specialized arithmetic). These tests pin the contract.
+
+    #[test]
+    fn inline_cache_slot_returns_none_for_non_cacheable_offsets() {
+        // GetLocalSlot is a sync-fast-path opcode with no inline
+        // cache; the index must report no slot.
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetLocalSlot, 0, 1);
+        chunk.emit(Op::Pop, 1);
+        chunk.emit(Op::Return, 1);
+        assert!(chunk.inline_cache_slot(0).is_none());
+        assert!(chunk.inline_cache_slot(3).is_none());
+        assert!(chunk.inline_cache_slot(4).is_none());
+    }
+
+    #[test]
+    fn inline_cache_slot_registered_for_adaptive_binary_op() {
+        // Pure-arithmetic ops use the adaptive-binary IC for shape
+        // specialization. The slot has to be 0 because the chunk is
+        // otherwise empty.
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Add, 1);
+        assert_eq!(chunk.inline_cache_slot(0), Some(0));
+    }
+
+    #[test]
+    fn inline_cache_slot_distinct_for_sequential_adaptive_binary_ops() {
+        // Three back-to-back Adds must get three distinct slots so
+        // each instruction's shape feedback evolves independently
+        // (otherwise the same call site would clobber a neighbor's
+        // learning every dispatch).
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Add, 1);
+        chunk.emit(Op::Sub, 1);
+        chunk.emit(Op::Mul, 1);
+        let s0 = chunk.inline_cache_slot(0).expect("Add slot");
+        let s1 = chunk.inline_cache_slot(1).expect("Sub slot");
+        let s2 = chunk.inline_cache_slot(2).expect("Mul slot");
+        assert_ne!(s0, s1);
+        assert_ne!(s1, s2);
+        assert_ne!(s0, s2);
+    }
+
+    #[test]
+    fn inline_cache_slot_returns_none_for_out_of_bounds_offset() {
+        // The dispatcher derives `op_offset` from `ip - 1`; an
+        // out-of-bounds query must return None rather than panic.
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Add, 1);
+        assert!(chunk.inline_cache_slot(usize::MAX).is_none());
+        assert!(chunk.inline_cache_slot(chunk.code.len()).is_none());
+        assert!(chunk.inline_cache_slot(chunk.code.len() + 16).is_none());
+    }
+
+    #[test]
+    fn inline_cache_slot_for_get_property_and_method_call() {
+        // GetProperty(Opt) and MethodCall(Opt) both register an IC
+        // slot at emit time — adaptive method-call dispatch and
+        // monomorphic property-cache learning depend on it.
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetProperty, 0, 1); // offset 0..3
+        chunk.emit_method_call(0, 1, 1); // offset 3..7
+        chunk.emit_method_call_opt(0, 1, 1); // offset 7..11
+        chunk.emit_u16(Op::GetPropertyOpt, 0, 1); // offset 11..14
+        assert!(chunk.inline_cache_slot(0).is_some(), "GetProperty");
+        assert!(chunk.inline_cache_slot(3).is_some(), "MethodCall");
+        assert!(chunk.inline_cache_slot(7).is_some(), "MethodCallOpt");
+        assert!(chunk.inline_cache_slot(11).is_some(), "GetPropertyOpt");
+    }
+
+    #[test]
+    fn inline_cache_slot_for_call_and_call_builtin() {
+        // Both `Op::Call` (closure / by-name callee) and
+        // `emit_call_builtin` register IC slots. The latter is the
+        // adaptive-call fast path used for every direct user-fn
+        // invocation.
+        let mut chunk = Chunk::new();
+        chunk.emit_u8(Op::Call, 1, 1); // offset 0..2
+        let call_builtin_offset = chunk.code.len();
+        chunk.emit_call_builtin(BuiltinId::from_name("any"), 0, 1, 1);
+        assert!(chunk.inline_cache_slot(0).is_some(), "Op::Call IC slot");
+        assert!(
+            chunk.inline_cache_slot(call_builtin_offset).is_some(),
+            "Op::CallBuiltin IC slot"
+        );
+    }
+
+    #[test]
+    fn inline_cache_slot_register_is_idempotent_for_same_offset() {
+        // The compile path uses `BTreeMap::contains_key` to dedup
+        // re-registration at the same offset (eg. when a helper
+        // re-emits into a still-live position). The flat index has
+        // to honor the same semantics — never silently overwriting
+        // an existing slot with a fresh one.
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Add, 1);
+        let slot_before = chunk.inline_cache_slot(0).expect("first registration");
+        // Manually re-register the same offset to confirm dedup.
+        chunk.register_inline_cache(0);
+        let slot_after = chunk.inline_cache_slot(0).expect("re-registration");
+        assert_eq!(slot_before, slot_after);
+    }
+
+    #[test]
+    fn inline_cache_index_round_trips_through_cached_chunk() {
+        // The cache freeze drops the flat index (it's derived from
+        // the BTreeMap that *is* serialized). On thaw, the flat
+        // index must be rebuilt so the first hot dispatch of a
+        // cached chunk doesn't fall off the IC-slot cliff (which
+        // would silently disable shape specialization until the
+        // chunk is recompiled from source).
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetLocalSlot, 0, 1);
+        chunk.emit_u16(Op::Constant, 0, 1);
+        chunk.emit(Op::Add, 1);
+        chunk.emit(Op::Sub, 1);
+        chunk.emit_method_call(0, 1, 1);
+        chunk.emit_u8(Op::Call, 1, 1);
+        let live_slots: Vec<(usize, Option<usize>)> = (0..chunk.code.len())
+            .map(|o| (o, chunk.inline_cache_slot(o)))
+            .collect();
+        let frozen = chunk.freeze_for_cache();
+        let thawed = Chunk::from_cached(&frozen);
+        let thawed_slots: Vec<(usize, Option<usize>)> = (0..thawed.code.len())
+            .map(|o| (o, thawed.inline_cache_slot(o)))
+            .collect();
+        assert_eq!(live_slots, thawed_slots);
+    }
+
+    #[test]
+    fn inline_cache_index_agrees_with_btreemap_view() {
+        // Authoritative parity check: for every code offset, the
+        // flat-index `inline_cache_slot` must return exactly what
+        // the underlying BTreeMap would (mod the `Option` boxing).
+        // Catches any future emit path that grows `inline_cache_slots`
+        // without going through `register_inline_cache`.
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Add, 1);
+        chunk.emit_u16(Op::GetVar, 0, 1);
+        chunk.emit(Op::LessInt, 1);
+        chunk.emit_u8(Op::Call, 2, 1);
+        chunk.emit(Op::Equal, 1);
+        chunk.emit_u16(Op::GetProperty, 0, 1);
+        chunk.emit_method_call_opt(0, 0, 1);
+        for offset in 0..chunk.code.len() {
+            let from_map = chunk.inline_cache_slots.get(&offset).copied();
+            let from_index = chunk.inline_cache_slot(offset);
+            assert_eq!(from_index, from_map, "parity broken at offset {offset}");
+        }
     }
 }
