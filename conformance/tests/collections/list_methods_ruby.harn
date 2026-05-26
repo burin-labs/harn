@@ -29,8 +29,8 @@ pipeline default(task) {
   let words = ["hello", "hi", "hey"]
   __io_println(words.min_by({ w -> len(w) }))
   __io_println(words.max_by({ w -> len(w) }))
-  // group_by
-  let grouped = [1, 2, 3, 4, 5, 6].group_by({ x -> x % 2 == 0 })
+  // group_by — discriminator must be a string (v0.8.43+); coerce explicitly.
+  let grouped = [1, 2, 3, 4, 5, 6].group_by({ x -> to_string(x % 2 == 0) })
   __io_println(grouped)
   // each_cons (sliding window)
   __io_println([1, 2, 3, 4].each_cons(2))

@@ -11,7 +11,7 @@ mod calendar;
 mod channel_guardrails;
 mod channels;
 pub(crate) mod clock;
-mod collections;
+pub(crate) mod collections;
 mod command_policy;
 mod compression;
 mod concurrency;

@@ -1,0 +1,66 @@
+// std/agent/judge_internals — private helpers shared by `std/agent/judge`
+// (verify_completion + done_judge) and `std/agent/step_judge`. NOT
+// intended as a public surface: every export is prefixed `__judge_` and
+// the file is excluded from the docs sweep. Consolidates the bits that
+// used to be copy-pasted between the two callers (LLM-options
+// overrides, structured-output schema field names, and the
+// "raw_verdict -> {vetoed, feedback}" classifier).
+/**
+ * Keys on `judge_cfg` that override `opts.llm_options` when present.
+ * Listed once here so adding (or renaming) an LLM tuning knob is a
+ * single-line change instead of a 2x sweep.
+ */
+const __JUDGE_LLM_OVERRIDE_KEYS = ["temperature", "max_tokens", "top_p", "tool_format", "reasoning_effort"]
+
+/**
+ * Apply per-judge LLM overrides on top of an already-built `llm_opts`
+ * dict. Mirrors the `for key in [...]` block that lived inline at both
+ * call sites before v0.8.43.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_apply_llm_overrides(llm_opts, judge_cfg)
+ */
+pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
+  var out = llm_opts
+  for key in __JUDGE_LLM_OVERRIDE_KEYS {
+    if judge_cfg[key] != nil {
+      out = out + {[key]: judge_cfg[key]}
+    }
+  }
+  return out
+}
+
+/**
+ * Classify a raw verdict string against an allow-list of pass tokens and
+ * compose the `{vetoed, feedback?}` outcome. `feedback_candidates` is
+ * tried in order: the first non-nil, non-empty entry wins. Falls back
+ * to `feedback_default` when nothing else is set.
+ *
+ * Used by `agent_step_judge` (pass tokens like "pass"/"yes"/"approve") and
+ * by `agent_verify_or_continue` (pass tokens like "done"/"complete").
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_classify_verdict("pass", ["pass", "yes"], [critique], default)
+ */
+pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, feedback_default) {
+  let normalized = lowercase(trim(to_string(raw_verdict ?? "")))
+  if contains(pass_tokens, normalized) {
+    return {vetoed: false, verdict: normalized}
+  }
+  var feedback = ""
+  for candidate in feedback_candidates {
+    if feedback == "" && candidate != nil && to_string(candidate) != "" {
+      feedback = to_string(candidate)
+    }
+  }
+  if feedback == "" {
+    feedback = feedback_default
+  }
+  return {vetoed: true, feedback: feedback, verdict: normalized}
+}

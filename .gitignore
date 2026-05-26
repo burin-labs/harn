@@ -1,4 +1,7 @@
 /target
+# Per-feature sitrep-style target dirs (`CARGO_TARGET_DIR=.target-sitrep cargo …`).
+# Anything matching `.target-*` is a per-feature out-of-tree Cargo target.
+.target-*/
 /crates/harn-cli/portal-dist/
 node_modules/
 __pycache__/

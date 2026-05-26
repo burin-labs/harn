@@ -6,6 +6,106 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.8.43
+
+### Breaking
+
+- **`count_by` and `group_by` now require a string discriminator.** The
+  callbacks passed to `xs.count_by(...)` and `xs.group_by(...)` previously
+  stringified non-string returns via `display()`, which silently merged
+  `Int(1)` and `String("1")` into the same bucket. They now raise a
+  `TypeError` ("callback must return a string discriminator…") when the
+  return value is anything other than a `string`. Migrate by wrapping
+  the callback body with `to_string(...)`:
+  `xs.count_by({ x -> to_string(x.id) })` instead of
+  `xs.count_by({ x -> x.id })`. Coercion is explicit, no silent merges.
+- **Root-level `stdlib/*.harn` removed.** Nine stale duplicates of the
+  canonical embedded stdlib (`crates/harn-stdlib/src/stdlib/stdlib_*.harn`)
+  were deleted: `collections.harn`, `math.harn`, `text.harn`, `path.harn`,
+  `json.harn`, `schema.harn`, `vision.harn`, `graphql.harn`,
+  `prompt_library.harn`. These files predated the embedded catalog
+  refactor and had no live loader. Any external script that copied
+  these paths into a Harn import should switch to the canonical
+  `import "std/<module>"` form, which has been the supported surface
+  since v0.6.
+
+### Fixed
+
+- **Bytecode cache invalidates when embedded stdlib changes.** The
+  per-user-file cache key (`CacheKey::from_source`) hashes the
+  transitive *user* import graph but `collect_user_imports`
+  deliberately drops `std/*` paths. That meant edits to any embedded
+  stdlib module (e.g., adding a new helper module, tweaking a
+  selector) would leave user-file bytecode cached against the *prior*
+  stdlib snapshot. On disk the stale chunk could reference function
+  slots that no longer matched the rebuilt stdlib, surfacing as
+  spurious errors like `Generator has no method 'keys'` partway
+  through an agent loop. The fix folds a stable
+  `embedded_stdlib_digest()` (sha256 over every `STDLIB_SOURCES`
+  entry, cached in a `OnceLock`) into `hash_transitive_user_imports`
+  so any stdlib edit busts user-file caches automatically — without
+  having to bump `HARN_VERSION` between developer rebuilds.
+- **Module init no longer wipes the active `@step` stack.** When a
+  builtin (e.g., `agent_loop`) lazy-loaded a stdlib module from
+  inside a `@step`-decorated function body, the module's
+  `init_chunk` ran with `self.frames` emptied. The frame-pop prune at
+  end-of-chunk then called `prune_below_frame(0)` against the shared
+  thread-local `STEP_STACK`, popping the *caller's* still-active
+  step. PostStep hooks for that step then silently never fired.
+  `vm/modules.rs::instantiate_module` now snapshots the persona/step
+  context (`step_runtime::take_active_context`) around the init-chunk
+  run and restores it after, so module loading is invisible to the
+  step-tracking surface.
+
+### Added
+
+- **`HarnCatalogModel` bridges expose the v0.8.42 typed catalog fields
+  (#2466).** The Swift and TypeScript code-generated bridges
+  (`spec/provider-catalog/HarnProviderCatalog.swift`,
+  `spec/provider-catalog/harn-provider-catalog.ts`) now surface
+  `tier`, `open_weight`, `strengths`, and `benchmarks` as typed
+  properties instead of unstructured JSON. Swift gets an explicit
+  `init(from decoder:)` that backfills `strengths` and `benchmarks`
+  to empty defaults so consumers stay buildable against
+  pre-migration catalog snapshots. TypeScript narrows `tier` to the
+  literal union `"small" | "mid" | "frontier" | "reasoning"`.
+- **`artificialanalysis_adapter` refresh source (#2465).** New entry in
+  `scripts/provider_catalog_sources.harn` parses
+  `data-aa-intelligence-index`, `data-aa-swe-bench-verified`, and
+  `data-aa-swe-bench-pro` attributes from
+  artificialanalysis.ai's model overview block and emits a
+  benchmarks-only observation. AA is aggregator-owned so the merge
+  layer keeps provider-published pricing / context-window claims
+  authoritative; this adapter only contributes to the `benchmarks`
+  dict added in #2463. Stays out of the default `--live` source list
+  until a follow-up rewires the drift-report golden.
+
+### Changed
+
+- **`std/llm/catalog` selector cleanups.** Three internal refactors with
+  identical user-visible behavior:
+  - `__capability_field` (the long `if capability == "X"` chain that
+    mapped capability names to schema field names) is now a two-table
+    lookup keyed off `__CAPABILITY_BOOL_FIELDS` and
+    `__CAPABILITY_LIST_FIELDS`. Adding a new capability is now a
+    one-line addition to whichever table fits.
+  - Tier scoring weights are hoisted into a single `__TIER_WEIGHTS`
+    const (`frontier: 40, reasoning: 35, mid: 20, small: 5`), plus
+    named constants for the strength/open-weight/non-deprecated
+    bonuses. Easier to audit and tune.
+  - `best_available_models` drop order moved from positional
+    `step >= N` checks into a single `__RELAX_ORDER` list. Reordering
+    the relaxation policy is now a one-line edit instead of a
+    fragile index shuffle.
+- **Judge plumbing DRY pass.** Extracted
+  `std/agent/judge_internals` with two private helpers:
+  `__judge_apply_llm_overrides` (replaces the
+  `for key in ["temperature", "max_tokens", "top_p", "tool_format", "reasoning_effort"]`
+  block that was copy-pasted between `step_judge.harn` and
+  `judge.harn`) and `__judge_classify_verdict` (the
+  pass-allowlist → `{vetoed, feedback}` normalization that both
+  judges needed).
+
 ## v0.8.42
 
 ### Added
