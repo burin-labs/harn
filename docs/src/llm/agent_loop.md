@@ -351,10 +351,10 @@ Available strategies:
 | `"hybrid"` | Summarize older messages, keep the latest suffix, and use truncate as the hard-limit fallback |
 
 Compaction emits `TranscriptCompacted` live events and transcript
-`compaction` events with `strategy`, `engine_strategy`,
+`compaction` events with `reason`, `strategy`, `engine_strategy`,
 `estimated_tokens_before`, `estimated_tokens_after`, `instruction_mode`,
 `instruction_source`, and `compaction_policy`, so replay tools can verify which
-policy and host/user instruction lane ran.
+trigger, policy, and host/user instruction lane ran.
 
 Hosts can attach first-class compaction instructions without building custom
 prompt concatenation. The typed `CompactionPolicy` shape accepts

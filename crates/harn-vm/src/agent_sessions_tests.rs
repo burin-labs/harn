@@ -52,6 +52,19 @@ fn event_count_by_kind(id: &str, expected_kind: &str) -> usize {
         .unwrap_or(0)
 }
 
+fn events_by_kind_json(id: &str, expected_kind: &str) -> Vec<serde_json::Value> {
+    snapshot(id)
+        .map(|snapshot| crate::llm::helpers::vm_value_to_json(&snapshot))
+        .and_then(|snapshot| snapshot.get("events").cloned())
+        .and_then(|events| events.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|event| {
+            event.get("kind").and_then(serde_json::Value::as_str) == Some(expected_kind)
+        })
+        .collect()
+}
+
 fn event_count(id: &str) -> usize {
     snapshot(id)
         .and_then(|snapshot| snapshot.as_dict().cloned())
@@ -69,6 +82,29 @@ fn budget_metadata(id: &str) -> serde_json::Value {
         .and_then(|value| value.get("metadata").cloned())
         .and_then(|metadata| metadata.get("transcript_budget").cloned())
         .expect("transcript budget metadata")
+}
+
+struct CliLlmMockGuard;
+
+impl Drop for CliLlmMockGuard {
+    fn drop(&mut self) {
+        crate::llm::clear_cli_llm_mock_mode();
+    }
+}
+
+fn install_cli_llm_mock(value: serde_json::Value) -> CliLlmMockGuard {
+    let mock = crate::llm::parse_llm_mock_value(&value).expect("valid llm mock");
+    crate::llm::install_cli_llm_mocks(vec![mock]);
+    CliLlmMockGuard
+}
+
+fn install_budget_fallback_mock() -> CliLlmMockGuard {
+    install_cli_llm_mock(serde_json::json!({
+        "error": {
+            "category": "server_error",
+            "message": "summarizer unavailable"
+        }
+    }))
 }
 
 fn simple_event(kind: &str) -> VmValue {
@@ -132,6 +168,7 @@ fn transcript_budget_rejects_event_count_growth() {
 #[test]
 fn transcript_budget_compaction_recovers_and_preserves_prompt_state() {
     reset_session_store();
+    let _mock = install_budget_fallback_mock();
     set_default_transcript_budget_policy(SessionTranscriptBudgetPolicy::compact(3, 4, 1));
     let id = open_or_create(Some("budget-compact-recover".into()));
 
@@ -148,7 +185,14 @@ fn transcript_budget_compaction_recovers_and_preserves_prompt_state() {
     let summary = snapshot_json["summary"]
         .as_str()
         .expect("budget compaction summary");
-    assert!(summary.contains("auto-compacted 3 older message(s)"));
+    assert!(summary.contains("auto-compacted"));
+    assert!(summary.contains("via truncate strategy"));
+    let compaction_events = events_by_kind_json(&id, "compaction");
+    assert_eq!(compaction_events.len(), 1);
+    let compaction_payload = &compaction_events[0]["metadata"];
+    assert_eq!(compaction_payload["reason"], "budget_pressure");
+    assert_eq!(compaction_payload["strategy"], "llm");
+    assert_eq!(compaction_payload["engine_strategy"], "truncate");
     let metadata = budget_metadata(&id);
     assert_eq!(metadata["last_action"]["action"], "compacted");
     assert_eq!(metadata["last_action"]["reason"], "message_count");
@@ -168,8 +212,65 @@ fn transcript_budget_compaction_recovers_and_preserves_prompt_state() {
 }
 
 #[test]
+fn transcript_budget_compaction_uses_llm_summary_when_available() {
+    reset_all_sinks();
+    reset_session_store();
+    let _mock = install_cli_llm_mock(serde_json::json!({
+        "text": "<canned budget summary>"
+    }));
+    set_default_transcript_budget_policy(SessionTranscriptBudgetPolicy::compact(3, 5, 1));
+    let id = open_or_create(Some("budget-compact-llm".into()));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    register_sink(&id, Arc::new(CapturingSink(captured.clone())));
+
+    inject_message(&id, make_msg("user", "one")).unwrap();
+    inject_message(&id, make_msg("assistant", "two")).unwrap();
+    inject_message(&id, make_msg("user", "three")).unwrap();
+    inject_message(&id, make_msg("assistant", "four")).unwrap();
+
+    assert!(message_count(&id) <= 3);
+    assert!(event_count(&id) <= 5);
+    let snapshot = snapshot(&id).expect("session snapshot");
+    let snapshot_json = crate::llm::helpers::vm_value_to_json(&snapshot);
+    let summary = snapshot_json["summary"]
+        .as_str()
+        .expect("budget compaction summary");
+    assert!(summary.contains("<canned budget summary>"));
+
+    let compaction_events = events_by_kind_json(&id, "compaction");
+    assert_eq!(compaction_events.len(), 1);
+    let compaction_payload = &compaction_events[0]["metadata"];
+    assert_eq!(compaction_payload["reason"], "budget_pressure");
+    assert_eq!(compaction_payload["strategy"], "llm");
+    assert_eq!(compaction_payload["engine_strategy"], "llm");
+
+    let events = captured.lock().expect("capture sink poisoned");
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        AgentEvent::TranscriptCompacted {
+            session_id,
+            mode,
+            reason,
+            strategy,
+            ..
+        } => {
+            assert_eq!(session_id, &id);
+            assert_eq!(mode, "auto");
+            assert_eq!(reason, "budget_pressure");
+            assert_eq!(strategy, "llm");
+        }
+        event => panic!("expected TranscriptCompacted event, got {event:?}"),
+    }
+
+    reset_all_sinks();
+    reset_default_transcript_budget_policy();
+    reset_session_store();
+}
+
+#[test]
 fn fork_preserves_transcript_budget_metadata() {
     reset_session_store();
+    let _mock = install_budget_fallback_mock();
     set_default_transcript_budget_policy(SessionTranscriptBudgetPolicy::compact(3, 4, 1));
     let parent = open_or_create(Some("budget-fork-parent".into()));
     inject_message(&parent, make_msg("user", "one")).unwrap();

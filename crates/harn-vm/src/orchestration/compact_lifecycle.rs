@@ -41,7 +41,7 @@ use crate::llm::helpers::{
 use crate::value::{VmError, VmValue};
 
 use super::{
-    auto_compact_messages, compact_strategy_name, compaction_policy_metadata_fields,
+    auto_compact_messages_with_result, compact_strategy_name, compaction_policy_metadata_fields,
     estimate_message_tokens, parse_compact_strategy, run_lifecycle_hooks,
     run_lifecycle_hooks_with_control, AutoCompactConfig, CompactStrategy, CompactionPolicy,
     HookControl, HookEvent,
@@ -99,12 +99,34 @@ impl CompactMode {
     }
 }
 
+/// Identifies why compaction fired. This is separate from [`CompactMode`]:
+/// mode describes the caller surface, while trigger explains the pressure
+/// that made the caller compact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompactionTrigger {
+    Manual,
+    Threshold,
+    BudgetPressure,
+}
+
+impl CompactionTrigger {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Threshold => "threshold",
+            Self::BudgetPressure => "budget_pressure",
+        }
+    }
+}
+
 /// Per-call inputs that travel with a compaction request through the
 /// lifecycle. Stored as references to keep allocations down on the hot path.
 pub struct CompactLifecycle<'a> {
     pub session_id: Option<&'a str>,
     pub transcript_id: Option<&'a str>,
     pub mode: CompactMode,
+    pub trigger: CompactionTrigger,
+    pub fire_hooks: bool,
     /// Reminder events from the source transcript that should pass through
     /// the `preserve_on_compact` / `ttl_turns` / `dedupe_key` lifecycle
     /// before being re-attached to the compacted transcript.
@@ -129,10 +151,20 @@ pub struct CompactLifecycle<'a> {
 
 impl<'a> CompactLifecycle<'a> {
     pub fn new(mode: CompactMode) -> Self {
+        let trigger = match mode {
+            CompactMode::Manual | CompactMode::Host | CompactMode::ResumeDigest => {
+                CompactionTrigger::Manual
+            }
+            CompactMode::Auto | CompactMode::Workflow | CompactMode::Worker => {
+                CompactionTrigger::Threshold
+            }
+        };
         Self {
             session_id: None,
             transcript_id: None,
             mode,
+            trigger,
+            fire_hooks: mode.fires_hooks(),
             reminder_events: Vec::new(),
             summary_override: None,
             provider_options: JsonValue::Object(serde_json::Map::new()),
@@ -148,6 +180,16 @@ impl<'a> CompactLifecycle<'a> {
 
     pub fn with_transcript_id(mut self, transcript_id: Option<&'a str>) -> Self {
         self.transcript_id = transcript_id;
+        self
+    }
+
+    pub fn with_trigger(mut self, trigger: CompactionTrigger) -> Self {
+        self.trigger = trigger;
+        self
+    }
+
+    pub fn with_hook_dispatch(mut self, fire_hooks: bool) -> Self {
+        self.fire_hooks = fire_hooks;
         self
     }
 
@@ -202,6 +244,14 @@ pub struct CompactionOutcome {
     pub event_metadata: JsonValue,
 }
 
+#[derive(Clone, Debug)]
+pub struct TranscriptCompactedEventMetrics {
+    pub archived_messages: usize,
+    pub estimated_tokens_before: usize,
+    pub estimated_tokens_after: usize,
+    pub snapshot_asset_id: Option<String>,
+}
+
 /// Reminder-lifecycle bookkeeping produced before the compaction runs and
 /// consumed by both the persisted transcript and the AgentEvent payload.
 #[derive(Debug, Default)]
@@ -234,13 +284,13 @@ pub struct ReminderDedupeRecord {
 }
 
 /// Run a transcript compaction through the canonical lifecycle. The
-/// `messages` vec is mutated in place by [`auto_compact_messages`]; on a
+/// `messages` vec is mutated in place by [`auto_compact_messages_with_result`]; on a
 /// `Ok(None)` return it is left untouched so callers that always write
 /// messages back (e.g. `transcript_auto_compact()`) can do so unconditionally.
 ///
 /// `Ok(None)` means no compaction happened — either the messages were
 /// already under threshold, a PreCompact hook returned `Block`, or
-/// `auto_compact_messages` itself decided there was nothing to do.
+/// `auto_compact_messages_with_result` itself decided there was nothing to do.
 pub(crate) async fn run_compaction_lifecycle(
     messages: &mut Vec<JsonValue>,
     config: &mut AutoCompactConfig,
@@ -254,7 +304,7 @@ pub(crate) async fn run_compaction_lifecycle(
     let estimated_tokens_before = estimate_message_tokens(messages);
     let original_message_count = messages.len();
 
-    let fires_hooks = lifecycle.mode.fires_hooks();
+    let fires_hooks = lifecycle.fire_hooks;
 
     if fires_hooks {
         let pre_payload = build_hook_payload(
@@ -276,9 +326,13 @@ pub(crate) async fn run_compaction_lifecycle(
     let reminder_report = compact_reminder_events(reminder_events);
     config.custom_compactor_reminders = reminder_report.custom_reminders.clone();
 
-    let Some(raw_summary) = auto_compact_messages(messages, config, llm_opts).await? else {
+    let Some(compact_result) =
+        auto_compact_messages_with_result(messages, config, llm_opts).await?
+    else {
         return Ok(None);
     };
+    let engine_strategy = compact_result.strategy;
+    let raw_summary = compact_result.summary;
     let summary = lifecycle.summary_override.clone().unwrap_or(raw_summary);
 
     if fires_hooks {
@@ -294,22 +348,27 @@ pub(crate) async fn run_compaction_lifecycle(
         build_snapshot_asset(
             transcript,
             config,
+            &engine_strategy,
             archived_messages,
             estimated_tokens_before,
             estimated_tokens_after,
         )
     });
     let snapshot_asset_id = snapshot_asset.as_ref().map(snapshot_asset_id_of);
+    let event_metrics = TranscriptCompactedEventMetrics {
+        archived_messages,
+        estimated_tokens_before,
+        estimated_tokens_after,
+        snapshot_asset_id: snapshot_asset_id.clone(),
+    };
 
     let event_metadata = build_event_metadata(
         &lifecycle,
         config,
-        archived_messages,
-        estimated_tokens_before,
-        estimated_tokens_after,
-        snapshot_asset_id.as_deref(),
+        &event_metrics,
         &reminder_report,
         &summary,
+        &engine_strategy,
     );
 
     if fires_hooks {
@@ -334,11 +393,9 @@ pub(crate) async fn run_compaction_lifecycle(
             emit_transcript_compacted_event(
                 session_id,
                 lifecycle.mode,
+                lifecycle.trigger.as_str(),
                 config,
-                archived_messages,
-                estimated_tokens_before,
-                estimated_tokens_after,
-                snapshot_asset_id.as_deref(),
+                event_metrics.clone(),
             )
             .await;
             if lifecycle.evaluate_providers {
@@ -361,7 +418,7 @@ pub(crate) async fn run_compaction_lifecycle(
         reminder_report,
         snapshot_asset,
         snapshot_asset_id,
-        strategy: config.compact_strategy.clone(),
+        strategy: engine_strategy,
         policy_strategy: config.policy_strategy.clone(),
         event_metadata,
     }))
@@ -374,20 +431,19 @@ pub(crate) async fn run_compaction_lifecycle(
 pub async fn emit_transcript_compacted_event(
     session_id: &str,
     mode: CompactMode,
+    reason: &str,
     config: &AutoCompactConfig,
-    archived_messages: usize,
-    estimated_tokens_before: usize,
-    estimated_tokens_after: usize,
-    snapshot_asset_id: Option<&str>,
+    metrics: TranscriptCompactedEventMetrics,
 ) {
     crate::llm::emit_live_agent_event(&AgentEvent::TranscriptCompacted {
         session_id: session_id.to_string(),
         mode: mode.as_str().to_string(),
+        reason: reason.to_string(),
         strategy: config.policy_strategy.clone(),
-        archived_messages,
-        estimated_tokens_before,
-        estimated_tokens_after,
-        snapshot_asset_id: snapshot_asset_id.map(str::to_string),
+        archived_messages: metrics.archived_messages,
+        estimated_tokens_before: metrics.estimated_tokens_before,
+        estimated_tokens_after: metrics.estimated_tokens_after,
+        snapshot_asset_id: metrics.snapshot_asset_id,
         instruction_mode: Some(config.policy.instruction_mode().to_string()),
         instruction_source: config.policy.instruction_source().map(str::to_string),
         compaction_policy: config.policy.metadata_json(),
@@ -401,21 +457,20 @@ pub async fn emit_transcript_compacted_event(
 pub fn emit_transcript_compacted_event_sync(
     session_id: &str,
     mode: CompactMode,
+    reason: String,
     policy: &CompactionPolicy,
     policy_strategy: String,
-    archived_messages: usize,
-    estimated_tokens_before: usize,
-    estimated_tokens_after: usize,
-    snapshot_asset_id: Option<String>,
+    metrics: TranscriptCompactedEventMetrics,
 ) {
     crate::llm::emit_live_agent_event_sync(&AgentEvent::TranscriptCompacted {
         session_id: session_id.to_string(),
         mode: mode.as_str().to_string(),
+        reason,
         strategy: policy_strategy,
-        archived_messages,
-        estimated_tokens_before,
-        estimated_tokens_after,
-        snapshot_asset_id,
+        archived_messages: metrics.archived_messages,
+        estimated_tokens_before: metrics.estimated_tokens_before,
+        estimated_tokens_after: metrics.estimated_tokens_after,
+        snapshot_asset_id: metrics.snapshot_asset_id,
         instruction_mode: Some(policy.instruction_mode().to_string()),
         instruction_source: policy.instruction_source().map(str::to_string),
         compaction_policy: policy.metadata_json(),
@@ -457,6 +512,7 @@ fn build_hook_payload(
         "session": {"id": session_id},
         "session_id": session_id,
         "mode": lifecycle.mode.as_str(),
+        "reason": lifecycle.trigger.as_str(),
         "strategy": strategy,
         "engine_strategy": strategy,
         "keep_last": config.keep_last,
@@ -571,24 +627,23 @@ fn apply_pre_modify_overrides(
 fn build_event_metadata(
     lifecycle: &CompactLifecycle<'_>,
     config: &AutoCompactConfig,
-    archived_messages: usize,
-    estimated_tokens_before: usize,
-    estimated_tokens_after: usize,
-    snapshot_asset_id: Option<&str>,
+    metrics: &TranscriptCompactedEventMetrics,
     reminder_report: &ReminderCompactReport,
     summary: &str,
+    engine_strategy: &CompactStrategy,
 ) -> JsonValue {
     let mut metadata = serde_json::json!({
         "mode": lifecycle.mode.as_str(),
+        "reason": lifecycle.trigger.as_str(),
         "strategy": config.policy_strategy,
-        "engine_strategy": compact_strategy_name(&config.compact_strategy),
+        "engine_strategy": compact_strategy_name(engine_strategy),
         "keep_last": config.keep_last,
         "target_tokens": (config.token_threshold > 0).then_some(config.token_threshold),
-        "archived_messages": archived_messages,
-        "estimated_tokens_before": estimated_tokens_before,
-        "estimated_tokens_after": estimated_tokens_after,
+        "archived_messages": metrics.archived_messages,
+        "estimated_tokens_before": metrics.estimated_tokens_before,
+        "estimated_tokens_after": metrics.estimated_tokens_after,
         "new_summary_len": summary.len(),
-        "snapshot_asset_id": snapshot_asset_id,
+        "snapshot_asset_id": metrics.snapshot_asset_id.as_deref(),
         "reminders_decremented": reminder_report.decremented_count,
         "reminders_expired": reminder_report.expired.len(),
         "reminders_deduped": reminder_report.deduped.len(),
@@ -789,6 +844,7 @@ fn emit_reminder_lifecycle_records(transcript_id: Option<&str>, report: &Reminde
 fn build_snapshot_asset(
     transcript: &VmValue,
     config: &AutoCompactConfig,
+    engine_strategy: &CompactStrategy,
     archived_messages: usize,
     estimated_tokens_before: usize,
     estimated_tokens_after: usize,
@@ -796,7 +852,7 @@ fn build_snapshot_asset(
     let mut asset_metadata = BTreeMap::from([
         (
             "strategy".to_string(),
-            VmValue::String(Rc::from(compact_strategy_name(&config.compact_strategy))),
+            VmValue::String(Rc::from(compact_strategy_name(engine_strategy))),
         ),
         (
             "archived_messages".to_string(),

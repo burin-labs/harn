@@ -1102,20 +1102,16 @@ fn append_event_to_transcript(transcript: VmValue, event: VmValue) -> VmValue {
     VmValue::Dict(Rc::new(next))
 }
 
-fn summary_message_vm(summary: &str) -> VmValue {
-    crate::stdlib::json_to_vm_value(&summary_message_json(summary))
-}
-
 fn tail_message_capacity(
     policy: &SessionTranscriptBudgetPolicy,
     reserve_audit_event: bool,
 ) -> usize {
-    let event_capacity = if reserve_audit_event {
-        policy.max_events.saturating_sub(1)
-    } else {
-        policy.max_events
-    };
+    let event_capacity = tail_event_capacity(policy, usize::from(reserve_audit_event));
     policy.max_messages.min(event_capacity)
+}
+
+fn tail_event_capacity(policy: &SessionTranscriptBudgetPolicy, reserved_events: usize) -> usize {
+    policy.max_events.saturating_sub(reserved_events)
 }
 
 fn trim_transcript_for_budget(
@@ -1140,47 +1136,106 @@ fn trim_transcript_for_budget(
     VmValue::Dict(Rc::new(next))
 }
 
+struct BudgetCompactionLiveEvent {
+    policy: crate::orchestration::CompactionPolicy,
+    policy_strategy: String,
+    metrics: crate::orchestration::TranscriptCompactedEventMetrics,
+}
+
+struct BudgetCompactionResult {
+    transcript: VmValue,
+    live_event: Option<BudgetCompactionLiveEvent>,
+}
+
 fn compact_transcript_for_budget(
     transcript: &VmValue,
     policy: &SessionTranscriptBudgetPolicy,
     keep_last: usize,
-    reason: &str,
-) -> VmValue {
+    session_id: &str,
+) -> BudgetCompactionResult {
     let dict = transcript.as_dict().cloned().unwrap_or_else(BTreeMap::new);
     let messages = transcript_messages_from_dict(&dict);
-    let message_capacity = tail_message_capacity(policy, true);
-    let mut retained = Vec::new();
-    let mut summary = None;
+    let message_capacity = policy.max_messages.min(tail_event_capacity(policy, 2));
+    // Auto-compaction may widen a suffix to start on a clean user-turn boundary,
+    // so reserve one extra slot beyond the summary when sizing for hard caps.
+    let tail_keep = keep_last.min(message_capacity.saturating_sub(2));
+    let mut config = crate::orchestration::AutoCompactConfig {
+        token_threshold: 0,
+        keep_last: tail_keep,
+        compact_strategy: crate::orchestration::CompactStrategy::Llm,
+        hard_limit_strategy: crate::orchestration::CompactStrategy::Truncate,
+        fallback_strategy: Some(crate::orchestration::CompactStrategy::Truncate),
+        policy_strategy: crate::orchestration::compact_strategy_name(
+            &crate::orchestration::CompactStrategy::Llm,
+        )
+        .to_string(),
+        ..Default::default()
+    };
 
-    if messages.len() > message_capacity {
-        if message_capacity > 0 {
-            let tail_keep = keep_last.min(message_capacity.saturating_sub(1));
-            let archived = messages.len().saturating_sub(tail_keep);
-            let summary_text = format!(
-                "[auto-compacted {archived} older message(s) under transcript budget]\nSession transcript exceeded the {reason} budget; retained the most recent {tail_keep} message(s)."
-            );
-            retained.push(summary_message_vm(&summary_text));
-            retained.extend(messages.into_iter().skip(archived).take(tail_keep));
-            summary = Some(summary_text);
-        }
-    } else {
-        retained = messages;
+    let mut json_messages = messages
+        .iter()
+        .map(crate::llm::helpers::vm_value_to_json)
+        .collect::<Vec<_>>();
+    let lifecycle =
+        crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Auto)
+            .with_session_id(Some(session_id))
+            .with_trigger(crate::orchestration::CompactionTrigger::BudgetPressure)
+            .with_hook_dispatch(false)
+            .with_evaluate_providers(false);
+    let llm_opts = crate::llm::extract_llm_options(&[
+        VmValue::String(Rc::from("")),
+        VmValue::Nil,
+        VmValue::Nil,
+    ])
+    .ok();
+    let outcome = futures::executor::block_on(crate::orchestration::run_compaction_lifecycle(
+        &mut json_messages,
+        &mut config,
+        llm_opts.as_ref(),
+        lifecycle,
+    ))
+    .ok()
+    .flatten();
+
+    let retained = json_messages
+        .iter()
+        .map(crate::stdlib::json_to_vm_value)
+        .collect::<Vec<_>>();
+    let mut events = crate::llm::helpers::transcript_events_from_messages(&retained);
+    let summary = outcome.as_ref().map(|outcome| outcome.summary.clone());
+    let mut live_event = None;
+    if let Some(outcome) = outcome {
+        events.push(crate::llm::helpers::transcript_event(
+            "compaction",
+            "system",
+            "internal",
+            "",
+            Some(outcome.event_metadata.clone()),
+        ));
+        live_event = Some(BudgetCompactionLiveEvent {
+            policy: config.policy.clone(),
+            policy_strategy: outcome.policy_strategy,
+            metrics: crate::orchestration::TranscriptCompactedEventMetrics {
+                archived_messages: outcome.archived_messages,
+                estimated_tokens_before: outcome.estimated_tokens_before,
+                estimated_tokens_after: outcome.estimated_tokens_after,
+                snapshot_asset_id: outcome.snapshot_asset_id,
+            },
+        });
     }
 
     let mut next = dict;
-    next.insert(
-        "events".to_string(),
-        VmValue::List(Rc::new(
-            crate::llm::helpers::transcript_events_from_messages(&retained),
-        )),
-    );
+    next.insert("events".to_string(), VmValue::List(Rc::new(events)));
     next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
     if let Some(summary) = summary {
         next.insert("summary".to_string(), VmValue::String(Rc::from(summary)));
     } else {
         next.remove("summary");
     }
-    VmValue::Dict(Rc::new(next))
+    BudgetCompactionResult {
+        transcript: VmValue::Dict(Rc::new(next)),
+        live_event,
+    }
 }
 
 fn recovered_transcript_with_audit(
@@ -1288,9 +1343,10 @@ fn apply_transcript_with_budget(
             Ok(())
         }
         TranscriptBudgetRecovery::Compact { keep_last } => {
-            let recovered = compact_transcript_for_budget(&candidate, &policy, keep_last, reason);
+            let compacted =
+                compact_transcript_for_budget(&candidate, &policy, keep_last, &state.id);
             let (with_audit, audit, usage_after) = recovered_transcript_with_audit(
-                recovered,
+                compacted.transcript,
                 "compacted",
                 source,
                 reason,
@@ -1319,6 +1375,18 @@ fn apply_transcript_with_budget(
             }
             state.last_transcript_budget_action = Some(audit);
             state.transcript = with_audit;
+            if let Some(event) = compacted.live_event {
+                crate::orchestration::emit_transcript_compacted_event_sync(
+                    &state.id,
+                    crate::orchestration::CompactMode::Auto,
+                    crate::orchestration::CompactionTrigger::BudgetPressure
+                        .as_str()
+                        .to_string(),
+                    &event.policy,
+                    event.policy_strategy,
+                    event.metrics,
+                );
+            }
             Ok(())
         }
     }
