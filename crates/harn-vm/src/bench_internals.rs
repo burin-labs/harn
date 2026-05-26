@@ -74,6 +74,113 @@ impl InlineCacheSlotLookupFixture {
     }
 }
 
+/// Bytecode-length presets for the adaptive-binary-cache read microbench.
+/// The fixture walks N adjacent `Op::Add` slots, exercising the same
+/// cache-read shape that `execute_adaptive_binary` issues on every
+/// dispatch. The interesting axis is "how many cacheable ops per sweep"
+/// — that's what the dispatch loop pays per iteration of a tight
+/// arithmetic body.
+pub const ADAPTIVE_BINARY_CACHE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
+
+/// Microbench fixture for the adaptive-binary inline-cache read path.
+///
+/// `Chunk::inline_cache_entry` (the pre-optimization path) clones the
+/// wrapping `InlineCacheEntry` enum on every dispatch — a 24-32B memcpy
+/// that the variant-checking match in `try_specialized_binary`
+/// destructures and throws away. `Chunk::peek_adaptive_binary_cache`
+/// (the new path) returns just the `(AdaptiveBinaryOp,
+/// AdaptiveBinaryState)` pair by value (both `Copy`), so the read is a
+/// single scalar move instead of a clone.
+///
+/// The fixture pre-warms every slot to the Specialized state (the steady
+/// state of a hot loop) so the bench measures the read overhead with no
+/// per-iteration state transitions. The accumulator sums the cached
+/// `hits` counter so the optimizer cannot dead-code the loop.
+pub struct AdaptiveBinaryCacheReadFixture {
+    chunk: Chunk,
+    offsets: Vec<usize>,
+    slots: Vec<usize>,
+}
+
+impl AdaptiveBinaryCacheReadFixture {
+    pub fn new(op_count: usize) -> Self {
+        use crate::chunk::{AdaptiveBinaryOp, AdaptiveBinaryState, BinaryShape, InlineCacheEntry};
+        let mut chunk = Chunk::new();
+        let mut offsets = Vec::with_capacity(op_count);
+        for _ in 0..op_count {
+            offsets.push(chunk.code.len());
+            chunk.emit(Op::Add, 1);
+        }
+        let mut slots = Vec::with_capacity(op_count);
+        for &offset in &offsets {
+            let slot = chunk
+                .inline_cache_slot(offset)
+                .expect("Op::Add registers an inline-cache slot at emit time");
+            // Pre-warm to Specialized{Int}, which is the steady state of a
+            // hot loop after `ADAPTIVE_QUICKEN_THRESHOLD` Int-Int Adds.
+            // That's the case that exercises the IC read on every dispatch.
+            chunk.set_inline_cache_entry(
+                slot,
+                InlineCacheEntry::AdaptiveBinary {
+                    op: AdaptiveBinaryOp::Add,
+                    state: AdaptiveBinaryState::Specialized {
+                        shape: BinaryShape::Int,
+                        hits: 1_000,
+                        misses: 0,
+                    },
+                },
+            );
+            slots.push(slot);
+        }
+        Self {
+            chunk,
+            offsets,
+            slots,
+        }
+    }
+
+    pub fn op_count(&self) -> usize {
+        self.offsets.len()
+    }
+
+    /// Sweep all slots via the new Copy peek path. Returns the sum of
+    /// observed `hits` counters so the optimizer cannot dead-code the
+    /// loop.
+    pub fn invoke_peek(&self) -> u64 {
+        use crate::chunk::AdaptiveBinaryState;
+        let mut acc = 0u64;
+        for &slot in &self.slots {
+            if let Some((_op, state)) = self.chunk.peek_adaptive_binary_cache(slot) {
+                let hits = match state {
+                    AdaptiveBinaryState::Specialized { hits, .. } => hits,
+                    AdaptiveBinaryState::Warmup { hits, .. } => hits as u64,
+                };
+                acc = acc.wrapping_add(hits);
+            }
+        }
+        acc
+    }
+
+    /// Control sweep using the pre-optimization `inline_cache_entry`
+    /// clone path. Same accumulator shape so the criterion bench can
+    /// A/B the two paths inside a single binary.
+    pub fn invoke_clone_control(&self) -> u64 {
+        use crate::chunk::{AdaptiveBinaryState, InlineCacheEntry};
+        let mut acc = 0u64;
+        for &slot in &self.slots {
+            let entry = self.chunk.inline_cache_entry(slot);
+            if let InlineCacheEntry::AdaptiveBinary { state, .. } = entry {
+                let hits = match state {
+                    AdaptiveBinaryState::Specialized { hits, .. } => hits,
+                    AdaptiveBinaryState::Warmup { hits, .. } => hits as u64,
+                };
+                acc = acc.wrapping_add(hits);
+            }
+        }
+        acc
+    }
+}
+
 pub struct NonModuleClosureCallFixture {
     capture_count: usize,
     last_capture_name: Option<String>,

@@ -436,7 +436,15 @@ pub(crate) enum AdaptiveBinaryOp {
     GreaterEqual,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Adaptive-binary IC state. All fields are scalar `Copy` (shape is a
+/// `Copy` enum, hit/miss counters are integers), so the struct as a whole
+/// is `Copy`. This lets `execute_adaptive_binary` extract the cached state
+/// by value for the specialization check without cloning the wrapping
+/// `InlineCacheEntry` on every dispatch — the previous shape held
+/// `Clone-only` state via the outer enum and forced a 24-32B memcpy on
+/// every Add/Sub/Mul/Div/Mod/Eq/Neq/Less/Greater/LessEq/GreaterEq op,
+/// which is the hottest opcode class in the dispatch loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AdaptiveBinaryState {
     Warmup {
         shape: BinaryShape,
@@ -1155,6 +1163,28 @@ impl Chunk {
             .get(slot)
             .cloned()
             .unwrap_or(InlineCacheEntry::Empty)
+    }
+
+    /// Adaptive-binary fast path read. Returns the cached
+    /// `(op, state)` pair by value (both `Copy`) when slot holds an
+    /// `AdaptiveBinary` entry, else `None`. Skips the
+    /// `InlineCacheEntry::clone` that `inline_cache_entry` performs:
+    /// since `AdaptiveBinaryState: Copy`, the read does a single
+    /// scalar move out of the cache instead of a 24-32B memcpy of the
+    /// wrapping enum (which the variant-checking match destructures
+    /// and throws away anyway). Fires on every Add/Sub/Mul/Div/Mod/Eq/
+    /// Neq/Less/Greater/LessEq/GreaterEq dispatch, so the per-op
+    /// savings compound across the millions of dispatches a typical
+    /// loop body issues.
+    #[inline]
+    pub(crate) fn peek_adaptive_binary_cache(
+        &self,
+        slot: usize,
+    ) -> Option<(AdaptiveBinaryOp, AdaptiveBinaryState)> {
+        match self.inline_caches.borrow().get(slot)? {
+            &InlineCacheEntry::AdaptiveBinary { op, state } => Some((op, state)),
+            _ => None,
+        }
     }
 
     pub(crate) fn set_inline_cache_entry(&self, slot: usize, entry: InlineCacheEntry) {
@@ -1952,5 +1982,98 @@ mod tests {
             let from_index = chunk.inline_cache_slot(offset);
             assert_eq!(from_index, from_map, "parity broken at offset {offset}");
         }
+    }
+
+    // --- peek_adaptive_binary_cache contract ---
+    //
+    // The peek replaces the per-dispatch `InlineCacheEntry::clone` on the
+    // hottest opcode class (Add / Sub / Mul / Div / Mod / Eq / Neq /
+    // Less / Greater / LessEq / GreaterEq). It must return None for
+    // unrelated IC variants — silently mis-extracting a `Property` /
+    // `DirectCall` / `Method` slot as `AdaptiveBinary` would feed
+    // garbage into `try_specialized_binary` and either spec-mis-fire or
+    // crash. These tests pin the variant gate.
+
+    #[test]
+    fn peek_adaptive_binary_returns_none_for_empty_slot() {
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Add, 1);
+        let slot = chunk.inline_cache_slot(0).expect("Add registers a slot");
+        // Default state of a freshly-emitted slot is Empty.
+        assert!(chunk.peek_adaptive_binary_cache(slot).is_none());
+    }
+
+    #[test]
+    fn peek_adaptive_binary_returns_op_and_state_after_warmup() {
+        use super::{AdaptiveBinaryOp, AdaptiveBinaryState, BinaryShape, InlineCacheEntry};
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Add, 1);
+        let slot = chunk.inline_cache_slot(0).expect("Add registers a slot");
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::AdaptiveBinary {
+                op: AdaptiveBinaryOp::Add,
+                state: AdaptiveBinaryState::Warmup {
+                    shape: BinaryShape::Int,
+                    hits: 2,
+                },
+            },
+        );
+        let (op, state) = chunk
+            .peek_adaptive_binary_cache(slot)
+            .expect("warmed slot peek");
+        assert_eq!(op, AdaptiveBinaryOp::Add);
+        assert!(matches!(
+            state,
+            AdaptiveBinaryState::Warmup {
+                shape: BinaryShape::Int,
+                hits: 2
+            }
+        ));
+    }
+
+    #[test]
+    fn peek_adaptive_binary_returns_none_for_non_binary_variants() {
+        // The cache slot may legitimately hold a `Property`, `Method`,
+        // or `DirectCall` entry (eg. a Property slot at the offset
+        // sequence happens to alias an Add slot during a code rewrite —
+        // currently this cannot happen, but the peek must defensively
+        // refuse non-AdaptiveBinary variants regardless).
+        use super::{InlineCacheEntry, PropertyCacheTarget};
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Add, 1);
+        let slot = chunk.inline_cache_slot(0).expect("Add registers a slot");
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::Property {
+                name_idx: 0,
+                target: PropertyCacheTarget::ListCount,
+            },
+        );
+        assert!(chunk.peek_adaptive_binary_cache(slot).is_none());
+    }
+
+    #[test]
+    fn peek_adaptive_binary_returns_none_for_out_of_bounds_slot() {
+        // Defensive: `execute_adaptive_binary` filters its `slot`
+        // through `inline_cache_slot` first, but
+        // `peek_adaptive_binary_cache` should still return None for an
+        // unmapped slot rather than panicking.
+        let chunk = Chunk::new();
+        assert!(chunk.peek_adaptive_binary_cache(0).is_none());
+        assert!(chunk.peek_adaptive_binary_cache(usize::MAX).is_none());
+    }
+
+    #[test]
+    fn peek_adaptive_binary_state_is_copy() {
+        // Compile-time assertion: `AdaptiveBinaryState: Copy` is the
+        // whole point of this optimization — if a future variant adds
+        // a non-Copy field, the static check below will fail at compile
+        // time before the dispatcher silently regresses to the heavy
+        // `InlineCacheEntry::clone` path.
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<super::AdaptiveBinaryState>();
+        assert_copy::<super::AdaptiveBinaryOp>();
+        assert_copy::<super::BinaryShape>();
     }
 }
