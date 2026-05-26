@@ -35,7 +35,20 @@ impl Vm {
         if closure.module_state.is_some() {
             return closure.env.clone();
         }
-        let mut call_env = closure.env.clone();
+        let call_env = closure.env.clone();
+        // Compile-time guard: the late-bind walk only matters when the
+        // callee body actually reads a name through the runtime env
+        // (GetVar / SetVar / CallBuiltin / ...). For pure-arithmetic
+        // collection callbacks (`x -> x * 2`, `x -> x % 2 == 0`) no
+        // such op is emitted, so the walk would inject closure-typed
+        // names the callee can never reach. Skipping it preserves
+        // observable semantics while collapsing the per-invocation
+        // caller-scope iteration on the hot `.map`/`.filter`/`.each`
+        // path.
+        if !closure.func.chunk.references_outer_names {
+            return call_env;
+        }
+        let mut call_env = call_env;
         // Late-bind only closure-typed names from the caller — enough
         // for local recursive / mutually-recursive fns to self-reference
         // without leaking caller-local data into the callee.
