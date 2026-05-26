@@ -6,6 +6,83 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.8.41
+
+### Added
+
+- **Code-graph Cypher executor (#2434).** New `hostlib_code_index_cypher`,
+  `hostlib_code_index_branch_overlay`, and `hostlib_code_index_freshness`
+  builtins layer a typed Tree-Sitter symbol graph (`Function`/`Type`/
+  `Module`/`Import`/`CallSite`/`Macro` nodes; `CALLS`/`REFS`/`IMPORTS`/
+  `CONTAINS`/`OVERRIDES` edges) on top of the existing flat dep index, with
+  a Cypher subset (`MATCH … WHERE … RETURN`, variable-length hops up to
+  depth 4, no writes) and per-branch CDC delta overlays so worktree caches
+  stay near-free. Capped at 10 000 rows per query and 3 disjoint patterns
+  per `MATCH` so scripts can't trigger N⁴ cartesian enumeration.
+- **`std/code_librarian` library (#2438).** Single-import Harn surface
+  wrapping the Cypher executor and the 28 existing `hostlib_code_index_*`
+  builtins: `code_librarian_query`, `code_librarian_outline`,
+  `code_librarian_who_calls`, `code_librarian_what_imports`,
+  `code_librarian_recent_changes`, `code_librarian_freshness`,
+  `code_librarian_branch_overlay`. Documented at
+  `docs/src/stdlib/code-librarian.md`; worked example at
+  `examples/code_librarian_explore.harn`.
+- **`code_librarian_query_nl` NL→Cypher (#2439).** Natural-language query
+  layer: a small-tier LLM compiles NL questions to typed Cypher; bounded
+  graph enumeration (depth ≤ 4, expansions ≤ 200) is the fallback when the
+  compile path returns zero rows. 5-minute in-process result cache.
+  Achieves 100% recall on the 30-question fixture corpus shipped with
+  #2434.
+- **Crystallization trajectory tap (#2436).** Agent-loop turn-level
+  trajectories are now a candidate source for the crystallization
+  pipeline, alongside Code Mode composition snippets. Replay-verifies
+  before promoting; rejects candidates whose generated Harn diverges from
+  the original trace outputs. `TrajectoryTap` accepts a custom replay
+  allowlist via `.with_replay_allowlist(…)`.
+- **`routing_policy` v2 (#2435).** Verifier-signal-driven escalation: the
+  routing chain now reads verifier outcomes per attempt and escalates on
+  lint/typecheck/test signals rather than just on HTTP status.
+- **Demo gate CI workflow (#2437).** PRs that add new public primitives
+  (stdlib builtins, host capabilities, orchestrator surfaces, language
+  constructs) must also register a `harn demo` scenario; the
+  `no-demo-needed` label opts out hygiene/refactor PRs. Canary demo added
+  for `routing_policy`. Documented in `CONTRIBUTING.md`.
+
+### Fixed
+
+- **Silent literal-alias collisions in Cypher `RETURN`.** Default literal
+  aliases now suffix as `value`, `value_2`, `value_3` (`RETURN 1, 2, 3`
+  used to silently drop earlier literals); duplicate explicit aliases now
+  parse-error.
+- **Silent trace loss in trajectory crystallization.** All collected
+  traces now ride through to the candidate result; dropped trace ids are
+  surfaced via `tracing::warn!` when the synthesizer can only consume the
+  first.
+- **`IndexedFile.symbols` empty after symbol-graph rebuild (#2456).** The
+  symbol-graph rebuild now feeds the same Tree-Sitter parse into the flat
+  outline structure that `hostlib_code_index_outline_get` returns, so the
+  outline reflects the indexed symbols on the current corpus.
+- **Three pre-existing correctness bugs (#2430).** Behind-the-scenes fixes
+  from a sweep of recent diffs.
+
+### Changed
+
+- **bincode 1.3 → 2.0 migration.** Migrated harn-vm's bytecode-cache
+  serializer to bincode 2's `serde::encode_to_vec` / `decode_from_slice`
+  API; bumped on-disk `SCHEMA_VERSION` 3→4 so stale caches transparently
+  regenerate.
+- **`fmt-harn` covers root-level `.harn` fixtures (#2451).** `stdlib/`,
+  `personas/`, `tests/bridge/`, `examples/`, and `evals/` are now in
+  scope; fixed `stdlib/json.harn` which had been silently broken since
+  v0.4.7 (used since-removed `var` + spread-with-computed-key syntax).
+- **Variable-length `*lo..` defaults to depth cap.** `*1..` (no high
+  bound) now resolves to `(1, 4)` matching open-bound Cypher semantics,
+  rather than the previous silent `(1, 3)`.
+- **`BranchOverlay` storage is LRU-capped.** `OverlayState.overlays` is
+  capped at 8 entries (FIFO eviction; active slot cleared when the live
+  overlay is evicted) so long-running daemons don't accumulate full
+  base-graph clones.
+
 ## v0.8.40
 
 ### Added
