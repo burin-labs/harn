@@ -1,0 +1,206 @@
+// std/semver — Semantic-version helpers used by release tooling, bump
+// orchestrators, and any harness that needs to parse, compare, or emit
+// SemVer (https://semver.org/) version strings.
+//
+// Scope: parse "MAJOR.MINOR.PATCH" triples (no prerelease/build metadata),
+// strip/add the canonical leading `v`, compute single-step bumps, classify
+// which bump separates two versions, and unpack release branches / tags.
+// These helpers used to live in each release-tooling repo (harn-bump-fleet's
+// `lib/semver.harn`, harn's own `scripts/detect_bump_type.harn`); promoting
+// them to the stdlib removes the per-repo drift and the inconsistent error
+// messages.
+//
+// Import with:
+//   import {
+//     strip_v, add_v, is_v_semver, parse, next, bump_type,
+//     version_from_release_branch, version_from_tag,
+//   } from "std/semver"
+/** Parsed "MAJOR.MINOR.PATCH" triple. All three fields are non-negative ints. */
+type Version = {major: int, minor: int, patch: int}
+
+/**
+ * Strip an optional leading `v` from a version string. Returns the empty
+ * string for `nil` input so callers can `strip_v(maybe_tag)` without a
+ * separate nil guard.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: strip_v("v1.2.3")
+ */
+pub fn strip_v(version) -> string {
+  let text = to_string(version ?? "")
+  if starts_with(text, "v") {
+    return substring(text, 1, len(text))
+  }
+  return text
+}
+
+/**
+ * Add a leading `v` to a bare semver string. No-op if already prefixed.
+ * Returns the empty string for `nil` input.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: add_v("1.2.3")
+ */
+pub fn add_v(version) -> string {
+  let text = to_string(version ?? "")
+  if text == "" || starts_with(text, "v") {
+    return text
+  }
+  return "v" + text
+}
+
+/**
+ * Return true for canonical release tags like `v1.2.3`. Rejects prerelease
+ * tails (`v1.2.3-rc.1`) and build metadata (`v1.2.3+ci.42`) — release
+ * tooling that cares about those forms should match its own regex.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: is_v_semver("v1.2.3")
+ */
+pub fn is_v_semver(value) -> bool {
+  return regex_match("^v[0-9]+\\.[0-9]+\\.[0-9]+$", to_string(value ?? "")) != nil
+}
+
+/**
+ * Parse a "MAJOR.MINOR.PATCH" string into a `Version` dict. Accepts an
+ * optional leading `v`. Returns `nil` (not an exception) when the input
+ * is not exactly three non-negative integers separated by dots, so
+ * callers can match-on-nil for soft validation. Use `next` / `bump_type`
+ * when a throwing variant is more ergonomic.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: parse("v1.2.3")
+ */
+pub fn parse(version) -> Version? {
+  let text = strip_v(version)
+  let parts = split(text, ".")
+  if len(parts) != 3 {
+    return nil
+  }
+  let major = to_int(parts[0])
+  let minor = to_int(parts[1])
+  let patch = to_int(parts[2])
+  if major == nil || minor == nil || patch == nil {
+    return nil
+  }
+  if major < 0 || minor < 0 || patch < 0 {
+    return nil
+  }
+  return {major: major, minor: minor, patch: patch}
+}
+
+/**
+ * Return the next "MAJOR.MINOR.PATCH" version for a `"major"`, `"minor"`,
+ * or `"patch"` bump. Throws on non-semver `current` or unknown `bump`.
+ * The returned string never carries a leading `v` — wrap with `add_v` if
+ * the caller wants the tag-shaped form.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: ["std/semver: current version is not semver", "std/semver: bump must be major, minor, or patch"]
+ * @api_stability: stable
+ * @example: next("1.2.3", "minor")
+ */
+pub fn next(current, bump) -> string {
+  let parsed = parse(current)
+  if parsed == nil {
+    throw "std/semver: current version is not semver: " + to_string(current ?? "")
+  }
+  if bump == "major" {
+    return to_string(parsed.major + 1) + ".0.0"
+  }
+  if bump == "minor" {
+    return to_string(parsed.major) + "." + to_string(parsed.minor + 1) + ".0"
+  }
+  if bump == "patch" {
+    return to_string(parsed.major) + "." + to_string(parsed.minor) + "."
+      + to_string(parsed.patch + 1)
+  }
+  throw "std/semver: bump must be major, minor, or patch, got: " + to_string(bump ?? "")
+}
+
+/**
+ * Classify the single step that takes `current` to `target`. Returns
+ * `"major"`, `"minor"`, `"patch"`, or `nil` when the gap is not exactly
+ * one bump (downgrades, two-step jumps, or equal versions all yield
+ * `nil`). Throws when either side is not parseable as semver — that's a
+ * programmer-error condition, not user input drift.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: ["std/semver: current/target version is not semver"]
+ * @api_stability: stable
+ * @example: bump_type("1.2.3", "1.2.4")
+ */
+pub fn bump_type(current, target) {
+  let cur = parse(current)
+  let tgt = parse(target)
+  if cur == nil {
+    throw "std/semver: current version is not semver: " + to_string(current ?? "")
+  }
+  if tgt == nil {
+    throw "std/semver: target version is not semver: " + to_string(target ?? "")
+  }
+  if tgt.major == cur.major + 1 && tgt.minor == 0 && tgt.patch == 0 {
+    return "major"
+  }
+  if tgt.major == cur.major && tgt.minor == cur.minor + 1 && tgt.patch == 0 {
+    return "minor"
+  }
+  if tgt.major == cur.major && tgt.minor == cur.minor && tgt.patch == cur.patch + 1 {
+    return "patch"
+  }
+  return nil
+}
+
+/**
+ * Extract `X.Y.Z` from a release branch named `release/vX.Y.Z`. Returns
+ * the empty string for branches that don't match the canonical shape —
+ * including `release/X.Y.Z` without the `v` and `release/v1.2` with a
+ * truncated triple. Use the empty-string sentinel to gate
+ * release-only code paths.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: version_from_release_branch("release/v1.2.3")
+ */
+pub fn version_from_release_branch(branch) -> string {
+  let text = to_string(branch ?? "")
+  if !starts_with(text, "release/v") {
+    return ""
+  }
+  let candidate = substring(text, 9, len(text))
+  if parse(candidate) == nil {
+    return ""
+  }
+  return candidate
+}
+
+/**
+ * Extract `X.Y.Z` from a `vX.Y.Z` tag. Non-`v` tags pass through unchanged
+ * (this is just `strip_v` named in a domain-specific way so callers reading
+ * release pipelines can grep for it).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: version_from_tag("v1.2.3")
+ */
+pub fn version_from_tag(tag) -> string {
+  return strip_v(tag)
+}

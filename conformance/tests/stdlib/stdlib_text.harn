@@ -52,4 +52,26 @@ pipeline default() {
   let output = "ok test1\nFAIL test2\nerror: bad input\nok test3\nassert failed"
   let formatted = format_test_errors(output)
   __io_println(formatted)
+  // pad_right / pad_left
+  __io_println("[" + pad_right("api", 6) + "]")
+  __io_println("[" + pad_right("already-wider", 4) + "]")
+  __io_println("[" + pad_left("7", 4, "0") + "]")
+  __io_println("[" + pad_left(42, 4, "0") + "]")
+  __io_println("[" + pad_left(nil, 3) + "]")
+  // repeat_string
+  __io_println(repeat_string("-", 5))
+  __io_println("[" + repeat_string("ab", 3) + "]")
+  __io_println("[" + repeat_string("-", 0) + "]")
+  __io_println("[" + repeat_string("-", -2) + "]")
+  // regex_first_capture / regex_capture_groups / regex_all_first_captures
+  __io_println(regex_first_capture("v(\\d+\\.\\d+\\.\\d+)", "release v1.2.3 ready"))
+  __io_println(regex_first_capture("does-not-(\\d+)", "no match here"))
+  __io_println(json_stringify(regex_capture_groups("(\\d+)\\.(\\d+)\\.(\\d+)", "1.2.3")))
+  __io_println(json_stringify(regex_capture_groups("(\\d+)", "no digits")))
+  __io_println(json_stringify(regex_all_first_captures("#(\\d+)", "fixes #12 and #34, refs #56")))
+  __io_println(json_stringify(regex_all_first_captures("#(\\d+)", "no issue refs")))
+  // truncate_middle: ensure head/tail bias goes to head (regression for the
+  // pre-fix `ceil(int / 2)` no-op that biased the tail instead).
+  __io_println(truncate_middle("0123456789", 6))
+  __io_println(truncate_middle("0123456789", 7))
 }

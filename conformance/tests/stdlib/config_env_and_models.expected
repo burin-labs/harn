@@ -15,3 +15,10 @@ auto
 claude-sonnet-4-6
 auto
 true
+minimax
+M2.5
+zai
+GLM-5
+cerebras
+gpt-oss-120b
+dashscope

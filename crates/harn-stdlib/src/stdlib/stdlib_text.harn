@@ -259,7 +259,10 @@ pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
     return substring(suffix, 0, limit)
   }
   let keep = limit - len(suffix)
-  let head = ceil(keep / 2)
+  // Bias the head larger when `keep` is odd. Plain `ceil(keep / 2)` would
+  // be a no-op here because integer `/` already truncates, so the head
+  // landed smaller than the tail — the opposite of the intent.
+  let head = (keep + 1) / 2
   let tail = keep - head
   return substring(value, 0, head) + suffix + substring(value, len(value) - tail)
 }
@@ -375,4 +378,121 @@ pub fn format_test_errors(output) {
     return join(error_lines[:20], "\n")
   }
   return join(error_lines, "\n")
+}
+
+/**
+ * Right-pad `value` with `fill` until the rendered length reaches `width`.
+ * Values already at or beyond `width` are returned unchanged. `fill`
+ * defaults to a single space; multi-character fills use the first
+ * grapheme. Coerces `value` to a string, so callers don't need to wrap
+ * numbers or nil with `to_string`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pad_right("api", 6)
+ */
+pub fn pad_right(value, width: int, fill: string = " ") -> string {
+  return to_string(value ?? "").pad_right(width, fill ?? " ")
+}
+
+/**
+ * Left-pad `value` with `fill` until the rendered length reaches `width`.
+ * The common cases are zero-padded numeric sort keys (`pad_left(rev, 18,
+ * "0")`) and right-aligned table cells. Coerces `value` to a string.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pad_left(7, 4, "0")
+ */
+pub fn pad_left(value, width: int, fill: string = " ") -> string {
+  return to_string(value ?? "").pad_left(width, fill ?? " ")
+}
+
+/**
+ * Repeat `text` `count` times. Negative or zero counts return the empty
+ * string. Useful for table separators (`repeat_string("-", width)`) where
+ * the call site is clearer than `" ".repeat(width)` or a `while` loop.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: repeat_string("-", 5)
+ */
+pub fn repeat_string(text, count: int) -> string {
+  if count == nil || count <= 0 {
+    return ""
+  }
+  return to_string(text ?? "").repeat(count)
+}
+
+/**
+ * Return the first capture group of the first match of `pattern` against
+ * `text`, or `nil` when the pattern doesn't match or has no groups. This
+ * is the most common regex shape in reporting and parsing scripts; it
+ * replaces the four-line `regex_captures + len-check + group-index`
+ * dance per call site.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: regex_first_capture("v(\\d+\\.\\d+\\.\\d+)", tag)
+ */
+pub fn regex_first_capture(pattern: string, text) {
+  let captures = regex_captures(pattern, to_string(text ?? "")) ?? []
+  if len(captures) == 0 {
+    return nil
+  }
+  let groups = captures[0]?.groups ?? []
+  if len(groups) == 0 {
+    return nil
+  }
+  return groups[0]
+}
+
+/**
+ * Return every capture group of the first match of `pattern` against
+ * `text`. Returns the empty list when the pattern doesn't match or has
+ * no groups. Useful when several groups need to be destructured at once.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: regex_capture_groups("(\\d+)\\.(\\d+)\\.(\\d+)", "1.2.3")
+ */
+pub fn regex_capture_groups(pattern: string, text) -> list {
+  let captures = regex_captures(pattern, to_string(text ?? "")) ?? []
+  if len(captures) == 0 {
+    return []
+  }
+  return captures[0]?.groups ?? []
+}
+
+/**
+ * Return the first capture group of every match of `pattern` against
+ * `text`. Returns the empty list when the pattern doesn't match. Common
+ * for sweep-and-extract patterns like pulling every `#NNNN` issue
+ * reference out of a changelog.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: regex_all_first_captures("#(\\d+)", "fixes #12 and #34")
+ */
+pub fn regex_all_first_captures(pattern: string, text) -> list {
+  var out = []
+  for capture in regex_captures(pattern, to_string(text ?? "")) ?? [] {
+    let groups = capture?.groups ?? []
+    if len(groups) > 0 {
+      out = out + [groups[0]]
+    }
+  }
+  return out
 }

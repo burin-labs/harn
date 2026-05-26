@@ -1,0 +1,71 @@
+import {
+  add_v,
+  bump_type,
+  is_v_semver,
+  next,
+  parse,
+  strip_v,
+  version_from_release_branch,
+  version_from_tag,
+} from "std/semver"
+
+/**
+ * `show` makes empty-string and nil cases visible in the .expected file
+ * (a bare `log("")` writes `[harn] ` with a trailing space, which most
+ * editors strip on save).
+ */
+fn show(value) -> string {
+  if value == nil {
+    return "<nil>"
+  }
+  if value == "" {
+    return "<empty>"
+  }
+  return to_string(value)
+}
+
+pipeline test(task) {
+  // strip_v / add_v
+  log(show(strip_v("v1.2.3")))
+  log(show(strip_v("1.2.3")))
+  log(show(strip_v(nil)))
+  log(show(add_v("1.2.3")))
+  log(show(add_v("v1.2.3")))
+  log(show(add_v("")))
+  // is_v_semver
+  log(is_v_semver("v1.2.3"))
+  log(is_v_semver("v1.2"))
+  log(is_v_semver("1.2.3"))
+  log(is_v_semver("v1.2.3-rc.1"))
+  log(is_v_semver(nil))
+  // parse: dict shape and rejection
+  let parsed = parse("v1.2.3")
+  log(parsed.major)
+  log(parsed.minor)
+  log(parsed.patch)
+  log(show(parse("1.2")))
+  log(show(parse("1.2.foo")))
+  log(show(parse("-1.2.3")))
+  // next: bump returns bare X.Y.Z
+  log(next("1.2.3", "patch"))
+  log(next("1.2.3", "minor"))
+  log(next("1.2.3", "major"))
+  log(next("v0.8.43", "patch"))
+  // bump_type: classify gap
+  log(show(bump_type("1.2.3", "1.2.4")))
+  log(show(bump_type("1.2.3", "1.3.0")))
+  log(show(bump_type("1.2.3", "2.0.0")))
+  log(show(bump_type("1.2.3", "1.2.3")))
+  log(show(bump_type("1.2.3", "1.2.5")))
+  log(show(bump_type("1.2.3", "1.5.0")))
+  log(show(bump_type("1.2.3", "1.3.5")))
+  // version_from_release_branch
+  log(show(version_from_release_branch("release/v1.2.3")))
+  log(show(version_from_release_branch("release/1.2.3")))
+  log(show(version_from_release_branch("main")))
+  log(show(version_from_release_branch("release/v1.2")))
+  log(show(version_from_release_branch(nil)))
+  // version_from_tag
+  log(version_from_tag("v1.2.3"))
+  log(version_from_tag("1.2.3"))
+}

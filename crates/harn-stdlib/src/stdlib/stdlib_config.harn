@@ -145,21 +145,35 @@ pub fn parse_model_id(id: string) -> ModelIdParts {
   if raw == "" {
     return {provider: "auto", model: "", raw: ""}
   }
-  for prefix in [
-    "ollama:",
-    "local:",
-    "openrouter:",
-    "openai:",
+  // Allowlist of provider prefixes that have first-class routes in the
+  // runtime. Keep in lockstep with the canonical list in
+  // `crates/harn-vm/src/llm/provider.rs::PROVIDER_NAMES`; the runtime
+  // adds the prefix matcher does too, so drift here silently downgrades
+  // explicit prefixes (e.g. `minimax:M2.5`) to `provider: "auto"`.
+  let provider_prefixes = [
     "anthropic:",
-    "google:",
     "azure:",
-    "groq:",
-    "together:",
-    "fireworks:",
-    "mistral:",
+    "cerebras:",
+    "dashscope:",
     "deepseek:",
+    "fireworks:",
+    "google:",
+    "groq:",
+    "huggingface:",
+    "local:",
+    "minimax:",
+    "mistral:",
+    "mlx:",
+    "ollama:",
+    "openai:",
+    "openrouter:",
+    "tgi:",
+    "together:",
     "vertex:",
-  ] {
+    "vllm:",
+    "zai:",
+  ]
+  for prefix in provider_prefixes {
     if starts_with(raw, prefix) {
       let provider = substring(prefix, 0, len(prefix) - 1)
       return {provider: provider, model: substring(raw, len(prefix)), raw: raw}

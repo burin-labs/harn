@@ -44,4 +44,16 @@ pipeline test(task) {
   // Coercing to string works as documented.
   let by_parity = [1, 2, 3, 4].count_by({ x -> to_string(x % 2) })
   __io_println(by_parity["0"] == 2 && by_parity["1"] == 2)
+  // tally inherits the same strict-string contract: ints used to collapse
+  // into the same bucket as their stringified form via `display()`.
+  let tally_error = try {
+    [1, 2, 3].tally()
+    "no error"
+  } catch (e) {
+    to_string(e)
+  }
+  __io_println(contains(tally_error, "tally") && contains(tally_error, "expected a list of strings"))
+  // Explicit coercion still tallies.
+  let by_string = [1, 2, 1, 1, 3].map({ x -> to_string(x) }).tally()
+  __io_println(by_string["1"] == 3 && by_string["2"] == 1 && by_string["3"] == 1)
 }

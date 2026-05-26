@@ -32,3 +32,20 @@ false
 FAIL test2
 error: bad input
 assert failed
+[api   ]
+[already-wider]
+[0007]
+[0042]
+[   ]
+-----
+[ababab]
+[]
+[]
+1.2.3
+nil
+["1","2","3"]
+[]
+["12","34","56"]
+[]
+01...9
+01...89

@@ -282,13 +282,38 @@ impl crate::vm::Vm {
                 Ok(VmValue::List(Rc::new(windows)))
             }
             "tally" => {
+                // Strict-string discriminator: dict keys are intrinsically
+                // `String`, and the previous `display()` path collapsed
+                // `Int(1)` and `String("1")` into the same bucket — the
+                // exact problem #2467 fixed for `count_by` / `group_by`.
                 let mut counts: BTreeMap<String, VmValue> = BTreeMap::new();
+                let mut error: Option<VmError> = None;
                 for item in items.iter() {
-                    let key = item.display();
-                    let current = counts.get(&key).and_then(|v| v.as_int()).unwrap_or(0);
-                    counts.insert(key, VmValue::Int(current + 1));
+                    let bucket = match item {
+                        VmValue::String(s) => (**s).to_string(),
+                        VmValue::Nil => {
+                            error = Some(VmError::TypeError(
+                                "tally: list contains nil; expected a list of strings (wrap with to_string(...) if you intended a scalar)"
+                                    .to_string(),
+                            ));
+                            break;
+                        }
+                        other => {
+                            error = Some(VmError::TypeError(format!(
+                                "tally: list contains {}; expected a list of strings — wrap with to_string(...) so the bucket key is unambiguous",
+                                other.type_name()
+                            )));
+                            break;
+                        }
+                    };
+                    let current = counts.get(&bucket).and_then(|v| v.as_int()).unwrap_or(0);
+                    counts.insert(bucket, VmValue::Int(current + 1));
                 }
-                Ok(VmValue::Dict(Rc::new(counts)))
+                if let Some(err) = error {
+                    Err(err)
+                } else {
+                    Ok(VmValue::Dict(Rc::new(counts)))
+                }
             }
             "to_list" => Ok(VmValue::List(Rc::clone(items))),
             "to_set" => {
