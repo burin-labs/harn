@@ -6,6 +6,77 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Breaking
+
+- **`tally` now requires a list of strings.** `xs.tally()` previously
+  used `value.display()` to derive the bucket key, which silently
+  collapsed `Int(1)` and `String("1")` into the same bucket — the
+  exact issue that v0.8.43's #2467 fixed for `count_by`/`group_by`.
+  `tally` now matches that contract and raises a `TypeError`
+  ("expected a list of strings") for non-string items. Migrate
+  by mapping the items first:
+  `xs.map({ x -> to_string(x) }).tally()`.
+
+### Added
+
+- **`std/semver` stdlib module.** Promotes semver helpers that every
+  release-tooling repo reinvents (`harn-bump-fleet/lib/semver.harn`,
+  `harn/scripts/detect_bump_type.harn`) into one canonical surface:
+  `strip_v`, `add_v`, `is_v_semver`, `parse`,
+  `next(current, bump)`, `bump_type(current, target)`,
+  `version_from_release_branch`, `version_from_tag`. `parse` returns
+  `nil` for malformed input so callers can match-on-nil for soft
+  validation; `next` and `bump_type` throw on non-semver input.
+- **`std/text` regex + pad helpers.** Six additions remove the
+  ~5-line `regex_captures + len-check + group-index` boilerplate from
+  every report/parse script and stop dependent repos from
+  reinventing zero-pad / table-padding loops:
+  - `regex_first_capture(pattern, text)` — first group of first
+    match (or `nil`).
+  - `regex_capture_groups(pattern, text)` — every group of the first
+    match.
+  - `regex_all_first_captures(pattern, text)` — first group of every
+    match.
+  - `pad_right(value, width, fill = " ")`,
+    `pad_left(value, width, fill = " ")` — coercing front-doors for
+    the existing `.pad_right`/`.pad_left` string methods, so
+    non-string callers don't reach for `to_string` first.
+  - `repeat_string(text, count)` — clearer than the
+    `" ".repeat(width)` method form in table-separator code.
+
+### Changed
+
+- **`scripts/detect_bump_type.harn` cuts over to `std/semver`.**
+  Removed its private `parse(...)` / `detect(...)` semver math and
+  routes through `std/semver::bump_type`, gaining stricter input
+  validation (negative components reject) and a single source of
+  truth for release-tooling repos.
+
+### Fixed
+
+- **`tally` no longer collapses `Int(1)` and `String("1")`.** See the
+  breaking-change note above for the contract — this is the same
+  `display()`-derived bucket-key collision that v0.8.43 fixed for
+  `count_by`/`group_by`, applied to the callbackless `tally` shape.
+- **`truncate_middle` head/tail bias was inverted.** The intent of
+  `let head = ceil(keep / 2)` was to bias the head when `keep` is
+  odd, but `keep / 2` is integer division so `ceil` was a no-op and
+  the tail ended up larger than the head — opposite of the intent.
+  Fixed by switching to integer ceiling division
+  `(keep + 1) / 2`. With `max_chars = 6` and a 10-char input, the
+  output now reads `01...9` (head=2, tail=1) instead of `0...89`
+  (head=1, tail=2).
+- **`std/config::parse_model_id` recognizes every runtime provider
+  again.** Its prefix allowlist had drifted from
+  `crates/harn-vm/src/llm/provider.rs::PROVIDER_NAMES`, so
+  `parse_model_id("minimax:M2.5")` returned `provider: "auto"`
+  instead of `provider: "minimax"`. Added the missing entries
+  (cerebras, dashscope, huggingface, minimax, mlx, tgi, vllm, zai)
+  and pointed the inline comment at the runtime list so future
+  drift is visible at the call site.
+
 ## v0.8.43
 
 ### Breaking

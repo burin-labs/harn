@@ -35,4 +35,18 @@ pipeline default() {
   let blank = parse_model_id("")
   __io_println(blank.provider)
   __io_println(blank.model == "")
+  // Recent provider additions (minimax/zai/cerebras/huggingface/mlx/vllm/
+  // tgi/dashscope) used to silently downgrade to provider: "auto" because
+  // the allowlist drifted from `crates/harn-vm/src/llm/provider.rs`.
+  let minimax = parse_model_id("minimax:M2.5")
+  __io_println(minimax.provider)
+  __io_println(minimax.model)
+  let zai = parse_model_id("zai:GLM-5")
+  __io_println(zai.provider)
+  __io_println(zai.model)
+  let cerebras = parse_model_id("cerebras:gpt-oss-120b")
+  __io_println(cerebras.provider)
+  __io_println(cerebras.model)
+  let dashscope = parse_model_id("dashscope:qwen-max")
+  __io_println(dashscope.provider)
 }

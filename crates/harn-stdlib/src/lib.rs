@@ -38,6 +38,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_text.harn"),
     },
     StdlibSource {
+        module: "semver",
+        source: include_str!("stdlib/stdlib_semver.harn"),
+    },
+    StdlibSource {
         module: "ansi",
         source: include_str!("stdlib/stdlib_ansi.harn"),
     },
@@ -1431,6 +1435,44 @@ mod tests {
             .collect::<BTreeSet<_>>();
         for name in ["page", "terminal_width", "rule", "clear", "select_from"] {
             assert!(exports.contains(name), "std/tui should export {name}");
+        }
+    }
+
+    #[test]
+    fn semver_stdlib_module_exports_release_helpers() {
+        let exports = public_functions_for_module("semver")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in [
+            "strip_v",
+            "add_v",
+            "is_v_semver",
+            "parse",
+            "next",
+            "bump_type",
+            "version_from_release_branch",
+            "version_from_tag",
+        ] {
+            assert!(exports.contains(name), "std/semver should export {name}");
+        }
+    }
+
+    #[test]
+    fn text_stdlib_module_exports_regex_and_pad_helpers() {
+        let exports = public_functions_for_module("text")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in [
+            "pad_left",
+            "pad_right",
+            "repeat_string",
+            "regex_first_capture",
+            "regex_capture_groups",
+            "regex_all_first_captures",
+        ] {
+            assert!(exports.contains(name), "std/text should export {name}");
         }
     }
 
