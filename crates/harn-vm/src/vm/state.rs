@@ -455,7 +455,15 @@ impl Vm {
         if closure.module_state.is_some() {
             return closure.env.clone();
         }
-        let mut call_env = Self::closure_call_env(&self.env, closure);
+        let call_env = Self::closure_call_env(&self.env, closure);
+        // Same compile-time short-circuit as the env walk in
+        // `closure_call_env`: when the callee body never resolves an
+        // outer name through the env, injecting closure-typed *slot*
+        // locals from the caller's frame is wasted work too.
+        if !closure.func.chunk.references_outer_names {
+            return call_env;
+        }
+        let mut call_env = call_env;
         let Some(frame) = self.frames.last() else {
             return call_env;
         };

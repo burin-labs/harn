@@ -614,6 +614,22 @@ pub struct Chunk {
     constant_strings: Rc<RefCell<Vec<Option<Rc<str>>>>>,
     /// Source-name metadata for slot-indexed locals in this chunk.
     pub(crate) local_slots: Vec<LocalSlotInfo>,
+    /// True when this chunk's bytecode emits an opcode that resolves a
+    /// name through the runtime env (`GetVar`, `SetVar`, `CallBuiltin`,
+    /// `CallBuiltinSpread`, `CheckType`). The closure-call hot path uses
+    /// this as a cheap static guard: if a closure body never reads
+    /// outer names by name, the caller-scope late-bind walks in
+    /// [`Vm::closure_call_env`] and
+    /// [`Vm::closure_call_env_for_current_frame`] are pure overhead and
+    /// can be skipped, leaving the closure's captured env as-is.
+    ///
+    /// Walks exist to inject late-bound closure-typed names — typically
+    /// for self/mutually-recursive local fns and for fns whose captured
+    /// env predates a sibling definition. Inline arithmetic / comparison
+    /// callbacks (the `.map(x -> x * 2)` / `.filter(x -> x % 2 == 0)`
+    /// shape) emit none of the flagged opcodes, so the walk is wasted
+    /// work on every invocation.
+    pub(crate) references_outer_names: bool,
 }
 
 pub type ChunkRef = Rc<Chunk>;
@@ -634,6 +650,8 @@ pub struct CachedChunk {
     pub(crate) functions: Vec<CachedCompiledFunction>,
     pub(crate) inline_cache_slots: BTreeMap<usize, usize>,
     pub(crate) local_slots: Vec<LocalSlotInfo>,
+    #[serde(default)]
+    pub(crate) references_outer_names: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -826,7 +844,36 @@ impl Chunk {
             inline_caches: Rc::new(RefCell::new(Vec::new())),
             constant_strings: Rc::new(RefCell::new(Vec::new())),
             local_slots: Vec::new(),
+            references_outer_names: false,
         }
+    }
+
+    /// Opcodes that perform a runtime env-based name lookup or
+    /// assignment. Emitting any of these marks the chunk as needing the
+    /// caller-scope late-bind walk in [`Vm::closure_call_env`].
+    ///
+    /// `Op::Call` / `Op::TailCall` / `Op::Pipe` make the list because
+    /// the compiler emits `Op::Constant("name") + Op::TailCall` for
+    /// `return fn_name(...)` (see `compile_return` in
+    /// `compiler/statements.rs`) — the callee is materialized on the
+    /// stack as a String and resolved through
+    /// [`Vm::resolve_named_closure`] at dispatch time, which is exactly
+    /// the path the walk feeds. Excluding them would silently break
+    /// mutual recursion across a tail-call boundary.
+    #[inline]
+    pub(crate) fn op_reads_outer_name(op: Op) -> bool {
+        matches!(
+            op,
+            Op::GetVar
+                | Op::SetVar
+                | Op::CallBuiltin
+                | Op::CallBuiltinSpread
+                | Op::CallSpread
+                | Op::Call
+                | Op::TailCall
+                | Op::Pipe
+                | Op::CheckType
+        )
     }
 
     /// Set the current column for subsequent emit calls.
@@ -856,6 +903,9 @@ impl Chunk {
         if is_adaptive_binary_op(op) {
             self.register_inline_cache(op_offset);
         }
+        if Self::op_reads_outer_name(op) {
+            self.references_outer_names = true;
+        }
     }
 
     /// Emit an instruction with a u16 argument.
@@ -877,6 +927,9 @@ impl Chunk {
         ) {
             self.register_inline_cache(op_offset);
         }
+        if Self::op_reads_outer_name(op) {
+            self.references_outer_names = true;
+        }
     }
 
     /// Emit an instruction with a u8 argument.
@@ -891,6 +944,9 @@ impl Chunk {
         self.columns.push(col);
         if matches!(op, Op::Call) {
             self.register_inline_cache(op_offset);
+        }
+        if Self::op_reads_outer_name(op) {
+            self.references_outer_names = true;
         }
     }
 
@@ -914,6 +970,7 @@ impl Chunk {
             self.columns.push(col);
         }
         self.register_inline_cache(op_offset);
+        self.references_outer_names = true;
     }
 
     /// Emit a direct builtin spread call.
@@ -927,6 +984,7 @@ impl Chunk {
             self.lines.push(line);
             self.columns.push(col);
         }
+        self.references_outer_names = true;
     }
 
     /// Emit a method call: op + u16 (method name) + u8 (arg count).
@@ -1064,6 +1122,7 @@ impl Chunk {
                 .collect(),
             inline_cache_slots: self.inline_cache_slots.clone(),
             local_slots: self.local_slots.clone(),
+            references_outer_names: self.references_outer_names,
         }
     }
 
@@ -1089,6 +1148,7 @@ impl Chunk {
             ])),
             constant_strings: Rc::new(RefCell::new(vec![None; constants_count])),
             local_slots: cached.local_slots.clone(),
+            references_outer_names: cached.references_outer_names,
         }
     }
 
@@ -1497,7 +1557,8 @@ impl Default for Chunk {
 
 #[cfg(test)]
 mod tests {
-    use super::Op;
+    use super::{Chunk, Op};
+    use crate::BuiltinId;
 
     #[test]
     fn op_from_byte_matches_repr_order() {
@@ -1506,5 +1567,160 @@ mod tests {
             assert_eq!(Op::from_byte(byte as u8), Some(op));
         }
         assert_eq!(Op::from_byte(Op::ALL.len() as u8), None);
+    }
+
+    // --- references_outer_names tracking ---
+    //
+    // Drives the compile-time guard used in `Vm::closure_call_env`
+    // and `Vm::closure_call_env_for_current_frame` to skip the
+    // per-invocation caller-scope late-bind walks. Coverage parity
+    // matters because false negatives would regress recursive /
+    // mutually-recursive fns.
+
+    #[test]
+    fn empty_chunk_does_not_reference_outer_names() {
+        let chunk = Chunk::new();
+        assert!(!chunk.references_outer_names);
+    }
+
+    #[test]
+    fn arithmetic_only_chunk_does_not_reference_outer_names() {
+        // The hot `.map(x -> x * 2)` / `.filter(x -> x % 2 == 0)`
+        // shape: pure stack/arithmetic ops and slot locals, no env
+        // reads. Must NOT flag — that's the whole point of the
+        // optimization.
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetLocalSlot, 0, 1);
+        chunk.emit_u16(Op::Constant, 0, 1);
+        chunk.emit(Op::MulInt, 1);
+        chunk.emit(Op::Pop, 1);
+        chunk.emit(Op::Return, 1);
+        assert!(!chunk.references_outer_names);
+    }
+
+    #[test]
+    fn slot_only_chunk_does_not_reference_outer_names() {
+        // Compiler-resolved locals never need env-based late-bind.
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::DefLocalSlot, 0, 1);
+        chunk.emit_u16(Op::GetLocalSlot, 0, 1);
+        chunk.emit_u16(Op::SetLocalSlot, 0, 1);
+        assert!(!chunk.references_outer_names);
+    }
+
+    #[test]
+    fn get_var_flags_outer_name_reference() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetVar, 0, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn set_var_flags_outer_name_reference() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::SetVar, 0, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn check_type_flags_outer_name_reference() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::CheckType, 0, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn call_builtin_flags_outer_name_reference() {
+        let mut chunk = Chunk::new();
+        chunk.emit_call_builtin(BuiltinId::from_name("any_name"), 0, 1, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn call_builtin_spread_flags_outer_name_reference() {
+        let mut chunk = Chunk::new();
+        chunk.emit_call_builtin_spread(BuiltinId::from_name("any_name"), 0, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn tail_call_flags_outer_name_reference() {
+        // `return fn_name(...)` compiles to Constant + TailCall —
+        // TailCall does a runtime name lookup, so it has to flag.
+        let mut chunk = Chunk::new();
+        chunk.emit_u8(Op::TailCall, 1, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn call_flags_outer_name_reference() {
+        // Op::Call can receive a String callee from the stack (the
+        // by-name dispatch shape), so it has to flag too.
+        let mut chunk = Chunk::new();
+        chunk.emit_u8(Op::Call, 1, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn pipe_flags_outer_name_reference() {
+        // `x |> name` resolves `name` through env when the value on
+        // the stack is a String / BuiltinRef.
+        let mut chunk = Chunk::new();
+        chunk.emit(Op::Pipe, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn method_call_does_not_flag_outer_name_reference() {
+        // Method receivers come off the operand stack, not the env;
+        // emitting MethodCall alone must not force the walk.
+        let mut chunk = Chunk::new();
+        chunk.emit_method_call(0, 1, 1);
+        chunk.emit_method_call_opt(0, 1, 1);
+        assert!(!chunk.references_outer_names);
+    }
+
+    #[test]
+    fn jump_and_control_flow_do_not_flag_outer_name_reference() {
+        // Jumps, returns, pops — control flow stays inside the
+        // frame and never touches env lookups.
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::Constant, 0, 1);
+        chunk.emit(Op::JumpIfFalse, 1);
+        chunk.emit(Op::Jump, 1);
+        chunk.emit(Op::Return, 1);
+        chunk.emit(Op::Pop, 1);
+        assert!(!chunk.references_outer_names);
+    }
+
+    #[test]
+    fn references_outer_names_is_monotonic() {
+        // Once flagged, subsequent non-flagging emits must not
+        // clear the bit — flags are sticky.
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetVar, 0, 1);
+        assert!(chunk.references_outer_names);
+        chunk.emit_u16(Op::GetLocalSlot, 0, 1);
+        chunk.emit(Op::MulInt, 1);
+        assert!(chunk.references_outer_names);
+    }
+
+    #[test]
+    fn freeze_thaw_round_trips_references_outer_names() {
+        // Bytecode-cache hits must observe the same flag as a
+        // fresh compile — otherwise the first call after a cache
+        // hit would either over- or under-skip the walk.
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetVar, 0, 1);
+        assert!(chunk.references_outer_names);
+        let frozen = chunk.freeze_for_cache();
+        let thawed = Chunk::from_cached(&frozen);
+        assert!(thawed.references_outer_names);
+
+        let plain = Chunk::new();
+        assert!(!plain.references_outer_names);
+        let frozen_plain = plain.freeze_for_cache();
+        let thawed_plain = Chunk::from_cached(&frozen_plain);
+        assert!(!thawed_plain.references_outer_names);
     }
 }

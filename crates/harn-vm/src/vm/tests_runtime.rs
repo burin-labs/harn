@@ -2362,3 +2362,124 @@ pipeline main(task) {
     let (out, _) = run_harn_at(&entry, source).unwrap();
     assert_eq!(out.trim(), "42");
 }
+
+// --- Closure late-bind walk skip (Chunk::references_outer_names) ---
+//
+// The runtime fast path in `Vm::closure_call_env` skips the
+// caller-scope late-bind walk for callees whose bodies never read
+// outer names. These tests pin the corner cases that would regress
+// if the static check ever stopped flagging an env-reading opcode:
+// self-recursion, mutual recursion, sibling-fn references, var
+// rebinding from inside a closure, and inline lambdas as callback
+// arguments.
+
+#[test]
+fn inline_arithmetic_lambda_map_filter_optimization_path() {
+    let out = run_vm(
+        r"pipeline default(task) {
+            let evens = [1, 2, 3, 4, 5, 6].filter({ x -> x % 2 == 0 })
+            let doubled = evens.map({ x -> x * 2 })
+            log(doubled)
+        }",
+    );
+    assert_eq!(out, "[harn] [4, 8, 12]\n");
+}
+
+#[test]
+fn self_recursive_named_fn_still_resolves_after_optimization() {
+    let out = run_vm(
+        r"pipeline default(task) {
+            fn fact(n) {
+                if n <= 1 { return 1 }
+                return n * fact(n - 1)
+            }
+            log(fact(6))
+        }",
+    );
+    assert_eq!(out, "[harn] 720\n");
+}
+
+#[test]
+fn mutually_recursive_named_fns_still_resolve_after_optimization() {
+    // `return is_odd(n - 1)` compiles to `Op::Constant + Op::TailCall`
+    // (see compile_return in compiler/statements.rs) — TailCall is
+    // in the flag set so the late-bind walk runs and the cross-fn
+    // resolution succeeds.
+    let out = run_vm(
+        r"pipeline default(task) {
+            fn is_even(n) {
+                if n == 0 { return true }
+                return is_odd(n - 1)
+            }
+            fn is_odd(n) {
+                if n == 0 { return false }
+                return is_even(n - 1)
+            }
+            log(is_even(4))
+            log(is_even(5))
+        }",
+    );
+    assert_eq!(out, "[harn] true\n[harn] false\n");
+}
+
+#[test]
+fn anonymous_lambda_calling_sibling_fn_via_call_builtin_flags() {
+    let out = run_vm(
+        r"pipeline default(task) {
+            fn helper(x) { return x + 100 }
+            let r = [1, 2, 3].map({ v -> helper(v) })
+            log(r)
+        }",
+    );
+    assert_eq!(out, "[harn] [101, 102, 103]\n");
+}
+
+#[test]
+fn anonymous_lambda_with_get_var_capture_flags() {
+    let out = run_vm(
+        r"pipeline default(task) {
+            let bonus = 10
+            let r = [1, 2, 3].map({ v -> v + bonus })
+            log(r)
+        }",
+    );
+    assert_eq!(out, "[harn] [11, 12, 13]\n");
+}
+
+#[test]
+fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
+    let out = run_vm(
+        r"pipeline default(task) {
+            fn helper_a(x) { return x + 1 }
+            fn helper_b(x) { return x + 2 }
+            let r = [10, 20, 30].map({ v -> v * 2 })
+            log(r)
+            log(helper_a(0))
+            log(helper_b(0))
+        }",
+    );
+    assert_eq!(out, "[harn] [20, 40, 60]\n[harn] 1\n[harn] 2\n");
+}
+
+#[test]
+fn nested_map_lambdas_skip_walk_independently() {
+    let out = run_vm(
+        r"pipeline default(task) {
+            let grid = [[1, 2], [3, 4]]
+            let r = grid.map({ row -> row.map({ x -> x * 10 }) })
+            log(r)
+        }",
+    );
+    assert_eq!(out, "[harn] [[10, 20], [30, 40]]\n");
+}
+
+#[test]
+fn typed_param_lambda_uses_check_type_and_walks() {
+    let out = run_vm(
+        r"pipeline default(task) {
+            let r = [1, 2, 3].map({ v: int -> v + 1 })
+            log(r)
+        }",
+    );
+    assert_eq!(out, "[harn] [2, 3, 4]\n");
+}
