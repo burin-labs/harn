@@ -63,6 +63,14 @@ fn or_pricing_usd_per_m(model: string) -> dict {
   if model == "anthropic/claude-opus-4.7" {
     return {input: 5.0, output: 25.0}
   }
+  // Unknown model id — the OpenRouter API has accepted both
+  // `<vendor>/<model>` and `openrouter/<vendor>/<model>` shapes in the
+  // past, and silently zero-pricing a routed candidate distorts the
+  // cell totals beyond recognition. Warn loudly so eval operators can
+  // extend the table rather than burying the discrepancy.
+  __io_println(
+    "warning: unknown model id `" + model + "`; pricing as zero — update or_pricing_usd_per_m",
+  )
   return {input: 0.0, output: 0.0}
 }
 
@@ -92,6 +100,11 @@ fn extract_first_fenced_harn(text: string) -> string {
  * only verifier is `typecheck`. The chain returns immediately because the
  * mock provider is free + deterministic; whatever the verifier emits is the
  * canonical "would the typecheck gate have accepted this" answer.
+ *
+ * The catch arm only swallows known routing-shaped errors (dicts carrying a
+ * `reason` field, or strings mentioning routing/budget/verifier). Any other
+ * exception is printed verbatim so unrelated bugs can't silently inflate the
+ * "escalate" bucket and disguise themselves as low baseline quality.
  */
 fn grade_outcome(code: string) -> string {
   llm_mock_push_scope()
@@ -112,6 +125,19 @@ fn grade_outcome(code: string) -> string {
       "escalate"
     }
   } catch (err) {
+    let err_text = to_string(err)
+    let reason = if type_of(err) == "dict" {
+      to_string(err?.reason ?? "")
+    } else {
+      ""
+    }
+    let is_routing_shape = reason != ""
+      || contains(err_text, "routing")
+      || contains(err_text, "budget")
+      || contains(err_text, "verifier")
+    if !is_routing_shape {
+      __io_println("grade_outcome: unexpected exception (not routing-shaped): " + err_text)
+    }
     "escalate"
   }
   llm_mock_pop_scope()
@@ -245,7 +271,22 @@ fn col_totals(rows: list, key: string) -> dict {
   return {cost_usd: cost, valid: valid}
 }
 
+/**
+ * Sanity check that `grade_outcome` returns "accept" on a code snippet
+ * we know typechecks. If this fires, the verifier-receipt shape upstream
+ * has shifted and every baseline output will silently be classified as
+ * "escalate" — which would make the eval results meaningless.
+ */
+fn smoke_check_grade_outcome() {
+  let outcome = grade_outcome("let answer: int = 42\n")
+  if outcome != "accept" {
+    throw "grade_outcome regression: known-good snippet returned `" + outcome
+      + "` instead of `accept`"
+  }
+}
+
 fn main(harness: Harness) {
+  smoke_check_grade_outcome()
   let skill_body = harness.fs.read_text(SKILL_BODY_PATH)
   let rows = TASKS.map({ task -> run_task_quartet(task, skill_body) })
   let bb = col_totals(rows, "baseline_bare")

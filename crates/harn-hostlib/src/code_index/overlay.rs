@@ -19,12 +19,22 @@
 //!   by both manual stage-and-apply tests and a future Git-driven
 //!   change-detector.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::ast::Language;
 
 use super::file_table::FileId;
 use super::symbol_graph::SymbolGraph;
+
+/// Cap on the number of branch overlays kept in memory at once.
+///
+/// Each registered overlay holds a full `materialized` clone of the base
+/// graph (see [`BranchOverlay::materialize`]), so unbounded registration
+/// is a real memory leak for long-running daemons that swap between many
+/// branches. The cap evicts the least-recently-set overlay when this is
+/// exceeded — chosen large enough to comfortably cover typical
+/// stack-of-PRs flows while keeping the bound predictable.
+pub const OVERLAY_CAPACITY: usize = 8;
 
 /// Per-file delta entry kept on an overlay.
 #[derive(Debug, Clone)]
@@ -119,9 +129,18 @@ impl BranchOverlay {
 
 /// Holder for the active overlay (if any). Threaded through the index
 /// state so every Cypher query can opt into the per-branch view.
+///
+/// Overlay storage is bounded by [`OVERLAY_CAPACITY`]; once that many
+/// branches have been registered, [`Self::set`] evicts the
+/// least-recently-set overlay to keep daemon memory predictable. Each
+/// overlay still owns a full base-graph clone (see
+/// [`BranchOverlay::materialize`]), so the cap matters in practice.
 #[derive(Debug, Default, Clone)]
 pub struct OverlayState {
     overlays: BTreeMap<String, BranchOverlay>,
+    /// Insertion order of branch names, used to evict the oldest entry
+    /// when `overlays.len()` would exceed [`OVERLAY_CAPACITY`].
+    insertion_order: VecDeque<String>,
     active: Option<String>,
 }
 
@@ -133,8 +152,26 @@ impl OverlayState {
 
     /// Insert or replace a branch overlay. Activating it is a separate
     /// step ([`Self::activate`]).
+    ///
+    /// When the registry already holds [`OVERLAY_CAPACITY`] distinct
+    /// branches, the oldest one is evicted before insertion. If the
+    /// evicted overlay happens to be currently active, the active slot
+    /// is cleared so we don't leave a dangling pointer.
     pub fn set(&mut self, overlay: BranchOverlay) {
-        self.overlays.insert(overlay.branch.clone(), overlay);
+        let branch = overlay.branch.clone();
+        // Bump branch to "most recent" if it was already present.
+        if self.overlays.contains_key(&branch) {
+            self.insertion_order.retain(|b| b != &branch);
+        } else if self.overlays.len() >= OVERLAY_CAPACITY {
+            if let Some(victim) = self.insertion_order.pop_front() {
+                self.overlays.remove(&victim);
+                if self.active.as_deref() == Some(victim.as_str()) {
+                    self.active = None;
+                }
+            }
+        }
+        self.insertion_order.push_back(branch.clone());
+        self.overlays.insert(branch, overlay);
     }
 
     /// Borrow a stored overlay (if registered).
@@ -247,6 +284,62 @@ mod tests {
         assert!(
             (0.66..1.0).contains(&reuse),
             "expected ~2/3 reuse, got {reuse}"
+        );
+    }
+
+    #[test]
+    fn registry_evicts_oldest_overlay_past_capacity() {
+        let base = base_graph();
+        let mut state = OverlayState::new();
+        // Fill the registry exactly to capacity.
+        for i in 0..OVERLAY_CAPACITY {
+            let mut overlay = BranchOverlay::new(format!("topic/{i}"));
+            overlay.materialize(&base);
+            state.set(overlay);
+        }
+        assert!(state.get("topic/0").is_some());
+        assert_eq!(state.overlays.len(), OVERLAY_CAPACITY);
+
+        // One more — the oldest (topic/0) should be evicted.
+        let mut overflow = BranchOverlay::new("topic/new");
+        overflow.materialize(&base);
+        state.set(overflow);
+        assert_eq!(state.overlays.len(), OVERLAY_CAPACITY);
+        assert!(
+            state.get("topic/0").is_none(),
+            "expected oldest overlay to be evicted"
+        );
+        assert!(state.get("topic/new").is_some());
+
+        // Re-setting an existing branch must not evict anything — it
+        // just refreshes recency.
+        let mut refreshed = BranchOverlay::new("topic/1");
+        refreshed.materialize(&base);
+        state.set(refreshed);
+        assert_eq!(state.overlays.len(), OVERLAY_CAPACITY);
+        assert!(state.get("topic/1").is_some());
+    }
+
+    #[test]
+    fn evicting_active_overlay_clears_active_slot() {
+        let base = base_graph();
+        let mut state = OverlayState::new();
+        for i in 0..OVERLAY_CAPACITY {
+            let mut overlay = BranchOverlay::new(format!("topic/{i}"));
+            overlay.materialize(&base);
+            state.set(overlay);
+        }
+        // Activate the soon-to-be-evicted entry.
+        state.activate(Some("topic/0".into()));
+        assert_eq!(state.active(), Some("topic/0"));
+
+        let mut overflow = BranchOverlay::new("topic/new");
+        overflow.materialize(&base);
+        state.set(overflow);
+        assert_eq!(
+            state.active(),
+            None,
+            "active slot should clear when its overlay is evicted"
         );
     }
 
