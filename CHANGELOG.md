@@ -6,6 +6,117 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.8.42
+
+### Added
+
+- **`std/agent/sitrep` post-turn summary primitive (#2463).** New stdlib
+  module exposes `agent_sitrep(messages_or_transcript, opts?)`,
+  `agent_sitrep_append(...)`, and `agent_sitrep_preferred_routes()` for
+  TUI / IDE hosts that want an ephemeral 3-sentence
+  CURRENT STATE / WORK DONE / NEXT ACTION rundown at the end of each
+  agent turn. The helper owns prompt engineering and provider
+  selection: a curated reverse-chronological route list (Anthropic
+  Haiku 4.5 → GPT-4o-mini → Gemini 2.5 Flash → DeepSeek V4-Flash →
+  Groq → Cerebras → Together → Ollama → local → mock) lands the call
+  on whichever provider has env credentials first. Returns
+  `{skipped: true, reason: "no_available_provider"}` instead of
+  throwing when nothing matches, so the caller can render
+  "(sitrep unavailable)" without crashing the turn. Companion
+  burin-code wiring tracked at burin-labs/burin-code#1266.
+- **Open-weight frontier catalog wave (#2463).** Added two new
+  providers — `minimax` (`api.minimax.io/v1`, `MINIMAX_API_KEY`) and
+  `zai` (`api.z.ai/v1`, `ZAI_API_KEY` / `ZHIPU_API_KEY` fallback) —
+  with capability rules covering native tools, thinking blocks, and
+  prompt caching where supported. Catalog rows for MiniMax M2 / M2.5
+  / M2.7 (+ highspeed variants) / Text-01, GLM-5 / GLM-5.1, DeepSeek
+  V4-Flash / V4-Pro / `deepseek-chat` / `deepseek-reasoner`, plus
+  OpenRouter mirrors (`minimax/minimax-m2{,.7}`,
+  `z-ai/glm-5{,.1,v-turbo}`, `deepseek/deepseek-v4-{flash,pro}`)
+  verified against `openrouter.ai/api/v1/models`. Kimi K2.6 row
+  corrected to 262K context with up-to-date $0.73 / $3.49
+  OpenRouter pricing.
+- **Richer per-model catalog metadata (#2463).** Every cataloged
+  model now carries `tier` (enum: `small` / `mid` / `frontier` /
+  `reasoning`), `open_weight: bool`, `strengths: list<string>`
+  (e.g. `coding`, `summarization`, `long_context`, `tool_use`,
+  `reasoning`, `vision`, `speed`, `cheap`, `agentic`), and
+  `benchmarks: dict<string, float>` (SWE-bench Verified + Pro and
+  AA intelligence index where published). Numbers fact-checked May
+  2026 against `artificialanalysis.ai`,
+  `morphllm.com/claude-benchmarks`, `vellum.ai`, and
+  `marc0.dev/en/leaderboard`. Exposed on `llm_catalog()` entries and
+  on the JSON / TS / Swift catalog exports.
+- **`std/llm/catalog` selectors (#2463).**
+  `models_with({tier?, strengths?, min_benchmark?, open_weight?,
+  provider?, max_input_per_mtok?, exclude_deprecated?,
+  available_only?})` returns ranked candidates;
+  `best_available_models(opts)` progressively relaxes constraints
+  (`min_benchmark` → `max_input_per_mtok` → `strengths` → `tier`
+  → `open_weight` → `provider`) until at least one model matches,
+  so degenerate environments with few accessible providers still
+  get a usable fallback; `pick_model(opts)` returns the top
+  candidate with `_relaxed_step` metadata so callers can see how
+  much the filter had to relax.
+- **List helpers `take_while` / `drop_while` / `count_by`
+  (#2463).** Registered as sync + async builtins, method-dispatched
+  on lists (`xs.take_while(...)`), and signed up in the parser
+  builtin signature table so the typechecker can reason about them.
+- **`release-harn` is now a first-class embedded skill (#2463).**
+  `harn skills list` and `harn skills get release-harn --full`
+  resolve the merge-queue-safe release workflow alongside
+  `harn-agent` / `harn-language` / `harn-providers` / etc. The body
+  documents the one-PR-carries-everything shape, recovery entry
+  points (`release_ship.sh --finalize`, `gh workflow run
+  publish-release.yml`), and the hard rules around never pushing to
+  a PR already in the merge queue. Previously the workflow was
+  Claude Code session-skill-only and invisible to direct CLI users.
+- **Provider catalog refresh schema carries v0.8.42 fields (#2463).**
+  `observation()` in `scripts/provider_catalog_refresh.harn` now
+  threads `benchmarks`, `strengths`, and `open_weight` through the
+  refresh pipeline so a future live source adapter
+  (`artificialanalysis.ai`, `swebench.com`) can refresh them
+  alongside pricing and context window. Existing adapters that
+  don't populate the new fields keep working — the helper reads
+  them through `fields?.<key>` and stores nil when absent.
+
+### Changed
+
+- **Tier moved from pattern-rule table to per-model field (#2463).**
+  The legacy `[[tier_rules]]` table in `providers.toml` (which
+  classified models by glob / substring / exact match) has been
+  removed. Each model row now declares its own tier directly
+  (`tier = "small" | "mid" | "frontier" | "reasoning"`). The
+  rule-evaluation code path remains as a runtime fallback for any
+  model that does not self-declare, but the catalog is now the
+  single source of truth. Aliases `frontier` / `mid` / `small` are
+  retained as explicit ergonomics — they point at specific models,
+  not patterns. Hosts that called `model_tier(id)` see no behaviour
+  change for models with declared tiers; rows without a declaration
+  now return `tier_defaults.default` (`"mid"`).
+
+### Fixed
+
+- **`llm_provider_status()` returned an incomplete provider set on
+  first call (#2463).** The thread-local registered-provider set
+  was populated by `reset_llm_state()` (called between test runs)
+  but not by the CLI's `run` path, which meant `mock` (and any
+  other registered-only provider) was silently absent from the
+  status table until something else seeded the registry.
+  `llm_provider_status_value` now calls
+  `register_default_providers()` before snapshotting, so every
+  caller sees the full set.
+- **Conformance flake: process-spawning tests intermittently failed
+  under full-suite load (#2463).** `wait_for_log_contains` in
+  `conformance/tests/_common.harn` had a 15-second budget; the
+  related `wait_for_exit` was already 30 seconds for exactly this
+  reason. Under the full conformance suite the freshly spawned
+  child could take 5–15 seconds to write its `ready` line,
+  intermittently tripping `signal_process_sigterm`,
+  `agent_state_resume_process`, `durable_step_run`, and
+  `agent_probe`. The budget is now 30 seconds to match
+  `wait_for_exit`.
+
 ## v0.8.41
 
 ### Added

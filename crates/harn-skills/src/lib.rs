@@ -136,6 +136,7 @@ const SOURCES: &[&str] = &[
     include_str!("corpus/harn-providers/SKILL.md"),
     include_str!("corpus/harn-testing/SKILL.md"),
     include_str!("corpus/harn-tracing/SKILL.md"),
+    include_str!("corpus/release-harn/SKILL.md"),
 ];
 
 static EMBEDDED_SKILLS: OnceLock<Box<[EmbeddedSkill]>> = OnceLock::new();
@@ -391,6 +392,7 @@ mod tests {
                 "harn-providers",
                 "harn-testing",
                 "harn-tracing",
+                "release-harn",
             ]
         );
         assert_eq!(skills.len(), SOURCES.len());
@@ -490,6 +492,7 @@ mod tests {
                 ["conformance", "deterministic", "mock_time"],
             ),
             ("harn-tracing", ["replay", "receipts", "transcript"]),
+            ("release-harn", ["release_ship", "merge queue", "tag"]),
         ];
 
         for (name, terms) in expectations {

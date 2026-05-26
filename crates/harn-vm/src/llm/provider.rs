@@ -203,6 +203,8 @@ pub(crate) fn register_default_providers() {
             "vllm",
             "tgi",
             "dashscope",
+            "minimax",
+            "zai",
         ] {
             names.insert(name.to_string());
         }

@@ -47,10 +47,23 @@ pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
   return nil
 }
 
-/** Poll a subprocess log until it contains the expected text. */
+/**
+ * Poll a subprocess log until it contains the expected text.
+ *
+ * Polls every 50ms for up to 30s. The upper bound matches
+ * [[wait_for_exit]] and exists for the same reason: under heavy
+ * concurrent load (the full conformance suite spawns many parallel
+ * cargo / harn invocations), the freshly-spawned child can take 5–15
+ * seconds to even reach its "ready" log line. The previous 15s budget
+ * was tight enough that signal_process_sigterm /
+ * agent_state_resume_process / durable_step_run / agent_probe
+ * intermittently failed under full-suite load while passing in
+ * isolation. Returns false on timeout; callers that need the readiness
+ * signal as a hard prereq should fail with a descriptive `require`.
+ */
 pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
   var attempts = 0
-  while attempts < 300 {
+  while attempts < 600 {
     if harness.fs.exists(log_path) {
       let log = exec("cat", log_path).stdout
       if contains(log, needle) {

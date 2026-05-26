@@ -438,6 +438,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/postturn.harn"),
     },
     StdlibSource {
+        module: "agent/sitrep",
+        source: include_str!("stdlib/agent/sitrep.harn"),
+    },
+    StdlibSource {
         module: "agent/judge",
         source: include_str!("stdlib/agent/judge.harn"),
     },
@@ -765,6 +769,10 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
     StdlibPromptAsset {
         path: "llm/prompts/transcript_summarize_user.harn.prompt",
         source: include_str!("stdlib/llm/prompts/transcript_summarize_user.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "llm/prompts/sitrep_user.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/sitrep_user.harn.prompt"),
     },
     StdlibPromptAsset {
         path: "llm/prompts/structural_chain_of_draft.harn.prompt",

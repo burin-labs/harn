@@ -259,6 +259,33 @@ pub struct ModelDef {
     /// avoid presenting them as one-click options.
     #[serde(default)]
     pub availability: ModelAvailability,
+    /// Popular-consensus tier label. Enum-typed string: "small" | "mid" |
+    /// "frontier" | "reasoning". Self-declared per model (no pattern-matched
+    /// rule table) so the catalog is the single source of truth. When None
+    /// the resolver returns the catalog default ("mid"). Use the richer
+    /// `strengths` + `benchmarks` fields to pick models for specific
+    /// workloads — `tier` exists only as a coarse popular-consensus shortcut.
+    #[serde(default)]
+    pub tier: Option<String>,
+    /// True when the model weights are downloadable / self-hostable
+    /// (open-weight / open-source license, regardless of commercial-use
+    /// restrictions). False when weights are closed (Anthropic, OpenAI,
+    /// Google, etc.). None when the catalog row predates the migration.
+    #[serde(default)]
+    pub open_weight: Option<bool>,
+    /// Workload-shaped strength tags. Conventional values include
+    /// `coding`, `summarization`, `long_context`, `tool_use`, `reasoning`,
+    /// `vision`, `speed`, `cheap`, `agentic`. Selectors should treat
+    /// missing entries as "no claim" rather than "no strength."
+    #[serde(default)]
+    pub strengths: Vec<String>,
+    /// Public benchmark numbers, keyed by a snake_case identifier
+    /// (`swe_bench_verified`, `humaneval`, `aa_intelligence_index`, etc.).
+    /// Values are the raw published scores. The selector layer is free
+    /// to normalize per benchmark; the catalog records the canonical
+    /// score so future readers can audit the source.
+    #[serde(default)]
+    pub benchmarks: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -586,6 +613,18 @@ pub fn model_tier(model_id: &str) -> String {
 }
 
 fn model_tier_with_config(config: &ProvidersConfig, model_id: &str) -> String {
+    // Per-model self-declared tier wins. This is the only path.
+    if let Some(model) = config.models.get(model_id) {
+        if let Some(tier) = model.tier.as_deref() {
+            let trimmed = tier.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    // Legacy pattern-rules: still consulted while we finish migrating the
+    // long tail of models to per-row `tier = "..."`. Newly added rows
+    // should set `tier` directly; the rule table is a fallback only.
     for rule in &config.tier_rules {
         if let Some(exact) = &rule.exact {
             if model_id == exact {
@@ -602,13 +641,6 @@ fn model_tier_with_config(config: &ProvidersConfig, model_id: &str) -> String {
                 return rule.tier.clone();
             }
         }
-    }
-    let lower = model_id.to_lowercase();
-    if lower.contains("9b") || lower.contains("a3b") {
-        return "small".to_string();
-    }
-    if lower.starts_with("claude-") || lower == "gpt-4o" {
-        return "frontier".to_string();
     }
     config.tier_defaults.default.clone()
 }
@@ -1183,6 +1215,10 @@ mod tests {
                 deprecation_note: None,
                 quality_tags: Vec::new(),
                 availability: ModelAvailability::default(),
+                tier: None,
+                open_weight: None,
+                strengths: Vec::new(),
+                benchmarks: std::collections::BTreeMap::new(),
             },
         );
         set_user_overrides(Some(overlay));
@@ -1213,10 +1249,18 @@ mod tests {
 
     #[test]
     fn test_model_tier_from_defaults() {
+        // Tier is now self-declared per model row in providers.toml.
+        // Models that match an entry use the declared value; unknown
+        // model ids fall through to `tier_defaults.default` ("mid").
         assert_eq!(model_tier("claude-sonnet-4-20250514"), "frontier");
         assert_eq!(model_tier("gpt-4o"), "frontier");
-        assert_eq!(model_tier("Qwen3.5-9B"), "small");
-        assert_eq!(model_tier("deepseek-v3"), "mid");
+        assert_eq!(model_tier("Qwen/Qwen3.5-9B"), "small");
+        assert_eq!(model_tier("deepseek-v4-flash"), "mid");
+        assert_eq!(model_tier("deepseek-v4-pro"), "frontier");
+        assert_eq!(model_tier("MiniMax-M2.7"), "frontier");
+        assert_eq!(model_tier("glm-5.1"), "frontier");
+        // Unknown ids resolve to the default.
+        assert_eq!(model_tier("definitely-not-a-real-model"), "mid");
     }
 
     #[test]
@@ -1396,8 +1440,19 @@ mod tests {
         let config = default_config();
         assert!(!config.providers.is_empty());
         assert!(!config.inference_rules.is_empty());
-        assert!(!config.tier_rules.is_empty());
+        // Tier is now declared on each model row; tier_rules is allowed
+        // to be empty (the rule table is a legacy fallback only).
         assert_eq!(config.tier_defaults.default, "mid");
+        // At least the new open-weight frontiers should have explicit tiers.
+        let frontiers = config
+            .models
+            .iter()
+            .filter(|(_, m)| m.tier.as_deref() == Some("frontier"))
+            .count();
+        assert!(
+            frontiers >= 4,
+            "expected at least 4 frontier-tagged models, got {frontiers}"
+        );
     }
 
     #[test]
@@ -1528,6 +1583,10 @@ mod tests {
                 deprecation_note: None,
                 quality_tags: Vec::new(),
                 availability: ModelAvailability::default(),
+                tier: None,
+                open_weight: None,
+                strengths: Vec::new(),
+                benchmarks: std::collections::BTreeMap::new(),
             },
         );
         overlay

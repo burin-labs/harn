@@ -1,0 +1,281 @@
+// std/agent/sitrep — concise post-turn summaries for end users.
+//
+// The TUI / IDE wants a tiny "what just happened" note at the end of each
+// turn (or at the end of a conversation). This module owns the prompt
+// engineering and provider selection so harness authors don't have to
+// reinvent it.
+//
+// Public surface:
+//   agent_sitrep(transcript_or_messages, opts?)
+//       -> {summary, lines, model_used, provider_used}
+//   agent_sitrep_append(transcript_or_messages, opts?)
+//       -> transcript with a system-role summary message appended
+//   agent_sitrep_preferred_routes()
+//       -> the default reverse-chronological route list (newest/best first)
+//
+// Routes are tried in order; the first one whose provider has resolvable
+// credentials wins. Callers can override the list via opts.routes — that
+// is the documented seam for picking a host's preferred provider/model
+// without having to know the prompt or capability quirks.
+//
+// Cost: a sitrep is typically 200-600 input tokens and emits ≤ 100 output
+// tokens. The default routes pick small, fast, cheap models tuned for
+// summarization.
+// Reverse-chronological order: newest / strongest summarizers first, then
+// progressively cheaper / more local fallbacks. Routes that name a single
+// {provider, model} resolve straight through; routes that name only a
+// provider use that provider's qc_default model.
+const __SITREP_DEFAULT_ROUTES = [
+  {provider: "anthropic", model: "claude-haiku-4-5-20251001"},
+  {provider: "openai", model: "gpt-4o-mini"},
+  {provider: "gemini", model: "gemini-2.5-flash"},
+  {provider: "openrouter", model: "google/gemini-2.5-flash"},
+  {provider: "deepseek", model: "deepseek-v4-flash"},
+  {provider: "groq", model: "llama-3.3-70b"},
+  {provider: "cerebras", model: "gpt-oss-120b"},
+  {provider: "together", model: "Qwen/Qwen3-Coder-Next-FP8"},
+  {provider: "ollama", model: "llama3.2"},
+  {provider: "local", model: "gemma-4-e4b-it"},
+  {provider: "mock"},
+]
+
+const __SITREP_SYSTEM_PROMPT = "You distill agent transcripts into concise 3-sentence situation reports for end users. Be specific, factual, and never invent details the transcript does not contain. Treat tool calls and tool results as authoritative when they conflict with surrounding prose."
+
+const __SITREP_DEFAULT_MAX_TOKENS = 400
+
+const __SITREP_DEFAULT_TEMPERATURE = 0.2
+
+fn __sitrep_available_providers() {
+  let status = llm_provider_status()
+  var available = {}
+  for entry in status {
+    if entry?.available {
+      available[entry.name] = true
+    }
+  }
+  return available
+}
+
+fn __sitrep_messages_from(input) {
+  if input == nil {
+    return []
+  }
+  if type_of(input) == "list" {
+    return input
+  }
+  if type_of(input) == "dict" && input?._type == "transcript" {
+    return transcript_messages(input)
+  }
+  if type_of(input) == "dict" && type_of(input?.messages) == "list" {
+    return input.messages
+  }
+  throw "agent_sitrep: expected a message list, transcript, or {messages} dict"
+}
+
+fn __sitrep_message_text(value) {
+  if value == nil {
+    return ""
+  }
+  if type_of(value) == "string" {
+    return value
+  }
+  if type_of(value) == "list" {
+    var parts = []
+    for chunk in value {
+      let chunk_text = if type_of(chunk) == "string" {
+        chunk
+      } else {
+        to_string(chunk?.text ?? chunk?.content ?? "")
+      }
+      if chunk_text != "" {
+        parts = parts + [chunk_text]
+      }
+    }
+    return join(parts, "\n")
+  }
+  return to_string(value)
+}
+
+fn __sitrep_truncate(text, max_chars) {
+  if max_chars == nil || max_chars <= 0 || len(text) <= max_chars {
+    return text
+  }
+  return substring(text, 0, max_chars) + " …[truncated]"
+}
+
+fn __sitrep_format_messages(messages, max_chars_per_message) {
+  var rendered = []
+  for message in messages {
+    let role = uppercase(to_string(message?.role ?? "user"))
+    let body = __sitrep_truncate(__sitrep_message_text(message?.content), max_chars_per_message)
+    if trim(body) == "" {
+      continue
+    }
+    rendered = rendered + ["[" + role + "] " + body]
+  }
+  return join(rendered, "\n\n")
+}
+
+fn __sitrep_route_is_available(route, available) {
+  let provider = route?.provider
+  if provider == nil || provider == "" {
+    return false
+  }
+  return available[provider]
+}
+
+fn __sitrep_resolved_routes(opts) {
+  let explicit = opts?.routes
+  if type_of(explicit) == "list" && len(explicit) > 0 {
+    return explicit
+  }
+  return __SITREP_DEFAULT_ROUTES
+}
+
+fn __sitrep_pick_route(opts) {
+  if opts?.provider != nil && opts?.model != nil {
+    return {provider: opts.provider, model: opts.model}
+  }
+  let available = __sitrep_available_providers()
+  for candidate in __sitrep_resolved_routes(opts) {
+    if __sitrep_route_is_available(candidate, available) {
+      let resolved_model = candidate?.model ?? llm_qc_default_model(candidate.provider)
+      if resolved_model != nil && resolved_model != "" {
+        return {provider: candidate.provider, model: resolved_model}
+      }
+    }
+  }
+  return nil
+}
+
+fn __sitrep_user_prompt(messages, opts) {
+  let max_chars_per_message = opts?.max_chars_per_message ?? 1200
+  let formatted = __sitrep_format_messages(messages, max_chars_per_message)
+  return render_prompt(
+    "std/llm/prompts/sitrep_user.harn.prompt",
+    {
+      formatted: formatted,
+      extra_instructions: opts?.extra_instructions ?? "",
+      audience: opts?.audience ?? "",
+    },
+  )
+}
+
+fn __sitrep_normalize_lines(text) {
+  if text == nil || trim(text) == "" {
+    return []
+  }
+  var lines = []
+  for raw in split(text, "\n") {
+    let cleaned = trim(raw)
+    if cleaned != "" {
+      lines = lines + [cleaned]
+    }
+  }
+  return lines
+}
+
+fn __sitrep_empty_result(reason) {
+  return {summary: "", lines: [], model_used: nil, provider_used: nil, skipped: true, reason: reason}
+}
+
+/**
+ * Produce a 3-sentence situation report for the current agent state.
+ *
+ * Accepts a transcript, a list of role/content messages, or a {messages}
+ * dict. Returns {summary, lines, model_used, provider_used} where
+ * `summary` is the full text the LLM produced and `lines` is `summary`
+ * split into one entry per non-empty line (typically 3).
+ *
+ * If no preferred provider has credentials and no `routes` override
+ * lands on an available one, the function returns
+ * {summary: "", skipped: true, reason: "no_available_provider"} rather
+ * than throwing — callers can render that as "(sitrep unavailable)" and
+ * carry on without crashing the turn.
+ *
+ * agent_sitrep.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_sitrep(transcript)
+ */
+pub fn agent_sitrep(input, opts = nil) {
+  let messages = __sitrep_messages_from(input)
+  if len(messages) == 0 {
+    return __sitrep_empty_result("empty_transcript")
+  }
+  let route = __sitrep_pick_route(opts)
+  if route == nil {
+    return __sitrep_empty_result("no_available_provider")
+  }
+  let user_prompt = __sitrep_user_prompt(messages, opts)
+  let llm_opts = {
+    provider: route.provider,
+    model: route.model,
+    temperature: opts?.temperature ?? __SITREP_DEFAULT_TEMPERATURE,
+    max_tokens: opts?.max_tokens ?? __SITREP_DEFAULT_MAX_TOKENS,
+    stream: false,
+  }
+  let system = opts?.system ?? __SITREP_SYSTEM_PROMPT
+  let response = llm_call(user_prompt, system, llm_opts)
+  let text = trim(response.text ?? "")
+  return {
+    summary: text,
+    lines: __sitrep_normalize_lines(text),
+    model_used: route.model,
+    provider_used: route.provider,
+    skipped: false,
+    reason: nil,
+  }
+}
+
+/**
+ * Run agent_sitrep and return the input transcript (or message list)
+ * with the summary appended as a system-role message tagged as a
+ * sitrep so a successor agent can recognize it.
+ *
+ * When the sitrep is skipped (no available provider, empty transcript),
+ * the input is returned unchanged.
+ *
+ * agent_sitrep_append.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_sitrep_append(transcript)
+ */
+pub fn agent_sitrep_append(input, opts = nil) {
+  let result = agent_sitrep(input, opts)
+  if result.skipped || result.summary == "" {
+    return input
+  }
+  let tag = opts?.tag ?? "sitrep"
+  let payload = "<" + tag + ">\n" + result.summary + "\n</" + tag + ">"
+  if type_of(input) == "list" {
+    return input + [{role: "system", content: payload}]
+  }
+  if type_of(input) == "dict" && input?._type == "transcript" {
+    return add_system(input, [{type: "text", text: payload, visibility: "public"}])
+  }
+  return input
+}
+
+/**
+ * Return the built-in reverse-chronological preferred route list.
+ * Useful as a starting point for callers that want to prepend a
+ * host-specific override before passing the result back as opts.routes.
+ *
+ * agent_sitrep_preferred_routes.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_sitrep_preferred_routes()
+ */
+pub fn agent_sitrep_preferred_routes() {
+  return __SITREP_DEFAULT_ROUTES
+}

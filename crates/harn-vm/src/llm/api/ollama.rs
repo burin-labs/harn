@@ -845,6 +845,10 @@ mod tests {
                 deprecation_note: None,
                 quality_tags: Vec::new(),
                 availability: crate::llm_config::ModelAvailability::default(),
+                tier: None,
+                open_weight: None,
+                strengths: Vec::new(),
+                benchmarks: std::collections::BTreeMap::new(),
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
@@ -938,6 +942,10 @@ mod tests {
                 deprecation_note: None,
                 quality_tags: Vec::new(),
                 availability: crate::llm_config::ModelAvailability::default(),
+                tier: None,
+                open_weight: None,
+                strengths: Vec::new(),
+                benchmarks: std::collections::BTreeMap::new(),
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
@@ -1182,6 +1190,10 @@ mod tests {
                 deprecation_note: None,
                 quality_tags: Vec::new(),
                 availability: crate::llm_config::ModelAvailability::default(),
+                tier: None,
+                open_weight: None,
+                strengths: Vec::new(),
+                benchmarks: std::collections::BTreeMap::new(),
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));

@@ -219,6 +219,47 @@ latency_p50_ms = 1600
 method = "GET"
 path = "/models"
 
+# MiniMax — OpenAI-compatible endpoint for MiniMax-M2 family. The direct
+# API serves the open-weight `MiniMax-M2`, `MiniMax-M2.5`, and
+# `MiniMax-M2.7` (released 2026-03-18). All three sit on the same
+# /v1/chat/completions URL; the wire format mirrors OpenAI chat
+# completions with native tool calls and thinking blocks.
+[providers.minimax]
+base_url = "https://api.minimax.io/v1"
+base_url_env = "MINIMAX_BASE_URL"
+auth_style = "bearer"
+auth_env = "MINIMAX_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0003
+cost_per_1k_out = 0.0012
+latency_p50_ms = 1700
+
+[providers.minimax.healthcheck]
+method = "GET"
+path = "/models"
+
+# Z.AI — host of the GLM family (GLM-4.6, GLM-4.7). Z.AI publishes both a
+# native PaaS endpoint (`/api/paas/v4`) and an OpenAI-compatible endpoint
+# (`/v1`); Harn dials the OpenAI-compatible one so the existing
+# openai_chat_completions wire format Just Works. The provider also
+# accepts the legacy `ZHIPU_API_KEY` env var; callers can rely on the
+# `auth_env` array trying each in order.
+[providers.zai]
+base_url = "https://api.z.ai/v1"
+base_url_env = "ZAI_BASE_URL"
+auth_style = "bearer"
+auth_env = ["ZAI_API_KEY", "ZHIPU_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0004
+cost_per_1k_out = 0.0017
+latency_p50_ms = 1900
+
+[providers.zai.healthcheck]
+method = "GET"
+path = "/models"
+
 # AWS Bedrock — resolves credentials through env, profile, container, or
 # EC2 instance roles, then signs Converse API calls with SigV4.
 [providers.bedrock]
@@ -387,49 +428,44 @@ provider = "gemini"
 pattern = "cerebras/*"
 provider = "cerebras"
 
-# ── Tier rules ───────────────────────────────────────────────────────────────
-# Classify a model into small / mid / frontier for default routing and
-# evaluation budgets. First match wins.
+# MiniMax — released-name canonical IDs (capital-M) sit on the direct
+# API. OpenRouter mirrors the same family under `minimax/*` slugs; that
+# routing is handled by the generic slash-prefix rule.
+[[inference_rules]]
+pattern = "MiniMax-*"
+provider = "minimax"
 
-[[tier_rules]]
-contains = "9b"
-tier = "small"
+# Z.AI — GLM family. Bare IDs ("glm-5", "glm-5.1") dial the direct
+# OpenAI-compatible Z.AI endpoint; `zhipu/*` is accepted as a legacy
+# prefix some packagers still use.
+[[inference_rules]]
+pattern = "glm-*"
+provider = "zai"
 
-[[tier_rules]]
-contains = "a3b"
-tier = "small"
+[[inference_rules]]
+pattern = "zhipu/*"
+provider = "zai"
 
-[[tier_rules]]
-contains = "gemma-4-e2b"
-tier = "small"
+# DeepSeek — V4 family. The direct API uses bare IDs while OpenRouter
+# slugs them as `deepseek/*`; only the bare form needs an inference
+# rule because slash-prefixed IDs hit the generic OpenRouter rule.
+[[inference_rules]]
+pattern = "deepseek-v4*"
+provider = "deepseek"
 
-[[tier_rules]]
-contains = "gemma-4-e4b"
-tier = "small"
+[[inference_rules]]
+pattern = "deepseek-chat"
+provider = "deepseek"
 
-[[tier_rules]]
-contains = "gemma-4-26b"
-tier = "mid"
+[[inference_rules]]
+pattern = "deepseek-reasoner"
+provider = "deepseek"
 
-[[tier_rules]]
-contains = "gemma-4-31b"
-tier = "frontier"
-
-[[tier_rules]]
-contains = "gemma4:26b"
-tier = "mid"
-
-[[tier_rules]]
-contains = "gemma4:31b"
-tier = "frontier"
-
-[[tier_rules]]
-pattern = "claude-*"
-tier = "frontier"
-
-[[tier_rules]]
-exact = "gpt-4o"
-tier = "frontier"
+# ── Tier defaults ────────────────────────────────────────────────────────────
+# Tier is self-declared on each model row via `tier = "small" | "mid" |
+# "frontier" | "reasoning"`. The legacy pattern-based [[tier_rules]] table
+# has been removed; the catalog is the single source of truth. Models
+# without an explicit `tier` resolve to `tier_defaults.default`.
 
 [tier_defaults]
 default = "mid"
@@ -572,6 +608,57 @@ id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
 provider = "mlx"
 tool_format = "native"
 
+# MiniMax direct API aliases.
+[aliases.minimax]
+id = "MiniMax-M2.7"
+provider = "minimax"
+
+[aliases."minimax-m2"]
+id = "MiniMax-M2"
+provider = "minimax"
+
+[aliases."minimax-m2.5"]
+id = "MiniMax-M2.5"
+provider = "minimax"
+
+[aliases."minimax-m2.7"]
+id = "MiniMax-M2.7"
+provider = "minimax"
+
+# Z.AI GLM aliases.
+[aliases.glm]
+id = "glm-5.1"
+provider = "zai"
+
+[aliases."glm-5"]
+id = "glm-5"
+provider = "zai"
+
+[aliases."glm-5.1"]
+id = "glm-5.1"
+provider = "zai"
+
+# DeepSeek V4 direct API aliases.
+[aliases.deepseek]
+id = "deepseek-v4-flash"
+provider = "deepseek"
+
+[aliases."deepseek-flash"]
+id = "deepseek-v4-flash"
+provider = "deepseek"
+
+[aliases."deepseek-pro"]
+id = "deepseek-v4-pro"
+provider = "deepseek"
+
+[aliases."deepseek-v4-flash"]
+id = "deepseek-v4-flash"
+provider = "deepseek"
+
+[aliases."deepseek-v4-pro"]
+id = "deepseek-v4-pro"
+provider = "deepseek"
+
 # Devstral (Mistral's agentic-coding tune).
 [aliases.devstral-small-2]
 id = "devstral-small-2:24b"
@@ -636,6 +723,9 @@ openai = "gpt-4o-mini"
 openrouter = "google/gemini-2.5-flash"
 ollama = "llama3.2"
 local = "gpt-4o"
+minimax = "MiniMax-M2.5-highspeed"
+zai = "glm-5"
+deepseek = "deepseek-v4-flash"
 
 # ── Models ───────────────────────────────────────────────────────────────────
 # Canonical model metadata: display name, provider, context window,
@@ -654,6 +744,9 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.08, cache_write_per_mtok = 1.00 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "summarization", "tool_use"]
 
 [models."claude-haiku-4-5-20251001"]
 name = "Claude Haiku 4.5"
@@ -661,6 +754,9 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
 
 [models."claude-3-5-sonnet-20240620"]
 name = "Claude Sonnet 3.5 (2024-06-20)"
@@ -668,14 +764,18 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
 [models."claude-3-5-sonnet-20241022"]
 name = "Claude Sonnet 3.5 (2024-10-22)"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context"]
 [models."claude-sonnet-4-20250514"]
 name = "Claude Sonnet 4"
 provider = "anthropic"
@@ -684,7 +784,10 @@ capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 deprecated = true
 deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 49.0 }
 [models."claude-sonnet-4-5"]
 name = "Claude Sonnet 4.5"
 provider = "anthropic"
@@ -693,14 +796,20 @@ capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 deprecated = true
 deprecation_note = "Sunset 2026-05-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 77.2 }
 [models."claude-sonnet-4-6"]
 name = "Claude Sonnet 4.6"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 79.6 }
 [models."claude-sonnet-4-7"]
 name = "Claude Sonnet 4.7"
 provider = "anthropic"
@@ -717,28 +826,37 @@ pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok 
 # (cache attribution surface differs — tracked separately in #2320).
 # Pricing matches the direct Anthropic API; OpenRouter adds its own
 # margin at request time.
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 81.0 }
 [models."anthropic/claude-haiku-4-5"]
 name = "Claude Haiku 4.5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
-
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
 [models."anthropic/claude-sonnet-4-6"]
 name = "Claude Sonnet 4.6 (via OpenRouter)"
 provider = "openrouter"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
 [models."claude-3-opus-20240229"]
 name = "Claude Opus 3"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
-
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "long_context"]
 [models."claude-opus-4-20250514"]
 name = "Claude Opus 4"
 provider = "anthropic"
@@ -747,7 +865,10 @@ capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
 deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-7."
-
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 77.6 }
 [models."claude-opus-4-1-20250805"]
 name = "Claude Opus 4.1"
 provider = "anthropic"
@@ -756,14 +877,20 @@ capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
 deprecation_note = "Superseded by claude-opus-4-7. No formal sunset yet; switch when convenient."
-
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 78.9 }
 [models."claude-opus-4-6"]
 name = "Claude Opus 4.6"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
-
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 80.8, swe_bench_pro = 53.4 }
 [models."claude-opus-4-7"]
 name = "Claude Opus 4.7"
 provider = "anthropic"
@@ -774,7 +901,10 @@ pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
 # GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
 # from API 2026-02-17 (Enterprise/Edu grace until 2026-04-03).
-
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 87.6, swe_bench_pro = 64.3 }
 [models."gpt-4o"]
 name = "GPT-4o"
 provider = "openai"
@@ -783,7 +913,9 @@ capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 10.00, cache_read_per_mtok = 1.25 }
 deprecated = true
 deprecation_note = "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5-mini for cheap routing or gpt-5 for frontier."
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "vision", "tool_use"]
 [models."gpt-4o-mini"]
 name = "GPT-4o Mini"
 provider = "openai"
@@ -794,7 +926,9 @@ pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 # gpt-4o (Feb 17 2026 API sunset) but gpt-4o-mini has no announced
 # sunset. Still the canonical `mid` tier default until gpt-5-mini ships
 # with confirmed pricing.
-
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "summarization", "tool_use"]
 [models."gpt-4-turbo"]
 name = "GPT-4 Turbo"
 provider = "openai"
@@ -803,28 +937,37 @@ capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 10.00, output_per_mtok = 30.00 }
 deprecated = true
 deprecation_note = "Superseded by gpt-5 family. Listed for cost-attribution backfill only."
-
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "tool_use"]
 [models.o1]
 name = "OpenAI o1"
 provider = "openai"
 context_window = 200000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
-
+tier = "reasoning"
+open_weight = false
+strengths = ["reasoning"]
 [models."o1-mini"]
 name = "OpenAI o1-mini"
 provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 12.00, cache_read_per_mtok = 1.50 }
-
+tier = "reasoning"
+open_weight = false
+strengths = ["reasoning", "cheap"]
 [models.o3]
 name = "OpenAI o3"
 provider = "openai"
 context_window = 200000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
-
+tier = "reasoning"
+open_weight = false
+strengths = ["reasoning", "coding"]
+benchmarks = { swe_bench_verified = 69.1 }
 [models."o3-mini"]
 name = "OpenAI o3-mini"
 provider = "openai"
@@ -835,7 +978,10 @@ pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok =
 # Google Gemini ─ pricing: https://ai.google.dev/pricing.
 # Gemini 1.0 / 1.5 already retired. Gemini 2.0 Flash + Flash-Lite shut
 # down 2026-06-01 per the deprecations page.
-
+tier = "reasoning"
+open_weight = false
+strengths = ["reasoning", "coding", "cheap"]
+benchmarks = { swe_bench_verified = 49.3 }
 [models."gemini-2.5-flash"]
 name = "Gemini 2.5 Flash"
 provider = "gemini"
@@ -847,13 +993,18 @@ pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok =
 # catalog entry so the `qc_defaults.openrouter` lookup resolves to a
 # registered ID. Pricing matches the native Gemini API; OpenRouter adds
 # its own margin at request time.
+tier = "mid"
+open_weight = false
+strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
 [models."google/gemini-2.5-flash"]
 name = "Gemini 2.5 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
-
+tier = "mid"
+open_weight = false
+strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
 [models."gemini-2.5-pro"]
 name = "Gemini 2.5 Pro"
 provider = "gemini"
@@ -862,14 +1013,19 @@ capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 1.25, output_per_mtok = 5.00, cache_read_per_mtok = 0.3125 }
 
 # Mistral hosted via OpenRouter.
-
+tier = "frontier"
+open_weight = false
+strengths = ["long_context", "vision", "reasoning", "coding"]
+benchmarks = { swe_bench_verified = 63.8 }
 [models."mistralai/mistral-large-2512"]
 name = "Mistral Large 3 2512"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.50, output_per_mtok = 1.50, cache_read_per_mtok = 0.05 }
-
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "tool_use", "long_context"]
 [models."mistralai/mistral-small-2603"]
 name = "Mistral Small 4"
 provider = "openrouter"
@@ -880,7 +1036,9 @@ pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok =
 # Open-weight executor candidates (<$2/Mtok with function calling). Use
 # these via OpenRouter or Fireworks for fast secondary-model dispatch.
 # Pricing snapshot 2026-05 from OpenRouter / Artificial Analysis.
-
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "coding", "speed"]
 [models."qwen/qwen3-coder"]
 name = "Qwen3 Coder 480B A35B"
 provider = "openrouter"
@@ -895,6 +1053,10 @@ availability = "serverless"
 # endpoint. Carry the catalog row so price/route metadata is preserved,
 # but mark `availability = "dedicated"` so hosts don't surface it as a
 # one-click serverless option.
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context", "agentic", "tool_use"]
+benchmarks = { swe_bench_verified = 67.0 }
 [models."Qwen/Qwen3-Coder-Next-FP8"]
 name = "Qwen3 Coder Next FP8 (Together, dedicated)"
 provider = "together"
@@ -902,21 +1064,28 @@ context_window = 262144
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.18, output_per_mtok = 0.18 }
 availability = "dedicated"
-
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context", "agentic"]
 [models."deepseek/deepseek-v3.2"]
 name = "DeepSeek V3.2"
 provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42 }
-
+tier = "mid"
+open_weight = true
+strengths = ["coding", "tool_use", "cheap"]
 [models."moonshotai/kimi-k2.6"]
 name = "Kimi K2.6"
 provider = "openrouter"
-context_window = 200000
+context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.55, output_per_mtok = 2.20 }
-
+pricing = { input_per_mtok = 0.73, output_per_mtok = 3.49 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
+benchmarks = { swe_bench_pro = 58.6, humanitys_last_exam_with_tools = 54.0 }
 [models."openai/gpt-oss-120b"]
 name = "GPT-OSS 120B"
 provider = "openrouter"
@@ -934,14 +1103,18 @@ pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 # the raw model name). Users routing via `model: "cerebras/<name>"` get
 # the slash-prefixed selector stripped by `normalize_model_id` while
 # `infer_provider` routes them to this provider.
-
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "tool_use"]
 [models."gpt-oss-120b"]
 name = "GPT-OSS 120B (Cerebras)"
 provider = "cerebras"
 context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 0.69 }
-
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use"]
 [models."llama-3.3-70b"]
 name = "Llama 3.3 70B (Cerebras)"
 provider = "cerebras"
@@ -949,8 +1122,222 @@ context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
 
-# Open-router Qwen3.5 9B (kept for the `small` tier alias).
+# MiniMax-M2 family ─ pricing pages:
+#   https://platform.minimax.io/docs (token-plan), llm-stats.com/models/minimax-m2-7.
+#   M2.5 release Feb 2026, M2.7 release 2026-03-18.
+# 230B total / 10B active MoE shared across M2/M2.5/M2.7. Context windows
+# from artificialanalysis.ai/models/minimax-m2-7 (205K). Pricing reflects
+# the direct MiniMax API surface; OpenRouter mirrors are listed
+# separately below.
+#
+# Tool calls + thinking-mode are supported (release notes call out
+# "agentic harness" support); structured output is delimited (no native
+# JSON schema mode), and prompt caching is hit-priced at 20% of input.
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use"]
+[models."MiniMax-M2"]
+name = "MiniMax M2"
+provider = "minimax"
+context_window = 204800
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.255, output_per_mtok = 1.00, cache_read_per_mtok = 0.051 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "cheap", "tool_use"]
+benchmarks = { aa_intelligence_index = 45.0 }
+[models."MiniMax-M2.5"]
+name = "MiniMax M2.5"
+provider = "minimax"
+context_window = 204800
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.28, output_per_mtok = 1.10, cache_read_per_mtok = 0.056 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context"]
+[models."MiniMax-M2.5-highspeed"]
+name = "MiniMax M2.5 (highspeed)"
+provider = "minimax"
+context_window = 204800
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.28, output_per_mtok = 1.10, cache_read_per_mtok = 0.056 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "coding", "agentic"]
+[models."MiniMax-M2.7"]
+name = "MiniMax M2.7"
+provider = "minimax"
+context_window = 204800
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+benchmarks = { aa_intelligence_index = 50.0 }
+[models."MiniMax-M2.7-highspeed"]
+name = "MiniMax M2.7 (highspeed)"
+provider = "minimax"
+context_window = 204800
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "coding", "agentic"]
+[models."MiniMax-Text-01"]
+name = "MiniMax Text 01"
+provider = "minimax"
+context_window = 1000000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.10 }
 
+# MiniMax mirror on OpenRouter — same family, OpenRouter adds margin and
+# bundles native-tools passthrough so the openai_chat_completions wire
+# format Just Works for callers without a direct MiniMax key.
+tier = "mid"
+open_weight = true
+strengths = ["long_context"]
+[models."minimax/minimax-m2.7"]
+name = "MiniMax M2.7 (via OpenRouter)"
+provider = "openrouter"
+context_window = 204800
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.40, output_per_mtok = 1.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+[models."minimax/minimax-m2"]
+name = "MiniMax M2 (via OpenRouter)"
+provider = "openrouter"
+context_window = 204800
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.33, output_per_mtok = 1.20 }
+
+# Z.AI GLM-5 family. GLM-5.1 (released 2026-04-07) is the 754B open-weight
+# flagship; GLM-5 is the prior generation. Direct Z.AI tariff via the
+# OpenAI-compatible /v1 endpoint. OpenRouter mirrors live below.
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "cheap"]
+[models."glm-5"]
+name = "GLM 5"
+provider = "zai"
+context_window = 202752
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.98, output_per_mtok = 3.08, cache_read_per_mtok = 0.20 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use"]
+[models."glm-5.1"]
+name = "GLM 5.1"
+provider = "zai"
+context_window = 202752
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+
+# OpenRouter mirror of GLM-5 family so callers without a Z.AI key still
+# resolve a route. OR doesn't list GLM-4.6/4.7 — the canonical OR slugs
+# are the GLM-5 generation.
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+benchmarks = { swe_bench_pro_lead = 1.0 }
+[models."z-ai/glm-5"]
+name = "GLM 5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 202752
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic"]
+[models."z-ai/glm-5.1"]
+name = "GLM 5.1 (via OpenRouter)"
+provider = "openrouter"
+context_window = 202752
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.98, output_per_mtok = 3.08 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+[models."z-ai/glm-5v-turbo"]
+name = "GLM 5V Turbo (via OpenRouter)"
+provider = "openrouter"
+context_window = 202752
+capabilities = ["tools", "streaming", "vision"]
+pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
+
+# DeepSeek V4 family ─ pricing pages: api-docs.deepseek.com/quick_start/pricing.
+# Both V4 models share a 1M-token context window and 384K-token output
+# cap. `deepseek-chat`/`deepseek-reasoner` are retained as deprecated
+# aliases on V4-Flash (non-thinking) and V4-Flash thinking-mode
+# respectively; per provider notes they retire 2026-07-24.
+tier = "mid"
+open_weight = true
+strengths = ["vision", "speed"]
+[models."deepseek-v4-flash"]
+name = "DeepSeek V4 Flash"
+provider = "deepseek"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.0028 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+benchmarks = { aa_intelligence_index = 58.0 }
+[models."deepseek-v4-pro"]
+name = "DeepSeek V4 Pro"
+provider = "deepseek"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+benchmarks = { aa_intelligence_index = 68.0 }
+[models."deepseek-chat"]
+name = "DeepSeek Chat (legacy → V4 Flash, non-thinking)"
+provider = "deepseek"
+context_window = 1000000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.0028 }
+deprecated = true
+deprecation_note = "Maps to deepseek-v4-flash non-thinking mode; retirement 2026-07-24 15:59 UTC per provider docs."
+tier = "mid"
+open_weight = true
+strengths = ["coding", "tool_use"]
+[models."deepseek-reasoner"]
+name = "DeepSeek Reasoner (legacy → V4 Flash, thinking)"
+provider = "deepseek"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.0028 }
+deprecated = true
+deprecation_note = "Maps to deepseek-v4-flash thinking mode; retirement 2026-07-24 15:59 UTC per provider docs."
+
+# DeepSeek V4 OpenRouter mirrors. Same model, OR adds margin.
+tier = "reasoning"
+open_weight = true
+strengths = ["reasoning", "coding"]
+[models."deepseek/deepseek-v4-flash"]
+name = "DeepSeek V4 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+[models."deepseek/deepseek-v4-pro"]
+name = "DeepSeek V4 Pro (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87 }
+
+# Open-router Qwen3.5 9B (kept for the `small` tier alias).
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
 [models."Qwen/Qwen3.5-9B"]
 name = "Qwen3.5 9B"
 provider = "openrouter"
@@ -960,14 +1347,18 @@ capabilities = ["tools", "streaming"]
 # Ollama / local models — no `pricing` (free); context_window reflects
 # model card ceiling. `runtime_context_window` caps what Harn will
 # actually feed the runtime (host memory budget).
-
+tier = "small"
+open_weight = true
+strengths = ["cheap", "speed"]
 [models."llama3.2"]
 name = "Llama 3.2"
 provider = "ollama"
 context_window = 32000
 stream_timeout = 300.0
 capabilities = ["tools", "streaming"]
-
+tier = "small"
+open_weight = true
+strengths = ["cheap", "speed"]
 [models."gemma4:26b"]
 name = "Gemma 4 26B MoE"
 provider = "ollama"
@@ -975,7 +1366,9 @@ context_window = 262144
 runtime_context_window = 32768
 stream_timeout = 300.0
 capabilities = ["tools", "vision", "streaming", "thinking"]
-
+tier = "mid"
+open_weight = true
+strengths = ["vision", "tool_use"]
 [models."qwen3.6:35b-a3b-coding-nvfp4"]
 name = "Qwen3.6 35B A3B Coding (NVFP4)"
 provider = "ollama"
@@ -983,7 +1376,9 @@ context_window = 262144
 runtime_context_window = 32768
 stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
-
+tier = "mid"
+open_weight = true
+strengths = ["coding", "speed"]
 [models."devstral-small-2:24b"]
 name = "Devstral Small 2 24B"
 provider = "ollama"
@@ -993,7 +1388,9 @@ stream_timeout = 600.0
 capabilities = ["tools", "streaming"]
 
 # llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
-
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic"]
 [models."qwen3.6-35b-a3b-ud-q4-k-xl"]
 name = "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)"
 provider = "llamacpp"
@@ -1001,7 +1398,9 @@ context_window = 262144
 runtime_context_window = 65536
 stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
-
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
 [models."qwen3.6-35b-a3b-ud-q5-k-xl"]
 name = "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)"
 provider = "llamacpp"
@@ -1009,7 +1408,9 @@ context_window = 262144
 runtime_context_window = 65536
 stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
-
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
 [models."qwen3.6-35b-a3b"]
 name = "Qwen3.6 35B (llama.cpp)"
 provider = "llamacpp"
@@ -1019,7 +1420,9 @@ stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
 
 # Apple Silicon MLX.
-
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
 [models."unsloth/Qwen3.6-27B-UD-MLX-4bit"]
 name = "Qwen3.6 27B (MLX 4-bit)"
 provider = "mlx"
@@ -1028,31 +1431,42 @@ stream_timeout = 900.0
 capabilities = ["tools", "vision", "streaming", "thinking"]
 
 # Local OpenAI-compatible servers (vLLM / bring-your-own).
-
+tier = "mid"
+open_weight = true
+strengths = ["coding", "vision"]
 [models."gemma-4-e2b-it"]
 name = "Gemma 4 E2B (local)"
 provider = "local"
 context_window = 131072
 stream_timeout = 300.0
 capabilities = ["streaming", "thinking"]
-
+tier = "small"
+open_weight = true
+strengths = ["cheap", "speed"]
 [models."gemma-4-e4b-it"]
 name = "Gemma 4 E4B (local)"
 provider = "local"
 context_window = 131072
 stream_timeout = 300.0
 capabilities = ["streaming", "thinking"]
-
+tier = "small"
+open_weight = true
+strengths = ["cheap"]
 [models."gemma-4-26b-a4b-it"]
 name = "Gemma 4 26B MoE (local)"
 provider = "local"
 context_window = 131072
 stream_timeout = 600.0
 capabilities = ["streaming", "thinking"]
-
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
 [models."gemma-4-31b-it"]
 name = "Gemma 4 31B (local)"
 provider = "local"
 context_window = 131072
 stream_timeout = 600.0
 capabilities = ["streaming", "thinking"]
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context"]

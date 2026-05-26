@@ -48,6 +48,9 @@ pub fn observation(provider: string, model_id: string, fields: dict, provenance:
     context_window: fields?.context_window,
     pricing: fields?.pricing,
     capabilities: fields?.capabilities,
+    benchmarks: fields?.benchmarks,
+    strengths: fields?.strengths,
+    open_weight: fields?.open_weight,
     source: provenance.source_url,
     source_kind: provenance?.source_kind ?? "html",
     source_owner: provenance?.source_owner ?? "provider",
@@ -60,6 +63,13 @@ pub fn observation(provider: string, model_id: string, fields: dict, provenance:
   }
 }
 
+/**
+ * #2463: benchmark dict + strength tags + open-weight flag are
+ * carried through the observation pipeline so live-scraped sources
+ * (artificialanalysis.ai, swebench.com) can refresh them alongside
+ * pricing / context window. Empty defaults preserve existing
+ * adapters that don't yet surface these fields.
+ */
 fn __observation_key(obs) {
   return obs.provider + ":" + obs.model_id
 }

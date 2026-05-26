@@ -164,3 +164,268 @@ pub fn family_of(model_id) {
   }
   return "generic"
 }
+
+/**
+ * ── Selector helpers ─────────────────────────────────────────────────
+ *
+ * `models_with({tier, strengths, min_benchmark, open_weight, provider,
+ *               max_input_per_mtok, exclude_deprecated, available_only})`
+ * returns every catalog model whose row satisfies *all* supplied
+ * constraints, ranked from "most relevant" to "least" (open-weight +
+ * strength count + benchmark score weighted; see __score_model).
+ *
+ * `best_available_model(opts)` is the degenerate-case sibling: it tries
+ * `models_with(opts)` first, then progressively drops constraints until
+ * something matches. Never returns nil unless the entire catalog is
+ * empty (which would mean the VM was set up without providers.toml).
+ *
+ * `pick_model(opts)` is the one-shot convenience: returns the top
+ * candidate from `best_available_model`, or nil if there is none.
+ */
+fn __available_provider_set() {
+  let status = llm_provider_status()
+  var available = {}
+  for entry in status {
+    if entry?.available {
+      available[entry.name] = true
+    }
+  }
+  return available
+}
+
+fn __strengths_match(model_strengths, required) {
+  if required == nil || len(required) == 0 {
+    return true
+  }
+  let actual = model_strengths ?? []
+  for tag in required {
+    if !actual.contains(tag) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __benchmark_match(model_benchmarks, required) {
+  if required == nil || len(required) == 0 {
+    return true
+  }
+  let actual = model_benchmarks ?? {}
+  for entry in required {
+    let key = entry.key
+    let min_value = to_float(entry.value)
+    let actual_value = actual[key]
+    if actual_value == nil {
+      return false
+    }
+    if to_float(actual_value) < min_value {
+      return false
+    }
+  }
+  return true
+}
+
+fn __score_model(model) {
+  // Higher is better. Compose: tier weight + strength count + best
+  // benchmark + open-weight bonus + non-deprecated bonus.
+  var score = 0.0
+  let tier = to_string(model?.tier ?? "")
+  if tier == "frontier" {
+    score = score + 40.0
+  } else if tier == "reasoning" {
+    score = score + 35.0
+  } else if tier == "mid" {
+    score = score + 20.0
+  } else if tier == "small" {
+    score = score + 5.0
+  }
+  score = score + len(model?.strengths ?? []) * 2.0
+  if model?.open_weight {
+    score = score + 5.0
+  }
+  if !(model?.deprecated ?? false) {
+    score = score + 10.0
+  }
+  let benchmarks = model?.benchmarks ?? {}
+  for entry in benchmarks {
+    let value = to_float(entry.value)
+    if value > score / 2.0 {
+      score = score + value / 10.0
+    }
+  }
+  return score
+}
+
+fn __filter_models(opts) {
+  let catalog = llm_catalog()
+  let want_tier = opts?.tier
+  let want_strengths = opts?.strengths ?? []
+  let want_benchmark = opts?.min_benchmark ?? {}
+  let want_open_weight = opts?.open_weight
+  let want_provider = opts?.provider
+  let exclude_deprecated = opts?.exclude_deprecated ?? true
+  let max_input = opts?.max_input_per_mtok
+  let available = if opts?.available_only ?? false {
+    __available_provider_set()
+  } else {
+    nil
+  }
+  var out = []
+  for model in catalog {
+    if want_tier != nil && to_string(model?.tier ?? "") != to_string(want_tier) {
+      continue
+    }
+    if want_provider != nil && to_string(model?.provider ?? "") != to_string(want_provider) {
+      continue
+    }
+    if want_open_weight != nil && model?.open_weight ?? nil != want_open_weight {
+      continue
+    }
+    if exclude_deprecated && model?.deprecated ?? false {
+      continue
+    }
+    if max_input != nil {
+      let price = model?.pricing?.input_per_mtok
+      if price != nil && to_float(price) > to_float(max_input) {
+        continue
+      }
+    }
+    if !__strengths_match(model?.strengths, want_strengths) {
+      continue
+    }
+    if !__benchmark_match(model?.benchmarks, want_benchmark) {
+      continue
+    }
+    if available != nil && !available[to_string(model?.provider ?? "")] {
+      continue
+    }
+    out = out + [model + {_score: __score_model(model)}]
+  }
+  // Sort descending by score: sort_by gives ascending, so negate the key.
+  return out.sort_by({ m -> -m._score })
+}
+
+/**
+ * Return every catalog model that satisfies the constraints, ranked by
+ * a composite quality/availability score (descending).
+ *
+ * Supported opts keys (all optional):
+ *   tier              — "small" | "mid" | "frontier" | "reasoning"
+ *   strengths         — list of required strength tags (e.g. ["coding"])
+ *   min_benchmark     — dict of {benchmark_key: minimum_score}
+ *   open_weight       — true | false (None means "no claim")
+ *   provider          — provider id (e.g. "anthropic")
+ *   max_input_per_mtok — cap on pricing.input_per_mtok
+ *   exclude_deprecated — defaults to true
+ *   available_only    — true means filter to providers whose env keys
+ *                       resolve (per llm_provider_status). Defaults false.
+ *
+ * Returns: list of model dicts (catalog shape) with a synthetic `_score`
+ * field. Empty list if nothing matches.
+ *
+ * Strong typing: opts is `Dict<string, any>`; the return is a
+ * `List<ModelCatalogEntry>` per the runtime catalog schema.
+ *
+ * models_with.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: models_with({tier: "frontier", strengths: ["coding"], available_only: true})
+ */
+pub fn models_with(opts = nil) {
+  return __filter_models(opts ?? {})
+}
+
+fn __relax_step(opts, step) {
+  // Each relaxation step drops one constraint, from least to most
+  // important. Returns nil when no further relaxations are possible
+  // (i.e. the empty filter has been reached).
+  if step == 0 {
+    return opts
+  }
+  var relaxed = opts
+  // Step 1: drop min_benchmark.
+  if step >= 1 && relaxed?.min_benchmark != nil {
+    relaxed = relaxed + {min_benchmark: nil}
+  }
+  // Step 2: drop max_input_per_mtok.
+  if step >= 2 && relaxed?.max_input_per_mtok != nil {
+    relaxed = relaxed + {max_input_per_mtok: nil}
+  }
+  // Step 3: drop strengths.
+  if step >= 3 && relaxed?.strengths != nil {
+    relaxed = relaxed + {strengths: nil}
+  }
+  // Step 4: drop tier.
+  if step >= 4 && relaxed?.tier != nil {
+    relaxed = relaxed + {tier: nil}
+  }
+  // Step 5: drop open_weight constraint.
+  if step >= 5 && relaxed?.open_weight != nil {
+    relaxed = relaxed + {open_weight: nil}
+  }
+  // Step 6: drop provider pin.
+  if step >= 6 && relaxed?.provider != nil {
+    relaxed = relaxed + {provider: nil}
+  }
+  // Step 7+: stop relaxing — caller gets the unconstrained catalog
+  // (filtered only by `available_only` and `exclude_deprecated`).
+  return relaxed
+}
+
+/**
+ * Like models_with(), but progressively relaxes constraints until at
+ * least one candidate matches. Returns {models, relaxed_from} where
+ * `relaxed_from` is the original opts dict that produced the result —
+ * an empty `relaxed_from` means the strict filter already matched.
+ *
+ * Drop order: min_benchmark → max_input_per_mtok → strengths → tier →
+ * open_weight → provider. `available_only` and `exclude_deprecated` are
+ * preserved through every relaxation so callers don't silently fall
+ * through to providers they can't reach.
+ *
+ * best_available_models.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: best_available_models({tier: "frontier", strengths: ["vision"]})
+ */
+pub fn best_available_models(opts = nil) {
+  let original = opts ?? {}
+  var step = 0
+  while step <= 7 {
+    let attempt = __relax_step(original, step)
+    let candidates = __filter_models(attempt)
+    if len(candidates) > 0 {
+      return {models: candidates, relaxed_from: original, relaxed_step: step, relaxed_opts: attempt}
+    }
+    step = step + 1
+  }
+  return {models: [], relaxed_from: original, relaxed_step: -1, relaxed_opts: original}
+}
+
+/**
+ * One-shot selector: returns the top model dict from
+ * best_available_models(opts), or nil if the catalog is empty. Carries
+ * `_score`, `_relaxed_step`, and `_relaxed_opts` fields so callers can
+ * see how much the filter had to relax.
+ *
+ * pick_model.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pick_model({tier: "frontier", strengths: ["coding"], available_only: true})
+ */
+pub fn pick_model(opts = nil) {
+  let result = best_available_models(opts)
+  if len(result.models) == 0 {
+    return nil
+  }
+  return result.models[0] + {_relaxed_step: result.relaxed_step, _relaxed_opts: result.relaxed_opts}
+}

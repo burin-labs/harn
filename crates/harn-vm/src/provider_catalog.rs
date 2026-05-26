@@ -110,6 +110,19 @@ pub struct CatalogModel {
     pub availability: ModelAvailabilityStatus,
     pub quality_tags: Vec<String>,
     pub capability_tags: Vec<String>,
+    /// Popular-consensus tier label: "small" | "mid" | "frontier" |
+    /// "reasoning". Self-declared on the model row; the rule-based path
+    /// is a fallback only.
+    pub tier: String,
+    /// True when weights are downloadable / self-hostable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_weight: Option<bool>,
+    /// Workload-shaped strength tags (coding, summarization, vision, ...).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub strengths: Vec<String>,
+    /// Public benchmark numbers, snake_case identifier -> score.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub benchmarks: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -543,7 +556,8 @@ pub fn schema_value() -> Value {
                     "deprecation",
                     "availability",
                     "quality_tags",
-                    "capability_tags"
+                    "capability_tags",
+                    "tier"
                 ],
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
@@ -563,7 +577,11 @@ pub fn schema_value() -> Value {
                     "deprecation": {"$ref": "#/$defs/deprecation"},
                     "availability": {"enum": ["serverless", "dedicated", "unknown"]},
                     "quality_tags": {"type": "array", "items": {"type": "string"}},
-                    "capability_tags": {"type": "array", "items": {"type": "string"}}
+                    "capability_tags": {"type": "array", "items": {"type": "string"}},
+                    "tier": {"enum": ["small", "mid", "frontier", "reasoning"]},
+                    "open_weight": {"type": "boolean"},
+                    "strengths": {"type": "array", "items": {"type": "string"}},
+                    "benchmarks": {"type": "object", "additionalProperties": {"type": "number"}}
                 },
                 "additionalProperties": false
             },
@@ -784,6 +802,10 @@ fn catalog_model(
         availability: ModelAvailabilityStatus::from(model.availability),
         quality_tags,
         capability_tags: model.capabilities.clone(),
+        tier: llm_config::model_tier(&id),
+        open_weight: model.open_weight,
+        strengths: model.strengths.clone(),
+        benchmarks: model.benchmarks.clone(),
         id,
         name: model.name,
         provider: model.provider,
