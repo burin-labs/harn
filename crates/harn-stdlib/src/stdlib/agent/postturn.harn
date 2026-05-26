@@ -2,6 +2,7 @@ import {
   agent_emit_event,
   agent_session_apply_reminder_post_turn,
   agent_session_inject_feedback,
+  agent_session_record_skill_event,
 } from "std/agent/state"
 
 fn __default_done_sentinel(opts) {
@@ -350,6 +351,221 @@ fn __post_turn_verdict_result(session, opts, verdict) {
   return nil
 }
 
+fn __tool_surface_name(entry) {
+  return entry?.name ?? entry?.function?.name ?? ""
+}
+
+fn __tool_surface_current_names(opts) {
+  let registry = opts?.tools
+  let entries = if type_of(registry) == "dict" {
+    registry?.tools ?? []
+  } else if type_of(registry) == "list" {
+    registry
+  } else {
+    []
+  }
+  var names = []
+  for entry in entries {
+    let name = __tool_surface_name(entry)
+    if name != "" && !contains(names, name) {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+fn __tool_surface_call_name(call) {
+  return call?.name ?? call?.function?.name ?? call?.tool ?? call?.tool_name ?? ""
+}
+
+fn __tool_surface_attempted_names(llm_result, dispatch_results) {
+  var names = []
+  for call in llm_result?.tool_calls ?? [] {
+    let name = __tool_surface_call_name(call)
+    if name != "" && !contains(names, name) {
+      names = names.push(name)
+    }
+  }
+  for result in dispatch_results {
+    let name = __tool_result_name(result)
+    if name != "" && !contains(names, name) {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+fn __tool_surface_append_history(history, attempted, window_turns) {
+  var next = history.push(attempted)
+  while len(next) > window_turns {
+    next = next[1:]
+  }
+  return next
+}
+
+fn __tool_surface_window_used(history) {
+  var used = []
+  for turn in history {
+    for name in turn {
+      if name != "" && !contains(used, name) {
+        used = used.push(name)
+      }
+    }
+  }
+  return used
+}
+
+fn __tool_surface_removed(candidates, used, hard_keep) {
+  var removed = []
+  for name in candidates {
+    if !contains(used, name) && !contains(hard_keep, name) {
+      removed = removed.push(name)
+    }
+  }
+  return removed
+}
+
+fn __tool_surface_remaining(candidates, removed) {
+  var remaining = []
+  for name in candidates {
+    if !contains(removed, name) {
+      remaining = remaining.push(name)
+    }
+  }
+  return remaining
+}
+
+fn __tool_surface_narrowing_post_turn(session, llm_result, dispatch_results, opts) {
+  let config = opts?.tool_surface_narrowing ?? {}
+  if !(config?.enabled ?? true) {
+    return {history: [], narrowed_tools: nil, changed: false}
+  }
+  let window_turns = config?.window_turns ?? 5
+  let attempted = __tool_surface_attempted_names(llm_result, dispatch_results)
+  let history = __tool_surface_append_history(opts?._tool_surface_narrowing_history ?? [], attempted, window_turns)
+  let candidates = __tool_surface_current_names(opts)
+  if len(candidates) == 0 || len(history) < window_turns {
+    return {history: history, narrowed_tools: opts?._tool_surface_narrowed_tools, changed: false}
+  }
+  let used = __tool_surface_window_used(history)
+  let hard_keep = config?.hard_keep ?? []
+  let removed = __tool_surface_removed(candidates, used, hard_keep)
+  if len(removed) == 0 {
+    return {history: history, narrowed_tools: opts?._tool_surface_narrowed_tools, changed: false}
+  }
+  let remaining = __tool_surface_remaining(candidates, removed)
+  let reason = "unused across last " + to_string(window_turns) + " turns"
+  agent_session_record_skill_event(
+    session.session_id,
+    "skill_narrow",
+    {reason: reason, removed_tools: removed, remaining_tools: remaining, window_turns: window_turns},
+  )
+  return {
+    history: history,
+    narrowed_tools: remaining,
+    changed: true,
+    removed_tools: removed,
+    remaining_tools: remaining,
+    reason: reason,
+  }
+}
+
+fn __post_turn_with_narrowing(outcome, narrowing) {
+  if narrowing == nil {
+    return outcome
+  }
+  return outcome + {narrowing: narrowing}
+}
+
+fn __tool_surface_keep_entry(entry, names) {
+  return contains(names, __tool_surface_name(entry))
+}
+
+fn __tool_surface_filter_registry(registry, names) {
+  if len(names) == 0 {
+    return registry
+  }
+  if type_of(registry) == "dict" {
+    var kept = []
+    for entry in registry?.tools ?? [] {
+      if __tool_surface_keep_entry(entry, names) {
+        kept = kept.push(entry)
+      }
+    }
+    return registry + {tools: kept}
+  }
+  if type_of(registry) == "list" {
+    var kept = []
+    for entry in registry {
+      if __tool_surface_keep_entry(entry, names) {
+        kept = kept.push(entry)
+      }
+    }
+    return kept
+  }
+  return registry
+}
+
+fn __tool_surface_policy_allowlist(names) {
+  if len(names) == 0 {
+    return ["__harn_tool_surface_no_tools__"]
+  }
+  return names
+}
+
+fn __tool_surface_policy_tools(policy, names) {
+  if policy != nil && type_of(policy) != "dict" {
+    return policy
+  }
+  let base = policy ?? {}
+  let existing = base?.tools ?? []
+  if type_of(existing) == "list" && len(existing) > 0 {
+    var intersected = []
+    for name in existing {
+      if contains(names, name) {
+        intersected = intersected.push(name)
+      }
+    }
+    return base + {tools: __tool_surface_policy_allowlist(intersected)}
+  }
+  return base + {tools: __tool_surface_policy_allowlist(names)}
+}
+
+/**
+ * agent_apply_tool_surface_narrowing.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_apply_tool_surface_narrowing(opts)
+ */
+pub fn agent_apply_tool_surface_narrowing(opts) {
+  let names = opts?._tool_surface_narrowed_tools
+  if len(names ?? []) == 0 {
+    return opts
+  }
+  return opts
+    + {
+    tools: __tool_surface_filter_registry(opts?.tools, names),
+    policy: __tool_surface_policy_tools(opts?.policy, names),
+  }
+}
+
+/**
+ * agent_reset_tool_surface_narrowing.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_reset_tool_surface_narrowing(opts)
+ */
+pub fn agent_reset_tool_surface_narrowing(opts) {
+  return opts
+    + {_tool_surface_narrowed_tools: nil, _tool_surface_narrowing_history: []}
+}
+
 /**
  * agent_extract_tool_calls.
  *
@@ -405,30 +621,38 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   }
   __host_fire_session_hook("post_turn", payload)
   agent_session_apply_reminder_post_turn(session.session_id, iteration)
+  let narrowing = if contains(successful_tool_names, "load_skill") {
+    {history: [], narrowed_tools: nil, changed: false}
+  } else {
+    __tool_surface_narrowing_post_turn(session, llm_result, dispatch_results, opts)
+  }
   if __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
-    return __completion_result(opts, payload, "sentinel")
+    return __post_turn_with_narrowing(__completion_result(opts, payload, "sentinel"), narrowing)
   }
   if __stop_after_successful_tools(opts, dispatch) {
-    return {kind: "break", stop_reason: "natural", needs_verify: false, done_judge_due: false}
+    return __post_turn_with_narrowing(
+      {kind: "break", stop_reason: "natural", needs_verify: false, done_judge_due: false},
+      narrowing,
+    )
   }
   let verdict = __post_turn_callback_verdict(opts, payload)
   let verdict_result = __post_turn_verdict_result(session, opts, verdict)
   if verdict_result != nil {
-    return verdict_result
+    return __post_turn_with_narrowing(verdict_result, narrowing)
   }
   if !has_tool_calls && trim(text) != "" && opts?.done_judge != nil {
-    return __completion_result(opts, payload, "natural")
+    return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
   if __native_tool_text_completion(opts, has_tool_calls, text) {
-    return __completion_result(opts, payload, "natural")
+    return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
   let loop_until_done = opts?.loop_until_done ?? false
   let daemon = opts?.daemon ?? false
   if !has_tool_calls && !loop_until_done && !daemon {
-    return __completion_result(opts, payload, "natural")
+    return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
   __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration)
-  return {kind: "continue", done_judge_due: false}
+  return __post_turn_with_narrowing({kind: "continue", done_judge_due: false}, narrowing)
 }
 
 fn visible_text_excerpt(text) {

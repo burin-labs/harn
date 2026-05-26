@@ -28,6 +28,7 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "reminder_emitted",
     "skill_activated",
     "skill_deactivated",
+    "skill_narrow",
     "skill_scope_tools",
     "tool_search_query",
     "tool_search_result",

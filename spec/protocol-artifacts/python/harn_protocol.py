@@ -177,6 +177,7 @@ ACP_SESSION_UPDATES: tuple = (
     "reminder_emitted",
     "skill_activated",
     "skill_deactivated",
+    "skill_narrow",
     "skill_scope_tools",
     "tool_search_query",
     "tool_search_result",
@@ -195,6 +196,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "reminder_emitted",
     "skill_activated",
     "skill_deactivated",
+    "skill_narrow",
     "skill_scope_tools",
     "tool_search_query",
     "tool_search_result",
@@ -453,6 +455,7 @@ class ACPSessionUpdate(str, Enum):
     REMINDER_EMITTED = "reminder_emitted"
     SKILL_ACTIVATED = "skill_activated"
     SKILL_DEACTIVATED = "skill_deactivated"
+    SKILL_NARROW = "skill_narrow"
     SKILL_SCOPE_TOOLS = "skill_scope_tools"
     TOOL_SEARCH_QUERY = "tool_search_query"
     TOOL_SEARCH_RESULT = "tool_search_result"

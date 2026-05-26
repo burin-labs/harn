@@ -313,6 +313,16 @@ pub enum AgentEvent {
         skill_name: String,
         allowed_tools: Vec<String>,
     },
+    /// Emitted when the agent loop ratchets the model-visible tool
+    /// surface narrower after observing recent tool-call usage. Unlike
+    /// `SkillScopeTools`, this is session-local and can only remove
+    /// tools from the currently-effective surface.
+    SkillNarrow {
+        session_id: String,
+        reason: String,
+        removed_tools: Vec<String>,
+        remaining_tools: Vec<String>,
+    },
     /// Emitted when a `tool_search` query is issued by the model. Carries
     /// the raw query args, the configured strategy, and a `mode` tag
     /// distinguishing the client-executed fallback (`"client"`) from
@@ -649,6 +659,7 @@ impl AgentEvent {
             | Self::SkillActivated { session_id, .. }
             | Self::SkillDeactivated { session_id, .. }
             | Self::SkillScopeTools { session_id, .. }
+            | Self::SkillNarrow { session_id, .. }
             | Self::ToolSearchQuery { session_id, .. }
             | Self::ToolSearchResult { session_id, .. }
             | Self::TranscriptCompacted { session_id, .. }

@@ -473,6 +473,34 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::SkillNarrow {
+                session_id,
+                reason,
+                removed_tools,
+                remaining_tools,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "skill_narrow",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "reason".to_string(),
+                    serde_json::Value::String(reason.clone()),
+                );
+                harn_meta.insert(
+                    "removedTools".to_string(),
+                    serde_json::to_value(removed_tools).unwrap_or_default(),
+                );
+                harn_meta.insert(
+                    "remainingTools".to_string(),
+                    serde_json::to_value(remaining_tools).unwrap_or_default(),
+                );
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             AgentEvent::ToolSearchQuery {
                 session_id,
                 tool_use_id,

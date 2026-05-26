@@ -57,6 +57,7 @@ existing Burin Code and other host renderers, advertised during
 - `reminder_emitted`
 - `skill_activated`
 - `skill_deactivated`
+- `skill_narrow`
 - `skill_scope_tools`
 - `tool_search_query`
 - `tool_search_result`
@@ -849,6 +850,7 @@ variants into:
 - `sessionUpdate: "skill_activated"` — `{skillName, iteration, reason}`
 - `sessionUpdate: "skill_deactivated"` — `{skillName, iteration}`
 - `sessionUpdate: "skill_scope_tools"` — `{skillName, allowedTools}`
+- `sessionUpdate: "skill_narrow"` — `{reason, removedTools, remainingTools}`
 
 `skill_matched` stays internal to the VM transcript — the candidate
 list can be large and host UIs typically only care about activation

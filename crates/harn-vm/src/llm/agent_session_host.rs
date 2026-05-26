@@ -1272,6 +1272,31 @@ fn host_agent_session_record_skill_event_builtin(
                 allowed_tools,
             });
         }
+        "skill_narrow" => {
+            let string_list = |key: &str| {
+                metadata_json
+                    .get(key)
+                    .and_then(|value| value.as_array())
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let reason = metadata_json
+                .get("reason")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string();
+            super::agent_runtime::emit_agent_event_sync(&AgentEvent::SkillNarrow {
+                session_id,
+                reason,
+                removed_tools: string_list("removed_tools"),
+                remaining_tools: string_list("remaining_tools"),
+            });
+        }
         _ => {}
     }
     Ok(VmValue::Nil)
@@ -1362,6 +1387,7 @@ async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         "tool_search_query"
             | "tool_search_result"
             | "typed_checkpoint"
+            | "skill_narrow"
             | "agent_loop_stall_warning"
             | "tool_format_override"
             | "tool_call_audit"
@@ -1572,6 +1598,26 @@ fn build_agent_event(
                 promoted,
                 strategy: get_string("strategy"),
                 mode: get_string("mode"),
+            })
+        }
+        "skill_narrow" => {
+            let string_list = |key: &str| {
+                payload_obj
+                    .and_then(|m| m.get(key))
+                    .and_then(|v| v.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            Ok(AgentEvent::SkillNarrow {
+                session_id: session_id.to_string(),
+                reason: get_string("reason"),
+                removed_tools: string_list("removed_tools"),
+                remaining_tools: string_list("remaining_tools"),
             })
         }
         "loop_control_decision" => Ok(AgentEvent::LoopControlDecision {

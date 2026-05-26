@@ -58,6 +58,27 @@
       "update": {
         "_meta": {
           "harn": {
+            "reason": "unused across 5 turns",
+            "remainingTools": [
+              "read"
+            ],
+            "removedTools": [
+              "write"
+            ]
+          }
+        },
+        "sessionUpdate": "skill_narrow"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
             "mode": "client",
             "name": "tool_search",
             "query": {

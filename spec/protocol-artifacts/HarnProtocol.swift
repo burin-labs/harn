@@ -63,6 +63,7 @@ public enum HarnProtocolConstants {
         "reminder_emitted",
         "skill_activated",
         "skill_deactivated",
+        "skill_narrow",
         "skill_scope_tools",
         "tool_search_query",
         "tool_search_result",
@@ -210,6 +211,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case reminderEmitted = "reminder_emitted"
     case skillActivated = "skill_activated"
     case skillDeactivated = "skill_deactivated"
+    case skillNarrow = "skill_narrow"
     case skillScopeTools = "skill_scope_tools"
     case toolSearchQuery = "tool_search_query"
     case toolSearchResult = "tool_search_result"
@@ -239,6 +241,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "reminder_emitted",
         "skill_activated",
         "skill_deactivated",
+        "skill_narrow",
         "skill_scope_tools",
         "tool_search_query",
         "tool_search_result",
