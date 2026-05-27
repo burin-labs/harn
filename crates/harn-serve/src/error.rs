@@ -45,10 +45,7 @@ impl DispatchError {
 /// by `DispatchError::Forbidden::message()` and by adapter-layer error
 /// envelopes (JSON-RPC `data.message`, HTTP body, ACP error reply) so
 /// callers see the same text everywhere.
-pub fn forbidden_message(
-    required: &BTreeSet<String>,
-    granted: &BTreeSet<String>,
-) -> String {
+pub fn forbidden_message(required: &BTreeSet<String>, granted: &BTreeSet<String>) -> String {
     let missing: Vec<&str> = required.difference(granted).map(String::as_str).collect();
     if missing.is_empty() {
         "missing required scope".to_string()

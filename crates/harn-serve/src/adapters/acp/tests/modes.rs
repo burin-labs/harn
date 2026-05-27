@@ -47,9 +47,7 @@ async fn acp_authenticate_uses_shared_auth_policy() {
     local
         .run_until(async {
             let config = AcpServerConfig::new(None).with_auth_policy(AuthPolicy {
-                methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single(
-                    "secret",
-                ))],
+                methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
             });
             let (request_tx, request_rx) = mpsc::unbounded_channel();
             let (response_tx, mut response_rx) = mpsc::unbounded_channel();

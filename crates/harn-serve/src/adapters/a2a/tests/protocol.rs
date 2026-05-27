@@ -1322,10 +1322,7 @@ pub fn list_personas(filter: string) -> string {
     let mut config = DispatchCoreConfig::for_script(&script);
     config.auth_policy = AuthPolicy {
         methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-            keys: vec![ApiKeyEntry::new(
-                "admin-key",
-                ["personas:read".to_string()],
-            )],
+            keys: vec![ApiKeyEntry::new("admin-key", ["personas:read".to_string()])],
         })],
     };
     let core = DispatchCore::new(config).expect("core");

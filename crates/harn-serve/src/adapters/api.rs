@@ -1953,10 +1953,9 @@ async fn authorize(
         // future caller. Wire it defensively so the surface returns the
         // structured 403 rather than dropping into a non-exhaustive
         // match panic.
-        AuthorizationDecision::MissingScope { required, granted } => Err(forbidden_api_error(
-            &required,
-            &granted,
-        )),
+        AuthorizationDecision::MissingScope { required, granted } => {
+            Err(forbidden_api_error(&required, &granted))
+        }
     }
 }
 
@@ -1966,10 +1965,7 @@ async fn authorize(
 /// fields as the JSON-RPC adapters; the only difference is the REST
 /// adapter inlines them under a single `error` envelope object instead
 /// of nesting under `error.data`.
-fn forbidden_api_error(
-    required: &BTreeSet<String>,
-    granted: &BTreeSet<String>,
-) -> Response {
+fn forbidden_api_error(required: &BTreeSet<String>, granted: &BTreeSet<String>) -> Response {
     let mut body = crate::forbidden_data_payload(required, granted);
     if let Some(map) = body.as_object_mut() {
         map.insert(

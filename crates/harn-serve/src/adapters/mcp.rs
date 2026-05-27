@@ -621,13 +621,13 @@ impl McpServer {
             // emptiness rule (`empty ⊆ anything`) makes this branch
             // unreachable. Treat as forbidden defensively if invariants
             // ever shift.
-            AuthorizationDecision::MissingScope { required, granted } => Err(
-                harn_vm::jsonrpc::error_response(
+            AuthorizationDecision::MissingScope { required, granted } => {
+                Err(harn_vm::jsonrpc::error_response(
                     id,
                     -32003,
                     &crate::forbidden_message(&required, &granted),
-                ),
-            ),
+                ))
+            }
         }
     }
 
