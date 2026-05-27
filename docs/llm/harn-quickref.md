@@ -3971,7 +3971,7 @@ let response = request(cli, "GET", "https://api.github.com/user")
   fan out multiple installations of the same provider.
 
 Full reference: conformance fixtures at
-`conformance/tests/stdlib/oauth_client_*.harn`.
+`conformance/tests/stdlib/oauth/oauth_client_*.harn`.
 
 ## OAuth storage (`std/oauth/storage`)
 

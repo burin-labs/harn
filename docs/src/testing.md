@@ -15,18 +15,31 @@ language and runtime. They live under `conformance/tests/` as paired files:
 Tests are grouped by area into subdirectories. `ls conformance/tests/` gives
 the current top-level map (examples: `language/`, `control_flow/`, `types/`,
 `collections/`, `concurrency/`, `stdlib/`, `templates/`, `modules/`,
-`agents/`, `integration/`, `runtime/`). The runner discovers `.harn` files
-recursively, so new tests just need to be dropped into the appropriate
-subdirectory.
+`agents/`, `scenarios/` (cross-feature compositions), `reminders/`,
+`runtime/`). High-volume categories may have a second level — for example,
+`stdlib/oauth/`, `stdlib/json/`, `stdlib/hitl/`, `stdlib/preset_hooks/`,
+`stdlib/tool_hooks/`, and `stdlib/project/` group the larger stdlib API
+surfaces. The runner discovers `.harn` files recursively, so new tests just
+need to be dropped into the appropriate subdirectory.
 
 Shared helpers live alongside the tests that use them:
 `conformance/tests/modules/lib/` holds import targets for the `modules/`
 tests, and `conformance/tests/templates/fixtures/` holds prompt-template
-fixtures for the `templates/` tests.
+fixtures for the `templates/` tests. The cross-cutting helper
+`conformance/tests/_common.harn` is imported as `"../_common"` from any
+direct subdirectory and `"../../_common"` from a second-level subdirectory.
 
-Error tests (Harn programs that are expected to fail) live under
-`conformance/errors/`, similarly subdivided into `syntax/`, `types/`,
-`semantic/`, and `runtime/`.
+Error tests live in two complementary homes:
+
+- `conformance/errors/`, subdivided by error **class** into `syntax/`,
+  `types/`, `semantic/`, and `runtime/` — for tests organized by where the
+  error fires in the compilation pipeline.
+- `conformance/tests/errors_by_feature/` — for error tests grouped by the
+  feature that produces them (for example, `agent_loop_*`, `defer_*`,
+  `catch_*`, `finally_*`).
+
+Both homes share the `.harn` + `.error` (or `.expected`) sibling-file
+convention and are walked by the same runner.
 
 ### Running tests
 

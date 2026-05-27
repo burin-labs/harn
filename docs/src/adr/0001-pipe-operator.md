@@ -35,7 +35,7 @@ I surveyed representative scripts from `examples/` and `conformance/tests/`:
   `.filter().map().to_list()`; no need to rewrite fluent receiver APIs.
 - `conformance/tests/collections/stream_operators_core.harn`: nested
   `stream.collect(stream.map(...))`; free functions benefit most from pipe.
-- `conformance/tests/stdlib/json_query.harn`: free-function query helpers; free
+- `conformance/tests/stdlib/json/json_query.harn`: free-function query helpers; free
   functions need composition without nesting.
 - `conformance/tests/language/multiline_logical.harn`: multiline closure pipes;
   operator-leading continuation is already accepted.

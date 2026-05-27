@@ -12,7 +12,7 @@ To extend the shipped catalogues see
 The recipes use `harn,ignore` fences because they show full agent-loop
 topologies (handler + dispatch + transcript wiring) that need an active
 session to type-check end-to-end. Each fragment matches a conformance
-fixture under `conformance/tests/stdlib/tool_hooks_*.harn`.
+fixture under `conformance/tests/stdlib/tool_hooks/tool_hooks_*.harn`.
 
 ## Rust agent: safe `cargo`
 

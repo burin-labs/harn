@@ -230,7 +230,7 @@ The shipped implementation is exercised by:
 - CLI integration tests for `harn check --invariants` and
   `harn explain --invariant`.
 - LSP diagnostic surfacing tests.
-- Conformance fixtures under `conformance/tests/integration/` and
+- Conformance fixtures under `conformance/tests/scenarios/` and
   `conformance/tests/stdlib/` that exercise the `@invariant` parser
   and Flow-predicate companion attributes (`@deterministic`,
   `@semantic`, `@archivist`, `@retroactive`).

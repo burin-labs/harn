@@ -786,4 +786,4 @@ instead of teaching the OAuth client about a non-OAuth protocol.
   CLI on top of this stack.
 - [Redaction policy](./redaction.md) — what's automatically scrubbed
   from persisted transcripts and receipts.
-- Conformance fixtures: `conformance/tests/stdlib/oauth_*.harn`.
+- Conformance fixtures: `conformance/tests/stdlib/oauth/oauth_*.harn`.

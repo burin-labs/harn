@@ -437,6 +437,6 @@ chips alongside the standard `tool_call_update` stream:
   the autoloaded one-pager.
 - `crates/harn-stdlib/src/stdlib/llm/tool_middleware.harn` — the
   source, with full per-function comments.
-- `conformance/tests/integration/tool_middleware_*.harn` — executable
+- `conformance/tests/scenarios/tool_middleware_*.harn` — executable
   examples covering the primitives, `with_required_reason`,
   `with_consent`, `with_dry_run`, and the agent_loop integration.
