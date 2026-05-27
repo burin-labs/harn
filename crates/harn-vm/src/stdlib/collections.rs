@@ -330,30 +330,32 @@ fn register_dict_builder_builtins(vm: &mut Vm) {
     vm.register_builtin("deep_clone", |args, _out| {
         Ok(deep_clone_value(args.first().unwrap_or(&VmValue::Nil)))
     });
-    vm.register_builtin("__deep_merge", |args, _out| {
+    // `deep_merge`, `unique`, `dict_from_pairs` ship under both their
+    // plain and `__`-prefixed names so the `std/collections` Harn
+    // wrappers can call the native fast-path while user scripts get
+    // the short form without an explicit `import "std/collections"`.
+    register_alias_pair(vm, "deep_merge", "__deep_merge", |args| {
         deep_merge_value(
             args.first().unwrap_or(&VmValue::Nil),
             args.get(1).unwrap_or(&VmValue::Nil),
         )
     });
-    vm.register_builtin("deep_merge", |args, _out| {
-        deep_merge_value(
-            args.first().unwrap_or(&VmValue::Nil),
-            args.get(1).unwrap_or(&VmValue::Nil),
-        )
-    });
-    vm.register_builtin("__list_unique", |args, _out| {
+    register_alias_pair(vm, "unique", "__list_unique", |args| {
         list_unique(args.first().unwrap_or(&VmValue::Nil))
     });
-    vm.register_builtin("unique", |args, _out| {
-        list_unique(args.first().unwrap_or(&VmValue::Nil))
-    });
-    vm.register_builtin("__dict_from_pairs", |args, _out| {
+    register_alias_pair(vm, "dict_from_pairs", "__dict_from_pairs", |args| {
         dict_from_pairs(args.first().unwrap_or(&VmValue::Nil))
     });
-    vm.register_builtin("dict_from_pairs", |args, _out| {
-        dict_from_pairs(args.first().unwrap_or(&VmValue::Nil))
-    });
+}
+
+fn register_alias_pair(
+    vm: &mut Vm,
+    public_name: &'static str,
+    raw_name: &'static str,
+    handler: fn(&[VmValue]) -> Result<VmValue, VmError>,
+) {
+    vm.register_builtin(public_name, move |args, _out| handler(args));
+    vm.register_builtin(raw_name, move |args, _out| handler(args));
 }
 
 /// Returns a shallow copy of `value`. Dicts and lists become fresh

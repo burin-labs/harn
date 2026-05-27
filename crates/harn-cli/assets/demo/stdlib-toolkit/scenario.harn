@@ -79,6 +79,13 @@ pipeline default(_task) {
   //    from_xml are inverses on real data. The runner just verifies
   //    the parsed shape; the receipt below carries the comparison.
   let parsed = from_xml(xml)
+  // 5b. Demonstrate the lossless-parse option. For general-purpose
+  //     XML where the inner tag matters (e.g. payloads of the form
+  //     `<addresses><a>...</a><a>...</a></addresses>` where `a` is
+  //     meaningful), `preserve_repeated_tag` keeps the tag instead
+  //     of collapsing the children to a bare list.
+  let lossless = from_xml("<addresses><a>1</a><a>2</a></addresses>", {preserve_repeated_tag: true})
+  let lossless_count = len(lossless.addresses.a)
   // 6. Frame the rendered context inside a 60-column margin with a
   //    visible divider so it's easy to diff against future renders.
   let divider = repeat("-", 60)
@@ -91,6 +98,7 @@ pipeline default(_task) {
     receipt_kind: "stdlib_toolkit_receipt",
     chat_index_keys: len(chat_index),
     config_keys: len(merged.config),
+    lossless_address_count: lossless_count,
     merged_retries: merged.config.retries,
     parse_root_keys: len(parsed.context ?? {}),
     persona: merged.persona,

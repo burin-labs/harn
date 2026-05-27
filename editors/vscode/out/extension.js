@@ -192,7 +192,19 @@ function activate(context) {
     const debugAdapterFactory = vscode.debug.registerDebugAdapterDescriptorFactory("harn", new HarnDebugAdapterFactory());
     const taskProvider = new HarnTaskProvider(harnPath);
     const taskProviderDisposable = vscode.tasks.registerTaskProvider("harn", taskProvider);
-    context.subscriptions.push(runCommand, fmtCommand, applyAllFixesCommand, debugConfigProvider, debugAdapterFactory, taskProviderDisposable);
+    // Invalidate the task cache whenever the data that feeds it
+    // changes — adding/removing a workspace folder shifts ${file} /
+    // ${workspaceFolder} expansion, and changing `harn.path` swaps
+    // the binary VS Code spawns for every task.
+    const workspaceFolderWatcher = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        taskProvider.invalidate();
+    });
+    const configWatcher = vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("harn.path")) {
+            taskProvider.invalidate();
+        }
+    });
+    context.subscriptions.push(runCommand, fmtCommand, applyAllFixesCommand, debugConfigProvider, debugAdapterFactory, taskProviderDisposable, workspaceFolderWatcher, configWatcher);
 }
 function deactivate() {
     return client?.stop();

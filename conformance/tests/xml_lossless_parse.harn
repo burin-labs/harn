@@ -1,0 +1,25 @@
+pipeline test(task) {
+  // Default behavior: repeated children of the same tag collapse into
+  // a bare list because the convention is render-side symmetric
+  // (`<list><item>...</item></list>`). The inner tag is dropped.
+  let default_parse = from_xml("<addresses><a>1</a><a>2</a></addresses>")
+  let default_addresses = default_parse.addresses
+  assert_eq(len(default_addresses), 2, "default parse collapses to a list")
+  assert_eq(default_addresses[0], 1, "first list element preserved")
+  assert_eq(default_addresses[1], 2, "second list element preserved")
+  // Lossless mode keeps the inner tag. Useful for general XML
+  // ingestion where the tag itself carries semantic meaning.
+  let lossless = from_xml("<addresses><a>1</a><a>2</a></addresses>", {preserve_repeated_tag: true})
+  assert_eq(len(lossless.addresses.a), 2, "preserve mode keeps inner tag in the result")
+  assert_eq(lossless.addresses.a[0], 1, "first value preserved under inner tag")
+  // The parser refuses pathologically nested input. The try-block
+  // surfaces the structural rejection so a future regression that
+  // removed the depth guard would be visible here.
+  let pathological = repeat("<a>", 257) + repeat("</a>", 257)
+  let result = try {
+    from_xml(pathological)
+  }
+  let saw_depth = is_err(result) && contains(to_string(unwrap_err(result)), "max nesting depth")
+  assert_eq(saw_depth, true, "depth guard rejects pathologically nested XML")
+  log("xml_lossless_parse: all tests passed")
+}

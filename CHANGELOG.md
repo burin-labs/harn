@@ -6,6 +6,56 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Built-in `jsonrpc_batch(url, calls, options?)`.** JSON-RPC 2.0 batch
+  client — sends an array of `{method, params?, id?, notify?}` envelopes
+  and returns results aligned with input order. Per-call errors arrive
+  as `{jsonrpc_error: true, ...}` dicts inside the result list so
+  partial failures don't tear down the whole batch.
+- **`from_xml(text, options?)` with `preserve_repeated_tag`.** Opt-in
+  lossless mode that keeps the inner tag when an element has repeated
+  children with the same tag (e.g.
+  `<addresses><a>1</a><a>2</a></addresses>` → `{addresses: {a: [1, 2]}}`
+  instead of the default `{addresses: [1, 2]}`). Use for general-purpose
+  XML ingestion; default behavior is unchanged for the
+  `<list><item>...</item></list>` convention.
+
+### Fixed
+
+- **DAP `modules` request with `moduleCount: 0`.** The previous
+  `.max(1)` clamp silently returned a single module for clients that
+  disable paging by passing `moduleCount: 0`. Per the DAP spec that
+  value (and an omitted field) both mean "return all remaining from
+  startModule"; we now honour it.
+- **XML parser depth guard.** Adversarial deeply-nested XML (e.g.
+  10 000 nested elements) no longer risks blowing the Rust stack.
+  `from_xml` enforces a 256-deep ceiling and surfaces a structured
+  "max nesting depth N exceeded" error.
+- **JSON-RPC default headers case-sensitivity.** A user-supplied
+  `content-type` header now overrides the default `Content-Type`
+  instead of being sent alongside it. Same fix for `Accept`.
+- **VS Code task provider cache invalidation.** The provider now
+  flushes its cached `vscode.Task[]` when the user changes
+  `harn.path` or adds/removes a workspace folder, so the next
+  `Tasks: Run Task` invocation reflects the new state.
+
+### Internal
+
+- **XML escape fast-path.** `to_xml` now spans-copies unescaped runs
+  instead of pushing chars one at a time. ASCII-dominant payloads
+  (the typical case) see fewer than one `push_str` per escaped byte.
+- **Dedup builtin-alias registrations.** The `to_xml`/`__to_xml`,
+  `from_xml`/`__from_xml`, `deep_merge`/`__deep_merge`,
+  `unique`/`__list_unique`, `dict_from_pairs`/`__dict_from_pairs`
+  pairs share one closure via a `register_alias_pair` helper.
+- **DAP prompt-span serialization.** `serialize_parent_chain` and
+  the per-handler JSON shapes now both go through a single
+  `serialize_span` helper so `burin/promptProvenance` and
+  `burin/promptConsumers` can never drift.
+
 ## v0.8.45
 
 ### Added

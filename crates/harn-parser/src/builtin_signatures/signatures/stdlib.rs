@@ -138,7 +138,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)],
         TY_DICT,
     ),
-    BuiltinSignature::simple("__from_xml", &[Param::new("text", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple(
+        "__from_xml",
+        &[
+            Param::new("text", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
     BuiltinSignature::simple("__list_unique", &[Param::new("items", TY_LIST)], TY_LIST),
     BuiltinSignature::simple(
         "__to_xml",
@@ -2068,8 +2075,24 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_STRING,
     ),
-    BuiltinSignature::simple("from_xml", &[Param::new("text", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple(
+        "from_xml",
+        &[
+            Param::new("text", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
     // Generic JSON-RPC client — see crates/harn-vm/src/stdlib/jsonrpc.rs.
+    BuiltinSignature::simple(
+        "jsonrpc_batch",
+        &[
+            Param::new("url", TY_STRING),
+            Param::new("calls", TY_LIST),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_LIST,
+    ),
     BuiltinSignature::simple(
         "jsonrpc_call",
         &[

@@ -247,13 +247,31 @@ export function activate(context: vscode.ExtensionContext) {
     taskProvider
   );
 
+  // Invalidate the task cache whenever the data that feeds it
+  // changes — adding/removing a workspace folder shifts ${file} /
+  // ${workspaceFolder} expansion, and changing `harn.path` swaps
+  // the binary VS Code spawns for every task.
+  const workspaceFolderWatcher =
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      taskProvider.invalidate();
+    });
+  const configWatcher = vscode.workspace.onDidChangeConfiguration(
+    (event: vscode.ConfigurationChangeEvent) => {
+      if (event.affectsConfiguration("harn.path")) {
+        taskProvider.invalidate();
+      }
+    }
+  );
+
   context.subscriptions.push(
     runCommand,
     fmtCommand,
     applyAllFixesCommand,
     debugConfigProvider,
     debugAdapterFactory,
-    taskProviderDisposable
+    taskProviderDisposable,
+    workspaceFolderWatcher,
+    configWatcher
   );
 }
 

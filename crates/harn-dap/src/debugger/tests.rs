@@ -852,6 +852,34 @@ fn test_modules_reports_entry_module() {
 }
 
 #[test]
+fn test_modules_with_explicit_zero_module_count_returns_all() {
+    // Per DAP, `moduleCount: 0` is paging-disabled and means "all
+    // remaining". The previous `.max(1)` silently returned a single
+    // entry — this regression test pins the new behavior.
+    let mut dbg = Debugger::new();
+    let (_dir, file) = write_temp_program("zerocount.harn", "pipeline t(task) { log(\"hi\") }");
+    dbg.handle_message(make_request(1, "initialize", None));
+    dbg.handle_message(make_request(
+        2,
+        "launch",
+        Some(json!({"program": file.to_string_lossy()})),
+    ));
+    let responses = dbg.handle_message(make_request(
+        3,
+        "modules",
+        Some(json!({"startModule": 0, "moduleCount": 0})),
+    ));
+    let body = responses[0].body.as_ref().unwrap();
+    let modules = body["modules"].as_array().unwrap();
+    let total = body["totalModules"].as_u64().unwrap_or(0);
+    assert_eq!(
+        modules.len() as u64,
+        total,
+        "moduleCount: 0 must return every module (paging disabled)"
+    );
+}
+
+#[test]
 fn test_triggered_breakpoint_skipped_until_trigger_fires() {
     use super::breakpoints::BreakpointAction;
     use std::collections::BTreeMap;
