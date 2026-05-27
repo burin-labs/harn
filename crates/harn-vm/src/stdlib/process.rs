@@ -191,10 +191,7 @@ fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     std::process::exit(code as i32);
 }
 
-#[harn_builtin(
-    sig = "exec(command: string, ...args: any) -> dict",
-    category = "process"
-)]
+#[harn_builtin(sig = "exec(...command: string) -> dict", category = "process")]
 fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -222,7 +219,7 @@ fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
-    sig = "exec_at(dir: string, command: string, ...args: any) -> dict",
+    sig = "exec_at(dir: string, ...command: string) -> dict",
     category = "process"
 )]
 fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

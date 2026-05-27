@@ -278,26 +278,26 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     Ok(VmValue::String(Rc::from(result)))
 }
 
-#[harn_builtin(sig = "trim(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "trim(text: string?) -> string", category = "strings")]
 fn trim_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(s.trim())))
 }
 
-#[harn_builtin(sig = "lowercase(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "lowercase(text: string?) -> string", category = "strings")]
 fn lowercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(s.to_lowercase())))
 }
 
-#[harn_builtin(sig = "uppercase(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "uppercase(text: string?) -> string", category = "strings")]
 fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(s.to_uppercase())))
 }
 
 #[harn_builtin(
-    sig = "split(text: string, separator?: string) -> list",
+    sig = "split(text: string?, separator?: string) -> list",
     category = "strings"
 )]
 fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -314,7 +314,7 @@ fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
-    sig = "unicode_normalize(text: string, form?: string) -> string",
+    sig = "unicode_normalize(text: string?, form?: string) -> string",
     category = "strings"
 )]
 fn unicode_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -337,7 +337,7 @@ fn unicode_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::String(Rc::from(normalized)))
 }
 
-#[harn_builtin(sig = "unicode_graphemes(text: string) -> list", category = "strings")]
+#[harn_builtin(sig = "unicode_graphemes(text: string?) -> list", category = "strings")]
 fn unicode_graphemes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::List(Rc::new(
@@ -348,7 +348,7 @@ fn unicode_graphemes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
-    sig = "str_pad(text: string, width: int, fill?: string, side?: string) -> string",
+    sig = "str_pad(text: string?, width: int, fill?: string, side?: string) -> string",
     category = "strings"
 )]
 fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -390,7 +390,7 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
-    sig = "starts_with(text: string, prefix: string) -> bool",
+    sig = "starts_with(text: string?, prefix: string?) -> bool",
     category = "strings"
 )]
 fn starts_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -400,7 +400,7 @@ fn starts_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    sig = "ends_with(text: string, suffix: string) -> bool",
+    sig = "ends_with(text: string?, suffix: string) -> bool",
     category = "strings"
 )]
 fn ends_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -430,7 +430,7 @@ fn contains_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
-    sig = "replace(text: string, old: string, new: string) -> string",
+    sig = "replace(text: string?, old: string, new: string) -> string",
     category = "strings"
 )]
 fn replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -456,7 +456,7 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(
-    sig = "substring(text: string, start: int, length?: int) -> string",
+    sig = "substring(text: string?, start: int, length?: int) -> string",
     category = "strings"
 )]
 fn substring_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -477,67 +477,67 @@ fn substring_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     }
 }
 
-#[harn_builtin(sig = "snake_to_camel(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "snake_to_camel(text: string?) -> string", category = "strings")]
 fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(words_to_camel(&split_snake(&s)))))
 }
 
-#[harn_builtin(sig = "snake_to_pascal(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "snake_to_pascal(text: string?) -> string", category = "strings")]
 fn snake_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(words_to_pascal(&split_snake(&s)))))
 }
 
-#[harn_builtin(sig = "camel_to_snake(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "camel_to_snake(text: string?) -> string", category = "strings")]
 fn camel_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(words_to_snake(&split_camel(&s)))))
 }
 
-#[harn_builtin(sig = "pascal_to_snake(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "pascal_to_snake(text: string?) -> string", category = "strings")]
 fn pascal_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(words_to_snake(&split_camel(&s)))))
 }
 
-#[harn_builtin(sig = "kebab_to_camel(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "kebab_to_camel(text: string?) -> string", category = "strings")]
 fn kebab_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(words_to_camel(&split_kebab(&s)))))
 }
 
-#[harn_builtin(sig = "camel_to_kebab(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "camel_to_kebab(text: string?) -> string", category = "strings")]
 fn camel_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(words_to_kebab(&split_camel(&s)))))
 }
 
-#[harn_builtin(sig = "snake_to_kebab(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "snake_to_kebab(text: string?) -> string", category = "strings")]
 fn snake_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(words_to_kebab(&split_snake(&s)))))
 }
 
-#[harn_builtin(sig = "kebab_to_snake(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "kebab_to_snake(text: string?) -> string", category = "strings")]
 fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(words_to_snake(&split_kebab(&s)))))
 }
 
-#[harn_builtin(sig = "pascal_to_camel(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "pascal_to_camel(text: string?) -> string", category = "strings")]
 fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
 }
 
-#[harn_builtin(sig = "camel_to_pascal(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "camel_to_pascal(text: string?) -> string", category = "strings")]
 fn camel_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(uppercase_first_str(&s))))
 }
 
-#[harn_builtin(sig = "title_case(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "title_case(text: string?) -> string", category = "strings")]
 fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let mut out = String::with_capacity(s.len());
@@ -556,13 +556,13 @@ fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::String(Rc::from(out)))
 }
 
-#[harn_builtin(sig = "uppercase_first(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "uppercase_first(text: string?) -> string", category = "strings")]
 fn uppercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(uppercase_first_str(&s))))
 }
 
-#[harn_builtin(sig = "lowercase_first(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "lowercase_first(text: string?) -> string", category = "strings")]
 fn lowercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
@@ -684,7 +684,7 @@ fn pop_llm_render_context_impl(_args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
-    sig = "repeat(text: string, count: int) -> string",
+    sig = "repeat(text: string?, count: int) -> string",
     category = "strings"
 )]
 fn repeat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -706,7 +706,7 @@ fn repeat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 }
 
 #[harn_builtin(
-    sig = "indent(text: string, prefix?: string) -> string",
+    sig = "indent(text: string?, prefix?: string) -> string",
     category = "strings"
 )]
 fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -732,14 +732,14 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     Ok(VmValue::String(Rc::from(out)))
 }
 
-#[harn_builtin(sig = "dedent(text: string) -> string", category = "strings")]
+#[harn_builtin(sig = "dedent(text: string?) -> string", category = "strings")]
 fn dedent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(dedent_str(&text))))
 }
 
 #[harn_builtin(
-    sig = "word_wrap(text: string, width?: int) -> string",
+    sig = "word_wrap(text: string?, width?: int) -> string",
     category = "strings"
 )]
 fn word_wrap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
