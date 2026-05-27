@@ -31,6 +31,7 @@ use std::time::Instant;
 
 use crate::llm::helpers::vm_value_to_json;
 use crate::stdlib::json_to_vm_value;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -70,106 +71,130 @@ pub(crate) fn reset_timing_state() {
 }
 
 pub(crate) fn register_timing_builtins(vm: &mut Vm) {
-    vm.register_builtin("__timing_start", |args, _out| {
-        let name = string_arg(args.first(), "__timing_start", "name")?;
-        let attrs = object_arg(args.get(1), "__timing_start", "attributes")?;
-        let attrs_btree = json_map_to_btree(&attrs);
-        let (span_id, trace_id, parent_id, start_unix_ms) =
-            crate::tracing::span_start_user_timing(name.clone(), attrs_btree);
-
-        let mut handle = BTreeMap::new();
-        handle.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
-        handle.insert("span_id".to_string(), VmValue::Int(span_id as i64));
-        handle.insert(
-            "trace_id".to_string(),
-            VmValue::String(Rc::from(trace_id.as_str())),
-        );
-        handle.insert(
-            "parent_span_id".to_string(),
-            parent_id
-                .map(|id| VmValue::Int(id as i64))
-                .unwrap_or(VmValue::Nil),
-        );
-        handle.insert(
-            "started_at_ms".to_string(),
-            VmValue::Int(start_unix_ms as i64),
-        );
-        handle.insert(
-            "monotonic_started_ms".to_string(),
-            VmValue::Int(now_monotonic_ms()),
-        );
-        handle.insert(
-            "attributes".to_string(),
-            json_to_vm_value(&serde_json::Value::Object(attrs)),
-        );
-        handle.insert(
-            "kind".to_string(),
-            VmValue::String(Rc::from(crate::tracing::SpanKind::UserTiming.as_str())),
-        );
-
-        Ok(VmValue::Dict(Rc::new(handle)))
-    });
-
-    vm.register_builtin("__timing_now_monotonic_ms", |_args, _out| {
-        Ok(VmValue::Int(now_monotonic_ms()))
-    });
-
-    vm.register_builtin("__timing_event", |args, _out| {
-        let span_id = handle_span_id(args.first(), "__timing_event")?;
-        let name = string_arg(args.get(1), "__timing_event", "name")?;
-        let attrs = object_arg(args.get(2), "__timing_event", "attributes")?;
-        let attached = crate::tracing::span_record_event(span_id, name, json_map_to_btree(&attrs));
-        Ok(VmValue::Bool(attached))
-    });
-
-    vm.register_builtin("__timing_end", |args, _out| {
-        let span_id = handle_span_id(args.first(), "__timing_end")?;
-        let handle_trace_id = handle_trace_id(args.first());
-        let final_attrs = object_arg(args.get(1), "__timing_end", "final_attributes")?;
-
-        // Idempotency: if this handle was already closed under the same
-        // trace, return the cached result instead of mutating the span
-        // stack again. A mismatched trace_id means `reset_tracing()`
-        // wrapped around the span_id counter, so the cached entry is
-        // stale and should not satisfy the lookup.
-        let cached = FINALIZED.with(|state| {
-            state
-                .borrow()
-                .get(&span_id)
-                .filter(|entry| match handle_trace_id.as_deref() {
-                    Some(trace) => entry.trace_id == trace,
-                    None => true,
-                })
-                .cloned()
-        });
-        if let Some(cached) = cached {
-            return Ok(json_to_vm_value(&cached.value));
-        }
-
-        for (key, value) in &final_attrs {
-            crate::tracing::span_attach_metadata(span_id, key, value.clone());
-        }
-
-        let Some(closed) = crate::tracing::span_end(span_id) else {
-            return Err(VmError::Runtime(format!(
-                "__timing_end: unknown timing handle (span_id={span_id})"
-            )));
-        };
-
-        let trace_id = closed.trace_id.clone();
-        let payload = finalized_to_json(&closed);
-        FINALIZED.with(|state| {
-            state.borrow_mut().insert(
-                span_id,
-                FinalizedTiming {
-                    trace_id,
-                    value: payload.clone(),
-                },
-            );
-        });
-        Ok(json_to_vm_value(&payload))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(
+    sig = "__timing_start(name: string, attributes?: dict) -> dict",
+    category = "timing"
+)]
+fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = string_arg(args.first(), "__timing_start", "name")?;
+    let attrs = object_arg(args.get(1), "__timing_start", "attributes")?;
+    let attrs_btree = json_map_to_btree(&attrs);
+    let (span_id, trace_id, parent_id, start_unix_ms) =
+        crate::tracing::span_start_user_timing(name.clone(), attrs_btree);
+
+    let mut handle = BTreeMap::new();
+    handle.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+    handle.insert("span_id".to_string(), VmValue::Int(span_id as i64));
+    handle.insert(
+        "trace_id".to_string(),
+        VmValue::String(Rc::from(trace_id.as_str())),
+    );
+    handle.insert(
+        "parent_span_id".to_string(),
+        parent_id
+            .map(|id| VmValue::Int(id as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    handle.insert(
+        "started_at_ms".to_string(),
+        VmValue::Int(start_unix_ms as i64),
+    );
+    handle.insert(
+        "monotonic_started_ms".to_string(),
+        VmValue::Int(now_monotonic_ms()),
+    );
+    handle.insert(
+        "attributes".to_string(),
+        json_to_vm_value(&serde_json::Value::Object(attrs)),
+    );
+    handle.insert(
+        "kind".to_string(),
+        VmValue::String(Rc::from(crate::tracing::SpanKind::UserTiming.as_str())),
+    );
+
+    Ok(VmValue::Dict(Rc::new(handle)))
+}
+
+#[harn_builtin(sig = "__timing_now_monotonic_ms() -> int", category = "timing")]
+fn timing_now_monotonic_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Int(now_monotonic_ms()))
+}
+
+#[harn_builtin(
+    sig = "__timing_event(handle: dict, name: string, attributes?: dict) -> bool",
+    category = "timing"
+)]
+fn timing_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let span_id = handle_span_id(args.first(), "__timing_event")?;
+    let name = string_arg(args.get(1), "__timing_event", "name")?;
+    let attrs = object_arg(args.get(2), "__timing_event", "attributes")?;
+    let attached = crate::tracing::span_record_event(span_id, name, json_map_to_btree(&attrs));
+    Ok(VmValue::Bool(attached))
+}
+
+#[harn_builtin(
+    sig = "__timing_end(handle: dict, final_attributes?: dict) -> dict",
+    category = "timing"
+)]
+fn timing_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let span_id = handle_span_id(args.first(), "__timing_end")?;
+    let handle_trace_id = handle_trace_id(args.first());
+    let final_attrs = object_arg(args.get(1), "__timing_end", "final_attributes")?;
+
+    // Idempotency: if this handle was already closed under the same
+    // trace, return the cached result instead of mutating the span
+    // stack again. A mismatched trace_id means `reset_tracing()`
+    // wrapped around the span_id counter, so the cached entry is
+    // stale and should not satisfy the lookup.
+    let cached = FINALIZED.with(|state| {
+        state
+            .borrow()
+            .get(&span_id)
+            .filter(|entry| match handle_trace_id.as_deref() {
+                Some(trace) => entry.trace_id == trace,
+                None => true,
+            })
+            .cloned()
+    });
+    if let Some(cached) = cached {
+        return Ok(json_to_vm_value(&cached.value));
+    }
+
+    for (key, value) in &final_attrs {
+        crate::tracing::span_attach_metadata(span_id, key, value.clone());
+    }
+
+    let Some(closed) = crate::tracing::span_end(span_id) else {
+        return Err(VmError::Runtime(format!(
+            "__timing_end: unknown timing handle (span_id={span_id})"
+        )));
+    };
+
+    let trace_id = closed.trace_id.clone();
+    let payload = finalized_to_json(&closed);
+    FINALIZED.with(|state| {
+        state.borrow_mut().insert(
+            span_id,
+            FinalizedTiming {
+                trace_id,
+                value: payload.clone(),
+            },
+        );
+    });
+    Ok(json_to_vm_value(&payload))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &TIMING_START_IMPL_DEF,
+    &TIMING_NOW_MONOTONIC_MS_IMPL_DEF,
+    &TIMING_EVENT_IMPL_DEF,
+    &TIMING_END_IMPL_DEF,
+];
 
 fn finalized_to_json(span: &crate::tracing::Span) -> serde_json::Value {
     let mut out = serde_json::Map::new();

@@ -122,22 +122,10 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("args", TY_ANY)],
         TY_LIST,
     ),
-    BuiltinSignature::simple(
-        "__deep_merge",
-        &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("__dict_filter_nil", &[Param::new("d", TY_DICT)], TY_DICT),
-    BuiltinSignature::simple(
-        "__dict_from_pairs",
-        &[Param::new("pairs", TY_LIST)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__dict_merge",
-        &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)],
-        TY_DICT,
-    ),
+    // `__deep_merge`, `__dict_filter_nil`, `__dict_from_pairs`,
+    // `__dict_merge`, `__list_unique`, `__dict_omit`, `__dict_pick`,
+    // `__dict_pick_keys` migrated to `#[harn_builtin]` in
+    // `harn-vm/src/stdlib/collections.rs`.
     BuiltinSignature::simple(
         "__from_xml",
         &[
@@ -146,7 +134,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
-    BuiltinSignature::simple("__list_unique", &[Param::new("items", TY_LIST)], TY_LIST),
     BuiltinSignature::simple(
         "__to_xml",
         &[
@@ -154,25 +141,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("options", TY_DICT_OR_NIL),
         ],
         TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "__dict_omit",
-        &[Param::new("d", TY_DICT), Param::new("keys", TY_LIST)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__dict_pick",
-        &[Param::new("d", TY_DICT), Param::new("keys", TY_LIST)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__dict_pick_keys",
-        &[
-            Param::new("d", TY_DICT),
-            Param::new("keys", TY_LIST),
-            Param::optional("drop_nil", TY_BOOL),
-        ],
-        TY_DICT,
     ),
     BuiltinSignature::simple(
         "__files_upload",
@@ -2034,15 +2002,9 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("x25519_keypair", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("x25519_agree", &[Param::new("args", TY_ANY)], TY_STRING),
     // Clone / merge / dedupe helpers — see crates/harn-vm/src/stdlib/collections.rs.
-    BuiltinSignature::simple("clone", &[Param::new("value", TY_ANY)], TY_ANY),
-    BuiltinSignature::simple("deep_clone", &[Param::new("value", TY_ANY)], TY_ANY),
-    BuiltinSignature::simple(
-        "deep_merge",
-        &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("unique", &[Param::new("items", TY_LIST)], TY_LIST),
-    BuiltinSignature::simple("dict_from_pairs", &[Param::new("pairs", TY_LIST)], TY_DICT),
+    // `clone`, `deep_clone`, `deep_merge`, `unique`, `dict_from_pairs`
+    // migrated to `#[harn_builtin]` in
+    // `harn-vm/src/stdlib/collections.rs`.
     // String formatting helpers — see crates/harn-vm/src/stdlib/strings.rs.
     BuiltinSignature::simple(
         "repeat",
@@ -2083,7 +2045,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
-    // Generic JSON-RPC client — see crates/harn-vm/src/stdlib/jsonrpc.rs.
     BuiltinSignature::simple(
         "jsonrpc_batch",
         &[
@@ -2093,6 +2054,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_LIST,
     ),
+    // Generic JSON-RPC client — see crates/harn-vm/src/stdlib/jsonrpc.rs.
     BuiltinSignature::simple(
         "jsonrpc_call",
         &[

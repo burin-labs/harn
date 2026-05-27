@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
@@ -224,423 +225,571 @@ fn span_kind_label(kind: PromptSpanKind) -> &'static str {
 }
 
 pub(crate) fn register_string_builtins(vm: &mut Vm) {
-    vm.register_builtin("format", |args, _out| {
-        let template = args.first().map(|a| a.display()).unwrap_or_default();
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-        // Dict → named placeholders `{key}`. Single-pass scan avoids double-substitution.
-        if let Some(dict) = args.get(1).and_then(|a| a.as_dict()) {
-            let mut result = String::with_capacity(template.len());
-            let mut rest = template.as_str();
-            while let Some(open) = rest.find('{') {
-                result.push_str(&rest[..open]);
-                if let Some(close) = rest[open..].find('}') {
-                    let key = &rest[open + 1..open + close];
-                    if let Some(val) = dict.get(key) {
-                        result.push_str(&val.display());
-                    } else {
-                        result.push_str(&rest[open..open + close + 1]);
-                    }
-                    rest = &rest[open + close + 1..];
-                } else {
-                    result.push_str(&rest[open..]);
-                    rest = "";
-                    break;
-                }
-            }
-            result.push_str(rest);
-            return Ok(VmValue::String(Rc::from(result)));
-        }
+#[harn_builtin(
+    sig = "format(template: string, ...rest: any) -> string",
+    category = "strings"
+)]
+fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let template = args.first().map(|a| a.display()).unwrap_or_default();
 
-        // Otherwise: positional `{}` placeholders.
+    // Dict → named placeholders `{key}`. Single-pass scan avoids double-substitution.
+    if let Some(dict) = args.get(1).and_then(|a| a.as_dict()) {
         let mut result = String::with_capacity(template.len());
-        let mut arg_iter = args.iter().skip(1);
         let mut rest = template.as_str();
-        while let Some(pos) = rest.find("{}") {
-            result.push_str(&rest[..pos]);
-            if let Some(arg) = arg_iter.next() {
-                result.push_str(&arg.display());
+        while let Some(open) = rest.find('{') {
+            result.push_str(&rest[..open]);
+            if let Some(close) = rest[open..].find('}') {
+                let key = &rest[open + 1..open + close];
+                if let Some(val) = dict.get(key) {
+                    result.push_str(&val.display());
+                } else {
+                    result.push_str(&rest[open..open + close + 1]);
+                }
+                rest = &rest[open + close + 1..];
             } else {
-                result.push_str("{}");
+                result.push_str(&rest[open..]);
+                rest = "";
+                break;
             }
-            rest = &rest[pos + 2..];
         }
         result.push_str(rest);
-        Ok(VmValue::String(Rc::from(result)))
-    });
+        return Ok(VmValue::String(Rc::from(result)));
+    }
 
-    vm.register_builtin("trim", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(s.trim())))
-    });
-
-    vm.register_builtin("lowercase", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(s.to_lowercase())))
-    });
-
-    vm.register_builtin("uppercase", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(s.to_uppercase())))
-    });
-
-    vm.register_builtin("split", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let sep = args
-            .get(1)
-            .map(|a| a.display())
-            .unwrap_or_else(|| " ".to_string());
-        let parts: Vec<VmValue> = s
-            .split(&sep)
-            .map(|p| VmValue::String(Rc::from(p)))
-            .collect();
-        Ok(VmValue::List(Rc::new(parts)))
-    });
-
-    vm.register_builtin("unicode_normalize", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let form = args
-            .get(1)
-            .map(|a| a.display().to_uppercase())
-            .unwrap_or_else(|| "NFC".to_string());
-        let normalized: String = match form.as_str() {
-            "NFC" => s.nfc().collect(),
-            "NFD" => s.nfd().collect(),
-            "NFKC" => s.nfkc().collect(),
-            "NFKD" => s.nfkd().collect(),
-            _ => {
-                return Err(VmError::Runtime(
-                    "unicode_normalize: form must be NFC, NFD, NFKC, or NFKD".to_string(),
-                ));
-            }
-        };
-        Ok(VmValue::String(Rc::from(normalized)))
-    });
-
-    vm.register_builtin("unicode_graphemes", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::List(Rc::new(
-            UnicodeSegmentation::graphemes(s.as_str(), true)
-                .map(|grapheme| VmValue::String(Rc::from(grapheme)))
-                .collect(),
-        )))
-    });
-
-    vm.register_builtin("str_pad", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let width = args.get(1).and_then(VmValue::as_int).unwrap_or(0).max(0) as usize;
-        let fill = args
-            .get(2)
-            .map(|a| a.display())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| " ".to_string());
-        let fill = UnicodeSegmentation::graphemes(fill.as_str(), true)
-            .next()
-            .unwrap_or(" ");
-        let side = args
-            .get(3)
-            .map(|a| a.display().to_lowercase())
-            .unwrap_or_else(|| "right".to_string());
-        let grapheme_count = UnicodeSegmentation::graphemes(s.as_str(), true).count();
-        if grapheme_count >= width {
-            return Ok(VmValue::String(Rc::from(s)));
+    // Otherwise: positional `{}` placeholders.
+    let mut result = String::with_capacity(template.len());
+    let mut arg_iter = args.iter().skip(1);
+    let mut rest = template.as_str();
+    while let Some(pos) = rest.find("{}") {
+        result.push_str(&rest[..pos]);
+        if let Some(arg) = arg_iter.next() {
+            result.push_str(&arg.display());
+        } else {
+            result.push_str("{}");
         }
-        let needed = width - grapheme_count;
-        let (left, right) = match side.as_str() {
-            "left" => (needed, 0),
-            "right" => (0, needed),
-            "both" => (needed / 2, needed - needed / 2),
-            _ => {
-                return Err(VmError::Runtime(
-                    "str_pad: side must be left, right, or both".to_string(),
-                ));
-            }
-        };
-        Ok(VmValue::String(Rc::from(format!(
-            "{}{}{}",
-            fill.repeat(left),
-            s,
-            fill.repeat(right)
-        ))))
-    });
-
-    vm.register_builtin("starts_with", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let prefix = args.get(1).map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::Bool(s.starts_with(&prefix)))
-    });
-
-    vm.register_builtin("ends_with", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let suffix = args.get(1).map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::Bool(s.ends_with(&suffix)))
-    });
-
-    vm.register_builtin("contains", |args, _out| {
-        match args.first().unwrap_or(&VmValue::Nil) {
-            VmValue::String(s) => {
-                let substr = args.get(1).map(|a| a.display()).unwrap_or_default();
-                Ok(VmValue::Bool(s.contains(&substr)))
-            }
-            VmValue::List(items) => {
-                let target = args.get(1).unwrap_or(&VmValue::Nil);
-                Ok(VmValue::Bool(
-                    items.iter().any(|item| values_equal(item, target)),
-                ))
-            }
-            _ => Ok(VmValue::Bool(false)),
-        }
-    });
-
-    vm.register_builtin("replace", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let old = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let new = args.get(2).map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(s.replace(&old, &new))))
-    });
-
-    vm.register_builtin("join", |args, _out| {
-        let sep = args.get(1).map(|a| a.display()).unwrap_or_default();
-        match args.first() {
-            Some(VmValue::List(items)) => {
-                let parts: Vec<String> = items.iter().map(|v| v.display()).collect();
-                Ok(VmValue::String(Rc::from(parts.join(&sep))))
-            }
-            _ => Ok(VmValue::String(Rc::from(""))),
-        }
-    });
-
-    vm.register_builtin("substring", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let start = args.get(1).and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
-        let chars: Vec<char> = s.chars().collect();
-        let start = start.min(chars.len());
-        match args.get(2).and_then(|a| a.as_int()) {
-            Some(length) => {
-                let length = (length.max(0) as usize).min(chars.len() - start);
-                let result: String = chars[start..start + length].iter().collect();
-                Ok(VmValue::String(Rc::from(result)))
-            }
-            None => {
-                let result: String = chars[start..].iter().collect();
-                Ok(VmValue::String(Rc::from(result)))
-            }
-        }
-    });
-
-    vm.register_builtin("snake_to_camel", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(words_to_camel(&split_snake(&s)))))
-    });
-
-    vm.register_builtin("snake_to_pascal", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(words_to_pascal(&split_snake(&s)))))
-    });
-
-    vm.register_builtin("camel_to_snake", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(words_to_snake(&split_camel(&s)))))
-    });
-
-    vm.register_builtin("pascal_to_snake", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(words_to_snake(&split_camel(&s)))))
-    });
-
-    vm.register_builtin("kebab_to_camel", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(words_to_camel(&split_kebab(&s)))))
-    });
-
-    vm.register_builtin("camel_to_kebab", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(words_to_kebab(&split_camel(&s)))))
-    });
-
-    vm.register_builtin("snake_to_kebab", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(words_to_kebab(&split_snake(&s)))))
-    });
-
-    vm.register_builtin("kebab_to_snake", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(words_to_snake(&split_kebab(&s)))))
-    });
-
-    vm.register_builtin("pascal_to_camel", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
-    });
-
-    vm.register_builtin("camel_to_pascal", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(uppercase_first_str(&s))))
-    });
-
-    vm.register_builtin("title_case", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let mut out = String::with_capacity(s.len());
-        let mut at_word_start = true;
-        for c in s.chars() {
-            if c.is_whitespace() {
-                at_word_start = true;
-                out.push(c);
-            } else if at_word_start {
-                out.extend(c.to_uppercase());
-                at_word_start = false;
-            } else {
-                out.extend(c.to_lowercase());
-            }
-        }
-        Ok(VmValue::String(Rc::from(out)))
-    });
-
-    vm.register_builtin("uppercase_first", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(uppercase_first_str(&s))))
-    });
-
-    vm.register_builtin("lowercase_first", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
-    });
-
-    vm.register_builtin("dirname", |args, _out| {
-        let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let p = std::path::Path::new(&path);
-        match p.parent() {
-            Some(parent) => Ok(VmValue::String(Rc::from(parent.to_string_lossy().as_ref()))),
-            None => Ok(VmValue::String(Rc::from(""))),
-        }
-    });
-
-    vm.register_builtin("basename", |args, _out| {
-        let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let p = std::path::Path::new(&path);
-        match p.file_name() {
-            Some(name) => Ok(VmValue::String(Rc::from(name.to_string_lossy().as_ref()))),
-            None => Ok(VmValue::String(Rc::from(""))),
-        }
-    });
-
-    vm.register_builtin("extname", |args, _out| {
-        let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let p = std::path::Path::new(&path);
-        match p.extension() {
-            Some(ext) => Ok(VmValue::String(Rc::from(format!(
-                ".{}",
-                ext.to_string_lossy()
-            )))),
-            None => Ok(VmValue::String(Rc::from(""))),
-        }
-    });
-
-    vm.register_builtin("render", |args, _out| render_asset(args));
-    vm.register_builtin("render_prompt", |args, _out| render_asset(args));
-    vm.register_builtin("render_string", |args, _out| render_template_string(args));
-    vm.register_builtin("render_with_provenance", |args, _out| {
-        render_asset_with_provenance(args)
-    });
-
-    // #106: pipelines invoke prompt_mark_rendered(prompt_id) just
-    // before passing a rendered prompt to llm_call. The builtin
-    // records (prompt_id, next_event_index) against the thread-local
-    // render-index map, which the DAP `burin/promptConsumers`
-    // response exposes so the IDE template gutter can jump-to-next-
-    // render. The `next_event_index` is a session-opaque counter —
-    // the IDE correlates it to AgentEvent.index via timestamp in the
-    // JSONL, or via the monotonic per-session render counter when
-    // scrubbing by render ordinal.
-    vm.register_builtin("prompt_mark_rendered", |args, _out| {
-        let Some(VmValue::String(prompt_id)) = args.first() else {
-            return Err(VmError::TypeError(
-                "prompt_mark_rendered: prompt_id must be a string".into(),
-            ));
-        };
-        let event_index = crate::stdlib::template::next_prompt_render_ordinal();
-        crate::stdlib::template::record_prompt_render_index(prompt_id, event_index);
-        Ok(VmValue::Int(event_index as i64))
-    });
-
-    // Internal LLM render-context plumbing — paired push/pop hooks used
-    // by the agent_loop / handler-stack stdlib so user-authored
-    // `.harn.prompt` partials can branch on `llm.provider`,
-    // `llm.capabilities.native_tools`, etc. while rendering inside an
-    // LLM-aware frame. Userspace never calls these directly; the stdlib
-    // wraps every push in a matching `defer { __pop_llm_render_context() }`.
-    vm.register_builtin("__push_llm_render_context", |args, _out| {
-        let provider = args.first().map(|a| a.display()).unwrap_or_default();
-        let model = args.get(1).map(|a| a.display()).unwrap_or_default();
-        // Skip the push when the caller hasn't resolved a concrete
-        // provider yet (empty or `"auto"`). Templates rendered while
-        // the unresolved options are in scope simply see `llm = nil`
-        // instead of an empty-capabilities frame that would silently
-        // mis-flag every capability check as false.
-        if provider.is_empty() || provider.eq_ignore_ascii_case("auto") {
-            return Ok(VmValue::Bool(false));
-        }
-        crate::stdlib::template::push_llm_render_context(
-            crate::stdlib::template::LlmRenderContext::resolve(&provider, &model),
-        );
-        Ok(VmValue::Bool(true))
-    });
-    vm.register_builtin("__pop_llm_render_context", |_args, _out| {
-        crate::stdlib::template::pop_llm_render_context();
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("repeat", |args, _out| {
-        let s = args.first().map(|a| a.display()).unwrap_or_default();
-        let count = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
-        if count <= 0 {
-            return Ok(VmValue::String(Rc::from("")));
-        }
-        // Reject pathological sizes so a typo doesn't try to allocate
-        // multi-gigabyte strings inside a script.
-        const MAX_OUT: usize = 1 << 24;
-        let total = s.len().saturating_mul(count as usize);
-        if total > MAX_OUT {
-            return Err(VmError::Runtime(format!(
-                "repeat: output would be {total} bytes (limit {MAX_OUT})"
-            )));
-        }
-        Ok(VmValue::String(Rc::from(s.repeat(count as usize))))
-    });
-
-    vm.register_builtin("indent", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        let prefix = args
-            .get(1)
-            .map(|a| a.display())
-            .unwrap_or_else(|| "  ".to_string());
-        if prefix.is_empty() || text.is_empty() {
-            return Ok(VmValue::String(Rc::from(text)));
-        }
-        let mut out = String::with_capacity(text.len() + prefix.len() * 4);
-        for line in text.split_inclusive('\n') {
-            // Don't pad blank lines — matches Python's textwrap.indent
-            // default behavior so callers don't get trailing whitespace
-            // on empty lines.
-            let visible = line.trim_end_matches('\n');
-            if !visible.is_empty() {
-                out.push_str(&prefix);
-            }
-            out.push_str(line);
-        }
-        Ok(VmValue::String(Rc::from(out)))
-    });
-
-    vm.register_builtin("dedent", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(dedent_str(&text))))
-    });
-
-    vm.register_builtin("word_wrap", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        let width = args.get(1).and_then(VmValue::as_int).unwrap_or(80).max(1) as usize;
-        Ok(VmValue::String(Rc::from(word_wrap_str(&text, width))))
-    });
+        rest = &rest[pos + 2..];
+    }
+    result.push_str(rest);
+    Ok(VmValue::String(Rc::from(result)))
 }
+
+#[harn_builtin(sig = "trim(text: string?) -> string", category = "strings")]
+fn trim_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(s.trim())))
+}
+
+#[harn_builtin(sig = "lowercase(text: string?) -> string", category = "strings")]
+fn lowercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(s.to_lowercase())))
+}
+
+#[harn_builtin(sig = "uppercase(text: string?) -> string", category = "strings")]
+fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(s.to_uppercase())))
+}
+
+#[harn_builtin(
+    sig = "split(text: string?, separator?: string) -> list",
+    category = "strings"
+)]
+fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let sep = args
+        .get(1)
+        .map(|a| a.display())
+        .unwrap_or_else(|| " ".to_string());
+    let parts: Vec<VmValue> = s
+        .split(&sep)
+        .map(|p| VmValue::String(Rc::from(p)))
+        .collect();
+    Ok(VmValue::List(Rc::new(parts)))
+}
+
+#[harn_builtin(
+    sig = "unicode_normalize(text: string?, form?: string) -> string",
+    category = "strings"
+)]
+fn unicode_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let form = args
+        .get(1)
+        .map(|a| a.display().to_uppercase())
+        .unwrap_or_else(|| "NFC".to_string());
+    let normalized: String = match form.as_str() {
+        "NFC" => s.nfc().collect(),
+        "NFD" => s.nfd().collect(),
+        "NFKC" => s.nfkc().collect(),
+        "NFKD" => s.nfkd().collect(),
+        _ => {
+            return Err(VmError::Runtime(
+                "unicode_normalize: form must be NFC, NFD, NFKC, or NFKD".to_string(),
+            ));
+        }
+    };
+    Ok(VmValue::String(Rc::from(normalized)))
+}
+
+#[harn_builtin(sig = "unicode_graphemes(text: string?) -> list", category = "strings")]
+fn unicode_graphemes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::List(Rc::new(
+        UnicodeSegmentation::graphemes(s.as_str(), true)
+            .map(|grapheme| VmValue::String(Rc::from(grapheme)))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "str_pad(text: string?, width: int, fill?: string, side?: string) -> string",
+    category = "strings"
+)]
+fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let width = args.get(1).and_then(VmValue::as_int).unwrap_or(0).max(0) as usize;
+    let fill = args
+        .get(2)
+        .map(|a| a.display())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| " ".to_string());
+    let fill = UnicodeSegmentation::graphemes(fill.as_str(), true)
+        .next()
+        .unwrap_or(" ");
+    let side = args
+        .get(3)
+        .map(|a| a.display().to_lowercase())
+        .unwrap_or_else(|| "right".to_string());
+    let grapheme_count = UnicodeSegmentation::graphemes(s.as_str(), true).count();
+    if grapheme_count >= width {
+        return Ok(VmValue::String(Rc::from(s)));
+    }
+    let needed = width - grapheme_count;
+    let (left, right) = match side.as_str() {
+        "left" => (needed, 0),
+        "right" => (0, needed),
+        "both" => (needed / 2, needed - needed / 2),
+        _ => {
+            return Err(VmError::Runtime(
+                "str_pad: side must be left, right, or both".to_string(),
+            ));
+        }
+    };
+    Ok(VmValue::String(Rc::from(format!(
+        "{}{}{}",
+        fill.repeat(left),
+        s,
+        fill.repeat(right)
+    ))))
+}
+
+#[harn_builtin(
+    sig = "starts_with(text: string?, prefix: string?) -> bool",
+    category = "strings"
+)]
+fn starts_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let prefix = args.get(1).map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::Bool(s.starts_with(&prefix)))
+}
+
+#[harn_builtin(
+    sig = "ends_with(text: string?, suffix: string) -> bool",
+    category = "strings"
+)]
+fn ends_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let suffix = args.get(1).map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::Bool(s.ends_with(&suffix)))
+}
+
+#[harn_builtin(
+    sig = "contains(haystack: string | list, needle: any) -> bool",
+    category = "strings"
+)]
+fn contains_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    match args.first().unwrap_or(&VmValue::Nil) {
+        VmValue::String(s) => {
+            let substr = args.get(1).map(|a| a.display()).unwrap_or_default();
+            Ok(VmValue::Bool(s.contains(&substr)))
+        }
+        VmValue::List(items) => {
+            let target = args.get(1).unwrap_or(&VmValue::Nil);
+            Ok(VmValue::Bool(
+                items.iter().any(|item| values_equal(item, target)),
+            ))
+        }
+        _ => Ok(VmValue::Bool(false)),
+    }
+}
+
+#[harn_builtin(
+    sig = "replace(text: string?, old: string, new: string) -> string",
+    category = "strings"
+)]
+fn replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let old = args.get(1).map(|a| a.display()).unwrap_or_default();
+    let new = args.get(2).map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(s.replace(&old, &new))))
+}
+
+#[harn_builtin(
+    sig = "join(items: list, separator?: string) -> string",
+    category = "strings"
+)]
+fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let sep = args.get(1).map(|a| a.display()).unwrap_or_default();
+    match args.first() {
+        Some(VmValue::List(items)) => {
+            let parts: Vec<String> = items.iter().map(|v| v.display()).collect();
+            Ok(VmValue::String(Rc::from(parts.join(&sep))))
+        }
+        _ => Ok(VmValue::String(Rc::from(""))),
+    }
+}
+
+#[harn_builtin(
+    sig = "substring(text: string?, start: int, length?: int) -> string",
+    category = "strings"
+)]
+fn substring_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let start = args.get(1).and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
+    let chars: Vec<char> = s.chars().collect();
+    let start = start.min(chars.len());
+    match args.get(2).and_then(|a| a.as_int()) {
+        Some(length) => {
+            let length = (length.max(0) as usize).min(chars.len() - start);
+            let result: String = chars[start..start + length].iter().collect();
+            Ok(VmValue::String(Rc::from(result)))
+        }
+        None => {
+            let result: String = chars[start..].iter().collect();
+            Ok(VmValue::String(Rc::from(result)))
+        }
+    }
+}
+
+#[harn_builtin(sig = "snake_to_camel(text: string?) -> string", category = "strings")]
+fn snake_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(words_to_camel(&split_snake(&s)))))
+}
+
+#[harn_builtin(sig = "snake_to_pascal(text: string?) -> string", category = "strings")]
+fn snake_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(words_to_pascal(&split_snake(&s)))))
+}
+
+#[harn_builtin(sig = "camel_to_snake(text: string?) -> string", category = "strings")]
+fn camel_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(words_to_snake(&split_camel(&s)))))
+}
+
+#[harn_builtin(sig = "pascal_to_snake(text: string?) -> string", category = "strings")]
+fn pascal_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(words_to_snake(&split_camel(&s)))))
+}
+
+#[harn_builtin(sig = "kebab_to_camel(text: string?) -> string", category = "strings")]
+fn kebab_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(words_to_camel(&split_kebab(&s)))))
+}
+
+#[harn_builtin(sig = "camel_to_kebab(text: string?) -> string", category = "strings")]
+fn camel_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(words_to_kebab(&split_camel(&s)))))
+}
+
+#[harn_builtin(sig = "snake_to_kebab(text: string?) -> string", category = "strings")]
+fn snake_to_kebab_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(words_to_kebab(&split_snake(&s)))))
+}
+
+#[harn_builtin(sig = "kebab_to_snake(text: string?) -> string", category = "strings")]
+fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(words_to_snake(&split_kebab(&s)))))
+}
+
+#[harn_builtin(sig = "pascal_to_camel(text: string?) -> string", category = "strings")]
+fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
+}
+
+#[harn_builtin(sig = "camel_to_pascal(text: string?) -> string", category = "strings")]
+fn camel_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(uppercase_first_str(&s))))
+}
+
+#[harn_builtin(sig = "title_case(text: string?) -> string", category = "strings")]
+fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let mut out = String::with_capacity(s.len());
+    let mut at_word_start = true;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            at_word_start = true;
+            out.push(c);
+        } else if at_word_start {
+            out.extend(c.to_uppercase());
+            at_word_start = false;
+        } else {
+            out.extend(c.to_lowercase());
+        }
+    }
+    Ok(VmValue::String(Rc::from(out)))
+}
+
+#[harn_builtin(sig = "uppercase_first(text: string?) -> string", category = "strings")]
+fn uppercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(uppercase_first_str(&s))))
+}
+
+#[harn_builtin(sig = "lowercase_first(text: string?) -> string", category = "strings")]
+fn lowercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
+}
+
+#[harn_builtin(sig = "dirname(path: string?) -> string", category = "strings")]
+fn dirname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let p = std::path::Path::new(&path);
+    match p.parent() {
+        Some(parent) => Ok(VmValue::String(Rc::from(parent.to_string_lossy().as_ref()))),
+        None => Ok(VmValue::String(Rc::from(""))),
+    }
+}
+
+#[harn_builtin(sig = "basename(path: string?) -> string", category = "strings")]
+fn basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let p = std::path::Path::new(&path);
+    match p.file_name() {
+        Some(name) => Ok(VmValue::String(Rc::from(name.to_string_lossy().as_ref()))),
+        None => Ok(VmValue::String(Rc::from(""))),
+    }
+}
+
+#[harn_builtin(sig = "extname(path: string?) -> string", category = "strings")]
+fn extname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let p = std::path::Path::new(&path);
+    match p.extension() {
+        Some(ext) => Ok(VmValue::String(Rc::from(format!(
+            ".{}",
+            ext.to_string_lossy()
+        )))),
+        None => Ok(VmValue::String(Rc::from(""))),
+    }
+}
+
+#[harn_builtin(
+    sig = "render(path: string?, bindings?: dict) -> string",
+    aliases = ["render_prompt"],
+    category = "strings"
+)]
+fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    render_asset(args)
+}
+
+#[harn_builtin(
+    sig = "render_string(template: string, bindings?: dict) -> string",
+    category = "strings"
+)]
+fn render_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    render_template_string(args)
+}
+
+#[harn_builtin(
+    sig = "render_with_provenance(path: string?, bindings?: dict) -> dict",
+    category = "strings"
+)]
+fn render_with_provenance_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    render_asset_with_provenance(args)
+}
+
+// #106: pipelines invoke prompt_mark_rendered(prompt_id) just
+// before passing a rendered prompt to llm_call. The builtin
+// records (prompt_id, next_event_index) against the thread-local
+// render-index map, which the DAP `burin/promptConsumers`
+// response exposes so the IDE template gutter can jump-to-next-
+// render. The `next_event_index` is a session-opaque counter —
+// the IDE correlates it to AgentEvent.index via timestamp in the
+// JSONL, or via the monotonic per-session render counter when
+// scrubbing by render ordinal.
+#[harn_builtin(
+    sig = "prompt_mark_rendered(prompt_id: string) -> int",
+    category = "strings"
+)]
+fn prompt_mark_rendered_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(VmValue::String(prompt_id)) = args.first() else {
+        return Err(VmError::TypeError(
+            "prompt_mark_rendered: prompt_id must be a string".into(),
+        ));
+    };
+    let event_index = crate::stdlib::template::next_prompt_render_ordinal();
+    crate::stdlib::template::record_prompt_render_index(prompt_id, event_index);
+    Ok(VmValue::Int(event_index as i64))
+}
+
+// Internal LLM render-context plumbing — paired push/pop hooks used
+// by the agent_loop / handler-stack stdlib so user-authored
+// `.harn.prompt` partials can branch on `llm.provider`,
+// `llm.capabilities.native_tools`, etc. while rendering inside an
+// LLM-aware frame. Userspace never calls these directly; the stdlib
+// wraps every push in a matching `defer { __pop_llm_render_context() }`.
+#[harn_builtin(
+    sig = "__push_llm_render_context(provider: string, model?: string) -> bool",
+    category = "strings"
+)]
+fn push_llm_render_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let provider = args.first().map(|a| a.display()).unwrap_or_default();
+    let model = args.get(1).map(|a| a.display()).unwrap_or_default();
+    // Skip the push when the caller hasn't resolved a concrete
+    // provider yet (empty or `"auto"`). Templates rendered while
+    // the unresolved options are in scope simply see `llm = nil`
+    // instead of an empty-capabilities frame that would silently
+    // mis-flag every capability check as false.
+    if provider.is_empty() || provider.eq_ignore_ascii_case("auto") {
+        return Ok(VmValue::Bool(false));
+    }
+    crate::stdlib::template::push_llm_render_context(
+        crate::stdlib::template::LlmRenderContext::resolve(&provider, &model),
+    );
+    Ok(VmValue::Bool(true))
+}
+
+#[harn_builtin(sig = "__pop_llm_render_context() -> nil", category = "strings")]
+fn pop_llm_render_context_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    crate::stdlib::template::pop_llm_render_context();
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "repeat(text: string?, count: int) -> string",
+    category = "strings"
+)]
+fn repeat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let s = args.first().map(|a| a.display()).unwrap_or_default();
+    let count = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
+    if count <= 0 {
+        return Ok(VmValue::String(Rc::from("")));
+    }
+    // Reject pathological sizes so a typo doesn't try to allocate
+    // multi-gigabyte strings inside a script.
+    const MAX_OUT: usize = 1 << 24;
+    let total = s.len().saturating_mul(count as usize);
+    if total > MAX_OUT {
+        return Err(VmError::Runtime(format!(
+            "repeat: output would be {total} bytes (limit {MAX_OUT})"
+        )));
+    }
+    Ok(VmValue::String(Rc::from(s.repeat(count as usize))))
+}
+
+#[harn_builtin(
+    sig = "indent(text: string?, prefix?: string) -> string",
+    category = "strings"
+)]
+fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    let prefix = args
+        .get(1)
+        .map(|a| a.display())
+        .unwrap_or_else(|| "  ".to_string());
+    if prefix.is_empty() || text.is_empty() {
+        return Ok(VmValue::String(Rc::from(text)));
+    }
+    let mut out = String::with_capacity(text.len() + prefix.len() * 4);
+    for line in text.split_inclusive('\n') {
+        // Don't pad blank lines — matches Python's textwrap.indent
+        // default behavior so callers don't get trailing whitespace
+        // on empty lines.
+        let visible = line.trim_end_matches('\n');
+        if !visible.is_empty() {
+            out.push_str(&prefix);
+        }
+        out.push_str(line);
+    }
+    Ok(VmValue::String(Rc::from(out)))
+}
+
+#[harn_builtin(sig = "dedent(text: string?) -> string", category = "strings")]
+fn dedent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::String(Rc::from(dedent_str(&text))))
+}
+
+#[harn_builtin(
+    sig = "word_wrap(text: string?, width?: int) -> string",
+    category = "strings"
+)]
+fn word_wrap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    let width = args.get(1).and_then(VmValue::as_int).unwrap_or(80).max(1) as usize;
+    Ok(VmValue::String(Rc::from(word_wrap_str(&text, width))))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &FORMAT_IMPL_DEF,
+    &TRIM_IMPL_DEF,
+    &LOWERCASE_IMPL_DEF,
+    &UPPERCASE_IMPL_DEF,
+    &SPLIT_IMPL_DEF,
+    &UNICODE_NORMALIZE_IMPL_DEF,
+    &UNICODE_GRAPHEMES_IMPL_DEF,
+    &STR_PAD_IMPL_DEF,
+    &STARTS_WITH_IMPL_DEF,
+    &ENDS_WITH_IMPL_DEF,
+    &CONTAINS_IMPL_DEF,
+    &REPLACE_IMPL_DEF,
+    &JOIN_IMPL_DEF,
+    &SUBSTRING_IMPL_DEF,
+    &SNAKE_TO_CAMEL_IMPL_DEF,
+    &SNAKE_TO_PASCAL_IMPL_DEF,
+    &CAMEL_TO_SNAKE_IMPL_DEF,
+    &PASCAL_TO_SNAKE_IMPL_DEF,
+    &KEBAB_TO_CAMEL_IMPL_DEF,
+    &CAMEL_TO_KEBAB_IMPL_DEF,
+    &SNAKE_TO_KEBAB_IMPL_DEF,
+    &KEBAB_TO_SNAKE_IMPL_DEF,
+    &PASCAL_TO_CAMEL_IMPL_DEF,
+    &CAMEL_TO_PASCAL_IMPL_DEF,
+    &TITLE_CASE_IMPL_DEF,
+    &UPPERCASE_FIRST_IMPL_DEF,
+    &LOWERCASE_FIRST_IMPL_DEF,
+    &DIRNAME_IMPL_DEF,
+    &BASENAME_IMPL_DEF,
+    &EXTNAME_IMPL_DEF,
+    &RENDER_IMPL_DEF,
+    &RENDER_STRING_IMPL_DEF,
+    &RENDER_WITH_PROVENANCE_IMPL_DEF,
+    &PROMPT_MARK_RENDERED_IMPL_DEF,
+    &PUSH_LLM_RENDER_CONTEXT_IMPL_DEF,
+    &POP_LLM_RENDER_CONTEXT_IMPL_DEF,
+    &REPEAT_IMPL_DEF,
+    &INDENT_IMPL_DEF,
+    &DEDENT_IMPL_DEF,
+    &WORD_WRAP_IMPL_DEF,
+];
 
 /// Strips the common leading whitespace from every non-blank line. The
 /// minimum prefix length wins (tabs and spaces are compared verbatim,

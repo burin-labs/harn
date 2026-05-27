@@ -4,6 +4,7 @@ use std::time::SystemTime;
 
 use base64::Engine;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -673,20 +674,100 @@ fn cookie_round_trip_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 }
 
 pub(crate) fn register_cookie_builtins(vm: &mut Vm) {
-    vm.register_builtin("cookie_parse", |args, _out| parse_cookie_builtin(args));
-    vm.register_builtin("cookie_serialize", |args, _out| {
-        cookie_serialize_builtin(args)
-    });
-    vm.register_builtin("cookie_delete", |args, _out| cookie_delete_builtin(args));
-    vm.register_builtin("cookie_sign", |args, _out| cookie_sign_builtin(args));
-    vm.register_builtin("cookie_verify", |args, _out| cookie_verify_builtin(args));
-    vm.register_builtin("session_sign", |args, _out| session_sign_builtin(args));
-    vm.register_builtin("session_verify", |args, _out| session_verify_builtin(args));
-    vm.register_builtin("session_cookie", |args, _out| session_cookie_builtin(args));
-    vm.register_builtin("session_from_cookies", |args, _out| {
-        session_from_cookies_builtin(args)
-    });
-    vm.register_builtin("cookie_round_trip", |args, _out| {
-        cookie_round_trip_builtin(args)
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(
+    sig = "cookie_parse(header: string | dict | list) -> dict",
+    category = "cookies"
+)]
+fn cookie_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    parse_cookie_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "cookie_serialize(name: string, value: string, options?: dict?) -> string",
+    category = "cookies"
+)]
+fn cookie_serialize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    cookie_serialize_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "cookie_delete(name: string, options?: dict?) -> string",
+    category = "cookies"
+)]
+fn cookie_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    cookie_delete_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "cookie_sign(value: string, secret: string) -> string",
+    category = "cookies"
+)]
+fn cookie_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    cookie_sign_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "cookie_verify(signed: string, secret: string) -> dict",
+    category = "cookies"
+)]
+fn cookie_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    cookie_verify_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "session_sign(payload: any, secret: string) -> string",
+    category = "cookies"
+)]
+fn session_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    session_sign_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "session_verify(token: string, secret: string) -> dict",
+    category = "cookies"
+)]
+fn session_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    session_verify_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "session_cookie(name: string, payload: any, secret: string, options?: dict?) -> string",
+    category = "cookies"
+)]
+fn session_cookie_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    session_cookie_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "session_from_cookies(header: string | dict | list, name: string, secret: string) -> dict",
+    category = "cookies"
+)]
+fn session_from_cookies_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    session_from_cookies_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "cookie_round_trip(request_or_set_cookie: string | dict | list, set_cookie?: string | dict | list) -> dict",
+    category = "cookies"
+)]
+fn cookie_round_trip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    cookie_round_trip_builtin(args)
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &COOKIE_PARSE_IMPL_DEF,
+    &COOKIE_SERIALIZE_IMPL_DEF,
+    &COOKIE_DELETE_IMPL_DEF,
+    &COOKIE_SIGN_IMPL_DEF,
+    &COOKIE_VERIFY_IMPL_DEF,
+    &SESSION_SIGN_IMPL_DEF,
+    &SESSION_VERIFY_IMPL_DEF,
+    &SESSION_COOKIE_IMPL_DEF,
+    &SESSION_FROM_COOKIES_IMPL_DEF,
+    &COOKIE_ROUND_TRIP_IMPL_DEF,
+];

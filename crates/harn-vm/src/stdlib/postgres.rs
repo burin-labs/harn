@@ -18,6 +18,9 @@ use sqlx_postgres::{
 use tokio::sync::Mutex;
 
 use crate::llm::vm_value_to_json;
+use crate::stdlib::macros::{
+    harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_BOOL, TY_DICT, TY_LIST,
+};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -64,151 +67,211 @@ pub(crate) fn reset_postgres_state() {
 }
 
 pub(crate) fn register_postgres_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("pg_pool", |args| async move {
-        let source = args.first().ok_or_else(|| {
-            runtime_error("pg_pool: url, env:, secret:, or {url|env|secret} is required")
-        })?;
-        let options = args.get(1).and_then(VmValue::as_dict).cloned();
-        open_pool(source, options.as_ref(), false).await
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_async_builtin("pg_connect", |args| async move {
-        let source = args.first().ok_or_else(|| {
-            runtime_error("pg_connect: url, env:, secret:, or {url|env|secret} is required")
-        })?;
-        let options = args.get(1).and_then(VmValue::as_dict).cloned();
-        open_pool(source, options.as_ref(), true).await
-    });
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &PG_POOL_IMPL_DEF,
+    &PG_CONNECT_IMPL_DEF,
+    &PG_CLOSE_IMPL_DEF,
+    &PG_QUERY_IMPL_DEF,
+    &PG_QUERY_ONE_IMPL_DEF,
+    &PG_EXECUTE_IMPL_DEF,
+    &PG_TRANSACTION_IMPL_DEF,
+    &PG_MOCK_POOL_IMPL_DEF,
+    &PG_MOCK_CALLS_IMPL_DEF,
+];
 
-    vm.register_async_builtin("pg_close", |args| async move {
-        let id = handle_id(args.first(), HANDLE_POOL, "pg_close")?;
-        let pool = POOLS.with(|pools| pools.borrow_mut().remove(&id).map(|record| record.pool));
-        if let Some(pool) = pool {
-            pool.close().await;
-            Ok(VmValue::Bool(true))
-        } else {
-            Ok(VmValue::Bool(false))
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_pool", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "postgres"
+)]
+async fn pg_pool_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let source = args.first().ok_or_else(|| {
+        runtime_error("pg_pool: url, env:, secret:, or {url|env|secret} is required")
+    })?;
+    let options = args.get(1).and_then(VmValue::as_dict).cloned();
+    open_pool(source, options.as_ref(), false).await
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_connect", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "postgres"
+)]
+async fn pg_connect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let source = args.first().ok_or_else(|| {
+        runtime_error("pg_connect: url, env:, secret:, or {url|env|secret} is required")
+    })?;
+    let options = args.get(1).and_then(VmValue::as_dict).cloned();
+    open_pool(source, options.as_ref(), true).await
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_close", &[Param::new("args", TY_ANY)], TY_BOOL),
+    kind = "async",
+    category = "postgres"
+)]
+async fn pg_close_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let id = handle_id(args.first(), HANDLE_POOL, "pg_close")?;
+    let pool = POOLS.with(|pools| pools.borrow_mut().remove(&id).map(|record| record.pool));
+    if let Some(pool) = pool {
+        pool.close().await;
+        Ok(VmValue::Bool(true))
+    } else {
+        Ok(VmValue::Bool(false))
+    }
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_query", &[Param::new("args", TY_ANY)], TY_LIST),
+    kind = "async",
+    category = "postgres"
+)]
+async fn pg_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| runtime_error("pg_query: pool or transaction handle is required"))?;
+    let sql = required_string_arg(&args, 1, "pg_query", "sql")?;
+    let params = params_arg(args.get(2), "pg_query")?;
+    query_many(target, &sql, &params).await
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_query_one", &[Param::new("args", TY_ANY)], TY_ANY),
+    kind = "async",
+    category = "postgres"
+)]
+async fn pg_query_one_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| runtime_error("pg_query_one: pool or transaction handle is required"))?;
+    let sql = required_string_arg(&args, 1, "pg_query_one", "sql")?;
+    let params = params_arg(args.get(2), "pg_query_one")?;
+    let rows = query_rows(target, &sql, &params).await?;
+    Ok(rows.into_iter().next().unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_execute", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "postgres"
+)]
+async fn pg_execute_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| runtime_error("pg_execute: pool or transaction handle is required"))?;
+    let sql = required_string_arg(&args, 1, "pg_execute", "sql")?;
+    let params = params_arg(args.get(2), "pg_execute")?;
+    execute_stmt(target, &sql, &params).await
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_transaction", &[Param::new("args", TY_ANY)], TY_ANY),
+    kind = "async",
+    category = "postgres"
+)]
+async fn pg_transaction_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let pool_id = handle_id(args.first(), HANDLE_POOL, "pg_transaction")?;
+    let closure = match args.get(1) {
+        Some(VmValue::Closure(closure)) => closure.clone(),
+        _ => {
+            return Err(runtime_error(
+                "pg_transaction: second argument must be a closure",
+            ))
         }
+    };
+    let options = args.get(2).and_then(VmValue::as_dict).cloned();
+    let pool = pool_by_id(&pool_id)?;
+    let tx = pool
+        .begin()
+        .await
+        .map_err(|error| runtime_error(format!("pg_transaction: begin failed: {error}")))?;
+    let tx_id = next_id("pgtx");
+    let tx_cell = Rc::new(Mutex::new(Some(tx)));
+    TXS.with(|txs| {
+        txs.borrow_mut().insert(tx_id.clone(), Rc::clone(&tx_cell));
     });
+    let tx_handle = handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
 
-    vm.register_async_builtin("pg_query", |args| async move {
-        let target = args
-            .first()
-            .ok_or_else(|| runtime_error("pg_query: pool or transaction handle is required"))?;
-        let sql = required_string_arg(&args, 1, "pg_query", "sql")?;
-        let params = params_arg(args.get(2), "pg_query")?;
-        query_many(target, &sql, &params).await
+    if let Some(settings) = options
+        .as_ref()
+        .and_then(|opts| opts.get("settings"))
+        .and_then(VmValue::as_dict)
+    {
+        apply_transaction_settings(&tx_id, settings).await?;
+    }
+
+    let mut child_vm = crate::vm::clone_async_builtin_child_vm()
+        .ok_or_else(|| runtime_error("pg_transaction: requires VM execution context"))?;
+    let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
+
+    TXS.with(|txs| {
+        txs.borrow_mut().remove(&tx_id);
     });
-
-    vm.register_async_builtin("pg_query_one", |args| async move {
-        let target = args
-            .first()
-            .ok_or_else(|| runtime_error("pg_query_one: pool or transaction handle is required"))?;
-        let sql = required_string_arg(&args, 1, "pg_query_one", "sql")?;
-        let params = params_arg(args.get(2), "pg_query_one")?;
-        let rows = query_rows(target, &sql, &params).await?;
-        Ok(rows.into_iter().next().unwrap_or(VmValue::Nil))
-    });
-
-    vm.register_async_builtin("pg_execute", |args| async move {
-        let target = args
-            .first()
-            .ok_or_else(|| runtime_error("pg_execute: pool or transaction handle is required"))?;
-        let sql = required_string_arg(&args, 1, "pg_execute", "sql")?;
-        let params = params_arg(args.get(2), "pg_execute")?;
-        execute_stmt(target, &sql, &params).await
-    });
-
-    vm.register_async_builtin("pg_transaction", |args| async move {
-        let pool_id = handle_id(args.first(), HANDLE_POOL, "pg_transaction")?;
-        let closure = match args.get(1) {
-            Some(VmValue::Closure(closure)) => closure.clone(),
-            _ => {
-                return Err(runtime_error(
-                    "pg_transaction: second argument must be a closure",
-                ))
-            }
-        };
-        let options = args.get(2).and_then(VmValue::as_dict).cloned();
-        let pool = pool_by_id(&pool_id)?;
-        let tx = pool
-            .begin()
-            .await
-            .map_err(|error| runtime_error(format!("pg_transaction: begin failed: {error}")))?;
-        let tx_id = next_id("pgtx");
-        let tx_cell = Rc::new(Mutex::new(Some(tx)));
-        TXS.with(|txs| {
-            txs.borrow_mut().insert(tx_id.clone(), Rc::clone(&tx_cell));
-        });
-        let tx_handle = handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
-
-        if let Some(settings) = options
-            .as_ref()
-            .and_then(|opts| opts.get("settings"))
-            .and_then(VmValue::as_dict)
-        {
-            apply_transaction_settings(&tx_id, settings).await?;
-        }
-
-        let mut child_vm = crate::vm::clone_async_builtin_child_vm()
-            .ok_or_else(|| runtime_error("pg_transaction: requires VM execution context"))?;
-        let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
-
-        TXS.with(|txs| {
-            txs.borrow_mut().remove(&tx_id);
-        });
-        let tx = tx_cell.lock().await.take().ok_or_else(|| {
+    let tx =
+        tx_cell.lock().await.take().ok_or_else(|| {
             runtime_error("pg_transaction: transaction handle was already consumed")
         })?;
-        match result {
-            Ok(value) => {
-                tx.commit().await.map_err(|error| {
-                    runtime_error(format!("pg_transaction: commit failed: {error}"))
-                })?;
-                Ok(value)
-            }
-            Err(error) => {
-                let _ = tx.rollback().await;
-                Err(error)
-            }
+    match result {
+        Ok(value) => {
+            tx.commit().await.map_err(|error| {
+                runtime_error(format!("pg_transaction: commit failed: {error}"))
+            })?;
+            Ok(value)
         }
-    });
+        Err(error) => {
+            let _ = tx.rollback().await;
+            Err(error)
+        }
+    }
+}
 
-    vm.register_builtin("pg_mock_pool", |args, _out| {
-        let fixtures = match args.first() {
-            Some(VmValue::List(items)) => parse_mock_fixtures(items)?,
-            Some(VmValue::Dict(_)) => parse_mock_fixtures(&Rc::new(vec![args[0].clone()]))?,
-            None | Some(VmValue::Nil) => Vec::new(),
-            _ => {
-                return Err(runtime_error(
-                    "pg_mock_pool: fixtures must be a list of dicts",
-                ))
-            }
-        };
-        let id = next_id("pgmock");
-        MOCKS.with(|mocks| {
-            mocks.borrow_mut().insert(
-                id.clone(),
-                MockPool {
-                    fixtures,
-                    calls: Vec::new(),
-                },
-            );
-        });
-        Ok(handle_value(HANDLE_MOCK, &id, BTreeMap::new()))
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_mock_pool", &[Param::new("args", TY_ANY)], TY_DICT),
+    category = "postgres"
+)]
+fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let fixtures = match args.first() {
+        Some(VmValue::List(items)) => parse_mock_fixtures(items)?,
+        Some(VmValue::Dict(_)) => parse_mock_fixtures(&Rc::new(vec![args[0].clone()]))?,
+        None | Some(VmValue::Nil) => Vec::new(),
+        _ => {
+            return Err(runtime_error(
+                "pg_mock_pool: fixtures must be a list of dicts",
+            ))
+        }
+    };
+    let id = next_id("pgmock");
+    MOCKS.with(|mocks| {
+        mocks.borrow_mut().insert(
+            id.clone(),
+            MockPool {
+                fixtures,
+                calls: Vec::new(),
+            },
+        );
     });
+    Ok(handle_value(HANDLE_MOCK, &id, BTreeMap::new()))
+}
 
-    vm.register_builtin("pg_mock_calls", |args, _out| {
-        let id = handle_id(args.first(), HANDLE_MOCK, "pg_mock_calls")?;
-        let calls = MOCKS.with(|mocks| {
-            mocks
-                .borrow()
-                .get(&id)
-                .map(|mock| mock.calls.clone())
-                .unwrap_or_default()
-        });
-        Ok(VmValue::List(Rc::new(calls)))
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_mock_calls", &[Param::new("args", TY_ANY)], TY_LIST),
+    category = "postgres"
+)]
+fn pg_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let id = handle_id(args.first(), HANDLE_MOCK, "pg_mock_calls")?;
+    let calls = MOCKS.with(|mocks| {
+        mocks
+            .borrow()
+            .get(&id)
+            .map(|mock| mock.calls.clone())
+            .unwrap_or_default()
     });
+    Ok(VmValue::List(Rc::new(calls)))
 }
 
 async fn open_pool(

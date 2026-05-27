@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -49,93 +50,119 @@ fn build_regex(pattern: &str, flags: &str) -> Result<regex::Regex, String> {
 }
 
 pub(crate) fn register_regex_builtins(vm: &mut Vm) {
-    vm.register_builtin("regex_match", |args, _out| {
-        if args.len() >= 2 {
-            let pattern = args[0].display();
-            let text = args[1].display();
-            let flags = args.get(2).map(VmValue::display).unwrap_or_default();
-            let re = get_cached_regex(&pattern, &flags)?;
-            let matches: Vec<VmValue> = re
-                .find_iter(&text)
-                .map(|m| VmValue::String(Rc::from(m.as_str())))
-                .collect();
-            if matches.is_empty() {
-                return Ok(VmValue::Nil);
-            }
-            return Ok(VmValue::List(Rc::new(matches)));
-        }
-        Ok(VmValue::Nil)
-    });
-
-    // Both `regex_replace` and `regex_replace_all` replace every match via the
-    // `regex` crate (supports `$1`, `${name}` backrefs). The `_all` spelling is
-    // a discoverability alias on the same implementation.
-    fn replace_all_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
-        if args.len() >= 3 {
-            let pattern = args[0].display();
-            let replacement = args[1].display();
-            let text = args[2].display();
-            let flags = args.get(3).map(VmValue::display).unwrap_or_default();
-            let re = get_cached_regex(&pattern, &flags)?;
-            return Ok(VmValue::String(Rc::from(
-                re.replace_all(&text, replacement.as_str()).into_owned(),
-            )));
-        }
-        Ok(VmValue::Nil)
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
     }
-    vm.register_builtin("regex_replace", |args, _out| replace_all_impl(args));
-    vm.register_builtin("regex_replace_all", |args, _out| replace_all_impl(args));
+}
 
-    vm.register_builtin("regex_captures", |args, _out| {
-        if args.len() < 2 {
-            return Ok(VmValue::List(Rc::new(Vec::new())));
-        }
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &REGEX_MATCH_IMPL_DEF,
+    &REGEX_REPLACE_IMPL_DEF,
+    &REGEX_CAPTURES_IMPL_DEF,
+    &REGEX_SPLIT_IMPL_DEF,
+];
+
+#[harn_builtin(
+    sig = "regex_match(pattern: string?, text: string?, flags?: string) -> list | nil",
+    category = "regex"
+)]
+fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() >= 2 {
         let pattern = args[0].display();
         let text = args[1].display();
-        let re = get_cached_regex(&pattern, "")?;
-
-        let mut results: Vec<VmValue> = Vec::new();
-        for caps in re.captures_iter(&text) {
-            let mut dict = BTreeMap::new();
-
-            dict.insert(
-                "match".to_string(),
-                VmValue::String(Rc::from(caps.get(0).map_or("", |m| m.as_str()))),
-            );
-
-            let groups: Vec<VmValue> = (1..caps.len())
-                .map(|i| match caps.get(i) {
-                    Some(m) => VmValue::String(Rc::from(m.as_str())),
-                    None => VmValue::Nil,
-                })
-                .collect();
-            dict.insert("groups".to_string(), VmValue::List(Rc::new(groups)));
-
-            for name in re.capture_names().flatten() {
-                if let Some(m) = caps.name(name) {
-                    dict.insert(name.to_string(), VmValue::String(Rc::from(m.as_str())));
-                }
-            }
-
-            results.push(VmValue::Dict(Rc::new(dict)));
-        }
-        Ok(VmValue::List(Rc::new(results)))
-    });
-
-    vm.register_builtin("regex_split", |args, _out| {
-        if args.len() < 2 {
-            return Ok(VmValue::Nil);
-        }
-        let text = args[0].display();
-        let pattern = args[1].display();
         let flags = args.get(2).map(VmValue::display).unwrap_or_default();
         let re = get_cached_regex(&pattern, &flags)?;
-        Ok(VmValue::List(Rc::new(
-            re.split(&text)
-                .map(|part| VmValue::String(Rc::from(part)))
-                .collect(),
-        )))
-    });
+        let matches: Vec<VmValue> = re
+            .find_iter(&text)
+            .map(|m| VmValue::String(Rc::from(m.as_str())))
+            .collect();
+        if matches.is_empty() {
+            return Ok(VmValue::Nil);
+        }
+        return Ok(VmValue::List(Rc::new(matches)));
+    }
+    Ok(VmValue::Nil)
+}
+
+// Both `regex_replace` and `regex_replace_all` replace every match via the
+// `regex` crate (supports `$1`, `${name}` backrefs). The `_all` spelling is
+// a discoverability alias on the same implementation.
+#[harn_builtin(
+    sig = "regex_replace(pattern: string?, replacement: string?, text: string?, flags?: string) -> string | nil",
+    aliases = ["regex_replace_all"],
+    category = "regex"
+)]
+fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() >= 3 {
+        let pattern = args[0].display();
+        let replacement = args[1].display();
+        let text = args[2].display();
+        let flags = args.get(3).map(VmValue::display).unwrap_or_default();
+        let re = get_cached_regex(&pattern, &flags)?;
+        return Ok(VmValue::String(Rc::from(
+            re.replace_all(&text, replacement.as_str()).into_owned(),
+        )));
+    }
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "regex_captures(pattern: string?, text: string?) -> list",
+    category = "regex"
+)]
+fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Ok(VmValue::List(Rc::new(Vec::new())));
+    }
+    let pattern = args[0].display();
+    let text = args[1].display();
+    let re = get_cached_regex(&pattern, "")?;
+
+    let mut results: Vec<VmValue> = Vec::new();
+    for caps in re.captures_iter(&text) {
+        let mut dict = BTreeMap::new();
+
+        dict.insert(
+            "match".to_string(),
+            VmValue::String(Rc::from(caps.get(0).map_or("", |m| m.as_str()))),
+        );
+
+        let groups: Vec<VmValue> = (1..caps.len())
+            .map(|i| match caps.get(i) {
+                Some(m) => VmValue::String(Rc::from(m.as_str())),
+                None => VmValue::Nil,
+            })
+            .collect();
+        dict.insert("groups".to_string(), VmValue::List(Rc::new(groups)));
+
+        for name in re.capture_names().flatten() {
+            if let Some(m) = caps.name(name) {
+                dict.insert(name.to_string(), VmValue::String(Rc::from(m.as_str())));
+            }
+        }
+
+        results.push(VmValue::Dict(Rc::new(dict)));
+    }
+    Ok(VmValue::List(Rc::new(results)))
+}
+
+#[harn_builtin(
+    sig = "regex_split(text: string?, pattern: string?, flags?: string) -> list | nil",
+    category = "regex"
+)]
+fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Ok(VmValue::Nil);
+    }
+    let text = args[0].display();
+    let pattern = args[1].display();
+    let flags = args.get(2).map(VmValue::display).unwrap_or_default();
+    let re = get_cached_regex(&pattern, &flags)?;
+    Ok(VmValue::List(Rc::new(
+        re.split(&text)
+            .map(|part| VmValue::String(Rc::from(part)))
+            .collect(),
+    )))
 }
 
 #[cfg(test)]

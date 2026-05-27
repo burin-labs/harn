@@ -42,6 +42,7 @@ use std::rc::Rc;
 
 use regex::Regex;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -517,495 +518,571 @@ fn make_match_record(
 }
 
 pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
-    vm.register_builtin("tool_rule", |args, _out| {
-        let config = require_dict(
-            args.first()
-                .ok_or_else(|| err("tool_rule: requires a config dict"))?,
-            "tool_rule",
-            "config",
-        )?;
-        let rule = validate_rule_dict(config, "tool_rule")?;
-        Ok(VmValue::Dict(Rc::new(rule)))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("catalogue", |args, _out| {
-        let config = require_dict(
-            args.first()
-                .ok_or_else(|| err("catalogue: requires a config dict"))?,
-            "catalogue",
-            "config",
-        )?;
-        build_catalogue(config)
-    });
+#[harn_builtin(sig = "tool_rule(config: dict) -> dict", category = "tool_hooks")]
+fn tool_rule_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let config = require_dict(
+        args.first()
+            .ok_or_else(|| err("tool_rule: requires a config dict"))?,
+        "tool_rule",
+        "config",
+    )?;
+    let rule = validate_rule_dict(config, "tool_rule")?;
+    Ok(VmValue::Dict(Rc::new(rule)))
+}
 
-    vm.register_builtin("tool_hooks_registry", |_args, _out| {
-        let mut registry = BTreeMap::new();
-        registry.insert(
-            "_type".to_string(),
-            VmValue::String(Rc::from(REGISTRY_TYPE)),
-        );
-        registry.insert("catalogues".to_string(), VmValue::List(Rc::new(Vec::new())));
-        Ok(VmValue::Dict(Rc::new(registry)))
-    });
+#[harn_builtin(sig = "catalogue(config: dict) -> dict", category = "tool_hooks")]
+fn catalogue_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let config = require_dict(
+        args.first()
+            .ok_or_else(|| err("catalogue: requires a config dict"))?,
+        "catalogue",
+        "config",
+    )?;
+    build_catalogue(config)
+}
 
-    vm.register_builtin("tool_hooks_register", |args, _out| {
-        let registry = require_tagged(
-            args.first()
-                .ok_or_else(|| err("tool_hooks_register: requires a registry"))?,
-            REGISTRY_TYPE,
-            "tool_hooks_register",
-            "first argument",
-        )?
-        .clone();
-        let catalogue_value = args
-            .get(1)
-            .ok_or_else(|| err("tool_hooks_register: requires a catalogue"))?;
-        let catalogue = require_tagged(
-            catalogue_value,
-            CATALOGUE_TYPE,
-            "tool_hooks_register",
-            "second argument",
-        )?;
-        let new_id = catalogue
-            .get("id")
-            .and_then(|v| match v {
-                VmValue::String(s) => Some(s.to_string()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        if new_id.is_empty() {
-            return Err(err("tool_hooks_register: catalogue is missing an id"));
+#[harn_builtin(sig = "tool_hooks_registry() -> dict", category = "tool_hooks")]
+fn tool_hooks_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut registry = BTreeMap::new();
+    registry.insert(
+        "_type".to_string(),
+        VmValue::String(Rc::from(REGISTRY_TYPE)),
+    );
+    registry.insert("catalogues".to_string(), VmValue::List(Rc::new(Vec::new())));
+    Ok(VmValue::Dict(Rc::new(registry)))
+}
+
+#[harn_builtin(
+    sig = "tool_hooks_register(registry: dict, catalogue: dict) -> dict",
+    category = "tool_hooks"
+)]
+fn tool_hooks_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let registry = require_tagged(
+        args.first()
+            .ok_or_else(|| err("tool_hooks_register: requires a registry"))?,
+        REGISTRY_TYPE,
+        "tool_hooks_register",
+        "first argument",
+    )?
+    .clone();
+    let catalogue_value = args
+        .get(1)
+        .ok_or_else(|| err("tool_hooks_register: requires a catalogue"))?;
+    let catalogue = require_tagged(
+        catalogue_value,
+        CATALOGUE_TYPE,
+        "tool_hooks_register",
+        "second argument",
+    )?;
+    let new_id = catalogue
+        .get("id")
+        .and_then(|v| match v {
+            VmValue::String(s) => Some(s.to_string()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if new_id.is_empty() {
+        return Err(err("tool_hooks_register: catalogue is missing an id"));
+    }
+
+    let existing = registry_catalogues(&registry);
+    let mut new_catalogues: Vec<VmValue> = Vec::with_capacity(existing.len() + 1);
+    let mut replaced = false;
+    for entry in existing {
+        if let VmValue::Dict(dict) = entry {
+            let id_match = dict
+                .get("id")
+                .and_then(|v| match v {
+                    VmValue::String(s) => Some(s.as_ref() == new_id),
+                    _ => None,
+                })
+                .unwrap_or(false);
+            if id_match {
+                new_catalogues.push(catalogue_value.clone());
+                replaced = true;
+                continue;
+            }
         }
+        new_catalogues.push(entry.clone());
+    }
+    if !replaced {
+        new_catalogues.push(catalogue_value.clone());
+    }
+    let mut next = registry;
+    next.insert(
+        "catalogues".to_string(),
+        VmValue::List(Rc::new(new_catalogues)),
+    );
+    Ok(VmValue::Dict(Rc::new(next)))
+}
 
-        let existing = registry_catalogues(&registry);
-        let mut new_catalogues: Vec<VmValue> = Vec::with_capacity(existing.len() + 1);
-        let mut replaced = false;
-        for entry in existing {
+#[harn_builtin(
+    sig = "tool_hooks_unregister(registry: dict, catalogue_id: string) -> dict",
+    category = "tool_hooks"
+)]
+fn tool_hooks_unregister_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let registry = require_tagged(
+        args.first()
+            .ok_or_else(|| err("tool_hooks_unregister: requires a registry"))?,
+        REGISTRY_TYPE,
+        "tool_hooks_unregister",
+        "first argument",
+    )?
+    .clone();
+    let target_id = match args.get(1) {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            return Err(err(format!(
+                "tool_hooks_unregister: catalogue id must be a string, got {}",
+                other.type_name()
+            )));
+        }
+        None => return Err(err("tool_hooks_unregister: requires a catalogue id")),
+    };
+    let existing = registry_catalogues(&registry);
+    let new_catalogues: Vec<VmValue> = existing
+        .iter()
+        .filter(|entry| {
             if let VmValue::Dict(dict) = entry {
-                let id_match = dict
-                    .get("id")
+                dict.get("id")
                     .and_then(|v| match v {
-                        VmValue::String(s) => Some(s.as_ref() == new_id),
+                        VmValue::String(s) => Some(s.as_ref() != target_id.as_str()),
                         _ => None,
                     })
-                    .unwrap_or(false);
-                if id_match {
-                    new_catalogues.push(catalogue_value.clone());
-                    replaced = true;
-                    continue;
-                }
+                    .unwrap_or(true)
+            } else {
+                true
             }
-            new_catalogues.push(entry.clone());
-        }
-        if !replaced {
-            new_catalogues.push(catalogue_value.clone());
-        }
-        let mut next = registry;
-        next.insert(
-            "catalogues".to_string(),
-            VmValue::List(Rc::new(new_catalogues)),
-        );
-        Ok(VmValue::Dict(Rc::new(next)))
-    });
+        })
+        .cloned()
+        .collect();
+    let mut next = registry;
+    next.insert(
+        "catalogues".to_string(),
+        VmValue::List(Rc::new(new_catalogues)),
+    );
+    Ok(VmValue::Dict(Rc::new(next)))
+}
 
-    vm.register_builtin("tool_hooks_unregister", |args, _out| {
-        let registry = require_tagged(
-            args.first()
-                .ok_or_else(|| err("tool_hooks_unregister: requires a registry"))?,
-            REGISTRY_TYPE,
-            "tool_hooks_unregister",
-            "first argument",
-        )?
-        .clone();
-        let target_id = match args.get(1) {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => {
-                return Err(err(format!(
-                    "tool_hooks_unregister: catalogue id must be a string, got {}",
-                    other.type_name()
-                )));
-            }
-            None => return Err(err("tool_hooks_unregister: requires a catalogue id")),
-        };
-        let existing = registry_catalogues(&registry);
-        let new_catalogues: Vec<VmValue> = existing
-            .iter()
-            .filter(|entry| {
-                if let VmValue::Dict(dict) = entry {
-                    dict.get("id")
-                        .and_then(|v| match v {
-                            VmValue::String(s) => Some(s.as_ref() != target_id.as_str()),
-                            _ => None,
-                        })
-                        .unwrap_or(true)
-                } else {
-                    true
-                }
-            })
-            .cloned()
-            .collect();
-        let mut next = registry;
-        next.insert(
-            "catalogues".to_string(),
-            VmValue::List(Rc::new(new_catalogues)),
-        );
-        Ok(VmValue::Dict(Rc::new(next)))
-    });
-
-    vm.register_builtin("tool_hooks_filter", |args, _out| {
-        let registry = require_tagged(
-            args.first()
-                .ok_or_else(|| err("tool_hooks_filter: requires a registry"))?,
-            REGISTRY_TYPE,
-            "tool_hooks_filter",
-            "first argument",
-        )?
-        .clone();
-        let stacks = match args.get(1) {
-            Some(VmValue::List(items)) => {
-                let mut out = Vec::with_capacity(items.len());
-                for item in items.iter() {
-                    match item {
-                        VmValue::String(s) => out.push(s.to_string()),
-                        other => {
-                            return Err(err(format!(
-                                "tool_hooks_filter: stacks entries must be strings, got {}",
-                                other.type_name()
-                            )));
-                        }
+#[harn_builtin(
+    sig = "tool_hooks_filter(registry: dict, stacks?: any) -> dict",
+    category = "tool_hooks"
+)]
+fn tool_hooks_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let registry = require_tagged(
+        args.first()
+            .ok_or_else(|| err("tool_hooks_filter: requires a registry"))?,
+        REGISTRY_TYPE,
+        "tool_hooks_filter",
+        "first argument",
+    )?
+    .clone();
+    let stacks = match args.get(1) {
+        Some(VmValue::List(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                match item {
+                    VmValue::String(s) => out.push(s.to_string()),
+                    other => {
+                        return Err(err(format!(
+                            "tool_hooks_filter: stacks entries must be strings, got {}",
+                            other.type_name()
+                        )));
                     }
                 }
-                out
             }
-            Some(VmValue::String(s)) => vec![s.to_string()],
-            Some(VmValue::Nil) | None => Vec::new(),
-            Some(other) => {
-                return Err(err(format!(
-                    "tool_hooks_filter: stacks must be a list of strings or string, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        // Empty stacks list is a no-op so callers can pass through an
-        // unfiltered registry without branching on the call-site.
-        let filtered: Vec<VmValue> = if stacks.is_empty() {
-            registry_catalogues(&registry).to_vec()
-        } else {
-            registry_catalogues(&registry)
-                .iter()
-                .filter(|entry| match entry {
-                    VmValue::Dict(dict) => match dict.get("stack") {
-                        // Catalogues with no declared stack act as "match any" —
-                        // they ship rules that aren't language-specific.
-                        Some(VmValue::String(s)) if !s.is_empty() => {
-                            stacks.iter().any(|requested| requested == s.as_ref())
-                        }
-                        _ => true,
-                    },
-                    _ => false,
-                })
-                .cloned()
-                .collect()
-        };
-        let mut next = registry;
-        next.insert("catalogues".to_string(), VmValue::List(Rc::new(filtered)));
-        Ok(VmValue::Dict(Rc::new(next)))
-    });
-
-    vm.register_builtin("tool_hooks_list", |args, _out| {
-        let registry = require_tagged(
-            args.first()
-                .ok_or_else(|| err("tool_hooks_list: requires a registry"))?,
-            REGISTRY_TYPE,
-            "tool_hooks_list",
-            "first argument",
-        )?;
-        let mut entries = Vec::new();
-        for catalogue in registry_catalogues(registry) {
-            let VmValue::Dict(dict) = catalogue else {
-                continue;
-            };
-            let rule_count = match dict.get("rules") {
-                Some(VmValue::List(rules)) => rules.len(),
-                _ => 0,
-            };
-            let mut summary = BTreeMap::new();
-            summary.insert(
-                "id".to_string(),
-                dict.get("id").cloned().unwrap_or(VmValue::Nil),
-            );
-            summary.insert(
-                "stack".to_string(),
-                dict.get("stack").cloned().unwrap_or(VmValue::Nil),
-            );
-            summary.insert(
-                "version".to_string(),
-                dict.get("version").cloned().unwrap_or(VmValue::Nil),
-            );
-            summary.insert(
-                "source".to_string(),
-                dict.get("source").cloned().unwrap_or(VmValue::Nil),
-            );
-            summary.insert(
-                "priority".to_string(),
-                dict.get("priority").cloned().unwrap_or(VmValue::Int(0)),
-            );
-            summary.insert("rule_count".to_string(), VmValue::Int(rule_count as i64));
-            entries.push(VmValue::Dict(Rc::new(summary)));
+            out
         }
-        Ok(VmValue::List(Rc::new(entries)))
-    });
-
-    vm.register_async_builtin("tool_hooks_match", |args| async move {
-        let registry = require_tagged(
-            args.first()
-                .ok_or_else(|| err("tool_hooks_match: requires a registry"))?,
-            REGISTRY_TYPE,
-            "tool_hooks_match",
-            "first argument",
-        )?
-        .clone();
-        let command = match args.get(1) {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => {
-                return Err(err(format!(
-                    "tool_hooks_match: command must be a string, got {}",
-                    other.type_name()
-                )));
-            }
-            None => return Err(err("tool_hooks_match: requires a command string")),
-        };
-        let context = args.get(2).cloned().unwrap_or(VmValue::Nil);
-        let requested_stacks = context_stacks(Some(&context));
-
-        // Linear sweep: catalogues × rules. Per the acceptance criterion we
-        // intentionally do not pre-index — keep ordering predictable, optimize
-        // later if profiling shows it matters.
-        let mut matches: Vec<(usize, usize, i64, i64, VmValue)> = Vec::new();
-        for (cat_idx, catalogue) in registry_catalogues(&registry).iter().enumerate() {
-            let VmValue::Dict(catalogue_dict) = catalogue else {
-                continue;
-            };
-            let catalogue_priority = match catalogue_dict.get("priority") {
-                Some(VmValue::Int(n)) => *n,
-                _ => 0,
-            };
-            let rules = match catalogue_dict.get("rules") {
-                Some(VmValue::List(rules)) => rules.clone(),
-                _ => Rc::new(Vec::new()),
-            };
-            for (rule_idx, rule) in rules.iter().enumerate() {
-                let VmValue::Dict(rule_dict) = rule else {
-                    continue;
-                };
-                let rule_stacks = rule_applies_to(rule_dict);
-                if !applies_to_matches(&rule_stacks, &requested_stacks) {
-                    continue;
-                }
-                let Some(pattern) = rule_dict.get("pattern") else {
-                    continue;
-                };
-                if invoke_rule_pattern(pattern, &command, &context).await? {
-                    let record = make_match_record(catalogue_dict, rule_dict);
-                    matches.push((
-                        cat_idx,
-                        rule_idx,
-                        catalogue_priority,
-                        rule_priority(rule_dict),
-                        record,
-                    ));
-                }
-            }
+        Some(VmValue::String(s)) => vec![s.to_string()],
+        Some(VmValue::Nil) | None => Vec::new(),
+        Some(other) => {
+            return Err(err(format!(
+                "tool_hooks_filter: stacks must be a list of strings or string, got {}",
+                other.type_name()
+            )));
         }
-
-        // Sort: rule priority desc, then catalogue priority desc, then
-        // declaration order (catalogue index, then rule index).
-        matches.sort_by(|a, b| {
-            b.3.cmp(&a.3)
-                .then_with(|| b.2.cmp(&a.2))
-                .then_with(|| a.0.cmp(&b.0))
-                .then_with(|| a.1.cmp(&b.1))
-        });
-        Ok(VmValue::List(Rc::new(
-            matches
-                .into_iter()
-                .map(|(_, _, _, _, record)| record)
-                .collect(),
-        )))
-    });
-
-    // TH-03 side-effect helpers used by the `tool_hooks_mode_*` callbacks
-    // in `crates/harn-stdlib/src/stdlib/stdlib_tool_hooks.harn`. Exposed as
-    // top-level builtins so the mode functions don't need access to a
-    // `harness` handle or transcript — they can run inside any tool
-    // dispatch, including bare unit tests where no agent session exists.
-    vm.register_builtin("tool_hooks_emit_audit", |args, _out| {
-        let kind = match args.first() {
-            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-            Some(VmValue::String(_)) => {
-                return Err(err(
-                    "tool_hooks_emit_audit: kind must be a non-empty string",
-                ));
-            }
-            Some(other) => {
-                return Err(err(format!(
-                    "tool_hooks_emit_audit: kind must be a string, got {}",
-                    other.type_name()
-                )));
-            }
-            None => return Err(err("tool_hooks_emit_audit: requires a kind string")),
-        };
-        let payload = args
-            .get(1)
-            .map(crate::llm::vm_value_to_json)
-            .unwrap_or(serde_json::Value::Null);
-        let entry = crate::orchestration::record_lifecycle_audit(kind, payload);
-        Ok(crate::stdlib::json_to_vm_value(&entry.to_json()))
-    });
-
-    vm.register_builtin("tool_hooks_inject_reminder", |args, _out| {
-        let options = require_dict(
-            args.first()
-                .ok_or_else(|| err("tool_hooks_inject_reminder: requires an options dict"))?,
-            "tool_hooks_inject_reminder",
-            "options",
-        )?;
-        let body = match options.get("body") {
-            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-            _ => {
-                return Err(err(
-                    "tool_hooks_inject_reminder: options.body must be a non-empty string",
-                ));
-            }
-        };
-        // Build the typed reminder via the canonical helper so dedupe/
-        // ttl/propagate/role_hint semantics stay in lockstep with
-        // `transcript.inject_reminder`. We pass the dict directly; the
-        // helper applies the same protocol defaults.
-        let reminder =
-            crate::llm::helpers::reminder_from_vm_value(&VmValue::Dict(Rc::new(options.clone())));
-        // Body cannot be empty from the helper either, since we already
-        // validated above. Replace whatever the helper produced with the
-        // validated body to keep one source of truth.
-        let reminder = crate::llm::helpers::SystemReminder { body, ..reminder };
-        let reminder_id = reminder.id.clone();
-
-        // Attach to the active agent session when one exists so the
-        // reminder shows up in the next turn's transcript. Headless
-        // pipelines (no session) silently skip the session write but
-        // still record the audit entry below, so conformance can
-        // observe the side-effect either way.
-        let mut session_attached = false;
-        let mut deduped_count: i64 = 0;
-        if let Some(session_id) = crate::agent_sessions::current_session_id() {
-            match crate::agent_sessions::inject_reminder(&session_id, reminder.clone()) {
-                Ok(report) => {
-                    session_attached = true;
-                    deduped_count = report.deduped_count as i64;
-                }
-                Err(_) => {
-                    // Session no longer exists — fall through to the
-                    // audit-only path rather than throwing, since the
-                    // tool-hook callback is best-effort.
-                }
-            }
-        }
-
-        // Always record an audit entry so the side-effect is observable
-        // via `lifecycle_audit_log_take()` / event-log replay even when
-        // no live session is attached.
-        let audit_payload = serde_json::json!({
-            "reminder_id": &reminder_id,
-            "tags": &reminder.tags,
-            "body": &reminder.body,
-            "ttl_turns": reminder.ttl_turns,
-            "dedupe_key": &reminder.dedupe_key,
-            "session_attached": session_attached,
-            "deduped_count": deduped_count,
-        });
-        crate::orchestration::record_lifecycle_audit("tool_hooks.reminder_injected", audit_payload);
-
-        let mut out = BTreeMap::new();
-        out.insert(
-            "reminder_id".to_string(),
-            VmValue::String(Rc::from(reminder_id.as_str())),
-        );
-        out.insert("deduped_count".to_string(), VmValue::Int(deduped_count));
-        out.insert(
-            "session_attached".to_string(),
-            VmValue::Bool(session_attached),
-        );
-        Ok(VmValue::Dict(Rc::new(out)))
-    });
-
-    // TH-05 (#1898) classifier cache: thread-local map keyed by
-    // `<scope>:<normalized_command>`. Optional TTL expires entries lazily
-    // on read so we don't need a background sweeper. The Harn-side
-    // `preset_run_command` wrapper builds the keys and decides what to
-    // cache; the Rust helpers stay dumb on purpose so callers can swap
-    // hashing / scope strategies without crossing the FFI boundary.
-    vm.register_builtin("__tool_hooks_classifier_cache_get", |args, _out| {
-        let key = match args.first() {
-            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-            _ => {
-                return Err(err(
-                    "__tool_hooks_classifier_cache_get: key must be a non-empty string",
-                ));
-            }
-        };
-        let now_ms = match args.get(1) {
-            Some(VmValue::Int(n)) => *n,
-            Some(VmValue::Nil) | None => 0,
-            Some(other) => {
-                return Err(err(format!(
-                    "__tool_hooks_classifier_cache_get: now_ms must be an int, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        Ok(classifier_cache_get(&key, now_ms))
-    });
-
-    vm.register_builtin("__tool_hooks_classifier_cache_put", |args, _out| {
-        let key = match args.first() {
-            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-            _ => {
-                return Err(err(
-                    "__tool_hooks_classifier_cache_put: key must be a non-empty string",
-                ));
-            }
-        };
-        let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        let now_ms = match args.get(2) {
-            Some(VmValue::Int(n)) => *n,
-            Some(VmValue::Nil) | None => 0,
-            Some(other) => {
-                return Err(err(format!(
-                    "__tool_hooks_classifier_cache_put: now_ms must be an int, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        let ttl_ms = match args.get(3) {
-            Some(VmValue::Int(n)) if *n > 0 => Some(*n),
-            Some(VmValue::Nil) | None => None,
-            Some(VmValue::Int(_)) => None,
-            Some(other) => {
-                return Err(err(format!(
-                    "__tool_hooks_classifier_cache_put: ttl_ms must be an int or nil, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        classifier_cache_put(key, value, now_ms, ttl_ms);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("__tool_hooks_classifier_cache_clear", |_args, _out| {
-        classifier_cache_clear();
-        Ok(VmValue::Nil)
-    });
+    };
+    // Empty stacks list is a no-op so callers can pass through an
+    // unfiltered registry without branching on the call-site.
+    let filtered: Vec<VmValue> = if stacks.is_empty() {
+        registry_catalogues(&registry).to_vec()
+    } else {
+        registry_catalogues(&registry)
+            .iter()
+            .filter(|entry| match entry {
+                VmValue::Dict(dict) => match dict.get("stack") {
+                    // Catalogues with no declared stack act as "match any" —
+                    // they ship rules that aren't language-specific.
+                    Some(VmValue::String(s)) if !s.is_empty() => {
+                        stacks.iter().any(|requested| requested == s.as_ref())
+                    }
+                    _ => true,
+                },
+                _ => false,
+            })
+            .cloned()
+            .collect()
+    };
+    let mut next = registry;
+    next.insert("catalogues".to_string(), VmValue::List(Rc::new(filtered)));
+    Ok(VmValue::Dict(Rc::new(next)))
 }
+
+#[harn_builtin(
+    sig = "tool_hooks_list(registry: dict) -> list",
+    category = "tool_hooks"
+)]
+fn tool_hooks_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let registry = require_tagged(
+        args.first()
+            .ok_or_else(|| err("tool_hooks_list: requires a registry"))?,
+        REGISTRY_TYPE,
+        "tool_hooks_list",
+        "first argument",
+    )?;
+    let mut entries = Vec::new();
+    for catalogue in registry_catalogues(registry) {
+        let VmValue::Dict(dict) = catalogue else {
+            continue;
+        };
+        let rule_count = match dict.get("rules") {
+            Some(VmValue::List(rules)) => rules.len(),
+            _ => 0,
+        };
+        let mut summary = BTreeMap::new();
+        summary.insert(
+            "id".to_string(),
+            dict.get("id").cloned().unwrap_or(VmValue::Nil),
+        );
+        summary.insert(
+            "stack".to_string(),
+            dict.get("stack").cloned().unwrap_or(VmValue::Nil),
+        );
+        summary.insert(
+            "version".to_string(),
+            dict.get("version").cloned().unwrap_or(VmValue::Nil),
+        );
+        summary.insert(
+            "source".to_string(),
+            dict.get("source").cloned().unwrap_or(VmValue::Nil),
+        );
+        summary.insert(
+            "priority".to_string(),
+            dict.get("priority").cloned().unwrap_or(VmValue::Int(0)),
+        );
+        summary.insert("rule_count".to_string(), VmValue::Int(rule_count as i64));
+        entries.push(VmValue::Dict(Rc::new(summary)));
+    }
+    Ok(VmValue::List(Rc::new(entries)))
+}
+
+#[harn_builtin(
+    sig = "tool_hooks_match(registry: dict, command: string, context?: any) -> list",
+    category = "tool_hooks",
+    kind = "async"
+)]
+async fn tool_hooks_match_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let registry = require_tagged(
+        args.first()
+            .ok_or_else(|| err("tool_hooks_match: requires a registry"))?,
+        REGISTRY_TYPE,
+        "tool_hooks_match",
+        "first argument",
+    )?
+    .clone();
+    let command = match args.get(1) {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            return Err(err(format!(
+                "tool_hooks_match: command must be a string, got {}",
+                other.type_name()
+            )));
+        }
+        None => return Err(err("tool_hooks_match: requires a command string")),
+    };
+    let context = args.get(2).cloned().unwrap_or(VmValue::Nil);
+    let requested_stacks = context_stacks(Some(&context));
+
+    // Linear sweep: catalogues × rules. Per the acceptance criterion we
+    // intentionally do not pre-index — keep ordering predictable, optimize
+    // later if profiling shows it matters.
+    let mut matches: Vec<(usize, usize, i64, i64, VmValue)> = Vec::new();
+    for (cat_idx, catalogue) in registry_catalogues(&registry).iter().enumerate() {
+        let VmValue::Dict(catalogue_dict) = catalogue else {
+            continue;
+        };
+        let catalogue_priority = match catalogue_dict.get("priority") {
+            Some(VmValue::Int(n)) => *n,
+            _ => 0,
+        };
+        let rules = match catalogue_dict.get("rules") {
+            Some(VmValue::List(rules)) => rules.clone(),
+            _ => Rc::new(Vec::new()),
+        };
+        for (rule_idx, rule) in rules.iter().enumerate() {
+            let VmValue::Dict(rule_dict) = rule else {
+                continue;
+            };
+            let rule_stacks = rule_applies_to(rule_dict);
+            if !applies_to_matches(&rule_stacks, &requested_stacks) {
+                continue;
+            }
+            let Some(pattern) = rule_dict.get("pattern") else {
+                continue;
+            };
+            if invoke_rule_pattern(pattern, &command, &context).await? {
+                let record = make_match_record(catalogue_dict, rule_dict);
+                matches.push((
+                    cat_idx,
+                    rule_idx,
+                    catalogue_priority,
+                    rule_priority(rule_dict),
+                    record,
+                ));
+            }
+        }
+    }
+
+    // Sort: rule priority desc, then catalogue priority desc, then
+    // declaration order (catalogue index, then rule index).
+    matches.sort_by(|a, b| {
+        b.3.cmp(&a.3)
+            .then_with(|| b.2.cmp(&a.2))
+            .then_with(|| a.0.cmp(&b.0))
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    Ok(VmValue::List(Rc::new(
+        matches
+            .into_iter()
+            .map(|(_, _, _, _, record)| record)
+            .collect(),
+    )))
+}
+
+// TH-03 side-effect helpers used by the `tool_hooks_mode_*` callbacks
+// in `crates/harn-stdlib/src/stdlib/stdlib_tool_hooks.harn`. Exposed as
+// top-level builtins so the mode functions don't need access to a
+// `harness` handle or transcript — they can run inside any tool
+// dispatch, including bare unit tests where no agent session exists.
+#[harn_builtin(
+    sig = "tool_hooks_emit_audit(kind: string, payload?: any) -> dict",
+    category = "tool_hooks"
+)]
+fn tool_hooks_emit_audit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let kind = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        Some(VmValue::String(_)) => {
+            return Err(err(
+                "tool_hooks_emit_audit: kind must be a non-empty string",
+            ));
+        }
+        Some(other) => {
+            return Err(err(format!(
+                "tool_hooks_emit_audit: kind must be a string, got {}",
+                other.type_name()
+            )));
+        }
+        None => return Err(err("tool_hooks_emit_audit: requires a kind string")),
+    };
+    let payload = args
+        .get(1)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let entry = crate::orchestration::record_lifecycle_audit(kind, payload);
+    Ok(crate::stdlib::json_to_vm_value(&entry.to_json()))
+}
+
+#[harn_builtin(
+    sig = "tool_hooks_inject_reminder(options: dict) -> dict",
+    category = "tool_hooks"
+)]
+fn tool_hooks_inject_reminder_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let options = require_dict(
+        args.first()
+            .ok_or_else(|| err("tool_hooks_inject_reminder: requires an options dict"))?,
+        "tool_hooks_inject_reminder",
+        "options",
+    )?;
+    let body = match options.get("body") {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(err(
+                "tool_hooks_inject_reminder: options.body must be a non-empty string",
+            ));
+        }
+    };
+    // Build the typed reminder via the canonical helper so dedupe/
+    // ttl/propagate/role_hint semantics stay in lockstep with
+    // `transcript.inject_reminder`. We pass the dict directly; the
+    // helper applies the same protocol defaults.
+    let reminder =
+        crate::llm::helpers::reminder_from_vm_value(&VmValue::Dict(Rc::new(options.clone())));
+    // Body cannot be empty from the helper either, since we already
+    // validated above. Replace whatever the helper produced with the
+    // validated body to keep one source of truth.
+    let reminder = crate::llm::helpers::SystemReminder { body, ..reminder };
+    let reminder_id = reminder.id.clone();
+
+    // Attach to the active agent session when one exists so the
+    // reminder shows up in the next turn's transcript. Headless
+    // pipelines (no session) silently skip the session write but
+    // still record the audit entry below, so conformance can
+    // observe the side-effect either way.
+    let mut session_attached = false;
+    let mut deduped_count: i64 = 0;
+    if let Some(session_id) = crate::agent_sessions::current_session_id() {
+        match crate::agent_sessions::inject_reminder(&session_id, reminder.clone()) {
+            Ok(report) => {
+                session_attached = true;
+                deduped_count = report.deduped_count as i64;
+            }
+            Err(_) => {
+                // Session no longer exists — fall through to the
+                // audit-only path rather than throwing, since the
+                // tool-hook callback is best-effort.
+            }
+        }
+    }
+
+    // Always record an audit entry so the side-effect is observable
+    // via `lifecycle_audit_log_take()` / event-log replay even when
+    // no live session is attached.
+    let audit_payload = serde_json::json!({
+        "reminder_id": &reminder_id,
+        "tags": &reminder.tags,
+        "body": &reminder.body,
+        "ttl_turns": reminder.ttl_turns,
+        "dedupe_key": &reminder.dedupe_key,
+        "session_attached": session_attached,
+        "deduped_count": deduped_count,
+    });
+    crate::orchestration::record_lifecycle_audit("tool_hooks.reminder_injected", audit_payload);
+
+    let mut out = BTreeMap::new();
+    out.insert(
+        "reminder_id".to_string(),
+        VmValue::String(Rc::from(reminder_id.as_str())),
+    );
+    out.insert("deduped_count".to_string(), VmValue::Int(deduped_count));
+    out.insert(
+        "session_attached".to_string(),
+        VmValue::Bool(session_attached),
+    );
+    Ok(VmValue::Dict(Rc::new(out)))
+}
+
+// TH-05 (#1898) classifier cache: thread-local map keyed by
+// `<scope>:<normalized_command>`. Optional TTL expires entries lazily
+// on read so we don't need a background sweeper. The Harn-side
+// `preset_run_command` wrapper builds the keys and decides what to
+// cache; the Rust helpers stay dumb on purpose so callers can swap
+// hashing / scope strategies without crossing the FFI boundary.
+#[harn_builtin(
+    sig = "__tool_hooks_classifier_cache_get(key: string, now_ms?: int) -> any",
+    category = "tool_hooks"
+)]
+fn tool_hooks_classifier_cache_get_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let key = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(err(
+                "__tool_hooks_classifier_cache_get: key must be a non-empty string",
+            ));
+        }
+    };
+    let now_ms = match args.get(1) {
+        Some(VmValue::Int(n)) => *n,
+        Some(VmValue::Nil) | None => 0,
+        Some(other) => {
+            return Err(err(format!(
+                "__tool_hooks_classifier_cache_get: now_ms must be an int, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    Ok(classifier_cache_get(&key, now_ms))
+}
+
+#[harn_builtin(
+    sig = "__tool_hooks_classifier_cache_put(key: string, value: any, now_ms?: int, ttl_ms?: int) -> nil",
+    category = "tool_hooks"
+)]
+fn tool_hooks_classifier_cache_put_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let key = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(err(
+                "__tool_hooks_classifier_cache_put: key must be a non-empty string",
+            ));
+        }
+    };
+    let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let now_ms = match args.get(2) {
+        Some(VmValue::Int(n)) => *n,
+        Some(VmValue::Nil) | None => 0,
+        Some(other) => {
+            return Err(err(format!(
+                "__tool_hooks_classifier_cache_put: now_ms must be an int, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let ttl_ms = match args.get(3) {
+        Some(VmValue::Int(n)) if *n > 0 => Some(*n),
+        Some(VmValue::Nil) | None => None,
+        Some(VmValue::Int(_)) => None,
+        Some(other) => {
+            return Err(err(format!(
+                "__tool_hooks_classifier_cache_put: ttl_ms must be an int or nil, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    classifier_cache_put(key, value, now_ms, ttl_ms);
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "__tool_hooks_classifier_cache_clear() -> nil",
+    category = "tool_hooks"
+)]
+fn tool_hooks_classifier_cache_clear_impl(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    classifier_cache_clear();
+    Ok(VmValue::Nil)
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &TOOL_RULE_IMPL_DEF,
+    &CATALOGUE_IMPL_DEF,
+    &TOOL_HOOKS_REGISTRY_IMPL_DEF,
+    &TOOL_HOOKS_REGISTER_IMPL_DEF,
+    &TOOL_HOOKS_UNREGISTER_IMPL_DEF,
+    &TOOL_HOOKS_FILTER_IMPL_DEF,
+    &TOOL_HOOKS_LIST_IMPL_DEF,
+    &TOOL_HOOKS_MATCH_IMPL_DEF,
+    &TOOL_HOOKS_EMIT_AUDIT_IMPL_DEF,
+    &TOOL_HOOKS_INJECT_REMINDER_IMPL_DEF,
+    &TOOL_HOOKS_CLASSIFIER_CACHE_GET_IMPL_DEF,
+    &TOOL_HOOKS_CLASSIFIER_CACHE_PUT_IMPL_DEF,
+    &TOOL_HOOKS_CLASSIFIER_CACHE_CLEAR_IMPL_DEF,
+];
 
 #[derive(Clone)]
 struct ClassifierCacheEntry {

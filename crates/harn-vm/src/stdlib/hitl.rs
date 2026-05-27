@@ -19,6 +19,7 @@ use crate::event_log::{
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema::schema_expect_value;
 use crate::stdlib::host::dispatch_mock_host_call;
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
 use crate::stdlib::waitpoint::{
     cancel_waitpoint_on, complete_waitpoint_on, create_waitpoint_on, inspect_waitpoint_on,
     wait_on_waitpoints, WaitpointRecord, WaitpointStatus, WaitpointWaitFailure,
@@ -270,21 +271,52 @@ enum WaitpointOutcome {
 }
 
 pub(crate) fn register_hitl_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("ask_user", |args| {
-        Box::pin(async move { ask_user_impl(&args).await })
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_async_builtin("request_approval", |args| {
-        Box::pin(async move { request_approval_impl(&args).await })
-    });
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &ASK_USER_BUILTIN_DEF,
+    &REQUEST_APPROVAL_BUILTIN_DEF,
+    &DUAL_CONTROL_BUILTIN_DEF,
+    &ESCALATE_TO_BUILTIN_DEF,
+];
 
-    vm.register_async_builtin("dual_control", |args| {
-        Box::pin(async move { dual_control_impl(&args).await })
-    });
+#[harn_builtin(
+    sig = "ask_user(prompt: string, options?: dict) -> any",
+    kind = "async",
+    category = "hitl"
+)]
+async fn ask_user_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    ask_user_impl(&args).await
+}
 
-    vm.register_async_builtin("escalate_to", |args| {
-        Box::pin(async move { escalate_to_impl(&args).await })
-    });
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("request_approval", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "hitl"
+)]
+async fn request_approval_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    request_approval_impl(&args).await
+}
+
+#[harn_builtin(
+    sig = "dual_control(n: int, m: int, action: closure, approvers?: list) -> dict",
+    kind = "async",
+    category = "hitl"
+)]
+async fn dual_control_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    dual_control_impl(&args).await
+}
+
+#[harn_builtin(
+    sig = "escalate_to(role: string, reason: string) -> dict",
+    kind = "async",
+    category = "hitl"
+)]
+async fn escalate_to_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    escalate_to_impl(&args).await
 }
 
 pub(crate) fn reset_hitl_state() {

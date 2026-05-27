@@ -1,5 +1,7 @@
 //! Standard library builtins for the Harn VM.
 
+pub mod macros;
+
 mod agent_sessions;
 pub mod agent_state;
 pub(crate) mod agents;
@@ -215,18 +217,23 @@ fn register_agent_stdlib_with_deferred_llm(vm: &mut Vm) {
     register_agent_stdlib_after_llm(vm);
 }
 
-/// Register all standard builtins on a VM (core + io + agent).
+/// Register all standard builtins on a VM (core + io + agent). Also
+/// installs the macro-emitted signature slice into the parser registry
+/// (idempotent under repeat calls with the same slice pointer).
 pub fn register_vm_stdlib(vm: &mut Vm) {
     register_core_stdlib(vm);
     register_io_stdlib(vm);
     register_agent_stdlib(vm);
+    harn_builtin_registry::install_builtin_signatures(all_builtin_signatures());
 }
 
-/// Register the stdlib shape used by latency-sensitive CLI execution.
+/// Register the stdlib shape used by latency-sensitive CLI execution. Also
+/// installs the macro-emitted signature slice into the parser registry.
 pub fn register_vm_stdlib_with_deferred_llm(vm: &mut Vm) {
     register_core_stdlib(vm);
     register_io_stdlib(vm);
     register_agent_stdlib_with_deferred_llm(vm);
+    harn_builtin_registry::install_builtin_signatures(all_builtin_signatures());
 }
 
 pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {
@@ -244,7 +251,118 @@ fn stdlib_probe_vm() -> Vm {
     crate::checkpoint::register_checkpoint_builtins(&mut vm, &tmp, "default");
     crate::metadata::register_metadata_builtins(&mut vm, &tmp);
     crate::metadata::register_scan_builtins(&mut vm);
+    // Install the macro-emitted signatures into the parser registry so any
+    // probe-driven name/metadata query (e.g. the alignment test) sees the
+    // post-migration sig set. Idempotent under repeat install with the same
+    // pointer (which `all_builtin_signatures()` guarantees).
+    harn_builtin_registry::install_builtin_signatures(all_builtin_signatures());
     vm
+}
+
+/// Aggregate of every `#[harn_builtin]`-emitted `VmBuiltinDef` in the stdlib.
+///
+/// Each migrated module exposes a `MODULE_BUILTINS: &[&VmBuiltinDef]` slice;
+/// they're concatenated here in deterministic alphabetical-by-module order.
+/// Returned with `'static` lifetime so the slice can be installed into the
+/// parser registry without leaking.
+pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
+    use std::sync::OnceLock;
+    static AGG: OnceLock<Vec<&'static macros::VmBuiltinDef>> = OnceLock::new();
+    AGG.get_or_init(|| {
+        // Per-module slices are pushed here as modules migrate to
+        // `#[harn_builtin]`. Order is alphabetical by module file name for
+        // predictability.
+        let mut out: Vec<&'static macros::VmBuiltinDef> = Vec::new();
+        out.extend_from_slice(agent_state::MODULE_BUILTINS);
+        out.extend_from_slice(bytes::MODULE_BUILTINS);
+        out.extend_from_slice(calendar::MODULE_BUILTINS);
+        out.extend_from_slice(clock::MODULE_BUILTINS);
+        out.extend_from_slice(collections::MODULE_BUILTINS);
+        out.extend_from_slice(command_policy::MODULE_BUILTINS);
+        out.extend_from_slice(compression::MODULE_BUILTINS);
+        out.extend_from_slice(connectors::MODULE_BUILTINS);
+        out.extend_from_slice(cookies::MODULE_BUILTINS);
+        out.extend_from_slice(crypto::MODULE_BUILTINS);
+        out.extend_from_slice(csv::MODULE_BUILTINS);
+        out.extend_from_slice(datetime::MODULE_BUILTINS);
+        out.extend_from_slice(durable_step::MODULE_BUILTINS);
+        out.extend_from_slice(event_log::MODULE_BUILTINS);
+        out.extend_from_slice(flow::MODULE_BUILTINS);
+        out.extend_from_slice(hitl::MODULE_BUILTINS);
+        out.extend_from_slice(hitl_read::MODULE_BUILTINS);
+        out.extend_from_slice(iter::MODULE_BUILTINS);
+        out.extend_from_slice(json::MODULE_BUILTINS);
+        out.extend_from_slice(json_stream::MODULE_BUILTINS);
+        out.extend_from_slice(junit::MODULE_BUILTINS);
+        out.extend_from_slice(lifecycle_receipts::MODULE_BUILTINS);
+        out.extend_from_slice(math::MODULE_BUILTINS);
+        out.extend_from_slice(monitors::MODULE_BUILTINS);
+        out.extend_from_slice(multipart::MODULE_BUILTINS);
+        out.extend_from_slice(net_policy::MODULE_BUILTINS);
+        out.extend_from_slice(observability::MODULE_BUILTINS);
+        out.extend_from_slice(path::MODULE_BUILTINS);
+        out.extend_from_slice(postgres::MODULE_BUILTINS);
+        out.extend_from_slice(process::MODULE_BUILTINS);
+        out.extend_from_slice(agents::records::MODULE_BUILTINS);
+        out.extend_from_slice(regex::MODULE_BUILTINS);
+        out.extend_from_slice(runtime_scope::MODULE_BUILTINS);
+        out.extend_from_slice(sets::MODULE_BUILTINS);
+        out.extend_from_slice(shapes::MODULE_BUILTINS);
+        out.extend_from_slice(skills::MODULE_BUILTINS);
+        out.extend_from_slice(strings::MODULE_BUILTINS);
+        out.extend_from_slice(supervisor::MODULE_BUILTINS);
+        out.extend_from_slice(timing::MODULE_BUILTINS);
+        out.extend_from_slice(tool_hooks::MODULE_BUILTINS);
+        out.extend_from_slice(tools::MODULE_BUILTINS);
+        out.extend_from_slice(tracing::MODULE_BUILTINS);
+        out.extend_from_slice(triggers_stdlib::MODULE_BUILTINS);
+        out.extend_from_slice(types::MODULE_BUILTINS);
+        out.extend_from_slice(waitpoint::MODULE_BUILTINS);
+        out.extend_from_slice(waitpoints::MODULE_BUILTINS);
+        out.extend_from_slice(web::MODULE_BUILTINS);
+        out
+    })
+    .as_slice()
+}
+
+/// Driver-facing helper: flatten the macro-emitted `BuiltinDef`s into a
+/// `&'static [&'static BuiltinSignature]` slice suitable for
+/// [`harn_builtin_registry::install_builtin_signatures`].
+///
+/// Aliases are expanded into their own `BuiltinSignature` entries (the
+/// allocation is leaked once at startup — process-lifetime is appropriate
+/// for a global registry).
+pub fn all_builtin_signatures() -> &'static [&'static harn_builtin_meta::BuiltinSignature] {
+    use std::sync::OnceLock;
+    static AGG: OnceLock<Vec<&'static harn_builtin_meta::BuiltinSignature>> = OnceLock::new();
+    AGG.get_or_init(|| {
+        let mut out: Vec<&'static harn_builtin_meta::BuiltinSignature> = Vec::new();
+        for def in all_builtin_defs() {
+            if def.runtime_only {
+                continue;
+            }
+            out.push(&def.sig);
+            for alias in def.aliases {
+                let aliased = harn_builtin_meta::BuiltinSignature {
+                    name: alias,
+                    ..def.sig
+                };
+                out.push(Box::leak(Box::new(aliased)));
+            }
+        }
+        out
+    })
+    .as_slice()
+}
+
+/// Register every `#[harn_builtin]`-emitted def on the given VM. Drivers
+/// that build the full stdlib via `register_vm_stdlib` get this for free —
+/// each module's `register_*_builtins` walks its `MODULE_BUILTINS` slice.
+/// This helper is exposed for embedders / tests that want a one-call entry.
+pub fn register_all_macro_builtins(vm: &mut Vm) {
+    for def in all_builtin_defs() {
+        vm.register_builtin_def(def);
+    }
 }
 
 /// Return the canonical list of all stdlib builtin names. Used by

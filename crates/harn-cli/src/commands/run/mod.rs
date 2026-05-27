@@ -1086,6 +1086,9 @@ pub async fn execute_run(
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
 ) -> RunOutcome {
+    // Install the macro-emitted signature slice so the typechecker sees
+    // `#[harn_builtin]`-migrated entries. Idempotent under repeat calls.
+    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
     execute_run_with_harnpack_and_sandbox_options(
         path,
         trace,

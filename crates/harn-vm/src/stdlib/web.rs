@@ -8,6 +8,7 @@ use scraper::{ElementRef, Html, Selector};
 use url::Url;
 
 use crate::stdlib::json_to_vm_value;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -264,55 +265,76 @@ fn web_error(name: &str, message: impl std::fmt::Display) -> VmError {
 }
 
 pub(crate) fn register_web_builtins(vm: &mut Vm) {
-    vm.register_builtin("__web_extract_html", |args, _out| {
-        let html = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_default();
-        let source_url = args.get(1).and_then(|value| match value {
-            VmValue::Nil => None,
-            other => Some(other.display()),
-        });
-        Ok(extract_html(&html, source_url.as_deref()))
-    });
-
-    vm.register_builtin("__web_resolve_url", |args, _out| {
-        let base = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_default();
-        let href = args.get(1).map(|value| value.display()).unwrap_or_default();
-        if href.trim().is_empty() {
-            return Ok(VmValue::Nil);
-        }
-        let parsed_base =
-            Url::parse(&base).map_err(|error| web_error("__web_resolve_url", error))?;
-        Ok(vm_str(resolve_url(Some(&parsed_base), &href)))
-    });
-
-    vm.register_builtin("__web_origin_url", |args, _out| {
-        let raw = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_default();
-        let path = args
-            .get(1)
-            .map(|value| value.display())
-            .unwrap_or_else(|| "/".to_string());
-        let mut parsed = Url::parse(&raw).map_err(|error| web_error("__web_origin_url", error))?;
-        let normalized_path = if path.is_empty() {
-            "/".to_string()
-        } else if path.starts_with('/') {
-            path
-        } else {
-            format!("/{path}")
-        };
-        parsed.set_path(&normalized_path);
-        parsed.set_query(None);
-        parsed.set_fragment(None);
-        Ok(vm_str(parsed.as_str()))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(
+    sig = "__web_extract_html(html: string, source_url?: string?) -> dict",
+    category = "web"
+)]
+fn web_extract_html_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let html = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    let source_url = args.get(1).and_then(|value| match value {
+        VmValue::Nil => None,
+        other => Some(other.display()),
+    });
+    Ok(extract_html(&html, source_url.as_deref()))
+}
+
+#[harn_builtin(
+    sig = "__web_resolve_url(base_url: string, href: string) -> string?",
+    category = "web"
+)]
+fn web_resolve_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let base = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    let href = args.get(1).map(|value| value.display()).unwrap_or_default();
+    if href.trim().is_empty() {
+        return Ok(VmValue::Nil);
+    }
+    let parsed_base = Url::parse(&base).map_err(|error| web_error("__web_resolve_url", error))?;
+    Ok(vm_str(resolve_url(Some(&parsed_base), &href)))
+}
+
+#[harn_builtin(
+    sig = "__web_origin_url(url: string, path?: string) -> string",
+    category = "web"
+)]
+fn web_origin_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let raw = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    let path = args
+        .get(1)
+        .map(|value| value.display())
+        .unwrap_or_else(|| "/".to_string());
+    let mut parsed = Url::parse(&raw).map_err(|error| web_error("__web_origin_url", error))?;
+    let normalized_path = if path.is_empty() {
+        "/".to_string()
+    } else if path.starts_with('/') {
+        path
+    } else {
+        format!("/{path}")
+    };
+    parsed.set_path(&normalized_path);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    Ok(vm_str(parsed.as_str()))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &WEB_EXTRACT_HTML_IMPL_DEF,
+    &WEB_RESOLVE_URL_IMPL_DEF,
+    &WEB_ORIGIN_URL_IMPL_DEF,
+];
 
 #[cfg(test)]
 mod tests {

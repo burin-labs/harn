@@ -8,7 +8,7 @@
 
 use crate::ast::TypeExpr;
 
-use super::{all_signatures, BuiltinMetadata, BuiltinSignature, Ty};
+use super::{all_signatures, BuiltinMetadata, BuiltinSignature, Ty, TyExt};
 
 /// Binary-search the registry for a given name. O(log N).
 pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {

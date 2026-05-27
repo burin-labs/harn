@@ -158,6 +158,54 @@ impl Vm {
         self.refresh_builtin_id(&name);
     }
 
+    /// Register a `VmBuiltinDef` (the shape emitted by `#[harn_builtin]`).
+    /// Registers the primary name plus each declared alias, sharing the
+    /// same handler. `runtime_only` defs skip the parser-side publish (the
+    /// vm-side registration still happens). `parser_only` defs skip the
+    /// vm-side registration entirely (handler is `None`).
+    pub fn register_builtin_def(&mut self, def: &'static crate::stdlib::macros::VmBuiltinDef) {
+        use crate::stdlib::macros::VmBuiltinHandler;
+        if def.parser_only {
+            return;
+        }
+        let names = std::iter::once(def.sig.name).chain(def.aliases.iter().copied());
+        for name in names {
+            match def.handler {
+                VmBuiltinHandler::Sync(f) => {
+                    let mut meta = VmBuiltinMetadata::sync_static(name);
+                    if let Some(category) = def.category {
+                        meta = meta.category_static(category);
+                    }
+                    if let Some(doc) = def.doc {
+                        meta = meta.doc_static(doc);
+                    }
+                    self.register_builtin_with_metadata(meta, f);
+                }
+                VmBuiltinHandler::Async(f) => {
+                    let mut meta = VmBuiltinMetadata::async_static(name);
+                    if let Some(category) = def.category {
+                        meta = meta.category_static(category);
+                    }
+                    if let Some(doc) = def.doc {
+                        meta = meta.doc_static(doc);
+                    }
+                    // Wrap the function pointer that already returns an
+                    // AsyncBuiltinFuture so register_async_builtin_with_metadata's
+                    // generic bound `F: Fn(Vec<VmValue>) -> Fut + 'static` is met.
+                    self.register_async_builtin_with_metadata(meta, f);
+                }
+                VmBuiltinHandler::None => {
+                    // Parser-only, but reached here despite parser_only=false.
+                    // This is a configuration bug.
+                    panic!(
+                        "VmBuiltinHandler::None for {name:?} without parser_only=true \
+                         on its BuiltinDef"
+                    );
+                }
+            }
+        }
+    }
+
     /// Remove a sync builtin (so an async version can take precedence).
     pub fn unregister_builtin(&mut self, name: &str) {
         Rc::make_mut(&mut self.builtins).remove(name);

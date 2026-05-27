@@ -8,6 +8,7 @@ use crate::event_log::{
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmStream, VmValue};
 use crate::vm::Vm;
 
@@ -15,69 +16,93 @@ const EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_qu
 
 pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
     register_event_log_namespace(vm);
-
-    vm.register_async_builtin("event_log.emit", |args| async move {
-        let topic = parse_topic(args.first(), "event_log.emit")?;
-        let kind = required_string(args.get(1), "event_log.emit", "kind")?;
-        let payload = args
-            .get(2)
-            .map(vm_value_to_json)
-            .unwrap_or(serde_json::Value::Null);
-        let headers = parse_headers(args.get(3), "event_log.emit")?;
-        let id = ensure_event_log()
-            .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
-            .await
-            .map_err(log_error)?;
-        Ok(VmValue::Int(id as i64))
-    });
-
-    vm.register_async_builtin("event_log.latest", |args| async move {
-        let topic = parse_topic(args.first(), "event_log.latest")?;
-        let latest = ensure_event_log().latest(&topic).await.map_err(log_error)?;
-        Ok(latest
-            .map(|id| VmValue::Int(id as i64))
-            .unwrap_or(VmValue::Nil))
-    });
-
-    vm.register_async_builtin("event_log.subscribe", |args| async move {
-        let options = parse_subscribe_options(&args)?;
-        let log = ensure_event_log();
-        let mut events = log
-            .clone()
-            .subscribe(&options.topic, options.from_cursor)
-            .await
-            .map_err(log_error)?;
-        let topic_name = options.topic.as_str().to_string();
-        let kind_prefix = options.kind_prefix.clone();
-        let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
-
-        tokio::task::spawn_local(async move {
-            while let Some(next) = events.next().await {
-                let value = match next {
-                    Ok((event_id, event)) => {
-                        if kind_prefix
-                            .as_deref()
-                            .is_some_and(|prefix| !event.kind.starts_with(prefix))
-                        {
-                            continue;
-                        }
-                        Ok(event_to_value(&topic_name, event_id, event))
-                    }
-                    Err(error) => Err(log_error(error)),
-                };
-                if tx.send(value).await.is_err() {
-                    return;
-                }
-            }
-        });
-
-        Ok(VmValue::stream(VmStream {
-            done: Rc::new(std::cell::Cell::new(false)),
-            receiver: Rc::new(tokio::sync::Mutex::new(rx)),
-            cancel: None,
-        }))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(
+    sig = "event_log.emit(topic: string, kind: string, payload?: any, headers?: dict) -> int",
+    kind = "async",
+    category = "event_log"
+)]
+async fn event_log_emit_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let topic = parse_topic(args.first(), "event_log.emit")?;
+    let kind = required_string(args.get(1), "event_log.emit", "kind")?;
+    let payload = args
+        .get(2)
+        .map(vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let headers = parse_headers(args.get(3), "event_log.emit")?;
+    let id = ensure_event_log()
+        .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
+        .await
+        .map_err(log_error)?;
+    Ok(VmValue::Int(id as i64))
+}
+
+#[harn_builtin(
+    sig = "event_log.latest(topic: string) -> int | nil",
+    kind = "async",
+    category = "event_log"
+)]
+async fn event_log_latest_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let topic = parse_topic(args.first(), "event_log.latest")?;
+    let latest = ensure_event_log().latest(&topic).await.map_err(log_error)?;
+    Ok(latest
+        .map(|id| VmValue::Int(id as i64))
+        .unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "event_log.subscribe(topic_or_options: string | dict, from_cursor?: int | nil) -> stream",
+    kind = "async",
+    category = "event_log"
+)]
+async fn event_log_subscribe_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let options = parse_subscribe_options(&args)?;
+    let log = ensure_event_log();
+    let mut events = log
+        .clone()
+        .subscribe(&options.topic, options.from_cursor)
+        .await
+        .map_err(log_error)?;
+    let topic_name = options.topic.as_str().to_string();
+    let kind_prefix = options.kind_prefix.clone();
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
+
+    tokio::task::spawn_local(async move {
+        while let Some(next) = events.next().await {
+            let value = match next {
+                Ok((event_id, event)) => {
+                    if kind_prefix
+                        .as_deref()
+                        .is_some_and(|prefix| !event.kind.starts_with(prefix))
+                    {
+                        continue;
+                    }
+                    Ok(event_to_value(&topic_name, event_id, event))
+                }
+                Err(error) => Err(log_error(error)),
+            };
+            if tx.send(value).await.is_err() {
+                return;
+            }
+        }
+    });
+
+    Ok(VmValue::stream(VmStream {
+        done: Rc::new(std::cell::Cell::new(false)),
+        receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+        cancel: None,
+    }))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &EVENT_LOG_EMIT_IMPL_DEF,
+    &EVENT_LOG_LATEST_IMPL_DEF,
+    &EVENT_LOG_SUBSCRIBE_IMPL_DEF,
+];
 
 fn register_event_log_namespace(vm: &mut Vm) {
     let names = ["emit", "latest", "subscribe"];

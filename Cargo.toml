@@ -1,6 +1,9 @@
 [workspace]
 default-members = ["crates/harn-cli"]
 members = [
+    "crates/harn-builtin-meta",
+    "crates/harn-builtin-registry",
+    "crates/harn-builtin-macros",
     "crates/harn-clock",
     "crates/harn-lexer",
     "crates/harn-parser",

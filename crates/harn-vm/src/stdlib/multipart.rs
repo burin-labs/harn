@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use sha2::{Digest, Sha256};
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -455,7 +456,11 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
     dict_value(map)
 }
 
-fn multipart_parse_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "multipart_parse(body: bytes | string, content_type: string, options?: dict) -> dict",
+    category = "multipart"
+)]
+fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let body = expect_bytes_or_string(args, 0, "multipart_parse")?;
     let content_type = expect_string(args, 1, "multipart_parse")?;
     let opts = optional_options(args, 2, "multipart_parse")?;
@@ -486,7 +491,11 @@ fn field_dict<'a>(
     }
 }
 
-fn multipart_field_bytes_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "multipart_field_bytes(field: dict) -> bytes",
+    category = "multipart"
+)]
+fn multipart_field_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let field = field_dict(args, "multipart_field_bytes")?;
     match field.get("bytes") {
         Some(VmValue::Bytes(bytes)) => Ok(VmValue::Bytes(bytes.clone())),
@@ -501,7 +510,11 @@ fn multipart_field_bytes_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     }
 }
 
-fn multipart_field_text_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "multipart_field_text(field: dict) -> string",
+    category = "multipart"
+)]
+fn multipart_field_text_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let field = field_dict(args, "multipart_field_text")?;
     let bytes = match field.get("bytes") {
         Some(VmValue::Bytes(bytes)) => bytes.as_slice(),
@@ -691,7 +704,11 @@ fn field_content_contains_boundary(field: &VmValue, boundary: &str) -> bool {
     })
 }
 
-fn multipart_form_data_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "multipart_form_data(fields: list, options?: dict) -> dict",
+    category = "multipart"
+)]
+fn multipart_form_data_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let fields = match args.first() {
         Some(VmValue::List(fields)) => fields.as_ref(),
         Some(other) => {
@@ -751,19 +768,17 @@ fn form_data_result(boundary: String, body: Vec<u8>) -> Result<VmValue, VmError>
 }
 
 pub(crate) fn register_multipart_builtins(vm: &mut Vm) {
-    vm.register_builtin("multipart_parse", |args, _out| {
-        multipart_parse_builtin(args)
-    });
-    vm.register_builtin("multipart_field_bytes", |args, _out| {
-        multipart_field_bytes_builtin(args)
-    });
-    vm.register_builtin("multipart_field_text", |args, _out| {
-        multipart_field_text_builtin(args)
-    });
-    vm.register_builtin("multipart_form_data", |args, _out| {
-        multipart_form_data_builtin(args)
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &MULTIPART_PARSE_BUILTIN_DEF,
+    &MULTIPART_FIELD_BYTES_BUILTIN_DEF,
+    &MULTIPART_FIELD_TEXT_BUILTIN_DEF,
+    &MULTIPART_FORM_DATA_BUILTIN_DEF,
+];
 
 #[cfg(test)]
 mod tests {

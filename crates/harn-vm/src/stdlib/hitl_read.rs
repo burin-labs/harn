@@ -8,6 +8,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::event_log::{active_event_log, EventId, EventLog, LogEvent, Topic};
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -55,9 +56,20 @@ struct HitlRequestEnvelope {
 }
 
 pub(crate) fn register_hitl_read_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("hitl_pending", |args| {
-        Box::pin(async move { hitl_pending_impl(&args).await })
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&HITL_PENDING_BUILTIN_DEF];
+
+#[harn_builtin(
+    sig = "hitl_pending(filters?: dict) -> list",
+    kind = "async",
+    category = "hitl"
+)]
+async fn hitl_pending_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    hitl_pending_impl(&args).await
 }
 
 async fn hitl_pending_impl(args: &[VmValue]) -> Result<VmValue, VmError> {

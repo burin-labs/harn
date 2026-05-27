@@ -1,0 +1,14 @@
+[package]
+name = "harn-builtin-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Runtime-installable builtin signature registry. Decouples harn-parser (consumer) from harn-vm (producer) without a dependency cycle."
+
+[dependencies]
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "0.8" }
+
+[lints]
+workspace = true

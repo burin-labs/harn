@@ -6,155 +6,251 @@ use chrono::{
 };
 use chrono_tz::Tz;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const DEFAULT_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
 pub(crate) fn register_datetime_builtins(vm: &mut Vm) {
-    vm.register_builtin("date_now", |_args, _out| {
-        let now = Utc::now();
-        let mut result = utc_datetime_dict(now);
-        result.insert(
-            "timestamp".to_string(),
-            VmValue::Float(now.timestamp_millis() as f64 / 1000.0),
-        );
-        result.insert(
-            "iso8601".to_string(),
-            VmValue::String(Rc::from(
-                now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            )),
-        );
-        Ok(VmValue::Dict(Rc::new(result)))
-    });
-
-    vm.register_builtin("date_now_iso", |_args, _out| {
-        Ok(VmValue::String(Rc::from(
-            Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        )))
-    });
-
-    vm.register_builtin("date_format", |args, _out| {
-        let dt = datetime_from_arg(args.first(), "date_format")?;
-        let fmt = args
-            .get(1)
-            .map(|a| a.display())
-            .unwrap_or_else(|| DEFAULT_FORMAT.to_string());
-        if let Some(tz_arg) = args.get(2) {
-            let tz = parse_timezone(&tz_arg.display(), "date_format")?;
-            return Ok(VmValue::String(Rc::from(
-                dt.with_timezone(&tz).format(&fmt).to_string(),
-            )));
-        }
-        Ok(VmValue::String(Rc::from(dt.format(&fmt).to_string())))
-    });
-
-    vm.register_builtin("date_parse", |args, _out| {
-        let input = args.first().map(|a| a.display()).unwrap_or_default();
-        let dt = parse_datetime_auto(&input)?;
-        Ok(timestamp_value(dt))
-    });
-
-    vm.register_builtin("date_in_zone", |args, _out| {
-        let dt = datetime_from_arg(args.first(), "date_in_zone")?;
-        let tz_arg = require_arg(args, 1, "date_in_zone", "timezone")?;
-        let tz_name = tz_arg.display();
-        let tz = parse_timezone(&tz_name, "date_in_zone")?;
-        let local = dt.with_timezone(&tz);
-        let mut result = zoned_datetime_dict(local);
-        result.insert("zone".to_string(), VmValue::String(Rc::from(tz_name)));
-        Ok(VmValue::Dict(Rc::new(result)))
-    });
-
-    vm.register_builtin("date_to_zone", |args, _out| {
-        let dt = datetime_from_arg(args.first(), "date_to_zone")?;
-        let tz_arg = require_arg(args, 1, "date_to_zone", "timezone")?;
-        let tz = parse_timezone(&tz_arg.display(), "date_to_zone")?;
-        Ok(VmValue::String(Rc::from(
-            dt.with_timezone(&tz).to_rfc3339(),
-        )))
-    });
-
-    vm.register_builtin("date_from_components", |args, _out| {
-        let components = require_dict(args.first(), "date_from_components")?;
-        let tz = match args.get(1) {
-            Some(VmValue::Nil) | None => chrono_tz::UTC,
-            Some(value) => parse_timezone(&value.display(), "date_from_components")?,
-        };
-        let dt = datetime_from_components(components, tz)?;
-        Ok(timestamp_value(dt.with_timezone(&Utc)))
-    });
-
-    vm.register_builtin("duration_ms", |args, _out| {
-        duration_from_number(args.first(), 1, "duration_ms").map(VmValue::Duration)
-    });
-    vm.register_builtin("duration_seconds", |args, _out| {
-        duration_from_number(args.first(), 1_000, "duration_seconds").map(VmValue::Duration)
-    });
-    vm.register_builtin("duration_minutes", |args, _out| {
-        duration_from_number(args.first(), 60_000, "duration_minutes").map(VmValue::Duration)
-    });
-    vm.register_builtin("duration_hours", |args, _out| {
-        duration_from_number(args.first(), 3_600_000, "duration_hours").map(VmValue::Duration)
-    });
-    vm.register_builtin("duration_days", |args, _out| {
-        duration_from_number(args.first(), 86_400_000, "duration_days").map(VmValue::Duration)
-    });
-
-    vm.register_builtin("date_add", |args, _out| {
-        let millis = timestamp_millis_from_arg(args.first(), "date_add")?;
-        let duration = require_duration(args.get(1), "date_add")?;
-        timestamp_millis_value(
-            millis
-                .checked_add(duration as i128)
-                .ok_or_else(|| vm_error("date_add: timestamp overflow"))?,
-        )
-    });
-
-    vm.register_builtin("date_diff", |args, _out| {
-        let a = timestamp_millis_from_arg(args.first(), "date_diff")?;
-        let b = timestamp_millis_from_arg(args.get(1), "date_diff")?;
-        let diff = a
-            .checked_sub(b)
-            .ok_or_else(|| vm_error("date_diff: duration overflow"))?;
-        let diff = i64::try_from(diff).map_err(|_| vm_error("date_diff: duration overflow"))?;
-        Ok(VmValue::Duration(diff))
-    });
-
-    vm.register_builtin("duration_to_seconds", |args, _out| {
-        let duration = require_duration(args.first(), "duration_to_seconds")?;
-        Ok(VmValue::Int(duration / 1_000))
-    });
-
-    vm.register_builtin("duration_to_human", |args, _out| {
-        let duration = require_duration(args.first(), "duration_to_human")?;
-        Ok(VmValue::String(Rc::from(format_duration_human(duration))))
-    });
-
-    vm.register_builtin("weekday_name", |args, _out| {
-        let dt = datetime_from_arg(args.first(), "weekday_name")?;
-        let name = match args.get(1) {
-            Some(VmValue::Nil) | None => dt.format("%A").to_string(),
-            Some(value) => {
-                let tz = parse_timezone(&value.display(), "weekday_name")?;
-                dt.with_timezone(&tz).format("%A").to_string()
-            }
-        };
-        Ok(VmValue::String(Rc::from(name)))
-    });
-
-    vm.register_builtin("month_name", |args, _out| {
-        let dt = datetime_from_arg(args.first(), "month_name")?;
-        let name = match args.get(1) {
-            Some(VmValue::Nil) | None => dt.format("%B").to_string(),
-            Some(value) => {
-                let tz = parse_timezone(&value.display(), "month_name")?;
-                dt.with_timezone(&tz).format("%B").to_string()
-            }
-        };
-        Ok(VmValue::String(Rc::from(name)))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(sig = "date_now() -> dict", category = "datetime")]
+fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let now = Utc::now();
+    let mut result = utc_datetime_dict(now);
+    result.insert(
+        "timestamp".to_string(),
+        VmValue::Float(now.timestamp_millis() as f64 / 1000.0),
+    );
+    result.insert(
+        "iso8601".to_string(),
+        VmValue::String(Rc::from(
+            now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        )),
+    );
+    Ok(VmValue::Dict(Rc::new(result)))
+}
+
+#[harn_builtin(sig = "date_now_iso() -> string", category = "datetime")]
+fn date_now_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(
+        Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    )))
+}
+
+#[harn_builtin(
+    sig = "date_format(timestamp: int | float | dict, format?: string, timezone?: string) -> string",
+    category = "datetime"
+)]
+fn date_format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dt = datetime_from_arg(args.first(), "date_format")?;
+    let fmt = args
+        .get(1)
+        .map(|a| a.display())
+        .unwrap_or_else(|| DEFAULT_FORMAT.to_string());
+    if let Some(tz_arg) = args.get(2) {
+        let tz = parse_timezone(&tz_arg.display(), "date_format")?;
+        return Ok(VmValue::String(Rc::from(
+            dt.with_timezone(&tz).format(&fmt).to_string(),
+        )));
+    }
+    Ok(VmValue::String(Rc::from(dt.format(&fmt).to_string())))
+}
+
+#[harn_builtin(
+    sig = "date_parse(text: string?) -> int | float",
+    category = "datetime"
+)]
+fn date_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let input = args.first().map(|a| a.display()).unwrap_or_default();
+    let dt = parse_datetime_auto(&input)?;
+    Ok(timestamp_value(dt))
+}
+
+#[harn_builtin(
+    sig = "date_in_zone(timestamp: int | float | dict, timezone: string) -> dict",
+    category = "datetime"
+)]
+fn date_in_zone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dt = datetime_from_arg(args.first(), "date_in_zone")?;
+    let tz_arg = require_arg(args, 1, "date_in_zone", "timezone")?;
+    let tz_name = tz_arg.display();
+    let tz = parse_timezone(&tz_name, "date_in_zone")?;
+    let local = dt.with_timezone(&tz);
+    let mut result = zoned_datetime_dict(local);
+    result.insert("zone".to_string(), VmValue::String(Rc::from(tz_name)));
+    Ok(VmValue::Dict(Rc::new(result)))
+}
+
+#[harn_builtin(
+    sig = "date_to_zone(timestamp: int | float | dict, timezone: string) -> string",
+    category = "datetime"
+)]
+fn date_to_zone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dt = datetime_from_arg(args.first(), "date_to_zone")?;
+    let tz_arg = require_arg(args, 1, "date_to_zone", "timezone")?;
+    let tz = parse_timezone(&tz_arg.display(), "date_to_zone")?;
+    Ok(VmValue::String(Rc::from(
+        dt.with_timezone(&tz).to_rfc3339(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "date_from_components(components: dict, timezone?: string) -> int | float",
+    category = "datetime"
+)]
+fn date_from_components_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let components = require_dict(args.first(), "date_from_components")?;
+    let tz = match args.get(1) {
+        Some(VmValue::Nil) | None => chrono_tz::UTC,
+        Some(value) => parse_timezone(&value.display(), "date_from_components")?,
+    };
+    let dt = datetime_from_components(components, tz)?;
+    Ok(timestamp_value(dt.with_timezone(&Utc)))
+}
+
+#[harn_builtin(
+    sig = "duration_ms(count: int | float) -> duration",
+    category = "datetime"
+)]
+fn duration_ms_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    duration_from_number(args.first(), 1, "duration_ms").map(VmValue::Duration)
+}
+
+#[harn_builtin(
+    sig = "duration_seconds(count: int | float) -> duration",
+    category = "datetime"
+)]
+fn duration_seconds_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    duration_from_number(args.first(), 1_000, "duration_seconds").map(VmValue::Duration)
+}
+
+#[harn_builtin(
+    sig = "duration_minutes(count: int | float) -> duration",
+    category = "datetime"
+)]
+fn duration_minutes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    duration_from_number(args.first(), 60_000, "duration_minutes").map(VmValue::Duration)
+}
+
+#[harn_builtin(
+    sig = "duration_hours(count: int | float) -> duration",
+    category = "datetime"
+)]
+fn duration_hours_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    duration_from_number(args.first(), 3_600_000, "duration_hours").map(VmValue::Duration)
+}
+
+#[harn_builtin(
+    sig = "duration_days(count: int | float) -> duration",
+    category = "datetime"
+)]
+fn duration_days_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    duration_from_number(args.first(), 86_400_000, "duration_days").map(VmValue::Duration)
+}
+
+#[harn_builtin(
+    sig = "date_add(timestamp: int | float | dict, duration: duration) -> int | float",
+    category = "datetime"
+)]
+fn date_add_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let millis = timestamp_millis_from_arg(args.first(), "date_add")?;
+    let duration = require_duration(args.get(1), "date_add")?;
+    timestamp_millis_value(
+        millis
+            .checked_add(duration as i128)
+            .ok_or_else(|| vm_error("date_add: timestamp overflow"))?,
+    )
+}
+
+#[harn_builtin(
+    sig = "date_diff(a: int | float | dict, b: int | float | dict) -> duration",
+    category = "datetime"
+)]
+fn date_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let a = timestamp_millis_from_arg(args.first(), "date_diff")?;
+    let b = timestamp_millis_from_arg(args.get(1), "date_diff")?;
+    let diff = a
+        .checked_sub(b)
+        .ok_or_else(|| vm_error("date_diff: duration overflow"))?;
+    let diff = i64::try_from(diff).map_err(|_| vm_error("date_diff: duration overflow"))?;
+    Ok(VmValue::Duration(diff))
+}
+
+#[harn_builtin(
+    sig = "duration_to_seconds(duration: duration) -> int",
+    category = "datetime"
+)]
+fn duration_to_seconds_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let duration = require_duration(args.first(), "duration_to_seconds")?;
+    Ok(VmValue::Int(duration / 1_000))
+}
+
+#[harn_builtin(
+    sig = "duration_to_human(duration: duration) -> string",
+    category = "datetime"
+)]
+fn duration_to_human_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let duration = require_duration(args.first(), "duration_to_human")?;
+    Ok(VmValue::String(Rc::from(format_duration_human(duration))))
+}
+
+#[harn_builtin(
+    sig = "weekday_name(timestamp: int | float | dict, timezone?: string) -> string",
+    category = "datetime"
+)]
+fn weekday_name_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dt = datetime_from_arg(args.first(), "weekday_name")?;
+    let name = match args.get(1) {
+        Some(VmValue::Nil) | None => dt.format("%A").to_string(),
+        Some(value) => {
+            let tz = parse_timezone(&value.display(), "weekday_name")?;
+            dt.with_timezone(&tz).format("%A").to_string()
+        }
+    };
+    Ok(VmValue::String(Rc::from(name)))
+}
+
+#[harn_builtin(
+    sig = "month_name(timestamp: int | float | dict, timezone?: string) -> string",
+    category = "datetime"
+)]
+fn month_name_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dt = datetime_from_arg(args.first(), "month_name")?;
+    let name = match args.get(1) {
+        Some(VmValue::Nil) | None => dt.format("%B").to_string(),
+        Some(value) => {
+            let tz = parse_timezone(&value.display(), "month_name")?;
+            dt.with_timezone(&tz).format("%B").to_string()
+        }
+    };
+    Ok(VmValue::String(Rc::from(name)))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &DATE_NOW_IMPL_DEF,
+    &DATE_NOW_ISO_IMPL_DEF,
+    &DATE_FORMAT_IMPL_DEF,
+    &DATE_PARSE_IMPL_DEF,
+    &DATE_IN_ZONE_IMPL_DEF,
+    &DATE_TO_ZONE_IMPL_DEF,
+    &DATE_FROM_COMPONENTS_IMPL_DEF,
+    &DURATION_MS_IMPL_DEF,
+    &DURATION_SECONDS_IMPL_DEF,
+    &DURATION_MINUTES_IMPL_DEF,
+    &DURATION_HOURS_IMPL_DEF,
+    &DURATION_DAYS_IMPL_DEF,
+    &DATE_ADD_IMPL_DEF,
+    &DATE_DIFF_IMPL_DEF,
+    &DURATION_TO_SECONDS_IMPL_DEF,
+    &DURATION_TO_HUMAN_IMPL_DEF,
+    &WEEKDAY_NAME_IMPL_DEF,
+    &MONTH_NAME_IMPL_DEF,
+];
 
 fn require_arg<'a>(
     args: &'a [VmValue],

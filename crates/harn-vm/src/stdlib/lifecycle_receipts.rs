@@ -19,126 +19,206 @@ use crate::orchestration::{
     ResumptionReceipt, SignedLifecycleTimestamp, SuspendInitiator, SuspensionReceipt,
     TriggerMatchInfo,
 };
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_lifecycle_receipt_builtins(vm: &mut Vm) {
-    vm.register_builtin("lifecycle_receipt_record_suspension", |args, _out| {
-        let receipt = parse_suspension_args(args)?;
-        let entry = record_suspension_receipt(&receipt);
-        Ok(json_to_vm(&entry.to_json()))
-    });
-
-    vm.register_builtin("lifecycle_receipt_record_resumption", |args, _out| {
-        let receipt = parse_resumption_args(args)?;
-        let entry = record_resumption_receipt(&receipt);
-        Ok(json_to_vm(&entry.to_json()))
-    });
-
-    vm.register_builtin("lifecycle_receipt_record_drain_decision", |args, _out| {
-        let receipt = parse_drain_decision_args(args)?;
-        let entry = record_drain_decision_receipt(&receipt);
-        Ok(json_to_vm(&entry.to_json()))
-    });
-
-    vm.register_builtin("lifecycle_receipts_snapshot", |_args, _out| {
-        let snapshot = lifecycle_receipts_snapshot();
-        let entries: Vec<VmValue> = snapshot
-            .into_iter()
-            .map(|entry| json_to_vm(&entry.to_json()))
-            .collect();
-        Ok(VmValue::List(Rc::new(entries)))
-    });
-
-    vm.register_builtin("verify_lifecycle_receipt_signature", |args, _out| {
-        let kind = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_default();
-        let payload = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        let payload_json = crate::llm::vm_value_to_json(&payload);
-        let outcome = verify_receipt_by_kind(&kind, &payload_json);
-        Ok(verification_value(outcome))
-    });
-
-    vm.register_builtin("lifecycle_resume_input_hash", |args, _out| {
-        let input = args.first().cloned().unwrap_or(VmValue::Nil);
-        let json = if matches!(input, VmValue::Nil) {
-            None
-        } else {
-            Some(crate::llm::vm_value_to_json(&input))
-        };
-        let hash = hash_resume_input(json.as_ref());
-        Ok(VmValue::String(Rc::from(hash)))
-    });
-
-    vm.register_builtin("lifecycle_drain_decision_prompt_hash", |args, _out| {
-        let prompt = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_default();
-        Ok(VmValue::String(Rc::from(hash_drain_decision_prompt(
-            &prompt,
-        ))))
-    });
-
-    vm.register_builtin("lifecycle_replay_resume_input", |args, _out| {
-        let receipt_value = args.first().cloned().unwrap_or(VmValue::Nil);
-        let candidate = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        let receipt_json = crate::llm::vm_value_to_json(&receipt_value);
-        let receipt: ResumptionReceipt = serde_json::from_value(receipt_json).map_err(|e| {
-            VmError::Runtime(format!(
-                "lifecycle_replay_resume_input: invalid receipt payload: {e}"
-            ))
-        })?;
-        let candidate_json = if matches!(candidate, VmValue::Nil) {
-            None
-        } else {
-            Some(crate::llm::vm_value_to_json(&candidate))
-        };
-        match replay_resume_input(&receipt, candidate_json.as_ref()) {
-            Ok(cached) => Ok(VmValue::Dict(Rc::new({
-                let mut map = BTreeMap::new();
-                map.insert("ok".to_string(), VmValue::Bool(true));
-                map.insert(
-                    "input".to_string(),
-                    cached
-                        .as_ref()
-                        .map(crate::stdlib::json_to_vm_value)
-                        .unwrap_or(VmValue::Nil),
-                );
-                map
-            }))),
-            Err(error) => Ok(error_value(error)),
-        }
-    });
-
-    vm.register_builtin("lifecycle_replay_drain_decision", |args, _out| {
-        let receipt_value = args.first().cloned().unwrap_or(VmValue::Nil);
-        let candidate_prompt = args.get(1).and_then(|value| match value {
-            VmValue::Nil => None,
-            other => Some(other.display()),
-        });
-        let receipt_json = crate::llm::vm_value_to_json(&receipt_value);
-        let receipt: DrainDecisionReceipt = serde_json::from_value(receipt_json).map_err(|e| {
-            VmError::Runtime(format!(
-                "lifecycle_replay_drain_decision: invalid receipt payload: {e}"
-            ))
-        })?;
-        match replay_drain_decision(&receipt, candidate_prompt.as_deref()) {
-            Ok(action) => Ok(VmValue::Dict(Rc::new({
-                let mut map = BTreeMap::new();
-                map.insert("ok".to_string(), VmValue::Bool(true));
-                map.insert(
-                    "action".to_string(),
-                    VmValue::String(Rc::from(drain_action_str(action))),
-                );
-                map
-            }))),
-            Err(error) => Ok(error_value(error)),
-        }
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(
+    sig = "lifecycle_receipt_record_suspension(receipt: dict) -> dict",
+    category = "lifecycle_receipts"
+)]
+fn lifecycle_receipt_record_suspension_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let receipt = parse_suspension_args(args)?;
+    let entry = record_suspension_receipt(&receipt);
+    Ok(json_to_vm(&entry.to_json()))
+}
+
+#[harn_builtin(
+    sig = "lifecycle_receipt_record_resumption(receipt: dict) -> dict",
+    category = "lifecycle_receipts"
+)]
+fn lifecycle_receipt_record_resumption_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let receipt = parse_resumption_args(args)?;
+    let entry = record_resumption_receipt(&receipt);
+    Ok(json_to_vm(&entry.to_json()))
+}
+
+#[harn_builtin(
+    sig = "lifecycle_receipt_record_drain_decision(receipt: dict) -> dict",
+    category = "lifecycle_receipts"
+)]
+fn lifecycle_receipt_record_drain_decision_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let receipt = parse_drain_decision_args(args)?;
+    let entry = record_drain_decision_receipt(&receipt);
+    Ok(json_to_vm(&entry.to_json()))
+}
+
+#[harn_builtin(
+    sig = "lifecycle_receipts_snapshot() -> list",
+    category = "lifecycle_receipts"
+)]
+fn lifecycle_receipts_snapshot_impl(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let snapshot = lifecycle_receipts_snapshot();
+    let entries: Vec<VmValue> = snapshot
+        .into_iter()
+        .map(|entry| json_to_vm(&entry.to_json()))
+        .collect();
+    Ok(VmValue::List(Rc::new(entries)))
+}
+
+#[harn_builtin(
+    sig = "verify_lifecycle_receipt_signature(kind: string, payload: dict) -> dict",
+    category = "lifecycle_receipts"
+)]
+fn verify_lifecycle_receipt_signature_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let kind = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    let payload = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let payload_json = crate::llm::vm_value_to_json(&payload);
+    let outcome = verify_receipt_by_kind(&kind, &payload_json);
+    Ok(verification_value(outcome))
+}
+
+#[harn_builtin(
+    sig = "lifecycle_resume_input_hash(input: any) -> string",
+    category = "lifecycle_receipts"
+)]
+fn lifecycle_resume_input_hash_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let input = args.first().cloned().unwrap_or(VmValue::Nil);
+    let json = if matches!(input, VmValue::Nil) {
+        None
+    } else {
+        Some(crate::llm::vm_value_to_json(&input))
+    };
+    let hash = hash_resume_input(json.as_ref());
+    Ok(VmValue::String(Rc::from(hash)))
+}
+
+#[harn_builtin(
+    sig = "lifecycle_drain_decision_prompt_hash(prompt: string) -> string",
+    category = "lifecycle_receipts"
+)]
+fn lifecycle_drain_decision_prompt_hash_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let prompt = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    Ok(VmValue::String(Rc::from(hash_drain_decision_prompt(
+        &prompt,
+    ))))
+}
+
+#[harn_builtin(
+    sig = "lifecycle_replay_resume_input(receipt: dict, candidate?: any) -> dict",
+    category = "lifecycle_receipts"
+)]
+fn lifecycle_replay_resume_input_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let receipt_value = args.first().cloned().unwrap_or(VmValue::Nil);
+    let candidate = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let receipt_json = crate::llm::vm_value_to_json(&receipt_value);
+    let receipt: ResumptionReceipt = serde_json::from_value(receipt_json).map_err(|e| {
+        VmError::Runtime(format!(
+            "lifecycle_replay_resume_input: invalid receipt payload: {e}"
+        ))
+    })?;
+    let candidate_json = if matches!(candidate, VmValue::Nil) {
+        None
+    } else {
+        Some(crate::llm::vm_value_to_json(&candidate))
+    };
+    match replay_resume_input(&receipt, candidate_json.as_ref()) {
+        Ok(cached) => Ok(VmValue::Dict(Rc::new({
+            let mut map = BTreeMap::new();
+            map.insert("ok".to_string(), VmValue::Bool(true));
+            map.insert(
+                "input".to_string(),
+                cached
+                    .as_ref()
+                    .map(crate::stdlib::json_to_vm_value)
+                    .unwrap_or(VmValue::Nil),
+            );
+            map
+        }))),
+        Err(error) => Ok(error_value(error)),
+    }
+}
+
+#[harn_builtin(
+    sig = "lifecycle_replay_drain_decision(receipt: dict, candidate_prompt?: string) -> dict",
+    category = "lifecycle_receipts"
+)]
+fn lifecycle_replay_drain_decision_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let receipt_value = args.first().cloned().unwrap_or(VmValue::Nil);
+    let candidate_prompt = args.get(1).and_then(|value| match value {
+        VmValue::Nil => None,
+        other => Some(other.display()),
+    });
+    let receipt_json = crate::llm::vm_value_to_json(&receipt_value);
+    let receipt: DrainDecisionReceipt = serde_json::from_value(receipt_json).map_err(|e| {
+        VmError::Runtime(format!(
+            "lifecycle_replay_drain_decision: invalid receipt payload: {e}"
+        ))
+    })?;
+    match replay_drain_decision(&receipt, candidate_prompt.as_deref()) {
+        Ok(action) => Ok(VmValue::Dict(Rc::new({
+            let mut map = BTreeMap::new();
+            map.insert("ok".to_string(), VmValue::Bool(true));
+            map.insert(
+                "action".to_string(),
+                VmValue::String(Rc::from(drain_action_str(action))),
+            );
+            map
+        }))),
+        Err(error) => Ok(error_value(error)),
+    }
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &LIFECYCLE_RECEIPT_RECORD_SUSPENSION_IMPL_DEF,
+    &LIFECYCLE_RECEIPT_RECORD_RESUMPTION_IMPL_DEF,
+    &LIFECYCLE_RECEIPT_RECORD_DRAIN_DECISION_IMPL_DEF,
+    &LIFECYCLE_RECEIPTS_SNAPSHOT_IMPL_DEF,
+    &VERIFY_LIFECYCLE_RECEIPT_SIGNATURE_IMPL_DEF,
+    &LIFECYCLE_RESUME_INPUT_HASH_IMPL_DEF,
+    &LIFECYCLE_DRAIN_DECISION_PROMPT_HASH_IMPL_DEF,
+    &LIFECYCLE_REPLAY_RESUME_INPUT_IMPL_DEF,
+    &LIFECYCLE_REPLAY_DRAIN_DECISION_IMPL_DEF,
+];
 
 fn parse_suspension_args(args: &[VmValue]) -> Result<SuspensionReceipt, VmError> {
     let dict = args

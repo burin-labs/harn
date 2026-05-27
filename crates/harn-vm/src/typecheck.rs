@@ -24,7 +24,7 @@
 //! error renders without a positional suffix.
 
 use harn_lexer::Span;
-use harn_parser::builtin_signatures::{self, BuiltinSignature};
+use harn_parser::builtin_signatures::{self, BuiltinSignature, TyExt};
 use harn_parser::typechecker::format_type;
 use harn_parser::TypeExpr;
 
@@ -427,7 +427,7 @@ pub fn validate_against_signature(
         // them. Skip type-param positions at runtime to avoid bogus
         // mismatches.
         let expected = param.ty.to_type_expr();
-        if matches!(&expected, TypeExpr::Named(n) if sig.is_type_param(n)) {
+        if matches!(&expected, TypeExpr::Named(n) if sig.is_type_param(n.as_str())) {
             continue;
         }
         // `any` is always satisfied; format_type would render "any"

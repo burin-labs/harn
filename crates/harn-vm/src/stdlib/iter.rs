@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_LIST};
 use crate::value::{VmError, VmValue};
 use crate::vm::iter::{
     broadcast_branches, drain_capped, iter_from_value, iter_handle_from_value, next_handle, VmIter,
@@ -152,211 +153,312 @@ fn register_stream_namespace(vm: &mut Vm) {
 
 pub(crate) fn register_iter_builtins(vm: &mut Vm) {
     register_stream_namespace(vm);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("iter", |args, _out| {
-        let v = args
-            .first()
-            .cloned()
-            .ok_or_else(|| VmError::TypeError("iter: expected 1 argument".to_string()))?;
-        iter_from_value(v)
-    });
-    vm.register_builtin("pair", |args, _out| {
-        if args.len() != 2 {
-            return Err(VmError::TypeError(format!(
-                "pair: expected 2 arguments, got {}",
-                args.len()
-            )));
-        }
-        Ok(VmValue::Pair(Rc::new((args[0].clone(), args[1].clone()))))
-    });
+// `iter` parser signature: union of list/dict/string/set/range/iter/Generator/stream/channel.
+// We express that as a hand-built signature via `sig_expr` so the `iter`, `Generator`, etc.
+// named types reach the parser as `Ty::Named("iter")`, matching the original entry.
+#[harn_builtin(
+    sig = "iter(value: list | dict | string | set | range | iter | Generator | stream | channel) -> iter",
+    category = "iter"
+)]
+fn iter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let v = args
+        .first()
+        .cloned()
+        .ok_or_else(|| VmError::TypeError("iter: expected 1 argument".to_string()))?;
+    iter_from_value(v)
+}
 
-    vm.register_builtin("stream.map", |args, _out| {
-        let inner = iter_handle_from_value(require_arg(args, 0, "stream.map")?)?;
-        let f = require_callable(args, 1, "stream.map")?;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Map {
-            inner,
-            f,
-        }))))
-    });
-    vm.register_builtin("stream.filter", |args, _out| {
-        let inner = iter_handle_from_value(require_arg(args, 0, "stream.filter")?)?;
-        let p = require_callable(args, 1, "stream.filter")?;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Filter {
-            inner,
-            p,
-        }))))
-    });
-    vm.register_builtin("stream.tap", |args, _out| {
-        let inner = iter_handle_from_value(require_arg(args, 0, "stream.tap")?)?;
-        let f = require_callable(args, 1, "stream.tap")?;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Tap {
-            inner,
-            f,
-        }))))
-    });
-    vm.register_builtin("stream.scan", |args, _out| {
-        let inner = iter_handle_from_value(require_arg(args, 0, "stream.scan")?)?;
-        let acc = require_arg(args, 1, "stream.scan")?;
-        let f = require_callable(args, 2, "stream.scan")?;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Scan {
-            inner,
-            acc,
-            f,
-        }))))
-    });
-    vm.register_builtin("stream.take", |args, _out| {
-        let inner = iter_handle_from_value(require_arg(args, 0, "stream.take")?)?;
-        let remaining = require_non_negative_usize(args, 1, "stream.take")?;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Take {
-            inner,
-            remaining,
-        }))))
-    });
-    vm.register_builtin("stream.take_until", |args, _out| {
-        let inner = iter_handle_from_value(require_arg(args, 0, "stream.take_until")?)?;
-        let p = require_callable(args, 1, "stream.take_until")?;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::TakeUntil {
-            inner,
-            p,
-        }))))
-    });
-    vm.register_builtin("stream.merge", |args, _out| {
-        if args.is_empty() {
-            return Err(type_error("stream.merge: expected at least one stream"));
+#[harn_builtin(sig = "pair(...args: any) -> pair", category = "iter")]
+fn pair_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() != 2 {
+        return Err(VmError::TypeError(format!(
+            "pair: expected 2 arguments, got {}",
+            args.len()
+        )));
+    }
+    Ok(VmValue::Pair(Rc::new((args[0].clone(), args[1].clone()))))
+}
+
+// stream.* builtins use dotted names that the sig-string grammar can't tokenize,
+// so we build their `BuiltinSignature` literals directly with `sig_expr`.
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.map", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_map_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(args, 0, "stream.map")?)?;
+    let f = require_callable(args, 1, "stream.map")?;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Map {
+        inner,
+        f,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.filter", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(args, 0, "stream.filter")?)?;
+    let p = require_callable(args, 1, "stream.filter")?;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Filter {
+        inner,
+        p,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.tap", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_tap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(args, 0, "stream.tap")?)?;
+    let f = require_callable(args, 1, "stream.tap")?;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Tap {
+        inner,
+        f,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.scan", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(args, 0, "stream.scan")?)?;
+    let acc = require_arg(args, 1, "stream.scan")?;
+    let f = require_callable(args, 2, "stream.scan")?;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Scan {
+        inner,
+        acc,
+        f,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.take", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_take_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(args, 0, "stream.take")?)?;
+    let remaining = require_non_negative_usize(args, 1, "stream.take")?;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Take {
+        inner,
+        remaining,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.take_until", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_take_until_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(args, 0, "stream.take_until")?)?;
+    let p = require_callable(args, 1, "stream.take_until")?;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::TakeUntil {
+        inner,
+        p,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.merge", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.is_empty() {
+        return Err(type_error("stream.merge: expected at least one stream"));
+    }
+    let sources = args
+        .iter()
+        .cloned()
+        .map(iter_handle_from_value)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(Some)
+        .collect();
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Merge {
+        sources,
+        cursor: 0,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.interleave", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_interleave_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(type_error(
+            "stream.interleave: expected at least two streams",
+        ));
+    }
+    let sources = args
+        .iter()
+        .cloned()
+        .map(iter_handle_from_value)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(Some)
+        .collect();
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Interleave {
+        sources,
+        cursor: 0,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.zip", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_zip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() != 2 {
+        return Err(type_error(format!(
+            "stream.zip: expected 2 streams, got {}",
+            args.len()
+        )));
+    }
+    let a = iter_handle_from_value(args[0].clone())?;
+    let b = iter_handle_from_value(args[1].clone())?;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Zip { a, b }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.broadcast", &[Param::new("args", TY_ANY)], TY_LIST),
+    category = "iter"
+)]
+fn stream_broadcast_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let source = iter_handle_from_value(require_arg(args, 0, "stream.broadcast")?)?;
+    let n = require_positive_usize(args, 1, "stream.broadcast")?;
+    Ok(VmValue::List(Rc::new(broadcast_branches(source, n))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.race", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_race_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.is_empty() {
+        return Err(type_error("stream.race: expected at least one stream"));
+    }
+    let sources = args
+        .iter()
+        .cloned()
+        .map(iter_handle_from_value)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(Some)
+        .collect();
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Race {
+        sources,
+        winner: None,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.throttle", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_throttle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(args, 0, "stream.throttle")?)?;
+    let per_sec = require_positive_f64(args, 1, "stream.throttle")?;
+    let interval_ms = (1000.0 / per_sec).ceil().max(1.0) as u64;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Throttle {
+        inner,
+        interval_ms,
+        next_ready: None,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.debounce", &[Param::new("args", TY_ANY)], TY_ANY),
+    category = "iter"
+)]
+fn stream_debounce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(args, 0, "stream.debounce")?)?;
+    let window_ms = require_non_negative_usize(args, 1, "stream.debounce")? as u64;
+    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Debounce {
+        inner,
+        window_ms,
+    }))))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.collect", &[Param::new("args", TY_ANY)], TY_LIST),
+    kind = "async",
+    category = "iter"
+)]
+async fn stream_collect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(&args, 0, "stream.collect")?)?;
+    let max = collect_max_arg(&args)?;
+    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("stream.collect: builtin requires VM execution context".to_string())
+    })?;
+    Ok(VmValue::List(Rc::new(
+        drain_capped(&inner, &mut vm, max).await?,
+    )))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.fold", &[Param::new("args", TY_ANY)], TY_ANY),
+    kind = "async",
+    category = "iter"
+)]
+async fn stream_fold_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(&args, 0, "stream.fold")?)?;
+    let mut acc = require_arg(&args, 1, "stream.fold")?;
+    let f = require_callable(&args, 2, "stream.fold")?;
+    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("stream.fold: builtin requires VM execution context".to_string())
+    })?;
+    loop {
+        match next_handle(&inner, &mut vm).await? {
+            Some(v) => acc = vm.call_callable_two(&f, &acc, &v).await?,
+            None => return Ok(acc),
         }
-        let sources = args
-            .iter()
-            .cloned()
-            .map(iter_handle_from_value)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(Some)
-            .collect();
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Merge {
-            sources,
-            cursor: 0,
-        }))))
-    });
-    vm.register_builtin("stream.interleave", |args, _out| {
-        if args.len() < 2 {
-            return Err(type_error(
-                "stream.interleave: expected at least two streams",
-            ));
-        }
-        let sources = args
-            .iter()
-            .cloned()
-            .map(iter_handle_from_value)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(Some)
-            .collect();
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Interleave {
-            sources,
-            cursor: 0,
-        }))))
-    });
-    vm.register_builtin("stream.zip", |args, _out| {
-        if args.len() != 2 {
+    }
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("stream.first", &[Param::new("args", TY_ANY)], TY_ANY),
+    kind = "async",
+    category = "iter"
+)]
+async fn stream_first_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let inner = iter_handle_from_value(require_arg(&args, 0, "stream.first")?)?;
+    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("stream.first: builtin requires VM execution context".to_string())
+    })?;
+    Ok(next_handle(&inner, &mut vm).await?.unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "parallel_race(...args: any) -> any",
+    kind = "async",
+    category = "iter"
+)]
+async fn parallel_race_impl_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = match require_arg(&args, 0, "parallel_race")? {
+        VmValue::List(items) => items,
+        other => {
             return Err(type_error(format!(
-                "stream.zip: expected 2 streams, got {}",
-                args.len()
-            )));
+                "parallel_race: first argument must be a list, got {}",
+                other.type_name()
+            )))
         }
-        let a = iter_handle_from_value(args[0].clone())?;
-        let b = iter_handle_from_value(args[1].clone())?;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Zip { a, b }))))
-    });
-    vm.register_builtin("stream.broadcast", |args, _out| {
-        let source = iter_handle_from_value(require_arg(args, 0, "stream.broadcast")?)?;
-        let n = require_positive_usize(args, 1, "stream.broadcast")?;
-        Ok(VmValue::List(Rc::new(broadcast_branches(source, n))))
-    });
-    vm.register_builtin("stream.race", |args, _out| {
-        if args.is_empty() {
-            return Err(type_error("stream.race: expected at least one stream"));
-        }
-        let sources = args
-            .iter()
-            .cloned()
-            .map(iter_handle_from_value)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(Some)
-            .collect();
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Race {
-            sources,
-            winner: None,
-        }))))
-    });
-    vm.register_builtin("stream.throttle", |args, _out| {
-        let inner = iter_handle_from_value(require_arg(args, 0, "stream.throttle")?)?;
-        let per_sec = require_positive_f64(args, 1, "stream.throttle")?;
-        let interval_ms = (1000.0 / per_sec).ceil().max(1.0) as u64;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Throttle {
-            inner,
-            interval_ms,
-            next_ready: None,
-        }))))
-    });
-    vm.register_builtin("stream.debounce", |args, _out| {
-        let inner = iter_handle_from_value(require_arg(args, 0, "stream.debounce")?)?;
-        let window_ms = require_non_negative_usize(args, 1, "stream.debounce")? as u64;
-        Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Debounce {
-            inner,
-            window_ms,
-        }))))
-    });
-
-    vm.register_async_builtin("stream.collect", |args| async move {
-        let inner = iter_handle_from_value(require_arg(&args, 0, "stream.collect")?)?;
-        let max = collect_max_arg(&args)?;
-        let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-            VmError::Runtime("stream.collect: builtin requires VM execution context".to_string())
-        })?;
-        Ok(VmValue::List(Rc::new(
-            drain_capped(&inner, &mut vm, max).await?,
-        )))
-    });
-    vm.register_async_builtin("stream.fold", |args| async move {
-        let inner = iter_handle_from_value(require_arg(&args, 0, "stream.fold")?)?;
-        let mut acc = require_arg(&args, 1, "stream.fold")?;
-        let f = require_callable(&args, 2, "stream.fold")?;
-        let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-            VmError::Runtime("stream.fold: builtin requires VM execution context".to_string())
-        })?;
-        loop {
-            match next_handle(&inner, &mut vm).await? {
-                Some(v) => acc = vm.call_callable_two(&f, &acc, &v).await?,
-                None => return Ok(acc),
-            }
-        }
-    });
-    vm.register_async_builtin("stream.first", |args| async move {
-        let inner = iter_handle_from_value(require_arg(&args, 0, "stream.first")?)?;
-        let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-            VmError::Runtime("stream.first: builtin requires VM execution context".to_string())
-        })?;
-        Ok(next_handle(&inner, &mut vm).await?.unwrap_or(VmValue::Nil))
-    });
-
-    vm.register_async_builtin("parallel_race", |args| async move {
-        let items = match require_arg(&args, 0, "parallel_race")? {
-            VmValue::List(items) => items,
-            other => {
-                return Err(type_error(format!(
-                    "parallel_race: first argument must be a list, got {}",
-                    other.type_name()
-                )))
-            }
-        };
-        let callable = require_callable(&args, 1, "parallel_race")?;
-        let cap = parallel_race_cap(args.get(2), items.len())?;
-        let parent_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-            VmError::Runtime("parallel_race: builtin requires VM execution context".to_string())
-        })?;
-        parallel_race_impl(parent_vm, items.iter().cloned().collect(), callable, cap).await
-    });
+    };
+    let callable = require_callable(&args, 1, "parallel_race")?;
+    let cap = parallel_race_cap(args.get(2), items.len())?;
+    let parent_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("parallel_race: builtin requires VM execution context".to_string())
+    })?;
+    parallel_race_impl(parent_vm, items.iter().cloned().collect(), callable, cap).await
 }
 
 fn parallel_race_cap(value: Option<&VmValue>, total: usize) -> Result<Option<usize>, VmError> {
@@ -455,3 +557,25 @@ fn spawn_parallel_race_task(
         }
     });
 }
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &ITER_IMPL_DEF,
+    &PAIR_IMPL_DEF,
+    &STREAM_MAP_IMPL_DEF,
+    &STREAM_FILTER_IMPL_DEF,
+    &STREAM_TAP_IMPL_DEF,
+    &STREAM_SCAN_IMPL_DEF,
+    &STREAM_TAKE_IMPL_DEF,
+    &STREAM_TAKE_UNTIL_IMPL_DEF,
+    &STREAM_MERGE_IMPL_DEF,
+    &STREAM_INTERLEAVE_IMPL_DEF,
+    &STREAM_ZIP_IMPL_DEF,
+    &STREAM_BROADCAST_IMPL_DEF,
+    &STREAM_RACE_IMPL_DEF,
+    &STREAM_THROTTLE_IMPL_DEF,
+    &STREAM_DEBOUNCE_IMPL_DEF,
+    &STREAM_COLLECT_IMPL_DEF,
+    &STREAM_FOLD_IMPL_DEF,
+    &STREAM_FIRST_IMPL_DEF,
+    &PARALLEL_RACE_IMPL_BUILTIN_DEF,
+];

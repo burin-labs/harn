@@ -9,6 +9,7 @@ use chrono::{
 };
 use chrono_tz::Tz;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -245,43 +246,34 @@ static COUNTRIES: &[CountryMeta] = &[
 ];
 
 pub(crate) fn register_calendar_builtins(vm: &mut Vm) {
-    vm.register_builtin("__calendar_parts", calendar_parts_builtin);
-    vm.register_builtin("__calendar_from_local", calendar_from_local_builtin);
-    vm.register_builtin("__calendar_boundary", calendar_boundary_builtin);
-    vm.register_builtin("__calendar_add", calendar_add_builtin);
-    vm.register_builtin("__calendar_date_range", calendar_date_range_builtin);
-    vm.register_builtin("__calendar_next_weekday", calendar_next_weekday_builtin);
-    vm.register_builtin("__calendar_countries", calendar_countries_builtin);
-    vm.register_builtin("__calendar_country_info", calendar_country_info_builtin);
-    vm.register_builtin("__calendar_supported_holiday_calendars", |_args, _out| {
-        Ok(VmValue::List(Rc::new(vec![holiday_calendar_info(
-            DEFAULT_HOLIDAY_CALENDAR,
-        )])))
-    });
-    vm.register_builtin("__calendar_holidays", calendar_holidays_builtin);
-    vm.register_builtin("__calendar_is_holiday", calendar_is_holiday_builtin);
-    vm.register_builtin(
-        "__calendar_is_business_day",
-        calendar_is_business_day_builtin,
-    );
-    vm.register_builtin(
-        "__calendar_next_business_day",
-        calendar_next_business_day_builtin,
-    );
-    vm.register_builtin(
-        "__calendar_add_business_days",
-        calendar_add_business_days_builtin,
-    );
-    vm.register_builtin(
-        "__calendar_business_days_between",
-        calendar_business_days_between_builtin,
-    );
-    vm.register_builtin(
-        "__calendar_business_window",
-        calendar_business_window_builtin,
-    );
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &CALENDAR_PARTS_BUILTIN_DEF,
+    &CALENDAR_FROM_LOCAL_BUILTIN_DEF,
+    &CALENDAR_BOUNDARY_BUILTIN_DEF,
+    &CALENDAR_ADD_BUILTIN_DEF,
+    &CALENDAR_DATE_RANGE_BUILTIN_DEF,
+    &CALENDAR_NEXT_WEEKDAY_BUILTIN_DEF,
+    &CALENDAR_COUNTRIES_BUILTIN_DEF,
+    &CALENDAR_COUNTRY_INFO_BUILTIN_DEF,
+    &CALENDAR_SUPPORTED_HOLIDAY_CALENDARS_BUILTIN_DEF,
+    &CALENDAR_HOLIDAYS_BUILTIN_DEF,
+    &CALENDAR_IS_HOLIDAY_BUILTIN_DEF,
+    &CALENDAR_IS_BUSINESS_DAY_BUILTIN_DEF,
+    &CALENDAR_NEXT_BUSINESS_DAY_BUILTIN_DEF,
+    &CALENDAR_ADD_BUSINESS_DAYS_BUILTIN_DEF,
+    &CALENDAR_BUSINESS_DAYS_BETWEEN_BUILTIN_DEF,
+    &CALENDAR_BUSINESS_WINDOW_BUILTIN_DEF,
+];
+
+#[harn_builtin(
+    sig = "__calendar_parts(timestamp: any, timezone?: string) -> dict",
+    category = "calendar"
+)]
 fn calendar_parts_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let timezone = timezone_arg(
         args.get(1),
@@ -295,6 +287,10 @@ fn calendar_parts_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     ))))
 }
 
+#[harn_builtin(
+    sig = "__calendar_from_local(parts: dict, timezone?: string, disambiguation?: string) -> int | float",
+    category = "calendar"
+)]
 fn calendar_from_local_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let parts = require_dict(args.first(), "__calendar_from_local", "parts")?;
     let timezone = timezone_arg(
@@ -309,6 +305,10 @@ fn calendar_from_local_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
     Ok(timestamp_value(dt.with_timezone(&Utc)))
 }
 
+#[harn_builtin(
+    sig = "__calendar_boundary(timestamp: any, unit: string, edge: string, timezone?: string) -> int | float",
+    category = "calendar"
+)]
 fn calendar_boundary_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let timezone = timezone_arg(
         args.get(3),
@@ -327,6 +327,10 @@ fn calendar_boundary_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
     )?))
 }
 
+#[harn_builtin(
+    sig = "__calendar_add(timestamp: any, amount: int, unit: string, timezone?: string, disambiguation?: string) -> int | float",
+    category = "calendar"
+)]
 fn calendar_add_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let timezone = timezone_arg(args.get(3), DEFAULT_TIMEZONE, "__calendar_add", "timezone")?;
     let dt = datetime_like_arg(args.first(), timezone, "__calendar_add")?;
@@ -342,6 +346,10 @@ fn calendar_add_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     )?))
 }
 
+#[harn_builtin(
+    sig = "__calendar_date_range(start: any, end: any, unit: string, timezone?: string, options?: dict) -> list",
+    category = "calendar"
+)]
 fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let timezone = timezone_arg(
         args.get(3),
@@ -390,6 +398,10 @@ fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
     Ok(VmValue::List(Rc::new(out)))
 }
 
+#[harn_builtin(
+    sig = "__calendar_next_weekday(timestamp: any, weekday: any, direction: string, timezone?: string, include_today?: bool) -> int | float",
+    category = "calendar"
+)]
 fn calendar_next_weekday_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let timezone = timezone_arg(
         args.get(3),
@@ -423,12 +435,17 @@ fn calendar_next_weekday_builtin(args: &[VmValue], _out: &mut String) -> Result<
     Ok(timestamp_value(resolved.with_timezone(&Utc)))
 }
 
+#[harn_builtin(sig = "__calendar_countries() -> list", category = "calendar")]
 fn calendar_countries_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::List(Rc::new(
         COUNTRIES.iter().map(country_value).collect(),
     )))
 }
 
+#[harn_builtin(
+    sig = "__calendar_country_info(code: string) -> dict | nil",
+    category = "calendar"
+)]
 fn calendar_country_info_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let code = string_arg(args.first(), "", "__calendar_country_info", "code")?;
     Ok(country_by_code(&code)
@@ -436,6 +453,23 @@ fn calendar_country_info_builtin(args: &[VmValue], _out: &mut String) -> Result<
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "__calendar_supported_holiday_calendars() -> list",
+    category = "calendar"
+)]
+fn calendar_supported_holiday_calendars_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(VmValue::List(Rc::new(vec![holiday_calendar_info(
+        DEFAULT_HOLIDAY_CALENDAR,
+    )])))
+}
+
+#[harn_builtin(
+    sig = "__calendar_holidays(calendar: string?, year: int) -> list",
+    category = "calendar"
+)]
 fn calendar_holidays_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let calendar = holiday_calendar_name_arg(args.first(), DEFAULT_HOLIDAY_CALENDAR)?;
     let year = i32::try_from(int_arg(args.get(1), "__calendar_holidays", "year")?)
@@ -447,6 +481,10 @@ fn calendar_holidays_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
     )))
 }
 
+#[harn_builtin(
+    sig = "__calendar_is_holiday(timestamp: any, calendar?: any, timezone?: string) -> bool",
+    category = "calendar"
+)]
 fn calendar_is_holiday_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let calendar = business_calendar_arg(args.get(1), args.get(2), "__calendar_is_holiday")?;
     let dt = datetime_like_arg(args.first(), calendar.timezone, "__calendar_is_holiday")?;
@@ -454,6 +492,10 @@ fn calendar_is_holiday_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
     Ok(VmValue::Bool(is_holiday_date(local_date, &calendar)?))
 }
 
+#[harn_builtin(
+    sig = "__calendar_is_business_day(timestamp: any, calendar?: any, timezone?: string) -> bool",
+    category = "calendar"
+)]
 fn calendar_is_business_day_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -468,6 +510,10 @@ fn calendar_is_business_day_builtin(
     Ok(VmValue::Bool(is_business_date(local_date, &calendar)?))
 }
 
+#[harn_builtin(
+    sig = "__calendar_next_business_day(timestamp: any, calendar?: any, timezone?: string, include_today?: bool) -> int | float",
+    category = "calendar"
+)]
 fn calendar_next_business_day_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -507,6 +553,10 @@ fn calendar_next_business_day_builtin(
     ))
 }
 
+#[harn_builtin(
+    sig = "__calendar_add_business_days(timestamp: any, days: int, calendar?: any, timezone?: string) -> int | float",
+    category = "calendar"
+)]
 fn calendar_add_business_days_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -548,6 +598,10 @@ fn calendar_add_business_days_builtin(
     ))
 }
 
+#[harn_builtin(
+    sig = "__calendar_business_days_between(start: any, end: any, calendar?: any, timezone?: string) -> int",
+    category = "calendar"
+)]
 fn calendar_business_days_between_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -589,6 +643,10 @@ fn calendar_business_days_between_builtin(
     Ok(VmValue::Int(count))
 }
 
+#[harn_builtin(
+    sig = "__calendar_business_window(timestamp: any, calendar?: any, options?: dict, timezone?: string) -> dict",
+    category = "calendar"
+)]
 fn calendar_business_window_builtin(
     args: &[VmValue],
     _out: &mut String,

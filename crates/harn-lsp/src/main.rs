@@ -33,6 +33,10 @@ impl HarnLsp {
 
 #[tokio::main]
 async fn main() {
+    // Install the macro-emitted builtin signature slice into the parser
+    // registry so hover/completion/diagnostics see the full builtin set.
+    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 

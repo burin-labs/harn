@@ -18,136 +18,216 @@ use std::rc::Rc;
 use crate::flow::{
     Approver, ByteSpan, EvidenceItem, InvariantBlockError, InvariantResult, Remediation, Verdict,
 };
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_flow_builtins(vm: &mut Vm) {
-    vm.register_builtin("flow_invariant_allow", |_args, _out| {
-        Ok(InvariantResult::allow().to_vm_value())
-    });
-
-    vm.register_builtin("flow_invariant_warn", |args, _out| {
-        let reason = required_string(args, 0, "flow_invariant_warn", "reason")?;
-        Ok(InvariantResult::warn(reason).to_vm_value())
-    });
-
-    vm.register_builtin("flow_invariant_block", |args, _out| {
-        let code = required_string(args, 0, "flow_invariant_block", "code")?;
-        let message = required_string(args, 1, "flow_invariant_block", "message")?;
-        Ok(InvariantResult::block(InvariantBlockError::new(code, message)).to_vm_value())
-    });
-
-    vm.register_builtin("flow_invariant_require_approval", |args, _out| {
-        let kind = required_string(args, 0, "flow_invariant_require_approval", "kind")?;
-        let id = required_string(args, 1, "flow_invariant_require_approval", "id")?;
-        let approver = match kind.as_str() {
-            "principal" => Approver::principal(id),
-            "role" => Approver::role(id),
-            other => {
-                return Err(VmError::Runtime(format!(
-                    "flow_invariant_require_approval: kind must be \"principal\" or \"role\", got \"{other}\""
-                )));
-            }
-        };
-        Ok(InvariantResult::require_approval(approver).to_vm_value())
-    });
-
-    vm.register_builtin("flow_evidence_atom", |args, _out| {
-        let atom_hex = required_string(args, 0, "flow_evidence_atom", "atom_id")?;
-        let atom = parse_atom_id(&atom_hex, "flow_evidence_atom")?;
-        let start = required_u64(args, 1, "flow_evidence_atom", "diff_start")?;
-        let end = required_u64(args, 2, "flow_evidence_atom", "diff_end")?;
-        validate_span(start, end, "flow_evidence_atom")?;
-        Ok(serde_to_vm(&EvidenceItem::AtomPointer {
-            atom,
-            diff_span: ByteSpan::new(start, end),
-        }))
-    });
-
-    vm.register_builtin("flow_evidence_metadata", |args, _out| {
-        let directory = required_string(args, 0, "flow_evidence_metadata", "directory")?;
-        let namespace = required_string(args, 1, "flow_evidence_metadata", "namespace")?;
-        let key = required_string(args, 2, "flow_evidence_metadata", "key")?;
-        Ok(serde_to_vm(&EvidenceItem::MetadataPath {
-            directory,
-            namespace,
-            key,
-        }))
-    });
-
-    vm.register_builtin("flow_evidence_transcript", |args, _out| {
-        let transcript_id = required_string(args, 0, "flow_evidence_transcript", "transcript_id")?;
-        let start = required_u64(args, 1, "flow_evidence_transcript", "span_start")?;
-        let end = required_u64(args, 2, "flow_evidence_transcript", "span_end")?;
-        validate_span(start, end, "flow_evidence_transcript")?;
-        Ok(serde_to_vm(&EvidenceItem::TranscriptExcerpt {
-            transcript_id,
-            span: ByteSpan::new(start, end),
-        }))
-    });
-
-    vm.register_builtin("flow_evidence_citation", |args, _out| {
-        let url = required_string(args, 0, "flow_evidence_citation", "url")?;
-        let quote = required_string(args, 1, "flow_evidence_citation", "quote")?;
-        let fetched_at = required_string(args, 2, "flow_evidence_citation", "fetched_at")?;
-        Ok(serde_to_vm(&EvidenceItem::ExternalCitation {
-            url,
-            quote,
-            fetched_at,
-        }))
-    });
-
-    vm.register_builtin("flow_remediation", |args, _out| {
-        let description = required_string(args, 0, "flow_remediation", "description")?;
-        Ok(serde_to_vm(&Remediation::describe(description)))
-    });
-
-    vm.register_builtin("flow_with_evidence", |args, _out| {
-        let mut result = require_invariant(args, 0, "flow_with_evidence")?;
-        let list = require_list_arg(args, 1, "flow_with_evidence", "evidence")?;
-        let evidence = list
-            .iter()
-            .map(decode_evidence_item)
-            .collect::<Result<Vec<_>, _>>()?;
-        result = result.with_evidence(evidence);
-        Ok(result.to_vm_value())
-    });
-
-    vm.register_builtin("flow_with_remediation", |args, _out| {
-        let mut result = require_invariant(args, 0, "flow_with_remediation")?;
-        let remediation = decode_remediation(args.get(1).unwrap_or(&VmValue::Nil))?;
-        result = result.with_remediation(remediation);
-        Ok(result.to_vm_value())
-    });
-
-    vm.register_builtin("flow_with_confidence", |args, _out| {
-        let mut result = require_invariant(args, 0, "flow_with_confidence")?;
-        let confidence = required_f64(args, 1, "flow_with_confidence", "confidence")?;
-        result = result.with_confidence(confidence);
-        Ok(result.to_vm_value())
-    });
-
-    vm.register_builtin("flow_invariant_kind", |args, _out| {
-        let result = require_invariant(args, 0, "flow_invariant_kind")?;
-        let kind = match &result.verdict {
-            Verdict::Allow => "allow",
-            Verdict::Warn { .. } => "warn",
-            Verdict::Block { .. } => "block",
-            Verdict::RequireApproval { .. } => "require_approval",
-        };
-        Ok(VmValue::String(Rc::from(kind)))
-    });
-
-    vm.register_builtin("flow_invariant_is_blocking", |args, _out| {
-        let result = require_invariant(args, 0, "flow_invariant_is_blocking")?;
-        Ok(VmValue::Bool(result.is_blocking()))
-    });
-
-    vm.register_builtin("flow_invariant_confidence", |args, _out| {
-        let result = require_invariant(args, 0, "flow_invariant_confidence")?;
-        Ok(VmValue::Float(result.confidence))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(sig = "flow_invariant_allow() -> dict", category = "flow")]
+fn flow_invariant_allow_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(InvariantResult::allow().to_vm_value())
+}
+
+#[harn_builtin(sig = "flow_invariant_warn(reason: string) -> dict", category = "flow")]
+fn flow_invariant_warn_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let reason = required_string(args, 0, "flow_invariant_warn", "reason")?;
+    Ok(InvariantResult::warn(reason).to_vm_value())
+}
+
+#[harn_builtin(
+    sig = "flow_invariant_block(code: string, message: string) -> dict",
+    category = "flow"
+)]
+fn flow_invariant_block_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let code = required_string(args, 0, "flow_invariant_block", "code")?;
+    let message = required_string(args, 1, "flow_invariant_block", "message")?;
+    Ok(InvariantResult::block(InvariantBlockError::new(code, message)).to_vm_value())
+}
+
+#[harn_builtin(
+    sig = "flow_invariant_require_approval(kind: string, id: string) -> dict",
+    category = "flow"
+)]
+fn flow_invariant_require_approval_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let kind = required_string(args, 0, "flow_invariant_require_approval", "kind")?;
+    let id = required_string(args, 1, "flow_invariant_require_approval", "id")?;
+    let approver = match kind.as_str() {
+        "principal" => Approver::principal(id),
+        "role" => Approver::role(id),
+        other => {
+            return Err(VmError::Runtime(format!(
+                "flow_invariant_require_approval: kind must be \"principal\" or \"role\", got \"{other}\""
+            )));
+        }
+    };
+    Ok(InvariantResult::require_approval(approver).to_vm_value())
+}
+
+#[harn_builtin(
+    sig = "flow_evidence_atom(atom_id: string, diff_start: int, diff_end: int) -> dict",
+    category = "flow"
+)]
+fn flow_evidence_atom_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let atom_hex = required_string(args, 0, "flow_evidence_atom", "atom_id")?;
+    let atom = parse_atom_id(&atom_hex, "flow_evidence_atom")?;
+    let start = required_u64(args, 1, "flow_evidence_atom", "diff_start")?;
+    let end = required_u64(args, 2, "flow_evidence_atom", "diff_end")?;
+    validate_span(start, end, "flow_evidence_atom")?;
+    Ok(serde_to_vm(&EvidenceItem::AtomPointer {
+        atom,
+        diff_span: ByteSpan::new(start, end),
+    }))
+}
+
+#[harn_builtin(
+    sig = "flow_evidence_metadata(directory: string, namespace: string, key: string) -> dict",
+    category = "flow"
+)]
+fn flow_evidence_metadata_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let directory = required_string(args, 0, "flow_evidence_metadata", "directory")?;
+    let namespace = required_string(args, 1, "flow_evidence_metadata", "namespace")?;
+    let key = required_string(args, 2, "flow_evidence_metadata", "key")?;
+    Ok(serde_to_vm(&EvidenceItem::MetadataPath {
+        directory,
+        namespace,
+        key,
+    }))
+}
+
+#[harn_builtin(
+    sig = "flow_evidence_transcript(transcript_id: string, span_start: int, span_end: int) -> dict",
+    category = "flow"
+)]
+fn flow_evidence_transcript_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let transcript_id = required_string(args, 0, "flow_evidence_transcript", "transcript_id")?;
+    let start = required_u64(args, 1, "flow_evidence_transcript", "span_start")?;
+    let end = required_u64(args, 2, "flow_evidence_transcript", "span_end")?;
+    validate_span(start, end, "flow_evidence_transcript")?;
+    Ok(serde_to_vm(&EvidenceItem::TranscriptExcerpt {
+        transcript_id,
+        span: ByteSpan::new(start, end),
+    }))
+}
+
+#[harn_builtin(
+    sig = "flow_evidence_citation(url: string, quote: string, fetched_at: string) -> dict",
+    category = "flow"
+)]
+fn flow_evidence_citation_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let url = required_string(args, 0, "flow_evidence_citation", "url")?;
+    let quote = required_string(args, 1, "flow_evidence_citation", "quote")?;
+    let fetched_at = required_string(args, 2, "flow_evidence_citation", "fetched_at")?;
+    Ok(serde_to_vm(&EvidenceItem::ExternalCitation {
+        url,
+        quote,
+        fetched_at,
+    }))
+}
+
+#[harn_builtin(
+    sig = "flow_remediation(description: string) -> dict",
+    category = "flow"
+)]
+fn flow_remediation_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let description = required_string(args, 0, "flow_remediation", "description")?;
+    Ok(serde_to_vm(&Remediation::describe(description)))
+}
+
+#[harn_builtin(
+    sig = "flow_with_evidence(result: dict, evidence: list) -> dict",
+    category = "flow"
+)]
+fn flow_with_evidence_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut result = require_invariant(args, 0, "flow_with_evidence")?;
+    let list = require_list_arg(args, 1, "flow_with_evidence", "evidence")?;
+    let evidence = list
+        .iter()
+        .map(decode_evidence_item)
+        .collect::<Result<Vec<_>, _>>()?;
+    result = result.with_evidence(evidence);
+    Ok(result.to_vm_value())
+}
+
+#[harn_builtin(
+    sig = "flow_with_remediation(result: dict, remediation: dict) -> dict",
+    category = "flow"
+)]
+fn flow_with_remediation_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut result = require_invariant(args, 0, "flow_with_remediation")?;
+    let remediation = decode_remediation(args.get(1).unwrap_or(&VmValue::Nil))?;
+    result = result.with_remediation(remediation);
+    Ok(result.to_vm_value())
+}
+
+#[harn_builtin(
+    sig = "flow_with_confidence(result: dict, confidence: float | int) -> dict",
+    category = "flow"
+)]
+fn flow_with_confidence_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut result = require_invariant(args, 0, "flow_with_confidence")?;
+    let confidence = required_f64(args, 1, "flow_with_confidence", "confidence")?;
+    result = result.with_confidence(confidence);
+    Ok(result.to_vm_value())
+}
+
+#[harn_builtin(sig = "flow_invariant_kind(result: dict) -> string", category = "flow")]
+fn flow_invariant_kind_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let result = require_invariant(args, 0, "flow_invariant_kind")?;
+    let kind = match &result.verdict {
+        Verdict::Allow => "allow",
+        Verdict::Warn { .. } => "warn",
+        Verdict::Block { .. } => "block",
+        Verdict::RequireApproval { .. } => "require_approval",
+    };
+    Ok(VmValue::String(Rc::from(kind)))
+}
+
+#[harn_builtin(
+    sig = "flow_invariant_is_blocking(result: dict) -> bool",
+    category = "flow"
+)]
+fn flow_invariant_is_blocking_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let result = require_invariant(args, 0, "flow_invariant_is_blocking")?;
+    Ok(VmValue::Bool(result.is_blocking()))
+}
+
+#[harn_builtin(
+    sig = "flow_invariant_confidence(result: dict) -> float",
+    category = "flow"
+)]
+fn flow_invariant_confidence_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let result = require_invariant(args, 0, "flow_invariant_confidence")?;
+    Ok(VmValue::Float(result.confidence))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &FLOW_INVARIANT_ALLOW_IMPL_DEF,
+    &FLOW_INVARIANT_WARN_IMPL_DEF,
+    &FLOW_INVARIANT_BLOCK_IMPL_DEF,
+    &FLOW_INVARIANT_REQUIRE_APPROVAL_IMPL_DEF,
+    &FLOW_EVIDENCE_ATOM_IMPL_DEF,
+    &FLOW_EVIDENCE_METADATA_IMPL_DEF,
+    &FLOW_EVIDENCE_TRANSCRIPT_IMPL_DEF,
+    &FLOW_EVIDENCE_CITATION_IMPL_DEF,
+    &FLOW_REMEDIATION_IMPL_DEF,
+    &FLOW_WITH_EVIDENCE_IMPL_DEF,
+    &FLOW_WITH_REMEDIATION_IMPL_DEF,
+    &FLOW_WITH_CONFIDENCE_IMPL_DEF,
+    &FLOW_INVARIANT_KIND_IMPL_DEF,
+    &FLOW_INVARIANT_IS_BLOCKING_IMPL_DEF,
+    &FLOW_INVARIANT_CONFIDENCE_IMPL_DEF,
+];
 
 fn serde_to_vm<T: serde::Serialize>(value: &T) -> VmValue {
     let json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);

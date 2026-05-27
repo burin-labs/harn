@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -63,22 +64,32 @@ impl TestRecord {
 }
 
 pub(crate) fn register_junit_builtins(vm: &mut Vm) {
-    vm.register_builtin("parse_junit_xml", |args, _out| {
-        let bytes: Vec<u8> = match args.first() {
-            Some(VmValue::String(s)) => s.as_bytes().to_vec(),
-            Some(VmValue::Bytes(b)) => (**b).clone(),
-            Some(VmValue::Nil) | None => Vec::new(),
-            Some(other) => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "parse_junit_xml: expected string or bytes, got {}",
-                    other.type_name()
-                )))));
-            }
-        };
-        let records = parse_junit_xml(&bytes);
-        let list: Vec<VmValue> = records.into_iter().map(record_to_value).collect();
-        Ok(VmValue::List(Rc::new(list)))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&PARSE_JUNIT_XML_IMPL_DEF];
+
+#[harn_builtin(
+    sig = "parse_junit_xml(input: string | bytes | nil) -> list",
+    category = "junit"
+)]
+fn parse_junit_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let bytes: Vec<u8> = match args.first() {
+        Some(VmValue::String(s)) => s.as_bytes().to_vec(),
+        Some(VmValue::Bytes(b)) => (**b).clone(),
+        Some(VmValue::Nil) | None => Vec::new(),
+        Some(other) => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "parse_junit_xml: expected string or bytes, got {}",
+                other.type_name()
+            )))));
+        }
+    };
+    let records = parse_junit_xml(&bytes);
+    let list: Vec<VmValue> = records.into_iter().map(record_to_value).collect();
+    Ok(VmValue::List(Rc::new(list)))
 }
 
 fn record_to_value(record: TestRecord) -> VmValue {

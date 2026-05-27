@@ -17,6 +17,11 @@ use protocol::{DapMessage, DapResponse};
 const MAX_DAP_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
 fn main() {
+    // Install the macro-emitted builtin signature slice into the parser
+    // registry so source-file typechecking inside DAP launch covers
+    // `#[harn_builtin]`-migrated entries.
+    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+
     // Shared seq counter spans both forward responses (debugger.next_seq)
     // and reverse requests (DapHostBridge.next_seq) so every adapter-
     // initiated message uses a globally unique seq, matching the DAP spec.

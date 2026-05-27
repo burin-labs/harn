@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::rc::Rc;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{value_structural_hash_key, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -295,68 +296,124 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
 /// `BTreeMap` allocation per inserted entry. The native paths cut every
 /// helper to one allocation and skip the per-entry callback dispatch
 /// `filter_nil`'s `.filter(closure)` form previously paid.
+///
+/// Implementations are individual `#[harn_builtin]`-annotated functions
+/// below; `register_dict_builder_builtins` walks the collected
+/// [`DICT_BUILDER_BUILTINS`] slice.
 fn register_dict_builder_builtins(vm: &mut Vm) {
-    vm.register_builtin("__dict_filter_nil", |args, _out| {
-        dict_filter_nil(args.first().unwrap_or(&VmValue::Nil))
-    });
-    vm.register_builtin("__dict_merge", |args, _out| {
-        dict_merge(
-            args.first().unwrap_or(&VmValue::Nil),
-            args.get(1).unwrap_or(&VmValue::Nil),
-        )
-    });
-    vm.register_builtin("__dict_pick", |args, _out| {
-        dict_pick(
-            args.first().unwrap_or(&VmValue::Nil),
-            args.get(1).unwrap_or(&VmValue::Nil),
-        )
-    });
-    vm.register_builtin("__dict_pick_keys", |args, _out| {
-        dict_pick_keys(
-            args.first().unwrap_or(&VmValue::Nil),
-            args.get(1).unwrap_or(&VmValue::Nil),
-            args.get(2).map(VmValue::is_truthy).unwrap_or(false),
-        )
-    });
-    vm.register_builtin("__dict_omit", |args, _out| {
-        dict_omit(
-            args.first().unwrap_or(&VmValue::Nil),
-            args.get(1).unwrap_or(&VmValue::Nil),
-        )
-    });
-    vm.register_builtin("clone", |args, _out| {
-        Ok(shallow_clone(args.first().unwrap_or(&VmValue::Nil)))
-    });
-    vm.register_builtin("deep_clone", |args, _out| {
-        Ok(deep_clone_value(args.first().unwrap_or(&VmValue::Nil)))
-    });
-    // `deep_merge`, `unique`, `dict_from_pairs` ship under both their
-    // plain and `__`-prefixed names so the `std/collections` Harn
-    // wrappers can call the native fast-path while user scripts get
-    // the short form without an explicit `import "std/collections"`.
-    register_alias_pair(vm, "deep_merge", "__deep_merge", |args| {
-        deep_merge_value(
-            args.first().unwrap_or(&VmValue::Nil),
-            args.get(1).unwrap_or(&VmValue::Nil),
-        )
-    });
-    register_alias_pair(vm, "unique", "__list_unique", |args| {
-        list_unique(args.first().unwrap_or(&VmValue::Nil))
-    });
-    register_alias_pair(vm, "dict_from_pairs", "__dict_from_pairs", |args| {
-        dict_from_pairs(args.first().unwrap_or(&VmValue::Nil))
-    });
+    for def in DICT_BUILDER_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
-fn register_alias_pair(
-    vm: &mut Vm,
-    public_name: &'static str,
-    raw_name: &'static str,
-    handler: fn(&[VmValue]) -> Result<VmValue, VmError>,
-) {
-    vm.register_builtin(public_name, move |args, _out| handler(args));
-    vm.register_builtin(raw_name, move |args, _out| handler(args));
+#[harn_builtin(sig = "__dict_filter_nil(d: dict) -> dict", category = "collections")]
+fn dict_filter_nil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_filter_nil(args.first().unwrap_or(&VmValue::Nil))
 }
+
+#[harn_builtin(
+    sig = "__dict_merge(a: dict, b: dict) -> dict",
+    category = "collections"
+)]
+fn dict_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_merge(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+    )
+}
+
+#[harn_builtin(
+    sig = "__dict_pick(d: dict, keys: list) -> dict",
+    category = "collections"
+)]
+fn dict_pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_pick(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+    )
+}
+
+#[harn_builtin(
+    sig = "__dict_pick_keys(d: dict, keys: list, drop_nil?: bool) -> dict",
+    category = "collections"
+)]
+fn dict_pick_keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_pick_keys(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+        args.get(2).map(VmValue::is_truthy).unwrap_or(false),
+    )
+}
+
+#[harn_builtin(
+    sig = "__dict_omit(d: dict, keys: list) -> dict",
+    category = "collections"
+)]
+fn dict_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_omit(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+    )
+}
+
+#[harn_builtin(sig = "clone(value: any) -> any", category = "collections")]
+fn clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(shallow_clone(args.first().unwrap_or(&VmValue::Nil)))
+}
+
+#[harn_builtin(sig = "deep_clone(value: any) -> any", category = "collections")]
+fn deep_clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(deep_clone_value(args.first().unwrap_or(&VmValue::Nil)))
+}
+
+#[harn_builtin(
+    sig = "deep_merge(a: dict, b: dict) -> dict",
+    aliases = ["__deep_merge"],
+    category = "collections"
+)]
+fn deep_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    deep_merge_value(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+    )
+}
+
+#[harn_builtin(
+    sig = "unique(items: list) -> list",
+    aliases = ["__list_unique"],
+    category = "collections"
+)]
+fn unique_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    list_unique(args.first().unwrap_or(&VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "dict_from_pairs(pairs: list) -> dict",
+    aliases = ["__dict_from_pairs"],
+    category = "collections"
+)]
+fn dict_from_pairs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_from_pairs(args.first().unwrap_or(&VmValue::Nil))
+}
+
+const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
+    &DICT_FILTER_NIL_IMPL_DEF,
+    &DICT_MERGE_IMPL_DEF,
+    &DICT_PICK_IMPL_DEF,
+    &DICT_PICK_KEYS_IMPL_DEF,
+    &DICT_OMIT_IMPL_DEF,
+    &CLONE_IMPL_DEF,
+    &DEEP_CLONE_IMPL_DEF,
+    &DEEP_MERGE_IMPL_DEF,
+    &UNIQUE_IMPL_DEF,
+    &DICT_FROM_PAIRS_IMPL_DEF,
+];
+
+/// The macro-emitted builtins from this module that the top-level stdlib
+/// aggregator pushes into `all_builtin_defs()`. Currently covers the
+/// dict_builder family; the rest of `collections.rs` still uses inline
+/// `vm.register_builtin` closures and will migrate in later passes.
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = DICT_BUILDER_BUILTINS;
 
 /// Returns a shallow copy of `value`. Dicts and lists become fresh
 /// allocations independent of the source; primitives are returned by value.

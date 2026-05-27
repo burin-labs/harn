@@ -12,6 +12,7 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
 use crate::triggers::registry::{AgentScope, TargetExpr};
@@ -116,362 +117,534 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
     register_trust_namespace(vm);
     register_corrections_namespace(vm);
 
-    vm.register_builtin("handler_context", |_args, _out| {
-        let Some(context) = current_dispatch_context() else {
-            return Ok(VmValue::Nil);
-        };
-        Ok(value_from_serde(&serde_json::json!({
-            "agent": context.agent_id,
-            "action": context.action,
-            "trace_id": context.trigger_event.trace_id.0,
-            "replay_of_event_id": context.replay_of_event_id,
-            "autonomy_tier": context.autonomy_tier,
-            "trigger_event": context.trigger_event,
-        })))
-    });
-
-    vm.register_builtin("list_providers_native", |_args, _out| {
-        Ok(VmValue::List(Rc::new(
-            registered_provider_metadata()
-                .into_iter()
-                .map(|provider| value_from_serde(&provider))
-                .collect(),
-        )))
-    });
-
-    vm.register_builtin("trigger_list", |_args, _out| {
-        Ok(VmValue::List(Rc::new(
-            snapshot_trigger_bindings()
-                .into_iter()
-                .map(|binding| value_from_serde(&binding))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("trigger_register", |args| async move {
-        let config = require_dict_arg(&args, 0, "trigger_register")?;
-        let spec = parse_trigger_config(config)?;
-        let id = dynamic_register(spec)
-            .await
-            .map_err(trigger_registry_error)?;
-        let binding =
-            resolve_live_trigger_binding(id.as_str(), None).map_err(trigger_registry_error)?;
-        Ok(value_from_serde(&binding.snapshot()))
-    });
-
-    vm.register_async_builtin("trigger_fire", |args| async move {
-        let (binding_id, binding_version) = trigger_handle_from_args(&args, "trigger_fire")?;
-        let raw_event = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("trigger_fire: missing trigger event".to_string()))?;
-        let event = parse_trigger_event(raw_event)?;
-        dispatch_trigger_event(binding_id, binding_version, event, None, None).await
-    });
-
-    vm.register_async_builtin("trigger_replay", |args| async move {
-        let event_id = args
-            .first()
-            .and_then(|value| match value {
-                VmValue::String(text) => Some(text.to_string()),
-                _ => None,
-            })
-            .ok_or_else(|| {
-                VmError::Runtime("trigger_replay: expected event id string".to_string())
-            })?;
-        replay_trigger_event(&event_id).await
-    });
-
-    vm.register_async_builtin("trigger_inspect_dlq", |_args| async move {
-        let entries = inspect_dlq_entries().await?;
-        Ok(VmValue::List(Rc::new(
-            entries
-                .into_iter()
-                .map(|entry| value_from_serde(&entry))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("trigger_inspect_lifecycle", |args| async move {
-        let kind = args.first().and_then(|value| match value {
-            VmValue::String(text) => Some(text.to_string()),
-            VmValue::Nil => None,
-            _ => None,
-        });
-        let entries = inspect_lifecycle_events(kind.as_deref()).await?;
-        Ok(VmValue::List(Rc::new(
-            entries
-                .into_iter()
-                .map(|entry| value_from_serde(&entry))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("trigger_inspect_action_graph", |args| async move {
-        let trace_id = args.first().and_then(|value| match value {
-            VmValue::String(text) => Some(text.to_string()),
-            VmValue::Nil => None,
-            _ => None,
-        });
-        let entries = inspect_action_graph_events(trace_id.as_deref()).await?;
-        Ok(VmValue::List(Rc::new(
-            entries
-                .into_iter()
-                .map(|entry| value_from_serde(&entry))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("trust_record", |args| async move {
-        append_trust_record_from_parts("trust_record", &args)
-            .await
-            .map(|record| value_from_serde(&record))
-    });
-
-    vm.register_async_builtin("trust_graph_record", |args| async move {
-        let decision = args.first().ok_or_else(|| {
-            VmError::Runtime("trust_graph_record: expected decision dict".to_string())
-        })?;
-        let record = append_trust_record_from_decision_for("trust_graph_record", decision).await?;
-        Ok(VmValue::String(Rc::from(record.record_id)))
-    });
-
-    vm.register_async_builtin("trust_query", |args| async move {
-        let filters = args
-            .first()
-            .map(parse_trust_query_filters)
-            .transpose()?
-            .unwrap_or_default();
-        let log = ensure_trigger_event_log();
-        let records = query_trust_records(&log, &filters)
-            .await
-            .map_err(|error| VmError::Runtime(format!("trust_query: {error}")))?;
-        if filters.grouped_by_trace {
-            return Ok(value_from_serde(&group_trust_records_by_trace(&records)));
-        }
-        Ok(VmValue::List(Rc::new(
-            records
-                .into_iter()
-                .map(|record| value_from_serde(&record))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("trust_graph_query", |args| async move {
-        let agent = required_string_arg(&args, 0, "trust_graph_query", "agent")?;
-        let action = optional_string_arg(&args, 1, "trust_graph_query", "action")?;
-        let log = ensure_trigger_event_log();
-        let score = trust_score_for(&log, &agent, action.as_deref())
-            .await
-            .map_err(|error| VmError::Runtime(format!("trust_graph_query: {error}")))?;
-        Ok(value_from_serde(&score))
-    });
-
-    vm.register_async_builtin("trust_graph_policy_for", |args| async move {
-        let agent = required_string_arg(&args, 0, "trust_graph_policy_for", "agent")?;
-        let log = ensure_trigger_event_log();
-        let policy = policy_for_agent(&log, &agent)
-            .await
-            .map_err(|error| VmError::Runtime(format!("trust_graph_policy_for: {error}")))?;
-        Ok(value_from_serde(&policy))
-    });
-
-    vm.register_async_builtin("trust_graph_verify_chain", |_args| async move {
-        let log = ensure_trigger_event_log();
-        let report = verify_trust_chain(&log)
-            .await
-            .map_err(|error| VmError::Runtime(format!("trust_graph_verify_chain: {error}")))?;
-        Ok(value_from_serde(&report))
-    });
-
-    vm.register_async_builtin("trust.query", |args| async move {
-        let filters = args
-            .first()
-            .map(parse_trust_query_filters)
-            .transpose()?
-            .unwrap_or_default();
-        let log = ensure_trigger_event_log();
-        let records = query_trust_graph_records(&log, &filters)
-            .await
-            .map_err(|error| VmError::Runtime(format!("trust.query: {error}")))?;
-        Ok(VmValue::List(Rc::new(
-            records
-                .into_iter()
-                .map(|record| value_from_serde(&record))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("trust.record", |args| async move {
-        let decision = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("trust.record: expected decision dict".to_string()))?;
-        let record = append_trust_record_from_decision_for("trust.record", decision).await?;
-        Ok(VmValue::String(Rc::from(record.record_id)))
-    });
-
-    vm.register_async_builtin("trust.score", |args| async move {
-        let agent = required_string_arg(&args, 0, "trust.score", "actor_id")?;
-        let action = optional_string_arg(&args, 1, "trust.score", "action")?;
-        let log = ensure_trigger_event_log();
-        let score = trust_score_for(&log, &agent, action.as_deref())
-            .await
-            .map_err(|error| VmError::Runtime(format!("trust.score: {error}")))?;
-        Ok(value_from_serde(&score))
-    });
-
-    vm.register_async_builtin("trust.policy_for", |args| async move {
-        let agent = required_string_arg(&args, 0, "trust.policy_for", "actor_id")?;
-        let log = ensure_trigger_event_log();
-        let policy = policy_for_agent(&log, &agent)
-            .await
-            .map_err(|error| VmError::Runtime(format!("trust.policy_for: {error}")))?;
-        Ok(value_from_serde(&policy))
-    });
-
-    vm.register_async_builtin("trust.verify_chain", |_args| async move {
-        let log = ensure_trigger_event_log();
-        let report = verify_trust_chain(&log)
-            .await
-            .map_err(|error| VmError::Runtime(format!("trust.verify_chain: {error}")))?;
-        Ok(value_from_serde(&report))
-    });
-
-    vm.register_async_builtin("correction_record", |args| async move {
-        let value = args.first().ok_or_else(|| {
-            VmError::Runtime("correction_record: expected correction dict".to_string())
-        })?;
-        let record = correction_record_from_value("correction_record", value)?;
-        let log = ensure_trigger_event_log();
-        let record = crate::append_correction_record(&log, &record)
-            .await
-            .map_err(|error| VmError::Runtime(format!("correction_record: {error}")))?;
-        Ok(value_from_serde(&record))
-    });
-
-    vm.register_async_builtin("correction_query", |args| async move {
-        let filters = args
-            .first()
-            .map(|value| correction_query_filters_from_value("correction_query", value))
-            .transpose()?
-            .unwrap_or_default();
-        let log = ensure_trigger_event_log();
-        let records = crate::query_correction_records(&log, &filters)
-            .await
-            .map_err(|error| VmError::Runtime(format!("correction_query: {error}")))?;
-        Ok(VmValue::List(Rc::new(
-            records
-                .into_iter()
-                .map(|record| value_from_serde(&record))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("corrections.record", |args| async move {
-        let value = args.first().ok_or_else(|| {
-            VmError::Runtime("corrections.record: expected correction dict".to_string())
-        })?;
-        let record = correction_record_from_value("corrections.record", value)?;
-        let log = ensure_trigger_event_log();
-        let record = crate::append_correction_record(&log, &record)
-            .await
-            .map_err(|error| VmError::Runtime(format!("corrections.record: {error}")))?;
-        Ok(VmValue::String(Rc::from(record.correction_id)))
-    });
-
-    vm.register_async_builtin("corrections.query", |args| async move {
-        let filters = args
-            .first()
-            .map(|value| correction_query_filters_from_value("corrections.query", value))
-            .transpose()?
-            .unwrap_or_default();
-        let log = ensure_trigger_event_log();
-        let records = crate::query_correction_records(&log, &filters)
-            .await
-            .map_err(|error| VmError::Runtime(format!("corrections.query: {error}")))?;
-        Ok(VmValue::List(Rc::new(
-            records
-                .into_iter()
-                .map(|record| value_from_serde(&record))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("webhook_intake_register", |args| async move {
-        let config = require_dict_arg(&args, 0, "webhook_intake_register")?;
-        let parsed = parse_webhook_intake_config(config)?;
-        let snapshot = register_webhook_intake(parsed).map_err(webhook_intake_error)?;
-        Ok(value_from_serde(&snapshot))
-    });
-
-    vm.register_async_builtin("webhook_intake_feed", |args| async move {
-        let intake_id = required_string_arg(&args, 0, "webhook_intake_feed", "intake_id")?;
-        let request_dict = require_dict_arg(&args, 1, "webhook_intake_feed")?;
-        let request = parse_webhook_intake_request(request_dict)?;
-        let outcome = feed_webhook_intake(&intake_id, request)
-            .await
-            .map_err(webhook_intake_error)?;
-        Ok(value_from_serde(&outcome))
-    });
-
-    vm.register_async_builtin("webhook_intake_deregister", |args| async move {
-        let intake_id = required_string_arg(&args, 0, "webhook_intake_deregister", "intake_id")?;
-        Ok(VmValue::Bool(deregister_webhook_intake(&intake_id)))
-    });
-
-    vm.register_builtin("webhook_intake_list", |_args, _out| {
-        Ok(VmValue::List(Rc::new(
-            snapshot_webhook_intakes()
-                .into_iter()
-                .map(|snapshot| value_from_serde(&snapshot))
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("webhook_intake_recent", |args| async move {
-        let intake_id = required_string_arg(&args, 0, "webhook_intake_recent", "intake_id")?;
-        let limit = match args.get(1) {
-            Some(VmValue::Int(value)) if *value >= 0 => *value as usize,
-            Some(VmValue::Nil) | None => 32,
-            Some(other) => {
-                return Err(VmError::Runtime(format!(
-                    "webhook_intake_recent: limit must be a non-negative int, got {}",
-                    other.type_name()
-                )))
-            }
-        };
-        let entries = recent_webhook_deliveries(&intake_id, limit)
-            .await
-            .map_err(webhook_intake_error)?;
-        Ok(VmValue::List(Rc::new(
-            entries
-                .iter()
-                .map(crate::stdlib::json_to_vm_value)
-                .collect(),
-        )))
-    });
-
-    vm.register_async_builtin("trigger_test_harness", |args| async move {
-        let fixture = match args.first() {
-            Some(VmValue::String(text)) => text.to_string(),
-            Some(VmValue::Dict(map)) => required_string(map, "fixture", "trigger_test_harness")?,
-            Some(other) => {
-                return Err(VmError::Runtime(format!(
-                    "trigger_test_harness: expected fixture string or dict, got {}",
-                    other.type_name()
-                )))
-            }
-            None => {
-                return Err(VmError::Runtime(
-                    "trigger_test_harness: missing fixture name".to_string(),
-                ))
-            }
-        };
-        let result = run_trigger_harness_fixture(&fixture)
-            .await
-            .map_err(|error| VmError::Runtime(format!("trigger_test_harness: {error}")))?;
-        Ok(value_from_serde(&result))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(sig = "handler_context() -> dict | nil", category = "triggers")]
+fn handler_context_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(context) = current_dispatch_context() else {
+        return Ok(VmValue::Nil);
+    };
+    Ok(value_from_serde(&serde_json::json!({
+        "agent": context.agent_id,
+        "action": context.action,
+        "trace_id": context.trigger_event.trace_id.0,
+        "replay_of_event_id": context.replay_of_event_id,
+        "autonomy_tier": context.autonomy_tier,
+        "trigger_event": context.trigger_event,
+    })))
+}
+
+#[harn_builtin(sig = "list_providers_native() -> list", category = "triggers")]
+fn list_providers_native_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::List(Rc::new(
+        registered_provider_metadata()
+            .into_iter()
+            .map(|provider| value_from_serde(&provider))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(sig = "trigger_list(...args: any) -> list", category = "triggers")]
+fn trigger_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::List(Rc::new(
+        snapshot_trigger_bindings()
+            .into_iter()
+            .map(|binding| value_from_serde(&binding))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "trigger_register(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trigger_register_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let config = require_dict_arg(&args, 0, "trigger_register")?;
+    let spec = parse_trigger_config(config)?;
+    let id = dynamic_register(spec)
+        .await
+        .map_err(trigger_registry_error)?;
+    let binding =
+        resolve_live_trigger_binding(id.as_str(), None).map_err(trigger_registry_error)?;
+    Ok(value_from_serde(&binding.snapshot()))
+}
+
+#[harn_builtin(
+    sig = "trigger_fire(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trigger_fire_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let (binding_id, binding_version) = trigger_handle_from_args(&args, "trigger_fire")?;
+    let raw_event = args
+        .get(1)
+        .ok_or_else(|| VmError::Runtime("trigger_fire: missing trigger event".to_string()))?;
+    let event = parse_trigger_event(raw_event)?;
+    dispatch_trigger_event(binding_id, binding_version, event, None, None).await
+}
+
+#[harn_builtin(
+    sig = "trigger_replay(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trigger_replay_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let event_id = args
+        .first()
+        .and_then(|value| match value {
+            VmValue::String(text) => Some(text.to_string()),
+            _ => None,
+        })
+        .ok_or_else(|| VmError::Runtime("trigger_replay: expected event id string".to_string()))?;
+    replay_trigger_event(&event_id).await
+}
+
+#[harn_builtin(
+    sig = "trigger_inspect_dlq(...args: any) -> list",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trigger_inspect_dlq_impl(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let entries = inspect_dlq_entries().await?;
+    Ok(VmValue::List(Rc::new(
+        entries
+            .into_iter()
+            .map(|entry| value_from_serde(&entry))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "trigger_inspect_lifecycle(...args: any) -> list",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trigger_inspect_lifecycle_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let kind = args.first().and_then(|value| match value {
+        VmValue::String(text) => Some(text.to_string()),
+        VmValue::Nil => None,
+        _ => None,
+    });
+    let entries = inspect_lifecycle_events(kind.as_deref()).await?;
+    Ok(VmValue::List(Rc::new(
+        entries
+            .into_iter()
+            .map(|entry| value_from_serde(&entry))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "trigger_inspect_action_graph(...args: any) -> list",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trigger_inspect_action_graph_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let trace_id = args.first().and_then(|value| match value {
+        VmValue::String(text) => Some(text.to_string()),
+        VmValue::Nil => None,
+        _ => None,
+    });
+    let entries = inspect_action_graph_events(trace_id.as_deref()).await?;
+    Ok(VmValue::List(Rc::new(
+        entries
+            .into_iter()
+            .map(|entry| value_from_serde(&entry))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "trust_record(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    append_trust_record_from_parts("trust_record", &args)
+        .await
+        .map(|record| value_from_serde(&record))
+}
+
+#[harn_builtin(
+    sig = "trust_graph_record(...args: any) -> string",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_graph_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let decision = args.first().ok_or_else(|| {
+        VmError::Runtime("trust_graph_record: expected decision dict".to_string())
+    })?;
+    let record = append_trust_record_from_decision_for("trust_graph_record", decision).await?;
+    Ok(VmValue::String(Rc::from(record.record_id)))
+}
+
+#[harn_builtin(
+    sig = "trust_query(...args: any) -> list",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let filters = args
+        .first()
+        .map(parse_trust_query_filters)
+        .transpose()?
+        .unwrap_or_default();
+    let log = ensure_trigger_event_log();
+    let records = query_trust_records(&log, &filters)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trust_query: {error}")))?;
+    if filters.grouped_by_trace {
+        return Ok(value_from_serde(&group_trust_records_by_trace(&records)));
+    }
+    Ok(VmValue::List(Rc::new(
+        records
+            .into_iter()
+            .map(|record| value_from_serde(&record))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "trust_graph_query(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_graph_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let agent = required_string_arg(&args, 0, "trust_graph_query", "agent")?;
+    let action = optional_string_arg(&args, 1, "trust_graph_query", "action")?;
+    let log = ensure_trigger_event_log();
+    let score = trust_score_for(&log, &agent, action.as_deref())
+        .await
+        .map_err(|error| VmError::Runtime(format!("trust_graph_query: {error}")))?;
+    Ok(value_from_serde(&score))
+}
+
+#[harn_builtin(
+    sig = "trust_graph_policy_for(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_graph_policy_for_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let agent = required_string_arg(&args, 0, "trust_graph_policy_for", "agent")?;
+    let log = ensure_trigger_event_log();
+    let policy = policy_for_agent(&log, &agent)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trust_graph_policy_for: {error}")))?;
+    Ok(value_from_serde(&policy))
+}
+
+#[harn_builtin(
+    sig = "trust_graph_verify_chain(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_graph_verify_chain_impl(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let log = ensure_trigger_event_log();
+    let report = verify_trust_chain(&log)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trust_graph_verify_chain: {error}")))?;
+    Ok(value_from_serde(&report))
+}
+
+#[harn_builtin(
+    sig = "trust.query(...args: any) -> list",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_query_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let filters = args
+        .first()
+        .map(parse_trust_query_filters)
+        .transpose()?
+        .unwrap_or_default();
+    let log = ensure_trigger_event_log();
+    let records = query_trust_graph_records(&log, &filters)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trust.query: {error}")))?;
+    Ok(VmValue::List(Rc::new(
+        records
+            .into_iter()
+            .map(|record| value_from_serde(&record))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "trust.record(...args: any) -> string",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_record_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let decision = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("trust.record: expected decision dict".to_string()))?;
+    let record = append_trust_record_from_decision_for("trust.record", decision).await?;
+    Ok(VmValue::String(Rc::from(record.record_id)))
+}
+
+#[harn_builtin(
+    sig = "trust.score(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_score_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let agent = required_string_arg(&args, 0, "trust.score", "actor_id")?;
+    let action = optional_string_arg(&args, 1, "trust.score", "action")?;
+    let log = ensure_trigger_event_log();
+    let score = trust_score_for(&log, &agent, action.as_deref())
+        .await
+        .map_err(|error| VmError::Runtime(format!("trust.score: {error}")))?;
+    Ok(value_from_serde(&score))
+}
+
+#[harn_builtin(
+    sig = "trust.policy_for(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_policy_for_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let agent = required_string_arg(&args, 0, "trust.policy_for", "actor_id")?;
+    let log = ensure_trigger_event_log();
+    let policy = policy_for_agent(&log, &agent)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trust.policy_for: {error}")))?;
+    Ok(value_from_serde(&policy))
+}
+
+#[harn_builtin(
+    sig = "trust.verify_chain(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trust_verify_chain_ns_impl(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let log = ensure_trigger_event_log();
+    let report = verify_trust_chain(&log)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trust.verify_chain: {error}")))?;
+    Ok(value_from_serde(&report))
+}
+
+#[harn_builtin(
+    sig = "correction_record(correction: dict) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn correction_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let value = args.first().ok_or_else(|| {
+        VmError::Runtime("correction_record: expected correction dict".to_string())
+    })?;
+    let record = correction_record_from_value("correction_record", value)?;
+    let log = ensure_trigger_event_log();
+    let record = crate::append_correction_record(&log, &record)
+        .await
+        .map_err(|error| VmError::Runtime(format!("correction_record: {error}")))?;
+    Ok(value_from_serde(&record))
+}
+
+#[harn_builtin(
+    sig = "correction_query(filters?: dict) -> list",
+    kind = "async",
+    category = "triggers"
+)]
+async fn correction_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let filters = args
+        .first()
+        .map(|value| correction_query_filters_from_value("correction_query", value))
+        .transpose()?
+        .unwrap_or_default();
+    let log = ensure_trigger_event_log();
+    let records = crate::query_correction_records(&log, &filters)
+        .await
+        .map_err(|error| VmError::Runtime(format!("correction_query: {error}")))?;
+    Ok(VmValue::List(Rc::new(
+        records
+            .into_iter()
+            .map(|record| value_from_serde(&record))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "corrections.record(correction: dict) -> string",
+    kind = "async",
+    category = "triggers"
+)]
+async fn corrections_record_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let value = args.first().ok_or_else(|| {
+        VmError::Runtime("corrections.record: expected correction dict".to_string())
+    })?;
+    let record = correction_record_from_value("corrections.record", value)?;
+    let log = ensure_trigger_event_log();
+    let record = crate::append_correction_record(&log, &record)
+        .await
+        .map_err(|error| VmError::Runtime(format!("corrections.record: {error}")))?;
+    Ok(VmValue::String(Rc::from(record.correction_id)))
+}
+
+#[harn_builtin(
+    sig = "corrections.query(filters?: dict) -> list",
+    kind = "async",
+    category = "triggers"
+)]
+async fn corrections_query_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let filters = args
+        .first()
+        .map(|value| correction_query_filters_from_value("corrections.query", value))
+        .transpose()?
+        .unwrap_or_default();
+    let log = ensure_trigger_event_log();
+    let records = crate::query_correction_records(&log, &filters)
+        .await
+        .map_err(|error| VmError::Runtime(format!("corrections.query: {error}")))?;
+    Ok(VmValue::List(Rc::new(
+        records
+            .into_iter()
+            .map(|record| value_from_serde(&record))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "webhook_intake_register(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn webhook_intake_register_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let config = require_dict_arg(&args, 0, "webhook_intake_register")?;
+    let parsed = parse_webhook_intake_config(config)?;
+    let snapshot = register_webhook_intake(parsed).map_err(webhook_intake_error)?;
+    Ok(value_from_serde(&snapshot))
+}
+
+#[harn_builtin(
+    sig = "webhook_intake_feed(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn webhook_intake_feed_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let intake_id = required_string_arg(&args, 0, "webhook_intake_feed", "intake_id")?;
+    let request_dict = require_dict_arg(&args, 1, "webhook_intake_feed")?;
+    let request = parse_webhook_intake_request(request_dict)?;
+    let outcome = feed_webhook_intake(&intake_id, request)
+        .await
+        .map_err(webhook_intake_error)?;
+    Ok(value_from_serde(&outcome))
+}
+
+#[harn_builtin(
+    sig = "webhook_intake_deregister(...args: any) -> bool",
+    kind = "async",
+    category = "triggers"
+)]
+async fn webhook_intake_deregister_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let intake_id = required_string_arg(&args, 0, "webhook_intake_deregister", "intake_id")?;
+    Ok(VmValue::Bool(deregister_webhook_intake(&intake_id)))
+}
+
+#[harn_builtin(
+    sig = "webhook_intake_list(...args: any) -> list",
+    category = "triggers"
+)]
+fn webhook_intake_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::List(Rc::new(
+        snapshot_webhook_intakes()
+            .into_iter()
+            .map(|snapshot| value_from_serde(&snapshot))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "webhook_intake_recent(...args: any) -> list",
+    kind = "async",
+    category = "triggers"
+)]
+async fn webhook_intake_recent_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let intake_id = required_string_arg(&args, 0, "webhook_intake_recent", "intake_id")?;
+    let limit = match args.get(1) {
+        Some(VmValue::Int(value)) if *value >= 0 => *value as usize,
+        Some(VmValue::Nil) | None => 32,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "webhook_intake_recent: limit must be a non-negative int, got {}",
+                other.type_name()
+            )))
+        }
+    };
+    let entries = recent_webhook_deliveries(&intake_id, limit)
+        .await
+        .map_err(webhook_intake_error)?;
+    Ok(VmValue::List(Rc::new(
+        entries
+            .iter()
+            .map(crate::stdlib::json_to_vm_value)
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "trigger_test_harness(...args: any) -> dict",
+    kind = "async",
+    category = "triggers"
+)]
+async fn trigger_test_harness_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let fixture = match args.first() {
+        Some(VmValue::String(text)) => text.to_string(),
+        Some(VmValue::Dict(map)) => required_string(map, "fixture", "trigger_test_harness")?,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "trigger_test_harness: expected fixture string or dict, got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "trigger_test_harness: missing fixture name".to_string(),
+            ))
+        }
+    };
+    let result = run_trigger_harness_fixture(&fixture)
+        .await
+        .map_err(|error| VmError::Runtime(format!("trigger_test_harness: {error}")))?;
+    Ok(value_from_serde(&result))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &HANDLER_CONTEXT_IMPL_DEF,
+    &LIST_PROVIDERS_NATIVE_IMPL_DEF,
+    &TRIGGER_LIST_IMPL_DEF,
+    &TRIGGER_REGISTER_IMPL_DEF,
+    &TRIGGER_FIRE_IMPL_DEF,
+    &TRIGGER_REPLAY_IMPL_DEF,
+    &TRIGGER_INSPECT_DLQ_IMPL_DEF,
+    &TRIGGER_INSPECT_LIFECYCLE_IMPL_DEF,
+    &TRIGGER_INSPECT_ACTION_GRAPH_IMPL_DEF,
+    &TRUST_RECORD_IMPL_DEF,
+    &TRUST_GRAPH_RECORD_IMPL_DEF,
+    &TRUST_QUERY_IMPL_DEF,
+    &TRUST_GRAPH_QUERY_IMPL_DEF,
+    &TRUST_GRAPH_POLICY_FOR_IMPL_DEF,
+    &TRUST_GRAPH_VERIFY_CHAIN_IMPL_DEF,
+    &TRUST_QUERY_NS_IMPL_DEF,
+    &TRUST_RECORD_NS_IMPL_DEF,
+    &TRUST_SCORE_NS_IMPL_DEF,
+    &TRUST_POLICY_FOR_NS_IMPL_DEF,
+    &TRUST_VERIFY_CHAIN_NS_IMPL_DEF,
+    &CORRECTION_RECORD_IMPL_DEF,
+    &CORRECTION_QUERY_IMPL_DEF,
+    &CORRECTIONS_RECORD_NS_IMPL_DEF,
+    &CORRECTIONS_QUERY_NS_IMPL_DEF,
+    &WEBHOOK_INTAKE_REGISTER_IMPL_DEF,
+    &WEBHOOK_INTAKE_FEED_IMPL_DEF,
+    &WEBHOOK_INTAKE_DEREGISTER_IMPL_DEF,
+    &WEBHOOK_INTAKE_LIST_IMPL_DEF,
+    &WEBHOOK_INTAKE_RECENT_IMPL_DEF,
+    &TRIGGER_TEST_HARNESS_IMPL_DEF,
+];
 
 fn register_trust_namespace(vm: &mut Vm) {
     let names = ["query", "record", "score", "policy_for", "verify_chain"];

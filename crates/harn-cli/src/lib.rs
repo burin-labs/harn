@@ -53,6 +53,13 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 pub fn run() {
     install_broken_pipe_panic_hook();
 
+    // Install the macro-emitted builtin signature slice into the parser
+    // registry BEFORE any script gets parsed. Without this, the typechecker
+    // falls back to the legacy static tables, which are missing the
+    // signatures for `#[harn_builtin]`-migrated entries (deep_clone,
+    // deep_merge, unique, dict_from_pairs, …).
+    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+
     let handle = thread::Builder::new()
         .name("harn-cli".to_string())
         .stack_size(CLI_RUNTIME_STACK_SIZE)

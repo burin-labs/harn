@@ -12,147 +12,185 @@ use crate::connectors::{
 use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
 use crate::secrets::{SecretId, SecretVersion};
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_connector_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("connector_call", |args| async move {
-        let provider = required_string_arg(&args, 0, "connector_call", "provider")?;
-        let method = required_string_arg(&args, 1, "connector_call", "method")?;
-        let params = match args.get(2) {
-            Some(VmValue::Dict(dict)) => vm_value_to_json(&VmValue::Dict(dict.clone())),
-            Some(value) if !matches!(value, VmValue::Nil) => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "connector_call: params must be a dict when provided",
-                ))));
-            }
-            _ => vm_value_to_json(&VmValue::Dict(Rc::new(BTreeMap::new()))),
-        };
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-        let client = active_connector_client(&provider).ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "connector_call: connector `{provider}` is not active"
-            ))))
-        })?;
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &CONNECTOR_CALL_IMPL_DEF,
+    &SECRET_GET_IMPL_DEF,
+    &EVENT_LOG_EMIT_IMPL_DEF,
+    &METRICS_INC_IMPL_DEF,
+    &CONNECTOR_SHARED_VERIFY_JWT_INLINE_IMPL_DEF,
+];
 
-        let result = client
-            .call(&method, params)
-            .await
-            .map_err(client_error_to_vm)?;
-        Ok(json_result_to_vm_value(&result))
-    });
+#[harn_builtin(
+    sig = "connector_call(provider: string, method: string, params?: dict) -> any",
+    kind = "async",
+    category = "connectors"
+)]
+async fn connector_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let provider = required_string_arg(&args, 0, "connector_call", "provider")?;
+    let method = required_string_arg(&args, 1, "connector_call", "method")?;
+    let params = match args.get(2) {
+        Some(VmValue::Dict(dict)) => vm_value_to_json(&VmValue::Dict(dict.clone())),
+        Some(value) if !matches!(value, VmValue::Nil) => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "connector_call: params must be a dict when provided",
+            ))));
+        }
+        _ => vm_value_to_json(&VmValue::Dict(Rc::new(BTreeMap::new()))),
+    };
 
-    vm.register_async_builtin("secret_get", |args| async move {
-        let raw = required_string_arg(&args, 0, "secret_get", "secret_id")?;
-        let ctx = active_harn_connector_ctx().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "secret_get: no active Harn connector context",
-            )))
-        })?;
-        let secret_id = parse_secret_id(raw.as_str()).ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "secret_get: expected secret id in namespace/name or namespace/name@version form",
-            )))
-        })?;
-        let secret = ctx.secrets.get(&secret_id).await.map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!("secret_get: {error}"))))
-        })?;
-        secret.with_exposed(|bytes| {
-            std::str::from_utf8(bytes)
-                .map(|value| VmValue::String(Rc::from(value.to_string())))
-                .map_err(|error| {
-                    VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "secret_get: secret '{secret_id}' is not valid UTF-8: {error}"
-                    ))))
-                })
-        })
-    });
+    let client = active_connector_client(&provider).ok_or_else(|| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "connector_call: connector `{provider}` is not active"
+        ))))
+    })?;
 
-    vm.register_async_builtin("event_log_emit", |args| async move {
-        let topic_name = required_string_arg(&args, 0, "event_log_emit", "topic")?;
-        let kind = required_string_arg(&args, 1, "event_log_emit", "kind")?;
-        let payload = args
-            .get(2)
-            .map(vm_value_to_json)
-            .unwrap_or(serde_json::Value::Null);
-        let headers = optional_headers_arg(&args, 3, "event_log_emit")?;
-        let ctx = active_harn_connector_ctx().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "event_log_emit: no active Harn connector context",
-            )))
-        })?;
-        let topic = Topic::new(topic_name).map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "event_log_emit: invalid topic: {error}"
-            ))))
-        })?;
-        let event_id = ctx
-            .event_log
-            .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
-            .await
+    let result = client
+        .call(&method, params)
+        .await
+        .map_err(client_error_to_vm)?;
+    Ok(json_result_to_vm_value(&result))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("secret_get", &[Param::new("args", TY_ANY)], TY_ANY),
+    kind = "async",
+    category = "connectors"
+)]
+async fn secret_get_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let raw = required_string_arg(&args, 0, "secret_get", "secret_id")?;
+    let ctx = active_harn_connector_ctx().ok_or_else(|| {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "secret_get: no active Harn connector context",
+        )))
+    })?;
+    let secret_id = parse_secret_id(raw.as_str()).ok_or_else(|| {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "secret_get: expected secret id in namespace/name or namespace/name@version form",
+        )))
+    })?;
+    let secret = ctx.secrets.get(&secret_id).await.map_err(|error| {
+        VmError::Thrown(VmValue::String(Rc::from(format!("secret_get: {error}"))))
+    })?;
+    secret.with_exposed(|bytes| {
+        std::str::from_utf8(bytes)
+            .map(|value| VmValue::String(Rc::from(value.to_string())))
             .map_err(|error| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "event_log_emit: {error}"
+                    "secret_get: secret '{secret_id}' is not valid UTF-8: {error}"
                 ))))
-            })?;
-        Ok(VmValue::Int(event_id as i64))
-    });
+            })
+    })
+}
 
-    vm.register_async_builtin("metrics_inc", |args| async move {
-        let name = required_string_arg(&args, 0, "metrics_inc", "name")?;
-        let amount = match args.get(1) {
-            Some(VmValue::Int(value)) => *value,
-            Some(VmValue::Float(value)) => *value as i64,
-            Some(value) if !matches!(value, VmValue::Nil) => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "metrics_inc: amount must be numeric, got {}",
-                    value.type_name()
-                )))));
-            }
-            _ => 1,
-        };
-        let ctx = active_harn_connector_ctx().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "metrics_inc: no active Harn connector context",
-            )))
-        })?;
-        ctx.metrics
-            .record_custom_counter(name.as_str(), amount.max(0) as u64);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_async_builtin("connector_shared_verify_jwt_inline", |args| async move {
-        let token = required_string_arg(&args, 0, "connector_shared_verify_jwt_inline", "token")?;
-        let jwks = required_json_arg(&args, 1, "connector_shared_verify_jwt_inline", "jwks")?;
-        let options = optional_json_arg(&args, 2, "connector_shared_verify_jwt_inline")?;
-        let jwks: JwkSet = serde_json::from_value(jwks).map_err(|error| {
+#[harn_builtin(
+    sig = "event_log_emit(topic: string, kind: string, payload?: any, headers?: dict) -> int",
+    kind = "async",
+    category = "connectors"
+)]
+async fn event_log_emit_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let topic_name = required_string_arg(&args, 0, "event_log_emit", "topic")?;
+    let kind = required_string_arg(&args, 1, "event_log_emit", "kind")?;
+    let payload = args
+        .get(2)
+        .map(vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let headers = optional_headers_arg(&args, 3, "event_log_emit")?;
+    let ctx = active_harn_connector_ctx().ok_or_else(|| {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "event_log_emit: no active Harn connector context",
+        )))
+    })?;
+    let topic = Topic::new(topic_name).map_err(|error| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "event_log_emit: invalid topic: {error}"
+        ))))
+    })?;
+    let event_id = ctx
+        .event_log
+        .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
+        .await
+        .map_err(|error| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
-                "connector_shared_verify_jwt_inline: invalid JWKS: {error}"
+                "event_log_emit: {error}"
             ))))
         })?;
-        let verify_options = jwt_verify_options(&options)?;
-        let http = reqwest::Client::new();
-        let result = crate::connectors::shared::verify_jwt_json(
-            &http,
-            &token,
-            JwtKeySource::Inline(&jwks),
-            &verify_options,
-        )
-        .await;
-        let value = match result {
-            Ok(claims) => serde_json::json!({
-                "ok": true,
-                "claims": claims,
-                "error": null,
-            }),
-            Err(error) => serde_json::json!({
-                "ok": false,
-                "claims": null,
-                "error": error.to_string(),
-            }),
-        };
-        Ok(json_result_to_vm_value(&value))
-    });
+    Ok(VmValue::Int(event_id as i64))
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("metrics_inc", &[Param::new("args", TY_ANY)], TY_ANY),
+    kind = "async",
+    category = "connectors"
+)]
+async fn metrics_inc_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let name = required_string_arg(&args, 0, "metrics_inc", "name")?;
+    let amount = match args.get(1) {
+        Some(VmValue::Int(value)) => *value,
+        Some(VmValue::Float(value)) => *value as i64,
+        Some(value) if !matches!(value, VmValue::Nil) => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "metrics_inc: amount must be numeric, got {}",
+                value.type_name()
+            )))));
+        }
+        _ => 1,
+    };
+    let ctx = active_harn_connector_ctx().ok_or_else(|| {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "metrics_inc: no active Harn connector context",
+        )))
+    })?;
+    ctx.metrics
+        .record_custom_counter(name.as_str(), amount.max(0) as u64);
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "connector_shared_verify_jwt_inline(token: string, jwks: dict, options?: dict) -> dict",
+    kind = "async",
+    category = "connectors"
+)]
+async fn connector_shared_verify_jwt_inline_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let token = required_string_arg(&args, 0, "connector_shared_verify_jwt_inline", "token")?;
+    let jwks = required_json_arg(&args, 1, "connector_shared_verify_jwt_inline", "jwks")?;
+    let options = optional_json_arg(&args, 2, "connector_shared_verify_jwt_inline")?;
+    let jwks: JwkSet = serde_json::from_value(jwks).map_err(|error| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "connector_shared_verify_jwt_inline: invalid JWKS: {error}"
+        ))))
+    })?;
+    let verify_options = jwt_verify_options(&options)?;
+    let http = reqwest::Client::new();
+    let result = crate::connectors::shared::verify_jwt_json(
+        &http,
+        &token,
+        JwtKeySource::Inline(&jwks),
+        &verify_options,
+    )
+    .await;
+    let value = match result {
+        Ok(claims) => serde_json::json!({
+            "ok": true,
+            "claims": claims,
+            "error": null,
+        }),
+        Err(error) => serde_json::json!({
+            "ok": false,
+            "claims": null,
+            "error": error.to_string(),
+        }),
+    };
+    Ok(json_result_to_vm_value(&value))
 }
 
 fn required_string_arg(
