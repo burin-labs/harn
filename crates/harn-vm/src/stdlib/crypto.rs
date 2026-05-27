@@ -1043,7 +1043,7 @@ fn jwt_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 #[harn_builtin(
-    sig = "signed_url(base: string, claims: dict, secret: string, expires_at: int, options?: dict) -> string",
+    sig = "signed_url(base: string?, claims: dict, secret: string?, expires_at: number, options?: dict) -> string",
     category = "crypto"
 )]
 fn signed_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -1051,7 +1051,7 @@ fn signed_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    sig = "verify_signed_url(url: string, secret_or_keys: string | dict, now: int, options?: dict) -> dict",
+    sig = "verify_signed_url(url: string?, secret_or_keys: string | dict, now: number, options?: dict) -> dict",
     category = "crypto"
 )]
 fn verify_signed_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
