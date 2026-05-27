@@ -6,6 +6,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -261,7 +262,11 @@ fn entry_value(fields: BTreeMap<String, VmValue>) -> VmValue {
     VmValue::Dict(Rc::new(fields))
 }
 
-fn gzip_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "gzip_encode(input: bytes | string, level?: int) -> bytes",
+    category = "compression"
+)]
+fn gzip_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes_or_string(args, 0, "gzip_encode")?;
     let level = expect_level(args, 1, DEFAULT_GZIP_LEVEL, 0..=9, "gzip_encode", "level")?;
     let mut encoder: GzEncoder<Vec<u8>> = GzBuilder::new()
@@ -276,7 +281,11 @@ fn gzip_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         .map_err(|error| builtin_error("gzip_encode", error))
 }
 
-fn gzip_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "gzip_decode(input: bytes, options?: dict) -> bytes",
+    category = "compression"
+)]
+fn gzip_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "gzip_decode")?;
     let cap = decompress_cap(args, 1, "gzip_decode")?;
     let mut decoder = GzDecoder::new(input);
@@ -284,7 +293,11 @@ fn gzip_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(bytes_value(output))
 }
 
-fn zstd_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "zstd_encode(input: bytes | string, level?: int) -> bytes",
+    category = "compression"
+)]
+fn zstd_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes_or_string(args, 0, "zstd_encode")?;
     let level_range = zstd::compression_level_range();
     let level = expect_level(
@@ -300,7 +313,11 @@ fn zstd_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         .map_err(|error| builtin_error("zstd_encode", error))
 }
 
-fn zstd_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "zstd_decode(input: bytes, options?: dict) -> bytes",
+    category = "compression"
+)]
+fn zstd_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "zstd_decode")?;
     let cap = decompress_cap(args, 1, "zstd_decode")?;
     let mut decoder = zstd::stream::Decoder::new(Cursor::new(input))
@@ -309,7 +326,11 @@ fn zstd_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(bytes_value(output))
 }
 
-fn brotli_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "brotli_encode(input: bytes | string, quality?: int) -> bytes",
+    category = "compression"
+)]
+fn brotli_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes_or_string(args, 0, "brotli_encode")?;
     let quality = expect_level(
         args,
@@ -327,7 +348,11 @@ fn brotli_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(bytes_value(output))
 }
 
-fn brotli_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "brotli_decode(input: bytes, options?: dict) -> bytes",
+    category = "compression"
+)]
+fn brotli_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "brotli_decode")?;
     let cap = decompress_cap(args, 1, "brotli_decode")?;
     let mut reader = brotli::Decompressor::new(Cursor::new(input), 4096);
@@ -335,7 +360,8 @@ fn brotli_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(bytes_value(output))
 }
 
-fn tar_create_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(sig = "tar_create(entries: list) -> bytes", category = "compression")]
+fn tar_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let entries = expect_entries(args, "tar_create")?;
     let mut output = Vec::new();
     {
@@ -369,7 +395,11 @@ fn tar_create_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(bytes_value(output))
 }
 
-fn tar_extract_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "tar_extract(input: bytes, options?: dict) -> list",
+    category = "compression"
+)]
+fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "tar_extract")?;
     let cap = decompress_cap(args, 1, "tar_extract")?;
     let mut archive = tar::Archive::new(Cursor::new(input));
@@ -426,7 +456,8 @@ fn tar_extract_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(VmValue::List(Rc::new(output)))
 }
 
-fn zip_create_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(sig = "zip_create(entries: list) -> bytes", category = "compression")]
+fn zip_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let entries = expect_entries(args, "zip_create")?;
     let cursor = Cursor::new(Vec::new());
     let mut writer = zip::ZipWriter::new(cursor);
@@ -450,7 +481,11 @@ fn zip_create_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(bytes_value(cursor.into_inner()))
 }
 
-fn zip_extract_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "zip_extract(input: bytes, options?: dict) -> list",
+    category = "compression"
+)]
+fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "zip_extract")?;
     let cap = decompress_cap(args, 1, "zip_extract")?;
     let cursor = Cursor::new(input);
@@ -494,17 +529,23 @@ fn zip_extract_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 }
 
 pub(crate) fn register_compression_builtins(vm: &mut Vm) {
-    vm.register_builtin("gzip_encode", |args, _out| gzip_encode_builtin(args));
-    vm.register_builtin("gzip_decode", |args, _out| gzip_decode_builtin(args));
-    vm.register_builtin("zstd_encode", |args, _out| zstd_encode_builtin(args));
-    vm.register_builtin("zstd_decode", |args, _out| zstd_decode_builtin(args));
-    vm.register_builtin("brotli_encode", |args, _out| brotli_encode_builtin(args));
-    vm.register_builtin("brotli_decode", |args, _out| brotli_decode_builtin(args));
-    vm.register_builtin("tar_create", |args, _out| tar_create_builtin(args));
-    vm.register_builtin("tar_extract", |args, _out| tar_extract_builtin(args));
-    vm.register_builtin("zip_create", |args, _out| zip_create_builtin(args));
-    vm.register_builtin("zip_extract", |args, _out| zip_extract_builtin(args));
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &GZIP_ENCODE_BUILTIN_DEF,
+    &GZIP_DECODE_BUILTIN_DEF,
+    &ZSTD_ENCODE_BUILTIN_DEF,
+    &ZSTD_DECODE_BUILTIN_DEF,
+    &BROTLI_ENCODE_BUILTIN_DEF,
+    &BROTLI_DECODE_BUILTIN_DEF,
+    &TAR_CREATE_BUILTIN_DEF,
+    &TAR_EXTRACT_BUILTIN_DEF,
+    &ZIP_CREATE_BUILTIN_DEF,
+    &ZIP_EXTRACT_BUILTIN_DEF,
+];
 
 #[cfg(test)]
 mod tests {

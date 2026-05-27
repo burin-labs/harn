@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -53,91 +54,132 @@ fn expect_int(args: &[VmValue], index: usize, builtin: &str) -> Result<i64, VmEr
 }
 
 pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
-    vm.register_builtin("bytes_from_string", |args, _out| {
-        let text = expect_string(args, 0, "bytes_from_string")?;
-        Ok(VmValue::Bytes(Rc::new(text.as_bytes().to_vec())))
-    });
-
-    vm.register_builtin("bytes_to_string", |args, _out| {
-        let bytes = expect_bytes(args, 0, "bytes_to_string")?;
-        let text = std::str::from_utf8(bytes)
-            .map_err(|error| runtime_error(format!("bytes_to_string: {error}")))?;
-        Ok(VmValue::String(Rc::from(text)))
-    });
-
-    vm.register_builtin("bytes_to_string_lossy", |args, _out| {
-        let bytes = expect_bytes(args, 0, "bytes_to_string_lossy")?;
-        Ok(VmValue::String(Rc::from(
-            String::from_utf8_lossy(bytes).into_owned(),
-        )))
-    });
-
-    vm.register_builtin("bytes_to_hex", |args, _out| {
-        let bytes = expect_bytes(args, 0, "bytes_to_hex")?;
-        Ok(VmValue::String(Rc::from(hex::encode(bytes))))
-    });
-
-    vm.register_builtin("bytes_from_hex", |args, _out| {
-        let text = expect_string(args, 0, "bytes_from_hex")?;
-        let bytes =
-            hex::decode(text).map_err(|error| runtime_error(format!("bytes_from_hex: {error}")))?;
-        Ok(VmValue::Bytes(Rc::new(bytes)))
-    });
-
-    vm.register_builtin("bytes_to_base64", |args, _out| {
-        use base64::Engine;
-
-        let bytes = expect_bytes(args, 0, "bytes_to_base64")?;
-        Ok(VmValue::String(Rc::from(
-            base64::engine::general_purpose::STANDARD.encode(bytes),
-        )))
-    });
-
-    vm.register_builtin("bytes_from_base64", |args, _out| {
-        use base64::Engine;
-
-        let text = expect_string(args, 0, "bytes_from_base64")?;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(text.as_bytes())
-            .map_err(|error| runtime_error(format!("bytes_from_base64: {error}")))?;
-        Ok(VmValue::Bytes(Rc::new(bytes)))
-    });
-
-    vm.register_builtin("bytes_len", |args, _out| {
-        let bytes = expect_bytes(args, 0, "bytes_len")?;
-        Ok(VmValue::Int(bytes.len() as i64))
-    });
-
-    vm.register_builtin("bytes_concat", |args, _out| {
-        let left = expect_bytes(args, 0, "bytes_concat")?;
-        let right = expect_bytes(args, 1, "bytes_concat")?;
-        let mut out = Vec::with_capacity(left.len() + right.len());
-        out.extend_from_slice(left);
-        out.extend_from_slice(right);
-        Ok(VmValue::Bytes(Rc::new(out)))
-    });
-
-    vm.register_builtin("bytes_slice", |args, _out| {
-        let bytes = expect_bytes(args, 0, "bytes_slice")?;
-        let len = bytes.len() as i64;
-        let start = expect_int(args, 1, "bytes_slice")?.clamp(0, len) as usize;
-        let end = expect_int(args, 2, "bytes_slice")?.clamp(0, len) as usize;
-        let slice = if start >= end {
-            Vec::new()
-        } else {
-            bytes[start..end].to_vec()
-        };
-        Ok(VmValue::Bytes(Rc::new(slice)))
-    });
-
-    vm.register_builtin("bytes_eq", |args, _out| {
-        use subtle::ConstantTimeEq;
-
-        let left = expect_bytes(args, 0, "bytes_eq")?;
-        let right = expect_bytes(args, 1, "bytes_eq")?;
-        Ok(VmValue::Bool(bool::from(left.ct_eq(right))))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(sig = "bytes_from_string(text: string) -> bytes", category = "bytes")]
+fn bytes_from_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = expect_string(args, 0, "bytes_from_string")?;
+    Ok(VmValue::Bytes(Rc::new(text.as_bytes().to_vec())))
+}
+
+#[harn_builtin(sig = "bytes_to_string(input: bytes) -> string", category = "bytes")]
+fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let bytes = expect_bytes(args, 0, "bytes_to_string")?;
+    let text = std::str::from_utf8(bytes)
+        .map_err(|error| runtime_error(format!("bytes_to_string: {error}")))?;
+    Ok(VmValue::String(Rc::from(text)))
+}
+
+#[harn_builtin(
+    sig = "bytes_to_string_lossy(input: bytes) -> string",
+    category = "bytes"
+)]
+fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let bytes = expect_bytes(args, 0, "bytes_to_string_lossy")?;
+    Ok(VmValue::String(Rc::from(
+        String::from_utf8_lossy(bytes).into_owned(),
+    )))
+}
+
+#[harn_builtin(sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
+fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let bytes = expect_bytes(args, 0, "bytes_to_hex")?;
+    Ok(VmValue::String(Rc::from(hex::encode(bytes))))
+}
+
+#[harn_builtin(sig = "bytes_from_hex(text: string) -> bytes", category = "bytes")]
+fn bytes_from_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = expect_string(args, 0, "bytes_from_hex")?;
+    let bytes =
+        hex::decode(text).map_err(|error| runtime_error(format!("bytes_from_hex: {error}")))?;
+    Ok(VmValue::Bytes(Rc::new(bytes)))
+}
+
+#[harn_builtin(sig = "bytes_to_base64(input: bytes) -> string", category = "bytes")]
+fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use base64::Engine;
+
+    let bytes = expect_bytes(args, 0, "bytes_to_base64")?;
+    Ok(VmValue::String(Rc::from(
+        base64::engine::general_purpose::STANDARD.encode(bytes),
+    )))
+}
+
+#[harn_builtin(sig = "bytes_from_base64(text: string) -> bytes", category = "bytes")]
+fn bytes_from_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use base64::Engine;
+
+    let text = expect_string(args, 0, "bytes_from_base64")?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(text.as_bytes())
+        .map_err(|error| runtime_error(format!("bytes_from_base64: {error}")))?;
+    Ok(VmValue::Bytes(Rc::new(bytes)))
+}
+
+#[harn_builtin(sig = "bytes_len(input: bytes) -> int", category = "bytes")]
+fn bytes_len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let bytes = expect_bytes(args, 0, "bytes_len")?;
+    Ok(VmValue::Int(bytes.len() as i64))
+}
+
+#[harn_builtin(
+    sig = "bytes_concat(left: bytes, right: bytes) -> bytes",
+    category = "bytes"
+)]
+fn bytes_concat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let left = expect_bytes(args, 0, "bytes_concat")?;
+    let right = expect_bytes(args, 1, "bytes_concat")?;
+    let mut out = Vec::with_capacity(left.len() + right.len());
+    out.extend_from_slice(left);
+    out.extend_from_slice(right);
+    Ok(VmValue::Bytes(Rc::new(out)))
+}
+
+#[harn_builtin(
+    sig = "bytes_slice(input: bytes, start: int, end: int) -> bytes",
+    category = "bytes"
+)]
+fn bytes_slice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let bytes = expect_bytes(args, 0, "bytes_slice")?;
+    let len = bytes.len() as i64;
+    let start = expect_int(args, 1, "bytes_slice")?.clamp(0, len) as usize;
+    let end = expect_int(args, 2, "bytes_slice")?.clamp(0, len) as usize;
+    let slice = if start >= end {
+        Vec::new()
+    } else {
+        bytes[start..end].to_vec()
+    };
+    Ok(VmValue::Bytes(Rc::new(slice)))
+}
+
+#[harn_builtin(
+    sig = "bytes_eq(left: bytes, right: bytes) -> bool",
+    category = "bytes"
+)]
+fn bytes_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use subtle::ConstantTimeEq;
+
+    let left = expect_bytes(args, 0, "bytes_eq")?;
+    let right = expect_bytes(args, 1, "bytes_eq")?;
+    Ok(VmValue::Bool(bool::from(left.ct_eq(right))))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &BYTES_FROM_STRING_IMPL_DEF,
+    &BYTES_TO_STRING_IMPL_DEF,
+    &BYTES_TO_STRING_LOSSY_IMPL_DEF,
+    &BYTES_TO_HEX_IMPL_DEF,
+    &BYTES_FROM_HEX_IMPL_DEF,
+    &BYTES_TO_BASE64_IMPL_DEF,
+    &BYTES_FROM_BASE64_IMPL_DEF,
+    &BYTES_LEN_IMPL_DEF,
+    &BYTES_CONCAT_IMPL_DEF,
+    &BYTES_SLICE_IMPL_DEF,
+    &BYTES_EQ_IMPL_DEF,
+];
 
 #[cfg(test)]
 mod tests {

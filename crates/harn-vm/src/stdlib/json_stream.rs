@@ -5,6 +5,7 @@ use std::rc::Rc;
 use serde_json::error::Category;
 
 use crate::schema;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -147,95 +148,142 @@ pub(crate) fn reset_json_stream_state() {
 }
 
 pub(crate) fn register_json_stream_builtins(vm: &mut Vm) {
-    vm.register_builtin("__json_stream_validator", |args, _out| {
-        let schema = args.first().ok_or_else(|| {
-            thrown("__json_stream_validator: requires a schema argument".to_string())
-        })?;
-        let schema = schema::schema_from_json_schema_value(schema)?;
-        let handle = next_handle();
-        JSON_STREAM_VALIDATORS.with(|validators| {
-            validators.borrow_mut().insert(
-                handle.clone(),
-                JsonStreamValidator {
-                    schema,
-                    buffer: String::new(),
-                    scan: JsonStreamScan::default(),
-                    status: JsonStreamStatus::Pending,
-                    value: None,
-                },
-            );
-        });
-        Ok(VmValue::String(Rc::from(handle)))
-    });
-
-    vm.register_builtin("__json_stream_validator_feed", |args, _out| {
-        let handle = handle_arg(args, "__json_stream_validator_feed")?;
-        let chunk = chunk_arg(args, "__json_stream_validator_feed")?;
-        with_validator(&handle, |validator| {
-            validator.feed(&chunk);
-            Ok(status_value(&validator.status))
-        })
-    });
-
-    vm.register_builtin("__json_stream_validator_value", |args, _out| {
-        let handle = handle_arg(args, "__json_stream_validator_value")?;
-        with_validator(&handle, |validator| {
-            Ok(match &validator.status {
-                JsonStreamStatus::Valid => validator.value.clone().unwrap_or(VmValue::Nil),
-                JsonStreamStatus::Pending | JsonStreamStatus::Invalid { .. } => VmValue::Nil,
-            })
-        })
-    });
-
-    vm.register_builtin("__json_stream_validator_status", |args, _out| {
-        let handle = handle_arg(args, "__json_stream_validator_status")?;
-        with_validator(&handle, |validator| Ok(status_value(&validator.status)))
-    });
-
-    // `std/json/stream_validate` (E5.1, #1773): plain-dict verdict API
-    // built on top of the same `JsonStreamValidator` storage that the
-    // `stream_validator` closure-bag uses. The verdict shape is
-    // intentionally provider-agnostic (`{verdict: "pending"|"valid"|"invalid",
-    // reason?, path?}`) so streaming agents can dispatch on it without
-    // pattern-matching enum variants.
-    vm.register_builtin("__json_stream_validate_create", |args, _out| {
-        let schema = args.first().ok_or_else(|| {
-            thrown("__json_stream_validate_create: requires a schema argument".to_string())
-        })?;
-        let schema = schema::schema_from_json_schema_value(schema)?;
-        let handle = next_handle();
-        JSON_STREAM_VALIDATORS.with(|validators| {
-            validators.borrow_mut().insert(
-                handle.clone(),
-                JsonStreamValidator {
-                    schema,
-                    buffer: String::new(),
-                    scan: JsonStreamScan::default(),
-                    status: JsonStreamStatus::Pending,
-                    value: None,
-                },
-            );
-        });
-        Ok(VmValue::String(Rc::from(handle)))
-    });
-
-    vm.register_builtin("__json_stream_validate_chunk", |args, _out| {
-        let handle = handle_arg(args, "__json_stream_validate_chunk")?;
-        let chunk = chunk_arg(args, "__json_stream_validate_chunk")?;
-        with_validator(&handle, |validator| {
-            validator.feed(&chunk);
-            Ok(verdict_value(&validator.status))
-        })
-    });
-
-    vm.register_builtin("__json_stream_validate_finalize", |args, _out| {
-        let handle = handle_arg(args, "__json_stream_validate_finalize")?;
-        with_validator(&handle, |validator| {
-            validator.finalize();
-            Ok(verdict_value(&validator.status))
-        })
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+fn create_validator(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmError> {
+    let schema = args
+        .first()
+        .ok_or_else(|| thrown(format!("{builtin}: requires a schema argument")))?;
+    let schema = schema::schema_from_json_schema_value(schema)?;
+    let handle = next_handle();
+    JSON_STREAM_VALIDATORS.with(|validators| {
+        validators.borrow_mut().insert(
+            handle.clone(),
+            JsonStreamValidator {
+                schema,
+                buffer: String::new(),
+                scan: JsonStreamScan::default(),
+                status: JsonStreamStatus::Pending,
+                value: None,
+            },
+        );
+    });
+    Ok(VmValue::String(Rc::from(handle)))
+}
+
+#[harn_builtin(
+    sig = "__json_stream_validator(schema: dict) -> string",
+    category = "json_stream"
+)]
+fn json_stream_validator_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    create_validator("__json_stream_validator", args)
+}
+
+#[harn_builtin(
+    sig = "__json_stream_validator_feed(handle: string, chunk: string | bytes) -> any",
+    category = "json_stream"
+)]
+fn json_stream_validator_feed_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let handle = handle_arg(args, "__json_stream_validator_feed")?;
+    let chunk = chunk_arg(args, "__json_stream_validator_feed")?;
+    with_validator(&handle, |validator| {
+        validator.feed(&chunk);
+        Ok(status_value(&validator.status))
+    })
+}
+
+#[harn_builtin(
+    sig = "__json_stream_validator_value(handle: string) -> any",
+    category = "json_stream"
+)]
+fn json_stream_validator_value_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let handle = handle_arg(args, "__json_stream_validator_value")?;
+    with_validator(&handle, |validator| {
+        Ok(match &validator.status {
+            JsonStreamStatus::Valid => validator.value.clone().unwrap_or(VmValue::Nil),
+            JsonStreamStatus::Pending | JsonStreamStatus::Invalid { .. } => VmValue::Nil,
+        })
+    })
+}
+
+#[harn_builtin(
+    sig = "__json_stream_validator_status(handle: string) -> any",
+    category = "json_stream"
+)]
+fn json_stream_validator_status_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let handle = handle_arg(args, "__json_stream_validator_status")?;
+    with_validator(&handle, |validator| Ok(status_value(&validator.status)))
+}
+
+// `std/json/stream_validate` (E5.1, #1773): plain-dict verdict API
+// built on top of the same `JsonStreamValidator` storage that the
+// `stream_validator` closure-bag uses. The verdict shape is
+// intentionally provider-agnostic (`{verdict: "pending"|"valid"|"invalid",
+// reason?, path?}`) so streaming agents can dispatch on it without
+// pattern-matching enum variants.
+#[harn_builtin(
+    sig = "__json_stream_validate_create(schema: dict) -> string",
+    category = "json_stream"
+)]
+fn json_stream_validate_create_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    create_validator("__json_stream_validate_create", args)
+}
+
+#[harn_builtin(
+    sig = "__json_stream_validate_chunk(handle: string, chunk: string | bytes) -> dict",
+    category = "json_stream"
+)]
+fn json_stream_validate_chunk_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let handle = handle_arg(args, "__json_stream_validate_chunk")?;
+    let chunk = chunk_arg(args, "__json_stream_validate_chunk")?;
+    with_validator(&handle, |validator| {
+        validator.feed(&chunk);
+        Ok(verdict_value(&validator.status))
+    })
+}
+
+#[harn_builtin(
+    sig = "__json_stream_validate_finalize(handle: string) -> dict",
+    category = "json_stream"
+)]
+fn json_stream_validate_finalize_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let handle = handle_arg(args, "__json_stream_validate_finalize")?;
+    with_validator(&handle, |validator| {
+        validator.finalize();
+        Ok(verdict_value(&validator.status))
+    })
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &JSON_STREAM_VALIDATOR_IMPL_DEF,
+    &JSON_STREAM_VALIDATOR_FEED_IMPL_DEF,
+    &JSON_STREAM_VALIDATOR_VALUE_IMPL_DEF,
+    &JSON_STREAM_VALIDATOR_STATUS_IMPL_DEF,
+    &JSON_STREAM_VALIDATE_CREATE_IMPL_DEF,
+    &JSON_STREAM_VALIDATE_CHUNK_IMPL_DEF,
+    &JSON_STREAM_VALIDATE_FINALIZE_IMPL_DEF,
+];
 
 impl JsonStreamValidator {
     fn feed(&mut self, chunk: &[u8]) {

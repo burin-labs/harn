@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::*;
 use crate::builtin_signatures;
+use crate::builtin_signatures::TyExt;
 use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
 

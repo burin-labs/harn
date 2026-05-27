@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use crate::ast::*;
 use crate::builtin_signatures;
+use crate::builtin_signatures::BuiltinSignatureExt;
 use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 

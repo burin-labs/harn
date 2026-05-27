@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -59,135 +60,163 @@ pub(crate) fn current_trace_context() -> Option<(String, String)> {
 }
 
 pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
-    vm.register_builtin("trace_start", |args, _out| {
-        use rand::RngExt;
-        let name = args.first().map(|a| a.display()).unwrap_or_default();
-        let trace_id = VM_TRACE_STACK.with(|stack| {
-            stack
-                .borrow()
-                .last()
-                .map(|t| t.trace_id.clone())
-                .unwrap_or_else(|| {
-                    let val: u32 = rand::rng().random();
-                    format!("{val:08x}")
-                })
-        });
-        let span_id = {
-            let val: u32 = rand::rng().random();
-            format!("{val:08x}")
-        };
-        let start_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-
-        VM_TRACE_STACK.with(|stack| {
-            stack.borrow_mut().push(VmTraceContext {
-                trace_id: trace_id.clone(),
-                span_id: span_id.clone(),
-            });
-        });
-
-        let mut span = BTreeMap::new();
-        span.insert("trace_id".to_string(), VmValue::String(Rc::from(trace_id)));
-        span.insert("span_id".to_string(), VmValue::String(Rc::from(span_id)));
-        span.insert("name".to_string(), VmValue::String(Rc::from(name)));
-        span.insert("start_ms".to_string(), VmValue::Int(start_ms));
-        Ok(VmValue::Dict(Rc::new(span)))
-    });
-
-    vm.register_builtin("trace_end", |args, out| {
-        let (name, trace_id, span_id, duration_ms) = finish_span_from_args(args)?;
-        let level_num = 1_u8;
-        if level_num >= VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) {
-            let mut fields = BTreeMap::new();
-            fields.insert("trace_id".to_string(), VmValue::String(Rc::from(trace_id)));
-            fields.insert("span_id".to_string(), VmValue::String(Rc::from(span_id)));
-            fields.insert("name".to_string(), VmValue::String(Rc::from(name)));
-            fields.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
-            let line = vm_build_log_line("info", "span_end", Some(&fields));
-            out.push_str(&line);
-        }
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("trace_id", |_args, _out| {
-        match current_trace_context().map(|context| context.0) {
-            Some(trace_id) => Ok(VmValue::String(Rc::from(trace_id))),
-            None => Ok(VmValue::Nil),
-        }
-    });
-
-    vm.register_builtin("llm_info", |_args, _out| {
-        let raw_model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
-        let resolved = crate::llm_config::resolve_model_info(&raw_model);
-        let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or(resolved.provider);
-        let model = if raw_model.is_empty() {
-            String::new()
-        } else {
-            resolved.id
-        };
-        let api_key_set = crate::llm_config::provider_key_available(&provider);
-        let mut info = BTreeMap::new();
-        info.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
-        info.insert("model".to_string(), VmValue::String(Rc::from(model)));
-        info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
-        Ok(VmValue::Dict(Rc::new(info)))
-    });
-
-    vm.register_builtin("enable_tracing", |args, _out| {
-        let enabled = match args.first() {
-            Some(VmValue::Bool(b)) => *b,
-            _ => true,
-        };
-        crate::tracing::set_tracing_enabled(enabled);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("trace_spans", |_args, _out| {
-        let spans = crate::tracing::peek_spans();
-        let vm_spans: Vec<VmValue> = spans.iter().map(crate::tracing::span_to_vm_value).collect();
-        Ok(VmValue::List(Rc::new(vm_spans)))
-    });
-
-    vm.register_builtin("trace_summary", |_args, _out| {
-        Ok(VmValue::String(Rc::from(crate::tracing::format_summary())))
-    });
-
-    // Bridge into the OTel-aware span system from Harn for lifecycle
-    // combinators (`std/lifecycle/combinators::with_telemetry`). Emits a
-    // `SpanKind::FnCall` span linked to the current parent span and
-    // returns the numeric span id; pair with `__lifecycle_span_end`.
-    vm.register_builtin("__lifecycle_span_start", |args, _out| {
-        let name = args.first().map(|a| a.display()).unwrap_or_default();
-        let id = crate::tracing::span_start(crate::tracing::SpanKind::FnCall, name);
-        Ok(VmValue::Int(id as i64))
-    });
-
-    vm.register_builtin("__lifecycle_span_end", |args, _out| {
-        let span_id = match args.first().and_then(|v| v.as_int()) {
-            Some(id) => id,
-            None => return Ok(VmValue::Nil),
-        };
-        if span_id < 0 {
-            return Ok(VmValue::Nil);
-        }
-        crate::tracing::span_end(span_id as u64);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("llm_usage", |_args, _out| {
-        let (total_input, total_output, total_duration, call_count) =
-            crate::llm::peek_trace_summary();
-        let mut usage = BTreeMap::new();
-        usage.insert("input_tokens".to_string(), VmValue::Int(total_input));
-        usage.insert("output_tokens".to_string(), VmValue::Int(total_output));
-        usage.insert(
-            "total_duration_ms".to_string(),
-            VmValue::Int(total_duration),
-        );
-        usage.insert("call_count".to_string(), VmValue::Int(call_count));
-        usage.insert("total_calls".to_string(), VmValue::Int(call_count));
-        Ok(VmValue::Dict(Rc::new(usage)))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(sig = "trace_start(...args: any) -> dict", category = "tracing")]
+fn trace_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use rand::RngExt;
+    let name = args.first().map(|a| a.display()).unwrap_or_default();
+    let trace_id = VM_TRACE_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .map(|t| t.trace_id.clone())
+            .unwrap_or_else(|| {
+                let val: u32 = rand::rng().random();
+                format!("{val:08x}")
+            })
+    });
+    let span_id = {
+        let val: u32 = rand::rng().random();
+        format!("{val:08x}")
+    };
+    let start_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    VM_TRACE_STACK.with(|stack| {
+        stack.borrow_mut().push(VmTraceContext {
+            trace_id: trace_id.clone(),
+            span_id: span_id.clone(),
+        });
+    });
+
+    let mut span = BTreeMap::new();
+    span.insert("trace_id".to_string(), VmValue::String(Rc::from(trace_id)));
+    span.insert("span_id".to_string(), VmValue::String(Rc::from(span_id)));
+    span.insert("name".to_string(), VmValue::String(Rc::from(name)));
+    span.insert("start_ms".to_string(), VmValue::Int(start_ms));
+    Ok(VmValue::Dict(Rc::new(span)))
+}
+
+#[harn_builtin(sig = "trace_end(...args: any) -> nil", category = "tracing")]
+fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let (name, trace_id, span_id, duration_ms) = finish_span_from_args(args)?;
+    let level_num = 1_u8;
+    if level_num >= VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) {
+        let mut fields = BTreeMap::new();
+        fields.insert("trace_id".to_string(), VmValue::String(Rc::from(trace_id)));
+        fields.insert("span_id".to_string(), VmValue::String(Rc::from(span_id)));
+        fields.insert("name".to_string(), VmValue::String(Rc::from(name)));
+        fields.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
+        let line = vm_build_log_line("info", "span_end", Some(&fields));
+        out.push_str(&line);
+    }
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(sig = "trace_id(...args: any) -> string?", category = "tracing")]
+fn trace_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    match current_trace_context().map(|context| context.0) {
+        Some(trace_id) => Ok(VmValue::String(Rc::from(trace_id))),
+        None => Ok(VmValue::Nil),
+    }
+}
+
+#[harn_builtin(sig = "llm_info() -> dict", category = "tracing")]
+fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let raw_model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
+    let resolved = crate::llm_config::resolve_model_info(&raw_model);
+    let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or(resolved.provider);
+    let model = if raw_model.is_empty() {
+        String::new()
+    } else {
+        resolved.id
+    };
+    let api_key_set = crate::llm_config::provider_key_available(&provider);
+    let mut info = BTreeMap::new();
+    info.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
+    info.insert("model".to_string(), VmValue::String(Rc::from(model)));
+    info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
+    Ok(VmValue::Dict(Rc::new(info)))
+}
+
+#[harn_builtin(sig = "enable_tracing(enabled?: bool) -> nil", category = "tracing")]
+fn enable_tracing_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let enabled = match args.first() {
+        Some(VmValue::Bool(b)) => *b,
+        _ => true,
+    };
+    crate::tracing::set_tracing_enabled(enabled);
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(sig = "trace_spans(...args: any) -> list", category = "tracing")]
+fn trace_spans_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let spans = crate::tracing::peek_spans();
+    let vm_spans: Vec<VmValue> = spans.iter().map(crate::tracing::span_to_vm_value).collect();
+    Ok(VmValue::List(Rc::new(vm_spans)))
+}
+
+#[harn_builtin(sig = "trace_summary(...args: any) -> string", category = "tracing")]
+fn trace_summary_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(crate::tracing::format_summary())))
+}
+
+#[harn_builtin(
+    sig = "__lifecycle_span_start(name: string) -> int",
+    category = "tracing"
+)]
+fn lifecycle_span_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = args.first().map(|a| a.display()).unwrap_or_default();
+    let id = crate::tracing::span_start(crate::tracing::SpanKind::FnCall, name);
+    Ok(VmValue::Int(id as i64))
+}
+
+#[harn_builtin(
+    sig = "__lifecycle_span_end(span_id: int) -> nil",
+    category = "tracing"
+)]
+fn lifecycle_span_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let span_id = match args.first().and_then(|v| v.as_int()) {
+        Some(id) => id,
+        None => return Ok(VmValue::Nil),
+    };
+    if span_id < 0 {
+        return Ok(VmValue::Nil);
+    }
+    crate::tracing::span_end(span_id as u64);
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(sig = "llm_usage() -> dict", category = "tracing")]
+fn llm_usage_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let (total_input, total_output, total_duration, call_count) = crate::llm::peek_trace_summary();
+    let mut usage = BTreeMap::new();
+    usage.insert("input_tokens".to_string(), VmValue::Int(total_input));
+    usage.insert("output_tokens".to_string(), VmValue::Int(total_output));
+    usage.insert(
+        "total_duration_ms".to_string(),
+        VmValue::Int(total_duration),
+    );
+    usage.insert("call_count".to_string(), VmValue::Int(call_count));
+    usage.insert("total_calls".to_string(), VmValue::Int(call_count));
+    Ok(VmValue::Dict(Rc::new(usage)))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &TRACE_START_IMPL_DEF,
+    &TRACE_END_IMPL_DEF,
+    &TRACE_ID_IMPL_DEF,
+    &LLM_INFO_IMPL_DEF,
+    &ENABLE_TRACING_IMPL_DEF,
+    &TRACE_SPANS_IMPL_DEF,
+    &TRACE_SUMMARY_IMPL_DEF,
+    &LIFECYCLE_SPAN_START_IMPL_DEF,
+    &LIFECYCLE_SPAN_END_IMPL_DEF,
+    &LLM_USAGE_IMPL_DEF,
+];

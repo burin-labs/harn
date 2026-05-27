@@ -4,6 +4,7 @@ use std::{cell::RefCell, collections::BTreeMap, thread_local};
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema;
 use crate::stdlib::json_query;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -43,266 +44,377 @@ fn schema_key_list(value: &VmValue, builtin_name: &str) -> Result<Vec<String>, V
 }
 
 pub(crate) fn register_json_builtins(vm: &mut Vm) {
-    vm.register_builtin("json_stringify", |args, _out| {
-        let val = args.first().unwrap_or(&VmValue::Nil);
-        Ok(VmValue::String(Rc::from(vm_value_to_json(val))))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("json_stringify_pretty", |args, _out| {
-        let val = args.first().unwrap_or(&VmValue::Nil);
-        serde_json::to_string_pretty(&vm_value_to_data_value(val))
-            .map(|text| VmValue::String(Rc::from(text)))
-            .map_err(|error| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "json_stringify_pretty: {error}"
-                ))))
-            })
-    });
+#[harn_builtin(sig = "json_stringify(value: any) -> string", category = "json")]
+fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = args.first().unwrap_or(&VmValue::Nil);
+    Ok(VmValue::String(Rc::from(vm_value_to_json(val))))
+}
 
-    vm.register_builtin("json_parse", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        if let Some(cached) = JSON_PARSE_CACHE.with(|cache| cache.borrow().get(&text).cloned()) {
-            return Ok(cached);
+#[harn_builtin(sig = "json_stringify_pretty(value: any) -> string", category = "json")]
+fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = args.first().unwrap_or(&VmValue::Nil);
+    serde_json::to_string_pretty(&vm_value_to_data_value(val))
+        .map(|text| VmValue::String(Rc::from(text)))
+        .map_err(|error| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "json_stringify_pretty: {error}"
+            ))))
+        })
+}
+
+#[harn_builtin(sig = "json_parse(text: string) -> any", category = "json")]
+fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    if let Some(cached) = JSON_PARSE_CACHE.with(|cache| cache.borrow().get(&text).cloned()) {
+        return Ok(cached);
+    }
+    match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(jv) => {
+            let parsed = schema::json_to_vm_value(&jv);
+            JSON_PARSE_CACHE.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                if cache.len() >= JSON_PARSE_CACHE_LIMIT {
+                    cache.clear();
+                }
+                cache.insert(text, parsed.clone());
+            });
+            Ok(parsed)
         }
-        match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(jv) => {
-                let parsed = schema::json_to_vm_value(&jv);
-                JSON_PARSE_CACHE.with(|cache| {
-                    let mut cache = cache.borrow_mut();
-                    if cache.len() >= JSON_PARSE_CACHE_LIMIT {
-                        cache.clear();
-                    }
-                    cache.insert(text, parsed.clone());
-                });
-                Ok(parsed)
-            }
-            Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "JSON parse error: {e}"
-            ))))),
-        }
-    });
+        Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "JSON parse error: {e}"
+        ))))),
+    }
+}
 
-    vm.register_builtin("yaml_parse", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        match serde_yml::from_str::<serde_yml::Value>(&text) {
-            Ok(value) => match serde_json::to_value(value) {
-                Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
-                Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "yaml_parse: {error}"
-                ))))),
-            },
+#[harn_builtin(sig = "yaml_parse(text: string) -> any", category = "json")]
+fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    match serde_yml::from_str::<serde_yml::Value>(&text) {
+        Ok(value) => match serde_json::to_value(value) {
+            Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
             Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "YAML parse error: {error}"
+                "yaml_parse: {error}"
             ))))),
-        }
-    });
+        },
+        Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "YAML parse error: {error}"
+        ))))),
+    }
+}
 
-    vm.register_builtin("yaml_stringify", |args, _out| {
-        let value = args.first().unwrap_or(&VmValue::Nil);
-        let data_value = vm_value_to_data_value(value);
-        serde_yml::to_string(&data_value)
-            .map(|text| VmValue::String(Rc::from(text)))
-            .map_err(|error| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "yaml_stringify: {error}"
-                ))))
-            })
-    });
+#[harn_builtin(sig = "yaml_stringify(value: any) -> string", category = "json")]
+fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let value = args.first().unwrap_or(&VmValue::Nil);
+    let data_value = vm_value_to_data_value(value);
+    serde_yml::to_string(&data_value)
+        .map(|text| VmValue::String(Rc::from(text)))
+        .map_err(|error| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "yaml_stringify: {error}"
+            ))))
+        })
+}
 
-    vm.register_builtin("toml_parse", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        match toml::from_str::<toml::Value>(&text) {
-            Ok(value) => match serde_json::to_value(value) {
-                Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
-                Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "toml_parse: {error}"
-                ))))),
-            },
+#[harn_builtin(sig = "toml_parse(text: string) -> any", category = "json")]
+fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    match toml::from_str::<toml::Value>(&text) {
+        Ok(value) => match serde_json::to_value(value) {
+            Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
             Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "TOML parse error: {error}"
+                "toml_parse: {error}"
             ))))),
-        }
-    });
+        },
+        Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "TOML parse error: {error}"
+        ))))),
+    }
+}
 
-    vm.register_builtin("toml_stringify", |args, _out| {
-        let value = args.first().unwrap_or(&VmValue::Nil);
-        let data_value = vm_value_to_data_value(value);
-        let toml_value = toml::Value::try_from(data_value).map_err(|error| {
+#[harn_builtin(sig = "toml_stringify(value: any) -> string", category = "json")]
+fn toml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let value = args.first().unwrap_or(&VmValue::Nil);
+    let data_value = vm_value_to_data_value(value);
+    let toml_value = toml::Value::try_from(data_value).map_err(|error| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "toml_stringify: {error}"
+        ))))
+    })?;
+    toml::to_string(&toml_value)
+        .map(|text| VmValue::String(Rc::from(text)))
+        .map_err(|error| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
                 "toml_stringify: {error}"
             ))))
-        })?;
-        toml::to_string(&toml_value)
-            .map(|text| VmValue::String(Rc::from(text)))
-            .map_err(|error| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "toml_stringify: {error}"
-                ))))
-            })
-    });
-
-    vm.register_builtin("json_validate", |args, _out| {
-        require_args(args, 2, "json_validate")?;
-        let result = schema::schema_expect_value(&args[0], &args[1], false);
-        match result {
-            Ok(_) => Ok(VmValue::Bool(true)),
-            Err(error) => Err(error),
-        }
-    });
-
-    vm.register_builtin("schema_check", |args, _out| {
-        require_args(args, 2, "schema_check")?;
-        Ok(schema::schema_result_value(&args[0], &args[1], false))
-    });
-
-    vm.register_builtin("schema_parse", |args, _out| {
-        require_args(args, 2, "schema_parse")?;
-        Ok(schema::schema_result_value(&args[0], &args[1], true))
-    });
-
-    vm.register_builtin("schema_is", |args, _out| {
-        require_args(args, 2, "schema_is")?;
-        Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))
-    });
-
-    // `schema_of(T)` is primarily a compile-time intrinsic: the compiler
-    // rewrites `schema_of(TypeAlias)` to the alias's JSON-Schema dict
-    // constant. This runtime fallback accepts an already-built schema dict
-    // and returns it unchanged, keeping `schema_of` useful in pipelines
-    // that pass schemas around at runtime (e.g. `let s = schema_of(T); ...`).
-    vm.register_builtin("schema_of", |args, _out| {
-        require_args(args, 1, "schema_of")?;
-        match &args[0] {
-            VmValue::Dict(_) => Ok(args[0].clone()),
-            other => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "schema_of: expected a type alias or schema dict, got {}",
-                other.type_name()
-            ))))),
-        }
-    });
-
-    vm.register_builtin("is_type", |args, _out| {
-        require_args(args, 2, "is_type")?;
-        Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))
-    });
-
-    vm.register_builtin("schema_expect", |args, _out| {
-        require_args(args, 2, "schema_expect")?;
-        let apply_defaults = args.get(2).is_some_and(|value| value.is_truthy());
-        schema::schema_expect_value(&args[0], &args[1], apply_defaults)
-    });
-
-    vm.register_builtin("schema_to_json_schema", |args, _out| {
-        require_args(args, 1, "schema_to_json_schema")?;
-        schema::schema_to_json_schema_value(&args[0])
-    });
-
-    vm.register_builtin("schema_from_json_schema", |args, _out| {
-        require_args(args, 1, "schema_from_json_schema")?;
-        schema::schema_from_json_schema_value(&args[0])
-    });
-
-    vm.register_builtin("schema_to_openapi_schema", |args, _out| {
-        require_args(args, 1, "schema_to_openapi_schema")?;
-        schema::schema_to_openapi_schema_value(&args[0])
-    });
-
-    vm.register_builtin("schema_from_openapi_schema", |args, _out| {
-        require_args(args, 1, "schema_from_openapi_schema")?;
-        schema::schema_from_openapi_schema_value(&args[0])
-    });
-
-    vm.register_builtin("schema_extend", |args, _out| {
-        require_args(args, 2, "schema_extend")?;
-        schema::schema_extend_value(&args[0], &args[1])
-    });
-
-    vm.register_builtin("schema_partial", |args, _out| {
-        require_args(args, 1, "schema_partial")?;
-        schema::schema_partial_value(&args[0])
-    });
-
-    vm.register_builtin("schema_pick", |args, _out| {
-        require_args(args, 2, "schema_pick")?;
-        let keys = schema_key_list(&args[1], "schema_pick")?;
-        schema::schema_pick_value(&args[0], &keys)
-    });
-
-    vm.register_builtin("schema_omit", |args, _out| {
-        require_args(args, 2, "schema_omit")?;
-        let keys = schema_key_list(&args[1], "schema_omit")?;
-        schema::schema_omit_value(&args[0], &keys)
-    });
-
-    vm.register_builtin("json_extract", |args, _out| {
-        if args.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "json_extract requires at least 1 argument: text",
-            ))));
-        }
-        let text = args[0].display();
-        let key = args.get(1).map(|a| a.display());
-
-        let json_str = extract_json_from_text(&text);
-        let parsed = match serde_json::from_str::<serde_json::Value>(&json_str) {
-            Ok(jv) => schema::json_to_vm_value(&jv),
-            Err(e) => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "json_extract: failed to parse JSON: {e}"
-                )))));
-            }
-        };
-
-        match key {
-            Some(k) => match &parsed {
-                VmValue::Dict(map) => match map.get(&k) {
-                    Some(val) => Ok(val.clone()),
-                    None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "json_extract: key '{k}' not found"
-                    ))))),
-                },
-                _ => Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "json_extract: parsed value is not a dict, cannot extract key",
-                )))),
-            },
-            None => Ok(parsed),
-        }
-    });
-
-    vm.register_builtin("json_pointer", |args, _out| {
-        require_args(args, 2, "json_pointer")?;
-        let ptr = args[1].display();
-        json_pointer_get(&args[0], &ptr)
-    });
-
-    vm.register_builtin("json_pointer_set", |args, _out| {
-        require_args(args, 3, "json_pointer_set")?;
-        let ptr = args[1].display();
-        json_pointer_set(&args[0], &ptr, args[2].clone())
-    });
-
-    vm.register_builtin("json_pointer_delete", |args, _out| {
-        require_args(args, 2, "json_pointer_delete")?;
-        let ptr = args[1].display();
-        json_pointer_delete(&args[0], &ptr)
-    });
-
-    vm.register_builtin("jq", |args, _out| {
-        require_args(args, 2, "jq")?;
-        let expr = args[1].display();
-        json_query::eval_jq(&args[0], &expr)
-            .map(|values| VmValue::List(Rc::new(values)))
-            .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))
-    });
-
-    vm.register_builtin("jq_first", |args, _out| {
-        require_args(args, 2, "jq_first")?;
-        let expr = args[1].display();
-        json_query::eval_jq(&args[0], &expr)
-            .map(|values| values.into_iter().next().unwrap_or(VmValue::Nil))
-            .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))
-    });
+        })
 }
+
+#[harn_builtin(
+    sig = "json_validate(value: any, schema: dict) -> bool",
+    category = "json"
+)]
+fn json_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "json_validate")?;
+    let result = schema::schema_expect_value(&args[0], &args[1], false);
+    match result {
+        Ok(_) => Ok(VmValue::Bool(true)),
+        Err(error) => Err(error),
+    }
+}
+
+#[harn_builtin(
+    sig = "schema_check(value: any, schema: any) -> any",
+    category = "json"
+)]
+fn schema_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "schema_check")?;
+    Ok(schema::schema_result_value(&args[0], &args[1], false))
+}
+
+#[harn_builtin(
+    sig = "schema_parse(value: any, schema: any) -> any",
+    category = "json"
+)]
+fn schema_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "schema_parse")?;
+    Ok(schema::schema_result_value(&args[0], &args[1], true))
+}
+
+#[harn_builtin(sig = "schema_is(value: any, schema: any) -> bool", category = "json")]
+fn schema_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "schema_is")?;
+    Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))
+}
+
+// `schema_of(T)` is primarily a compile-time intrinsic: the compiler
+// rewrites `schema_of(TypeAlias)` to the alias's JSON-Schema dict
+// constant. This runtime fallback accepts an already-built schema dict
+// and returns it unchanged, keeping `schema_of` useful in pipelines
+// that pass schemas around at runtime (e.g. `let s = schema_of(T); ...`).
+#[harn_builtin(sig = "schema_of(type_alias: any) -> dict", category = "json")]
+fn schema_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 1, "schema_of")?;
+    match &args[0] {
+        VmValue::Dict(_) => Ok(args[0].clone()),
+        other => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "schema_of: expected a type alias or schema dict, got {}",
+            other.type_name()
+        ))))),
+    }
+}
+
+#[harn_builtin(sig = "is_type(value: any, schema: any) -> bool", category = "json")]
+fn is_type_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "is_type")?;
+    Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))
+}
+
+#[harn_builtin(
+    sig = "schema_expect(value: any, schema: any, apply_defaults?: bool) -> any",
+    category = "json"
+)]
+fn schema_expect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "schema_expect")?;
+    let apply_defaults = args.get(2).is_some_and(|value| value.is_truthy());
+    schema::schema_expect_value(&args[0], &args[1], apply_defaults)
+}
+
+#[harn_builtin(sig = "schema_to_json_schema(schema: any) -> dict", category = "json")]
+fn schema_to_json_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 1, "schema_to_json_schema")?;
+    schema::schema_to_json_schema_value(&args[0])
+}
+
+#[harn_builtin(
+    sig = "schema_from_json_schema(json_schema: dict) -> dict",
+    category = "json"
+)]
+fn schema_from_json_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 1, "schema_from_json_schema")?;
+    schema::schema_from_json_schema_value(&args[0])
+}
+
+#[harn_builtin(
+    sig = "schema_to_openapi_schema(schema: any) -> dict",
+    category = "json"
+)]
+fn schema_to_openapi_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 1, "schema_to_openapi_schema")?;
+    schema::schema_to_openapi_schema_value(&args[0])
+}
+
+#[harn_builtin(
+    sig = "schema_from_openapi_schema(openapi_schema: dict) -> dict",
+    category = "json"
+)]
+fn schema_from_openapi_schema_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    require_args(args, 1, "schema_from_openapi_schema")?;
+    schema::schema_from_openapi_schema_value(&args[0])
+}
+
+#[harn_builtin(
+    sig = "schema_extend(base: dict, overrides: dict) -> dict",
+    category = "json"
+)]
+fn schema_extend_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "schema_extend")?;
+    schema::schema_extend_value(&args[0], &args[1])
+}
+
+#[harn_builtin(sig = "schema_partial(schema: any) -> dict", category = "json")]
+fn schema_partial_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 1, "schema_partial")?;
+    schema::schema_partial_value(&args[0])
+}
+
+#[harn_builtin(
+    sig = "schema_pick(schema: any, keys: list) -> dict",
+    category = "json"
+)]
+fn schema_pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "schema_pick")?;
+    let keys = schema_key_list(&args[1], "schema_pick")?;
+    schema::schema_pick_value(&args[0], &keys)
+}
+
+#[harn_builtin(
+    sig = "schema_omit(schema: any, keys: list) -> dict",
+    category = "json"
+)]
+fn schema_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "schema_omit")?;
+    let keys = schema_key_list(&args[1], "schema_omit")?;
+    schema::schema_omit_value(&args[0], &keys)
+}
+
+#[harn_builtin(
+    sig = "json_extract(text: string, key?: string) -> any",
+    category = "json"
+)]
+fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "json_extract requires at least 1 argument: text",
+        ))));
+    }
+    let text = args[0].display();
+    let key = args.get(1).map(|a| a.display());
+
+    let json_str = extract_json_from_text(&text);
+    let parsed = match serde_json::from_str::<serde_json::Value>(&json_str) {
+        Ok(jv) => schema::json_to_vm_value(&jv),
+        Err(e) => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "json_extract: failed to parse JSON: {e}"
+            )))));
+        }
+    };
+
+    match key {
+        Some(k) => match &parsed {
+            VmValue::Dict(map) => match map.get(&k) {
+                Some(val) => Ok(val.clone()),
+                None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "json_extract: key '{k}' not found"
+                ))))),
+            },
+            _ => Err(VmError::Thrown(VmValue::String(Rc::from(
+                "json_extract: parsed value is not a dict, cannot extract key",
+            )))),
+        },
+        None => Ok(parsed),
+    }
+}
+
+#[harn_builtin(
+    sig = "json_pointer(value: any, pointer: string) -> any",
+    category = "json"
+)]
+fn json_pointer_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "json_pointer")?;
+    let ptr = args[1].display();
+    json_pointer_get(&args[0], &ptr)
+}
+
+#[harn_builtin(
+    sig = "json_pointer_set(value: any, pointer: string, replacement: any) -> any",
+    category = "json"
+)]
+fn json_pointer_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 3, "json_pointer_set")?;
+    let ptr = args[1].display();
+    json_pointer_set(&args[0], &ptr, args[2].clone())
+}
+
+#[harn_builtin(
+    sig = "json_pointer_delete(value: any, pointer: string) -> any",
+    category = "json"
+)]
+fn json_pointer_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "json_pointer_delete")?;
+    let ptr = args[1].display();
+    json_pointer_delete(&args[0], &ptr)
+}
+
+#[harn_builtin(sig = "jq(value: any, expression: string) -> list", category = "json")]
+fn jq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "jq")?;
+    let expr = args[1].display();
+    json_query::eval_jq(&args[0], &expr)
+        .map(|values| VmValue::List(Rc::new(values)))
+        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))
+}
+
+#[harn_builtin(
+    sig = "jq_first(value: any, expression: string) -> any",
+    category = "json"
+)]
+fn jq_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "jq_first")?;
+    let expr = args[1].display();
+    json_query::eval_jq(&args[0], &expr)
+        .map(|values| values.into_iter().next().unwrap_or(VmValue::Nil))
+        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &JSON_STRINGIFY_IMPL_DEF,
+    &JSON_STRINGIFY_PRETTY_IMPL_DEF,
+    &JSON_PARSE_IMPL_DEF,
+    &YAML_PARSE_IMPL_DEF,
+    &YAML_STRINGIFY_IMPL_DEF,
+    &TOML_PARSE_IMPL_DEF,
+    &TOML_STRINGIFY_IMPL_DEF,
+    &JSON_VALIDATE_IMPL_DEF,
+    &SCHEMA_CHECK_IMPL_DEF,
+    &SCHEMA_PARSE_IMPL_DEF,
+    &SCHEMA_IS_IMPL_DEF,
+    &SCHEMA_OF_IMPL_DEF,
+    &IS_TYPE_IMPL_DEF,
+    &SCHEMA_EXPECT_IMPL_DEF,
+    &SCHEMA_TO_JSON_SCHEMA_IMPL_DEF,
+    &SCHEMA_FROM_JSON_SCHEMA_IMPL_DEF,
+    &SCHEMA_TO_OPENAPI_SCHEMA_IMPL_DEF,
+    &SCHEMA_FROM_OPENAPI_SCHEMA_IMPL_DEF,
+    &SCHEMA_EXTEND_IMPL_DEF,
+    &SCHEMA_PARTIAL_IMPL_DEF,
+    &SCHEMA_PICK_IMPL_DEF,
+    &SCHEMA_OMIT_IMPL_DEF,
+    &JSON_EXTRACT_IMPL_DEF,
+    &JSON_POINTER_IMPL_DEF,
+    &JSON_POINTER_SET_IMPL_DEF,
+    &JSON_POINTER_DELETE_IMPL_DEF,
+    &JQ_IMPL_DEF,
+    &JQ_FIRST_IMPL_DEF,
+];
 
 fn json_pointer_tokens(ptr: &str, builtin: &str) -> Result<Vec<String>, VmError> {
     if ptr.is_empty() {

@@ -36,20 +36,22 @@ use std::rc::Rc;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_xml_builtins(vm: &mut Vm) {
-    // `to_xml`/`from_xml` are registered under both their plain and
-    // `__`-prefixed names so the `std/xml` Harn wrappers can call the
-    // raw fast-path while user scripts get the short form without an
-    // explicit `import "std/xml"` for single-use system-prompt
-    // builders.
-    register_alias_pair(vm, "to_xml", "__to_xml", to_xml_builtin);
-    register_alias_pair(vm, "from_xml", "__from_xml", from_xml_builtin);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
-fn to_xml_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "to_xml(value: any, options?: dict?) -> string",
+    aliases = ["__to_xml"],
+    category = "xml"
+)]
+fn to_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args.first().unwrap_or(&VmValue::Nil);
     let options = args.get(1).and_then(VmValue::as_dict);
     let opts = XmlOptions::from_dict(options);
@@ -57,22 +59,17 @@ fn to_xml_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(VmValue::String(Rc::from(xml)))
 }
 
-fn from_xml_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "from_xml(text: string) -> dict",
+    aliases = ["__from_xml"],
+    category = "xml"
+)]
+fn from_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
-    let options = args.get(1).and_then(VmValue::as_dict);
-    let parse_opts = ParseOptions::from_dict(options);
-    parse_xml(&text, &parse_opts)
+    parse_xml(&text)
 }
 
-fn register_alias_pair(
-    vm: &mut Vm,
-    public_name: &'static str,
-    raw_name: &'static str,
-    handler: fn(&[VmValue]) -> Result<VmValue, VmError>,
-) {
-    vm.register_builtin(public_name, move |args, _out| handler(args));
-    vm.register_builtin(raw_name, move |args, _out| handler(args));
-}
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&TO_XML_IMPL_DEF, &FROM_XML_IMPL_DEF];
 
 struct XmlOptions {
     root: String,
@@ -221,29 +218,13 @@ fn push_indent(out: &mut String, opts: &XmlOptions, depth: usize) {
 }
 
 fn escape_text(out: &mut String, text: &str) {
-    // Span-copy: the typical case is "lots of text, few escapables",
-    // so push longest unescaped runs at once and only spell out the
-    // entity for the three XML-reserved bytes. All three are ASCII,
-    // so we can scan the byte slice without worrying about UTF-8
-    // boundaries (the entire UTF-8 multibyte tail is >= 0x80 and
-    // never collides with `&`/`<`/`>`).
-    let bytes = text.as_bytes();
-    let mut start = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        let entity = match b {
-            b'&' => "&amp;",
-            b'<' => "&lt;",
-            b'>' => "&gt;",
-            _ => continue,
-        };
-        if start < i {
-            out.push_str(&text[start..i]);
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(ch),
         }
-        out.push_str(entity);
-        start = i + 1;
-    }
-    if start < bytes.len() {
-        out.push_str(&text[start..]);
     }
 }
 
@@ -289,41 +270,9 @@ fn is_xml_name_char(ch: char) -> bool {
 
 // --- Parser ---
 
-/// Hard cap on XML element nesting depth. The parser is recursive, so
-/// without a depth check an adversarial document like `<a><a><a>...`
-/// would blow the stack. 256 leaves plenty of headroom for legitimate
-/// prompt-shape XML (system-prompt blocks rarely nest past a handful
-/// of levels) while keeping recursion well inside Rust's default
-/// 8 MiB main-thread stack and the 1–2 MiB worker thread stacks we
-/// spawn for harn-runtime tasks.
-const MAX_XML_DEPTH: usize = 256;
-
-#[derive(Default)]
-struct ParseOptions {
-    preserve_repeated_tag: bool,
-}
-
-impl ParseOptions {
-    fn from_dict(options: Option<&BTreeMap<String, VmValue>>) -> Self {
-        let mut out = ParseOptions::default();
-        let Some(dict) = options else {
-            return out;
-        };
-        if let Some(VmValue::Bool(b)) = dict.get("preserve_repeated_tag") {
-            out.preserve_repeated_tag = *b;
-        }
-        out
-    }
-}
-
-fn parse_xml(text: &str, parse_opts: &ParseOptions) -> Result<VmValue, VmError> {
+fn parse_xml(text: &str) -> Result<VmValue, VmError> {
     let bytes = text.as_bytes();
-    let mut p = Parser {
-        src: bytes,
-        pos: 0,
-        depth: 0,
-        opts: parse_opts,
-    };
+    let mut p = Parser { src: bytes, pos: 0 };
     p.skip_ws_and_prologue()?;
     if p.pos >= p.src.len() {
         return Ok(VmValue::Dict(Rc::new(BTreeMap::new())));
@@ -338,8 +287,6 @@ fn parse_xml(text: &str, parse_opts: &ParseOptions) -> Result<VmValue, VmError> 
 struct Parser<'a> {
     src: &'a [u8],
     pos: usize,
-    depth: usize,
-    opts: &'a ParseOptions,
 }
 
 impl<'a> Parser<'a> {
@@ -404,18 +351,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_element(&mut self) -> Result<(String, VmValue), VmError> {
-        if self.depth >= MAX_XML_DEPTH {
-            return Err(parse_error(format!(
-                "max nesting depth {MAX_XML_DEPTH} exceeded"
-            )));
-        }
-        self.depth += 1;
-        let result = self.parse_element_inner();
-        self.depth -= 1;
-        result
-    }
-
-    fn parse_element_inner(&mut self) -> Result<(String, VmValue), VmError> {
         self.consume(b"<")?;
         let tag = self.read_name()?;
         let attrs = self.read_attrs()?;
@@ -472,7 +407,7 @@ impl<'a> Parser<'a> {
                 return Err(parse_error("unterminated element".into()));
             }
         }
-        let value = finalize_element(children, text_buf, attrs, self.opts);
+        let value = finalize_element(children, text_buf, attrs);
         Ok((tag, value))
     }
 
@@ -581,7 +516,6 @@ fn finalize_element(
     children: BTreeMap<String, Vec<VmValue>>,
     text: String,
     attrs: Vec<(String, String)>,
-    opts: &ParseOptions,
 ) -> VmValue {
     let trimmed = text.trim();
     if children.is_empty() && attrs.is_empty() {
@@ -591,19 +525,9 @@ fn finalize_element(
         return scalar_from_text(trimmed);
     }
     // Plain repeated-child case (e.g. `<list><item>a</item><item>b</item></list>`).
-    // The default collapse is render-side symmetric with `to_xml`'s
-    // list serialization (item_tag wraps each element). When the
-    // caller passes `{preserve_repeated_tag: true}` the inner tag is
-    // kept so general-purpose XML (`<addresses><a>1</a><a>2</a></addresses>`)
-    // round-trips losslessly.
     if children.len() == 1 && attrs.is_empty() && trimmed.is_empty() {
         let (tag, values) = children.into_iter().next().unwrap();
         if values.len() > 1 {
-            if opts.preserve_repeated_tag {
-                let mut out = BTreeMap::new();
-                out.insert(tag, VmValue::List(Rc::new(values)));
-                return VmValue::Dict(Rc::new(out));
-            }
             return VmValue::List(Rc::new(values));
         }
         let mut out = BTreeMap::new();
@@ -681,10 +605,6 @@ mod tests {
         }
     }
 
-    fn parse(xml: &str) -> Result<VmValue, VmError> {
-        parse_xml(xml, &ParseOptions::default())
-    }
-
     #[test]
     fn renders_flat_dict() {
         let value = dict(&[
@@ -750,7 +670,7 @@ mod tests {
     #[test]
     fn parse_flat_dict_round_trip() {
         let xml = "<root><name>Ada</name><year>1815</year></root>";
-        let parsed = parse(xml).unwrap();
+        let parsed = parse_xml(xml).unwrap();
         let outer = parsed.as_dict().unwrap();
         let inner = outer.get("root").and_then(VmValue::as_dict).unwrap();
         assert_eq!(
@@ -764,7 +684,7 @@ mod tests {
     fn parse_repeated_children_into_list() {
         let xml =
             "<root><previous_chats><item>x.jsonl</item><item>y.jsonl</item></previous_chats></root>";
-        let parsed = parse(xml).unwrap();
+        let parsed = parse_xml(xml).unwrap();
         let outer = parsed.as_dict().unwrap();
         let inner = outer.get("root").and_then(VmValue::as_dict).unwrap();
         let chats = inner.get("previous_chats").unwrap();
@@ -785,7 +705,7 @@ mod tests {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!-- a comment -->
 <root><a>1</a></root>"#;
-        let parsed = parse(xml).unwrap();
+        let parsed = parse_xml(xml).unwrap();
         let root = parsed.as_dict().unwrap().get("root").cloned().unwrap();
         let a = root.as_dict().unwrap().get("a").cloned().unwrap();
         assert_eq!(a.as_int(), Some(1));
@@ -794,7 +714,7 @@ mod tests {
     #[test]
     fn parse_handles_cdata() {
         let xml = "<root><raw><![CDATA[<not parsed>]]></raw></root>";
-        let parsed = parse(xml).unwrap();
+        let parsed = parse_xml(xml).unwrap();
         let root = parsed.as_dict().unwrap().get("root").cloned().unwrap();
         let raw = root.as_dict().unwrap().get("raw").cloned().unwrap();
         assert_eq!(raw.display(), "<not parsed>".to_string());
@@ -803,7 +723,7 @@ mod tests {
     #[test]
     fn parse_handles_attributes() {
         let xml = r#"<root><item id="42" name="foo">x</item></root>"#;
-        let parsed = parse(xml).unwrap();
+        let parsed = parse_xml(xml).unwrap();
         let root = parsed.as_dict().unwrap().get("root").cloned().unwrap();
         let item = root.as_dict().unwrap().get("item").cloned().unwrap();
         let item_dict = item.as_dict().unwrap();
@@ -826,75 +746,12 @@ mod tests {
     #[test]
     fn parse_rejects_mismatched_tags() {
         let xml = "<a></b>";
-        let err = parse(xml).unwrap_err();
+        let err = parse_xml(xml).unwrap_err();
         match err {
             VmError::Thrown(VmValue::String(msg)) => {
                 assert!(msg.contains("mismatched"), "got: {msg}");
             }
             other => panic!("unexpected error: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_rejects_pathologically_nested_xml() {
-        // 257 nested elements blows the depth budget by one. We don't
-        // build a 10k-element string because the recursion limit
-        // itself is the contract — once we trip it the inner branches
-        // never run.
-        let depth = MAX_XML_DEPTH + 1;
-        let mut xml = String::with_capacity(depth * 8);
-        for _ in 0..depth {
-            xml.push_str("<a>");
-        }
-        for _ in 0..depth {
-            xml.push_str("</a>");
-        }
-        let err = parse(&xml).unwrap_err();
-        match err {
-            VmError::Thrown(VmValue::String(msg)) => {
-                assert!(
-                    msg.contains("max nesting depth"),
-                    "expected depth error, got: {msg}"
-                );
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn preserve_repeated_tag_keeps_inner_tag() {
-        let xml = "<addresses><a>1</a><a>2</a></addresses>";
-        let opts = ParseOptions {
-            preserve_repeated_tag: true,
-        };
-        let parsed = parse_xml(xml, &opts).unwrap();
-        let outer = parsed.as_dict().unwrap();
-        let addresses = outer
-            .get("addresses")
-            .and_then(VmValue::as_dict)
-            .expect("addresses dict");
-        let inner = addresses
-            .get("a")
-            .cloned()
-            .expect("inner tag preserved under `a`");
-        let items: Vec<i64> = match inner {
-            VmValue::List(items) => items.iter().filter_map(VmValue::as_int).collect(),
-            other => panic!("expected list under `a`, got {other:?}"),
-        };
-        assert_eq!(items, vec![1, 2]);
-    }
-
-    #[test]
-    fn default_parse_collapses_repeated_tag_to_list() {
-        let xml = "<addresses><a>1</a><a>2</a></addresses>";
-        let parsed = parse(xml).unwrap();
-        let outer = parsed.as_dict().unwrap();
-        match outer.get("addresses") {
-            Some(VmValue::List(items)) => {
-                let ints: Vec<i64> = items.iter().filter_map(VmValue::as_int).collect();
-                assert_eq!(ints, vec![1, 2]);
-            }
-            other => panic!("expected list, got {other:?}"),
         }
     }
 }

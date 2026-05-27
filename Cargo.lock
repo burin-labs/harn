@@ -2138,6 +2138,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-builtin-macros"
+version = "0.8.45"
+dependencies = [
+ "harn-builtin-meta",
+ "harn-builtin-registry",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "harn-builtin-meta"
+version = "0.8.45"
+
+[[package]]
+name = "harn-builtin-registry"
+version = "0.8.45"
+dependencies = [
+ "harn-builtin-meta",
+]
+
+[[package]]
 name = "harn-cli"
 version = "0.8.45"
 dependencies = [
@@ -2381,6 +2403,8 @@ dependencies = [
 name = "harn-parser"
 version = "0.8.45"
 dependencies = [
+ "harn-builtin-meta",
+ "harn-builtin-registry",
  "harn-lexer",
  "serde",
  "serde_json",
@@ -2453,6 +2477,9 @@ dependencies = [
  "flate2",
  "futures",
  "globset",
+ "harn-builtin-macros",
+ "harn-builtin-meta",
+ "harn-builtin-registry",
  "harn-clock",
  "harn-ir",
  "harn-lexer",

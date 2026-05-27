@@ -1,0 +1,13 @@
+[package]
+name = "harn-builtin-meta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared type definitions for Harn builtin signatures (BuiltinSignature, Param, Ty). Consumed by both harn-parser and harn-vm so signatures stay cycle-free."
+
+[dependencies]
+
+[lints]
+workspace = true

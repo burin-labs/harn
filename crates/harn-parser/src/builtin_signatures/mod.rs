@@ -4,16 +4,31 @@
 //! enforcement, and lint awareness all consult the registry returned by
 //! [`all_signatures`].
 //!
-//! To add a builtin: register it in the VM stdlib (the VM panics at
-//! registration time if a builtin's name is missing here), then add an
-//! entry to the appropriate namespace file under `signatures/`. The
-//! registry is concatenated and sorted centrally so the parser lookup
-//! table and the runtime stay in lockstep.
+//! ## Architecture
+//!
+//! Historically every builtin lived in two places — its implementation +
+//! runtime registration in `harn-vm/src/stdlib/*.rs`, and a hand-written
+//! `BuiltinSignature` literal under `signatures/*.rs` here in the parser.
+//! Drift between the two was caught at test time but cost a 2-file tax per
+//! new builtin.
+//!
+//! That two-sided system has been replaced by the `#[harn_builtin]`
+//! proc-macro (see `harn-builtin-macros`), which emits both the runtime
+//! handler registration AND the parser `BuiltinSignature` from a single
+//! annotated function. The vm crate aggregates them and installs them here
+//! at driver startup via [`harn_builtin_registry::install_builtin_signatures`].
+//!
+//! During migration the legacy static `signatures::groups()` tables remain
+//! as a fallback so unmigrated builtins still type-check. As modules port
+//! to `#[harn_builtin]` their entries move out of the static tables into
+//! the macro-emitted `MODULE_BUILTINS` slices. Once all signatures have
+//! migrated the static tables are deleted.
 
 mod lookup;
 mod signatures;
 mod types;
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 pub use lookup::{
@@ -21,22 +36,41 @@ pub use lookup::{
     iter_builtin_names, lookup,
 };
 pub use types::{
-    BuiltinMetadata, BuiltinSignature, Param, ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL, TY_BYTES,
-    TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_DURATION, TY_FLOAT, TY_INT,
-    TY_INT_OR_NIL, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
+    ty_to_type_expr, BuiltinMetadata, BuiltinSignature, BuiltinSignatureExt, Param,
+    ShapeFieldDescriptor, Ty, TyExt, TY_ANY, TY_BOOL, TY_BYTES, TY_BYTES_OR_NIL, TY_CLOSURE,
+    TY_DICT, TY_DICT_OR_NIL, TY_DURATION, TY_FLOAT, TY_INT, TY_INT_OR_NIL, TY_LIST, TY_NEVER,
+    TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 
+pub use harn_builtin_registry::install_builtin_signatures;
+
 /// Every builtin known to the parser, sorted alphabetically by name.
+///
+/// During migration this concatenates:
+///
+/// 1. The runtime-installed slice (drivers populate via
+///    [`install_builtin_signatures`] with the `#[harn_builtin]`-emitted defs).
+/// 2. The legacy static `signatures::groups()` tables for builtins that
+///    haven't yet ported to the proc-macro.
+///
+/// Duplicates by name are resolved in favour of the runtime-installed entry.
 pub fn all_signatures() -> &'static [BuiltinSignature] {
     static ALL_SIGNATURES: OnceLock<Vec<BuiltinSignature>> = OnceLock::new();
 
     ALL_SIGNATURES
         .get_or_init(|| {
-            let groups = signatures::groups();
-            let mut signatures =
-                Vec::with_capacity(groups.iter().map(|group| group.len()).sum::<usize>());
-            for group in groups {
-                signatures.extend_from_slice(group);
+            let installed = harn_builtin_registry::installed_signatures();
+            let installed_names: HashSet<&'static str> = installed.iter().map(|s| s.name).collect();
+
+            let mut signatures: Vec<BuiltinSignature> = installed.iter().map(|sig| **sig).collect();
+
+            for group in signatures::groups() {
+                for sig in group {
+                    if installed_names.contains(sig.name) {
+                        continue;
+                    }
+                    signatures.push(*sig);
+                }
             }
             signatures.sort_by_key(|sig| sig.name);
             signatures

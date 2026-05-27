@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::orchestration::RunExecutionRecord;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -157,235 +158,294 @@ fn path_escapes_project_root(joined: &std::path::Path) -> bool {
 }
 
 pub(crate) fn register_process_builtins(vm: &mut Vm) {
-    vm.register_builtin("env", |args, _out| {
-        let name = args.first().map(|a| a.display()).unwrap_or_default();
-        if let Some(value) = read_env_value(&name) {
-            return Ok(VmValue::String(Rc::from(value)));
-        }
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("env_or", |args, _out| {
-        let name = args.first().map(|a| a.display()).unwrap_or_default();
-        let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        if let Some(value) = read_env_value(&name) {
-            return Ok(VmValue::String(Rc::from(value)));
-        }
-        Ok(default)
-    });
-
-    // `timestamp` / `elapsed` are now registered by clock.rs so they
-    // honor mock_time / advance_time. Don't register here.
-
-    vm.register_builtin("exit", |args, _out| {
-        let code = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-        std::process::exit(code as i32);
-    });
-
-    vm.register_builtin("exec", |args, _out| {
-        if args.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "exec: command is required",
-            ))));
-        }
-        let cmd = args[0].display();
-        let cmd_args: Vec<String> = args[1..].iter().map(|a| a.display()).collect();
-        let output = exec_command(None, &cmd, &cmd_args)?;
-        Ok(vm_output_to_value(output))
-    });
-
-    vm.register_builtin("shell", |args, _out| {
-        let cmd = args.first().map(|a| a.display()).unwrap_or_default();
-        if cmd.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "shell: command string is required",
-            ))));
-        }
-        let invocation = crate::shells::default_shell_invocation(&cmd)
-            .map_err(|error| VmError::Runtime(format!("shell: {error}")))?;
-        let output = exec_shell_args(None, &invocation.program, &invocation.args)?;
-        Ok(vm_output_to_value(output))
-    });
-
-    vm.register_builtin("exec_at", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "exec_at: directory and command are required",
-            ))));
-        }
-        let dir = args[0].display();
-        let cmd = args[1].display();
-        let cmd_args: Vec<String> = args[2..].iter().map(|a| a.display()).collect();
-        let output = exec_command(Some(dir.as_str()), &cmd, &cmd_args)?;
-        Ok(vm_output_to_value(output))
-    });
-
-    vm.register_builtin("shell_at", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "shell_at: directory and command string are required",
-            ))));
-        }
-        let dir = args[0].display();
-        let cmd = args[1].display();
-        if cmd.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "shell_at: command string is required",
-            ))));
-        }
-        let invocation = crate::shells::default_shell_invocation(&cmd)
-            .map_err(|error| VmError::Runtime(format!("shell_at: {error}")))?;
-        let output = exec_shell_args(Some(dir.as_str()), &invocation.program, &invocation.args)?;
-        Ok(vm_output_to_value(output))
-    });
-
-    // `elapsed` registered by clock.rs (mockable). See note above.
-
-    vm.register_builtin("username", |_args, _out| {
-        let user = std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_default();
-        Ok(VmValue::String(Rc::from(user)))
-    });
-
-    vm.register_builtin("hostname", |_args, _out| {
-        let name = std::env::var("HOSTNAME")
-            .or_else(|_| std::env::var("COMPUTERNAME"))
-            .or_else(|_| {
-                std::process::Command::new("hostname")
-                    .output()
-                    .ok()
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                    .ok_or(std::env::VarError::NotPresent)
-            })
-            .unwrap_or_default();
-        Ok(VmValue::String(Rc::from(name)))
-    });
-
-    vm.register_builtin("platform", |_args, _out| {
-        let os = if cfg!(target_os = "macos") {
-            "darwin"
-        } else if cfg!(target_os = "linux") {
-            "linux"
-        } else if cfg!(target_os = "windows") {
-            "windows"
-        } else {
-            std::env::consts::OS
-        };
-        Ok(VmValue::String(Rc::from(os)))
-    });
-
-    vm.register_builtin("arch", |_args, _out| {
-        Ok(VmValue::String(Rc::from(std::env::consts::ARCH)))
-    });
-
-    vm.register_builtin("home_dir", |_args, _out| {
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_default();
-        Ok(VmValue::String(Rc::from(home)))
-    });
-
-    vm.register_builtin("pid", |_args, _out| {
-        Ok(VmValue::Int(std::process::id() as i64))
-    });
-
-    vm.register_builtin("date_iso", |_args, _out| {
-        // `date_iso` reads the OS wall clock directly (it predates the
-        // unified `clock_mock`). Routing through `leak_audit::wall_now`
-        // keeps the production behavior unchanged but surfaces the call
-        // in `testbench_clock_leaks()` whenever a script invokes it
-        // under a paused testbench session, so fidelity hazards are
-        // visible instead of silently corrupting tapes.
-        let now = crate::clock_mock::leak_audit::wall_now("stdlib/date_iso");
-        let dt: chrono::DateTime<chrono::Utc> = now.into();
-        Ok(VmValue::String(Rc::from(
-            dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        )))
-    });
-
-    vm.register_builtin("cwd", |_args, _out| {
-        let dir = current_execution_context()
-            .and_then(|context| context.cwd)
-            .or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .map(|p| p.to_string_lossy().into_owned())
-            })
-            .unwrap_or_default();
-        Ok(VmValue::String(Rc::from(dir)))
-    });
-
-    vm.register_builtin("execution_root", |_args, _out| {
-        Ok(VmValue::String(Rc::from(
-            execution_root_path().to_string_lossy().into_owned(),
-        )))
-    });
-
-    vm.register_builtin("asset_root", |_args, _out| {
-        Ok(VmValue::String(Rc::from(
-            asset_root_path().to_string_lossy().into_owned(),
-        )))
-    });
-
-    vm.register_builtin("runtime_paths", |_args, _out| {
-        let runtime_base = runtime_root_base();
-        let mut paths = BTreeMap::new();
-        paths.insert(
-            "execution_root".to_string(),
-            VmValue::String(Rc::from(
-                execution_root_path().to_string_lossy().into_owned(),
-            )),
-        );
-        paths.insert(
-            "asset_root".to_string(),
-            VmValue::String(Rc::from(asset_root_path().to_string_lossy().into_owned())),
-        );
-        paths.insert(
-            "state_root".to_string(),
-            VmValue::String(Rc::from(
-                crate::runtime_paths::state_root(&runtime_base)
-                    .to_string_lossy()
-                    .into_owned(),
-            )),
-        );
-        paths.insert(
-            "run_root".to_string(),
-            VmValue::String(Rc::from(
-                crate::runtime_paths::run_root(&runtime_base)
-                    .to_string_lossy()
-                    .into_owned(),
-            )),
-        );
-        paths.insert(
-            "worktree_root".to_string(),
-            VmValue::String(Rc::from(
-                crate::runtime_paths::worktree_root(&runtime_base)
-                    .to_string_lossy()
-                    .into_owned(),
-            )),
-        );
-        Ok(VmValue::Dict(Rc::new(paths)))
-    });
-
-    vm.register_builtin("spawn_captured", |args, _out| spawn_captured_value(args));
-
-    // `term_width()` / `term_height()` return the current terminal
-    // dimensions in columns and rows. Reads `COLUMNS` / `LINES` env vars
-    // first (so test harnesses can pin a value), falls back to the
-    // platform `ioctl` size, and finally defaults to 80x24 when neither
-    // is available (e.g. when stdout is not a TTY). These are the
-    // free-builtin aliases for `harness.term.width()` /
-    // `harness.term.height()`. `std/tui` already exposes
-    // `__tui_terminal_width` for its renderer; these aliases keep
-    // ported subcommands working without importing the tui module.
-    vm.register_builtin("term_width", |_args, _out| {
-        Ok(VmValue::Int(crate::term::width() as i64))
-    });
-    vm.register_builtin("term_height", |_args, _out| {
-        Ok(VmValue::Int(crate::term::height() as i64))
-    });
+    for def in PROCESS_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(sig = "env(name: string) -> string?", category = "process")]
+fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = args.first().map(|a| a.display()).unwrap_or_default();
+    if let Some(value) = read_env_value(&name) {
+        return Ok(VmValue::String(Rc::from(value)));
+    }
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "env_or(name: string, default: any) -> any",
+    category = "process"
+)]
+fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = args.first().map(|a| a.display()).unwrap_or_default();
+    let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    if let Some(value) = read_env_value(&name) {
+        return Ok(VmValue::String(Rc::from(value)));
+    }
+    Ok(default)
+}
+
+#[harn_builtin(sig = "exit(code?: int) -> never", category = "process")]
+fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let code = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+    std::process::exit(code as i32);
+}
+
+#[harn_builtin(
+    sig = "exec(command: string, ...args: any) -> dict",
+    category = "process"
+)]
+fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "exec: command is required",
+        ))));
+    }
+    let cmd = args[0].display();
+    let cmd_args: Vec<String> = args[1..].iter().map(|a| a.display()).collect();
+    let output = exec_command(None, &cmd, &cmd_args)?;
+    Ok(vm_output_to_value(output))
+}
+
+#[harn_builtin(sig = "shell(command: string) -> dict", category = "process")]
+fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let cmd = args.first().map(|a| a.display()).unwrap_or_default();
+    if cmd.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "shell: command string is required",
+        ))));
+    }
+    let invocation = crate::shells::default_shell_invocation(&cmd)
+        .map_err(|error| VmError::Runtime(format!("shell: {error}")))?;
+    let output = exec_shell_args(None, &invocation.program, &invocation.args)?;
+    Ok(vm_output_to_value(output))
+}
+
+#[harn_builtin(
+    sig = "exec_at(dir: string, command: string, ...args: any) -> dict",
+    category = "process"
+)]
+fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "exec_at: directory and command are required",
+        ))));
+    }
+    let dir = args[0].display();
+    let cmd = args[1].display();
+    let cmd_args: Vec<String> = args[2..].iter().map(|a| a.display()).collect();
+    let output = exec_command(Some(dir.as_str()), &cmd, &cmd_args)?;
+    Ok(vm_output_to_value(output))
+}
+
+#[harn_builtin(
+    sig = "shell_at(dir: string, command: string) -> dict",
+    category = "process"
+)]
+fn shell_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "shell_at: directory and command string are required",
+        ))));
+    }
+    let dir = args[0].display();
+    let cmd = args[1].display();
+    if cmd.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "shell_at: command string is required",
+        ))));
+    }
+    let invocation = crate::shells::default_shell_invocation(&cmd)
+        .map_err(|error| VmError::Runtime(format!("shell_at: {error}")))?;
+    let output = exec_shell_args(Some(dir.as_str()), &invocation.program, &invocation.args)?;
+    Ok(vm_output_to_value(output))
+}
+
+#[harn_builtin(sig = "username(...args: any) -> string", category = "process")]
+fn username_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default();
+    Ok(VmValue::String(Rc::from(user)))
+}
+
+#[harn_builtin(sig = "hostname() -> string", category = "process")]
+fn hostname_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .or_else(|_| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .ok_or(std::env::VarError::NotPresent)
+        })
+        .unwrap_or_default();
+    Ok(VmValue::String(Rc::from(name)))
+}
+
+#[harn_builtin(sig = "platform(...args: any) -> string", category = "process")]
+fn platform_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let os = if cfg!(target_os = "macos") {
+        "darwin"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        std::env::consts::OS
+    };
+    Ok(VmValue::String(Rc::from(os)))
+}
+
+#[harn_builtin(sig = "arch() -> string", category = "process")]
+fn arch_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(std::env::consts::ARCH)))
+}
+
+#[harn_builtin(sig = "home_dir() -> string", category = "process")]
+fn home_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    Ok(VmValue::String(Rc::from(home)))
+}
+
+#[harn_builtin(sig = "pid(...args: any) -> int", category = "process")]
+fn pid_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Int(std::process::id() as i64))
+}
+
+#[harn_builtin(sig = "date_iso() -> string", category = "process")]
+fn date_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    // `date_iso` reads the OS wall clock directly (it predates the
+    // unified `clock_mock`). Routing through `leak_audit::wall_now`
+    // keeps the production behavior unchanged but surfaces the call
+    // in `testbench_clock_leaks()` whenever a script invokes it
+    // under a paused testbench session, so fidelity hazards are
+    // visible instead of silently corrupting tapes.
+    let now = crate::clock_mock::leak_audit::wall_now("stdlib/date_iso");
+    let dt: chrono::DateTime<chrono::Utc> = now.into();
+    Ok(VmValue::String(Rc::from(
+        dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    )))
+}
+
+#[harn_builtin(sig = "cwd() -> string", category = "process")]
+fn cwd_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dir = current_execution_context()
+        .and_then(|context| context.cwd)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default();
+    Ok(VmValue::String(Rc::from(dir)))
+}
+
+#[harn_builtin(sig = "execution_root() -> string", category = "process")]
+fn execution_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(
+        execution_root_path().to_string_lossy().into_owned(),
+    )))
+}
+
+#[harn_builtin(sig = "asset_root() -> string", category = "process")]
+fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(
+        asset_root_path().to_string_lossy().into_owned(),
+    )))
+}
+
+#[harn_builtin(sig = "runtime_paths() -> dict", category = "process")]
+fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let runtime_base = runtime_root_base();
+    let mut paths = BTreeMap::new();
+    paths.insert(
+        "execution_root".to_string(),
+        VmValue::String(Rc::from(
+            execution_root_path().to_string_lossy().into_owned(),
+        )),
+    );
+    paths.insert(
+        "asset_root".to_string(),
+        VmValue::String(Rc::from(asset_root_path().to_string_lossy().into_owned())),
+    );
+    paths.insert(
+        "state_root".to_string(),
+        VmValue::String(Rc::from(
+            crate::runtime_paths::state_root(&runtime_base)
+                .to_string_lossy()
+                .into_owned(),
+        )),
+    );
+    paths.insert(
+        "run_root".to_string(),
+        VmValue::String(Rc::from(
+            crate::runtime_paths::run_root(&runtime_base)
+                .to_string_lossy()
+                .into_owned(),
+        )),
+    );
+    paths.insert(
+        "worktree_root".to_string(),
+        VmValue::String(Rc::from(
+            crate::runtime_paths::worktree_root(&runtime_base)
+                .to_string_lossy()
+                .into_owned(),
+        )),
+    );
+    Ok(VmValue::Dict(Rc::new(paths)))
+}
+
+#[harn_builtin(sig = "spawn_captured(opts: dict) -> dict", category = "process")]
+fn spawn_captured_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    spawn_captured_value(args)
+}
+
+// `term_width()` / `term_height()` return the current terminal
+// dimensions in columns and rows. Reads `COLUMNS` / `LINES` env vars
+// first (so test harnesses can pin a value), falls back to the
+// platform `ioctl` size, and finally defaults to 80x24 when neither
+// is available (e.g. when stdout is not a TTY). These are the
+// free-builtin aliases for `harness.term.width()` /
+// `harness.term.height()`. `std/tui` already exposes
+// `__tui_terminal_width` for its renderer; these aliases keep
+// ported subcommands working without importing the tui module.
+#[harn_builtin(sig = "term_width() -> int", category = "process")]
+fn term_width_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Int(crate::term::width() as i64))
+}
+
+#[harn_builtin(sig = "term_height() -> int", category = "process")]
+fn term_height_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Int(crate::term::height() as i64))
+}
+
+const PROCESS_BUILTINS: &[&VmBuiltinDef] = &[
+    &ENV_IMPL_DEF,
+    &ENV_OR_IMPL_DEF,
+    &EXIT_IMPL_DEF,
+    &EXEC_IMPL_DEF,
+    &SHELL_IMPL_DEF,
+    &EXEC_AT_IMPL_DEF,
+    &SHELL_AT_IMPL_DEF,
+    &USERNAME_IMPL_DEF,
+    &HOSTNAME_IMPL_DEF,
+    &PLATFORM_IMPL_DEF,
+    &ARCH_IMPL_DEF,
+    &HOME_DIR_IMPL_DEF,
+    &PID_IMPL_DEF,
+    &DATE_ISO_IMPL_DEF,
+    &CWD_IMPL_DEF,
+    &EXECUTION_ROOT_IMPL_DEF,
+    &ASSET_ROOT_IMPL_DEF,
+    &RUNTIME_PATHS_IMPL_DEF,
+    &SPAWN_CAPTURED_IMPL_DEF,
+    &TERM_WIDTH_IMPL_DEF,
+    &TERM_HEIGHT_IMPL_DEF,
+];
 
 /// Run an external command synchronously and return captured output.
 ///
@@ -597,33 +657,69 @@ pub fn find_project_root(base: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// Register builtins that depend on source directory context.
 pub(crate) fn register_path_builtins(vm: &mut Vm) {
-    vm.register_builtin("source_dir", |_args, _out| {
-        let dir = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
-        match dir {
-            Some(d) => Ok(VmValue::String(Rc::from(d.to_string_lossy().into_owned()))),
-            None => {
-                let cwd = std::env::current_dir()
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                Ok(VmValue::String(Rc::from(cwd)))
-            }
-        }
-    });
-
-    vm.register_builtin("project_root", |_args, _out| {
-        let base = current_execution_context()
-            .and_then(|context| context.cwd.map(PathBuf::from))
-            .or_else(|| VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        match find_project_root(&base) {
-            Some(root) => Ok(VmValue::String(Rc::from(
-                root.to_string_lossy().into_owned(),
-            ))),
-            None => Ok(VmValue::Nil),
-        }
-    });
+    for def in PATH_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(sig = "source_dir(...args: any) -> string", category = "process")]
+fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dir = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+    match dir {
+        Some(d) => Ok(VmValue::String(Rc::from(d.to_string_lossy().into_owned()))),
+        None => {
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(VmValue::String(Rc::from(cwd)))
+        }
+    }
+}
+
+#[harn_builtin(sig = "project_root() -> string?", category = "process")]
+fn project_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let base = current_execution_context()
+        .and_then(|context| context.cwd.map(PathBuf::from))
+        .or_else(|| VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    match find_project_root(&base) {
+        Some(root) => Ok(VmValue::String(Rc::from(
+            root.to_string_lossy().into_owned(),
+        ))),
+        None => Ok(VmValue::Nil),
+    }
+}
+
+const PATH_BUILTINS: &[&VmBuiltinDef] = &[&SOURCE_DIR_IMPL_DEF, &PROJECT_ROOT_IMPL_DEF];
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    // process builtins
+    &ENV_IMPL_DEF,
+    &ENV_OR_IMPL_DEF,
+    &EXIT_IMPL_DEF,
+    &EXEC_IMPL_DEF,
+    &SHELL_IMPL_DEF,
+    &EXEC_AT_IMPL_DEF,
+    &SHELL_AT_IMPL_DEF,
+    &USERNAME_IMPL_DEF,
+    &HOSTNAME_IMPL_DEF,
+    &PLATFORM_IMPL_DEF,
+    &ARCH_IMPL_DEF,
+    &HOME_DIR_IMPL_DEF,
+    &PID_IMPL_DEF,
+    &DATE_ISO_IMPL_DEF,
+    &CWD_IMPL_DEF,
+    &EXECUTION_ROOT_IMPL_DEF,
+    &ASSET_ROOT_IMPL_DEF,
+    &RUNTIME_PATHS_IMPL_DEF,
+    &SPAWN_CAPTURED_IMPL_DEF,
+    &TERM_WIDTH_IMPL_DEF,
+    &TERM_HEIGHT_IMPL_DEF,
+    // path builtins (register_path_builtins)
+    &SOURCE_DIR_IMPL_DEF,
+    &PROJECT_ROOT_IMPL_DEF,
+];
 
 fn vm_output_to_value(output: std::process::Output) -> VmValue {
     let mut result = BTreeMap::new();

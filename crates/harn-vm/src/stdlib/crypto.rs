@@ -6,6 +6,7 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::url_encoding::percent_encode_component;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -731,478 +732,8 @@ fn aws_sigv4_headers_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     })))
 }
 
-pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
-    fn display_arg(args: &[VmValue]) -> String {
-        args.first().map(|a| a.display()).unwrap_or_default()
-    }
-
-    vm.register_builtin("base64_encode", |args, _out| {
-        let bytes = match args.first() {
-            Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
-            Some(other) => other.display().into_bytes(),
-            None => Vec::new(),
-        };
-        use base64::Engine;
-        Ok(VmValue::String(Rc::from(
-            base64::engine::general_purpose::STANDARD.encode(bytes),
-        )))
-    });
-    vm.register_builtin("base64_decode", |args, _out| {
-        let val = display_arg(args);
-        use base64::Engine;
-        match base64::engine::general_purpose::STANDARD.decode(val.as_bytes()) {
-            Ok(bytes) => Ok(VmValue::String(Rc::from(
-                String::from_utf8_lossy(&bytes).into_owned(),
-            ))),
-            Err(e) => Err(VmError::Runtime(format!("base64 decode error: {e}"))),
-        }
-    });
-    vm.register_builtin("base64url_encode", |args, _out| {
-        let val = display_arg(args);
-        use base64::Engine;
-        Ok(VmValue::String(Rc::from(
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(val.as_bytes()),
-        )))
-    });
-    vm.register_builtin("base64url_decode", |args, _out| {
-        let val = display_arg(args);
-        use base64::Engine;
-        match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(val.as_bytes()) {
-            Ok(bytes) => Ok(VmValue::String(Rc::from(
-                String::from_utf8_lossy(&bytes).into_owned(),
-            ))),
-            Err(e) => Err(VmError::Runtime(format!("base64url decode error: {e}"))),
-        }
-    });
-    // bytes_to_base64url(bytes) -> base64url-no-pad string. Accepts bytes
-    // or a string (treated as UTF-8 bytes). Use for PKCE S256 challenges,
-    // JWT segments, and any other URL-safe encoding of raw bytes.
-    vm.register_builtin("bytes_to_base64url", |args, _out| {
-        use base64::Engine;
-        let bytes = match args.first() {
-            Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
-            Some(other) => other.display().into_bytes(),
-            None => Vec::new(),
-        };
-        Ok(VmValue::String(Rc::from(
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
-        )))
-    });
-    // sha256_base64url(input) -> base64url-no-pad encoding of SHA-256.
-    // Convenience for RFC 7636 PKCE S256 challenges so callers do not
-    // round-trip through hex.
-    vm.register_builtin("sha256_base64url", |args, _out| {
-        use base64::Engine;
-        use sha2::Digest;
-        let bytes = match args.first() {
-            Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
-            Some(other) => other.display().into_bytes(),
-            None => Vec::new(),
-        };
-        let digest = sha2::Sha256::digest(&bytes);
-        Ok(VmValue::String(Rc::from(
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest),
-        )))
-    });
-    // crypto_random_bytes(n) -> VmValue::Bytes of length n drawn from a
-    // CSPRNG. Used by OAuth.client to build PKCE verifiers and state
-    // tokens with strong entropy. n must be a positive integer.
-    vm.register_builtin("crypto_random_bytes", |args, _out| {
-        use rand::Rng as _;
-        let n = match args.first() {
-            Some(VmValue::Int(value)) if *value > 0 => *value as usize,
-            Some(other) => {
-                return Err(VmError::Runtime(format!(
-                    "crypto_random_bytes: n must be a positive integer, got {}",
-                    other.type_name()
-                )));
-            }
-            None => {
-                return Err(VmError::Runtime(
-                    "crypto_random_bytes: n is required".to_string(),
-                ));
-            }
-        };
-        if n > 1024 {
-            return Err(VmError::Runtime(format!(
-                "crypto_random_bytes: n must be <= 1024, got {n}"
-            )));
-        }
-        let mut out = vec![0u8; n];
-        rand::rng().fill_bytes(&mut out);
-        Ok(VmValue::Bytes(Rc::new(out)))
-    });
-    vm.register_builtin("base32_encode", |args, _out| {
-        let val = display_arg(args);
-        Ok(VmValue::String(Rc::from(
-            data_encoding::BASE32.encode(val.as_bytes()),
-        )))
-    });
-    vm.register_builtin("base32_decode", |args, _out| {
-        let val = display_arg(args);
-        match data_encoding::BASE32.decode(val.as_bytes()) {
-            Ok(bytes) => Ok(VmValue::String(Rc::from(
-                String::from_utf8_lossy(&bytes).into_owned(),
-            ))),
-            Err(e) => Err(VmError::Runtime(format!("base32 decode error: {e}"))),
-        }
-    });
-    vm.register_builtin("hex_encode", |args, _out| {
-        let val = display_arg(args);
-        Ok(VmValue::String(Rc::from(hex::encode(val.as_bytes()))))
-    });
-    vm.register_builtin("hex_decode", |args, _out| {
-        let val = display_arg(args);
-        match hex::decode(val.as_bytes()) {
-            Ok(bytes) => Ok(VmValue::String(Rc::from(
-                String::from_utf8_lossy(&bytes).into_owned(),
-            ))),
-            Err(e) => Err(VmError::Runtime(format!("hex decode error: {e}"))),
-        }
-    });
-
-    // Stable FNV-1a over the canonical display form so logically-equal values
-    // hash identically. For bucketing/indexing only — use sha256 for integrity.
-    vm.register_builtin("hash_value", |args, _out| {
-        let val = args.first().unwrap_or(&VmValue::Nil);
-        let key = crate::value::value_structural_hash_key(val);
-        let mut hash: u64 = 0xcbf29ce484222325;
-        for byte in key.as_bytes() {
-            hash ^= *byte as u64;
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        Ok(VmValue::Int(hash as i64))
-    });
-
-    macro_rules! register_hash {
-        ($vm:expr, $name:expr, $digest:path, $hasher:ty) => {
-            $vm.register_builtin($name, |args, _out| {
-                use $digest as _;
-                let val = display_arg(args);
-                let hash = <$hasher>::digest(val.as_bytes());
-                let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-                Ok(VmValue::String(Rc::from(hex)))
-            });
-        };
-    }
-    register_hash!(vm, "sha256", sha2::Digest, sha2::Sha256);
-    register_hash!(vm, "sha224", sha2::Digest, sha2::Sha224);
-    register_hash!(vm, "sha384", sha2::Digest, sha2::Sha384);
-    register_hash!(vm, "sha512", sha2::Digest, sha2::Sha512);
-    register_hash!(vm, "sha512_256", sha2::Digest, sha2::Sha512_256);
-    register_hash!(vm, "md5", md5::Digest, md5::Md5);
-
-    // Top-level alias for `harness.crypto.sha256(...)`. It accepts `Bytes`
-    // values directly, so content-addressing scripts can hash binary payloads
-    // without first stringifying them.
-    vm.register_builtin("sha256_hex", |args, _out| {
-        Ok(crate::harness_crypto::sha256_hex_value(args))
-    });
-
-    // HMAC-SHA256 over (key, message). Both inputs are taken as their byte
-    // sequences (string `display()` of nil/numbers stringifies first). The
-    // returned hex string is what most webhook providers send in their
-    // signature header (e.g. GitHub's `x-hub-signature-256: sha256=<hex>`).
-    vm.register_builtin("hmac_sha256", |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
-        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-        Ok(VmValue::String(Rc::from(hex)))
-    });
-
-    // HMAC-SHA256 returning standard base64 (used by Slack-style signatures).
-    vm.register_builtin("hmac_sha256_base64", |args, _out| {
-        use base64::Engine;
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
-        Ok(VmValue::String(Rc::from(
-            base64::engine::general_purpose::STANDARD.encode(&mac),
-        )))
-    });
-
-    // HMAC-SHA1 (hex). Provided for legacy webhook signatures (e.g. older
-    // Bitbucket / GitHub `x-hub-signature: sha1=<hex>`); SHA-256 should be
-    // preferred for any new integration.
-    vm.register_builtin("hmac_sha1", |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let mac = crate::connectors::hmac::hmac_sha1(key.as_bytes(), msg.as_bytes());
-        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-        Ok(VmValue::String(Rc::from(hex)))
-    });
-
-    vm.register_builtin("jwt_sign", |args, _out| jwt_sign_builtin(args));
-
-    vm.register_builtin("signed_url", |args, _out| signed_url_builtin(args));
-    vm.register_builtin("verify_signed_url", |args, _out| {
-        verify_signed_url_builtin(args)
-    });
-    vm.register_builtin("aws_sigv4_headers", |args, _out| {
-        aws_sigv4_headers_builtin(args)
-    });
-
-    // Constant-time string equality. The variable-time `==` operator can leak
-    // the position of the first differing byte through timing, which lets an
-    // attacker recover an HMAC signature byte-by-byte. Always use this for
-    // signature comparison.
-    vm.register_builtin("constant_time_eq", |args, _out| {
-        let a = args.first().map(|a| a.display()).unwrap_or_default();
-        let b = args.get(1).map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::Bool(crate::connectors::hmac::secure_eq(
-            a.as_bytes(),
-            b.as_bytes(),
-        )))
-    });
-
-    vm.register_builtin("url_encode", |args, _out| {
-        let val = display_arg(args);
-        let encoded: String = val
-            .bytes()
-            .map(|b| match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                    (b as char).to_string()
-                }
-                _ => format!("%{b:02X}"),
-            })
-            .collect();
-        Ok(VmValue::String(Rc::from(encoded)))
-    });
-
-    vm.register_builtin("url_decode", |args, _out| {
-        let val = display_arg(args);
-        let mut result = Vec::new();
-        let bytes = val.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'%' && i + 2 < bytes.len() {
-                if let Ok(byte) = u8::from_str_radix(&val[i + 1..i + 3], 16) {
-                    result.push(byte);
-                    i += 3;
-                    continue;
-                }
-            }
-            if bytes[i] == b'+' {
-                result.push(b' ');
-            } else {
-                result.push(bytes[i]);
-            }
-            i += 1;
-        }
-        Ok(VmValue::String(Rc::from(
-            String::from_utf8_lossy(&result).into_owned(),
-        )))
-    });
-
-    // --- modern hashing -------------------------------------------------
-
-    vm.register_builtin("sha3_256", |args, _out| {
-        use sha3::{Digest, Sha3_256};
-        let input = bytes_or_string_input(args.first())?;
-        let digest = Sha3_256::digest(&input);
-        Ok(VmValue::String(Rc::from(hex::encode(digest))))
-    });
-
-    vm.register_builtin("sha3_512", |args, _out| {
-        use sha3::{Digest, Sha3_512};
-        let input = bytes_or_string_input(args.first())?;
-        let digest = Sha3_512::digest(&input);
-        Ok(VmValue::String(Rc::from(hex::encode(digest))))
-    });
-
-    vm.register_builtin("blake3", |args, _out| {
-        let input = bytes_or_string_input(args.first())?;
-        let digest = blake3::hash(&input);
-        Ok(VmValue::String(Rc::from(digest.to_hex().to_string())))
-    });
-
-    // --- ed25519 keypair / sign / verify --------------------------------
-
-    vm.register_builtin("ed25519_keypair", |_args, _out| {
-        use ed25519_dalek::{SigningKey, VerifyingKey};
-        use rand::RngExt;
-        let mut bytes = [0u8; 32];
-        rand::rng().fill(&mut bytes);
-        let signing = SigningKey::from_bytes(&bytes);
-        let verifying: VerifyingKey = signing.verifying_key();
-        let mut dict = std::collections::BTreeMap::new();
-        dict.insert(
-            "private".to_string(),
-            VmValue::String(Rc::from(hex::encode(signing.to_bytes()))),
-        );
-        dict.insert(
-            "public".to_string(),
-            VmValue::String(Rc::from(hex::encode(verifying.to_bytes()))),
-        );
-        Ok(VmValue::Dict(Rc::new(dict)))
-    });
-
-    vm.register_builtin("ed25519_sign", |args, _out| {
-        use ed25519_dalek::{Signer, SigningKey};
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "ed25519_sign: expected (private_hex, message)",
-            ))));
-        }
-        let priv_hex = args[0].display();
-        let msg = bytes_or_string_input(Some(&args[1]))?;
-        let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "ed25519_sign: invalid hex private key: {e}"
-            ))))
-        })?;
-        let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "ed25519_sign: private key must be 32 bytes",
-            )))
-        })?;
-        let signing = SigningKey::from_bytes(&priv_arr);
-        let sig = signing.sign(&msg);
-        Ok(VmValue::String(Rc::from(hex::encode(sig.to_bytes()))))
-    });
-
-    vm.register_builtin("ed25519_verify", |args, _out| {
-        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-        if args.len() < 3 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "ed25519_verify: expected (public_hex, message, signature_hex)",
-            ))));
-        }
-        let pub_hex = args[0].display();
-        let msg = bytes_or_string_input(Some(&args[1]))?;
-        let sig_hex = args[2].display();
-
-        let pub_bytes = match hex::decode(&pub_hex) {
-            Ok(b) => b,
-            Err(_) => return Ok(VmValue::Bool(false)),
-        };
-        let sig_bytes = match hex::decode(&sig_hex) {
-            Ok(b) => b,
-            Err(_) => return Ok(VmValue::Bool(false)),
-        };
-        let pub_arr: [u8; 32] = match pub_bytes.as_slice().try_into() {
-            Ok(a) => a,
-            Err(_) => return Ok(VmValue::Bool(false)),
-        };
-        let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
-            Ok(a) => a,
-            Err(_) => return Ok(VmValue::Bool(false)),
-        };
-        let verifying = match VerifyingKey::from_bytes(&pub_arr) {
-            Ok(v) => v,
-            Err(_) => return Ok(VmValue::Bool(false)),
-        };
-        let signature = Signature::from_bytes(&sig_arr);
-        Ok(VmValue::Bool(verifying.verify(&msg, &signature).is_ok()))
-    });
-
-    // --- x25519 keypair / agree -----------------------------------------
-
-    vm.register_builtin("x25519_keypair", |_args, _out| {
-        use rand::RngExt;
-        use x25519_dalek::{PublicKey, StaticSecret};
-        let mut bytes = [0u8; 32];
-        rand::rng().fill(&mut bytes);
-        let secret = StaticSecret::from(bytes);
-        let public = PublicKey::from(&secret);
-        let mut dict = std::collections::BTreeMap::new();
-        dict.insert(
-            "private".to_string(),
-            VmValue::String(Rc::from(hex::encode(secret.to_bytes()))),
-        );
-        dict.insert(
-            "public".to_string(),
-            VmValue::String(Rc::from(hex::encode(public.to_bytes()))),
-        );
-        Ok(VmValue::Dict(Rc::new(dict)))
-    });
-
-    vm.register_builtin("x25519_agree", |args, _out| {
-        use x25519_dalek::{PublicKey, StaticSecret};
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "x25519_agree: expected (private_hex, peer_public_hex)",
-            ))));
-        }
-        let priv_hex = args[0].display();
-        let pub_hex = args[1].display();
-        let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "x25519_agree: invalid private hex: {e}"
-            ))))
-        })?;
-        let pub_bytes = hex::decode(&pub_hex).map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "x25519_agree: invalid public hex: {e}"
-            ))))
-        })?;
-        let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "x25519_agree: private must be 32 bytes",
-            )))
-        })?;
-        let pub_arr: [u8; 32] = pub_bytes.as_slice().try_into().map_err(|_| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "x25519_agree: public must be 32 bytes",
-            )))
-        })?;
-        let secret = StaticSecret::from(priv_arr);
-        let peer = PublicKey::from(pub_arr);
-        let shared = secret.diffie_hellman(&peer);
-        Ok(VmValue::String(Rc::from(hex::encode(shared.as_bytes()))))
-    });
-
-    // --- jwt_verify (HS256 / RS256 / ES256) -----------------------------
-
-    vm.register_builtin("jwt_verify", |args, _out| {
-        use jsonwebtoken::{decode, DecodingKey, Validation};
-        if args.len() < 3 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "jwt_verify: expected (alg, token, key)",
-            ))));
-        }
-        let alg = args[0].display();
-        let token = args[1].display();
-        let key_str = args[2].display();
-        let algorithm = match alg.as_str() {
-            "HS256" => Algorithm::HS256,
-            "ES256" => Algorithm::ES256,
-            "RS256" => Algorithm::RS256,
-            other => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "jwt_verify: unsupported algorithm '{other}'"
-                )))));
-            }
-        };
-        let decoding_key = match algorithm {
-            Algorithm::HS256 => DecodingKey::from_secret(key_str.as_bytes()),
-            Algorithm::ES256 => DecodingKey::from_ec_pem(key_str.as_bytes()).map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "jwt_verify: invalid ES256 public key: {e}"
-                ))))
-            })?,
-            Algorithm::RS256 => DecodingKey::from_rsa_pem(key_str.as_bytes()).map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "jwt_verify: invalid RS256 public key: {e}"
-                ))))
-            })?,
-            _ => unreachable!(),
-        };
-        let mut validation = Validation::new(algorithm);
-        // Don't enforce exp/nbf/aud automatically — the caller can opt in
-        // by validating claims themselves.
-        validation.validate_exp = false;
-        validation.validate_nbf = false;
-        validation.required_spec_claims.clear();
-        let decoded = decode::<serde_json::Value>(&token, &decoding_key, &validation)
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("jwt_verify: {e}")))))?;
-        let claims_value = crate::schema::json_to_vm_value(&decoded.claims);
-        let mut dict = std::collections::BTreeMap::new();
-        dict.insert("valid".to_string(), VmValue::Bool(true));
-        dict.insert("claims".to_string(), claims_value);
-        Ok(VmValue::Dict(Rc::new(dict)))
-    });
+fn display_arg(args: &[VmValue]) -> String {
+    args.first().map(|a| a.display()).unwrap_or_default()
 }
 
 fn bytes_or_string_input(arg: Option<&VmValue>) -> Result<Vec<u8>, VmError> {
@@ -1213,6 +744,653 @@ fn bytes_or_string_input(arg: Option<&VmValue>) -> Result<Vec<u8>, VmError> {
         None => Ok(Vec::new()),
     }
 }
+
+pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+#[harn_builtin(
+    sig = "base64_encode(input: string | bytes) -> string",
+    category = "crypto"
+)]
+fn base64_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let bytes = match args.first() {
+        Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
+        Some(other) => other.display().into_bytes(),
+        None => Vec::new(),
+    };
+    use base64::Engine;
+    Ok(VmValue::String(Rc::from(
+        base64::engine::general_purpose::STANDARD.encode(bytes),
+    )))
+}
+
+#[harn_builtin(sig = "base64_decode(text: string) -> string", category = "crypto")]
+fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    use base64::Engine;
+    match base64::engine::general_purpose::STANDARD.decode(val.as_bytes()) {
+        Ok(bytes) => Ok(VmValue::String(Rc::from(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        ))),
+        Err(e) => Err(VmError::Runtime(format!("base64 decode error: {e}"))),
+    }
+}
+
+#[harn_builtin(
+    sig = "base64url_encode(input: string | bytes) -> string",
+    category = "crypto"
+)]
+fn base64url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    use base64::Engine;
+    Ok(VmValue::String(Rc::from(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(val.as_bytes()),
+    )))
+}
+
+#[harn_builtin(sig = "base64url_decode(text: string) -> string", category = "crypto")]
+fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    use base64::Engine;
+    match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(val.as_bytes()) {
+        Ok(bytes) => Ok(VmValue::String(Rc::from(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        ))),
+        Err(e) => Err(VmError::Runtime(format!("base64url decode error: {e}"))),
+    }
+}
+
+// bytes_to_base64url(bytes) -> base64url-no-pad string. Accepts bytes
+// or a string (treated as UTF-8 bytes). Use for PKCE S256 challenges,
+// JWT segments, and any other URL-safe encoding of raw bytes.
+#[harn_builtin(
+    sig = "bytes_to_base64url(input: string | bytes) -> string",
+    category = "crypto"
+)]
+fn bytes_to_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use base64::Engine;
+    let bytes = match args.first() {
+        Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
+        Some(other) => other.display().into_bytes(),
+        None => Vec::new(),
+    };
+    Ok(VmValue::String(Rc::from(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
+    )))
+}
+
+// sha256_base64url(input) -> base64url-no-pad encoding of SHA-256.
+// Convenience for RFC 7636 PKCE S256 challenges so callers do not
+// round-trip through hex.
+#[harn_builtin(
+    sig = "sha256_base64url(input: string | bytes) -> string",
+    category = "crypto"
+)]
+fn sha256_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use base64::Engine;
+    use sha2::Digest;
+    let bytes = match args.first() {
+        Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
+        Some(other) => other.display().into_bytes(),
+        None => Vec::new(),
+    };
+    let digest = sha2::Sha256::digest(&bytes);
+    Ok(VmValue::String(Rc::from(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest),
+    )))
+}
+
+// crypto_random_bytes(n) -> VmValue::Bytes of length n drawn from a
+// CSPRNG. Used by OAuth.client to build PKCE verifiers and state
+// tokens with strong entropy. n must be a positive integer.
+#[harn_builtin(sig = "crypto_random_bytes(n: int) -> bytes", category = "crypto")]
+fn crypto_random_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use rand::Rng as _;
+    let n = match args.first() {
+        Some(VmValue::Int(value)) if *value > 0 => *value as usize,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "crypto_random_bytes: n must be a positive integer, got {}",
+                other.type_name()
+            )));
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "crypto_random_bytes: n is required".to_string(),
+            ));
+        }
+    };
+    if n > 1024 {
+        return Err(VmError::Runtime(format!(
+            "crypto_random_bytes: n must be <= 1024, got {n}"
+        )));
+    }
+    let mut out = vec![0u8; n];
+    rand::rng().fill_bytes(&mut out);
+    Ok(VmValue::Bytes(Rc::new(out)))
+}
+
+#[harn_builtin(sig = "base32_encode(input: string) -> string", category = "crypto")]
+fn base32_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    Ok(VmValue::String(Rc::from(
+        data_encoding::BASE32.encode(val.as_bytes()),
+    )))
+}
+
+#[harn_builtin(sig = "base32_decode(text: string) -> string", category = "crypto")]
+fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    match data_encoding::BASE32.decode(val.as_bytes()) {
+        Ok(bytes) => Ok(VmValue::String(Rc::from(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        ))),
+        Err(e) => Err(VmError::Runtime(format!("base32 decode error: {e}"))),
+    }
+}
+
+#[harn_builtin(sig = "hex_encode(input: string) -> string", category = "crypto")]
+fn hex_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    Ok(VmValue::String(Rc::from(hex::encode(val.as_bytes()))))
+}
+
+#[harn_builtin(sig = "hex_decode(text: string) -> string", category = "crypto")]
+fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    match hex::decode(val.as_bytes()) {
+        Ok(bytes) => Ok(VmValue::String(Rc::from(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        ))),
+        Err(e) => Err(VmError::Runtime(format!("hex decode error: {e}"))),
+    }
+}
+
+// Stable FNV-1a over the canonical display form so logically-equal values
+// hash identically. For bucketing/indexing only — use sha256 for integrity.
+#[harn_builtin(sig = "hash_value(value: any) -> int", category = "crypto")]
+fn hash_value_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = args.first().unwrap_or(&VmValue::Nil);
+    let key = crate::value::value_structural_hash_key(val);
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in key.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    Ok(VmValue::Int(hash as i64))
+}
+
+#[harn_builtin(sig = "sha256(input: string) -> string", category = "crypto")]
+fn sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use sha2::Digest;
+    let val = display_arg(args);
+    let hash = sha2::Sha256::digest(val.as_bytes());
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(VmValue::String(Rc::from(hex)))
+}
+
+#[harn_builtin(sig = "sha224(input: string) -> string", category = "crypto")]
+fn sha224_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use sha2::Digest;
+    let val = display_arg(args);
+    let hash = sha2::Sha224::digest(val.as_bytes());
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(VmValue::String(Rc::from(hex)))
+}
+
+#[harn_builtin(sig = "sha384(input: string) -> string", category = "crypto")]
+fn sha384_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use sha2::Digest;
+    let val = display_arg(args);
+    let hash = sha2::Sha384::digest(val.as_bytes());
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(VmValue::String(Rc::from(hex)))
+}
+
+#[harn_builtin(sig = "sha512(input: string) -> string", category = "crypto")]
+fn sha512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use sha2::Digest;
+    let val = display_arg(args);
+    let hash = sha2::Sha512::digest(val.as_bytes());
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(VmValue::String(Rc::from(hex)))
+}
+
+#[harn_builtin(sig = "sha512_256(input: string) -> string", category = "crypto")]
+fn sha512_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use sha2::Digest;
+    let val = display_arg(args);
+    let hash = sha2::Sha512_256::digest(val.as_bytes());
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(VmValue::String(Rc::from(hex)))
+}
+
+#[harn_builtin(sig = "md5(input: string) -> string", category = "crypto")]
+fn md5_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use md5::Digest;
+    let val = display_arg(args);
+    let hash = md5::Md5::digest(val.as_bytes());
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(VmValue::String(Rc::from(hex)))
+}
+
+// Top-level alias for `harness.crypto.sha256(...)`. It accepts `Bytes`
+// values directly, so content-addressing scripts can hash binary payloads
+// without first stringifying them.
+#[harn_builtin(
+    sig = "sha256_hex(input: string | bytes) -> string",
+    category = "crypto"
+)]
+fn sha256_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(crate::harness_crypto::sha256_hex_value(args))
+}
+
+// HMAC-SHA256 over (key, message). Both inputs are taken as their byte
+// sequences (string `display()` of nil/numbers stringifies first). The
+// returned hex string is what most webhook providers send in their
+// signature header (e.g. GitHub's `x-hub-signature-256: sha256=<hex>`).
+#[harn_builtin(
+    sig = "hmac_sha256(key: string, message: string) -> string",
+    category = "crypto"
+)]
+fn hmac_sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
+    let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
+    let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(VmValue::String(Rc::from(hex)))
+}
+
+// HMAC-SHA256 returning standard base64 (used by Slack-style signatures).
+#[harn_builtin(
+    sig = "hmac_sha256_base64(key: string, message: string) -> string",
+    category = "crypto"
+)]
+fn hmac_sha256_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use base64::Engine;
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
+    let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
+    Ok(VmValue::String(Rc::from(
+        base64::engine::general_purpose::STANDARD.encode(&mac),
+    )))
+}
+
+// HMAC-SHA1 (hex). Provided for legacy webhook signatures (e.g. older
+// Bitbucket / GitHub `x-hub-signature: sha1=<hex>`); SHA-256 should be
+// preferred for any new integration.
+#[harn_builtin(
+    sig = "hmac_sha1(key: string, message: string) -> string",
+    category = "crypto"
+)]
+fn hmac_sha1_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
+    let mac = crate::connectors::hmac::hmac_sha1(key.as_bytes(), msg.as_bytes());
+    let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(VmValue::String(Rc::from(hex)))
+}
+
+#[harn_builtin(
+    sig = "jwt_sign(algorithm: string, claims: dict, private_key: string) -> string",
+    category = "crypto"
+)]
+fn jwt_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    jwt_sign_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "signed_url(base: string, claims: dict, secret: string, expires_at: int, options?: dict) -> string",
+    category = "crypto"
+)]
+fn signed_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    signed_url_builtin(args)
+}
+
+#[harn_builtin(
+    sig = "verify_signed_url(url: string, secret_or_keys: string | dict, now: int, options?: dict) -> dict",
+    category = "crypto"
+)]
+fn verify_signed_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    verify_signed_url_builtin(args)
+}
+
+#[harn_builtin(sig = "aws_sigv4_headers(spec: dict) -> dict", category = "crypto")]
+fn aws_sigv4_headers_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    aws_sigv4_headers_builtin(args)
+}
+
+// Constant-time string equality. The variable-time `==` operator can leak
+// the position of the first differing byte through timing, which lets an
+// attacker recover an HMAC signature byte-by-byte. Always use this for
+// signature comparison.
+#[harn_builtin(
+    sig = "constant_time_eq(a: string, b: string) -> bool",
+    category = "crypto"
+)]
+fn constant_time_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let a = args.first().map(|a| a.display()).unwrap_or_default();
+    let b = args.get(1).map(|a| a.display()).unwrap_or_default();
+    Ok(VmValue::Bool(crate::connectors::hmac::secure_eq(
+        a.as_bytes(),
+        b.as_bytes(),
+    )))
+}
+
+#[harn_builtin(sig = "url_encode(input: string) -> string", category = "crypto")]
+fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    let encoded: String = val
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect();
+    Ok(VmValue::String(Rc::from(encoded)))
+}
+
+#[harn_builtin(sig = "url_decode(text: string) -> string", category = "crypto")]
+fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let val = display_arg(args);
+    let mut result = Vec::new();
+    let bytes = val.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(&val[i + 1..i + 3], 16) {
+                result.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        if bytes[i] == b'+' {
+            result.push(b' ');
+        } else {
+            result.push(bytes[i]);
+        }
+        i += 1;
+    }
+    Ok(VmValue::String(Rc::from(
+        String::from_utf8_lossy(&result).into_owned(),
+    )))
+}
+
+// --- modern hashing -------------------------------------------------
+
+#[harn_builtin(sig = "sha3_256(input: string | bytes) -> string", category = "crypto")]
+fn sha3_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use sha3::{Digest, Sha3_256};
+    let input = bytes_or_string_input(args.first())?;
+    let digest = Sha3_256::digest(&input);
+    Ok(VmValue::String(Rc::from(hex::encode(digest))))
+}
+
+#[harn_builtin(sig = "sha3_512(input: string | bytes) -> string", category = "crypto")]
+fn sha3_512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use sha3::{Digest, Sha3_512};
+    let input = bytes_or_string_input(args.first())?;
+    let digest = Sha3_512::digest(&input);
+    Ok(VmValue::String(Rc::from(hex::encode(digest))))
+}
+
+#[harn_builtin(sig = "blake3(input: string | bytes) -> string", category = "crypto")]
+fn blake3_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let input = bytes_or_string_input(args.first())?;
+    let digest = blake3::hash(&input);
+    Ok(VmValue::String(Rc::from(digest.to_hex().to_string())))
+}
+
+// --- ed25519 keypair / sign / verify --------------------------------
+
+#[harn_builtin(sig = "ed25519_keypair() -> dict", category = "crypto")]
+fn ed25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use ed25519_dalek::{SigningKey, VerifyingKey};
+    use rand::RngExt;
+    let mut bytes = [0u8; 32];
+    rand::rng().fill(&mut bytes);
+    let signing = SigningKey::from_bytes(&bytes);
+    let verifying: VerifyingKey = signing.verifying_key();
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert(
+        "private".to_string(),
+        VmValue::String(Rc::from(hex::encode(signing.to_bytes()))),
+    );
+    dict.insert(
+        "public".to_string(),
+        VmValue::String(Rc::from(hex::encode(verifying.to_bytes()))),
+    );
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+#[harn_builtin(
+    sig = "ed25519_sign(private_hex: string, message: string | bytes) -> string",
+    category = "crypto"
+)]
+fn ed25519_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use ed25519_dalek::{Signer, SigningKey};
+    if args.len() < 2 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "ed25519_sign: expected (private_hex, message)",
+        ))));
+    }
+    let priv_hex = args[0].display();
+    let msg = bytes_or_string_input(Some(&args[1]))?;
+    let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "ed25519_sign: invalid hex private key: {e}"
+        ))))
+    })?;
+    let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "ed25519_sign: private key must be 32 bytes",
+        )))
+    })?;
+    let signing = SigningKey::from_bytes(&priv_arr);
+    let sig = signing.sign(&msg);
+    Ok(VmValue::String(Rc::from(hex::encode(sig.to_bytes()))))
+}
+
+#[harn_builtin(
+    sig = "ed25519_verify(public_hex: string, message: string | bytes, signature_hex: string) -> bool",
+    category = "crypto"
+)]
+fn ed25519_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    if args.len() < 3 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "ed25519_verify: expected (public_hex, message, signature_hex)",
+        ))));
+    }
+    let pub_hex = args[0].display();
+    let msg = bytes_or_string_input(Some(&args[1]))?;
+    let sig_hex = args[2].display();
+
+    let pub_bytes = match hex::decode(&pub_hex) {
+        Ok(b) => b,
+        Err(_) => return Ok(VmValue::Bool(false)),
+    };
+    let sig_bytes = match hex::decode(&sig_hex) {
+        Ok(b) => b,
+        Err(_) => return Ok(VmValue::Bool(false)),
+    };
+    let pub_arr: [u8; 32] = match pub_bytes.as_slice().try_into() {
+        Ok(a) => a,
+        Err(_) => return Ok(VmValue::Bool(false)),
+    };
+    let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+        Ok(a) => a,
+        Err(_) => return Ok(VmValue::Bool(false)),
+    };
+    let verifying = match VerifyingKey::from_bytes(&pub_arr) {
+        Ok(v) => v,
+        Err(_) => return Ok(VmValue::Bool(false)),
+    };
+    let signature = Signature::from_bytes(&sig_arr);
+    Ok(VmValue::Bool(verifying.verify(&msg, &signature).is_ok()))
+}
+
+// --- x25519 keypair / agree -----------------------------------------
+
+#[harn_builtin(sig = "x25519_keypair() -> dict", category = "crypto")]
+fn x25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use rand::RngExt;
+    use x25519_dalek::{PublicKey, StaticSecret};
+    let mut bytes = [0u8; 32];
+    rand::rng().fill(&mut bytes);
+    let secret = StaticSecret::from(bytes);
+    let public = PublicKey::from(&secret);
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert(
+        "private".to_string(),
+        VmValue::String(Rc::from(hex::encode(secret.to_bytes()))),
+    );
+    dict.insert(
+        "public".to_string(),
+        VmValue::String(Rc::from(hex::encode(public.to_bytes()))),
+    );
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+#[harn_builtin(
+    sig = "x25519_agree(private_hex: string, peer_public_hex: string) -> string",
+    category = "crypto"
+)]
+fn x25519_agree_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use x25519_dalek::{PublicKey, StaticSecret};
+    if args.len() < 2 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "x25519_agree: expected (private_hex, peer_public_hex)",
+        ))));
+    }
+    let priv_hex = args[0].display();
+    let pub_hex = args[1].display();
+    let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "x25519_agree: invalid private hex: {e}"
+        ))))
+    })?;
+    let pub_bytes = hex::decode(&pub_hex).map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "x25519_agree: invalid public hex: {e}"
+        ))))
+    })?;
+    let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "x25519_agree: private must be 32 bytes",
+        )))
+    })?;
+    let pub_arr: [u8; 32] = pub_bytes.as_slice().try_into().map_err(|_| {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "x25519_agree: public must be 32 bytes",
+        )))
+    })?;
+    let secret = StaticSecret::from(priv_arr);
+    let peer = PublicKey::from(pub_arr);
+    let shared = secret.diffie_hellman(&peer);
+    Ok(VmValue::String(Rc::from(hex::encode(shared.as_bytes()))))
+}
+
+// --- jwt_verify (HS256 / RS256 / ES256) -----------------------------
+
+#[harn_builtin(
+    sig = "jwt_verify(algorithm: string, token: string, key: string) -> dict",
+    category = "crypto"
+)]
+fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    use jsonwebtoken::{decode, DecodingKey, Validation};
+    if args.len() < 3 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "jwt_verify: expected (alg, token, key)",
+        ))));
+    }
+    let alg = args[0].display();
+    let token = args[1].display();
+    let key_str = args[2].display();
+    let algorithm = match alg.as_str() {
+        "HS256" => Algorithm::HS256,
+        "ES256" => Algorithm::ES256,
+        "RS256" => Algorithm::RS256,
+        other => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "jwt_verify: unsupported algorithm '{other}'"
+            )))));
+        }
+    };
+    let decoding_key = match algorithm {
+        Algorithm::HS256 => DecodingKey::from_secret(key_str.as_bytes()),
+        Algorithm::ES256 => DecodingKey::from_ec_pem(key_str.as_bytes()).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "jwt_verify: invalid ES256 public key: {e}"
+            ))))
+        })?,
+        Algorithm::RS256 => DecodingKey::from_rsa_pem(key_str.as_bytes()).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "jwt_verify: invalid RS256 public key: {e}"
+            ))))
+        })?,
+        _ => unreachable!(),
+    };
+    let mut validation = Validation::new(algorithm);
+    // Don't enforce exp/nbf/aud automatically — the caller can opt in
+    // by validating claims themselves.
+    validation.validate_exp = false;
+    validation.validate_nbf = false;
+    validation.required_spec_claims.clear();
+    let decoded = decode::<serde_json::Value>(&token, &decoding_key, &validation)
+        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("jwt_verify: {e}")))))?;
+    let claims_value = crate::schema::json_to_vm_value(&decoded.claims);
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert("valid".to_string(), VmValue::Bool(true));
+    dict.insert("claims".to_string(), claims_value);
+    Ok(VmValue::Dict(Rc::new(dict)))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &BASE64_ENCODE_IMPL_DEF,
+    &BASE64_DECODE_IMPL_DEF,
+    &BASE64URL_ENCODE_IMPL_DEF,
+    &BASE64URL_DECODE_IMPL_DEF,
+    &BYTES_TO_BASE64URL_IMPL_DEF,
+    &SHA256_BASE64URL_IMPL_DEF,
+    &CRYPTO_RANDOM_BYTES_IMPL_DEF,
+    &BASE32_ENCODE_IMPL_DEF,
+    &BASE32_DECODE_IMPL_DEF,
+    &HEX_ENCODE_IMPL_DEF,
+    &HEX_DECODE_IMPL_DEF,
+    &HASH_VALUE_IMPL_DEF,
+    &SHA256_IMPL_DEF,
+    &SHA224_IMPL_DEF,
+    &SHA384_IMPL_DEF,
+    &SHA512_IMPL_DEF,
+    &SHA512_256_IMPL_DEF,
+    &MD5_IMPL_DEF,
+    &SHA256_HEX_IMPL_DEF,
+    &HMAC_SHA256_IMPL_DEF,
+    &HMAC_SHA256_BASE64_IMPL_DEF,
+    &HMAC_SHA1_IMPL_DEF,
+    &JWT_SIGN_IMPL_DEF,
+    &SIGNED_URL_IMPL_DEF,
+    &VERIFY_SIGNED_URL_IMPL_DEF,
+    &AWS_SIGV4_HEADERS_IMPL_DEF,
+    &CONSTANT_TIME_EQ_IMPL_DEF,
+    &URL_ENCODE_IMPL_DEF,
+    &URL_DECODE_IMPL_DEF,
+    &SHA3_256_IMPL_DEF,
+    &SHA3_512_IMPL_DEF,
+    &BLAKE3_IMPL_DEF,
+    &ED25519_KEYPAIR_IMPL_DEF,
+    &ED25519_SIGN_IMPL_DEF,
+    &ED25519_VERIFY_IMPL_DEF,
+    &X25519_KEYPAIR_IMPL_DEF,
+    &X25519_AGREE_IMPL_DEF,
+    &JWT_VERIFY_IMPL_DEF,
+];
 
 #[cfg(test)]
 mod tests {
