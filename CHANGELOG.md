@@ -6,7 +6,7 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.45
 
 ### Added
 
@@ -52,6 +52,27 @@ condensed series summaries instead of full per-patch history.
   surfaces `harn run/check/fmt/lint/test` entries, and two problem
   matchers (`$harn`, `$harn-lint`) route diagnostics into the
   Problems panel.
+
+### Breaking
+
+- **The typechecker now enforces declared generic and return contracts
+  more strictly (#2492).** Generic type parameters are no longer treated
+  as wildcard-compatible values, typed functions and pipelines must
+  satisfy their declared return types across bare returns, fallthrough,
+  nested returns, and exhaustive final matches, and top-level forward
+  placeholders promote to their concrete binding types. Code that relied
+  on unconstrained generics behaving like `any` or on implicitly falling
+  through a typed function/pipeline now receives a type error.
+
+### Fixed
+
+- **Unused-variable lint now recognizes `parallel ... with { ... }`
+  option expressions (#2493).** Locals used only in options such as
+  `max_concurrent` are no longer reported as unused.
+- **Schema-aware LLM result data inference now follows `Schema<T>`
+  output declarations (#2492).** Result `data` remains optional unless
+  `output_validation: "error"` is selected, matching runtime behavior
+  while preserving the stronger type information.
 
 ## v0.8.44
 
