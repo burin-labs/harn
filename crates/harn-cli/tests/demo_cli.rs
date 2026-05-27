@@ -179,6 +179,11 @@ fn stdlib_toolkit_demo_runs_end_to_end_against_bundled_tape() {
         "unique should collapse the duplicate chat reference in first-seen order:\n{}",
         outcome.stdout
     );
+    assert!(
+        outcome.stdout.contains("\"lossless_address_count\":2"),
+        "preserve_repeated_tag should keep both <a> entries under the inner tag:\n{}",
+        outcome.stdout
+    );
 }
 
 #[test]

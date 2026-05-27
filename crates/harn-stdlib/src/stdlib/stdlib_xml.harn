@@ -37,6 +37,19 @@ pub fn to_xml(value, options: XmlOptions = {}) -> string {
 }
 
 /**
+ * Options for `from_xml`.
+ *
+ * - `preserve_repeated_tag` — when `true`, an element whose only
+ *   children share a single tag (e.g. `<addresses><a>1</a><a>2</a></addresses>`)
+ *   keeps the inner tag and yields `{addresses: {a: [1, 2]}}` instead
+ *   of collapsing to `{addresses: [1, 2]}`. Use this for general XML
+ *   parsing where the inner tag is meaningful; leave it `false`
+ *   (default) for `to_xml`-symmetric round-trips that target the
+ *   `<list><item>...</item></list>` convention.
+ */
+type FromXmlOptions = {preserve_repeated_tag?: bool}
+
+/**
  * Parse an XML document back into a Harn value. Repeated children with
  * the same tag collapse into a list; attributes are exposed under
  * `@attr`; mixed content's text is exposed under `@text`.
@@ -47,6 +60,6 @@ pub fn to_xml(value, options: XmlOptions = {}) -> string {
  * @api_stability: stable
  * @example: from_xml("<root><a>1</a></root>")
  */
-pub fn from_xml(text: string) {
-  return __from_xml(text ?? "")
+pub fn from_xml(text: string, options: FromXmlOptions = {}) {
+  return __from_xml(text ?? "", options ?? {})
 }

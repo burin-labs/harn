@@ -487,8 +487,9 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `dict_from_pairs(pairs)` | pairs: list of `[key, value]` | dict | Build a dict from a list of pairs (later pairs override earlier ones) |
 | `index_by(items, fn)` | items: list, fn: closure | dict | Build a lookup table keyed by `fn(item)` |
 | `to_xml(value, options?)` | value: any, options: dict (`root`, `item_tag`, `pretty`, `declaration`) | string | Convert a Harn value into XML. Dicts → tag trees; lists → repeated `<item>` children |
-| `from_xml(text)` | text: string | dict | Parse XML back into a dict tree. Repeated children collapse into a list; attributes land under `@attr` |
+| `from_xml(text, options?)` | text: string, options: dict (`preserve_repeated_tag`) | dict | Parse XML back into a dict tree. Repeated children collapse into a list by default; `preserve_repeated_tag: true` keeps the inner tag |
 | `jsonrpc_call(url, method, params?, options?)` | url: string, method: string, params: any, options: dict (`headers`, `id`, `notify`, `timeout_ms`) | any | POST a JSON-RPC 2.0 envelope. Returns `result` on success, raises a structured error dict on failure |
+| `jsonrpc_batch(url, calls, options?)` | url: string, calls: list of `{method, params?, id?, notify?}` dicts, options: dict (`headers`, `timeout_ms`) | list | POST a JSON-RPC 2.0 batch. Returns a list aligned with input order; per-call errors arrive as `{jsonrpc_error: true, ...}` dicts inside the list |
 
 ### Iterator methods
 

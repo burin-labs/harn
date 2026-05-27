@@ -1,0 +1,39 @@
+/**
+ * `jsonrpc_batch` is HTTP-bound, so we can't exercise the round-trip
+ * in a hermetic conformance test. Instead this fixture nails down
+ * the argument-validation contract — the helper rejects an empty
+ * url, a non-list `calls`, an empty `calls`, and a malformed call
+ * entry without trying to reach the network. Unit tests in
+ * crates/harn-vm/src/stdlib/jsonrpc.rs cover the success/response
+ * paths against a synthetic envelope.
+ */
+pipeline test(task) {
+  let url_result = try {
+    jsonrpc_batch("", [{method: "ping"}])
+  }
+  assert_eq(is_err(url_result), true, "empty url is rejected")
+  assert_eq(
+    contains(to_string(unwrap_err(url_result)), "url is required"),
+    true,
+    "url-required error surfaces verbatim",
+  )
+  let empty_calls = try {
+    jsonrpc_batch("http://example.invalid/rpc", [])
+  }
+  assert_eq(is_err(empty_calls), true, "empty calls is rejected")
+  assert_eq(
+    contains(to_string(unwrap_err(empty_calls)), "calls list cannot be empty"),
+    true,
+    "empty-list error surfaces verbatim",
+  )
+  let bad_call = try {
+    jsonrpc_batch("http://example.invalid/rpc", [{params: [1, 2]}])
+  }
+  assert_eq(is_err(bad_call), true, "missing method is rejected")
+  assert_eq(
+    contains(to_string(unwrap_err(bad_call)), "missing 'method'"),
+    true,
+    "missing-method error surfaces verbatim",
+  )
+  log("jsonrpc_batch validation: all tests passed")
+}

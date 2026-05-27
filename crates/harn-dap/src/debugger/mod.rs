@@ -16,6 +16,22 @@ use serde_json::json;
 use crate::protocol::*;
 use state::ProgramState;
 
+/// Serialize a PromptSourceSpan into the JSON shape the IDE consumes
+/// for prompt-template highlighting. Used by both `burin/promptProvenance`
+/// and `burin/promptConsumers` so the wire shape stays consistent.
+fn serialize_span(span: &harn_vm::PromptSourceSpan) -> serde_json::Value {
+    json!({
+        "templateUri": span.template_uri,
+        "templateLine": span.template_line,
+        "templateCol": span.template_col,
+        "outputStart": span.output_start,
+        "outputEnd": span.output_end,
+        "kind": prompt_span_kind_label(span.kind),
+        "boundValue": span.bound_value,
+        "parentSpan": serialize_parent_chain(span.parent_span.as_deref()),
+    })
+}
+
 /// Recursively serialize a PromptSourceSpan parent chain into nested
 /// JSON so IDEs can render a breadcrumb like `A → B → C` when a deep
 /// render spanned three included files (#96). Returns null when the
@@ -23,16 +39,7 @@ use state::ProgramState;
 fn serialize_parent_chain(span: Option<&harn_vm::PromptSourceSpan>) -> serde_json::Value {
     match span {
         None => serde_json::Value::Null,
-        Some(s) => json!({
-            "templateUri": s.template_uri,
-            "templateLine": s.template_line,
-            "templateCol": s.template_col,
-            "outputStart": s.output_start,
-            "outputEnd": s.output_end,
-            "kind": prompt_span_kind_label(s.kind),
-            "boundValue": s.bound_value,
-            "parentSpan": serialize_parent_chain(s.parent_span.as_deref()),
-        }),
+        Some(s) => serialize_span(s),
     }
 }
 
@@ -333,21 +340,14 @@ impl Debugger {
                 } else {
                     span.template_uri.clone()
                 };
+                let mut body = serialize_span(&span);
+                body["templateUri"] = json!(effective_uri);
+                body["rootTemplateUri"] = json!(template_uri);
                 vec![DapResponse::success(
                     seq,
                     msg.seq,
                     "burin/promptProvenance",
-                    Some(json!({
-                        "templateUri": effective_uri,
-                        "rootTemplateUri": template_uri,
-                        "templateLine": span.template_line,
-                        "templateCol": span.template_col,
-                        "outputStart": span.output_start,
-                        "outputEnd": span.output_end,
-                        "kind": prompt_span_kind_label(span.kind),
-                        "boundValue": span.bound_value,
-                        "parentSpan": serialize_parent_chain(span.parent_span.as_deref()),
-                    })),
+                    Some(body),
                 )]
             }
             None => vec![self.dap_error(
@@ -393,15 +393,18 @@ impl Debugger {
                 // record_prompt_render_index — the IDE's jump-to-
                 // next-render falls back to no-op cleanly.
                 let event_indices = harn_vm::prompt_render_indices(&prompt_id);
-                json!({
-                    "promptId": prompt_id,
-                    "templateLine": span.template_line,
-                    "templateCol": span.template_col,
-                    "outputStart": span.output_start,
-                    "outputEnd": span.output_end,
-                    "kind": prompt_span_kind_label(span.kind),
-                    "eventIndices": event_indices,
-                })
+                let mut entry = serialize_span(&span);
+                // The consumer view doesn't surface the parent chain
+                // — the IDE pivots on the inner template's line range
+                // — and adds the cross-link to events.
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.remove("templateUri");
+                    obj.remove("boundValue");
+                    obj.remove("parentSpan");
+                }
+                entry["promptId"] = json!(prompt_id);
+                entry["eventIndices"] = json!(event_indices);
+                entry
             })
             .collect();
         let seq = self.next_seq();
@@ -650,16 +653,22 @@ impl Debugger {
             .and_then(|a| a.get("startModule"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
+        // Per DAP spec, `moduleCount` is optional and defaults to "all
+        // remaining from startModule". An explicit `0` is also "all" —
+        // VS Code uses it to ask for the full list when paging is
+        // disabled. The previous `.max(1)` silently returned a single
+        // module for that case.
         let module_count = args
             .and_then(|a| a.get("moduleCount"))
             .and_then(|v| v.as_u64())
             .map(|v| v as usize)
+            .filter(|n| *n > 0)
             .unwrap_or(paths.len());
         let total_module_count = paths.len();
         let modules: Vec<serde_json::Value> = paths
             .into_iter()
             .skip(start_module)
-            .take(module_count.max(1))
+            .take(module_count)
             .map(|path| {
                 let name = std::path::Path::new(&path)
                     .file_name()
