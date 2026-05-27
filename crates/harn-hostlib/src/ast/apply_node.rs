@@ -137,7 +137,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let path = PathBuf::from(&path_str);
     let language = match Language::detect(&path, language_hint.as_deref()) {
         Some(l) => l,
-        None => return Ok(unsupported_language_response(&path_str, language_hint.as_deref())),
+        None => {
+            return Ok(unsupported_language_response(
+                &path_str,
+                language_hint.as_deref(),
+            ))
+        }
     };
 
     let source = read_source(&path, session_id.as_deref(), max_bytes as usize)?;
@@ -149,7 +154,14 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let target_index = match resolve_target_capture(&query, &target_capture) {
         Ok(idx) => idx,
-        Err(detail) => return Ok(no_match_response(&path_str, &query_text, &target_capture, &detail)),
+        Err(detail) => {
+            return Ok(no_match_response(
+                &path_str,
+                &query_text,
+                &target_capture,
+                &detail,
+            ))
+        }
     };
 
     let tree = parse_source(&source, language).map_err(|err| HostlibError::Backend {
@@ -185,7 +197,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
 
     Ok(applied_response(
-        &path_str, &source, &patched, &chosen, &replacement, dry_run,
+        &path_str,
+        &source,
+        &patched,
+        &chosen,
+        &replacement,
+        dry_run,
     ))
 }
 
@@ -422,14 +439,14 @@ fn applied_response(
             ("applied".to_string(), VmValue::Bool(true)),
             ("path".to_string(), str_value(path)),
             ("dry_run".to_string(), VmValue::Bool(dry_run)),
-            (
-                "match_count".to_string(),
-                VmValue::Int(chosen.len() as i64),
-            ),
+            ("match_count".to_string(), VmValue::Int(chosen.len() as i64)),
             (
                 "edits".to_string(),
                 VmValue::List(Rc::new(
-                    chosen.iter().map(|s| edit_to_value(s, replacement)).collect(),
+                    chosen
+                        .iter()
+                        .map(|s| edit_to_value(s, replacement))
+                        .collect(),
                 )),
             ),
             (
@@ -463,10 +480,7 @@ fn ambiguous_response(match_count: usize, spans: &[Span]) -> VmValue {
         [
             ("result".to_string(), str_value("ambiguous")),
             ("applied".to_string(), VmValue::Bool(false)),
-            (
-                "match_count".to_string(),
-                VmValue::Int(match_count as i64),
-            ),
+            ("match_count".to_string(), VmValue::Int(match_count as i64)),
             (
                 "spans".to_string(),
                 VmValue::List(Rc::new(spans.iter().map(span_to_value).collect())),
@@ -814,7 +828,10 @@ mod tests {
         let path = file.path().to_string_lossy().to_string();
         let result = invoke(dict(&[
             ("path", vm_string(&path)),
-            ("query", vm_string("(function_declaration body: (statement_block) @target)")),
+            (
+                "query",
+                vm_string("(function_declaration body: (statement_block) @target)"),
+            ),
             ("replacement", vm_string("{\n  return `hi ${name}!`;\n}")),
         ]));
         assert_eq!(s(field(&result, "result")), "applied");
@@ -824,13 +841,20 @@ mod tests {
 
     #[test]
     fn supports_go_function_rewrite() {
-        let source = "package main\n\nfunc greet(name string) string {\n\treturn \"hi \" + name\n}\n";
+        let source =
+            "package main\n\nfunc greet(name string) string {\n\treturn \"hi \" + name\n}\n";
         let file = write_temp("go", source);
         let path = file.path().to_string_lossy().to_string();
         let result = invoke(dict(&[
             ("path", vm_string(&path)),
-            ("query", vm_string("(function_declaration body: (block) @target)")),
-            ("replacement", vm_string("{\n\treturn \"hi \" + name + \"!\"\n}")),
+            (
+                "query",
+                vm_string("(function_declaration body: (block) @target)"),
+            ),
+            (
+                "replacement",
+                vm_string("{\n\treturn \"hi \" + name + \"!\"\n}"),
+            ),
         ]));
         assert_eq!(s(field(&result, "result")), "applied");
         let preview = s(field(&result, "preview"));
@@ -846,7 +870,10 @@ mod tests {
         let result = invoke(dict(&[
             ("path", vm_string(&path)),
             ("query", vm_string(query)),
-            ("replacement", vm_string("{\n    return \"hi \\(name)!\"\n}")),
+            (
+                "replacement",
+                vm_string("{\n    return \"hi \\(name)!\"\n}"),
+            ),
         ]));
         // tree-sitter-swift's node kind may differ; if so we tolerate
         // unsupported queries here, but the call itself should succeed
