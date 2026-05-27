@@ -79,7 +79,7 @@ pub fn generate_harn_code(candidate: &WorkflowCandidate) -> String {
         if step.segment == SegmentKind::Fuzzy {
             writeln!(
                 out,
-                "  // TODO: fuzzy segment still needs LLM/reviewer handling before deterministic promotion."
+                "  // review_required: fuzzy segment still needs LLM/reviewer handling before deterministic promotion."
             )
             .unwrap();
             writeln!(

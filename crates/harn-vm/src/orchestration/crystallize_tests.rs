@@ -292,7 +292,9 @@ fn preserves_remaining_fuzzy_segment() {
         .iter()
         .any(|step| step.segment == SegmentKind::Fuzzy));
     assert!(candidate.savings.remaining_model_calls > 0);
-    assert!(artifacts.harn_code.contains("TODO: fuzzy segment"));
+    assert!(artifacts
+        .harn_code
+        .contains("review_required: fuzzy segment"));
 }
 
 #[test]
