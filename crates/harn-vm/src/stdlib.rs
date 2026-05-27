@@ -321,6 +321,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(waitpoint::MODULE_BUILTINS);
         out.extend_from_slice(waitpoints::MODULE_BUILTINS);
         out.extend_from_slice(web::MODULE_BUILTINS);
+        out.extend_from_slice(xml::MODULE_BUILTINS);
         out
     })
     .as_slice()

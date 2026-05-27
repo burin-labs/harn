@@ -36,20 +36,24 @@ use std::rc::Rc;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_xml_builtins(vm: &mut Vm) {
-    // `to_xml`/`from_xml` are registered under both their plain and
-    // `__`-prefixed names so the `std/xml` Harn wrappers can call the
-    // raw fast-path while user scripts get the short form without an
-    // explicit `import "std/xml"` for single-use system-prompt
-    // builders.
-    register_alias_pair(vm, "to_xml", "__to_xml", to_xml_builtin);
-    register_alias_pair(vm, "from_xml", "__from_xml", from_xml_builtin);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
-fn to_xml_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&TO_XML_IMPL_DEF, &FROM_XML_IMPL_DEF];
+
+#[harn_builtin(
+    sig = "to_xml(value: any, options?: dict) -> string",
+    aliases = ["__to_xml"],
+    category = "xml"
+)]
+fn to_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args.first().unwrap_or(&VmValue::Nil);
     let options = args.get(1).and_then(VmValue::as_dict);
     let opts = XmlOptions::from_dict(options);
@@ -57,21 +61,16 @@ fn to_xml_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     Ok(VmValue::String(Rc::from(xml)))
 }
 
-fn from_xml_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+#[harn_builtin(
+    sig = "from_xml(text: string, options?: dict) -> dict",
+    aliases = ["__from_xml"],
+    category = "xml"
+)]
+fn from_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     let options = args.get(1).and_then(VmValue::as_dict);
     let parse_opts = ParseOptions::from_dict(options);
     parse_xml(&text, &parse_opts)
-}
-
-fn register_alias_pair(
-    vm: &mut Vm,
-    public_name: &'static str,
-    raw_name: &'static str,
-    handler: fn(&[VmValue]) -> Result<VmValue, VmError>,
-) {
-    vm.register_builtin(public_name, move |args, _out| handler(args));
-    vm.register_builtin(raw_name, move |args, _out| handler(args));
 }
 
 struct XmlOptions {
