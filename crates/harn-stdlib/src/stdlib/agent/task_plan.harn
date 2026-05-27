@@ -179,6 +179,19 @@ pub fn task_plan_schema() {
           max_tool_calls: schema_field(schema_int(), false),
           max_model_calls: schema_field(schema_int(), false),
           max_steps: schema_field(schema_int(), false),
+          wall_clock_ms: schema_field(schema_int(), false),
+          total_cost_usd: schema_field(schema_float(), false),
+          consecutive_failures: schema_field(
+            schema_object(
+              {
+                max: schema_field(schema_int(), false),
+                kinds: schema_field(schema_list(schema_string()), false),
+                paused_for_ms: schema_field(schema_int(), false),
+              },
+              {additional_properties: schema_any()},
+            ),
+            false,
+          ),
         },
       ),
       capabilities: __task_plan_optional_dict(
@@ -388,10 +401,8 @@ fn __task_plan_write_kinds_in_use(plan) {
   return seen
 }
 
-fn __task_plan_validate_budgets(plan, report) {
+fn __task_plan_validate_node_count_budget(node_count, merged, report) {
   var out = report
-  let merged = __TASK_PLAN_DEFAULT_BUDGETS + plan?.budgets ?? {}
-  let node_count = len(__task_plan_collect_node_ids(plan))
   if node_count > merged.max_nodes {
     out = __task_plan_push_error(
       out,
@@ -403,7 +414,11 @@ fn __task_plan_validate_budgets(plan, report) {
         + to_string(merged.max_nodes),
     )
   }
-  let write_kinds_seen = __task_plan_write_kinds_in_use(plan)
+  return out
+}
+
+fn __task_plan_validate_write_capability_budget(plan, write_kinds_seen, report) {
+  var out = report
   let caps = plan?.capabilities ?? {}
   let cap_tools = caps?.tools ?? []
   let allow_writes = contains(cap_tools, "edit")
@@ -420,6 +435,109 @@ fn __task_plan_validate_budgets(plan, report) {
         + ") but capabilities.tools does not list `edit` or `run` and side_effect_level is not `writes_files`/`runs_commands`",
     )
   }
+  return out
+}
+
+fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
+  var out = report
+  if explicit?.wall_clock_ms != nil
+    && (type_of(explicit.wall_clock_ms) != "int" || explicit.wall_clock_ms < 1) {
+    out = __task_plan_push_error(
+      out,
+      "budget_wall_clock_ms",
+      "budgets.wall_clock_ms",
+      "budgets.wall_clock_ms must be a positive integer",
+    )
+  }
+  let total_cost_kind = type_of(explicit?.total_cost_usd)
+  if explicit?.total_cost_usd != nil
+    && ((total_cost_kind != "float" && total_cost_kind != "int")
+    || to_float(explicit.total_cost_usd) <= 0.0) {
+    out = __task_plan_push_error(
+      out,
+      "budget_total_cost_usd",
+      "budgets.total_cost_usd",
+      "budgets.total_cost_usd must be positive",
+    )
+  }
+  return out
+}
+
+fn __task_plan_failure_kinds(failures) {
+  if type_of(failures) == "dict" {
+    return failures?.kinds ?? ["transient", "rate_limit", "provider_5xx"]
+  }
+  return ["transient", "rate_limit", "provider_5xx"]
+}
+
+fn __task_plan_validate_failure_kind_items(kinds, report) {
+  var out = report
+  if type_of(kinds) != "list" || len(kinds) == 0 {
+    return __task_plan_push_error(
+      out,
+      "budget_consecutive_failures_kinds",
+      "budgets.consecutive_failures.kinds",
+      "budgets.consecutive_failures.kinds must not be empty",
+    )
+  }
+  for kind in kinds {
+    if type_of(kind) != "string" || kind == "" {
+      out = __task_plan_push_error(
+        out,
+        "budget_consecutive_failures_kind",
+        "budgets.consecutive_failures.kinds",
+        "budgets.consecutive_failures.kinds must contain non-empty strings",
+      )
+    }
+  }
+  return out
+}
+
+fn __task_plan_validate_consecutive_failure_budget(explicit, report) {
+  var out = report
+  let failures = explicit?.consecutive_failures
+  if failures == nil {
+    return out
+  }
+  if type_of(failures) != "dict" {
+    return __task_plan_push_error(
+      out,
+      "budget_consecutive_failures",
+      "budgets.consecutive_failures",
+      "budgets.consecutive_failures must be an object",
+    )
+  }
+  if failures?.max == nil || type_of(failures.max) != "int" || failures.max < 1 {
+    out = __task_plan_push_error(
+      out,
+      "budget_consecutive_failures_max",
+      "budgets.consecutive_failures.max",
+      "budgets.consecutive_failures.max must be a positive integer",
+    )
+  }
+  out = __task_plan_validate_failure_kind_items(__task_plan_failure_kinds(failures), out)
+  if failures?.paused_for_ms != nil
+    && (type_of(failures.paused_for_ms) != "int" || failures.paused_for_ms < 0) {
+    out = __task_plan_push_error(
+      out,
+      "budget_consecutive_failures_pause",
+      "budgets.consecutive_failures.paused_for_ms",
+      "budgets.consecutive_failures.paused_for_ms must be non-negative",
+    )
+  }
+  return out
+}
+
+fn __task_plan_validate_budgets(plan, report) {
+  var out = report
+  let explicit = plan?.budgets ?? {}
+  let merged = __TASK_PLAN_DEFAULT_BUDGETS + explicit
+  let node_count = len(__task_plan_collect_node_ids(plan))
+  let write_kinds_seen = __task_plan_write_kinds_in_use(plan)
+  out = __task_plan_validate_node_count_budget(node_count, merged, out)
+  out = __task_plan_validate_write_capability_budget(plan, write_kinds_seen, out)
+  out = __task_plan_validate_scalar_loop_budgets(explicit, out)
+  out = __task_plan_validate_consecutive_failure_budget(explicit, out)
   return out + {budget_summary: merged + {node_count: node_count, write_kinds: write_kinds_seen}}
 }
 
@@ -581,7 +699,44 @@ fn __task_plan_workflow_mode(node) {
   return "llm"
 }
 
-fn __task_plan_model_policy(node) {
+fn __task_plan_loop_budget_policy(plan) {
+  let budgets = plan?.budgets ?? {}
+  var policy = {}
+  if budgets?.wall_clock_ms != nil {
+    policy = policy + {wall_clock_ms: budgets.wall_clock_ms}
+  }
+  if budgets?.total_cost_usd != nil {
+    policy = policy + {total_cost_usd: budgets.total_cost_usd}
+  }
+  if budgets?.consecutive_failures != nil {
+    policy = policy + {consecutive_failures: budgets.consecutive_failures}
+  }
+  return policy
+}
+
+fn __task_plan_merge_iteration_budget(model_policy, budget_policy) {
+  if len(budget_policy) == 0 {
+    return model_policy
+  }
+  let raw = model_policy?.iteration_budget
+  let existing = if type_of(raw) == "dict" {
+    raw
+  } else if raw != nil {
+    {mode: raw}
+  } else {
+    {}
+  }
+  return model_policy + {iteration_budget: existing + budget_policy}
+}
+
+fn __task_plan_mode_budget_policy(mode, budget_policy) {
+  if mode == "agent" || mode == "llm" {
+    return budget_policy
+  }
+  return {}
+}
+
+fn __task_plan_model_policy(node, budget_policy) {
   let model = node?.model ?? {}
   var policy = {}
   if model?.provider != nil {
@@ -599,7 +754,7 @@ fn __task_plan_model_policy(node) {
   if model?.max_tokens != nil {
     policy = policy + {max_tokens: model.max_tokens}
   }
-  return policy
+  return __task_plan_merge_iteration_budget(policy, budget_policy)
 }
 
 fn __task_plan_capability_policy(node) {
@@ -684,9 +839,9 @@ fn __task_plan_kind_fields(node) {
   return {}
 }
 
-fn __task_plan_compile_node(node_id, node) {
+fn __task_plan_compile_node(node_id, node, budget_policy) {
   let mode = __task_plan_workflow_mode(node)
-  let model_policy = __task_plan_model_policy(node)
+  let model_policy = __task_plan_model_policy(node, __task_plan_mode_budget_policy(mode, budget_policy))
   let capability_policy = __task_plan_capability_policy(node)
   let base_meta = {task_plan_kind: node?.kind, task_plan_purpose: node?.purpose ?? ""}
     + node?.metadata ?? {}
@@ -716,8 +871,9 @@ fn __task_plan_compile_node(node_id, node) {
 
 fn __task_plan_compile_nodes(plan) {
   var compiled = {}
+  let budget_policy = __task_plan_loop_budget_policy(plan)
   for entry in plan?.nodes ?? {} {
-    compiled = compiled + {[entry.key]: __task_plan_compile_node(entry.key, entry.value)}
+    compiled = compiled + {[entry.key]: __task_plan_compile_node(entry.key, entry.value, budget_policy)}
   }
   return compiled
 }

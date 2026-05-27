@@ -271,6 +271,21 @@ pub enum AgentEvent {
     BudgetExhausted {
         session_id: String,
         max_iterations: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost_usd: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wall_clock_ms: Option<u64>,
+    },
+    /// Emitted when a loop-level budget circuit breaker trips after N
+    /// consecutive retryable failures. `paused_for_ms` is the mock-time-aware
+    /// backoff already honored before the terminal budget event.
+    BudgetCircuitBreaker {
+        session_id: String,
+        kind: String,
+        consecutive_count: usize,
+        paused_for_ms: u64,
     },
     /// Emitted when the loop breaks because consecutive text-only turns
     /// hit `max_nudges`. Parity with `BudgetExhausted` / `IterationEnd` for
@@ -655,6 +670,7 @@ impl AgentEvent {
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }
+            | Self::BudgetCircuitBreaker { session_id, .. }
             | Self::LoopStuck { session_id, .. }
             | Self::DaemonWatchdogTripped { session_id, .. }
             | Self::SkillActivated { session_id, .. }

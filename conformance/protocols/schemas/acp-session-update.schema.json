@@ -78,12 +78,14 @@
             "sessionId": { "type": "string", "minLength": 1 },
             "kind": {
               "enum": [
+                "budget_circuit_breaker",
                 "budget_exhausted",
                 "composition_child_call",
                 "composition_child_result",
                 "composition_error",
                 "composition_finish",
                 "composition_start",
+                "control_outcome",
                 "daemon_watchdog_tripped",
                 "feedback_injected",
                 "iteration_end",
@@ -92,9 +94,10 @@
                 "loop_control_decision",
                 "loop_stuck",
                 "progress_reported",
+                "scope_classifier_verdict",
                 "session_closed",
-                "step_judge_decision",
                 "structural_validator_decision",
+                "step_judge_decision",
                 "tool_call_audit",
                 "tool_format_override",
                 "typed_checkpoint"

@@ -514,6 +514,70 @@ fn __positive_int_budget_field(value, fallback, label) {
   return value
 }
 
+fn __nonnegative_int_budget_field(value, fallback, label) {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `" + label + "` must be a non-negative integer; got " + type_of(value)
+  }
+  if value < 0 {
+    throw "agent_loop: `" + label + "` must be a non-negative integer; got " + to_string(value)
+  }
+  return value
+}
+
+fn __positive_float_budget_field(value, fallback, label) {
+  if value == nil {
+    return fallback
+  }
+  let kind = type_of(value)
+  if kind != "float" && kind != "int" {
+    throw "agent_loop: `" + label + "` must be a positive number; got " + kind
+  }
+  let parsed = to_float(value)
+  if parsed <= 0.0 {
+    throw "agent_loop: `" + label + "` must be a positive number; got " + to_string(value)
+  }
+  return parsed
+}
+
+fn __normalize_consecutive_failure_budget(value) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `iteration_budget.consecutive_failures` must be a dict or nil; got "
+      + type_of(value)
+  }
+  if value?.max == nil {
+    throw "agent_loop: `iteration_budget.consecutive_failures.max` is required"
+  }
+  let max_count = __positive_int_budget_field(value?.max, nil, "iteration_budget.consecutive_failures.max")
+  let kinds = value?.kinds ?? ["transient", "rate_limit", "provider_5xx"]
+  if type_of(kinds) != "list" {
+    throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must be a list of strings; got "
+      + type_of(kinds)
+  }
+  if len(kinds) == 0 {
+    throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must not be empty"
+  }
+  for kind in kinds {
+    if type_of(kind) != "string" || kind == "" {
+      throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must contain non-empty strings"
+    }
+  }
+  return {
+    max: max_count,
+    kinds: kinds,
+    paused_for_ms: __nonnegative_int_budget_field(
+      value?.paused_for_ms,
+      0,
+      "iteration_budget.consecutive_failures.paused_for_ms",
+    ),
+  }
+}
+
 fn __validate_loop_control(value) {
   if value == nil {
     return
@@ -824,6 +888,9 @@ fn __normalize_iteration_budget(opts) {
     max: max_cap,
     extend_by: extend_by,
     expose_decisions: expose_decisions,
+    wall_clock_ms: __positive_int_budget_field(user_budget?.wall_clock_ms, nil, "iteration_budget.wall_clock_ms"),
+    total_cost_usd: __positive_float_budget_field(user_budget?.total_cost_usd, nil, "iteration_budget.total_cost_usd"),
+    consecutive_failures: __normalize_consecutive_failure_budget(user_budget?.consecutive_failures),
   }
 }
 

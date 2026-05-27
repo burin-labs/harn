@@ -205,6 +205,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "worker_update",
 )
 HARN_AGENT_EVENT_KINDS: tuple = (
+    "budget_circuit_breaker",
     "budget_exhausted",
     "composition_child_call",
     "composition_child_result",

@@ -52,6 +52,7 @@ pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
 /// "unknown kind, ignore." Keep it sorted for diff-friendliness and
 /// keep it in lockstep with the match arm in `events.rs`.
 pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
+    "budget_circuit_breaker",
     "budget_exhausted",
     "composition_child_call",
     "composition_child_result",
