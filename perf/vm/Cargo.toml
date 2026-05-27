@@ -28,6 +28,11 @@ path = "bench_adaptive_binary_cache_read.rs"
 harness = false
 
 [[bench]]
+name = "bench_method_cache_read"
+path = "bench_method_cache_read.rs"
+harness = false
+
+[[bench]]
 name = "bench_vm_fixtures"
 path = "bench_vm_fixtures.rs"
 harness = false

@@ -181,6 +181,102 @@ impl AdaptiveBinaryCacheReadFixture {
     }
 }
 
+/// Bytecode-length presets for the method-cache read microbench. The
+/// fixture sweeps N adjacent `Op::MethodCall` slots, exercising the
+/// same cache-read shape that `execute_method_call(_sync|_spread)`
+/// issues on every dispatch. N spans a small predicate body
+/// through a deep stdlib pipeline.
+pub const METHOD_CACHE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
+
+/// Microbench fixture for the method inline-cache read path.
+///
+/// `Chunk::inline_cache_entry` (the pre-optimization path) clones the
+/// wrapping `InlineCacheEntry` enum on every dispatch — a 32-48B memcpy
+/// that the variant-checking `let-else` in `try_cached_method`
+/// destructures and throws away. `Chunk::peek_method_cache` (the new
+/// path) returns just the `(name_idx, argc, target)` triple by value
+/// (all three are `Copy` — `u16`, `usize`, `MethodCacheTarget`), so the
+/// read is a single scalar move out of the cache instead of a clone.
+///
+/// The fixture pre-warms every slot to a `Method` entry (the steady
+/// state of a hot pipeline like `xs.contains(...).filter(...).count()`)
+/// so the bench measures the read overhead with no per-iteration state
+/// transitions. The accumulator sums the cached `argc` so the optimizer
+/// cannot dead-code the loop.
+pub struct MethodCacheReadFixture {
+    chunk: Chunk,
+    offsets: Vec<usize>,
+    slots: Vec<usize>,
+}
+
+impl MethodCacheReadFixture {
+    pub fn new(op_count: usize) -> Self {
+        use crate::chunk::{InlineCacheEntry, MethodCacheTarget};
+        let mut chunk = Chunk::new();
+        let mut offsets = Vec::with_capacity(op_count);
+        for _ in 0..op_count {
+            offsets.push(chunk.code.len());
+            chunk.emit_method_call(0, 1, 1);
+        }
+        let mut slots = Vec::with_capacity(op_count);
+        for &offset in &offsets {
+            let slot = chunk
+                .inline_cache_slot(offset)
+                .expect("Op::MethodCall registers an inline-cache slot at emit time");
+            // Pre-warm to a Method entry with `ListContains` — a 1-arg
+            // method-call shape that flows through every method-call
+            // dispatcher (`execute_method_call`, `execute_method_call_sync`,
+            // `execute_method_call_spread`).
+            chunk.set_inline_cache_entry(
+                slot,
+                InlineCacheEntry::Method {
+                    name_idx: 0,
+                    argc: 1,
+                    target: MethodCacheTarget::ListContains,
+                },
+            );
+            slots.push(slot);
+        }
+        Self {
+            chunk,
+            offsets,
+            slots,
+        }
+    }
+
+    pub fn op_count(&self) -> usize {
+        self.offsets.len()
+    }
+
+    /// Sweep all slots via the new Copy peek path. Returns the sum of
+    /// observed `argc` values so the optimizer cannot dead-code the
+    /// loop.
+    pub fn invoke_peek(&self) -> usize {
+        let mut acc = 0usize;
+        for &slot in &self.slots {
+            if let Some((_name_idx, argc, _target)) = self.chunk.peek_method_cache(slot) {
+                acc = acc.wrapping_add(argc);
+            }
+        }
+        acc
+    }
+
+    /// Control sweep using the pre-optimization `inline_cache_entry`
+    /// clone path. Same accumulator shape so the criterion bench can
+    /// A/B the two paths inside a single binary.
+    pub fn invoke_clone_control(&self) -> usize {
+        use crate::chunk::InlineCacheEntry;
+        let mut acc = 0usize;
+        for &slot in &self.slots {
+            let entry = self.chunk.inline_cache_entry(slot);
+            if let InlineCacheEntry::Method { argc, .. } = entry {
+                acc = acc.wrapping_add(argc);
+            }
+        }
+        acc
+    }
+}
+
 pub struct NonModuleClosureCallFixture {
     capture_count: usize,
     last_capture_name: Option<String>,

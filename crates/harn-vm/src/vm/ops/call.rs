@@ -348,21 +348,14 @@ impl super::super::Vm {
     }
 
     fn try_cached_method(
-        cache: &InlineCacheEntry,
+        cache: Option<(u16, usize, MethodCacheTarget)>,
         name_idx: u16,
         argc: usize,
         obj: &VmValue,
         args: &[VmValue],
     ) -> Option<VmValue> {
-        let InlineCacheEntry::Method {
-            name_idx: cached_name_idx,
-            argc: cached_argc,
-            target,
-        } = cache
-        else {
-            return None;
-        };
-        if *cached_name_idx != name_idx || *cached_argc != argc {
+        let (cached_name_idx, cached_argc, target) = cache?;
+        if cached_name_idx != name_idx || cached_argc != argc {
             return None;
         }
 
@@ -1310,7 +1303,7 @@ impl super::super::Vm {
     }
 
     pub(super) async fn execute_method_call(&mut self, optional: bool) -> Result<(), VmError> {
-        let (name_idx, argc, cache_slot, cache_entry) = {
+        let (name_idx, argc, cache_slot, cached_method) = {
             let frame = self.frames.last_mut().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
             let name_idx = frame.chunk.read_u16(frame.ip);
@@ -1318,10 +1311,8 @@ impl super::super::Vm {
             let argc = frame.chunk.code[frame.ip] as usize;
             frame.ip += 1;
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cache_entry = cache_slot
-                .map(|slot| frame.chunk.inline_cache_entry(slot))
-                .unwrap_or(InlineCacheEntry::Empty);
-            (name_idx, argc, cache_slot, cache_entry)
+            let cached_method = cache_slot.and_then(|slot| frame.chunk.peek_method_cache(slot));
+            (name_idx, argc, cache_slot, cached_method)
         };
         let args_start = self.stack_arg_start(argc)?;
         let obj_idx = args_start
@@ -1336,7 +1327,7 @@ impl super::super::Vm {
             self.stack.truncate(obj_idx);
             self.stack.push(VmValue::Nil);
         } else if let Some(result) = Self::try_cached_method(
-            &cache_entry,
+            cached_method,
             name_idx,
             argc,
             &obj,
@@ -1383,16 +1374,14 @@ impl super::super::Vm {
         &mut self,
         optional: bool,
     ) -> Option<Result<(), VmError>> {
-        let (name_idx, argc, cache_slot, cache_entry) = {
+        let (name_idx, argc, cache_slot, cached_method) = {
             let frame = self.frames.last().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
             let name_idx = frame.chunk.read_u16(frame.ip);
             let argc = frame.chunk.code[frame.ip + 2] as usize;
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cache_entry = cache_slot
-                .map(|slot| frame.chunk.inline_cache_entry(slot))
-                .unwrap_or(InlineCacheEntry::Empty);
-            (name_idx, argc, cache_slot, cache_entry)
+            let cached_method = cache_slot.and_then(|slot| frame.chunk.peek_method_cache(slot));
+            (name_idx, argc, cache_slot, cached_method)
         };
 
         let args_start = match self.stack.len().checked_sub(argc) {
@@ -1415,9 +1404,13 @@ impl super::super::Vm {
             ));
         }
 
-        if let Some(result) =
-            Self::try_cached_method(&cache_entry, name_idx, argc, obj, &self.stack[args_start..])
-        {
+        if let Some(result) = Self::try_cached_method(
+            cached_method,
+            name_idx,
+            argc,
+            obj,
+            &self.stack[args_start..],
+        ) {
             return Some(self.finish_method_call_sync(argc, Ok(result), name_idx, None, None));
         }
 
@@ -1473,16 +1466,14 @@ impl super::super::Vm {
     }
 
     pub(super) async fn execute_method_call_spread(&mut self) -> Result<(), VmError> {
-        let (name_idx, cache_slot, cache_entry) = {
+        let (name_idx, cache_slot, cached_method) = {
             let frame = self.frames.last_mut().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
             let name_idx = frame.chunk.read_u16(frame.ip);
             frame.ip += 2;
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cache_entry = cache_slot
-                .map(|slot| frame.chunk.inline_cache_entry(slot))
-                .unwrap_or(InlineCacheEntry::Empty);
-            (name_idx, cache_slot, cache_entry)
+            let cached_method = cache_slot.and_then(|slot| frame.chunk.peek_method_cache(slot));
+            (name_idx, cache_slot, cached_method)
         };
         let args_val = self.pop()?;
         let obj = self.pop()?;
@@ -1495,7 +1486,7 @@ impl super::super::Vm {
             }
         };
         if let Some(result) =
-            Self::try_cached_method(&cache_entry, name_idx, args.len(), &obj, &args)
+            Self::try_cached_method(cached_method, name_idx, args.len(), &obj, &args)
         {
             self.stack.push(result);
         } else {

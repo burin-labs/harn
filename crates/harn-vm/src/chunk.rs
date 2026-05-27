@@ -1187,6 +1187,29 @@ impl Chunk {
         }
     }
 
+    /// Method-cache fast path read. Returns the cached `(name_idx, argc,
+    /// target)` triple by value (all three are `Copy`) when `slot` holds a
+    /// `Method` entry, else `None`. Skips the full `InlineCacheEntry::clone`
+    /// that `inline_cache_entry` performs on every `Op::MethodCall`,
+    /// `Op::MethodCallOpt`, and `Op::MethodCallSpread` dispatch: the
+    /// variant-checking `let-else` in `try_cached_method` destructures and
+    /// throws the wrapping enum away anyway, so reading the payload by `Copy`
+    /// avoids the 32-48B enum memcpy. Method-call dispatch is the second-
+    /// hottest IC-keyed opcode class after the adaptive binary ops, so the
+    /// per-dispatch savings compound across the millions of method calls a
+    /// typical pipeline (`xs.filter(...).map(...).count()`) issues.
+    #[inline]
+    pub(crate) fn peek_method_cache(&self, slot: usize) -> Option<(u16, usize, MethodCacheTarget)> {
+        match self.inline_caches.borrow().get(slot)? {
+            &InlineCacheEntry::Method {
+                name_idx,
+                argc,
+                target,
+            } => Some((name_idx, argc, target)),
+            _ => None,
+        }
+    }
+
     pub(crate) fn set_inline_cache_entry(&self, slot: usize, entry: InlineCacheEntry) {
         if let Some(existing) = self.inline_caches.borrow_mut().get_mut(slot) {
             *existing = entry;
@@ -1657,7 +1680,7 @@ impl Default for Chunk {
 
 #[cfg(test)]
 mod tests {
-    use super::{Chunk, Op};
+    use super::{Chunk, InlineCacheEntry, MethodCacheTarget, Op, PropertyCacheTarget};
     use crate::BuiltinId;
 
     #[test]
@@ -2075,5 +2098,84 @@ mod tests {
         assert_copy::<super::AdaptiveBinaryState>();
         assert_copy::<super::AdaptiveBinaryOp>();
         assert_copy::<super::BinaryShape>();
+    }
+
+    // --- peek_method_cache contract ---
+    //
+    // The peek replaces the per-dispatch `InlineCacheEntry::clone` on the
+    // method-call dispatch sites (`Op::MethodCall`, `Op::MethodCallOpt`,
+    // `Op::MethodCallSpread`). It must return None for unrelated IC variants
+    // — silently mis-extracting a `Property` / `DirectCall` / `AdaptiveBinary`
+    // slot as `Method` would feed garbage into `try_cached_method` and either
+    // spec-mis-fire (wrong target/argc) or skip the cache entirely on a real
+    // hit. These tests pin the variant gate.
+
+    #[test]
+    fn peek_method_cache_returns_none_for_empty_slot() {
+        let mut chunk = Chunk::new();
+        chunk.emit_method_call(0, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("MethodCall registers a slot");
+        assert!(chunk.peek_method_cache(slot).is_none());
+    }
+
+    #[test]
+    fn peek_method_cache_returns_triple_after_warmup() {
+        let mut chunk = Chunk::new();
+        chunk.emit_method_call(7, 2, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("MethodCall registers a slot");
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::Method {
+                name_idx: 7,
+                argc: 2,
+                target: MethodCacheTarget::ListContains,
+            },
+        );
+        let (name_idx, argc, target) = chunk.peek_method_cache(slot).expect("warmed slot peek");
+        assert_eq!(name_idx, 7);
+        assert_eq!(argc, 2);
+        assert_eq!(target, MethodCacheTarget::ListContains);
+    }
+
+    #[test]
+    fn peek_method_cache_returns_none_for_non_method_variants() {
+        // The cache slot may legitimately hold an `AdaptiveBinary`,
+        // `Property`, or `DirectCall` entry. The peek must defensively
+        // refuse non-Method variants regardless.
+        let mut chunk = Chunk::new();
+        chunk.emit_method_call(0, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("MethodCall registers a slot");
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::Property {
+                name_idx: 0,
+                target: PropertyCacheTarget::ListCount,
+            },
+        );
+        assert!(chunk.peek_method_cache(slot).is_none());
+    }
+
+    #[test]
+    fn peek_method_cache_returns_none_for_out_of_bounds_slot() {
+        let chunk = Chunk::new();
+        assert!(chunk.peek_method_cache(0).is_none());
+        assert!(chunk.peek_method_cache(usize::MAX).is_none());
+    }
+
+    #[test]
+    fn peek_method_cache_target_is_copy() {
+        // Compile-time assertion: `MethodCacheTarget: Copy` is the whole
+        // point of this peek path — if a future variant adds a non-Copy
+        // field (eg. an `Rc<str>` for a dynamic method name), the static
+        // check below will fail at compile time before the dispatcher
+        // silently regresses to the heavy `InlineCacheEntry::clone` path.
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<super::MethodCacheTarget>();
     }
 }
