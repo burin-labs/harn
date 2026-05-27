@@ -278,9 +278,11 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(collections::MODULE_BUILTINS);
         out.extend_from_slice(compression::MODULE_BUILTINS);
         out.extend_from_slice(cookies::MODULE_BUILTINS);
+        out.extend_from_slice(crypto::MODULE_BUILTINS);
         out.extend_from_slice(csv::MODULE_BUILTINS);
         out.extend_from_slice(datetime::MODULE_BUILTINS);
         out.extend_from_slice(flow::MODULE_BUILTINS);
+        out.extend_from_slice(iter::MODULE_BUILTINS);
         out.extend_from_slice(json::MODULE_BUILTINS);
         out.extend_from_slice(json_stream::MODULE_BUILTINS);
         out.extend_from_slice(jsonrpc::MODULE_BUILTINS);
@@ -295,6 +297,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(skills::MODULE_BUILTINS);
         out.extend_from_slice(strings::MODULE_BUILTINS);
         out.extend_from_slice(tool_hooks::MODULE_BUILTINS);
+        out.extend_from_slice(tools::MODULE_BUILTINS);
         out.extend_from_slice(tracing::MODULE_BUILTINS);
         out.extend_from_slice(types::MODULE_BUILTINS);
         out.extend_from_slice(web::MODULE_BUILTINS);
