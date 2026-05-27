@@ -1,8 +1,55 @@
 name: Build release binaries
 
+# Triggers, in order of importance:
+#
+#   1. push tags v* — the real release path. Builds, signs, notarizes,
+#      packages, uploads artifacts, creates the GitHub release, and
+#      publishes the container image. Driven by release_harn.harn pushing
+#      the tag at the pinned commit (before the Release PR merges).
+#
+#   2. push main — warm-cache-only mode. Runs the same build matrix to
+#      populate the per-target Swatinem rust-cache on main so the next
+#      tag push can restore warm via restore-keys prefix matching.
+#      Skips sign/notarize/package/upload/release/container.
+#
+#      The setup job below short-circuits this mode unless the push
+#      changed Cargo.lock, any **/Cargo.toml, or rust-toolchain.toml —
+#      those are exactly the inputs Swatinem hashes into its exact
+#      cache key, so we re-warm precisely when a restore-keys fallback
+#      would otherwise be needed. (The check lives in the setup job
+#      rather than as a `paths:` trigger filter because GitHub's docs
+#      are ambiguous about how `paths:` interacts with `tags:` in the
+#      same push block — checking in-job is unambiguous and lets a
+#      single `push:` trigger cover both events.)
+#
+#   3. schedule, daily — safety-net warm-up that refreshes the cache
+#      against GitHub's 7-day no-access eviction even during quiet
+#      stretches on main.
+#
+#   4. workflow_dispatch — manual (re-)release of an existing tag, e.g.
+#      to recover when binaries were aborted mid-build last time.
+#
+# Cache architecture note. GitHub Actions caches are scoped per-ref: a
+# tag-push run (refs/tags/vX.Y.Z) can only restore caches saved on that
+# exact tag or on the default branch (main). It cannot reach caches
+# saved by another tag's run. So the warm-only events (2 and 3) own the
+# save; tag-push and workflow_dispatch only restore. Swatinem's
+# restore-keys prefix-matches on `release-${target}`, so even when
+# Cargo.lock changes between two warms (every release rotates internal
+# `harn-*` crate versions, which propagate into Cargo.lock and rotate
+# Swatinem's exact key), the tag-push run still falls back to the most
+# recent main-scoped warm cache with the same shared-key prefix. Cargo
+# then does an incremental rebuild of just the deps whose fingerprints
+# actually changed instead of a 30-50 min cold compile per target.
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  schedule:
+    # Daily warm at 05:17 UTC. Staggered from release-smoke's 09:17 cron
+    # so the two release-mode workflows don't contend for runners or for
+    # the per-repo cache budget at the same minute.
+    - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
       tag:
@@ -21,7 +68,13 @@ permissions:
 
 concurrency:
   group: build-release-binaries-${{ inputs.tag || github.ref_name }}
-  cancel-in-progress: false
+  # Tag-push runs must never be cancelled mid-build (the release waits on
+  # their artifacts), and neither should manual workflow_dispatch recovery
+  # runs. Warm-cache-only events (push to main, schedule) ARE safe to
+  # cancel: a newer warm fully supersedes the older one, and the cache it
+  # produces will be at least as fresh as the cancelled run's would have
+  # been.
+  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'schedule' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -43,12 +96,18 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.tag || github.ref }}
+          # Need at least one parent commit so the push-main warm-mode
+          # path check (`git diff HEAD^ HEAD -- …`) below can resolve
+          # HEAD^. depth: 2 is enough; the default depth=1 would make
+          # HEAD^ point at nothing on a fresh clone.
+          fetch-depth: 2
 
       - name: Resolve release context
         id: resolve
         env:
           INPUT_TAG: ${{ inputs.tag }}
           FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
+          EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
@@ -64,6 +123,28 @@ jobs:
               exit 1
             fi
             VERSION="${REF#v}"
+          elif [[ "$EVENT_NAME" == "schedule" ]]; then
+            # Cron-driven warm-cache run. Always proceed — the whole point
+            # is to refresh the cache against GitHub's 7-day eviction.
+            SHOULD_BUILD_BINARIES=true
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+          elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
+            # Push-to-main warm-cache run, but only when this push actually
+            # changed something that rotates Swatinem's exact cache key.
+            # For non-keying pushes the previous warm cache is still good
+            # and a rebuild adds no signal.
+            CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml 2>/dev/null || true)"
+            if [[ -n "$CHANGED_KEYING_FILES" ]]; then
+              SHOULD_BUILD_BINARIES=true
+              VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+              echo "::notice::Warm-cache-only run (push main). Keying files changed:"
+              while IFS= read -r f; do printf '::notice::  %s\n' "$f"; done <<<"$CHANGED_KEYING_FILES"
+              echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+            else
+              VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+              echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml — existing warm cache still keys cleanly. Skipping build matrix."
+            fi
           else
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           fi
@@ -167,17 +248,18 @@ jobs:
         shell: bash
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
 
-      # This workflow fires on tag pushes (refs/tags/v*) and workflow_dispatch
-      # against a tag, so a `save-if: github.ref == 'refs/heads/main'` guard
-      # always evaluates false and the release cache was never populated. Let
-      # Swatinem save by default so the second release in a series can warm
-      # restore the per-target `target/` from the previous tag instead of
-      # rebuilding all deps from scratch.
+      # See the cache architecture note at the top of this workflow for why
+      # only warm-cache-only events save. Short version: tag-push runs can
+      # never restore another tag's cache, so a tag-push save just burns a
+      # cache slot. Letting only main-push + cron save (and tag-push +
+      # workflow_dispatch restore) keeps the per-repo 10 GB cache budget
+      # focused on the entries we can actually read back.
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: release-${{ matrix.target }}
           cache-on-failure: true
           cache-bin: false
+          save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
 
       - name: Add cross-compile target to pinned toolchain
         run: |
@@ -206,7 +288,7 @@ jobs:
       # against Apple's CDN at first launch on the user's machine instead,
       # which is silent once the binary is notarized.
       - name: Apple sign + notarize (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && needs.setup.outputs.is_release == 'true'
         env:
           APPLE_DEVELOPER_ID_CERT_P12: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
           APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
@@ -297,7 +379,7 @@ jobs:
           rm -f "$KEY_FILE" "$NOTARY_ZIP"
 
       - name: Tear down macOS keychain
-        if: always() && runner.os == 'macOS'
+        if: always() && runner.os == 'macOS' && needs.setup.outputs.is_release == 'true'
         run: |
           KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
           if [ -f "$KEYCHAIN" ]; then
@@ -305,7 +387,7 @@ jobs:
           fi
 
       - name: Package (unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && needs.setup.outputs.is_release == 'true'
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/harn dist/harn
@@ -315,7 +397,7 @@ jobs:
           tar czf harn-${{ matrix.target }}.tar.gz harn harn-dap harn-lsp
 
       - name: Package (windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && needs.setup.outputs.is_release == 'true'
         shell: bash
         run: |
           mkdir -p dist
@@ -396,7 +478,11 @@ jobs:
   release:
     name: Create GitHub release
     needs: [setup, build]
-    if: needs.setup.outputs.should_build_binaries == 'true' && !cancelled() && !failure()
+    # is_release gates out warm-cache-only events (push to main, schedule):
+    # they run the build matrix to populate the cache but must not author a
+    # GitHub release. should_build_binaries gates the all-assets-present
+    # tag-push case where there's nothing to upload.
+    if: needs.setup.outputs.is_release == 'true' && needs.setup.outputs.should_build_binaries == 'true' && !cancelled() && !failure()
     runs-on: ubuntu-latest
     permissions:
       contents: write
