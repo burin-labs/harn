@@ -25,6 +25,11 @@ pub(super) fn schema_type_expr_from_node(node: &SNode, scope: &TypeScope) -> Opt
             if let Some(schema) = scope.get_schema_binding(name).cloned().flatten() {
                 return Some(schema);
             }
+            if let Some(Some(TypeExpr::Applied { name, args })) = scope.get_var(name) {
+                if name == "Schema" && args.len() == 1 {
+                    return Some(args[0].clone());
+                }
+            }
             scope.resolve_type(name).cloned()
         }
         Node::DictLiteral(entries) => schema_type_expr_from_dict(entries, scope),

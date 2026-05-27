@@ -156,6 +156,82 @@ pipeline t(task) {
 }
 
 #[test]
+fn test_tagged_shape_union_guarded_arm_does_not_cover_variant() {
+    let errs = errors(
+        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) -> string {
+    match m.kind {
+      "ping" -> { return "ping" }
+      "pong" if false -> { return "pong" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive match on tagged shape union"))
+        .collect();
+    assert_eq!(exh.len(), 1, "got: {errs:?}");
+    assert!(
+        exh[0].contains("\"pong\""),
+        "expected guarded pong to remain missing, got: {}",
+        exh[0]
+    );
+}
+
+#[test]
+fn test_literal_union_guarded_arm_does_not_cover_variant() {
+    let errs = errors(
+        r#"type Verdict = "pass" | "fail"
+
+pipeline t(task) {
+  fn classify(v: Verdict) -> string {
+    match v {
+      "pass" -> { return "ok" }
+      "fail" if false -> { return "no" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive match on literal union"))
+        .collect();
+    assert_eq!(exh.len(), 1, "got: {errs:?}");
+    assert!(
+        exh[0].contains("\"fail\""),
+        "expected guarded fail to remain missing, got: {}",
+        exh[0]
+    );
+}
+
+#[test]
+fn test_named_union_guarded_arm_does_not_cover_type() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn show(x: string | int) -> string {
+    match x {
+      "value" -> { return "string" }
+      1 if false -> { return "int" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive match on union type"))
+        .collect();
+    assert_eq!(exh.len(), 1, "got: {errs:?}");
+    assert!(
+        exh[0].contains("int"),
+        "expected guarded int arm to remain missing, got: {}",
+        exh[0]
+    );
+}
+
+#[test]
 fn test_non_exhaustive_match_wildcard_silences_error() {
     // Wildcard `_` arm escapes the new exhaustiveness error.
     let errs = errors(

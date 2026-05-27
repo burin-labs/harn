@@ -831,6 +831,8 @@ let s = Status.Pending("waiting")
 match s.variant {
   "Pending" -> { log(s.fields[0]) }
   "Active" -> { log("ok") }
+  "Inactive" -> { log("inactive") }
+  "Failed" -> { log(s.fields[1]) }
 }
 ```
 

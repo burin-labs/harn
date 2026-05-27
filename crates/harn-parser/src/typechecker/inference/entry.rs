@@ -105,6 +105,30 @@ impl TypeChecker {
                         for stmt in body {
                             self.check_return_type(stmt, ret_type, inner_node.span, &mut ret_scope);
                         }
+                        if !Self::block_definitely_exits(body) {
+                            let actual = self
+                                .infer_block_type(body, &ret_scope)
+                                .unwrap_or_else(|| TypeExpr::Named("nil".into()));
+                            if !self.types_compatible(ret_type, &actual, &ret_scope) {
+                                let value_span =
+                                    body.last().map(|stmt| stmt.span).unwrap_or(inner_node.span);
+                                self.type_mismatch_at(
+                                    Code::ReturnTypeMismatch,
+                                    "pipeline result",
+                                    ret_type,
+                                    &actual,
+                                    value_span,
+                                    (
+                                        Some((
+                                            inner_node.span,
+                                            "pipeline return type declared here".to_string(),
+                                        )),
+                                        Some(value_span),
+                                    ),
+                                    &ret_scope,
+                                );
+                            }
+                        }
                     }
                     self.fn_depth -= 1;
                 }
@@ -166,14 +190,20 @@ impl TypeChecker {
                         vars,
                         mutable_vars,
                         nil_widenable_vars,
+                        schema_bindings,
+                        untyped_sources,
+                        annotated_vars,
                         ..
                     } = scope;
                     let root = Rc::make_mut(&mut self.scope);
                     for (name, ty) in vars {
-                        root.vars.entry(name).or_insert(ty);
+                        root.vars.insert(name, ty);
                     }
                     root.mutable_vars.extend(mutable_vars);
                     root.nil_widenable_vars.extend(nil_widenable_vars);
+                    root.schema_bindings.extend(schema_bindings);
+                    root.untyped_sources.extend(untyped_sources);
+                    root.annotated_vars.extend(annotated_vars);
                 }
             }
         }

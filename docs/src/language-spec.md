@@ -2600,12 +2600,12 @@ be omitted.
 ### tool declarations
 
 ```harn
-tool read_file(path: string, encoding: string) -> string {
+tool read_text(path: string, encoding: string = "utf-8") -> string {
   description "Read a file from the filesystem"
   read_file(path)
 }
 
-tool search(query: string, file_glob: string = "*.py") -> string {
+tool search_files(query: string, file_glob: string = "*.py") -> string {
   description "Search files matching an optional glob"
   "..."
 }
@@ -3876,6 +3876,10 @@ inside each arm; the same narrowing fires under
 `if obj.<tag> == "value"` / `else`:
 
 ```harn
+type Msg =
+  {kind: "ping", ttl: int} |
+  {kind: "pong", latency_ms: int}
+
 fn handle(m: Msg) -> string {
   match m.kind {
     "ping" -> { return "ttl=" + to_string(m.ttl) }

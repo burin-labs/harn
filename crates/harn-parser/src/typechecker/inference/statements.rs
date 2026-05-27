@@ -148,7 +148,11 @@ impl TypeChecker {
         }
     }
 
-    fn iterable_item_type(&self, iter_type: &TypeExpr, scope: &TypeScope) -> InferredType {
+    pub(in crate::typechecker) fn iterable_item_type(
+        &self,
+        iter_type: &TypeExpr,
+        scope: &TypeScope,
+    ) -> InferredType {
         let resolved = self.resolve_alias(iter_type, scope);
         let non_nil = without_nil(&resolved)?;
         match self.resolve_alias(&non_nil, scope) {
@@ -703,7 +707,14 @@ impl TypeChecker {
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
-                self.check_fn_body(&[], params, return_type, body, &[], false, span);
+                self.check_value_returning_body(
+                    params,
+                    return_type,
+                    body,
+                    span,
+                    "tool result",
+                    "tool return type declared here",
+                );
             }
 
             Node::SkillDecl { name, fields, .. } => {

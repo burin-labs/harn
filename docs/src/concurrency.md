@@ -289,14 +289,16 @@ Thread-safe counters:
 let counter = atomic(0)
 log(atomic_get(counter))         // 0
 
-let c2 = atomic_add(counter, 5)
-log(atomic_get(c2))              // 5
+let before_add = atomic_add(counter, 5)
+log(before_add)                  // 0
+log(atomic_get(counter))         // 5
 
-let c3 = atomic_set(c2, 100)
-log(atomic_get(c3))              // 100
+let before_set = atomic_set(counter, 100)
+log(before_set)                  // 5
+log(atomic_get(counter))         // 100
 ```
 
-Atomic operations return new atomic values (they don't mutate in place).
+Atomic updates mutate the handle and return the previous integer value.
 
 ## Mutex
 

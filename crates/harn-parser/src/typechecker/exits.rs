@@ -25,6 +25,23 @@ pub fn stmt_definitely_exits(stmt: &SNode) -> bool {
         // returning `match` as unreachable, and to let the type
         // checker treat the tail as `never`.
         Node::MatchExpr { arms, .. } => match_definitely_exits(arms),
+        Node::Block(body)
+        | Node::TryExpr { body }
+        | Node::CostRoute { body, .. }
+        | Node::MutexBlock { body }
+        | Node::DeadlineBlock { body, .. }
+        | Node::Retry { body, .. } => block_definitely_exits(body),
+        Node::TryCatch {
+            body,
+            catch_body,
+            finally_body,
+            ..
+        } => {
+            finally_body
+                .as_ref()
+                .is_some_and(|body| block_definitely_exits(body))
+                || (block_definitely_exits(body) && block_definitely_exits(catch_body))
+        }
         _ => false,
     }
 }

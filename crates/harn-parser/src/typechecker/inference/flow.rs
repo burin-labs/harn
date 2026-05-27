@@ -505,6 +505,198 @@ impl TypeChecker {
         block_definitely_exits(stmts)
     }
 
+    pub(in crate::typechecker) fn match_is_exhaustive(
+        &self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+    ) -> bool {
+        if arms.iter().any(Self::match_arm_is_unguarded_catch_all) {
+            return true;
+        }
+        if let Some(enum_name) = self.match_enum_name(value, scope) {
+            return self.match_covers_enum_variants(&enum_name, arms, scope);
+        }
+        if let Some(exhaustive) = self.match_covers_tagged_shape_union(value, arms, scope) {
+            return exhaustive;
+        }
+        self.match_covers_union(value, arms, scope).unwrap_or(false)
+    }
+
+    fn match_enum_name(&self, value: &SNode, scope: &TypeScope) -> Option<String> {
+        let ty = match &value.node {
+            Node::PropertyAccess { object, property } if property == "variant" => {
+                self.infer_type(object, scope)?
+            }
+            _ => self.infer_type(value, scope)?,
+        };
+        match self.resolve_alias(&ty, scope) {
+            TypeExpr::Named(name) | TypeExpr::Applied { name, .. }
+                if scope.get_enum(&name).is_some() =>
+            {
+                Some(name)
+            }
+            _ => None,
+        }
+    }
+
+    fn match_arm_is_unguarded_catch_all(arm: &MatchArm) -> bool {
+        arm.guard.is_none()
+            && pattern_alternatives(&arm.pattern)
+                .iter()
+                .any(|leaf| matches!(&leaf.node, Node::Identifier(_)))
+    }
+
+    fn match_covers_enum_variants(
+        &self,
+        enum_name: &str,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+    ) -> bool {
+        let Some(enum_info) = scope.get_enum(enum_name) else {
+            return false;
+        };
+        let variant_names: Vec<&str> = enum_info
+            .variants
+            .iter()
+            .map(|variant| variant.name.as_str())
+            .collect();
+        let mut covered: Vec<String> = Vec::new();
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
+            for leaf in pattern_alternatives(&arm.pattern) {
+                match &leaf.node {
+                    Node::StringLiteral(name) | Node::Identifier(name)
+                        if variant_names.contains(&name.as_str()) =>
+                    {
+                        covered.push(name.clone());
+                    }
+                    Node::EnumConstruct { variant, .. }
+                    | Node::PropertyAccess {
+                        property: variant, ..
+                    }
+                    | Node::MethodCall {
+                        method: variant, ..
+                    } => covered.push(variant.clone()),
+                    Node::Identifier(_) => return true,
+                    _ => {}
+                }
+            }
+        }
+        variant_names
+            .iter()
+            .all(|variant| covered.iter().any(|covered| covered == variant))
+    }
+
+    fn match_covers_tagged_shape_union(
+        &self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+    ) -> Option<bool> {
+        let Node::PropertyAccess { object, property } = &value.node else {
+            return None;
+        };
+        let Node::Identifier(obj_var) = &object.node else {
+            return None;
+        };
+        let Some(Some(raw_type)) = scope.get_var(obj_var).cloned() else {
+            return None;
+        };
+        let TypeExpr::Union(members) = self.resolve_alias(&raw_type, scope) else {
+            return None;
+        };
+        let members = resolve_union_shape_members(&members, scope);
+        if discriminant_field(&members).as_deref() != Some(property.as_str()) {
+            return None;
+        }
+
+        let mut covered: Vec<DiscriminantValue> = Vec::new();
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
+            for leaf in pattern_alternatives(&arm.pattern) {
+                match &leaf.node {
+                    Node::StringLiteral(value) => {
+                        covered.push(DiscriminantValue::Str(value.clone()));
+                    }
+                    Node::IntLiteral(value) => covered.push(DiscriminantValue::Int(*value)),
+                    Node::Identifier(_) => return Some(true),
+                    _ => {}
+                }
+            }
+        }
+
+        Some(members.iter().all(|member| {
+            let TypeExpr::Shape(fields) = member else {
+                return true;
+            };
+            let Some(field) = fields.iter().find(|field| field.name == *property) else {
+                return true;
+            };
+            DiscriminantValue::from_type(&field.type_expr)
+                .is_some_and(|value| covered.contains(&value))
+        }))
+    }
+
+    fn match_covers_union(
+        &self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+    ) -> Option<bool> {
+        let inferred = self.infer_type(value, scope)?;
+        let TypeExpr::Union(members) = self.resolve_alias(&inferred, scope) else {
+            return None;
+        };
+
+        if members
+            .iter()
+            .all(|member| matches!(member, TypeExpr::LitString(_) | TypeExpr::LitInt(_)))
+        {
+            let mut covered: Vec<DiscriminantValue> = Vec::new();
+            for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
+                for leaf in pattern_alternatives(&arm.pattern) {
+                    match &leaf.node {
+                        Node::StringLiteral(value) => {
+                            covered.push(DiscriminantValue::Str(value.clone()));
+                        }
+                        Node::IntLiteral(value) => covered.push(DiscriminantValue::Int(*value)),
+                        Node::Identifier(_) => return Some(true),
+                        _ => {}
+                    }
+                }
+            }
+            return Some(members.iter().all(|member| {
+                DiscriminantValue::from_type(member).is_some_and(|value| covered.contains(&value))
+            }));
+        }
+
+        if !members
+            .iter()
+            .all(|member| matches!(member, TypeExpr::Named(_)))
+        {
+            return None;
+        }
+
+        let mut covered: Vec<&'static str> = Vec::new();
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
+            for leaf in pattern_alternatives(&arm.pattern) {
+                match &leaf.node {
+                    Node::NilLiteral => covered.push("nil"),
+                    Node::BoolLiteral(_) => covered.push("bool"),
+                    Node::IntLiteral(_) => covered.push("int"),
+                    Node::FloatLiteral(_) => covered.push("float"),
+                    Node::StringLiteral(_) => covered.push("string"),
+                    Node::Identifier(_) => return Some(true),
+                    _ => {}
+                }
+            }
+        }
+
+        Some(members.iter().all(|member| match member {
+            TypeExpr::Named(name) => covered.contains(&name.as_str()),
+            _ => true,
+        }))
+    }
+
     pub(in crate::typechecker) fn check_match_exhaustiveness(
         &mut self,
         value: &SNode,
@@ -512,30 +704,7 @@ impl TypeChecker {
         scope: &TypeScope,
         span: Span,
     ) {
-        // Detect pattern: match <expr>.variant { "VariantA" -> ... }
-        let enum_name = match &value.node {
-            Node::PropertyAccess { object, property } if property == "variant" => {
-                // Infer the type of the object
-                match self.infer_type(object, scope) {
-                    Some(TypeExpr::Named(name)) => {
-                        if scope.get_enum(&name).is_some() {
-                            Some(name)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
-            }
-            _ => {
-                // Direct match on an enum value: match <expr> { ... }
-                match self.infer_type(value, scope) {
-                    Some(TypeExpr::Named(name)) if scope.get_enum(&name).is_some() => Some(name),
-                    _ => None,
-                }
-            }
-        };
-
+        let enum_name = self.match_enum_name(value, scope);
         let Some(enum_name) = enum_name else {
             // Two non-enum cases left:
             //   1. `match obj.<tag>` where `obj` is a tagged shape union →
@@ -556,25 +725,23 @@ impl TypeChecker {
         let mut covered: Vec<String> = Vec::new();
         let mut has_wildcard = false;
 
-        for arm in arms {
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
             for leaf in pattern_alternatives(&arm.pattern) {
                 match &leaf.node {
                     // String literal pattern (matching on .variant): "VariantA"
                     Node::StringLiteral(s) => covered.push(s.clone()),
-                    // Identifier pattern acts as a wildcard/catch-all
-                    Node::Identifier(name)
-                        if name == "_"
-                            || !variants
-                                .variants
-                                .iter()
-                                .any(|variant| variant.name == *name) =>
-                    {
-                        has_wildcard = true;
-                    }
                     // Direct enum construct pattern: EnumName.Variant
                     Node::EnumConstruct { variant, .. } => covered.push(variant.clone()),
                     // PropertyAccess pattern: EnumName.Variant (no args)
                     Node::PropertyAccess { property, .. } => covered.push(property.clone()),
+                    // MethodCall pattern: EnumName.Variant(bindings...)
+                    Node::MethodCall {
+                        method: variant, ..
+                    } => covered.push(variant.clone()),
+                    // Identifier patterns bind and catch all remaining values at runtime.
+                    Node::Identifier(_) => {
+                        has_wildcard = true;
+                    }
                     _ => {
                         // Unknown pattern shape — conservatively treat as wildcard
                         has_wildcard = true;
@@ -637,7 +804,7 @@ impl TypeChecker {
 
         let mut has_wildcard = false;
         let mut covered: Vec<DiscriminantValue> = Vec::new();
-        for arm in arms {
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
             for leaf in pattern_alternatives(&arm.pattern) {
                 match &leaf.node {
                     Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
@@ -715,7 +882,7 @@ impl TypeChecker {
         let mut has_wildcard = false;
         let mut covered_types: Vec<String> = Vec::new();
 
-        for arm in arms {
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
             for leaf in pattern_alternatives(&arm.pattern) {
                 match &leaf.node {
                     // type_of(x) == "string" style patterns are common but hard to detect here
@@ -790,7 +957,7 @@ impl TypeChecker {
     ) {
         let mut has_wildcard = false;
         let mut covered: Vec<DiscriminantValue> = Vec::new();
-        for arm in arms {
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
             for leaf in pattern_alternatives(&arm.pattern) {
                 match &leaf.node {
                     Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),

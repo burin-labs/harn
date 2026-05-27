@@ -282,9 +282,10 @@ usage block:
 import { parser, parse, render_help } from "std/cli/argparse"
 
 let result = parse(spec, argv)
-if result.err != nil {
+let err = result.err
+if err != nil {
   __io_eprintln(render_help(spec))
-  __io_eprintln("error: " + result.err.hint)
+  __io_eprintln("error: " + err.hint)
   exit(2)
 }
 let parsed = result.ok
