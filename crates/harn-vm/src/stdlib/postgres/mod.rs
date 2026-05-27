@@ -1274,13 +1274,7 @@ pg_close(db)
         )
         .unwrap();
 
-        let schema = format!(
-            "harn_pg_mig_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(0)
-        );
+        let schema = format!("harn_pg_mig_{}", uuid::Uuid::new_v4().simple());
         let migration_dir = dir.to_string_lossy().into_owned();
         let source = format!(
             r#"
@@ -1345,10 +1339,7 @@ pg_close(db)
         reset_postgres_state();
         let schema = format!(
             "harn_pg_cloud_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(0)
+            uuid::Uuid::new_v4().simple()
         );
         let source = format!(
             r#"

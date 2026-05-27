@@ -495,6 +495,12 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/stdlib/long_running.rs"
   "crates/harn-vm/src/stdlib/memory.rs"
   "crates/harn-vm/src/stdlib/monitors.rs"
+  # `pg_execute` and `pg_migrate` time the host wall-clock duration of the
+  # Postgres round-trip and surface it as `duration_ms` in the result dict
+  # (issue #2500). The measurement IS the observability source of truth
+  # — same shape as the existing `process.rs` allowlist entry.
+  "crates/harn-vm/src/stdlib/postgres/migrate.rs"
+  "crates/harn-vm/src/stdlib/postgres/mod.rs"
   "crates/harn-vm/src/stdlib/process.rs"
   "crates/harn-vm/src/stdlib/supervisor.rs"
   "crates/harn-vm/src/stdlib/tracing.rs"
