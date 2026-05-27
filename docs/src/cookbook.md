@@ -198,6 +198,104 @@ pipeline default(task) {
 }
 ```
 
+## Precise edits with AST tools
+
+### How to rewrite a function body via a tree-sitter query
+
+`edit_apply_node` from [`std/edit`](./stdlib/edit.md) replaces AST nodes
+matched by a Tree-Sitter query with a fresh fragment, leaving the
+surrounding indentation and trailing trivia untouched. This is the
+right reach when an agent needs to "change this function body" or
+"replace this call" — freeform text patching breaks on whitespace
+drift; AST-aware splice does not.
+
+The query must declare at least one capture; the capture named by
+`target_capture` (default `target`) is the replaced span. Single-capture
+queries accept any capture name.
+
+```harn,ignore
+import "std/edit"
+
+pipeline default(task) {
+  let result = edit_apply_node({
+    path: "src/lib.rs",
+    query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
+    replacement: "{ format!(\"hi {name}!\") }",
+  })
+
+  if !result.applied {
+    log("edit failed: ${result.result} — ${result.details}")
+    return
+  }
+  log("rewrote ${len(result.edits)} match(es) in ${result.path}")
+}
+```
+
+The default selector is `"unique"`: more than one match returns
+`result == "ambiguous"`. Use `"first"`, `"all"`, or `"nth"` (with
+`nth: N`, 1-based) to disambiguate.
+
+```harn,ignore
+import "std/edit"
+
+pipeline default(task) {
+  // Rewrite every `fn foo() { … }` body in a file.
+  let result = edit_apply_node({
+    path: "src/lib.rs",
+    query: "(function_item body: (block) @target)",
+    replacement: "{ unimplemented!() }",
+    select: "all",
+  })
+  log("rewrote ${result.match_count} bodies")
+}
+```
+
+Validation is on by default: the post-edit source is re-parsed and any
+tree-sitter `ERROR` / `MISSING` node aborts with
+`result == "syntax_error"`. The original file is left untouched on
+rejection.
+
+```harn,ignore
+import "std/edit"
+
+pipeline default(task) {
+  let result = edit_apply_node({
+    path: "src/lib.rs",
+    query: "(function_item body: (block) @target)",
+    replacement: "{ (",  // intentional syntax error
+  })
+  // result.applied == false, result.result == "syntax_error",
+  // file on disk is unchanged.
+  log(result.details)
+}
+```
+
+Pass `dry_run: true` to inspect the splice without writing. When a
+hostlib `session_id` is supplied, both the read and the write route
+through the staged filesystem (see issue #1722), so the edit is atomic
+alongside any sibling staged writes.
+
+```harn,ignore
+import "std/edit"
+
+pipeline default(task) {
+  let preview = edit_apply_node({
+    path: "src/lib.rs",
+    query: "(function_item body: (block) @target)",
+    replacement: "{ 42 }",
+    select: "first",
+    dry_run: true,
+  })
+  log(preview.preview)  // rewritten source; file on disk is untouched
+}
+```
+
+Supported languages on the first batch: Rust, TypeScript / TSX,
+JavaScript / JSX, Python, Go, Swift, Java, C / C++, C#, Ruby, Kotlin,
+PHP, Scala, Bash, Zig, Elixir, Lua, Haskell, R. Languages outside the
+table return `result == "unsupported_language"`; callers can fall back
+to `edit_apply_old_new_patch` (text-mode) in that branch.
+
 ## MCP servers
 
 ### How to call an MCP server

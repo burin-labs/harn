@@ -890,3 +890,71 @@ pub fn edit_validate_changed_regions(before, after, expected_regions, options = 
     },
   }
 }
+
+/**
+ * Locate one or more AST nodes via a Tree-Sitter query and replace each
+ * match's bytes with `replacement`. The byte splice preserves leading
+ * indentation, trailing trivia, and any whitespace outside the matched
+ * span — so this is the precise alternative to freeform text patching
+ * for "change this function body" / "rename this call" style edits.
+ *
+ * The query must declare at least one capture; the capture named by
+ * `target_capture` (default `"target"`) is the replaceable span.
+ * Single-capture queries accept any capture name.
+ *
+ * Multi-match policy via `select`:
+ *
+ * - `"unique"` (default) requires exactly one match; else `ambiguous`.
+ * - `"first"` picks the lowest byte offset.
+ * - `"all"` rewrites every match.
+ * - `"nth"` plus `nth: N` picks the 1-based index in document order.
+ *
+ * When `validate` is true (default) the rewritten source is re-parsed and
+ * any tree-sitter ERROR/MISSING node aborts the edit with
+ * `result == "syntax_error"`. When `dry_run` is true the file is left
+ * untouched but the response still carries the `preview` text the splice
+ * would produce.
+ *
+ * Reads and writes route through staged-fs (#1722) when a `session_id` is
+ * supplied so the edit is atomic alongside siblings.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_apply_node({path: "src/lib.rs", query: query, replacement: "{ 42 }"})
+ */
+pub fn edit_apply_node(params) {
+  let raw = hostlib_ast_apply_node(params ?? {})
+  let payload = raw ?? {}
+  let provenance = {
+    module: "std/edit",
+    helper: "edit_apply_node",
+    path: payload?.path,
+    dry_run: payload?.dry_run ?? false,
+    before_sha256: payload?.before_sha256,
+    after_sha256: payload?.after_sha256,
+    caller: params?.provenance,
+  }
+  return {
+    ok: payload?.result ?? "" == "applied",
+    applied: payload?.applied ?? false,
+    result: payload?.result ?? "no_match",
+    path: payload?.path,
+    dry_run: payload?.dry_run ?? false,
+    match_count: payload?.match_count ?? 0,
+    edits: payload?.edits ?? [],
+    spans: payload?.spans ?? [],
+    preview: payload?.preview,
+    before_sha256: payload?.before_sha256,
+    after_sha256: payload?.after_sha256,
+    query: payload?.query,
+    target_capture: payload?.target_capture,
+    details: payload?.details,
+    error_row: payload?.error_row,
+    error_column: payload?.error_column,
+    errors: [],
+    warnings: [],
+    provenance: provenance,
+  }
+}
