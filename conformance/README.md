@@ -153,8 +153,8 @@ make conformance
 # Or, equivalently:
 HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test conformance
 
-# A single category
-cargo run --bin harn -- test conformance --selection conformance/tests/stdlib/oauth
+# A single category (positional selection — file or directory)
+cargo run --bin harn -- test conformance conformance/tests/stdlib/oauth
 
 # By substring filter
 cargo run --bin harn -- test conformance --filter oauth_device_flow
