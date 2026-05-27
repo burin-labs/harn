@@ -29,7 +29,7 @@ exclude = ["crates/harn-wasm"]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.45"
+version = "0.8.46"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn"
