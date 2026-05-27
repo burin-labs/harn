@@ -276,6 +276,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(agent_state::MODULE_BUILTINS);
         out.extend_from_slice(bytes::MODULE_BUILTINS);
         out.extend_from_slice(calendar::MODULE_BUILTINS);
+        out.extend_from_slice(channel_guardrails::MODULE_BUILTINS);
         out.extend_from_slice(clock::MODULE_BUILTINS);
         out.extend_from_slice(collections::MODULE_BUILTINS);
         out.extend_from_slice(command_policy::MODULE_BUILTINS);
@@ -307,11 +308,13 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(agents::records::MODULE_BUILTINS);
         out.extend_from_slice(regex::MODULE_BUILTINS);
         out.extend_from_slice(runtime_scope::MODULE_BUILTINS);
+        out.extend_from_slice(sandbox::MODULE_BUILTINS);
         out.extend_from_slice(sets::MODULE_BUILTINS);
         out.extend_from_slice(shapes::MODULE_BUILTINS);
         out.extend_from_slice(skills::MODULE_BUILTINS);
         out.extend_from_slice(strings::MODULE_BUILTINS);
         out.extend_from_slice(supervisor::MODULE_BUILTINS);
+        out.extend_from_slice(testbench::MODULE_BUILTINS);
         out.extend_from_slice(timing::MODULE_BUILTINS);
         out.extend_from_slice(tool_hooks::MODULE_BUILTINS);
         out.extend_from_slice(tools::MODULE_BUILTINS);
