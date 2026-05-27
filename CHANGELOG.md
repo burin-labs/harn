@@ -55,22 +55,6 @@ condensed series summaries instead of full per-patch history.
   the per-handler JSON shapes now both go through a single
   `serialize_span` helper so `burin/promptProvenance` and
   `burin/promptConsumers` can never drift.
-- **Local OTLP exporter auto-registration.** `harn-vm` ships an
-  `events::install_otel_sink_from_env` helper that wires the existing
-  `OtelSink` (`crates/harn-vm/src/events.rs`) into the thread-local
-  event-sink chain whenever `HARN_OTEL_ENDPOINT` (or the standard
-  `OTEL_EXPORTER_OTLP_ENDPOINT`) is set. `harn-cli`'s `async_main` calls
-  it once at startup so every subcommand — `harn run`, `harn serve acp`,
-  evals — exports spans through the OTLP/HTTP collector at the
-  configured endpoint. Honors `HARN_OTEL_SERVICE_NAME` /
-  `OTEL_SERVICE_NAME` (default `"harn"`) and `HARN_OTEL_HEADERS` /
-  `OTEL_EXPORTER_OTLP_HEADERS` for header-based auth (e.g. Honeycomb
-  team ID). The auto-registered batch processor uses the host's tokio
-  runtime; a paired `events::shutdown_otel_sink` drains the queue
-  before the runtime exits so short-lived `harn run` invocations never
-  drop tail-end spans. Redaction stays under the active policy
-  (`crate::redact::current_policy`), unchanged from the pre-existing
-  `OtelSink` contract.
 
 ## v0.8.45
 
