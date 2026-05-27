@@ -719,7 +719,6 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         return Ok(VmValue::String(Rc::from(text)));
     }
     let mut out = String::with_capacity(text.len() + prefix.len() * 4);
-    let mut first = true;
     for line in text.split_inclusive('\n') {
         // Don't pad blank lines — matches Python's textwrap.indent
         // default behavior so callers don't get trailing whitespace
@@ -729,11 +728,6 @@ fn indent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
             out.push_str(&prefix);
         }
         out.push_str(line);
-        first = false;
-    }
-    if first {
-        // text was empty — already handled above, but guard anyway.
-        return Ok(VmValue::String(Rc::from(text)));
     }
     Ok(VmValue::String(Rc::from(out)))
 }

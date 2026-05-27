@@ -126,7 +126,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     // `__dict_merge`, `__list_unique`, `__dict_omit`, `__dict_pick`,
     // `__dict_pick_keys` migrated to `#[harn_builtin]` in
     // `harn-vm/src/stdlib/collections.rs`.
-    BuiltinSignature::simple("__from_xml", &[Param::new("text", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple(
+        "__from_xml",
+        &[
+            Param::new("text", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
     BuiltinSignature::simple(
         "__to_xml",
         &[
@@ -2030,7 +2037,23 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_STRING,
     ),
-    BuiltinSignature::simple("from_xml", &[Param::new("text", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple(
+        "from_xml",
+        &[
+            Param::new("text", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "jsonrpc_batch",
+        &[
+            Param::new("url", TY_STRING),
+            Param::new("calls", TY_LIST),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_LIST,
+    ),
     // Generic JSON-RPC client — see crates/harn-vm/src/stdlib/jsonrpc.rs.
     BuiltinSignature::simple(
         "jsonrpc_call",
