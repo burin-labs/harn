@@ -262,6 +262,9 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
     }
     if runs > 1 {
         let determinism = determinism_summary(&source, &executions);
+        let fixture_failed = executions
+            .iter()
+            .any(|execution| !execution.report.fixture.pass);
         println!(
             "Determinism: {} (compared {} run(s))",
             if determinism.pass { "PASS" } else { "FAIL" },
@@ -270,7 +273,7 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
         for failure in determinism.failures {
             println!("  {failure}");
         }
-        return i32::from(!determinism.pass);
+        return i32::from(fixture_failed || !determinism.pass);
     }
     i32::from(!executions[0].report.fixture.pass)
 }
@@ -529,6 +532,9 @@ fn print_report_human(report: &ReplayReport) {
         "Embedded replay fixture: {}",
         if report.fixture.pass { "PASS" } else { "FAIL" }
     );
+    for failure in &report.fixture.failures {
+        println!("  failure: {failure}");
+    }
     for transition in &report.transitions {
         println!(
             "transition {} -> {} ({})",
