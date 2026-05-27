@@ -140,6 +140,26 @@ lineage, and mutation session audit metadata. Hosts own approval UX, concrete
 file mutations, and undo/redo semantics. For autonomous or background edits,
 prefer worktree-backed execution over ambient cwd state.
 
+## Changelog fragments
+
+- Non-trivial PRs drop a single fragment file: `changelog.d/<id>.<category>.md`.
+  `<id>` is the PR or issue number, `<category>` is one of `breaking`,
+  `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`. The body
+  is the bullet(s) you would have hand-edited under `### Heading` inside
+  `## Unreleased`.
+- See `changelog.d/README.md` for the format and examples.
+- At release time the fragments are assembled into `## Unreleased` and the
+  fragment files are deleted in the same release commit.
+- The `Changelog fragment` GitHub Actions check is the soft gate. PRs that
+  genuinely need no entry (typos, internal refactors, dep bumps with no
+  user-visible effect) carry the `no-changelog-needed` label; the gate
+  treats that as a pass. Direct edits to `CHANGELOG.md` are also accepted
+  (legacy path).
+- Architecture: the assembler and the per-major archive helper live in
+  `harn-bump-fleet/lib/changelog.harn`; release-time invocation lives in
+  `harn-bump-fleet/release_harn.harn::apply_draft_release_notes`. Bump
+  helpers and tests are versioned with the harn-bump-fleet repo, not here.
+
 ## Release
 
 - Open version-bump PR after release content lands:
