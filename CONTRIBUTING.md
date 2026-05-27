@@ -319,11 +319,18 @@ genuinely unavoidable.
 
 ## Maintaining the changelog
 
-Keep `CHANGELOG.md` focused on the actively maintained release range. When a
-future major-version cut makes older release headers mostly archaeological,
-move the already-condensed older entries into a versioned archive such as
-`CHANGELOG-pre-0.6.md` and leave a one-line link near the top of
-`CHANGELOG.md`.
+Day to day: drop a `changelog.d/<id>.<category>.md` fragment per PR; see
+[`changelog.d/README.md`](changelog.d/README.md) for the format and
+[`AGENTS.md`](AGENTS.md) for the soft CI gate. Direct edits to
+`## Unreleased` in `CHANGELOG.md` remain accepted (legacy path).
+
+At a major (or 0.x-equivalent) cut, keep `CHANGELOG.md` focused on the
+active release range by snipping the prior series into a versioned
+archive such as `CHANGELOG-pre-0.8.md` (detailed per-patch notes for
+v0.6.0 – v0.7.62) or `CHANGELOG-pre-0.6.md` (condensed pre-launch
+summaries) and leaving a link near the top of `CHANGELOG.md`. The
+`harn-bump-fleet/lib/changelog.harn::changelog_archive_below_version`
+helper produces the same split layout deterministically.
 
 ## Key references
 
