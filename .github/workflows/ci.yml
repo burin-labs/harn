@@ -146,7 +146,12 @@ jobs:
           cache-bin: false
       - run: make conformance
       - run: make protocol-conformance
-      - run: make mcp-rc-conformance
+      # NOTE: `make mcp-rc-conformance` used to run here as well, but its two
+      # `cargo test -p ... --tests` invocations are a strict subset of
+      # `cargo nextest run --workspace` in the parallel `rust-test` job —
+      # they were paying ~4 min to redo work the workspace test run already
+      # covers. Removed in favor of relying on `rust-test`; kept as a
+      # developer-convenience target in the Makefile for local iteration.
       # Promoted out of `make lint` (in the rust-lint job) so the Linux
       # critical path doesn't pay ~1-2 min to compile harn-cli from scratch
       # just to count `@xfail:` markers. `make conformance` above already
@@ -156,9 +161,10 @@ jobs:
       - run: make fmt-harn
       # Audit gates promoted from release_gate.sh audit so a stale
       # generated artifact (highlight keywords, language-spec mirror,
-      # trigger quickref, provider/connector matrices, docs snippets,
-      # release metadata) fails the
-      # PR instead of waiting until release time.
+      # trigger quickref, provider/connector matrices, docs snippets)
+      # fails the PR instead of waiting until release time. These all
+      # use the already-warm `target/debug/harn` binary built by
+      # `make conformance` above, so they're effectively free here.
       - run: make check-highlight
       - run: make check-language-spec
       - run: make check-trigger-quickref
@@ -168,6 +174,21 @@ jobs:
       - run: make check-trigger-examples
       - run: make check-docs-snippets
       - run: make check-diagnostics-catalog
+
+  audit-scripts:
+    name: Audit scripts
+    # Pure-Python / pure-shell audit gates that do NOT need a Rust toolchain
+    # or a built `target/debug/harn` binary. Split out of `harn-audit` so
+    # they run in parallel with the long Rust build path and provide fast
+    # feedback on docs / metadata / binding drift without waiting on
+    # `make conformance` (~4 min).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history + tags so the changelog retroactive-edit check can
+          # traverse BASE..HEAD and inspect commit trailers.
+          fetch-depth: 0
       # check-bindings runs the published Python and Go protocol bindings
       # against the committed JSON fixture. ubuntu-latest ships python3 and
       # go preinstalled, so no setup action is required.
@@ -365,7 +386,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust-lint, rust-test, harn-audit, windows, portal, actions, e2e]
+    needs: [fmt, lint-md, rust-lint, rust-test, harn-audit, audit-scripts, windows, portal, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -375,6 +396,7 @@ jobs:
             ["Rust lint"]="${{ needs['rust-lint'].result }}"
             ["Rust test"]="${{ needs['rust-test'].result }}"
             ["Harn conformance + audit"]="${{ needs['harn-audit'].result }}"
+            ["Audit scripts"]="${{ needs['audit-scripts'].result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )

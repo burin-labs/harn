@@ -112,6 +112,14 @@ protocol-conformance:
 #   - tests/legacy_compat.rs    — 2025-11-25 wire compat regression
 #   - tests/artifacts.rs        — published fixtures + recursive $defs
 #   - harn-cli mcp_rc_compat_tests — orchestrator MCP server
+#
+# This target is a developer-convenience entry point for local iteration
+# on the MCP surface — it lets you re-run the focused suite without
+# building the whole workspace. CI does NOT call it: the two `cargo test`
+# invocations below are a strict subset of `cargo nextest run --workspace`
+# in the `rust-test` workflow job, so running it again in `harn-audit`
+# would pay ~4 min of wall-clock to redo work the workspace test run
+# already covers.
 mcp-rc-conformance:
 	@echo "=== MCP RC harness: harn-mcp-rc-compat suite (client / generic_server / legacy_compat / artifacts) ==="
 	HARN_LLM_CALLS_DISABLED=1 cargo test -p harn-mcp-rc-compat --tests
