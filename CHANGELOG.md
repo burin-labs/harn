@@ -21,6 +21,12 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`harn replay` can read sessions directly from `events.sqlite`
+  (#2474).** `harn replay --session-id <id> --events-db <path>`
+  reconstructs a replayable run record from the session's
+  sanitized `observability.agent_events` stream, and `--runs N`
+  compares allowlist-normalized event material across repeated replay
+  reads.
 - **Agent-loop tool-surface narrowing (#2473).** `agent_loop` now narrows
   model-visible tools between turns after a rolling five-turn inactivity
   window. The `tool_surface_narrowing` option accepts `enabled`,

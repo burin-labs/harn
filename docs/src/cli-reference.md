@@ -1428,11 +1428,20 @@ harn runs inspect .harn-runs/<run>.json --compare baseline.json
 
 ## harn replay
 
-Replay a persisted workflow run record from saved output.
+Replay a persisted workflow run record from saved output, a replay-oracle
+fixture, or an agent session stored in the SQLite EventLog.
 
 ```bash
 harn replay .harn-runs/<run>.json
+harn replay --fixture conformance/replay-oracle/fixtures/simple_trigger_local_handler.valid.json --runs 3 --json
+harn replay --session-id <id> --events-db .harn/events.sqlite --runs 3 --json
 ```
+
+`--session-id` reads the `observability.agent_events.<sanitized-id>` topic
+from `--events-db` in append order, reconstructs a replayable run record,
+and feeds it through the same replay summary path as run-record input.
+When `--runs N` is greater than one, JSON output includes per-run reports
+plus an allowlist-normalized determinism summary.
 
 ## harn eval
 

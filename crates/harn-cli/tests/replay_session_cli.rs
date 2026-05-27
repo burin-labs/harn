@@ -37,6 +37,35 @@ fn unique_normalized_runs(parsed: &serde_json::Value) -> BTreeSet<String> {
         .collect()
 }
 
+fn write_failing_run_record(path: &std::path::Path) {
+    let run = json!({
+        "_type": "run_record",
+        "id": "run-failing-fixture",
+        "workflow_id": "replay-fixture-exit",
+        "workflow_name": "Replay fixture exit",
+        "task": "Exercise human replay exit handling",
+        "status": "failed",
+        "started_at": "2026-05-26T00:00:00.000Z",
+        "finished_at": "2026-05-26T00:00:01.000Z",
+        "replay_fixture": {
+            "_type": "replay_fixture",
+            "id": "fixture-expects-completed",
+            "source_run_id": "run-failing-fixture",
+            "workflow_id": "replay-fixture-exit",
+            "workflow_name": "Replay fixture exit",
+            "created_at": "2026-05-26T00:00:01.000Z",
+            "eval_kind": "replay",
+            "expected_status": "completed",
+            "stage_assertions": []
+        }
+    });
+    std::fs::write(
+        path,
+        serde_json::to_vec_pretty(&run).expect("serialize failing run record"),
+    )
+    .expect("write failing run record");
+}
+
 fn append_agent_event(
     log: &SqliteEventLog,
     topic: &Topic,
@@ -185,6 +214,23 @@ fn replay_session_id_errors_when_session_absent() {
         .as_str()
         .unwrap_or("")
         .contains("session-missing"));
+}
+
+#[test]
+fn replay_human_runs_fail_when_embedded_fixture_fails() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let run_record = temp.path().join("run.json");
+    write_failing_run_record(&run_record);
+
+    let out = Command::new(binary_path())
+        .args(["replay", run_record.to_str().unwrap(), "--runs", "2"])
+        .output()
+        .expect("spawn harn replay --runs");
+    assert!(!out.status.success(), "expected replay fixture failure");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Embedded replay fixture: FAIL"));
+    assert!(stdout.contains("run status mismatch"));
+    assert!(stdout.contains("Determinism: PASS"));
 }
 
 #[test]
