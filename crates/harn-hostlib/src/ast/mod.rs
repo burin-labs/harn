@@ -30,6 +30,7 @@ use harn_vm::VmValue;
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
+mod apply_node;
 mod bracket_balance;
 mod function_body;
 mod fuzzy;
@@ -199,6 +200,12 @@ impl HostlibCapability for AstCapability {
             "hostlib_ast_bracket_balance",
             "bracket_balance",
             bracket_balance::run,
+        );
+        register(
+            registry,
+            "hostlib_ast_apply_node",
+            "apply_node",
+            apply_node::run,
         );
     }
 }

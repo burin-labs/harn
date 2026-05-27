@@ -242,6 +242,7 @@ Pure helpers for agent-authored text patches:
 
 | Function | Description |
 |---|---|
+| `edit_apply_node(params)` | AST-precise replace via a Tree-Sitter query. Splices `replacement` in for each matched node, preserving leading indentation and trailing trivia; validates the post-edit source by re-parsing. Routes through staged-fs when `session_id` is supplied. See [Edit stdlib](./stdlib/edit.md). |
 | `edit_apply_old_new_patch(text, old_text, new_text, options?)` | Apply one anchored old/new patch with exact, line-normalized, and structural matching; returns hashes, match kind, line span, changed regions, errors, warnings, and provenance |
 | `edit_splice_lines(text, start_line, end_line_exclusive, new_text, options?)` | Replace a half-open 0-based line range and return the same patch metadata shape |
 | `edit_changed_regions(before, after)` | Return deterministic line-level changed-region metadata for one contiguous diff |

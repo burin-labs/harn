@@ -169,6 +169,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/ast/bracket_balance.response.json"),
     ),
+    (
+        "ast",
+        "apply_node",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/apply_node.request.json"),
+    ),
+    (
+        "ast",
+        "apply_node",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/apply_node.response.json"),
+    ),
     // code_index/
     (
         "code_index",

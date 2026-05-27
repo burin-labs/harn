@@ -291,6 +291,63 @@ return {{
 }
 
 #[test]
+fn end_to_end_apply_node_via_harn_script() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let source_path = root.join("hello.rs");
+    fs::write(
+        &source_path,
+        "fn greet(name: &str) -> String {\n    format!(\"hi {name}\")\n}\n",
+    )
+    .unwrap();
+    let path_str = source_path.to_string_lossy().replace('\\', "/");
+
+    let path = &path_str;
+    let script = format!(
+        r#"
+let preview = hostlib_ast_apply_node({{
+    path: "{path}",
+    query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
+    replacement: "{{ format!(\"hi {{name}}!\") }}",
+    dry_run: true,
+}})
+let applied = hostlib_ast_apply_node({{
+    path: "{path}",
+    query: "(function_item body: (block) @target)",
+    replacement: "{{ format!(\"hi {{name}}!\") }}",
+    select: "first",
+}})
+return {{
+    preview_result: preview.result,
+    preview_dry: preview.dry_run,
+    preview_contains_bang: contains(preview.preview, "hi {{name}}!"),
+    applied_result: applied.result,
+    match_count: applied.match_count,
+}}
+"#,
+    );
+
+    let (result, _) = run_harn(&script);
+    let dict = match &result {
+        VmValue::Dict(d) => d,
+        other => panic!("expected dict, got {other:?}"),
+    };
+    let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
+    assert!(matches!(get("preview_result"), VmValue::String(s) if s.as_ref() == "applied"));
+    assert!(matches!(get("preview_dry"), VmValue::Bool(true)));
+    assert!(matches!(get("preview_contains_bang"), VmValue::Bool(true)));
+    assert!(matches!(get("applied_result"), VmValue::String(s) if s.as_ref() == "applied"));
+    assert!(matches!(get("match_count"), VmValue::Int(1)));
+
+    // Disk content should reflect the second (non-dry-run) call.
+    let on_disk = std::fs::read_to_string(&source_path).expect("read");
+    assert!(
+        on_disk.contains("hi {name}!"),
+        "expected post-edit content on disk, got:\n{on_disk}"
+    );
+}
+
+#[test]
 fn end_to_end_code_index_via_harn_script() {
     let dir = TempDir::new().unwrap();
     let root = dir.path();

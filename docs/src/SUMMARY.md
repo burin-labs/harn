@@ -87,6 +87,7 @@
 - [Timing stdlib](./stdlib/timing.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [Code librarian stdlib](./stdlib/code-librarian.md)
+- [Edit stdlib](./stdlib/edit.md)
 - [OAuth storage stdlib](./stdlib/oauth-storage.md)
 - [Prompt library stdlib](./stdlib/prompt-library.md)
 - [Human in the loop](./hitl.md)

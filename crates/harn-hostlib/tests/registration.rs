@@ -39,6 +39,7 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_symbol_delete",
             "hostlib_ast_symbol_replace",
             "hostlib_ast_bracket_balance",
+            "hostlib_ast_apply_node",
         ]
     );
     // Each AST builtin must reject empty input with a structured
@@ -60,6 +61,7 @@ fn ast_capability_registers_documented_methods() {
         ("hostlib_ast_symbol_delete", "source"),
         ("hostlib_ast_symbol_replace", "source"),
         ("hostlib_ast_bracket_balance", "source"),
+        ("hostlib_ast_apply_node", "path"),
     ];
     for (name, expected_param) in expected_missing {
         let entry = registry.find(name).expect("registered");
@@ -361,9 +363,10 @@ fn install_default_wires_every_module_into_a_vm() {
             "secret_store"
         ]
     );
-    // Builtin count: 12 ast + 27 code_index + 2 scanner + 4 fs + 4 fs_snapshot
-    // + 2 fs_watch + 13 tools + 1 hostlib_enable + 4 secret_store = 69.
-    assert!(registry.builtins().len() >= 69);
+    // Builtin count: 13 ast (incl. apply_node) + 27 code_index + 2 scanner
+    // + 4 fs + 4 fs_snapshot + 2 fs_watch + 13 tools + 1 hostlib_enable
+    // + 4 secret_store = 70.
+    assert!(registry.builtins().len() >= 70);
 }
 
 #[test]

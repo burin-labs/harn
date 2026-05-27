@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/apply_node.response.json",
+  "title": "ast.apply_node response",
+  "description": "Tagged-union response for ast.apply_node. `result` discriminates success (`applied`) from the failure modes; `applied` mirrors `result == \"applied\"` for ergonomic callers.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "no_match",
+        "ambiguous",
+        "invalid_query",
+        "unsupported_language",
+        "syntax_error"
+      ]
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "True iff `result == \"applied\"`."
+    },
+    "path": {
+      "type": "string"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "Echoes the `dry_run` request flag (set only when `result == \"applied\"`)."
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "edits": {
+      "type": "array",
+      "description": "Per-edit metadata, in document order. Set only when `result == \"applied\"`.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "start_byte": { "type": "integer", "minimum": 0 },
+          "end_byte": { "type": "integer", "minimum": 0 },
+          "start_row": { "type": "integer", "minimum": 0 },
+          "start_col": { "type": "integer", "minimum": 0 },
+          "end_row": { "type": "integer", "minimum": 0 },
+          "end_col": { "type": "integer", "minimum": 0 },
+          "original": { "type": "string" },
+          "replacement": { "type": "string" }
+        },
+        "required": ["start_byte", "end_byte", "original", "replacement"],
+        "additionalProperties": false
+      }
+    },
+    "spans": {
+      "type": "array",
+      "description": "Per-match span metadata when `result == \"ambiguous\"`.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "start_byte": { "type": "integer", "minimum": 0 },
+          "end_byte": { "type": "integer", "minimum": 0 },
+          "start_row": { "type": "integer", "minimum": 0 },
+          "start_col": { "type": "integer", "minimum": 0 },
+          "end_row": { "type": "integer", "minimum": 0 },
+          "end_col": { "type": "integer", "minimum": 0 },
+          "text": { "type": "string" }
+        },
+        "required": ["start_byte", "end_byte", "text"],
+        "additionalProperties": false
+      }
+    },
+    "before_sha256": {
+      "type": "string",
+      "description": "Hex sha256 of the original source. Set only when `result == \"applied\"`."
+    },
+    "after_sha256": {
+      "type": "string",
+      "description": "Hex sha256 of the post-splice source. Set only when `result == \"applied\"`."
+    },
+    "preview": {
+      "type": "string",
+      "description": "Post-splice source text. Always set when `result == \"applied\"`; also surfaced on `syntax_error` so callers can inspect the rejected output."
+    },
+    "query": {
+      "type": "string",
+      "description": "Echoes the original query; set on `no_match` and `invalid_query` for ergonomic diagnostics."
+    },
+    "target_capture": {
+      "type": "string",
+      "description": "Capture name used to drive replacement; set on `no_match`."
+    },
+    "details": {
+      "type": "string",
+      "description": "Short human-readable diagnostic; set on every non-`applied` result."
+    },
+    "error_row": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Tree-sitter query error row when `result == \"invalid_query\"`."
+    },
+    "error_column": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Tree-sitter query error column when `result == \"invalid_query\"`."
+    }
+  },
+  "required": ["result", "applied"],
+  "additionalProperties": false
+}
