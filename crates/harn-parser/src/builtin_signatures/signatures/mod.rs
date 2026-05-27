@@ -8,6 +8,7 @@
 mod agents;
 mod integrations;
 mod project;
+mod schema;
 mod shapes;
 mod stdlib;
 mod workflow;
@@ -18,12 +19,13 @@ pub(crate) use super::types::{
     TY_STRING, TY_STRING_OR_NIL,
 };
 
-pub(crate) fn groups() -> [&'static [BuiltinSignature]; 5] {
+pub(crate) fn groups() -> [&'static [BuiltinSignature]; 6] {
     [
         stdlib::SIGNATURES,
         agents::SIGNATURES,
         integrations::SIGNATURES,
         project::SIGNATURES,
+        schema::SIGNATURES,
         workflow::SIGNATURES,
     ]
 }

@@ -296,6 +296,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(junit::MODULE_BUILTINS);
         out.extend_from_slice(lifecycle_receipts::MODULE_BUILTINS);
         out.extend_from_slice(math::MODULE_BUILTINS);
+        out.extend_from_slice(memory::MODULE_BUILTINS);
         out.extend_from_slice(monitors::MODULE_BUILTINS);
         out.extend_from_slice(multipart::MODULE_BUILTINS);
         out.extend_from_slice(net_policy::MODULE_BUILTINS);
