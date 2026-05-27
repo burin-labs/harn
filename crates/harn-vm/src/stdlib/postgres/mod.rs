@@ -1337,10 +1337,7 @@ pg_close(db)
             return;
         }
         reset_postgres_state();
-        let schema = format!(
-            "harn_pg_cloud_{}",
-            uuid::Uuid::new_v4().simple()
-        );
+        let schema = format!("harn_pg_cloud_{}", uuid::Uuid::new_v4().simple());
         let source = format!(
             r#"
 import "std/postgres"
