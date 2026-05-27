@@ -405,6 +405,10 @@ Sets also support method syntax: `my_set.union(other)`.
 | `unicode_graphemes(str)` | str: string | list | Split a string into extended grapheme clusters |
 | `str_pad(str, width, char?, side?)` | str: string, width: int, char: string, side: `"left"\|"right"\|"both"` | string | Pad to a grapheme width using the given fill character |
 | `format(template, ...)` | template: string, args: any | string | Format string with `{}` placeholders. With a dict as the second arg, supports named `{key}` placeholders |
+| `repeat(str, n)` | str: string, n: int | string | Concatenate `str` with itself `n` times. Rejects pathological sizes |
+| `indent(text, prefix?)` | text: string, prefix: string (default `"  "`) | string | Prefix every non-blank line with the given indent |
+| `dedent(text)` | text: string | string | Strip the longest common leading whitespace from every non-blank line |
+| `word_wrap(text, width?)` | text: string, width: int (default 80) | string | Greedy word-wrap that preserves existing newlines and never splits words mid-token |
 
 ### String methods (dot syntax)
 
@@ -476,6 +480,15 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `partition(list, fn)` | list: list, fn: closure | dict | Split into `{match, no_match}` lists |
 | `dedup_by(list, fn)` | list: list, fn: closure | list | Keep the first item for each callback-derived key |
 | `flat_map(list, fn)` | list: list, fn: closure | list | Map then flatten one level |
+| `clone(value)` | value: any | any | Shallow copy. Dicts and lists become fresh allocations independent of the source; primitives return by value |
+| `deep_clone(value)` | value: any | any | Recursive deep copy. Nested dicts/lists are duplicated top-to-bottom |
+| `deep_merge(a, b)` | a: dict, b: dict | dict | Recursive merge — when both sides have a dict at the same key the dicts merge; otherwise right wins |
+| `unique(list)` | list: list | list | Remove duplicates, preserving first-seen order. Structural equality |
+| `dict_from_pairs(pairs)` | pairs: list of `[key, value]` | dict | Build a dict from a list of pairs (later pairs override earlier ones) |
+| `index_by(items, fn)` | items: list, fn: closure | dict | Build a lookup table keyed by `fn(item)` |
+| `to_xml(value, options?)` | value: any, options: dict (`root`, `item_tag`, `pretty`, `declaration`) | string | Convert a Harn value into XML. Dicts → tag trees; lists → repeated `<item>` children |
+| `from_xml(text)` | text: string | dict | Parse XML back into a dict tree. Repeated children collapse into a list; attributes land under `@attr` |
+| `jsonrpc_call(url, method, params?, options?)` | url: string, method: string, params: any, options: dict (`headers`, `id`, `notify`, `timeout_ms`) | any | POST a JSON-RPC 2.0 envelope. Returns `result` on success, raises a structured error dict on failure |
 
 ### Iterator methods
 

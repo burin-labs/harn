@@ -788,6 +788,67 @@ fn test_capabilities_advertise_new_bp_features() {
     assert_eq!(body["supportsSetExpression"], true);
     assert_eq!(body["supportsRestartFrame"], true);
     assert_eq!(body["supportsBurinPromptProvenance"], true);
+    assert_eq!(body["supportsModulesRequest"], true);
+    assert_eq!(body["supportsLoadedSourcesRequest"], true);
+    assert_eq!(body["supportsTerminateRequest"], true);
+}
+
+#[test]
+fn test_terminate_emits_terminated_event() {
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(1, "terminate", None));
+    // Response + terminated event.
+    assert!(responses
+        .iter()
+        .any(|r| r.command.as_deref() == Some("terminate") && r.success == Some(true)));
+    assert!(responses
+        .iter()
+        .any(|r| r.event.as_deref() == Some("terminated")));
+    assert!(!dbg.is_running());
+}
+
+#[test]
+fn test_loaded_sources_reports_entry_program() {
+    let mut dbg = Debugger::new();
+    let (_dir, file) = write_temp_program("loaded.harn", "pipeline t(task) { log(\"hi\") }");
+    dbg.handle_message(make_request(1, "initialize", None));
+    dbg.handle_message(make_request(
+        2,
+        "launch",
+        Some(json!({"program": file.to_string_lossy()})),
+    ));
+    let responses = dbg.handle_message(make_request(3, "loadedSources", None));
+    let body = responses[0].body.as_ref().unwrap();
+    let sources = body["sources"].as_array().unwrap();
+    assert!(
+        sources
+            .iter()
+            .any(|s| s.get("path").and_then(|p| p.as_str()).is_some()),
+        "loadedSources must include at least the entry script's path"
+    );
+}
+
+#[test]
+fn test_modules_reports_entry_module() {
+    let mut dbg = Debugger::new();
+    let (_dir, file) = write_temp_program("mods.harn", "pipeline t(task) { log(\"hi\") }");
+    dbg.handle_message(make_request(1, "initialize", None));
+    dbg.handle_message(make_request(
+        2,
+        "launch",
+        Some(json!({"program": file.to_string_lossy()})),
+    ));
+    let responses = dbg.handle_message(make_request(3, "modules", None));
+    let body = responses[0].body.as_ref().unwrap();
+    let modules = body["modules"].as_array().unwrap();
+    assert!(!modules.is_empty(), "modules list must not be empty");
+    let total = body["totalModules"].as_u64().unwrap_or(0);
+    assert!(total >= 1);
+    // Module entries must carry id + name + path.
+    let first = &modules[0];
+    assert!(first.get("id").is_some());
+    assert!(first.get("name").is_some());
+    assert!(first.get("path").is_some());
 }
 
 #[test]

@@ -74,6 +74,9 @@ impl Debugger {
             "restartFrame" => self.handle_restart_frame(&msg),
             "setExceptionBreakpoints" => self.handle_set_exception_breakpoints(&msg),
             "disconnect" => self.handle_disconnect(&msg),
+            "terminate" => self.handle_terminate(&msg),
+            "modules" => self.handle_modules(&msg),
+            "loadedSources" => self.handle_loaded_sources(&msg),
             "cancel" => self.handle_cancel(&msg),
             "completions" => self.handle_completions(&msg),
             "stepInTargets" => self.handle_step_in_targets(&msg),
@@ -578,5 +581,107 @@ impl Debugger {
         let seq = self.next_seq();
         responses.push(DapResponse::success(seq, msg.seq, "disconnect", None));
         responses
+    }
+
+    /// DAP `terminate` — graceful stop variant of `disconnect`. The IDE
+    /// uses this when the user clicks the stop button; we treat it as
+    /// "drain in-flight reverse requests, then emit `terminated`". The
+    /// session stays connected so the IDE can still query post-mortem
+    /// state (variables, output) until it follows up with `disconnect`.
+    fn handle_terminate(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        self.running = false;
+        if let Some(bridge) = &self.host_bridge {
+            bridge.cancel_all_pending("terminate");
+        }
+        self.program_state = ProgramState::Terminated;
+        let mut responses = Vec::new();
+        self.end_progress(&mut responses);
+        let seq = self.next_seq();
+        responses.push(DapResponse::success(seq, msg.seq, "terminate", None));
+        let event_seq = self.next_seq();
+        responses.push(DapResponse::event(event_seq, "terminated", None));
+        responses
+    }
+
+    /// DAP `loadedSources` — enumerate every script the debugger could
+    /// surface a `source` request for. Used by the IDE's "Loaded
+    /// Scripts" tree so the user can open imported `.harn` files (or
+    /// embedded stdlib modules) directly.
+    fn handle_loaded_sources(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let mut paths: Vec<String> = self
+            .vm
+            .as_ref()
+            .map(|vm| vm.debug_loaded_source_paths())
+            .unwrap_or_default();
+        if let Some(entry) = &self.source_path {
+            if !paths.iter().any(|p| p == entry) {
+                paths.push(entry.clone());
+            }
+        }
+        let sources: Vec<serde_json::Value> = paths
+            .into_iter()
+            .map(|p| {
+                let src = self.source_for_path(&p);
+                serde_json::to_value(src).unwrap_or(serde_json::Value::Null)
+            })
+            .collect();
+        let seq = self.next_seq();
+        vec![DapResponse::success(
+            seq,
+            msg.seq,
+            "loadedSources",
+            Some(json!({ "sources": sources })),
+        )]
+    }
+
+    /// DAP `modules` — coarse module list keyed by source path. Harn
+    /// doesn't have shared-library modules, but the IDE's Modules panel
+    /// is the canonical UX for "what files contribute code to this
+    /// debug session." Each loaded source becomes one module entry
+    /// whose `id` is the path (stable) and `name` is the file basename.
+    fn handle_modules(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let paths: Vec<String> = self
+            .vm
+            .as_ref()
+            .map(|vm| vm.debug_loaded_source_paths())
+            .unwrap_or_default();
+        let args = msg.arguments.as_ref();
+        let start_module = args
+            .and_then(|a| a.get("startModule"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        let module_count = args
+            .and_then(|a| a.get("moduleCount"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(paths.len());
+        let total_module_count = paths.len();
+        let modules: Vec<serde_json::Value> = paths
+            .into_iter()
+            .skip(start_module)
+            .take(module_count.max(1))
+            .map(|path| {
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone());
+                json!({
+                    "id": path,
+                    "name": name,
+                    "path": path,
+                    "isUserCode": !path.starts_with("<stdlib>/"),
+                })
+            })
+            .collect();
+        let seq = self.next_seq();
+        vec![DapResponse::success(
+            seq,
+            msg.seq,
+            "modules",
+            Some(json!({
+                "modules": modules,
+                "totalModules": total_module_count,
+            })),
+        )]
     }
 }

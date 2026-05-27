@@ -1,0 +1,27 @@
+pipeline test(task) {
+  // repeat
+  assert_eq(repeat("ab", 3), "ababab", "repeat triples a string")
+  assert_eq(repeat("x", 0), "", "repeat with zero gives empty")
+  assert_eq(repeat("", 5), "", "empty input stays empty")
+  // indent
+  let multi = "first\nsecond\n\nfourth"
+  let bumped = indent(multi, "  ")
+  assert_eq(bumped, "  first\n  second\n\n  fourth", "indent preserves blank lines")
+  // dedent: strip the longest common prefix
+  let heredoc = "    line one\n      line two\n    line three"
+  let flush = dedent(heredoc)
+  assert_eq(flush, "line one\n  line two\nline three", "dedent strips minimum common prefix")
+  // word_wrap
+  let wrapped = word_wrap("the quick brown fox jumps over the lazy dog", 15)
+  assert_eq(
+    wrapped,
+    "the quick brown\nfox jumps over\nthe lazy dog",
+    "word_wrap breaks at word boundary",
+  )
+  assert_eq(
+    word_wrap("alpha beta\ngamma delta", 20),
+    "alpha beta\ngamma delta",
+    "word_wrap preserves paragraphs under the limit",
+  )
+  log("string helpers: all tests passed")
+}

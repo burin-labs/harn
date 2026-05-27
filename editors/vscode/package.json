@@ -14,7 +14,8 @@
   },
   "activationEvents": [
     "onLanguage:harn",
-    "onDebug"
+    "onDebug",
+    "onTaskType:harn"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -123,7 +124,66 @@
           "description": "Path to the harn-dap debug adapter binary"
         }
       }
-    }
+    },
+    "taskDefinitions": [
+      {
+        "type": "harn",
+        "required": ["command"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": ["run", "check", "fmt", "lint", "test"],
+            "description": "The harn subcommand to invoke."
+          },
+          "file": {
+            "type": "string",
+            "description": "Path to a .harn script. Defaults to the current file when omitted.",
+            "default": "${file}"
+          },
+          "args": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Extra arguments appended after the file path.",
+            "default": []
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for the spawned process.",
+            "default": "${workspaceFolder}"
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "harn",
+        "owner": "harn",
+        "source": "harn",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(?:error|warning|note)?\\s*([^:]+):(\\d+):(\\d+):?\\s+(error|warning|note):?\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      },
+      {
+        "name": "harn-lint",
+        "owner": "harn",
+        "source": "harn-lint",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^([^:]+):(\\d+):(\\d+):\\s+(error|warning|info):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",

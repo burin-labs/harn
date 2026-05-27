@@ -324,6 +324,176 @@ fn register_dict_builder_builtins(vm: &mut Vm) {
             args.get(1).unwrap_or(&VmValue::Nil),
         )
     });
+    vm.register_builtin("clone", |args, _out| {
+        Ok(shallow_clone(args.first().unwrap_or(&VmValue::Nil)))
+    });
+    vm.register_builtin("deep_clone", |args, _out| {
+        Ok(deep_clone_value(args.first().unwrap_or(&VmValue::Nil)))
+    });
+    vm.register_builtin("__deep_merge", |args, _out| {
+        deep_merge_value(
+            args.first().unwrap_or(&VmValue::Nil),
+            args.get(1).unwrap_or(&VmValue::Nil),
+        )
+    });
+    vm.register_builtin("deep_merge", |args, _out| {
+        deep_merge_value(
+            args.first().unwrap_or(&VmValue::Nil),
+            args.get(1).unwrap_or(&VmValue::Nil),
+        )
+    });
+    vm.register_builtin("__list_unique", |args, _out| {
+        list_unique(args.first().unwrap_or(&VmValue::Nil))
+    });
+    vm.register_builtin("unique", |args, _out| {
+        list_unique(args.first().unwrap_or(&VmValue::Nil))
+    });
+    vm.register_builtin("__dict_from_pairs", |args, _out| {
+        dict_from_pairs(args.first().unwrap_or(&VmValue::Nil))
+    });
+    vm.register_builtin("dict_from_pairs", |args, _out| {
+        dict_from_pairs(args.first().unwrap_or(&VmValue::Nil))
+    });
+}
+
+/// Returns a shallow copy of `value`. Dicts and lists become fresh
+/// allocations independent of the source; primitives are returned by value.
+/// Opaque handles (closures, channels, atomics, MCP clients, etc.) are
+/// returned unchanged because copying them would either be a no-op
+/// (Rc-cloned handle) or violate identity invariants.
+fn shallow_clone(value: &VmValue) -> VmValue {
+    match value {
+        VmValue::Dict(d) => VmValue::Dict(Rc::new((**d).clone())),
+        VmValue::List(items) => VmValue::List(Rc::new((**items).clone())),
+        VmValue::Set(items) => VmValue::Set(Rc::new((**items).clone())),
+        other => other.clone(),
+    }
+}
+
+/// Returns a recursive deep copy of `value`. Dicts and lists are duplicated
+/// and their entries are deep-cloned in turn. Handles and other opaque
+/// runtime values are passed through unchanged (deep copying a channel or
+/// MCP client is undefined and the runtime treats them as identities).
+fn deep_clone_value(value: &VmValue) -> VmValue {
+    match value {
+        VmValue::Dict(d) => {
+            let mut out = BTreeMap::new();
+            for (key, val) in d.iter() {
+                out.insert(key.clone(), deep_clone_value(val));
+            }
+            VmValue::Dict(Rc::new(out))
+        }
+        VmValue::List(items) => {
+            VmValue::List(Rc::new(items.iter().map(deep_clone_value).collect()))
+        }
+        VmValue::Set(items) => VmValue::Set(Rc::new(items.iter().map(deep_clone_value).collect())),
+        VmValue::Pair(p) => {
+            VmValue::Pair(Rc::new((deep_clone_value(&p.0), deep_clone_value(&p.1))))
+        }
+        other => other.clone(),
+    }
+}
+
+/// Recursively merges `b` into `a`, returning a fresh dict. When both
+/// sides have a dict at the same key, the dicts are merged recursively.
+/// Otherwise the right-hand value wins, matching the shallow `merge`
+/// semantics for terminal nodes. Nil arguments are treated as empty
+/// dicts so that variadic accumulators don't require a base case.
+fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
+    let left = dict_arg(a, "deep_merge")?;
+    let right = dict_arg(b, "deep_merge")?;
+    if right.is_empty() {
+        return Ok(VmValue::Dict(left));
+    }
+    if left.is_empty() {
+        return Ok(VmValue::Dict(right));
+    }
+    let mut merged = Rc::try_unwrap(left).unwrap_or_else(|d| (*d).clone());
+    let right_entries: Vec<(String, VmValue)> = match Rc::try_unwrap(right) {
+        Ok(map) => map.into_iter().collect(),
+        Err(rc) => rc.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+    };
+    for (key, value) in right_entries {
+        match merged.remove(&key) {
+            Some(existing) => match (&existing, &value) {
+                (VmValue::Dict(_), VmValue::Dict(_)) => {
+                    let recursed = deep_merge_value(&existing, &value)?;
+                    merged.insert(key, recursed);
+                }
+                _ => {
+                    merged.insert(key, value);
+                }
+            },
+            None => {
+                merged.insert(key, value);
+            }
+        }
+    }
+    Ok(VmValue::Dict(Rc::new(merged)))
+}
+
+/// Returns a list with duplicate entries removed while preserving the
+/// first-seen order. Structural equality is used (matching `==` in
+/// scripts) via `value_structural_hash_key`, so two structurally equal
+/// dicts collapse to a single entry.
+fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
+    let items = match value {
+        VmValue::List(items) | VmValue::Set(items) => Rc::clone(items),
+        VmValue::Nil => return Ok(VmValue::List(Rc::new(Vec::new()))),
+        other => {
+            return Err(VmError::TypeError(format!(
+                "unique: expected a list, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let mut seen: HashSet<String> = HashSet::with_capacity(items.len());
+    let mut out: Vec<VmValue> = Vec::with_capacity(items.len());
+    for item in items.iter() {
+        let key = value_structural_hash_key(item);
+        if seen.insert(key) {
+            out.push(item.clone());
+        }
+    }
+    Ok(VmValue::List(Rc::new(out)))
+}
+
+/// Converts a list of `[key, value]` pairs (or `pair(key, value)` values)
+/// into a dict. The conversion is order-independent (BTreeMap), and
+/// later pairs override earlier ones — matching the `__dict_merge`
+/// right-wins convention.
+fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
+    let pairs = match value {
+        VmValue::List(items) | VmValue::Set(items) => Rc::clone(items),
+        VmValue::Nil => return Ok(VmValue::Dict(Rc::new(BTreeMap::new()))),
+        other => {
+            return Err(VmError::TypeError(format!(
+                "dict_from_pairs: expected a list of [key, value] pairs, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let mut out = BTreeMap::new();
+    for (index, entry) in pairs.iter().enumerate() {
+        let (key, val) = match entry {
+            VmValue::Pair(p) => (p.0.clone(), p.1.clone()),
+            VmValue::List(items) if items.len() == 2 => (items[0].clone(), items[1].clone()),
+            other => {
+                return Err(VmError::TypeError(format!(
+                    "dict_from_pairs: entry {index} must be a [key, value] list or pair, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        let key_string = match key {
+            VmValue::String(s) => (*s).to_string(),
+            VmValue::Int(n) => n.to_string(),
+            VmValue::Bool(b) => b.to_string(),
+            other => other.display(),
+        };
+        out.insert(key_string, val);
+    }
+    Ok(VmValue::Dict(Rc::new(out)))
 }
 
 fn dict_filter_nil(value: &VmValue) -> Result<VmValue, VmError> {
@@ -495,5 +665,131 @@ mod tests {
         let kept = result.as_dict().expect("dict result");
         assert_eq!(kept.len(), 1);
         assert!(kept.contains_key("b"));
+    }
+
+    #[test]
+    fn shallow_clone_decouples_dict_from_source() {
+        let inner = VmValue::Dict(Rc::new(BTreeMap::new()));
+        let source = dict(&[("inner", inner)]);
+        let copy = shallow_clone(&source);
+        match (&source, &copy) {
+            (VmValue::Dict(a), VmValue::Dict(b)) => assert!(!Rc::ptr_eq(a, b)),
+            _ => panic!("expected dicts"),
+        }
+        match (
+            source.as_dict().unwrap().get("inner").unwrap(),
+            copy.as_dict().unwrap().get("inner").unwrap(),
+        ) {
+            (VmValue::Dict(a), VmValue::Dict(b)) => {
+                assert!(Rc::ptr_eq(a, b), "shallow clone shares inner Rc");
+            }
+            _ => panic!("expected nested dicts"),
+        }
+    }
+
+    #[test]
+    fn deep_clone_duplicates_nested_dicts_and_lists() {
+        let inner_dict = dict(&[("k", VmValue::Int(1))]);
+        let inner_list = VmValue::List(Rc::new(vec![VmValue::Int(1), VmValue::Int(2)]));
+        let source = dict(&[("d", inner_dict), ("l", inner_list)]);
+        let copy = deep_clone_value(&source);
+
+        let copy_dict = copy.as_dict().unwrap();
+        match copy_dict.get("d").unwrap() {
+            VmValue::Dict(rc) => {
+                let original_inner = source.as_dict().unwrap().get("d").unwrap();
+                let VmValue::Dict(orig_rc) = original_inner else {
+                    panic!()
+                };
+                assert!(!Rc::ptr_eq(rc, orig_rc));
+            }
+            _ => panic!("expected dict at d"),
+        }
+        match copy_dict.get("l").unwrap() {
+            VmValue::List(items) => {
+                let VmValue::List(orig_items) = source.as_dict().unwrap().get("l").unwrap() else {
+                    panic!()
+                };
+                assert!(!Rc::ptr_eq(items, orig_items));
+            }
+            _ => panic!("expected list at l"),
+        }
+    }
+
+    #[test]
+    fn deep_merge_recurses_into_nested_dicts() {
+        let a = dict(&[(
+            "config",
+            dict(&[("retries", VmValue::Int(3)), ("backoff", VmValue::Int(100))]),
+        )]);
+        let b = dict(&[(
+            "config",
+            dict(&[
+                ("retries", VmValue::Int(5)),
+                ("jitter", VmValue::Bool(true)),
+            ]),
+        )]);
+        let merged = deep_merge_value(&a, &b).unwrap();
+        let config = merged
+            .as_dict()
+            .and_then(|d| d.get("config"))
+            .and_then(|v| v.as_dict())
+            .expect("nested dict");
+        assert_eq!(config.get("retries").and_then(VmValue::as_int), Some(5));
+        assert_eq!(config.get("backoff").and_then(VmValue::as_int), Some(100));
+        match config.get("jitter") {
+            Some(VmValue::Bool(true)) => {}
+            other => panic!("expected jitter=true, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deep_merge_right_wins_when_types_differ() {
+        let a = dict(&[("x", dict(&[("a", VmValue::Int(1))]))]);
+        let b = dict(&[("x", VmValue::Int(99))]);
+        let merged = deep_merge_value(&a, &b).unwrap();
+        assert_eq!(
+            merged
+                .as_dict()
+                .and_then(|d| d.get("x"))
+                .and_then(VmValue::as_int),
+            Some(99)
+        );
+    }
+
+    #[test]
+    fn list_unique_preserves_first_seen_order() {
+        let input = VmValue::List(Rc::new(vec![
+            VmValue::Int(1),
+            VmValue::Int(2),
+            VmValue::Int(1),
+            VmValue::Int(3),
+            VmValue::Int(2),
+        ]));
+        let result = list_unique(&input).unwrap();
+        let items = match &result {
+            VmValue::List(items) => items.clone(),
+            _ => panic!("expected list"),
+        };
+        let ints: Vec<i64> = items.iter().filter_map(VmValue::as_int).collect();
+        assert_eq!(ints, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn dict_from_pairs_accepts_two_element_lists() {
+        let pairs = VmValue::List(Rc::new(vec![
+            VmValue::List(Rc::new(vec![
+                VmValue::String(Rc::from("a")),
+                VmValue::Int(1),
+            ])),
+            VmValue::List(Rc::new(vec![
+                VmValue::String(Rc::from("b")),
+                VmValue::Int(2),
+            ])),
+        ]));
+        let result = dict_from_pairs(&pairs).unwrap();
+        let d = result.as_dict().unwrap();
+        assert_eq!(d.get("a").and_then(VmValue::as_int), Some(1));
+        assert_eq!(d.get("b").and_then(VmValue::as_int), Some(2));
     }
 }

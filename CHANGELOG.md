@@ -6,6 +6,53 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Built-in `clone`, `deep_clone`, `deep_merge`.** Shallow and recursive
+  copies for dicts/lists/primitives, plus a dict deep-merge with
+  right-wins on conflict and recursive descent into nested dicts.
+  Lifts a repeated hand-coded for-loop pattern out of every userspace
+  script that wanted a decoupled copy of a context object.
+- **Built-in `unique`, `dict_from_pairs`, `index_by`.** First-seen-order
+  list dedupe, pair-list → dict conversion, and a fluent
+  `index_by(records, { r -> r.id })` for building lookup tables from
+  result lists.
+- **Built-in `repeat`, `indent`, `dedent`, `word_wrap`.** Cover the
+  string-formatting gaps that show up when assembling system-prompt
+  text or release fact sheets — heredoc-style content can be authored
+  flush-left and dedented at render time without manual stripping.
+- **Built-in `to_xml` / `from_xml` (and `import "std/xml"`).** Convert a
+  Harn value to an XML document and back. Dicts become tag trees,
+  lists become repeated `<item>` children, primitives become text
+  nodes. Designed for building tagged context blocks for LLM system
+  prompts (e.g. `{previous_chats: ["x.jsonl", "y.jsonl"]}` →
+  `<previous_chats><item>x.jsonl</item>...</previous_chats>`) without
+  manual concatenation.
+- **Built-in `jsonrpc_call(url, method, params?, options?)`.** Generic
+  JSON-RPC 2.0 client over HTTP that goes through the existing egress
+  allowlist and mock plumbing. Unwraps `result` automatically and
+  raises a structured error dict when the server responds with an
+  `error` envelope. Useful for talking to non-MCP RPC peers without
+  hand-crafting envelopes through `http_post`.
+- **DAP `terminate`, `modules`, `loadedSources` requests.** The IDE's
+  Modules and Loaded Scripts panels are now populated, and graceful
+  terminate is wired alongside `disconnect`. Capabilities advertise
+  `supportsModulesRequest` and `supportsLoadedSourcesRequest` so VS
+  Code surfaces the panels automatically.
+- **LSP `textDocument/typeDefinition`, `textDocument/declaration`,
+  `textDocument/implementation`, `textDocument/documentHighlight`.**
+  Symbol-occurrence highlighting in the current document, plus the
+  navigation triplet the editor's "Go to" submenu expects. For Harn
+  these largely converge on `goto_definition` today, but the LSP
+  surface is now spec-complete enough that VS Code stops showing a
+  "command not implemented" toast.
+- **VS Code task provider + problem matchers.** `Tasks: Run Task`
+  surfaces `harn run/check/fmt/lint/test` entries, and two problem
+  matchers (`$harn`, `$harn-lint`) route diagnostics into the
+  Problems panel.
+
 ## v0.8.44
 
 ### Breaking

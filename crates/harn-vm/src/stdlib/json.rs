@@ -498,7 +498,7 @@ pub(crate) fn escape_json_string_vm(s: &str) -> String {
     out
 }
 
-fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
+pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
     match value {
         VmValue::Int(i) => serde_json::json!(i),
         VmValue::Float(f) if f.is_finite() => serde_json::json!(f),

@@ -311,6 +311,27 @@ impl Vm {
         frames
     }
 
+    /// List every source path that has a cached body the debugger can
+    /// surface — entry programs, resolved imports, and stdlib modules.
+    /// Powers DAP `loadedSources` and `modules` so the IDE can populate
+    /// the "Loaded Scripts" and "Modules" panels without guessing the
+    /// import graph.
+    pub fn debug_loaded_source_paths(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self
+            .source_cache
+            .keys()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        if let Some(entry) = self.source_file.as_deref() {
+            if !paths.iter().any(|p| p == entry) {
+                paths.push(entry.to_string());
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
     /// Return cached source text by debugger source key. This covers entry
     /// programs, real imports that have already been read, and synthetic
     /// sources such as stdlib modules or generated in-memory modules.

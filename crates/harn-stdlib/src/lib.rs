@@ -94,6 +94,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_json_stream.harn"),
     },
     StdlibSource {
+        module: "xml",
+        source: include_str!("stdlib/stdlib_xml.harn"),
+    },
+    StdlibSource {
         module: "cache",
         source: include_str!("stdlib/stdlib_cache.harn"),
     },

@@ -88,6 +88,8 @@ pub struct Capabilities {
     pub supports_exception_breakpoint_filters: bool,
     pub supports_terminate_request: bool,
     pub supports_cancel_request: bool,
+    pub supports_modules_request: bool,
+    pub supports_loaded_sources_request: bool,
     #[serde(rename = "supportsCompletionsRequest")]
     pub supports_completions_request: bool,
     /// DAP `invalidated` event opt-in — #110 fires this when
@@ -120,6 +122,8 @@ impl Default for Capabilities {
             supports_exception_breakpoint_filters: true,
             supports_terminate_request: true,
             supports_cancel_request: true,
+            supports_modules_request: true,
+            supports_loaded_sources_request: true,
             supports_completions_request: true,
             supports_invalidated_event: true,
             supports_harn_host_call: true,

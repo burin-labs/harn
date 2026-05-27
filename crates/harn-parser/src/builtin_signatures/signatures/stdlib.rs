@@ -122,11 +122,31 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("args", TY_ANY)],
         TY_LIST,
     ),
+    BuiltinSignature::simple(
+        "__deep_merge",
+        &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)],
+        TY_DICT,
+    ),
     BuiltinSignature::simple("__dict_filter_nil", &[Param::new("d", TY_DICT)], TY_DICT),
+    BuiltinSignature::simple(
+        "__dict_from_pairs",
+        &[Param::new("pairs", TY_LIST)],
+        TY_DICT,
+    ),
     BuiltinSignature::simple(
         "__dict_merge",
         &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)],
         TY_DICT,
+    ),
+    BuiltinSignature::simple("__from_xml", &[Param::new("text", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple("__list_unique", &[Param::new("items", TY_LIST)], TY_LIST),
+    BuiltinSignature::simple(
+        "__to_xml",
+        &[
+            Param::new("value", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_STRING,
     ),
     BuiltinSignature::simple(
         "__dict_omit",
@@ -2006,4 +2026,58 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("sha3_512", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("x25519_keypair", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("x25519_agree", &[Param::new("args", TY_ANY)], TY_STRING),
+    // Clone / merge / dedupe helpers — see crates/harn-vm/src/stdlib/collections.rs.
+    BuiltinSignature::simple("clone", &[Param::new("value", TY_ANY)], TY_ANY),
+    BuiltinSignature::simple("deep_clone", &[Param::new("value", TY_ANY)], TY_ANY),
+    BuiltinSignature::simple(
+        "deep_merge",
+        &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("unique", &[Param::new("items", TY_LIST)], TY_LIST),
+    BuiltinSignature::simple("dict_from_pairs", &[Param::new("pairs", TY_LIST)], TY_DICT),
+    // String formatting helpers — see crates/harn-vm/src/stdlib/strings.rs.
+    BuiltinSignature::simple(
+        "repeat",
+        &[Param::new("text", TY_STRING), Param::new("count", TY_INT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "indent",
+        &[
+            Param::new("text", TY_STRING),
+            Param::optional("prefix", TY_STRING),
+        ],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple("dedent", &[Param::new("text", TY_STRING)], TY_STRING),
+    BuiltinSignature::simple(
+        "word_wrap",
+        &[
+            Param::new("text", TY_STRING),
+            Param::optional("width", TY_INT),
+        ],
+        TY_STRING,
+    ),
+    // XML conversion — see crates/harn-vm/src/stdlib/xml.rs.
+    BuiltinSignature::simple(
+        "to_xml",
+        &[
+            Param::new("value", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple("from_xml", &[Param::new("text", TY_STRING)], TY_DICT),
+    // Generic JSON-RPC client — see crates/harn-vm/src/stdlib/jsonrpc.rs.
+    BuiltinSignature::simple(
+        "jsonrpc_call",
+        &[
+            Param::new("url", TY_STRING),
+            Param::new("method", TY_STRING),
+            Param::optional("params", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_ANY,
+    ),
 ];
