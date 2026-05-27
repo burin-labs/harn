@@ -14,7 +14,6 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -22,9 +21,11 @@ use harn_vm::events::{
     add_event_sink, clear_event_sinks, emit_span_end, emit_span_start, install_otel_sink_from_env,
     reset_event_sinks, shutdown_otel_sink, CollectorSink,
 };
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::time::timeout;
 
-/// Read the full HTTP request (headers + chunked body) into memory.
-/// The opentelemetry-otlp HTTP client uses `Content-Length`, never
+/// Read the full HTTP request (headers + body) into memory.
+/// `opentelemetry-otlp`'s HTTP client uses `Content-Length`, never
 /// chunked transfer, so this short read loop is enough.
 fn read_request(stream: &mut std::net::TcpStream) -> String {
     let mut buf = vec![0u8; 16 * 1024];
@@ -35,7 +36,6 @@ fn read_request(stream: &mut std::net::TcpStream) -> String {
             Ok(n) => {
                 text.push_str(&String::from_utf8_lossy(&buf[..n]));
                 if text.contains("\r\n\r\n") {
-                    // Try to detect content-length and keep reading.
                     if let Some(cl) = content_length(&text) {
                         let header_end = text.find("\r\n\r\n").unwrap() + 4;
                         if text.len() - header_end >= cl {
@@ -65,30 +65,42 @@ fn content_length(headers: &str) -> Option<usize> {
     None
 }
 
+/// Drain any additional already-buffered requests after the first one
+/// arrives. Returns the snapshot of all requests received so far.
+async fn drain_remaining(rx: &mut UnboundedReceiver<String>, head: String) -> Vec<String> {
+    let mut out = vec![head];
+    while let Ok(Some(msg)) = timeout(Duration::from_millis(10), rx.recv()).await {
+        out.push(msg);
+    }
+    out
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn install_otel_sink_emits_spans_to_configured_endpoint() {
-    // Stand up the single-shot HTTP listener first so the port is
-    // bound before we point the exporter at it.
+    // Bind the OTLP stub before we point the exporter at it.
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind otlp stub");
     listener.set_nonblocking(false).expect("blocking otlp stub");
     let addr = listener.local_addr().expect("stub addr");
 
-    let received = Arc::new(Mutex::new(Vec::<String>::new()));
-    let received_clone = received.clone();
+    // Sync → async bridge: the stub thread pushes received requests
+    // into a tokio mpsc channel the async test awaits on. Avoids
+    // polling the shared `Vec` with wall-clock sleep + Instant
+    // comparisons — both of which the test-pattern audit forbids
+    // because they degrade into flakes under runner contention.
+    let (tx, mut rx): (UnboundedSender<String>, UnboundedReceiver<String>) =
+        mpsc::unbounded_channel();
     let stub = thread::spawn(move || {
         // Batch flushes can issue more than one request when the
-        // exporter retries internally. Accept until the test thread
-        // closes the listener — the test does this implicitly when it
-        // drops the JoinHandle.
+        // exporter retries internally. Accept until the listener is
+        // dropped — the test does this implicitly when it returns.
         while let Ok((mut stream, _)) = listener.accept() {
             let request = read_request(&mut stream);
-            received_clone
-                .lock()
-                .expect("stub mutex poisoned")
-                .push(request);
-            // Minimal OTLP/HTTP success response — the body is an
-            // empty `ExportTraceServiceResponse` so the client doesn't
-            // mark the export as a failure and trigger a retry storm.
+            // Test side may already have torn down the channel; we
+            // don't care, the listener exits cleanly either way.
+            let _ = tx.send(request);
+            // Minimal OTLP/HTTP success: empty
+            // `ExportTraceServiceResponse` so the client doesn't
+            // mark the export as a failure and retry.
             let response =
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}";
             let _ = stream.write_all(response.as_bytes());
@@ -96,9 +108,8 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
         }
     });
 
-    // SAFETY: the test process is single-threaded by construction
-    // because the integration-test binary only contains this one
-    // test. No other consumer is reading these vars while we run.
+    // SAFETY: the integration-test binary contains only this one
+    // test, so no other consumer is reading these vars while we run.
     unsafe {
         std::env::set_var("HARN_OTEL_ENDPOINT", format!("http://{addr}"));
         std::env::set_var("HARN_OTEL_SERVICE_NAME", "burin-otel-smoke");
@@ -115,9 +126,6 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
         install_otel_sink_from_env().expect("otel sink install failed against the loopback stub");
     assert!(installed, "expected sink to install when endpoint is set");
 
-    // Emit one span pair. The first call to `install` registered the
-    // batch processor; emit/end go through the EventSink chain to the
-    // sink we just installed.
     let mut start_meta = BTreeMap::new();
     start_meta.insert("turn".to_string(), serde_json::json!(7));
     emit_span_start(42, None, "burin.turn", "agent_loop", start_meta);
@@ -136,28 +144,18 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
     let was_shut = shutdown_otel_sink().expect("shutdown_otel_sink errored");
     assert!(was_shut, "expected shutdown to flush an installed provider");
 
-    // Reset the sink chain after shutdown so the OtelSink's own
-    // `Drop` is the no-op path (the provider is already shut down).
     reset_event_sinks();
 
-    // Give the listener thread up to 5 s to receive the request. In
-    // practice the shutdown-driven flush completes well inside 50 ms;
-    // the budget guards against macOS scheduling jitter under nextest
-    // flake-detection profiles. The yield loop polls every 25 ms so
-    // we exit as soon as data arrives.
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        if !received.lock().expect("stub mutex poisoned").is_empty() {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "OTLP stub never received an export within 5s",
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    // Wait for the first request through the channel. The 5 s
+    // budget guards against macOS scheduling jitter under
+    // flake-detection profiles; the typical path completes in under
+    // 50 ms because `shutdown_otel_sink` blocks on `force_flush`.
+    let first = timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("OTLP stub never received an export within 5s")
+        .expect("OTLP stub channel closed unexpectedly");
+    let snapshot = drain_remaining(&mut rx, first).await;
 
-    let snapshot = received.lock().expect("stub mutex poisoned").clone();
     let combined = snapshot.join("\n----\n");
     assert!(
         combined.contains("POST /v1/traces"),
@@ -172,7 +170,6 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
         "expected the service.name resource attribute in payload, got:\n{combined}",
     );
 
-    // Drop the listener-owning thread by letting it fall out of scope.
     drop(stub);
 
     // SAFETY: see above — single-threaded test process.
