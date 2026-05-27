@@ -112,6 +112,23 @@ log(add(1, 2))
 }
 
 #[test]
+fn test_parallel_options_mark_variables_used() {
+    let diags = lint_source(
+        r"
+pipeline default(task) {
+let concurrency = 2
+let results = parallel each [1, 2] with { max_concurrent: concurrency } { n -> n }
+log(results)
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "unused-variable"),
+        "parallel options should mark referenced variables used: {diags:?}"
+    );
+}
+
+#[test]
 fn test_multiple_rules() {
     let diags = lint_source(
         r#"

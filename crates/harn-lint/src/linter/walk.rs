@@ -988,9 +988,13 @@ impl<'a> Linter<'a> {
                 expr,
                 body,
                 variable,
+                options,
                 ..
             } => {
                 self.lint_node(expr);
+                for (_, value) in options {
+                    self.lint_node(value);
+                }
                 self.push_scope();
                 if let Some(v) = variable {
                     if let Some(scope) = self.scopes.last_mut() {
