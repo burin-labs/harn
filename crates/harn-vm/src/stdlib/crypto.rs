@@ -767,7 +767,7 @@ fn base64_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     )))
 }
 
-#[harn_builtin(sig = "base64_decode(text: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "base64_decode(text: string?) -> string", category = "crypto")]
 fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     use base64::Engine;
@@ -791,7 +791,7 @@ fn base64url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     )))
 }
 
-#[harn_builtin(sig = "base64url_decode(text: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "base64url_decode(text: string?) -> string", category = "crypto")]
 fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     use base64::Engine;
@@ -881,7 +881,7 @@ fn base32_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     )))
 }
 
-#[harn_builtin(sig = "base32_decode(text: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "base32_decode(text: string?) -> string", category = "crypto")]
 fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     match data_encoding::BASE32.decode(val.as_bytes()) {
@@ -898,7 +898,7 @@ fn hex_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::String(Rc::from(hex::encode(val.as_bytes()))))
 }
 
-#[harn_builtin(sig = "hex_decode(text: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "hex_decode(text: string?) -> string", category = "crypto")]
 fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     match hex::decode(val.as_bytes()) {
@@ -1095,7 +1095,7 @@ fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::String(Rc::from(encoded)))
 }
 
-#[harn_builtin(sig = "url_decode(text: string) -> string", category = "crypto")]
+#[harn_builtin(sig = "url_decode(text: string?) -> string", category = "crypto")]
 fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     let mut result = Vec::new();

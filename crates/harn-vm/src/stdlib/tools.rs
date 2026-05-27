@@ -768,7 +768,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::Dict(Rc::new(new_registry)))
 }
 
-#[harn_builtin(sig = "tool_parse_call(text: string) -> list", category = "tools")]
+#[harn_builtin(sig = "tool_parse_call(text: string?) -> list", category = "tools")]
 fn tool_parse_call_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
 

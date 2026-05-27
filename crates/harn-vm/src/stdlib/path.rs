@@ -244,7 +244,7 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "path_parts(path: string) -> dict", category = "path")]
+#[harn_builtin(sig = "path_parts(path: string?) -> dict", category = "path")]
 fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
@@ -265,32 +265,32 @@ fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     Ok(VmValue::Dict(Rc::new(map)))
 }
 
-#[harn_builtin(sig = "path_parent(path: string) -> string", category = "path")]
+#[harn_builtin(sig = "path_parent(path: string?) -> string", category = "path")]
 fn path_parent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(parent(&p))))
 }
 
-#[harn_builtin(sig = "path_basename(path: string) -> string", category = "path")]
+#[harn_builtin(sig = "path_basename(path: string?) -> string", category = "path")]
 fn path_basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(basename(&p))))
 }
 
-#[harn_builtin(sig = "path_stem(path: string) -> string", category = "path")]
+#[harn_builtin(sig = "path_stem(path: string?) -> string", category = "path")]
 fn path_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(stem(&p))))
 }
 
-#[harn_builtin(sig = "path_extension(path: string) -> string", category = "path")]
+#[harn_builtin(sig = "path_extension(path: string?) -> string", category = "path")]
 fn path_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(extension(&p))))
 }
 
 #[harn_builtin(
-    sig = "path_with_extension(path: string, extension: string) -> string",
+    sig = "path_with_extension(path: string?, extension: string) -> string",
     category = "path"
 )]
 fn path_with_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -300,7 +300,7 @@ fn path_with_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[harn_builtin(
-    sig = "path_with_stem(path: string, stem: string) -> string",
+    sig = "path_with_stem(path: string?, stem: string) -> string",
     category = "path"
 )]
 fn path_with_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -309,26 +309,26 @@ fn path_with_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::String(Rc::from(with_stem(&p, &s))))
 }
 
-#[harn_builtin(sig = "path_is_absolute(path: string) -> bool", category = "path")]
+#[harn_builtin(sig = "path_is_absolute(path: string?) -> bool", category = "path")]
 fn path_is_absolute_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::Bool(is_absolute_str(&p)))
 }
 
-#[harn_builtin(sig = "path_is_relative(path: string) -> bool", category = "path")]
+#[harn_builtin(sig = "path_is_relative(path: string?) -> bool", category = "path")]
 fn path_is_relative_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::Bool(!is_absolute_str(&p)))
 }
 
-#[harn_builtin(sig = "path_normalize(path: string) -> string", category = "path")]
+#[harn_builtin(sig = "path_normalize(path: string?) -> string", category = "path")]
 fn path_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(normalize(&p))))
 }
 
 #[harn_builtin(
-    sig = "path_relative_to(path: string, base: string) -> string?",
+    sig = "path_relative_to(path: string?, base: string) -> string?",
     category = "path"
 )]
 fn path_relative_to_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -340,13 +340,13 @@ fn path_relative_to_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     }
 }
 
-#[harn_builtin(sig = "path_to_posix(path: string) -> string", category = "path")]
+#[harn_builtin(sig = "path_to_posix(path: string?) -> string", category = "path")]
 fn path_to_posix_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(to_posix(&p))))
 }
 
-#[harn_builtin(sig = "path_to_native(path: string) -> string", category = "path")]
+#[harn_builtin(sig = "path_to_native(path: string?) -> string", category = "path")]
 fn path_to_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     // Harn normalises on `/` regardless of OS, so this currently mirrors
     // path_to_posix. Reserved for future Windows-host specialisation.
@@ -355,7 +355,7 @@ fn path_to_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
-    sig = "path_workspace_info(path: string, workspace_root?: string) -> dict",
+    sig = "path_workspace_info(path: string?, workspace_root?: string) -> dict",
     category = "path"
 )]
 fn path_workspace_info_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -373,7 +373,7 @@ fn path_workspace_info_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 }
 
 #[harn_builtin(
-    sig = "path_workspace_normalize(path: string, workspace_root?: string) -> string?",
+    sig = "path_workspace_normalize(path: string?, workspace_root?: string) -> string?",
     category = "path"
 )]
 fn path_workspace_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -389,7 +389,7 @@ fn path_workspace_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<
         .unwrap_or(VmValue::Nil))
 }
 
-#[harn_builtin(sig = "path_segments(path: string) -> list", category = "path")]
+#[harn_builtin(sig = "path_segments(path: string?) -> list", category = "path")]
 fn path_segments_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let (_, _, segments) = split_segments(&p);

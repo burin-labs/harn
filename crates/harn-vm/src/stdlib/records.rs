@@ -413,7 +413,7 @@ fn artifact_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 }
 
 #[harn_builtin(
-    sig = "artifact_workspace_file(path: string, content: string, options?: dict) -> dict",
+    sig = "artifact_workspace_file(path: string?, content: string, options?: dict) -> dict",
     category = "records"
 )]
 fn artifact_workspace_file_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -460,7 +460,7 @@ fn artifact_workspace_snapshot_impl(
 }
 
 #[harn_builtin(
-    sig = "artifact_editor_selection(path: string, text: string, options?: dict) -> dict",
+    sig = "artifact_editor_selection(path: string?, text: string?, options?: dict) -> dict",
     category = "records"
 )]
 fn artifact_editor_selection_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -481,7 +481,7 @@ fn artifact_editor_selection_impl(args: &[VmValue], _out: &mut String) -> Result
 }
 
 #[harn_builtin(
-    sig = "artifact_verification_result(title: string, text: string, options?: dict) -> dict",
+    sig = "artifact_verification_result(title: string, text: string?, options?: dict) -> dict",
     category = "records"
 )]
 fn artifact_verification_result_impl(
@@ -501,7 +501,7 @@ fn artifact_verification_result_impl(
 }
 
 #[harn_builtin(
-    sig = "artifact_test_result(title: string, text: string, options?: dict) -> dict",
+    sig = "artifact_test_result(title: string, text: string?, options?: dict) -> dict",
     category = "records"
 )]
 fn artifact_test_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -544,7 +544,7 @@ fn artifact_command_result_impl(args: &[VmValue], _out: &mut String) -> Result<V
 }
 
 #[harn_builtin(
-    sig = "artifact_diff(path: string, before: string, after: string, options?: dict) -> dict",
+    sig = "artifact_diff(path: string?, before: string, after: string, options?: dict) -> dict",
     category = "records"
 )]
 fn artifact_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -566,7 +566,7 @@ fn artifact_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
-    sig = "artifact_git_diff(diff_text: string, options?: dict) -> dict",
+    sig = "artifact_git_diff(diff_text: string?, options?: dict) -> dict",
     category = "records"
 )]
 fn artifact_git_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -760,7 +760,7 @@ fn run_record_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     to_vm(&run)
 }
 
-#[harn_builtin(sig = "load_run_tree(path: string) -> dict", category = "records")]
+#[harn_builtin(sig = "load_run_tree(path: string?) -> dict", category = "records")]
 fn load_run_tree_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = require_string_arg(args, 0, "load_run_tree", "path")?;
     let tree = load_run_tree(&path)?;
@@ -782,7 +782,7 @@ fn run_record_save_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     to_vm(&serde_json::json!({"path": persisted, "run": run}))
 }
 
-#[harn_builtin(sig = "run_record_load(path: string) -> dict", category = "records")]
+#[harn_builtin(sig = "run_record_load(path: string?) -> dict", category = "records")]
 fn run_record_load_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args
         .first()

@@ -61,7 +61,10 @@ fn date_format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::String(Rc::from(dt.format(&fmt).to_string())))
 }
 
-#[harn_builtin(sig = "date_parse(text: string) -> int | float", category = "datetime")]
+#[harn_builtin(
+    sig = "date_parse(text: string?) -> int | float",
+    category = "datetime"
+)]
 fn date_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = args.first().map(|a| a.display()).unwrap_or_default();
     let dt = parse_datetime_auto(&input)?;

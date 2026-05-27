@@ -568,7 +568,7 @@ fn lowercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
 }
 
-#[harn_builtin(sig = "dirname(path: string) -> string", category = "strings")]
+#[harn_builtin(sig = "dirname(path: string?) -> string", category = "strings")]
 fn dirname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
@@ -578,7 +578,7 @@ fn dirname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     }
 }
 
-#[harn_builtin(sig = "basename(path: string) -> string", category = "strings")]
+#[harn_builtin(sig = "basename(path: string?) -> string", category = "strings")]
 fn basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
@@ -588,7 +588,7 @@ fn basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     }
 }
 
-#[harn_builtin(sig = "extname(path: string) -> string", category = "strings")]
+#[harn_builtin(sig = "extname(path: string?) -> string", category = "strings")]
 fn extname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let p = std::path::Path::new(&path);
@@ -602,7 +602,7 @@ fn extname_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 }
 
 #[harn_builtin(
-    sig = "render(path: string, bindings?: dict) -> string",
+    sig = "render(path: string?, bindings?: dict) -> string",
     aliases = ["render_prompt"],
     category = "strings"
 )]
@@ -619,7 +619,7 @@ fn render_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
-    sig = "render_with_provenance(path: string, bindings?: dict) -> dict",
+    sig = "render_with_provenance(path: string?, bindings?: dict) -> dict",
     category = "strings"
 )]
 fn render_with_provenance_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

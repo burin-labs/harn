@@ -59,7 +59,7 @@ pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
     }
 }
 
-#[harn_builtin(sig = "bytes_from_string(text: string) -> bytes", category = "bytes")]
+#[harn_builtin(sig = "bytes_from_string(text: string?) -> bytes", category = "bytes")]
 fn bytes_from_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = expect_string(args, 0, "bytes_from_string")?;
     Ok(VmValue::Bytes(Rc::new(text.as_bytes().to_vec())))
@@ -90,7 +90,7 @@ fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::String(Rc::from(hex::encode(bytes))))
 }
 
-#[harn_builtin(sig = "bytes_from_hex(text: string) -> bytes", category = "bytes")]
+#[harn_builtin(sig = "bytes_from_hex(text: string?) -> bytes", category = "bytes")]
 fn bytes_from_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = expect_string(args, 0, "bytes_from_hex")?;
     let bytes =
@@ -108,7 +108,7 @@ fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     )))
 }
 
-#[harn_builtin(sig = "bytes_from_base64(text: string) -> bytes", category = "bytes")]
+#[harn_builtin(sig = "bytes_from_base64(text: string?) -> bytes", category = "bytes")]
 fn bytes_from_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
 

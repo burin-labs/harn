@@ -67,7 +67,7 @@ fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
         })
 }
 
-#[harn_builtin(sig = "json_parse(text: string) -> any", category = "json")]
+#[harn_builtin(sig = "json_parse(text: string?) -> any", category = "json")]
 fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(cached) = JSON_PARSE_CACHE.with(|cache| cache.borrow().get(&text).cloned()) {
@@ -91,7 +91,7 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     }
 }
 
-#[harn_builtin(sig = "yaml_parse(text: string) -> any", category = "json")]
+#[harn_builtin(sig = "yaml_parse(text: string?) -> any", category = "json")]
 fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     match serde_yml::from_str::<serde_yml::Value>(&text) {
@@ -120,7 +120,7 @@ fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         })
 }
 
-#[harn_builtin(sig = "toml_parse(text: string) -> any", category = "json")]
+#[harn_builtin(sig = "toml_parse(text: string?) -> any", category = "json")]
 fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     match toml::from_str::<toml::Value>(&text) {
@@ -296,7 +296,7 @@ fn schema_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    sig = "json_extract(text: string, key?: string) -> any",
+    sig = "json_extract(text: string?, key?: string) -> any",
     category = "json"
 )]
 fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
