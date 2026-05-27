@@ -1,0 +1,76 @@
+name: Changelog fragment
+
+# Every PR that changes user-visible code must drop a
+# `changelog.d/<id>.<category>.md` fragment OR edit `CHANGELOG.md`
+# directly. The detection logic lives in
+# `.github/scripts/changelog-fragment-check.sh`; this workflow is the CI
+# wrapper that resolves the diff range, reads PR labels for the
+# `no-changelog-needed` opt-out, and runs the script.
+#
+# Mirrors the `demo-gate.yml` pattern. Not yet wired into `ci.yml`'s
+# required "CI status" job — promote to a required check via the
+# merge-queue ruleset once the false-positive rate has been observed
+# on real PRs.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: changelog-fragment-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changelog-fragment:
+    name: Changelog fragment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # `git merge-base` between the PR base and head needs full history.
+          fetch-depth: 0
+
+      - name: Resolve gate inputs
+        id: inputs
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "merge_group" ]; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Changelog fragment::merge_group event — gate is a no-op pass."
+            exit 0
+          fi
+
+          bypass=""
+          if printf '%s' "$PR_LABELS_JSON" \
+            | jq -e 'any(. == "no-changelog-needed")' > /dev/null; then
+            bypass="PR carries the no-changelog-needed label."
+          fi
+
+          {
+            echo "skip=0"
+            echo "base_sha=$PR_BASE_SHA"
+            echo "head_sha=$PR_HEAD_SHA"
+            echo "bypass_reason=$bypass"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run changelog fragment gate
+        if: steps.inputs.outputs.skip != '1'
+        env:
+          BASE_SHA: ${{ steps.inputs.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.inputs.outputs.head_sha }}
+          BYPASS_REASON: ${{ steps.inputs.outputs.bypass_reason }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/changelog-fragment-check.sh

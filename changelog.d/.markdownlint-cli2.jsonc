@@ -1,0 +1,13 @@
+{
+  // Fragment files (`<id>.<category>.md`) are bullet snippets that get
+  // concatenated under a `### Category` heading at release time — they
+  // are never standalone documents, so MD041 ("first line is H1") and
+  // MD025 ("single H1") don't apply. README.md in this directory is a
+  // normal document and is not affected (markdownlint-cli2 doesn't have
+  // per-file overrides in a single config; if you author a non-fragment
+  // file here, add its own H1 — the README already has one).
+  "config": {
+    "MD041": false,
+    "MD025": false
+  }
+}
