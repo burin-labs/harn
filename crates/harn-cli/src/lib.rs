@@ -65,6 +65,15 @@ pub fn run() {
                     process::exit(1);
                 });
             runtime.block_on(async_main());
+            // Drain any queued OTLP exports while the tokio runtime
+            // is still alive. The auto-registered `OtelSink` uses a
+            // batch processor with `runtime::Tokio`; if we let the
+            // runtime drop before this call, in-flight spans never
+            // reach the configured collector. No-op when OTel is not
+            // configured.
+            if let Err(error) = harn_vm::events::shutdown_otel_sink() {
+                eprintln!("[harn] OTel exporter shutdown failed: {error}");
+            }
         })
         .unwrap_or_else(|error| {
             eprintln!("failed to start CLI runtime thread: {error}");
@@ -110,6 +119,16 @@ fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send)) -> bool {
 
 #[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
 async fn async_main() {
+    // Install the OTLP exporter sink before any subcommand runs so a
+    // 20+ minute autonomous session has spans streaming to the
+    // configured collector from the first turn. When neither
+    // `HARN_OTEL_ENDPOINT` nor `OTEL_EXPORTER_OTLP_ENDPOINT` is set
+    // this is a no-op. A misconfigured endpoint logs and continues —
+    // local observability is opt-in and must never fail the run.
+    if let Err(error) = harn_vm::events::install_otel_sink_from_env() {
+        eprintln!("[harn] OTel exporter disabled: {error}");
+    }
+
     let raw_args = normalize_serve_args(env::args().collect());
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
         provider_bootstrap::maybe_seed_ollama_for_run_file(Path::new(&raw_args[1]), false, false)

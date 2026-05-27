@@ -230,28 +230,230 @@ pub struct OtelSink {
 
 #[cfg(feature = "otel")]
 impl OtelSink {
-    /// Create a new OTel sink. Initialises the OTLP span exporter
-    /// (default endpoint via OTEL_EXPORTER_OTLP_ENDPOINT, or localhost:4318).
+    /// Create a new OTel sink. Reads OTLP configuration from the
+    /// environment (endpoint, service name, headers). Errors when the
+    /// span exporter fails to initialise — a missing endpoint is **not**
+    /// an error; the exporter falls back to OpenTelemetry's default
+    /// (`http://localhost:4318/v1/traces`). Callers that want
+    /// presence-of-endpoint to gate registration should use
+    /// [`install_otel_sink_from_env`].
     pub fn new() -> Result<Self, String> {
-        use opentelemetry_otlp::SpanExporter;
+        use opentelemetry::global;
+        use opentelemetry_otlp::{
+            Protocol, SpanExporter, WithExportConfig as _, WithHttpConfig as _,
+        };
+        use opentelemetry_sdk::runtime;
+        use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
         use opentelemetry_sdk::trace::SdkTracerProvider;
+        use opentelemetry_sdk::Resource;
 
-        let exporter = SpanExporter::builder()
+        let endpoint = otel_endpoint_from_env();
+        let headers = otel_headers_from_env();
+        let service_name = otel_service_name_from_env();
+
+        // opentelemetry-otlp does not pull in any default HTTP client
+        // because the `reqwest-rustls` feature only opts the dep in —
+        // the exporter still requires an explicit client. Reuse the
+        // same reqwest configuration as the orchestrator-side
+        // provider so both surfaces hit the collector with identical
+        // TLS + connection-pool behaviour.
+        let http_client = reqwest::Client::builder()
+            .build()
+            .map_err(|error| format!("failed to build OTLP HTTP client: {error}"))?;
+
+        let mut exporter_builder = SpanExporter::builder()
             .with_http()
+            .with_http_client(http_client)
+            .with_protocol(Protocol::HttpJson)
+            .with_headers(headers);
+        if let Some(endpoint) = endpoint.as_deref() {
+            exporter_builder =
+                exporter_builder.with_endpoint(normalize_otlp_traces_endpoint(endpoint));
+        }
+        let exporter = exporter_builder
             .build()
             .map_err(|e| format!("OTel span exporter init failed: {e}"))?;
 
+        // Drive the batch processor on the current Tokio runtime so
+        // the exporter's reqwest client can reach the network. The
+        // default SDK processor spawns its own thread, which has no
+        // Tokio reactor and panics on the first send — we need the
+        // async-runtime variant for the same reason the orchestrator
+        // path uses it.
         let provider = SdkTracerProvider::builder()
-            .with_batch_exporter(exporter)
+            .with_resource(Resource::builder().with_service_name(service_name).build())
+            .with_span_processor(BatchSpanProcessor::builder(exporter, runtime::Tokio).build())
             .build();
 
-        opentelemetry::global::set_tracer_provider(provider.clone());
+        global::set_tracer_provider(provider.clone());
 
         Ok(Self {
             provider,
             active_spans: std::cell::RefCell::new(std::collections::HashMap::new()),
         })
     }
+}
+
+/// Burin-side spawns a fresh `harn` child per session, so the only
+/// reliable way to opt into local trace export is via environment
+/// variables read at startup. Prefer the Harn-specific variable so a
+/// caller that points an unrelated process at an OTLP collector via
+/// the shared OpenTelemetry variable doesn't accidentally enable Harn
+/// emission too.
+#[cfg(feature = "otel")]
+fn otel_endpoint_from_env() -> Option<String> {
+    for name in ["HARN_OTEL_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"] {
+        if let Ok(value) = std::env::var(name) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "otel")]
+fn otel_service_name_from_env() -> String {
+    for name in ["HARN_OTEL_SERVICE_NAME", "OTEL_SERVICE_NAME"] {
+        if let Ok(value) = std::env::var(name) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    "harn".to_string()
+}
+
+#[cfg(feature = "otel")]
+fn otel_headers_from_env() -> std::collections::HashMap<String, String> {
+    let raw = std::env::var("HARN_OTEL_HEADERS")
+        .ok()
+        .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_HEADERS").ok())
+        .unwrap_or_default();
+    raw.split([',', '\n', ';'])
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .filter_map(|segment| {
+            let (name, value) = segment
+                .split_once('=')
+                .or_else(|| segment.split_once(':'))?;
+            let name = name.trim();
+            let value = value.trim();
+            if name.is_empty() || value.is_empty() {
+                return None;
+            }
+            Some((name.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+#[cfg(feature = "otel")]
+fn normalize_otlp_traces_endpoint(endpoint: &str) -> String {
+    let trimmed = endpoint.trim_end_matches('/');
+    if trimmed.ends_with("/v1/traces") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/v1/traces")
+    }
+}
+
+/// Idempotency guard for [`install_otel_sink_from_env`]. The first
+/// caller wins; later ones become no-ops returning `Ok(false)`. The
+/// stored provider keeps the batch processor's runtime alive — and
+/// gives [`shutdown_otel_sink`] a handle to flush before the host
+/// tokio runtime exits.
+#[cfg(feature = "otel")]
+static OTEL_PROVIDER: std::sync::OnceLock<
+    std::sync::Mutex<Option<opentelemetry_sdk::trace::SdkTracerProvider>>,
+> = std::sync::OnceLock::new();
+
+/// Register an [`OtelSink`] into the thread-local event sink chain when
+/// the environment is configured for OTLP export.
+///
+/// Returns `Ok(true)` when a sink was installed, `Ok(false)` when no
+/// OTLP endpoint is configured (or when a sink has already been
+/// installed for this process), and `Err` when the exporter failed to
+/// initialise.
+///
+/// The exporter activates iff at least one of `HARN_OTEL_ENDPOINT` or
+/// the standard `OTEL_EXPORTER_OTLP_ENDPOINT` is non-empty. Service
+/// name comes from `HARN_OTEL_SERVICE_NAME` → `OTEL_SERVICE_NAME` →
+/// `"harn"` (in that order). Headers come from `HARN_OTEL_HEADERS` →
+/// `OTEL_EXPORTER_OTLP_HEADERS` (comma/semicolon-separated
+/// `name=value` pairs).
+///
+/// Hosts (`harn run`, `harn serve acp`, embedders like Burin) should
+/// call this once near process startup so any spans emitted during the
+/// session land at the configured collector.
+#[cfg(feature = "otel")]
+pub fn install_otel_sink_from_env() -> Result<bool, String> {
+    if otel_endpoint_from_env().is_none() {
+        return Ok(false);
+    }
+    let provider_slot = OTEL_PROVIDER.get_or_init(|| std::sync::Mutex::new(None));
+    {
+        let guard = provider_slot.lock().expect("otel provider mutex poisoned");
+        if guard.is_some() {
+            // A sink was already installed in this process. Don't
+            // double-register; the existing one will keep emitting.
+            return Ok(false);
+        }
+    }
+    let sink = OtelSink::new()?;
+    let provider = sink.provider.clone();
+    add_event_sink(Rc::new(sink));
+    provider_slot
+        .lock()
+        .expect("otel provider mutex poisoned")
+        .replace(provider);
+    Ok(true)
+}
+
+/// Flush and tear down the auto-registered OTel sink. Hosts that
+/// shut down their tokio runtime before process exit must call this
+/// while the runtime is still alive — `BatchSpanProcessor` needs a
+/// reactor to drain queued exports, and the [`Drop`] impl on
+/// [`OtelSink`] otherwise runs after the runtime is gone. Safe to
+/// call when no sink was installed.
+///
+/// Returns `Ok(true)` when a provider was flushed, `Ok(false)` when
+/// none was installed, and `Err` when the SDK reported an export or
+/// shutdown error. Errors are advisory — long-running hosts should
+/// log and continue.
+#[cfg(feature = "otel")]
+pub fn shutdown_otel_sink() -> Result<bool, String> {
+    let Some(slot) = OTEL_PROVIDER.get() else {
+        return Ok(false);
+    };
+    let provider = {
+        let mut guard = slot.lock().expect("otel provider mutex poisoned");
+        guard.take()
+    };
+    let Some(provider) = provider else {
+        return Ok(false);
+    };
+    provider
+        .force_flush()
+        .map_err(|error| format!("OTel force_flush failed: {error}"))?;
+    provider
+        .shutdown()
+        .map_err(|error| format!("OTel shutdown failed: {error}"))?;
+    Ok(true)
+}
+
+/// No-op stub for builds compiled without the `otel` feature. Returns
+/// `Ok(false)` so call sites can use the same code path on either
+/// build.
+#[cfg(not(feature = "otel"))]
+pub fn install_otel_sink_from_env() -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(not(feature = "otel"))]
+pub fn shutdown_otel_sink() -> Result<bool, String> {
+    Ok(false)
 }
 
 #[cfg(feature = "otel")]
@@ -413,5 +615,169 @@ mod tests {
         assert_eq!(logs[0].metadata["tokens"], serde_json::json!(42));
 
         reset_event_sinks();
+    }
+
+    #[cfg(feature = "otel")]
+    mod otel_env {
+        use super::super::*;
+        use std::sync::{Mutex, MutexGuard, OnceLock};
+
+        /// Serializes env-mutating tests in this module. Crate-wide
+        /// `crate::llm::env_lock()` is reserved for LLM env scopes; a
+        /// dedicated lock here keeps these tests independent.
+        fn lock() -> MutexGuard<'static, ()> {
+            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+            LOCK.get_or_init(|| Mutex::new(()))
+                .lock()
+                .expect("otel env lock")
+        }
+
+        /// RAII guard for a single env var. Saves the prior value on
+        /// construction and restores it on Drop so parallel tests in
+        /// the same process don't leak state.
+        struct ScopedEnvVar {
+            key: &'static str,
+            previous: Option<String>,
+        }
+
+        impl ScopedEnvVar {
+            fn set(key: &'static str, value: &str) -> Self {
+                let previous = std::env::var(key).ok();
+                // SAFETY: env mutation is serialized by the test-level
+                // `lock()` above; no other thread inspects these
+                // variables while a guard is alive.
+                unsafe { std::env::set_var(key, value) };
+                Self { key, previous }
+            }
+
+            fn remove(key: &'static str) -> Self {
+                let previous = std::env::var(key).ok();
+                // SAFETY: see `set` above.
+                unsafe { std::env::remove_var(key) };
+                Self { key, previous }
+            }
+        }
+
+        impl Drop for ScopedEnvVar {
+            fn drop(&mut self) {
+                // SAFETY: see `set` above. Restoration happens while the
+                // test still holds the module lock.
+                match &self.previous {
+                    Some(value) => unsafe { std::env::set_var(self.key, value) },
+                    None => unsafe { std::env::remove_var(self.key) },
+                }
+            }
+        }
+
+        #[test]
+        fn install_returns_false_when_endpoint_unset() {
+            let _guard = lock();
+            let _endpoint = ScopedEnvVar::remove("HARN_OTEL_ENDPOINT");
+            let _standard = ScopedEnvVar::remove("OTEL_EXPORTER_OTLP_ENDPOINT");
+
+            let installed = install_otel_sink_from_env()
+                .expect("install must not error when endpoint is unset");
+            assert!(!installed, "expected no sink registration without endpoint");
+        }
+
+        #[test]
+        fn endpoint_helper_prefers_harn_variable() {
+            let _guard = lock();
+            let _harn = ScopedEnvVar::set("HARN_OTEL_ENDPOINT", "http://harn.example.test:4318");
+            let _standard = ScopedEnvVar::set(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "http://generic.example.test:4318",
+            );
+
+            assert_eq!(
+                otel_endpoint_from_env().as_deref(),
+                Some("http://harn.example.test:4318"),
+            );
+        }
+
+        #[test]
+        fn endpoint_helper_falls_back_to_standard_variable() {
+            let _guard = lock();
+            let _harn = ScopedEnvVar::remove("HARN_OTEL_ENDPOINT");
+            let _standard = ScopedEnvVar::set(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "http://generic.example.test:4318",
+            );
+
+            assert_eq!(
+                otel_endpoint_from_env().as_deref(),
+                Some("http://generic.example.test:4318"),
+            );
+        }
+
+        #[test]
+        fn endpoint_helper_ignores_whitespace_only_values() {
+            let _guard = lock();
+            let _harn = ScopedEnvVar::set("HARN_OTEL_ENDPOINT", "   ");
+            let _standard = ScopedEnvVar::remove("OTEL_EXPORTER_OTLP_ENDPOINT");
+
+            assert!(otel_endpoint_from_env().is_none());
+        }
+
+        #[test]
+        fn service_name_helper_layers_defaults() {
+            let _guard = lock();
+            let _harn = ScopedEnvVar::remove("HARN_OTEL_SERVICE_NAME");
+            let _standard = ScopedEnvVar::remove("OTEL_SERVICE_NAME");
+            assert_eq!(otel_service_name_from_env(), "harn");
+
+            let _standard = ScopedEnvVar::set("OTEL_SERVICE_NAME", "burin-code");
+            assert_eq!(otel_service_name_from_env(), "burin-code");
+
+            let _harn = ScopedEnvVar::set("HARN_OTEL_SERVICE_NAME", "burin-tui");
+            assert_eq!(otel_service_name_from_env(), "burin-tui");
+        }
+
+        #[test]
+        fn headers_helper_parses_comma_separated_pairs() {
+            let _guard = lock();
+            let _harn = ScopedEnvVar::set(
+                "HARN_OTEL_HEADERS",
+                "x-honeycomb-team=abc123, x-other=val ,blank=",
+            );
+
+            let headers = otel_headers_from_env();
+            assert_eq!(
+                headers.get("x-honeycomb-team").map(String::as_str),
+                Some("abc123"),
+            );
+            assert_eq!(headers.get("x-other").map(String::as_str), Some("val"));
+            assert!(
+                !headers.contains_key("blank"),
+                "empty values must be dropped to match the orchestrator helper",
+            );
+        }
+
+        #[test]
+        fn normalize_endpoint_appends_traces_path_when_missing() {
+            assert_eq!(
+                normalize_otlp_traces_endpoint("http://localhost:4318"),
+                "http://localhost:4318/v1/traces",
+            );
+            assert_eq!(
+                normalize_otlp_traces_endpoint("http://localhost:4318/"),
+                "http://localhost:4318/v1/traces",
+            );
+            assert_eq!(
+                normalize_otlp_traces_endpoint("http://localhost:4318/v1/traces"),
+                "http://localhost:4318/v1/traces",
+            );
+            assert_eq!(
+                normalize_otlp_traces_endpoint("http://localhost:4318/v1/traces/"),
+                "http://localhost:4318/v1/traces",
+            );
+        }
+    }
+
+    #[cfg(not(feature = "otel"))]
+    #[test]
+    fn install_otel_sink_returns_ok_false_on_non_otel_builds() {
+        let installed = install_otel_sink_from_env().expect("non-otel stub never errors");
+        assert!(!installed);
     }
 }
