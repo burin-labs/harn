@@ -23,6 +23,8 @@ pub use typechecker::{
     DiagnosticSeverity, InlayHintInfo, TypeChecker, TypeDiagnostic,
 };
 
+pub use builtin_signatures::install_builtin_signatures;
+
 /// Returns `true` if `name` is a builtin recognized by the parser's static analyzer.
 pub fn is_known_builtin(name: &str) -> bool {
     builtin_signatures::is_builtin(name)

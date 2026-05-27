@@ -17,6 +17,7 @@ use crate::orchestration::{
     select_artifacts, ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
     ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
 };
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -282,738 +283,935 @@ fn build_helper_artifact(
 }
 
 pub(crate) fn register_record_builtins(vm: &mut Vm) {
-    vm.register_builtin("artifact", |args, _out| {
-        let artifact =
-            normalize_artifact(args.first().ok_or_else(|| {
-                VmError::Runtime("artifact: missing artifact payload".to_string())
-            })?)?;
-        emit_handoff_event(&artifact);
-        to_vm(&artifact)
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("handoff", |args, _out| {
-        let value = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("handoff: missing payload".to_string()))?;
-        let json = crate::llm::vm_value_to_json(value);
-        let mut handoff = handoff_from_json_value(&json)
-            .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
-            .ok_or_else(|| VmError::Runtime("handoff: invalid handoff payload".to_string()))?;
-        attach_current_reminder_propagation(&mut handoff);
-        to_vm(&handoff)
-    });
+#[harn_builtin(sig = "artifact(payload: dict) -> dict", category = "records")]
+fn artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let artifact = normalize_artifact(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("artifact: missing artifact payload".to_string()))?,
+    )?;
+    emit_handoff_event(&artifact);
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("handoff_context", |args, _out| {
-        let value = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("handoff_context: missing payload".to_string()))?;
-        let json = crate::llm::vm_value_to_json(value);
-        let handoff = handoff_from_json_value(&json)
-            .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
-            .ok_or_else(|| {
-                VmError::Runtime("handoff_context: invalid handoff payload".to_string())
-            })?;
-        Ok(VmValue::String(Rc::from(handoff_context_text(&handoff))))
-    });
+#[harn_builtin(sig = "handoff(payload: dict) -> dict", category = "records")]
+fn handoff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let value = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("handoff: missing payload".to_string()))?;
+    let json = crate::llm::vm_value_to_json(value);
+    let mut handoff = handoff_from_json_value(&json)
+        .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
+        .ok_or_else(|| VmError::Runtime("handoff: invalid handoff payload".to_string()))?;
+    attach_current_reminder_propagation(&mut handoff);
+    to_vm(&handoff)
+}
 
-    vm.register_builtin("handoff_routes", |_args, _out| {
-        to_vm(&crate::orchestration::snapshot_handoff_routes())
-    });
+#[harn_builtin(sig = "handoff_context(payload: dict) -> string", category = "records")]
+fn handoff_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let value = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("handoff_context: missing payload".to_string()))?;
+    let json = crate::llm::vm_value_to_json(value);
+    let handoff = handoff_from_json_value(&json)
+        .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
+        .ok_or_else(|| VmError::Runtime("handoff_context: invalid handoff payload".to_string()))?;
+    Ok(VmValue::String(Rc::from(handoff_context_text(&handoff))))
+}
 
-    // `handoff_effects(source, ceiling?)` — compute the typed effect set
-    // for a child agent's entrypoint source. Pipelines call this when
-    // building a spawn-time handoff so the envelope carries an explicit,
-    // ceiling-clamped effect set (issue HARN-#1776 / E5.3). The dispatcher
-    // (E5.4) and the OpenTrustGraph receipt chain (E5.5) consume this
-    // payload directly.
-    vm.register_builtin("handoff_effects", |args, _out| {
-        let source = match args.first() {
-            Some(VmValue::String(text)) => text.to_string(),
-            Some(VmValue::Nil) | None => String::new(),
-            Some(other) => {
-                return Err(VmError::Runtime(format!(
-                    "handoff_effects: expected source string, got {}",
-                    other.type_name()
-                )));
-            }
-        };
-        let ceiling = match args.get(1) {
-            Some(VmValue::Nil) | None => None,
-            Some(value) => {
-                let json = crate::llm::vm_value_to_json(value);
-                Some(
-                    serde_json::from_value::<CapabilityPolicy>(json).map_err(|error| {
-                        VmError::Runtime(format!("handoff_effects: ceiling parse error: {error}"))
-                    })?,
-                )
-            }
-        };
-        let effects = compute_handoff_effects(&source, ceiling.as_ref());
-        to_vm(&effects)
-    });
+#[harn_builtin(sig = "handoff_routes() -> list", category = "records")]
+fn handoff_routes_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    to_vm(&crate::orchestration::snapshot_handoff_routes())
+}
 
-    vm.register_builtin("artifact_derive", |args, _out| {
-        let parent = normalize_artifact(
-            args.first()
-                .ok_or_else(|| VmError::Runtime("artifact_derive: missing parent".to_string()))?,
-        )?;
-        let kind = args
-            .get(1)
-            .map(|v| v.display())
-            .unwrap_or_else(|| "artifact".to_string());
-        let mut derived = parent.clone();
-        derived.id = format!("{}_derived", parent.id);
-        derived.kind = kind;
-        derived.lineage.push(parent.id);
-        if let Some(VmValue::Dict(extra)) = args.get(2) {
-            let extra_json = crate::llm::vm_value_to_json(&VmValue::Dict(extra.clone()));
-            if let Some(text) = extra_json.get("text").and_then(|v| v.as_str()) {
-                derived.text = Some(text.to_string());
-            }
+/// `handoff_effects(source, ceiling?)` — compute the typed effect set for a
+/// child agent's entrypoint source. Pipelines call this when building a
+/// spawn-time handoff so the envelope carries an explicit, ceiling-clamped
+/// effect set (issue HARN-#1776 / E5.3). The dispatcher (E5.4) and the
+/// OpenTrustGraph receipt chain (E5.5) consume this payload directly.
+#[harn_builtin(
+    sig = "handoff_effects(source: string, ceiling?: dict) -> list",
+    category = "records"
+)]
+fn handoff_effects_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let source = match args.first() {
+        Some(VmValue::String(text)) => text.to_string(),
+        Some(VmValue::Nil) | None => String::new(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "handoff_effects: expected source string, got {}",
+                other.type_name()
+            )));
         }
-        to_vm(&derived.normalize())
-    });
+    };
+    let ceiling = match args.get(1) {
+        Some(VmValue::Nil) | None => None,
+        Some(value) => {
+            let json = crate::llm::vm_value_to_json(value);
+            Some(
+                serde_json::from_value::<CapabilityPolicy>(json).map_err(|error| {
+                    VmError::Runtime(format!("handoff_effects: ceiling parse error: {error}"))
+                })?,
+            )
+        }
+    };
+    let effects = compute_handoff_effects(&source, ceiling.as_ref());
+    to_vm(&effects)
+}
 
-    vm.register_builtin("artifact_select", |args, _out| {
-        let artifacts = parse_artifact_list(args.first())?;
-        let policy = parse_context_policy(args.get(1))?;
-        to_vm(&select_artifacts(artifacts, &policy))
-    });
+#[harn_builtin(
+    sig = "artifact_derive(parent: dict, kind?: string, extras?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_derive_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let parent = normalize_artifact(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("artifact_derive: missing parent".to_string()))?,
+    )?;
+    let kind = args
+        .get(1)
+        .map(|v| v.display())
+        .unwrap_or_else(|| "artifact".to_string());
+    let mut derived = parent.clone();
+    derived.id = format!("{}_derived", parent.id);
+    derived.kind = kind;
+    derived.lineage.push(parent.id);
+    if let Some(VmValue::Dict(extra)) = args.get(2) {
+        let extra_json = crate::llm::vm_value_to_json(&VmValue::Dict(extra.clone()));
+        if let Some(text) = extra_json.get("text").and_then(|v| v.as_str()) {
+            derived.text = Some(text.to_string());
+        }
+    }
+    to_vm(&derived.normalize())
+}
 
-    vm.register_builtin("artifact_context", |args, _out| {
-        let artifacts = parse_artifact_list(args.first())?;
-        let policy = parse_context_policy(args.get(1))?;
-        Ok(VmValue::String(Rc::from(render_artifacts_context(
-            &select_artifacts(artifacts, &policy),
-            &policy,
-        ))))
-    });
+#[harn_builtin(
+    sig = "artifact_select(artifacts: list, policy?: dict) -> list",
+    category = "records"
+)]
+fn artifact_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let artifacts = parse_artifact_list(args.first())?;
+    let policy = parse_context_policy(args.get(1))?;
+    to_vm(&select_artifacts(artifacts, &policy))
+}
 
-    vm.register_builtin("artifact_workspace_file", |args, _out| {
-        let path = require_string_arg(args, 0, "artifact_workspace_file", "path")?;
-        let content = require_text_arg(args, 1, "artifact_workspace_file", "content")?;
-        let mut options = parse_artifact_helper_options(args.get(2))?;
-        options
-            .metadata
-            .insert("path".to_string(), serde_json::json!(path));
-        let artifact = build_helper_artifact(
-            "workspace_file",
-            Some(path.clone()),
-            Some(content.clone()),
-            Some(serde_json::json!({"path": path, "content": content})),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_context(artifacts: list, policy?: dict) -> string",
+    category = "records"
+)]
+fn artifact_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let artifacts = parse_artifact_list(args.first())?;
+    let policy = parse_context_policy(args.get(1))?;
+    Ok(VmValue::String(Rc::from(render_artifacts_context(
+        &select_artifacts(artifacts, &policy),
+        &policy,
+    ))))
+}
 
-    vm.register_builtin("artifact_workspace_snapshot", |args, _out| {
-        let paths = args.first().ok_or_else(|| {
-            VmError::Runtime("artifact_workspace_snapshot: missing paths".to_string())
-        })?;
-        let summary = optional_text_arg(args.get(1));
-        let mut options = parse_artifact_helper_options(args.get(2))?;
-        options
-            .metadata
-            .insert("paths".to_string(), crate::llm::vm_value_to_json(paths));
-        let artifact = build_helper_artifact(
-            "workspace_snapshot",
-            Some("workspace snapshot".to_string()),
-            summary,
-            Some(serde_json::json!({"paths": crate::llm::vm_value_to_json(paths)})),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_workspace_file(path: string, content: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_workspace_file_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = require_string_arg(args, 0, "artifact_workspace_file", "path")?;
+    let content = require_text_arg(args, 1, "artifact_workspace_file", "content")?;
+    let mut options = parse_artifact_helper_options(args.get(2))?;
+    options
+        .metadata
+        .insert("path".to_string(), serde_json::json!(path));
+    let artifact = build_helper_artifact(
+        "workspace_file",
+        Some(path.clone()),
+        Some(content.clone()),
+        Some(serde_json::json!({"path": path, "content": content})),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_editor_selection", |args, _out| {
-        let path = require_string_arg(args, 0, "artifact_editor_selection", "path")?;
-        let text = require_text_arg(args, 1, "artifact_editor_selection", "text")?;
-        let mut options = parse_artifact_helper_options(args.get(2))?;
-        options
-            .metadata
-            .insert("path".to_string(), serde_json::json!(path));
-        let artifact = build_helper_artifact(
-            "editor_selection",
-            Some(format!("selection {path}")),
-            Some(text.clone()),
-            Some(serde_json::json!({"path": path, "text": text})),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_workspace_snapshot(paths: any, summary?: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_workspace_snapshot_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let paths = args.first().ok_or_else(|| {
+        VmError::Runtime("artifact_workspace_snapshot: missing paths".to_string())
+    })?;
+    let summary = optional_text_arg(args.get(1));
+    let mut options = parse_artifact_helper_options(args.get(2))?;
+    options
+        .metadata
+        .insert("paths".to_string(), crate::llm::vm_value_to_json(paths));
+    let artifact = build_helper_artifact(
+        "workspace_snapshot",
+        Some("workspace snapshot".to_string()),
+        summary,
+        Some(serde_json::json!({"paths": crate::llm::vm_value_to_json(paths)})),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_verification_result", |args, _out| {
-        let title = require_string_arg(args, 0, "artifact_verification_result", "title")?;
-        let text = require_text_arg(args, 1, "artifact_verification_result", "text")?;
-        let artifact = build_helper_artifact(
-            "verification_result",
-            Some(title.clone()),
-            Some(text.clone()),
-            Some(serde_json::json!({"title": title, "text": text})),
-            parse_artifact_helper_options(args.get(2))?,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_editor_selection(path: string, text: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_editor_selection_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = require_string_arg(args, 0, "artifact_editor_selection", "path")?;
+    let text = require_text_arg(args, 1, "artifact_editor_selection", "text")?;
+    let mut options = parse_artifact_helper_options(args.get(2))?;
+    options
+        .metadata
+        .insert("path".to_string(), serde_json::json!(path));
+    let artifact = build_helper_artifact(
+        "editor_selection",
+        Some(format!("selection {path}")),
+        Some(text.clone()),
+        Some(serde_json::json!({"path": path, "text": text})),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_test_result", |args, _out| {
-        let title = require_string_arg(args, 0, "artifact_test_result", "title")?;
-        let text = require_text_arg(args, 1, "artifact_test_result", "text")?;
-        let artifact = build_helper_artifact(
-            "test_result",
-            Some(title.clone()),
-            Some(text.clone()),
-            Some(serde_json::json!({"title": title, "text": text})),
-            parse_artifact_helper_options(args.get(2))?,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_verification_result(title: string, text: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_verification_result_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let title = require_string_arg(args, 0, "artifact_verification_result", "title")?;
+    let text = require_text_arg(args, 1, "artifact_verification_result", "text")?;
+    let artifact = build_helper_artifact(
+        "verification_result",
+        Some(title.clone()),
+        Some(text.clone()),
+        Some(serde_json::json!({"title": title, "text": text})),
+        parse_artifact_helper_options(args.get(2))?,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_command_result", |args, _out| {
-        let command = require_string_arg(args, 0, "artifact_command_result", "command")?;
-        let output = args.get(1).ok_or_else(|| {
-            VmError::Runtime("artifact_command_result: missing output".to_string())
-        })?;
-        let mut options = parse_artifact_helper_options(args.get(2))?;
-        options
-            .metadata
-            .insert("command".to_string(), serde_json::json!(command));
-        let artifact = build_helper_artifact(
-            "command_result",
-            Some(command.clone()),
-            Some(value_to_text(output)),
-            Some(serde_json::json!({
-                "command": command,
-                "output": crate::llm::vm_value_to_json(output)
-            })),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_test_result(title: string, text: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_test_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let title = require_string_arg(args, 0, "artifact_test_result", "title")?;
+    let text = require_text_arg(args, 1, "artifact_test_result", "text")?;
+    let artifact = build_helper_artifact(
+        "test_result",
+        Some(title.clone()),
+        Some(text.clone()),
+        Some(serde_json::json!({"title": title, "text": text})),
+        parse_artifact_helper_options(args.get(2))?,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_diff", |args, _out| {
-        let path = require_string_arg(args, 0, "artifact_diff", "path")?;
-        let before = require_text_arg(args, 1, "artifact_diff", "before")?;
-        let after = require_text_arg(args, 2, "artifact_diff", "after")?;
-        let mut options = parse_artifact_helper_options(args.get(3))?;
-        options
-            .metadata
-            .insert("path".to_string(), serde_json::json!(path));
-        let artifact = build_helper_artifact(
-            "diff",
-            Some(format!("diff {path}")),
-            Some(render_unified_diff(Some(&path), &before, &after)),
-            Some(serde_json::json!({"path": path, "before": before, "after": after})),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_command_result(command: string, output: any, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_command_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let command = require_string_arg(args, 0, "artifact_command_result", "command")?;
+    let output = args
+        .get(1)
+        .ok_or_else(|| VmError::Runtime("artifact_command_result: missing output".to_string()))?;
+    let mut options = parse_artifact_helper_options(args.get(2))?;
+    options
+        .metadata
+        .insert("command".to_string(), serde_json::json!(command));
+    let artifact = build_helper_artifact(
+        "command_result",
+        Some(command.clone()),
+        Some(value_to_text(output)),
+        Some(serde_json::json!({
+            "command": command,
+            "output": crate::llm::vm_value_to_json(output)
+        })),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_git_diff", |args, _out| {
-        let diff_text = require_text_arg(args, 0, "artifact_git_diff", "diff_text")?;
-        let artifact = build_helper_artifact(
-            "git_diff",
-            Some("git diff".to_string()),
-            Some(diff_text.clone()),
-            Some(serde_json::json!({"diff": diff_text})),
-            parse_artifact_helper_options(args.get(1))?,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_diff(path: string, before: string, after: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = require_string_arg(args, 0, "artifact_diff", "path")?;
+    let before = require_text_arg(args, 1, "artifact_diff", "before")?;
+    let after = require_text_arg(args, 2, "artifact_diff", "after")?;
+    let mut options = parse_artifact_helper_options(args.get(3))?;
+    options
+        .metadata
+        .insert("path".to_string(), serde_json::json!(path));
+    let artifact = build_helper_artifact(
+        "diff",
+        Some(format!("diff {path}")),
+        Some(render_unified_diff(Some(&path), &before, &after)),
+        Some(serde_json::json!({"path": path, "before": before, "after": after})),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_diff_review", |args, _out| {
-        let target = normalize_artifact(args.first().ok_or_else(|| {
-            VmError::Runtime("artifact_diff_review: missing target artifact".to_string())
-        })?)?;
-        let summary = optional_text_arg(args.get(1));
-        let mut options = parse_artifact_helper_options(args.get(2))?;
-        options.lineage.extend(target.lineage.clone());
-        options.lineage.push(target.id.clone());
-        options.metadata.insert(
-            "target_artifact_id".to_string(),
-            serde_json::json!(target.id),
-        );
-        options
-            .metadata
-            .insert("target_kind".to_string(), serde_json::json!(target.kind));
-        let artifact = build_helper_artifact(
-            "diff_review",
-            Some(format!(
-                "review {}",
-                target.title.clone().unwrap_or_else(|| target.id.clone())
-            )),
-            summary,
-            Some(serde_json::json!({"target_artifact_id": target.id, "target_kind": target.kind})),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_git_diff(diff_text: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_git_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let diff_text = require_text_arg(args, 0, "artifact_git_diff", "diff_text")?;
+    let artifact = build_helper_artifact(
+        "git_diff",
+        Some("git diff".to_string()),
+        Some(diff_text.clone()),
+        Some(serde_json::json!({"diff": diff_text})),
+        parse_artifact_helper_options(args.get(1))?,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_review_decision", |args, _out| {
-        let target = normalize_artifact(args.first().ok_or_else(|| {
-            VmError::Runtime("artifact_review_decision: missing target artifact".to_string())
-        })?)?;
-        let decision = require_string_arg(args, 1, "artifact_review_decision", "decision")?;
-        let mut options = parse_artifact_helper_options(args.get(2))?;
-        options.lineage.extend(target.lineage.clone());
-        options.lineage.push(target.id.clone());
-        options.metadata.insert(
-            "target_artifact_id".to_string(),
-            serde_json::json!(target.id),
-        );
-        options
-            .metadata
-            .insert("target_kind".to_string(), serde_json::json!(target.kind));
-        options
-            .metadata
-            .insert("decision".to_string(), serde_json::json!(decision));
-        let artifact = build_helper_artifact(
-            "review_decision",
-            Some(format!(
-                "{} {}",
-                decision,
-                target.title.clone().unwrap_or_else(|| target.id.clone())
-            )),
-            Some(decision.clone()),
-            Some(serde_json::json!({
-                "target_artifact_id": target.id,
-                "target_kind": target.kind,
-                "decision": decision
-            })),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_diff_review(target: dict, summary?: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_diff_review_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = normalize_artifact(args.first().ok_or_else(|| {
+        VmError::Runtime("artifact_diff_review: missing target artifact".to_string())
+    })?)?;
+    let summary = optional_text_arg(args.get(1));
+    let mut options = parse_artifact_helper_options(args.get(2))?;
+    options.lineage.extend(target.lineage.clone());
+    options.lineage.push(target.id.clone());
+    options.metadata.insert(
+        "target_artifact_id".to_string(),
+        serde_json::json!(target.id),
+    );
+    options
+        .metadata
+        .insert("target_kind".to_string(), serde_json::json!(target.kind));
+    let artifact = build_helper_artifact(
+        "diff_review",
+        Some(format!(
+            "review {}",
+            target.title.clone().unwrap_or_else(|| target.id.clone())
+        )),
+        summary,
+        Some(serde_json::json!({"target_artifact_id": target.id, "target_kind": target.kind})),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_patch_proposal", |args, _out| {
-        let target = normalize_artifact(args.first().ok_or_else(|| {
-            VmError::Runtime("artifact_patch_proposal: missing target artifact".to_string())
-        })?)?;
-        let patch = require_text_arg(args, 1, "artifact_patch_proposal", "patch")?;
-        let mut options = parse_artifact_helper_options(args.get(2))?;
-        options.lineage.extend(target.lineage.clone());
-        options.lineage.push(target.id.clone());
-        options.metadata.insert(
-            "target_artifact_id".to_string(),
-            serde_json::json!(target.id),
-        );
-        options
-            .metadata
-            .insert("target_kind".to_string(), serde_json::json!(target.kind));
-        let artifact = build_helper_artifact(
-            "patch_proposal",
-            Some(format!(
-                "patch for {}",
-                target.title.clone().unwrap_or_else(|| target.id.clone())
-            )),
-            Some(patch.clone()),
-            Some(serde_json::json!({
-                "target_artifact_id": target.id,
-                "target_kind": target.kind,
-                "patch": patch
-            })),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_review_decision(target: dict, decision: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_review_decision_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = normalize_artifact(args.first().ok_or_else(|| {
+        VmError::Runtime("artifact_review_decision: missing target artifact".to_string())
+    })?)?;
+    let decision = require_string_arg(args, 1, "artifact_review_decision", "decision")?;
+    let mut options = parse_artifact_helper_options(args.get(2))?;
+    options.lineage.extend(target.lineage.clone());
+    options.lineage.push(target.id.clone());
+    options.metadata.insert(
+        "target_artifact_id".to_string(),
+        serde_json::json!(target.id),
+    );
+    options
+        .metadata
+        .insert("target_kind".to_string(), serde_json::json!(target.kind));
+    options
+        .metadata
+        .insert("decision".to_string(), serde_json::json!(decision));
+    let artifact = build_helper_artifact(
+        "review_decision",
+        Some(format!(
+            "{} {}",
+            decision,
+            target.title.clone().unwrap_or_else(|| target.id.clone())
+        )),
+        Some(decision.clone()),
+        Some(serde_json::json!({
+            "target_artifact_id": target.id,
+            "target_kind": target.kind,
+            "decision": decision
+        })),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_verification_bundle", |args, _out| {
-        let title = require_string_arg(args, 0, "artifact_verification_bundle", "title")?;
-        let checks = args.get(1).ok_or_else(|| {
-            VmError::Runtime("artifact_verification_bundle: missing checks".to_string())
-        })?;
-        let artifact = build_helper_artifact(
-            "verification_bundle",
-            Some(title.clone()),
-            Some(value_to_text(checks)),
-            Some(serde_json::json!({
-                "title": title,
-                "checks": crate::llm::vm_value_to_json(checks)
-            })),
-            parse_artifact_helper_options(args.get(2))?,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_patch_proposal(target: dict, patch: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_patch_proposal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = normalize_artifact(args.first().ok_or_else(|| {
+        VmError::Runtime("artifact_patch_proposal: missing target artifact".to_string())
+    })?)?;
+    let patch = require_text_arg(args, 1, "artifact_patch_proposal", "patch")?;
+    let mut options = parse_artifact_helper_options(args.get(2))?;
+    options.lineage.extend(target.lineage.clone());
+    options.lineage.push(target.id.clone());
+    options.metadata.insert(
+        "target_artifact_id".to_string(),
+        serde_json::json!(target.id),
+    );
+    options
+        .metadata
+        .insert("target_kind".to_string(), serde_json::json!(target.kind));
+    let artifact = build_helper_artifact(
+        "patch_proposal",
+        Some(format!(
+            "patch for {}",
+            target.title.clone().unwrap_or_else(|| target.id.clone())
+        )),
+        Some(patch.clone()),
+        Some(serde_json::json!({
+            "target_artifact_id": target.id,
+            "target_kind": target.kind,
+            "patch": patch
+        })),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("artifact_apply_intent", |args, _out| {
-        let target = normalize_artifact(args.first().ok_or_else(|| {
-            VmError::Runtime("artifact_apply_intent: missing target artifact".to_string())
-        })?)?;
-        let intent = require_string_arg(args, 1, "artifact_apply_intent", "intent")?;
-        let mut options = parse_artifact_helper_options(args.get(2))?;
-        options.lineage.extend(target.lineage.clone());
-        options.lineage.push(target.id.clone());
-        options.metadata.insert(
-            "target_artifact_id".to_string(),
-            serde_json::json!(target.id),
-        );
-        options
-            .metadata
-            .insert("target_kind".to_string(), serde_json::json!(target.kind));
-        let artifact = build_helper_artifact(
-            "apply_intent",
-            Some(format!(
-                "{} {}",
-                intent,
-                target.title.clone().unwrap_or_else(|| target.id.clone())
-            )),
-            Some(intent.clone()),
-            Some(serde_json::json!({
-                "target_artifact_id": target.id,
-                "target_kind": target.kind,
-                "intent": intent
-            })),
-            options,
-        );
-        to_vm(&artifact)
-    });
+#[harn_builtin(
+    sig = "artifact_verification_bundle(title: string, checks: any, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_verification_bundle_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let title = require_string_arg(args, 0, "artifact_verification_bundle", "title")?;
+    let checks = args.get(1).ok_or_else(|| {
+        VmError::Runtime("artifact_verification_bundle: missing checks".to_string())
+    })?;
+    let artifact = build_helper_artifact(
+        "verification_bundle",
+        Some(title.clone()),
+        Some(value_to_text(checks)),
+        Some(serde_json::json!({
+            "title": title,
+            "checks": crate::llm::vm_value_to_json(checks)
+        })),
+        parse_artifact_helper_options(args.get(2))?,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("run_record", |args, _out| {
-        let run = normalize_run_record(
-            args.first()
-                .ok_or_else(|| VmError::Runtime("run_record: missing payload".to_string()))?,
-        )?;
-        to_vm(&run)
-    });
+#[harn_builtin(
+    sig = "artifact_apply_intent(target: dict, intent: string, options?: dict) -> dict",
+    category = "records"
+)]
+fn artifact_apply_intent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = normalize_artifact(args.first().ok_or_else(|| {
+        VmError::Runtime("artifact_apply_intent: missing target artifact".to_string())
+    })?)?;
+    let intent = require_string_arg(args, 1, "artifact_apply_intent", "intent")?;
+    let mut options = parse_artifact_helper_options(args.get(2))?;
+    options.lineage.extend(target.lineage.clone());
+    options.lineage.push(target.id.clone());
+    options.metadata.insert(
+        "target_artifact_id".to_string(),
+        serde_json::json!(target.id),
+    );
+    options
+        .metadata
+        .insert("target_kind".to_string(), serde_json::json!(target.kind));
+    let artifact = build_helper_artifact(
+        "apply_intent",
+        Some(format!(
+            "{} {}",
+            intent,
+            target.title.clone().unwrap_or_else(|| target.id.clone())
+        )),
+        Some(intent.clone()),
+        Some(serde_json::json!({
+            "target_artifact_id": target.id,
+            "target_kind": target.kind,
+            "intent": intent
+        })),
+        options,
+    );
+    to_vm(&artifact)
+}
 
-    vm.register_builtin("load_run_tree", |args, _out| {
-        let path = require_string_arg(args, 0, "load_run_tree", "path")?;
-        let tree = load_run_tree(&path)?;
-        to_vm(&tree)
-    });
+#[harn_builtin(sig = "run_record(payload: dict) -> dict", category = "records")]
+fn run_record_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let run = normalize_run_record(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("run_record: missing payload".to_string()))?,
+    )?;
+    to_vm(&run)
+}
 
-    vm.register_builtin("run_record_save", |args, _out| {
-        let mut run = normalize_run_record(
-            args.first()
-                .ok_or_else(|| VmError::Runtime("run_record_save: missing run".to_string()))?,
-        )?;
-        let path = args.get(1).map(|v| v.display()).filter(|s| !s.is_empty());
-        let persisted = save_run_record(&run, path.as_deref())?;
-        run.persisted_path = Some(persisted.clone());
-        to_vm(&serde_json::json!({"path": persisted, "run": run}))
-    });
+#[harn_builtin(sig = "load_run_tree(path: string) -> dict", category = "records")]
+fn load_run_tree_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = require_string_arg(args, 0, "load_run_tree", "path")?;
+    let tree = load_run_tree(&path)?;
+    to_vm(&tree)
+}
 
-    vm.register_builtin("run_record_load", |args, _out| {
-        let path = args
-            .first()
-            .map(|v| v.display())
-            .ok_or_else(|| VmError::Runtime("run_record_load: missing path".to_string()))?;
-        to_vm(&crate::orchestration::load_run_record(
-            std::path::Path::new(&path),
-        )?)
-    });
+#[harn_builtin(
+    sig = "run_record_save(run: dict, path?: string) -> dict",
+    category = "records"
+)]
+fn run_record_save_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut run = normalize_run_record(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("run_record_save: missing run".to_string()))?,
+    )?;
+    let path = args.get(1).map(|v| v.display()).filter(|s| !s.is_empty());
+    let persisted = save_run_record(&run, path.as_deref())?;
+    run.persisted_path = Some(persisted.clone());
+    to_vm(&serde_json::json!({"path": persisted, "run": run}))
+}
 
-    vm.register_builtin("run_record_fixture", |args, _out| {
-        let run = normalize_run_record(
-            args.first()
-                .ok_or_else(|| VmError::Runtime("run_record_fixture: missing run".to_string()))?,
-        )?;
-        to_vm(&replay_fixture_from_run(&run))
-    });
+#[harn_builtin(sig = "run_record_load(path: string) -> dict", category = "records")]
+fn run_record_load_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args
+        .first()
+        .map(|v| v.display())
+        .ok_or_else(|| VmError::Runtime("run_record_load: missing path".to_string()))?;
+    to_vm(&crate::orchestration::load_run_record(
+        std::path::Path::new(&path),
+    )?)
+}
 
-    vm.register_builtin("run_record_eval", |args, _out| {
-        let run = normalize_run_record(
-            args.first()
-                .ok_or_else(|| VmError::Runtime("run_record_eval: missing run".to_string()))?,
-        )?;
-        let fixture: ReplayFixture = match args.get(1) {
-            Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
-                .map_err(|e| VmError::Runtime(format!("run_record_eval: {e}")))?,
-            None => replay_fixture_from_run(&run),
-        };
-        to_vm(&evaluate_run_against_fixture(&run, &fixture))
-    });
+#[harn_builtin(sig = "run_record_fixture(run: dict) -> dict", category = "records")]
+fn run_record_fixture_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let run = normalize_run_record(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("run_record_fixture: missing run".to_string()))?,
+    )?;
+    to_vm(&replay_fixture_from_run(&run))
+}
 
-    vm.register_builtin("run_record_eval_suite", |args, _out| {
-        let items = match args.first() {
-            Some(VmValue::List(list)) => list.clone(),
-            _ => {
-                return Err(VmError::Runtime(
-                    "run_record_eval_suite: missing list".to_string(),
-                ));
-            }
-        };
-        let mut cases = Vec::new();
-        for item in items.iter() {
-            let source_path = item
-                .as_dict()
-                .and_then(|dict| dict.get("path"))
-                .map(|value| value.display())
-                .filter(|value| !value.is_empty());
-            let run = if let Some(dict) = item.as_dict() {
-                if let Some(run_value) = dict.get("run") {
-                    normalize_run_record(run_value)?
-                } else {
-                    normalize_run_record(item)?
-                }
+#[harn_builtin(
+    sig = "run_record_eval(run: dict, fixture?: dict) -> dict",
+    category = "records"
+)]
+fn run_record_eval_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let run = normalize_run_record(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("run_record_eval: missing run".to_string()))?,
+    )?;
+    let fixture: ReplayFixture = match args.get(1) {
+        Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
+            .map_err(|e| VmError::Runtime(format!("run_record_eval: {e}")))?,
+        None => replay_fixture_from_run(&run),
+    };
+    to_vm(&evaluate_run_against_fixture(&run, &fixture))
+}
+
+#[harn_builtin(
+    sig = "run_record_eval_suite(cases: list) -> dict",
+    category = "records"
+)]
+fn run_record_eval_suite_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let items = match args.first() {
+        Some(VmValue::List(list)) => list.clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "run_record_eval_suite: missing list".to_string(),
+            ));
+        }
+    };
+    let mut cases = Vec::new();
+    for item in items.iter() {
+        let source_path = item
+            .as_dict()
+            .and_then(|dict| dict.get("path"))
+            .map(|value| value.display())
+            .filter(|value| !value.is_empty());
+        let run = if let Some(dict) = item.as_dict() {
+            if let Some(run_value) = dict.get("run") {
+                normalize_run_record(run_value)?
             } else {
                 normalize_run_record(item)?
-            };
-            let fixture: ReplayFixture = match item.as_dict().and_then(|dict| dict.get("fixture")) {
-                Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
-                    .map_err(|e| VmError::Runtime(format!("run_record_eval_suite: {e}")))?,
-                None => replay_fixture_from_run(&run),
-            };
-            cases.push((run, fixture, source_path));
-        }
-        to_vm(&evaluate_run_suite(cases))
-    });
+            }
+        } else {
+            normalize_run_record(item)?
+        };
+        let fixture: ReplayFixture = match item.as_dict().and_then(|dict| dict.get("fixture")) {
+            Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
+                .map_err(|e| VmError::Runtime(format!("run_record_eval_suite: {e}")))?,
+            None => replay_fixture_from_run(&run),
+        };
+        cases.push((run, fixture, source_path));
+    }
+    to_vm(&evaluate_run_suite(cases))
+}
 
-    vm.register_builtin("run_record_diff", |args, _out| {
-        let left =
-            normalize_run_record(args.first().ok_or_else(|| {
-                VmError::Runtime("run_record_diff: missing left run".to_string())
-            })?)?;
-        let right =
-            normalize_run_record(args.get(1).ok_or_else(|| {
-                VmError::Runtime("run_record_diff: missing right run".to_string())
-            })?)?;
-        to_vm(&diff_run_records(&left, &right))
-    });
+#[harn_builtin(
+    sig = "run_record_diff(left: dict, right: dict) -> dict",
+    category = "records"
+)]
+fn run_record_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let left = normalize_run_record(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("run_record_diff: missing left run".to_string()))?,
+    )?;
+    let right = normalize_run_record(
+        args.get(1)
+            .ok_or_else(|| VmError::Runtime("run_record_diff: missing right run".to_string()))?,
+    )?;
+    to_vm(&diff_run_records(&left, &right))
+}
 
-    vm.register_builtin("eval_suite_manifest", |args, _out| {
-        let manifest = normalize_eval_suite_manifest(args.first().ok_or_else(|| {
-            VmError::Runtime("eval_suite_manifest: missing manifest payload".to_string())
-        })?)?;
-        to_vm(&manifest)
-    });
+#[harn_builtin(
+    sig = "eval_suite_manifest(payload: dict) -> dict",
+    category = "records"
+)]
+fn eval_suite_manifest_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let manifest = normalize_eval_suite_manifest(args.first().ok_or_else(|| {
+        VmError::Runtime("eval_suite_manifest: missing manifest payload".to_string())
+    })?)?;
+    to_vm(&manifest)
+}
 
-    vm.register_builtin("eval_suite_run", |args, _out| {
-        let manifest = normalize_eval_suite_manifest(args.first().ok_or_else(|| {
-            VmError::Runtime("eval_suite_run: missing manifest payload".to_string())
-        })?)?;
-        to_vm(&evaluate_run_suite_manifest(&manifest)?)
-    });
+#[harn_builtin(sig = "eval_suite_run(payload: dict) -> dict", category = "records")]
+fn eval_suite_run_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let manifest = normalize_eval_suite_manifest(args.first().ok_or_else(|| {
+        VmError::Runtime("eval_suite_run: missing manifest payload".to_string())
+    })?)?;
+    to_vm(&evaluate_run_suite_manifest(&manifest)?)
+}
 
-    vm.register_builtin("eval_pack_manifest", |args, _out| {
-        let manifest = normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
-            VmError::Runtime("eval_pack_manifest: missing manifest payload".to_string())
-        })?)?;
-        to_vm(&manifest)
-    });
+#[harn_builtin(
+    sig = "eval_pack_manifest(payload: dict) -> dict",
+    category = "records"
+)]
+fn eval_pack_manifest_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let manifest = normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
+        VmError::Runtime("eval_pack_manifest: missing manifest payload".to_string())
+    })?)?;
+    to_vm(&manifest)
+}
 
-    vm.register_builtin("eval_pack_run", |args, _out| {
-        let manifest = normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
+#[harn_builtin(sig = "eval_pack_run(payload: dict) -> dict", category = "records")]
+fn eval_pack_run_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let manifest =
+        normalize_eval_pack_manifest_value(args.first().ok_or_else(|| {
             VmError::Runtime("eval_pack_run: missing manifest payload".to_string())
         })?)?;
-        to_vm(&evaluate_eval_pack_manifest(&manifest)?)
-    });
+    to_vm(&evaluate_eval_pack_manifest(&manifest)?)
+}
 
-    vm.register_builtin("persona_eval_ladder_manifest", |args, _out| {
-        let manifest =
-            normalize_persona_eval_ladder_manifest_value(args.first().ok_or_else(|| {
-                VmError::Runtime(
-                    "persona_eval_ladder_manifest: missing manifest payload".to_string(),
-                )
-            })?)?;
-        to_vm(&manifest)
-    });
+#[harn_builtin(
+    sig = "persona_eval_ladder_manifest(payload: dict) -> dict",
+    category = "records"
+)]
+fn persona_eval_ladder_manifest_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let manifest =
+        normalize_persona_eval_ladder_manifest_value(args.first().ok_or_else(|| {
+            VmError::Runtime("persona_eval_ladder_manifest: missing manifest payload".to_string())
+        })?)?;
+    to_vm(&manifest)
+}
 
-    vm.register_builtin("persona_eval_ladder_run", |args, _out| {
-        let manifest =
-            normalize_persona_eval_ladder_manifest_value(args.first().ok_or_else(|| {
-                VmError::Runtime("persona_eval_ladder_run: missing manifest payload".to_string())
-            })?)?;
-        to_vm(&run_persona_eval_ladder(&manifest)?)
-    });
+#[harn_builtin(
+    sig = "persona_eval_ladder_run(payload: dict) -> dict",
+    category = "records"
+)]
+fn persona_eval_ladder_run_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let manifest =
+        normalize_persona_eval_ladder_manifest_value(args.first().ok_or_else(|| {
+            VmError::Runtime("persona_eval_ladder_run: missing manifest payload".to_string())
+        })?)?;
+    to_vm(&run_persona_eval_ladder(&manifest)?)
+}
 
-    vm.register_builtin("friction_event", |args, _out| {
-        let event = normalize_friction_event(
-            args.first()
-                .ok_or_else(|| VmError::Runtime("friction_event: missing payload".to_string()))?,
-        )?;
-        to_vm(&event)
-    });
+#[harn_builtin(sig = "friction_event(payload: dict) -> dict", category = "records")]
+fn friction_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let event = normalize_friction_event(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("friction_event: missing payload".to_string()))?,
+    )?;
+    to_vm(&event)
+}
 
-    vm.register_builtin("friction_record", |args, _out| {
-        let event =
-            normalize_friction_event(args.first().ok_or_else(|| {
-                VmError::Runtime("friction_record: missing payload".to_string())
-            })?)?;
-        let options = args.get(1).map(crate::llm::vm_value_to_json);
-        let enabled = options
-            .as_ref()
-            .and_then(|value| value.get("enabled"))
-            .and_then(|value| value.as_bool())
-            .unwrap_or(true);
-        if !enabled {
-            return to_vm(&serde_json::json!({
-                "recorded": false,
-                "sink": "disabled",
-                "event": event
-            }));
-        }
-
-        FRICTION_EVENTS.with(|events| events.borrow_mut().push(event.clone()));
-
-        let path = options
-            .as_ref()
-            .and_then(|value| value.get("log_path").or_else(|| value.get("path")))
-            .and_then(|value| value.as_str())
-            .map(str::to_string)
-            .or_else(|| std::env::var("HARN_FRICTION_LOG").ok());
-        if let Some(path) = path {
-            let encoded = serde_json::to_string(&event)
-                .map_err(|e| VmError::Runtime(format!("friction_record: encode error: {e}")))?;
-            if let Some(parent) = std::path::Path::new(&path).parent() {
-                if parent.as_os_str().is_empty() {
-                    // Relative filename in cwd: no directory to create.
-                } else {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        VmError::Runtime(format!("friction_record: failed to create log dir: {e}"))
-                    })?;
-                }
-            }
-            use std::io::Write;
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .map_err(|e| {
-                    VmError::Runtime(format!("friction_record: failed to open log: {e}"))
-                })?;
-            writeln!(file, "{encoded}").map_err(|e| {
-                VmError::Runtime(format!("friction_record: failed to append log: {e}"))
-            })?;
-            return to_vm(&serde_json::json!({
-                "recorded": true,
-                "sink": "jsonl",
-                "path": path,
-                "event": event
-            }));
-        }
-
-        to_vm(&serde_json::json!({
-            "recorded": true,
-            "sink": "memory",
+#[harn_builtin(
+    sig = "friction_record(payload: dict, options?: dict) -> dict",
+    category = "records"
+)]
+fn friction_record_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let event = normalize_friction_event(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("friction_record: missing payload".to_string()))?,
+    )?;
+    let options = args.get(1).map(crate::llm::vm_value_to_json);
+    let enabled = options
+        .as_ref()
+        .and_then(|value| value.get("enabled"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    if !enabled {
+        return to_vm(&serde_json::json!({
+            "recorded": false,
+            "sink": "disabled",
             "event": event
-        }))
-    });
+        }));
+    }
 
-    vm.register_builtin("friction_events", |_args, _out| {
-        let events = FRICTION_EVENTS.with(|events| events.borrow().clone());
-        to_vm(&events)
-    });
+    FRICTION_EVENTS.with(|events| events.borrow_mut().push(event.clone()));
 
-    vm.register_builtin("friction_clear", |_args, _out| {
-        FRICTION_EVENTS.with(|events| events.borrow_mut().clear());
-        Ok(VmValue::Nil)
-    });
+    let path = options
+        .as_ref()
+        .and_then(|value| value.get("log_path").or_else(|| value.get("path")))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| std::env::var("HARN_FRICTION_LOG").ok());
+    if let Some(path) = path {
+        let encoded = serde_json::to_string(&event)
+            .map_err(|e| VmError::Runtime(format!("friction_record: encode error: {e}")))?;
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            if parent.as_os_str().is_empty() {
+                // Relative filename in cwd: no directory to create.
+            } else {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    VmError::Runtime(format!("friction_record: failed to create log dir: {e}"))
+                })?;
+            }
+        }
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| VmError::Runtime(format!("friction_record: failed to open log: {e}")))?;
+        writeln!(file, "{encoded}")
+            .map_err(|e| VmError::Runtime(format!("friction_record: failed to append log: {e}")))?;
+        return to_vm(&serde_json::json!({
+            "recorded": true,
+            "sink": "jsonl",
+            "path": path,
+            "event": event
+        }));
+    }
 
-    vm.register_builtin("context_pack_manifest", |args, _out| {
-        let manifest = normalize_context_pack_manifest(args.first().ok_or_else(|| {
+    to_vm(&serde_json::json!({
+        "recorded": true,
+        "sink": "memory",
+        "event": event
+    }))
+}
+
+#[harn_builtin(sig = "friction_events() -> list", category = "records")]
+fn friction_events_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let events = FRICTION_EVENTS.with(|events| events.borrow().clone());
+    to_vm(&events)
+}
+
+#[harn_builtin(sig = "friction_clear() -> nil", category = "records")]
+fn friction_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    FRICTION_EVENTS.with(|events| events.borrow_mut().clear());
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "context_pack_manifest(payload: dict) -> dict",
+    category = "records"
+)]
+fn context_pack_manifest_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let manifest =
+        normalize_context_pack_manifest(args.first().ok_or_else(|| {
             VmError::Runtime("context_pack_manifest: missing payload".to_string())
         })?)?;
-        to_vm(&manifest)
-    });
+    to_vm(&manifest)
+}
 
-    vm.register_builtin("context_pack_manifest_parse", |args, _out| {
-        let src = require_text_arg(args, 0, "context_pack_manifest_parse", "source")?;
-        let manifest = parse_context_pack_manifest_src(&src)?;
-        to_vm(&manifest)
-    });
+#[harn_builtin(
+    sig = "context_pack_manifest_parse(source: string) -> dict",
+    category = "records"
+)]
+fn context_pack_manifest_parse_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let src = require_text_arg(args, 0, "context_pack_manifest_parse", "source")?;
+    let manifest = parse_context_pack_manifest_src(&src)?;
+    to_vm(&manifest)
+}
 
-    vm.register_builtin("context_pack_suggestions", |args, _out| {
-        let events = match args.first() {
-            Some(value) => parse_friction_events_value(value)?,
-            None => FRICTION_EVENTS.with(|events| Ok::<_, VmError>(events.borrow().clone()))?,
-        };
-        let options: ContextPackSuggestionOptions = match args.get(1) {
-            Some(value) if !matches!(value, VmValue::Nil) => {
-                serde_json::from_value(crate::llm::vm_value_to_json(value)).map_err(|e| {
-                    VmError::Runtime(format!(
-                        "context_pack_suggestions: options parse error: {e}"
-                    ))
-                })?
-            }
-            _ => ContextPackSuggestionOptions::default(),
-        };
-        to_vm(&generate_context_pack_suggestions(&events, &options))
-    });
-
-    vm.register_builtin("friction_eval_fixture", |args, _out| {
-        let fixture = args.first().ok_or_else(|| {
-            VmError::Runtime("friction_eval_fixture: missing fixture payload".to_string())
-        })?;
-        let json = crate::llm::vm_value_to_json(fixture);
-        let events = parse_friction_events_value(fixture)?;
-        let options: ContextPackSuggestionOptions = json
-            .get("options")
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|e| {
-                VmError::Runtime(format!("friction_eval_fixture: options parse error: {e}"))
-            })?
-            .unwrap_or_default();
-        let expectations: Vec<ContextPackSuggestionExpectation> = json
-            .get("expected_suggestions")
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|e| {
+#[harn_builtin(
+    sig = "context_pack_suggestions(events?: list, options?: dict) -> list",
+    category = "records"
+)]
+fn context_pack_suggestions_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let events = match args.first() {
+        Some(value) => parse_friction_events_value(value)?,
+        None => FRICTION_EVENTS.with(|events| Ok::<_, VmError>(events.borrow().clone()))?,
+    };
+    let options: ContextPackSuggestionOptions = match args.get(1) {
+        Some(value) if !matches!(value, VmValue::Nil) => {
+            serde_json::from_value(crate::llm::vm_value_to_json(value)).map_err(|e| {
                 VmError::Runtime(format!(
-                    "friction_eval_fixture: expected_suggestions parse error: {e}"
+                    "context_pack_suggestions: options parse error: {e}"
                 ))
             })?
-            .unwrap_or_default();
-        let suggestions = generate_context_pack_suggestions(&events, &options);
-        let failures = evaluate_context_pack_suggestion_expectations(&suggestions, &expectations);
-        to_vm(&serde_json::json!({
-            "pass": failures.is_empty(),
-            "failures": failures,
-            "event_count": events.len(),
-            "suggestion_count": suggestions.len(),
-            "suggestions": suggestions
-        }))
-    });
-
-    vm.register_builtin("eval_metric", |args, _out| {
-        let name = args
-            .first()
-            .map(|v| v.display())
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| VmError::Runtime("eval_metric: missing name".to_string()))?;
-        let value = args
-            .get(1)
-            .ok_or_else(|| VmError::Runtime("eval_metric: missing value".to_string()))?;
-        let value_json = crate::llm::vm_value_to_json(value);
-        let metadata = args
-            .get(2)
-            .filter(|v| !matches!(v, VmValue::Nil))
-            .map(crate::llm::vm_value_to_json);
-        EVAL_METRICS.with(|m| {
-            m.borrow_mut().push(EvalMetric {
-                name,
-                value: value_json,
-                metadata,
-            });
-        });
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("eval_metrics", |_args, _out| {
-        let metrics = EVAL_METRICS.with(|m| m.borrow().clone());
-        let list: Vec<VmValue> = metrics
-            .iter()
-            .map(|metric| {
-                let mut dict = BTreeMap::new();
-                dict.insert(
-                    "name".to_string(),
-                    VmValue::String(Rc::from(metric.name.as_str())),
-                );
-                dict.insert(
-                    "value".to_string(),
-                    crate::stdlib::json_to_vm_value(&metric.value),
-                );
-                if let Some(ref meta) = metric.metadata {
-                    dict.insert(
-                        "metadata".to_string(),
-                        crate::stdlib::json_to_vm_value(meta),
-                    );
-                }
-                VmValue::Dict(Rc::new(dict))
-            })
-            .collect();
-        Ok(VmValue::List(Rc::from(list)))
-    });
+        }
+        _ => ContextPackSuggestionOptions::default(),
+    };
+    to_vm(&generate_context_pack_suggestions(&events, &options))
 }
+
+#[harn_builtin(
+    sig = "friction_eval_fixture(fixture: dict) -> dict",
+    category = "records"
+)]
+fn friction_eval_fixture_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let fixture = args.first().ok_or_else(|| {
+        VmError::Runtime("friction_eval_fixture: missing fixture payload".to_string())
+    })?;
+    let json = crate::llm::vm_value_to_json(fixture);
+    let events = parse_friction_events_value(fixture)?;
+    let options: ContextPackSuggestionOptions = json
+        .get("options")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| VmError::Runtime(format!("friction_eval_fixture: options parse error: {e}")))?
+        .unwrap_or_default();
+    let expectations: Vec<ContextPackSuggestionExpectation> = json
+        .get("expected_suggestions")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| {
+            VmError::Runtime(format!(
+                "friction_eval_fixture: expected_suggestions parse error: {e}"
+            ))
+        })?
+        .unwrap_or_default();
+    let suggestions = generate_context_pack_suggestions(&events, &options);
+    let failures = evaluate_context_pack_suggestion_expectations(&suggestions, &expectations);
+    to_vm(&serde_json::json!({
+        "pass": failures.is_empty(),
+        "failures": failures,
+        "event_count": events.len(),
+        "suggestion_count": suggestions.len(),
+        "suggestions": suggestions
+    }))
+}
+
+#[harn_builtin(
+    sig = "eval_metric(name: string, value: any, metadata?: dict) -> nil",
+    category = "records"
+)]
+fn eval_metric_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = args
+        .first()
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| VmError::Runtime("eval_metric: missing name".to_string()))?;
+    let value = args
+        .get(1)
+        .ok_or_else(|| VmError::Runtime("eval_metric: missing value".to_string()))?;
+    let value_json = crate::llm::vm_value_to_json(value);
+    let metadata = args
+        .get(2)
+        .filter(|v| !matches!(v, VmValue::Nil))
+        .map(crate::llm::vm_value_to_json);
+    EVAL_METRICS.with(|m| {
+        m.borrow_mut().push(EvalMetric {
+            name,
+            value: value_json,
+            metadata,
+        });
+    });
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(sig = "eval_metrics() -> list", category = "records")]
+fn eval_metrics_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let metrics = EVAL_METRICS.with(|m| m.borrow().clone());
+    let list: Vec<VmValue> = metrics
+        .iter()
+        .map(|metric| {
+            let mut dict = BTreeMap::new();
+            dict.insert(
+                "name".to_string(),
+                VmValue::String(Rc::from(metric.name.as_str())),
+            );
+            dict.insert(
+                "value".to_string(),
+                crate::stdlib::json_to_vm_value(&metric.value),
+            );
+            if let Some(ref meta) = metric.metadata {
+                dict.insert(
+                    "metadata".to_string(),
+                    crate::stdlib::json_to_vm_value(meta),
+                );
+            }
+            VmValue::Dict(Rc::new(dict))
+        })
+        .collect();
+    Ok(VmValue::List(Rc::from(list)))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &ARTIFACT_IMPL_DEF,
+    &HANDOFF_IMPL_DEF,
+    &HANDOFF_CONTEXT_IMPL_DEF,
+    &HANDOFF_ROUTES_IMPL_DEF,
+    &HANDOFF_EFFECTS_IMPL_DEF,
+    &ARTIFACT_DERIVE_IMPL_DEF,
+    &ARTIFACT_SELECT_IMPL_DEF,
+    &ARTIFACT_CONTEXT_IMPL_DEF,
+    &ARTIFACT_WORKSPACE_FILE_IMPL_DEF,
+    &ARTIFACT_WORKSPACE_SNAPSHOT_IMPL_DEF,
+    &ARTIFACT_EDITOR_SELECTION_IMPL_DEF,
+    &ARTIFACT_VERIFICATION_RESULT_IMPL_DEF,
+    &ARTIFACT_TEST_RESULT_IMPL_DEF,
+    &ARTIFACT_COMMAND_RESULT_IMPL_DEF,
+    &ARTIFACT_DIFF_IMPL_DEF,
+    &ARTIFACT_GIT_DIFF_IMPL_DEF,
+    &ARTIFACT_DIFF_REVIEW_IMPL_DEF,
+    &ARTIFACT_REVIEW_DECISION_IMPL_DEF,
+    &ARTIFACT_PATCH_PROPOSAL_IMPL_DEF,
+    &ARTIFACT_VERIFICATION_BUNDLE_IMPL_DEF,
+    &ARTIFACT_APPLY_INTENT_IMPL_DEF,
+    &RUN_RECORD_IMPL_DEF,
+    &LOAD_RUN_TREE_IMPL_DEF,
+    &RUN_RECORD_SAVE_IMPL_DEF,
+    &RUN_RECORD_LOAD_IMPL_DEF,
+    &RUN_RECORD_FIXTURE_IMPL_DEF,
+    &RUN_RECORD_EVAL_IMPL_DEF,
+    &RUN_RECORD_EVAL_SUITE_IMPL_DEF,
+    &RUN_RECORD_DIFF_IMPL_DEF,
+    &EVAL_SUITE_MANIFEST_IMPL_DEF,
+    &EVAL_SUITE_RUN_IMPL_DEF,
+    &EVAL_PACK_MANIFEST_IMPL_DEF,
+    &EVAL_PACK_RUN_IMPL_DEF,
+    &PERSONA_EVAL_LADDER_MANIFEST_IMPL_DEF,
+    &PERSONA_EVAL_LADDER_RUN_IMPL_DEF,
+    &FRICTION_EVENT_IMPL_DEF,
+    &FRICTION_RECORD_IMPL_DEF,
+    &FRICTION_EVENTS_IMPL_DEF,
+    &FRICTION_CLEAR_IMPL_DEF,
+    &CONTEXT_PACK_MANIFEST_IMPL_DEF,
+    &CONTEXT_PACK_MANIFEST_PARSE_IMPL_DEF,
+    &CONTEXT_PACK_SUGGESTIONS_IMPL_DEF,
+    &FRICTION_EVAL_FIXTURE_IMPL_DEF,
+    &EVAL_METRIC_IMPL_DEF,
+    &EVAL_METRICS_IMPL_DEF,
+];

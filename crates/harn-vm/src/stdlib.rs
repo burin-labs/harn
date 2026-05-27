@@ -273,32 +273,52 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         // `#[harn_builtin]`. Order is alphabetical by module file name for
         // predictability.
         let mut out: Vec<&'static macros::VmBuiltinDef> = Vec::new();
+        out.extend_from_slice(agent_state::MODULE_BUILTINS);
         out.extend_from_slice(bytes::MODULE_BUILTINS);
         out.extend_from_slice(calendar::MODULE_BUILTINS);
+        out.extend_from_slice(clock::MODULE_BUILTINS);
         out.extend_from_slice(collections::MODULE_BUILTINS);
+        out.extend_from_slice(command_policy::MODULE_BUILTINS);
         out.extend_from_slice(compression::MODULE_BUILTINS);
+        out.extend_from_slice(connectors::MODULE_BUILTINS);
         out.extend_from_slice(cookies::MODULE_BUILTINS);
         out.extend_from_slice(crypto::MODULE_BUILTINS);
         out.extend_from_slice(csv::MODULE_BUILTINS);
         out.extend_from_slice(datetime::MODULE_BUILTINS);
+        out.extend_from_slice(durable_step::MODULE_BUILTINS);
+        out.extend_from_slice(event_log::MODULE_BUILTINS);
         out.extend_from_slice(flow::MODULE_BUILTINS);
+        out.extend_from_slice(hitl::MODULE_BUILTINS);
+        out.extend_from_slice(hitl_read::MODULE_BUILTINS);
         out.extend_from_slice(iter::MODULE_BUILTINS);
         out.extend_from_slice(json::MODULE_BUILTINS);
         out.extend_from_slice(json_stream::MODULE_BUILTINS);
         out.extend_from_slice(junit::MODULE_BUILTINS);
+        out.extend_from_slice(lifecycle_receipts::MODULE_BUILTINS);
         out.extend_from_slice(math::MODULE_BUILTINS);
+        out.extend_from_slice(monitors::MODULE_BUILTINS);
         out.extend_from_slice(multipart::MODULE_BUILTINS);
+        out.extend_from_slice(net_policy::MODULE_BUILTINS);
+        out.extend_from_slice(observability::MODULE_BUILTINS);
         out.extend_from_slice(path::MODULE_BUILTINS);
+        out.extend_from_slice(postgres::MODULE_BUILTINS);
         out.extend_from_slice(process::MODULE_BUILTINS);
+        out.extend_from_slice(agents::records::MODULE_BUILTINS);
         out.extend_from_slice(regex::MODULE_BUILTINS);
+        out.extend_from_slice(runtime_scope::MODULE_BUILTINS);
         out.extend_from_slice(sets::MODULE_BUILTINS);
         out.extend_from_slice(shapes::MODULE_BUILTINS);
         out.extend_from_slice(skills::MODULE_BUILTINS);
         out.extend_from_slice(strings::MODULE_BUILTINS);
+        out.extend_from_slice(supervisor::MODULE_BUILTINS);
+        out.extend_from_slice(timing::MODULE_BUILTINS);
         out.extend_from_slice(tool_hooks::MODULE_BUILTINS);
         out.extend_from_slice(tools::MODULE_BUILTINS);
         out.extend_from_slice(tracing::MODULE_BUILTINS);
+        out.extend_from_slice(triggers_stdlib::MODULE_BUILTINS);
         out.extend_from_slice(types::MODULE_BUILTINS);
+        out.extend_from_slice(waitpoint::MODULE_BUILTINS);
+        out.extend_from_slice(waitpoints::MODULE_BUILTINS);
         out.extend_from_slice(web::MODULE_BUILTINS);
         out
     })

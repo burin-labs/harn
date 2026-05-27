@@ -15,6 +15,7 @@ use crate::event_log::{
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
 use crate::triggers::dispatcher::{
     current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease,
 };
@@ -105,9 +106,20 @@ struct MonitorWaitRecord {
 }
 
 pub(crate) fn register_monitor_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("monitor_wait_for_native", |args| async move {
-        monitor_wait_for_impl(&args).await
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&MONITOR_WAIT_FOR_NATIVE_BUILTIN_DEF];
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("monitor_wait_for_native", &[Param::new("args", TY_ANY)], TY_ANY),
+    kind = "async",
+    category = "monitor"
+)]
+async fn monitor_wait_for_native_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    monitor_wait_for_impl(&args).await
 }
 
 pub(crate) fn reset_monitor_state() {

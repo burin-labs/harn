@@ -8,6 +8,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
+use crate::stdlib::macros::{
+    harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT, TY_LIST,
+};
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -114,123 +117,157 @@ thread_local! {
 }
 
 pub(crate) fn register_supervisor_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("supervisor_start", |args| async move {
-        let base_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-            VmError::Runtime("supervisor_start: requires VM execution context".to_string())
-        })?;
-        let spec = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("supervisor_start: spec is required".to_string()))?;
-        let handle = start_supervisor(base_vm, spec)?;
-        let value = supervisor_handle_value(&handle.state.borrow());
-        Ok(value)
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("supervisor_state", |args, _out| {
-        let state = supervisor_from_args(args, "supervisor_state")?;
-        let value = supervisor_state_value(&state.borrow());
-        Ok(value)
-    });
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &SUPERVISOR_START_IMPL_DEF,
+    &SUPERVISOR_STATE_IMPL_DEF,
+    &SUPERVISOR_EVENTS_IMPL_DEF,
+    &SUPERVISOR_METRICS_IMPL_DEF,
+    &SUPERVISOR_STOP_IMPL_DEF,
+];
 
-    vm.register_builtin("supervisor_events", |args, _out| {
-        let state = supervisor_from_args(args, "supervisor_events")?;
-        let value = events_value(&state.borrow());
-        Ok(value)
-    });
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("supervisor_start", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "supervisor"
+)]
+async fn supervisor_start_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let base_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("supervisor_start: requires VM execution context".to_string())
+    })?;
+    let spec = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("supervisor_start: spec is required".to_string()))?;
+    let handle = start_supervisor(base_vm, spec)?;
+    let value = supervisor_handle_value(&handle.state.borrow());
+    Ok(value)
+}
 
-    vm.register_builtin("supervisor_metrics", |args, _out| {
-        let state = supervisor_from_args(args, "supervisor_metrics")?;
-        let value = metrics_value(&state.borrow());
-        Ok(value)
-    });
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("supervisor_state", &[Param::new("args", TY_ANY)], TY_DICT),
+    category = "supervisor"
+)]
+fn supervisor_state_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let state = supervisor_from_args(args, "supervisor_state")?;
+    let value = supervisor_state_value(&state.borrow());
+    Ok(value)
+}
 
-    vm.register_async_builtin("supervisor_stop", |args| async move {
-        let id = supervisor_id_from_args(&args, "supervisor_stop")?;
-        let timeout_ms = args.get(1).and_then(duration_ms).unwrap_or_else(|| {
-            supervisor_lookup(&id).map_or(5000, |h| h.state.borrow().shutdown_ms)
-        });
-        let handle = supervisor_lookup(&id).ok_or_else(|| {
-            VmError::Runtime(format!("supervisor_stop: unknown supervisor '{id}'"))
-        })?;
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("supervisor_events", &[Param::new("args", TY_ANY)], TY_LIST),
+    category = "supervisor"
+)]
+fn supervisor_events_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let state = supervisor_from_args(args, "supervisor_events")?;
+    let value = events_value(&state.borrow());
+    Ok(value)
+}
 
-        {
-            let mut state = handle.state.borrow_mut();
-            if state.status != "stopped" {
-                state.status = "draining".to_string();
-                state.stop_requested = true;
-                push_event(&mut state, None, "supervisor_stopping", None);
-                for child in &mut state.children {
-                    if child.status == "running" {
-                        child.status = "draining".to_string();
-                        child.current_wait_reason = Some("shutdown".to_string());
-                    }
-                    if let Some(token) = &child.cancel_token {
-                        token.store(true, Ordering::SeqCst);
-                    }
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("supervisor_metrics", &[Param::new("args", TY_ANY)], TY_DICT),
+    category = "supervisor"
+)]
+fn supervisor_metrics_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let state = supervisor_from_args(args, "supervisor_metrics")?;
+    let value = metrics_value(&state.borrow());
+    Ok(value)
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("supervisor_stop", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "supervisor"
+)]
+async fn supervisor_stop_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let id = supervisor_id_from_args(&args, "supervisor_stop")?;
+    let timeout_ms = args
+        .get(1)
+        .and_then(duration_ms)
+        .unwrap_or_else(|| supervisor_lookup(&id).map_or(5000, |h| h.state.borrow().shutdown_ms));
+    let handle = supervisor_lookup(&id)
+        .ok_or_else(|| VmError::Runtime(format!("supervisor_stop: unknown supervisor '{id}'")))?;
+
+    {
+        let mut state = handle.state.borrow_mut();
+        if state.status != "stopped" {
+            state.status = "draining".to_string();
+            state.stop_requested = true;
+            push_event(&mut state, None, "supervisor_stopping", None);
+            for child in &mut state.children {
+                if child.status == "running" {
+                    child.status = "draining".to_string();
+                    child.current_wait_reason = Some("shutdown".to_string());
+                }
+                if let Some(token) = &child.cancel_token {
+                    token.store(true, Ordering::SeqCst);
                 }
             }
         }
+    }
 
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
-        loop {
-            if handle
-                .state
-                .borrow()
-                .children
-                .iter()
-                .all(|child| !matches!(child.status.as_str(), "running" | "draining"))
-            {
-                break;
-            }
-            if tokio::time::Instant::now() >= deadline {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        if handle
+            .state
+            .borrow()
+            .children
+            .iter()
+            .all(|child| !matches!(child.status.as_str(), "running" | "draining"))
         {
-            let mut state = handle.state.borrow_mut();
-            let mut forced = false;
-            for idx in 0..state.children.len() {
-                let child = &mut state.children[idx];
-                if matches!(
-                    child.status.as_str(),
-                    "running" | "draining" | "waiting" | "circuit_open"
-                ) {
-                    child.generation = child.generation.saturating_add(1);
-                    if let Some(join) = child.join.take() {
-                        join.abort();
-                    }
-                    child.cancel_token = None;
-                    child.status = "stopped".to_string();
-                    child.current_wait_reason = None;
-                    child.next_restart_time_ms = None;
-                    forced = true;
-                    let name = child.spec.name.clone();
-                    push_event(
-                        &mut state,
-                        Some(name),
-                        "child_stopped",
-                        Some("supervisor stop".to_string()),
-                    );
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    {
+        let mut state = handle.state.borrow_mut();
+        let mut forced = false;
+        for idx in 0..state.children.len() {
+            let child = &mut state.children[idx];
+            if matches!(
+                child.status.as_str(),
+                "running" | "draining" | "waiting" | "circuit_open"
+            ) {
+                child.generation = child.generation.saturating_add(1);
+                if let Some(join) = child.join.take() {
+                    join.abort();
                 }
+                child.cancel_token = None;
+                child.status = "stopped".to_string();
+                child.current_wait_reason = None;
+                child.next_restart_time_ms = None;
+                forced = true;
+                let name = child.spec.name.clone();
+                push_event(
+                    &mut state,
+                    Some(name),
+                    "child_stopped",
+                    Some("supervisor stop".to_string()),
+                );
             }
-            state.status = "stopped".to_string();
-            push_event(
-                &mut state,
-                None,
-                "supervisor_stopped",
-                Some(if forced { "forced" } else { "drained" }.to_string()),
-            );
         }
+        state.status = "stopped".to_string();
+        push_event(
+            &mut state,
+            None,
+            "supervisor_stopped",
+            Some(if forced { "forced" } else { "drained" }.to_string()),
+        );
+    }
 
-        if let Some(join) = handle.state.borrow_mut().supervisor_join.take() {
-            join.abort();
-        }
+    if let Some(join) = handle.state.borrow_mut().supervisor_join.take() {
+        join.abort();
+    }
 
-        let value = supervisor_state_value(&handle.state.borrow());
-        Ok(value)
-    });
+    let value = supervisor_state_value(&handle.state.borrow());
+    Ok(value)
 }
 
 fn start_supervisor(base_vm: Vm, spec_value: &VmValue) -> Result<SupervisorHandle, VmError> {

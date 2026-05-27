@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
 use crate::stdlib::json_to_vm_value;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -56,107 +57,144 @@ pub(crate) fn reset_observability_state() {
 }
 
 pub(crate) fn register_observability_builtins(vm: &mut Vm) {
-    vm.register_builtin("__obs_configure", |args, _out| {
-        let config_value = args.first().cloned().unwrap_or(VmValue::Nil);
-        let parsed = parse_config(&config_value)?;
-        OBS_STATE.with(|state| state.borrow_mut().config = parsed);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("__obs_reset", |_args, _out| {
-        reset_observability_state();
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("__obs_start_span", |args, _out| {
-        let name = string_arg(args.first(), "__obs_start_span", "name")?;
-        let attrs = object_arg(args.get(1), "__obs_start_span", "attrs")?;
-        let span = OBS_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            state.next_span_id += 1;
-            let parent = state.span_stack.last();
-            let trace_id = parent
-                .map(|span| span.trace_id.clone())
-                .unwrap_or_else(|| format!("obs_trace_{}", uuid::Uuid::now_v7()));
-            let span_id = format!("obs_span_{:016x}", state.next_span_id);
-            let vm_span_id =
-                crate::tracing::span_start(crate::tracing::SpanKind::FnCall, name.clone());
-            for (key, value) in attrs.iter() {
-                crate::tracing::span_set_metadata(vm_span_id, key, value.clone());
-            }
-            let span = ObsSpan {
-                id: span_id,
-                trace_id,
-                name,
-                attrs,
-                vm_span_id,
-            };
-            state.span_stack.push(span.clone());
-            span
-        });
-        Ok(span_to_vm_value(&span))
-    });
-
-    vm.register_builtin("__obs_end_span", |args, _out| {
-        let span_id = field_string(args.first(), "span_id").unwrap_or_default();
-        let ended = OBS_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            let pos = if span_id.is_empty() {
-                state.span_stack.len().checked_sub(1)
-            } else {
-                state.span_stack.iter().rposition(|span| span.id == span_id)
-            };
-            pos.map(|idx| state.span_stack.remove(idx))
-        });
-        if let Some(span) = ended {
-            crate::tracing::span_end(span.vm_span_id);
-            let mut fields = serde_json::Map::new();
-            fields.insert(
-                "span_name".to_string(),
-                serde_json::Value::String(span.name),
-            );
-            fields.extend(span.attrs);
-            let mut event = base_event("span_end", "span", Some(fields), None, None)?;
-            event.insert(
-                "trace_id".to_string(),
-                serde_json::Value::String(span.trace_id),
-            );
-            event.insert("span_id".to_string(), serde_json::Value::String(span.id));
-            emit_event(event, None);
-        }
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("__obs_emit", |args, _out| {
-        let event_value = args.first().cloned().unwrap_or(VmValue::Nil);
-        let mut event = match vm_value_to_json(&event_value) {
-            serde_json::Value::Object(map) => map,
-            other => {
-                return Err(VmError::Runtime(format!(
-                    "__obs_emit: event must be a dict, got {}",
-                    json_to_vm_value(&other).type_name()
-                )));
-            }
-        };
-        let explicit_backend = event.remove("backend");
-        let emitted = emit_event(event, explicit_backend);
-        Ok(json_to_vm_value(&emitted))
-    });
-
-    vm.register_builtin("__obs_events", |_args, _out| {
-        let events = OBS_STATE.with(|state| state.borrow().emissions.clone());
-        Ok(json_to_vm_value(&serde_json::Value::Array(events)))
-    });
-
-    vm.register_builtin("__obs_events_take", |_args, _out| {
-        let events = OBS_STATE.with(|state| std::mem::take(&mut state.borrow_mut().emissions));
-        Ok(json_to_vm_value(&serde_json::Value::Array(events)))
-    });
-
-    vm.register_builtin("__obs_auto_backend", |_args, _out| {
-        Ok(json_to_vm_value(&resolve_auto_backend()))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(
+    sig = "__obs_configure(...args: any) -> nil",
+    category = "observability"
+)]
+fn obs_configure_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let config_value = args.first().cloned().unwrap_or(VmValue::Nil);
+    let parsed = parse_config(&config_value)?;
+    OBS_STATE.with(|state| state.borrow_mut().config = parsed);
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(sig = "__obs_reset(...args: any) -> nil", category = "observability")]
+fn obs_reset_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    reset_observability_state();
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "__obs_start_span(...args: any) -> dict",
+    category = "observability"
+)]
+fn obs_start_span_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let name = string_arg(args.first(), "__obs_start_span", "name")?;
+    let attrs = object_arg(args.get(1), "__obs_start_span", "attrs")?;
+    let span = OBS_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.next_span_id += 1;
+        let parent = state.span_stack.last();
+        let trace_id = parent
+            .map(|span| span.trace_id.clone())
+            .unwrap_or_else(|| format!("obs_trace_{}", uuid::Uuid::now_v7()));
+        let span_id = format!("obs_span_{:016x}", state.next_span_id);
+        let vm_span_id = crate::tracing::span_start(crate::tracing::SpanKind::FnCall, name.clone());
+        for (key, value) in attrs.iter() {
+            crate::tracing::span_set_metadata(vm_span_id, key, value.clone());
+        }
+        let span = ObsSpan {
+            id: span_id,
+            trace_id,
+            name,
+            attrs,
+            vm_span_id,
+        };
+        state.span_stack.push(span.clone());
+        span
+    });
+    Ok(span_to_vm_value(&span))
+}
+
+#[harn_builtin(
+    sig = "__obs_end_span(...args: any) -> nil",
+    category = "observability"
+)]
+fn obs_end_span_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let span_id = field_string(args.first(), "span_id").unwrap_or_default();
+    let ended = OBS_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let pos = if span_id.is_empty() {
+            state.span_stack.len().checked_sub(1)
+        } else {
+            state.span_stack.iter().rposition(|span| span.id == span_id)
+        };
+        pos.map(|idx| state.span_stack.remove(idx))
+    });
+    if let Some(span) = ended {
+        crate::tracing::span_end(span.vm_span_id);
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "span_name".to_string(),
+            serde_json::Value::String(span.name),
+        );
+        fields.extend(span.attrs);
+        let mut event = base_event("span_end", "span", Some(fields), None, None)?;
+        event.insert(
+            "trace_id".to_string(),
+            serde_json::Value::String(span.trace_id),
+        );
+        event.insert("span_id".to_string(), serde_json::Value::String(span.id));
+        emit_event(event, None);
+    }
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(sig = "__obs_emit(...args: any) -> list", category = "observability")]
+fn obs_emit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let event_value = args.first().cloned().unwrap_or(VmValue::Nil);
+    let mut event = match vm_value_to_json(&event_value) {
+        serde_json::Value::Object(map) => map,
+        other => {
+            return Err(VmError::Runtime(format!(
+                "__obs_emit: event must be a dict, got {}",
+                json_to_vm_value(&other).type_name()
+            )));
+        }
+    };
+    let explicit_backend = event.remove("backend");
+    let emitted = emit_event(event, explicit_backend);
+    Ok(json_to_vm_value(&emitted))
+}
+
+#[harn_builtin(sig = "__obs_events(...args: any) -> list", category = "observability")]
+fn obs_events_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let events = OBS_STATE.with(|state| state.borrow().emissions.clone());
+    Ok(json_to_vm_value(&serde_json::Value::Array(events)))
+}
+
+#[harn_builtin(
+    sig = "__obs_events_take(...args: any) -> list",
+    category = "observability"
+)]
+fn obs_events_take_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let events = OBS_STATE.with(|state| std::mem::take(&mut state.borrow_mut().emissions));
+    Ok(json_to_vm_value(&serde_json::Value::Array(events)))
+}
+
+#[harn_builtin(
+    sig = "__obs_auto_backend(...args: any) -> dict",
+    category = "observability"
+)]
+fn obs_auto_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(json_to_vm_value(&resolve_auto_backend()))
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &OBS_CONFIGURE_IMPL_DEF,
+    &OBS_RESET_IMPL_DEF,
+    &OBS_START_SPAN_IMPL_DEF,
+    &OBS_END_SPAN_IMPL_DEF,
+    &OBS_EMIT_IMPL_DEF,
+    &OBS_EVENTS_IMPL_DEF,
+    &OBS_EVENTS_TAKE_IMPL_DEF,
+    &OBS_AUTO_BACKEND_IMPL_DEF,
+];
 
 fn parse_config(value: &VmValue) -> Result<ObsConfig, VmError> {
     if matches!(value, VmValue::Nil) {

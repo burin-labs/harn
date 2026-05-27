@@ -13,6 +13,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::clock_mock;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::testbench::tape::{self as tape, ClockSource, TapeRecordKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -142,62 +143,93 @@ impl MockClockGuard {
 }
 
 pub(crate) fn register_clock_builtins(vm: &mut Vm) {
-    // Replace the existing `timestamp` registration in process.rs so it
-    // honors the mock. Process.rs registers it first; we override here.
-    vm.register_builtin("timestamp", |_args, _out| {
-        Ok(VmValue::Float(now_wall_seconds()))
-    });
-
-    // Replace `elapsed` so it honors the mock too.
-    vm.register_builtin("elapsed", |_args, _out| {
-        Ok(VmValue::Int(now_monotonic_ms()))
-    });
-
-    vm.register_builtin("monotonic_ms", |_args, _out| {
-        Ok(VmValue::Int(now_monotonic_ms()))
-    });
-
-    vm.register_builtin("now_ms", |_args, _out| Ok(VmValue::Int(now_wall_ms())));
-
-    vm.register_async_builtin("sleep_ms", |args| async move {
-        let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-        if ms <= 0 {
-            return Ok(VmValue::Nil);
-        }
-        if is_mocked() {
-            advance(ms);
-        } else {
-            tokio::time::sleep(Duration::from_millis(ms as u64)).await;
-        }
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("mock_time", |args, _out| {
-        let Some(ms) = args.first().and_then(|a| a.as_int()) else {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "mock_time(ms): expected an integer millisecond timestamp",
-            ))));
-        };
-        push_mock(ms);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("advance_time", |args, _out| {
-        let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-        if !is_mocked() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "advance_time: no mock active. Call mock_time(ms) first.",
-            ))));
-        }
-        advance(ms);
-        Ok(VmValue::Int(now_wall_ms()))
-    });
-
-    vm.register_builtin("unmock_time", |_args, _out| {
-        pop_mock();
-        Ok(VmValue::Nil)
-    });
+    // Some of these intentionally override registrations from earlier
+    // modules (e.g. `timestamp`/`elapsed` registered by process.rs) so
+    // they honor the active clock mock. `register_builtin_def` ends up
+    // calling `register_builtin_with_metadata`, which replaces existing
+    // entries, preserving the override behavior.
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(sig = "timestamp(...args: any) -> float", category = "clock")]
+fn timestamp_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Float(now_wall_seconds()))
+}
+
+#[harn_builtin(sig = "elapsed() -> int", category = "clock")]
+fn elapsed_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Int(now_monotonic_ms()))
+}
+
+#[harn_builtin(sig = "monotonic_ms(...args: any) -> int", category = "clock")]
+fn monotonic_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Int(now_monotonic_ms()))
+}
+
+#[harn_builtin(sig = "now_ms(...args: any) -> int", category = "clock")]
+fn now_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Int(now_wall_ms()))
+}
+
+#[harn_builtin(
+    sig = "sleep_ms(...args: any) -> nil",
+    kind = "async",
+    category = "clock"
+)]
+async fn sleep_ms_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+    if ms <= 0 {
+        return Ok(VmValue::Nil);
+    }
+    if is_mocked() {
+        advance(ms);
+    } else {
+        tokio::time::sleep(Duration::from_millis(ms as u64)).await;
+    }
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(sig = "mock_time(...args: any) -> nil", category = "clock")]
+fn mock_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(ms) = args.first().and_then(|a| a.as_int()) else {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "mock_time(ms): expected an integer millisecond timestamp",
+        ))));
+    };
+    push_mock(ms);
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(sig = "advance_time(ms: int) -> int", category = "clock")]
+fn advance_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+    if !is_mocked() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "advance_time: no mock active. Call mock_time(ms) first.",
+        ))));
+    }
+    advance(ms);
+    Ok(VmValue::Int(now_wall_ms()))
+}
+
+#[harn_builtin(sig = "unmock_time(...args: any) -> nil", category = "clock")]
+fn unmock_time_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    pop_mock();
+    Ok(VmValue::Nil)
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &TIMESTAMP_IMPL_DEF,
+    &ELAPSED_IMPL_DEF,
+    &MONOTONIC_MS_IMPL_DEF,
+    &NOW_MS_IMPL_DEF,
+    &SLEEP_MS_IMPL_DEF,
+    &MOCK_TIME_IMPL_DEF,
+    &ADVANCE_TIME_IMPL_DEF,
+    &UNMOCK_TIME_IMPL_DEF,
+];
 
 #[cfg(test)]
 mod tests {

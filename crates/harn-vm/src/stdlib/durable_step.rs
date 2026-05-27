@@ -11,6 +11,7 @@ use crate::event_log::{
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{value_structural_hash_key, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -56,12 +57,30 @@ pub(crate) fn reset_durable_step_state() {
 
 pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
     register_step_namespace(vm);
-    vm.register_async_builtin("step.run", |args| async move { step_run(args).await });
-    vm.register_async_builtin(
-        "step.inspect",
-        |args| async move { step_inspect(args).await },
-    );
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
+
+#[harn_builtin(
+    sig = "step.run(...args: any) -> any",
+    kind = "async",
+    category = "durable_step"
+)]
+async fn step_run_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    step_run(args).await
+}
+
+#[harn_builtin(
+    sig = "step.inspect(namespace_or_options?: string | dict | nil) -> list",
+    kind = "async",
+    category = "durable_step"
+)]
+async fn step_inspect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    step_inspect(args).await
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&STEP_RUN_IMPL_DEF, &STEP_INSPECT_IMPL_DEF];
 
 fn register_step_namespace(vm: &mut Vm) {
     let names = ["run", "inspect"];

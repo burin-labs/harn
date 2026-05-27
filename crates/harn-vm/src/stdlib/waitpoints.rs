@@ -14,6 +14,7 @@ use crate::event_log::{
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
 use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::value::{VmError, VmValue};
 use crate::vm::clone_async_builtin_child_vm;
@@ -67,18 +68,52 @@ struct WaitOptions {
 }
 
 pub(crate) fn register_waitpoint_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("waitpoint_create", |args| async move {
-        waitpoint_create_impl(&args).await
-    });
-    vm.register_async_builtin("waitpoint_complete", |args| async move {
-        waitpoint_complete_impl(&args).await
-    });
-    vm.register_async_builtin("waitpoint_cancel", |args| async move {
-        waitpoint_cancel_impl(&args).await
-    });
-    vm.register_async_builtin("waitpoint_wait", |args| async move {
-        waitpoint_wait_impl(&args).await
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &WAITPOINT_CREATE_BUILTIN_DEF,
+    &WAITPOINT_COMPLETE_BUILTIN_DEF,
+    &WAITPOINT_CANCEL_BUILTIN_DEF,
+    &WAITPOINT_WAIT_BUILTIN_DEF,
+];
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("waitpoint_create", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "waitpoint"
+)]
+async fn waitpoint_create_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    waitpoint_create_impl(&args).await
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("waitpoint_complete", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "waitpoint"
+)]
+async fn waitpoint_complete_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    waitpoint_complete_impl(&args).await
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("waitpoint_cancel", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "waitpoint"
+)]
+async fn waitpoint_cancel_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    waitpoint_cancel_impl(&args).await
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("waitpoint_wait", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "waitpoint"
+)]
+async fn waitpoint_wait_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    waitpoint_wait_impl(&args).await
 }
 
 pub(crate) fn reset_waitpoint_state() {

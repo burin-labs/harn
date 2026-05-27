@@ -15,6 +15,7 @@ use crate::event_log::{
     EventLog, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::triggers::dispatcher::{
     current_dispatch_context, current_dispatch_is_replay, DispatchContext,
 };
@@ -161,18 +162,52 @@ enum WaiterResolution {
 }
 
 pub(crate) fn register_waitpoint_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("__waitpoint_create", |args| {
-        Box::pin(async move { waitpoint_create_builtin(&args).await })
-    });
-    vm.register_async_builtin("__waitpoint_wait", |args| {
-        Box::pin(async move { waitpoint_wait_builtin(&args).await })
-    });
-    vm.register_async_builtin("__waitpoint_complete", |args| {
-        Box::pin(async move { waitpoint_complete_builtin(&args).await })
-    });
-    vm.register_async_builtin("__waitpoint_cancel", |args| {
-        Box::pin(async move { waitpoint_cancel_builtin(&args).await })
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &WAITPOINT_CREATE_BUILTIN_MACRO_DEF,
+    &WAITPOINT_WAIT_BUILTIN_MACRO_DEF,
+    &WAITPOINT_COMPLETE_BUILTIN_MACRO_DEF,
+    &WAITPOINT_CANCEL_BUILTIN_MACRO_DEF,
+];
+
+#[harn_builtin(
+    sig = "__waitpoint_create(options?: string | dict | nil) -> dict",
+    kind = "async",
+    category = "waitpoint"
+)]
+async fn waitpoint_create_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    waitpoint_create_builtin(&args).await
+}
+
+#[harn_builtin(
+    sig = "__waitpoint_wait(handles: string | dict | list, options?: dict) -> dict | list",
+    kind = "async",
+    category = "waitpoint"
+)]
+async fn waitpoint_wait_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    waitpoint_wait_builtin(&args).await
+}
+
+#[harn_builtin(
+    sig = "__waitpoint_complete(handle: string | dict, value?: any, options?: dict) -> dict",
+    kind = "async",
+    category = "waitpoint"
+)]
+async fn waitpoint_complete_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    waitpoint_complete_builtin(&args).await
+}
+
+#[harn_builtin(
+    sig = "__waitpoint_cancel(handle: string | dict, options?: dict) -> dict",
+    kind = "async",
+    category = "waitpoint"
+)]
+async fn waitpoint_cancel_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    waitpoint_cancel_builtin(&args).await
 }
 
 pub(crate) fn reset_waitpoint_state() {

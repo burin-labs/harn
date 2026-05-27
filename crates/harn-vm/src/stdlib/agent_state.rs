@@ -9,6 +9,7 @@ use backend::{
     WriterIdentity,
 };
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -21,121 +22,147 @@ pub use backend::{
 };
 
 pub fn register_agent_state_builtins(vm: &mut Vm) {
-    register_init(vm);
-    register_resume(vm);
-    register_write(vm);
-    register_read(vm);
-    register_list(vm);
-    register_delete(vm);
-    register_handoff(vm);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
-fn register_init(vm: &mut Vm) {
-    vm.register_builtin("__agent_state_init", |args, _out| {
-        let backend = FilesystemBackend::new();
-        let (scope, writer, conflict_policy) = parse_init_request(args)?;
-        backend.ensure_scope(&scope)?;
-        Ok(handle_value(&backend, &scope, &writer, conflict_policy))
-    });
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &AGENT_STATE_INIT_IMPL_DEF,
+    &AGENT_STATE_RESUME_IMPL_DEF,
+    &AGENT_STATE_WRITE_IMPL_DEF,
+    &AGENT_STATE_READ_IMPL_DEF,
+    &AGENT_STATE_LIST_IMPL_DEF,
+    &AGENT_STATE_DELETE_IMPL_DEF,
+    &AGENT_STATE_HANDOFF_IMPL_DEF,
+];
+
+#[harn_builtin(
+    sig = "__agent_state_init(root_or_session: string, options_or_root?: any, options?: dict) -> dict",
+    runtime_only = true,
+    category = "agent_state"
+)]
+fn agent_state_init_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let backend = FilesystemBackend::new();
+    let (scope, writer, conflict_policy) = parse_init_request(args)?;
+    backend.ensure_scope(&scope)?;
+    Ok(handle_value(&backend, &scope, &writer, conflict_policy))
 }
 
-fn register_resume(vm: &mut Vm) {
-    vm.register_builtin("__agent_state_resume", |args, _out| {
-        let backend = FilesystemBackend::new();
-        let (scope, writer, conflict_policy) = parse_resume_request(args)?;
-        backend.resume_scope(&scope)?;
-        Ok(handle_value(&backend, &scope, &writer, conflict_policy))
-    });
+#[harn_builtin(
+    sig = "__agent_state_resume(root: string, session_id: string, options?: dict) -> dict",
+    runtime_only = true,
+    category = "agent_state"
+)]
+fn agent_state_resume_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let backend = FilesystemBackend::new();
+    let (scope, writer, conflict_policy) = parse_resume_request(args)?;
+    backend.resume_scope(&scope)?;
+    Ok(handle_value(&backend, &scope, &writer, conflict_policy))
 }
 
-fn register_write(vm: &mut Vm) {
-    vm.register_builtin("__agent_state_write", |args, _out| {
-        let backend = FilesystemBackend::new();
-        let handle = handle_from_args(args, "__agent_state_write")?;
-        let key = required_arg_string(args, 1, "__agent_state_write", "key")?;
-        let content = required_arg_string(args, 2, "__agent_state_write", "content")?;
-        let scope = scope_from_handle(handle)?;
-        let options = write_options_from_handle(handle)?;
-        let outcome = backend.write(&scope, &key, &content, &options)?;
-        enforce_conflict_policy(handle, &outcome)?;
-        Ok(VmValue::Nil)
-    });
+#[harn_builtin(
+    sig = "__agent_state_write(handle: dict, key: string, content: string) -> nil",
+    runtime_only = true,
+    category = "agent_state"
+)]
+fn agent_state_write_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let backend = FilesystemBackend::new();
+    let handle = handle_from_args(args, "__agent_state_write")?;
+    let key = required_arg_string(args, 1, "__agent_state_write", "key")?;
+    let content = required_arg_string(args, 2, "__agent_state_write", "content")?;
+    let scope = scope_from_handle(handle)?;
+    let options = write_options_from_handle(handle)?;
+    let outcome = backend.write(&scope, &key, &content, &options)?;
+    enforce_conflict_policy(handle, &outcome)?;
+    Ok(VmValue::Nil)
 }
 
-fn register_read(vm: &mut Vm) {
-    vm.register_builtin("__agent_state_read", |args, _out| {
-        let backend = FilesystemBackend::new();
-        let handle = handle_from_args(args, "__agent_state_read")?;
-        let key = required_arg_string(args, 1, "__agent_state_read", "key")?;
-        let scope = scope_from_handle(handle)?;
-        match backend.read(&scope, &key)? {
-            Some(content) => Ok(VmValue::String(Rc::from(content))),
-            None => Ok(VmValue::Nil),
-        }
-    });
+#[harn_builtin(
+    sig = "__agent_state_read(handle: dict, key: string) -> string?",
+    runtime_only = true,
+    category = "agent_state"
+)]
+fn agent_state_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let backend = FilesystemBackend::new();
+    let handle = handle_from_args(args, "__agent_state_read")?;
+    let key = required_arg_string(args, 1, "__agent_state_read", "key")?;
+    let scope = scope_from_handle(handle)?;
+    match backend.read(&scope, &key)? {
+        Some(content) => Ok(VmValue::String(Rc::from(content))),
+        None => Ok(VmValue::Nil),
+    }
 }
 
-fn register_list(vm: &mut Vm) {
-    vm.register_builtin("__agent_state_list", |args, _out| {
-        let backend = FilesystemBackend::new();
-        let handle = handle_from_args(args, "__agent_state_list")?;
-        let scope = scope_from_handle(handle)?;
-        let items = backend
-            .list(&scope)?
-            .into_iter()
-            .map(|key| VmValue::String(Rc::from(key)))
-            .collect();
-        Ok(VmValue::List(Rc::new(items)))
-    });
+#[harn_builtin(
+    sig = "__agent_state_list(handle: dict) -> list",
+    runtime_only = true,
+    category = "agent_state"
+)]
+fn agent_state_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let backend = FilesystemBackend::new();
+    let handle = handle_from_args(args, "__agent_state_list")?;
+    let scope = scope_from_handle(handle)?;
+    let items = backend
+        .list(&scope)?
+        .into_iter()
+        .map(|key| VmValue::String(Rc::from(key)))
+        .collect();
+    Ok(VmValue::List(Rc::new(items)))
 }
 
-fn register_delete(vm: &mut Vm) {
-    vm.register_builtin("__agent_state_delete", |args, _out| {
-        let backend = FilesystemBackend::new();
-        let handle = handle_from_args(args, "__agent_state_delete")?;
-        let key = required_arg_string(args, 1, "__agent_state_delete", "key")?;
-        let scope = scope_from_handle(handle)?;
-        backend.delete(&scope, &key)?;
-        Ok(VmValue::Nil)
-    });
+#[harn_builtin(
+    sig = "__agent_state_delete(handle: dict, key: string) -> nil",
+    runtime_only = true,
+    category = "agent_state"
+)]
+fn agent_state_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let backend = FilesystemBackend::new();
+    let handle = handle_from_args(args, "__agent_state_delete")?;
+    let key = required_arg_string(args, 1, "__agent_state_delete", "key")?;
+    let scope = scope_from_handle(handle)?;
+    backend.delete(&scope, &key)?;
+    Ok(VmValue::Nil)
 }
 
-fn register_handoff(vm: &mut Vm) {
-    vm.register_builtin("__agent_state_handoff", |args, _out| {
-        let backend = FilesystemBackend::new();
-        let handle = handle_from_args(args, "__agent_state_handoff")?;
-        let summary = args.get(1).ok_or_else(|| {
-            VmError::Runtime("__agent_state_handoff: `summary` is required".to_string())
-        })?;
-        let summary_json = crate::llm::vm_value_to_json(summary);
-        let serde_json::Value::Object(_) = summary_json else {
-            return Err(VmError::Runtime(
-                "__agent_state_handoff: `summary` must be a JSON object".to_string(),
-            ));
-        };
-        let typed_handoff =
-            crate::orchestration::normalize_handoff_artifact_json(summary_json.clone()).ok();
-        let scope = scope_from_handle(handle)?;
-        let writer = writer_from_handle(handle);
-        let envelope = serde_json::json!({
-            "_type": "agent_state_handoff",
-            "version": 1,
-            "session_id": scope.namespace,
-            "root": scope.root.to_string_lossy(),
-            "key": HANDOFF_KEY,
-            "summary": summary_json,
-            "handoff": typed_handoff,
-            "writer": writer_json(&writer),
-            "written_at": now_epoch_seconds(),
-        });
-        let content = serde_json::to_string_pretty(&envelope).map_err(|error| {
-            VmError::Runtime(format!("agent_state.handoff: encode error: {error}"))
-        })?;
-        let options = write_options_from_handle(handle)?;
-        let outcome = backend.write(&scope, HANDOFF_KEY, &content, &options)?;
-        enforce_conflict_policy(handle, &outcome)?;
-        Ok(VmValue::Nil)
+#[harn_builtin(
+    sig = "__agent_state_handoff(handle: dict, summary: dict) -> nil",
+    runtime_only = true,
+    category = "agent_state"
+)]
+fn agent_state_handoff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let backend = FilesystemBackend::new();
+    let handle = handle_from_args(args, "__agent_state_handoff")?;
+    let summary = args.get(1).ok_or_else(|| {
+        VmError::Runtime("__agent_state_handoff: `summary` is required".to_string())
+    })?;
+    let summary_json = crate::llm::vm_value_to_json(summary);
+    let serde_json::Value::Object(_) = summary_json else {
+        return Err(VmError::Runtime(
+            "__agent_state_handoff: `summary` must be a JSON object".to_string(),
+        ));
+    };
+    let typed_handoff =
+        crate::orchestration::normalize_handoff_artifact_json(summary_json.clone()).ok();
+    let scope = scope_from_handle(handle)?;
+    let writer = writer_from_handle(handle);
+    let envelope = serde_json::json!({
+        "_type": "agent_state_handoff",
+        "version": 1,
+        "session_id": scope.namespace,
+        "root": scope.root.to_string_lossy(),
+        "key": HANDOFF_KEY,
+        "summary": summary_json,
+        "handoff": typed_handoff,
+        "writer": writer_json(&writer),
+        "written_at": now_epoch_seconds(),
     });
+    let content = serde_json::to_string_pretty(&envelope)
+        .map_err(|error| VmError::Runtime(format!("agent_state.handoff: encode error: {error}")))?;
+    let options = write_options_from_handle(handle)?;
+    let outcome = backend.write(&scope, HANDOFF_KEY, &content, &options)?;
+    enforce_conflict_policy(handle, &outcome)?;
+    Ok(VmValue::Nil)
 }
 
 fn handle_from_args<'a>(
