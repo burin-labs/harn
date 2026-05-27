@@ -8,6 +8,7 @@ mod error;
 mod exports;
 mod mcp_context;
 mod mcp_prompts;
+pub mod permissions;
 #[cfg(test)]
 mod protocol_fixture_tests;
 mod replay;
@@ -41,5 +42,10 @@ pub use core::{
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
 pub use mcp_prompts::FilePromptCatalog;
+pub use permissions::{
+    ActionClass, AuditEntry, AuditFilter, AuditOutcome, DecisionScope, InMemoryConfig,
+    InMemoryPermissionStore, LlmPolicy, PermissionDecision, PermissionPolicy, PermissionRequest,
+    PermissionStore, PolicyVersion, RedactionPolicy, RememberRule, RememberSpec, Risk, RuleId,
+};
 pub use replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 pub use tls::{bind_listener, HstsConfig, HttpTlsConfig};
