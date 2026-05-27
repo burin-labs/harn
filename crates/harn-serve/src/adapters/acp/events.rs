@@ -1162,11 +1162,44 @@ impl AgentEventSink for AcpAgentEventSink {
             AgentEvent::BudgetExhausted {
                 session_id,
                 max_iterations,
+                kind,
+                cost_usd,
+                wall_clock_ms,
             } => {
+                let mut payload = serde_json::Map::new();
+                payload.insert(
+                    "maxIterations".to_string(),
+                    serde_json::json!(max_iterations),
+                );
+                if let Some(kind) = kind {
+                    payload.insert("budgetKind".to_string(), serde_json::json!(kind));
+                }
+                if let Some(cost_usd) = cost_usd {
+                    payload.insert("costUsd".to_string(), serde_json::json!(cost_usd));
+                }
+                if let Some(wall_clock_ms) = wall_clock_ms {
+                    payload.insert("wallClockMs".to_string(), serde_json::json!(wall_clock_ms));
+                }
                 self.emit_agent_event_ext(
                     "budget_exhausted",
                     session_id,
-                    serde_json::json!({"maxIterations": max_iterations}),
+                    serde_json::Value::Object(payload),
+                );
+            }
+            AgentEvent::BudgetCircuitBreaker {
+                session_id,
+                kind,
+                consecutive_count,
+                paused_for_ms,
+            } => {
+                self.emit_agent_event_ext(
+                    "budget_circuit_breaker",
+                    session_id,
+                    serde_json::json!({
+                        "breakerKind": kind,
+                        "consecutiveCount": consecutive_count,
+                        "pausedForMs": paused_for_ms,
+                    }),
                 );
             }
             AgentEvent::LoopStuck {

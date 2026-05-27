@@ -78,6 +78,7 @@
       }
     },
     "harnAgentEventKinds": [
+      "budget_circuit_breaker",
       "budget_exhausted",
       "composition_child_call",
       "composition_child_result",

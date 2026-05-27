@@ -459,6 +459,15 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
         AgentEvent::BudgetExhausted {
             session_id: "session-1".to_string(),
             max_iterations: 8,
+            kind: Some("max_iterations".to_string()),
+            cost_usd: Some(0.12),
+            wall_clock_ms: Some(1_500),
+        },
+        AgentEvent::BudgetCircuitBreaker {
+            session_id: "session-1".to_string(),
+            kind: "consecutive_failures".to_string(),
+            consecutive_count: 3,
+            paused_for_ms: 2_000,
         },
         AgentEvent::LoopStuck {
             session_id: "session-1".to_string(),
@@ -1683,6 +1692,15 @@ fn internal_agent_events_never_emit_session_updates() {
     sink.handle_event(&AgentEvent::BudgetExhausted {
         session_id: "session-1".to_string(),
         max_iterations: 3,
+        kind: None,
+        cost_usd: None,
+        wall_clock_ms: None,
+    });
+    sink.handle_event(&AgentEvent::BudgetCircuitBreaker {
+        session_id: "session-1".to_string(),
+        kind: "consecutive_failures".to_string(),
+        consecutive_count: 2,
+        paused_for_ms: 0,
     });
     sink.handle_event(&AgentEvent::IterationEnd {
         session_id: "session-1".to_string(),
@@ -1723,7 +1741,7 @@ fn internal_agent_events_never_emit_session_updates() {
         );
     }
     assert_eq!(
-        count, 6,
+        count, 7,
         "expected one ExtNotification per fed AgentEvent, got {count}"
     );
 }

@@ -46,6 +46,7 @@ import {
   agent_session_record_assistant,
   agent_session_record_tool_results,
   agent_session_record_usage,
+  agent_session_totals,
 } from "std/agent/state"
 import { agent_step_judge } from "std/agent/step_judge"
 import {
@@ -973,7 +974,7 @@ fn __next_text_only_count(tool_count, consecutive_text_only) {
  * the transcript JSONL. Empty/missing fields are dropped so the event
  * stays small for providers that don't report telemetry.
  */
-fn __iteration_info_payload(llm_result, tool_count, visible_text) {
+fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates = nil) {
   let telemetry = llm_result?.provider_telemetry ?? {}
   let thinking = llm_result?.thinking ?? ""
   let thinking_chars = if type_of(thinking) == "string" {
@@ -981,6 +982,7 @@ fn __iteration_info_payload(llm_result, tool_count, visible_text) {
   } else {
     0
   }
+  let extra = aggregates ?? {}
   return {
     tool_count: tool_count,
     text: visible_text,
@@ -991,6 +993,156 @@ fn __iteration_info_payload(llm_result, tool_count, visible_text) {
     output_tokens: llm_result?.output_tokens ?? 0,
     thinking_chars: thinking_chars,
   }
+    + extra
+}
+
+fn __agent_loop_elapsed_ms(start_ms) {
+  let elapsed = now_ms() - start_ms
+  if elapsed < 0 {
+    return 0
+  }
+  return elapsed
+}
+
+fn __agent_loop_cost_usd(totals) {
+  let value = to_float(totals?.cost_usd ?? 0.0)
+  if value == nil {
+    return 0.0
+  }
+  return value
+}
+
+fn __agent_loop_budget_aggregates(session_id, totals, loop_start_ms) {
+  let resolved_totals = totals ?? agent_session_totals(session_id)
+  return {
+    cost_usd: __agent_loop_cost_usd(resolved_totals),
+    wall_clock_ms: __agent_loop_elapsed_ms(loop_start_ms),
+  }
+}
+
+fn __agent_loop_iteration_info(
+  session_id,
+  llm_result,
+  tool_count,
+  visible_text,
+  totals,
+  loop_start_ms,
+) {
+  return __iteration_info_payload(
+    llm_result,
+    tool_count,
+    visible_text,
+    __agent_loop_budget_aggregates(session_id, totals, loop_start_ms),
+  )
+}
+
+fn __agent_loop_budget_exhaustion(
+  session_id,
+  budget,
+  iteration,
+  totals,
+  loop_start_ms,
+  max_iterations,
+) {
+  let aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
+  if budget?.wall_clock_ms != nil && aggregates.wall_clock_ms >= budget.wall_clock_ms {
+    return aggregates
+      + {exhausted: true, kind: "wall_clock", iteration: iteration, max_iterations: max_iterations}
+  }
+  if budget?.total_cost_usd != nil && aggregates.cost_usd >= budget.total_cost_usd {
+    return aggregates
+      + {exhausted: true, kind: "total_cost", iteration: iteration, max_iterations: max_iterations}
+  }
+  return aggregates + {exhausted: false, kind: "", iteration: iteration, max_iterations: max_iterations}
+}
+
+fn __agent_loop_emit_budget_exhausted(session_id, exhaustion) {
+  agent_emit_event(
+    session_id,
+    "budget_exhausted",
+    {
+      kind: exhaustion?.kind ?? "budget_exhausted",
+      max_iterations: exhaustion?.max_iterations ?? 0,
+      iteration: exhaustion?.iteration ?? 0,
+      cost_usd: exhaustion?.cost_usd ?? 0.0,
+      wall_clock_ms: exhaustion?.wall_clock_ms ?? 0,
+    },
+  )
+}
+
+fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {
+  return decisions
+    .push(
+    {
+      iteration: iteration,
+      action: "stop",
+      old_limit: current_max,
+      new_limit: current_max,
+      reason: reason,
+      status: "budget_exhausted",
+    },
+  )
+}
+
+fn __agent_loop_state_budget_fields(
+  session_id,
+  totals,
+  loop_start_ms,
+  budget,
+  consecutive_failure_count,
+) {
+  let aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
+  let failure_config = __agent_loop_consecutive_failure_config(budget)
+  return {
+    wall_clock_ms: aggregates.wall_clock_ms,
+    wall_clock_limit_ms: budget?.wall_clock_ms,
+    cost_usd: aggregates.cost_usd,
+    total_cost_limit_usd: budget?.total_cost_usd,
+    consecutive_failures: consecutive_failure_count,
+    consecutive_failure_limit: failure_config?.max,
+  }
+}
+
+fn __agent_loop_failure_matches_kind(error, wanted) {
+  let category = to_string(error?.category ?? "")
+  let reason = to_string(error?.reason ?? "")
+  let kind = to_string(error?.kind ?? "")
+  let status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
+  if wanted == "transient" {
+    return kind == "transient" || category == "transient_network" || category == "timeout"
+      || reason == "timeout"
+  }
+  if wanted == "rate_limit" {
+    return kind == "rate_limit" || category == "rate_limit" || category == "rate_limited"
+      || reason == "rate_limit"
+      || status == 429
+  }
+  if wanted == "provider_5xx" {
+    return kind == "provider_5xx" || category == "server_error" || category == "overloaded"
+      || reason == "server_error"
+      || (status >= 500 && status < 600)
+  }
+  return category == wanted || reason == wanted || kind == wanted
+}
+
+fn __agent_loop_consecutive_failure_config(budget) {
+  let config = budget?.consecutive_failures
+  if type_of(config) != "dict" {
+    return nil
+  }
+  return config
+}
+
+fn __agent_loop_tracks_failure(error, config) {
+  if config == nil {
+    return false
+  }
+  for kind in config?.kinds ?? ["transient", "rate_limit", "provider_5xx"] {
+    if __agent_loop_failure_matches_kind(error, kind) {
+      return true
+    }
+  }
+  return false
 }
 
 fn __agent_loop_finalize_failed(session, iteration) {
@@ -1510,8 +1662,27 @@ fn __agent_loop_run(message, session, initial_opts) {
     var current_max = budget.initial
     var extensions_used = 0
     var budget_decisions = []
+    var consecutive_failure_count = 0
+    var budget_exhausted_emitted = false
     var last_tool_count = 0
+    let loop_start_ms = now_ms()
     while iteration < current_max {
+      let boundary_exhaustion = __agent_loop_budget_exhaustion(
+        session.session_id,
+        budget,
+        iteration,
+        nil,
+        loop_start_ms,
+        current_max,
+      )
+      if boundary_exhaustion.exhausted {
+        __agent_loop_emit_budget_exhausted(session.session_id, boundary_exhaustion)
+        budget_exhausted_emitted = true
+        budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, boundary_exhaustion.kind)
+        final_status = "budget_exhausted"
+        stop_reason = boundary_exhaustion.kind
+        break
+      }
       let checkpoint = __agent_loop_suspend_checkpoint(session, iteration)
       if checkpoint != nil {
         __drain_audit_flushes(audit_background_tasks)
@@ -1574,12 +1745,58 @@ fn __agent_loop_run(message, session, initial_opts) {
       }
       let call = __invoke_llm(message, turn_system, llm_opts)
       if !call.ok {
+        let failure_config = __agent_loop_consecutive_failure_config(budget)
+        if __agent_loop_tracks_failure(call?.error, failure_config) {
+          iteration = iteration + 1
+          consecutive_failure_count = consecutive_failure_count + 1
+          let failure_aggregates = __agent_loop_budget_aggregates(session.session_id, nil, loop_start_ms)
+          agent_emit_event(
+            session.session_id,
+            "iteration_end",
+            {
+              iteration: iteration_index + 1,
+              iteration_info: failure_aggregates
+                + {
+                dispatch_skipped: true,
+                skip_reason: "provider_failure",
+                provider_error: call?.error ?? {},
+                consecutive_failures: consecutive_failure_count,
+              },
+            },
+          )
+          if consecutive_failure_count >= failure_config.max {
+            let paused_for_ms = failure_config?.paused_for_ms ?? 0
+            agent_emit_event(
+              session.session_id,
+              "budget_circuit_breaker",
+              {
+                kind: "consecutive_failures",
+                consecutive_count: consecutive_failure_count,
+                paused_for_ms: paused_for_ms,
+              },
+            )
+            if paused_for_ms > 0 {
+              sleep_ms(paused_for_ms)
+            }
+            let exhaustion = __agent_loop_budget_aggregates(session.session_id, nil, loop_start_ms)
+              + {exhausted: true, kind: "consecutive_failures", iteration: iteration, max_iterations: current_max}
+            __agent_loop_emit_budget_exhausted(session.session_id, exhaustion)
+            budget_exhausted_emitted = true
+            budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, exhaustion.kind)
+            final_status = "budget_exhausted"
+            stop_reason = "circuit_breaker"
+            terminal_error = call?.error
+            break
+          }
+          continue
+        }
         final_status = call.status
         stop_reason = call?.stop_reason ?? call.status
         terminal_error = call?.error
         break
       }
       let llm_result = call.value
+      consecutive_failure_count = 0
       iteration = iteration + 1
       let raw_text = llm_result?.text ?? ""
       let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools)
@@ -1614,7 +1831,14 @@ fn __agent_loop_run(message, session, initial_opts) {
           "iteration_end",
           {
             iteration: iteration_index + 1,
-            iteration_info: __iteration_info_payload(llm_result, len(tool_calls), visible_text),
+            iteration_info: __agent_loop_iteration_info(
+              session.session_id,
+              llm_result,
+              len(tool_calls),
+              visible_text,
+              _totals,
+              loop_start_ms,
+            ),
           },
         )
         final_status = "suspended"
@@ -1657,12 +1881,20 @@ fn __agent_loop_run(message, session, initial_opts) {
         if feedback != "" {
           agent_session_inject_feedback(session.session_id, "structural_validator", feedback)
         }
+        let structural_totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
         agent_emit_event(
           session.session_id,
           "iteration_end",
           {
             iteration: iteration_index + 1,
-            iteration_info: __iteration_info_payload(llm_result, 0, visible_text)
+            iteration_info: __agent_loop_iteration_info(
+              session.session_id,
+              llm_result,
+              0,
+              visible_text,
+              structural_totals,
+              loop_start_ms,
+            )
               + {
               dispatch_skipped: true,
               skip_reason: "structural_validator_revise",
@@ -1671,6 +1903,27 @@ fn __agent_loop_run(message, session, initial_opts) {
             },
           },
         )
+        let structural_exhaustion = __agent_loop_budget_exhaustion(
+          session.session_id,
+          budget,
+          iteration,
+          structural_totals,
+          loop_start_ms,
+          current_max,
+        )
+        if structural_exhaustion.exhausted {
+          __agent_loop_emit_budget_exhausted(session.session_id, structural_exhaustion)
+          budget_exhausted_emitted = true
+          budget_decisions = __agent_loop_record_budget_stop(
+            budget_decisions,
+            iteration,
+            current_max,
+            structural_exhaustion.kind,
+          )
+          final_status = "budget_exhausted"
+          stop_reason = structural_exhaustion.kind
+          break
+        }
         continue
       } else if !(structural_verdict?.skipped ?? false) {
         structural_validator_attempts = 0
@@ -1692,16 +1945,39 @@ fn __agent_loop_run(message, session, initial_opts) {
             )
           }
         } else {
-          agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+          let stall_totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
           let tool_count = len(tool_calls)
           agent_emit_event(
             session.session_id,
             "iteration_end",
             {
               iteration: iteration_index + 1,
-              iteration_info: __iteration_info_payload(llm_result, tool_count, visible_text),
+              iteration_info: __agent_loop_iteration_info(
+                session.session_id,
+                llm_result,
+                tool_count,
+                visible_text,
+                stall_totals,
+                loop_start_ms,
+              ),
             },
           )
+          let stall_exhaustion = __agent_loop_budget_exhaustion(
+            session.session_id,
+            budget,
+            iteration,
+            stall_totals,
+            loop_start_ms,
+            current_max,
+          )
+          if stall_exhaustion.exhausted {
+            __agent_loop_emit_budget_exhausted(session.session_id, stall_exhaustion)
+            budget_exhausted_emitted = true
+            budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, stall_exhaustion.kind)
+            final_status = "budget_exhausted"
+            stop_reason = stall_exhaustion.kind
+            break
+          }
           let stalled_done_checkpoint = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
           if stalled_done_checkpoint.delivered > 0 {
             continue
@@ -1732,12 +2008,20 @@ fn __agent_loop_run(message, session, initial_opts) {
           if critique != "" {
             agent_session_inject_feedback(session.session_id, "step_judge", critique)
           }
+          let step_totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
           agent_emit_event(
             session.session_id,
             "iteration_end",
             {
               iteration: iteration_index + 1,
-              iteration_info: __iteration_info_payload(llm_result, 0, visible_text)
+              iteration_info: __agent_loop_iteration_info(
+                session.session_id,
+                llm_result,
+                0,
+                visible_text,
+                step_totals,
+                loop_start_ms,
+              )
                 + {
                 dispatch_skipped: true,
                 skip_reason: "step_judge_revise",
@@ -1746,6 +2030,22 @@ fn __agent_loop_run(message, session, initial_opts) {
               },
             },
           )
+          let step_exhaustion = __agent_loop_budget_exhaustion(
+            session.session_id,
+            budget,
+            iteration,
+            step_totals,
+            loop_start_ms,
+            current_max,
+          )
+          if step_exhaustion.exhausted {
+            __agent_loop_emit_budget_exhausted(session.session_id, step_exhaustion)
+            budget_exhausted_emitted = true
+            budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, step_exhaustion.kind)
+            final_status = "budget_exhausted"
+            stop_reason = step_exhaustion.kind
+            break
+          }
           continue
         } else if !(step_verdict?.skipped ?? false) {
           step_judge_attempts = 0
@@ -1760,10 +2060,33 @@ fn __agent_loop_run(message, session, initial_opts) {
           "iteration_end",
           {
             iteration: iteration_index + 1,
-            iteration_info: __iteration_info_payload(llm_result, tool_count_skipped, visible_text)
+            iteration_info: __agent_loop_iteration_info(
+              session.session_id,
+              llm_result,
+              tool_count_skipped,
+              visible_text,
+              totals_skipped,
+              loop_start_ms,
+            )
               + {dispatch_skipped: true, skip_reason: "interrupt_immediate"},
           },
         )
+        let skipped_exhaustion = __agent_loop_budget_exhaustion(
+          session.session_id,
+          budget,
+          iteration,
+          totals_skipped,
+          loop_start_ms,
+          current_max,
+        )
+        if skipped_exhaustion.exhausted {
+          __agent_loop_emit_budget_exhausted(session.session_id, skipped_exhaustion)
+          budget_exhausted_emitted = true
+          budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, skipped_exhaustion.kind)
+          final_status = "budget_exhausted"
+          stop_reason = skipped_exhaustion.kind
+          break
+        }
         if agent_budget_post_call_blocked(totals_skipped, turn_opts) {
           final_status = "budget_exhausted"
           break
@@ -1789,11 +2112,34 @@ fn __agent_loop_run(message, session, initial_opts) {
         "iteration_end",
         {
           iteration: iteration_index + 1,
-          iteration_info: __iteration_info_payload(llm_result, tool_count, visible_text),
+          iteration_info: __agent_loop_iteration_info(
+            session.session_id,
+            llm_result,
+            tool_count,
+            visible_text,
+            totals,
+            loop_start_ms,
+          ),
         },
       )
       let post_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "post_tool_dispatch", {iteration: iteration_index + 1})
       let bridge_step_delivered = post_dispatch_checkpoint.delivered
+      let exhaustion = __agent_loop_budget_exhaustion(
+        session.session_id,
+        budget,
+        iteration,
+        totals,
+        loop_start_ms,
+        current_max,
+      )
+      if exhaustion.exhausted {
+        __agent_loop_emit_budget_exhausted(session.session_id, exhaustion)
+        budget_exhausted_emitted = true
+        budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, exhaustion.kind)
+        final_status = "budget_exhausted"
+        stop_reason = exhaustion.kind
+        break
+      }
       if agent_budget_post_call_blocked(totals, turn_opts) {
         final_status = "budget_exhausted"
         break
@@ -1826,7 +2172,14 @@ fn __agent_loop_run(message, session, initial_opts) {
           missing_required_tools: missing_required_for_loop,
           completion_proposed: false,
           verdict: nil,
-        },
+        }
+          + __agent_loop_state_budget_fields(
+          session.session_id,
+          totals,
+          loop_start_ms,
+          budget,
+          consecutive_failure_count,
+        ),
       )
       let post_turn_opts = turn_opts
         + {
@@ -1900,7 +2253,14 @@ fn __agent_loop_run(message, session, initial_opts) {
           missing_required_tools: missing_required_for_loop,
           completion_proposed: outcome.kind == "break",
           verdict: verdict_record,
-        },
+        }
+          + __agent_loop_state_budget_fields(
+          session.session_id,
+          totals,
+          loop_start_ms,
+          budget,
+          consecutive_failure_count,
+        ),
       )
       let command = agent_loop_control_invoke(opts, budget, loop_state)
       let applied = agent_loop_apply_command(
@@ -1925,6 +2285,18 @@ fn __agent_loop_run(message, session, initial_opts) {
     }
     if final_status == "" && iteration >= current_max && stop_reason == nil {
       final_status = "budget_exhausted"
+    }
+    if final_status == "budget_exhausted" && !budget_exhausted_emitted {
+      let terminal_exhaustion = __agent_loop_budget_aggregates(session.session_id, nil, loop_start_ms)
+        + {
+        exhausted: true,
+        kind: stop_reason ?? "max_iterations",
+        iteration: iteration,
+        max_iterations: current_max,
+      }
+      __agent_loop_emit_budget_exhausted(session.session_id, terminal_exhaustion)
+      budget_exhausted_emitted = true
+      budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, terminal_exhaustion.kind)
     }
     if opts?.daemon && final_status != "" {
       agent_daemon_snapshot(session, opts, final_status, iteration)

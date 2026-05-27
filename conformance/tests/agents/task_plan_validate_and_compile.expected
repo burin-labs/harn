@@ -3,10 +3,16 @@ true
 3
 3
 32
+30000
 true
 discover
 stage
 agent
+30000
+true
+2
+rate_limit
+500
 verify
 cargo test -p auth
 agent_loop

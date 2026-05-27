@@ -16,6 +16,9 @@ type AgentLoopBudget = {
   max: int,
   extend_by: int,
   expose_decisions: bool,
+  wall_clock_ms: int?,
+  total_cost_usd: float?,
+  consecutive_failures: dict?,
 }
 
 type AgentLoopBudgetDecision = {
@@ -61,6 +64,12 @@ fn __agent_loop_state(args) -> AgentLoopState {
       max: args.budget_max,
       remaining: remaining,
       extension_count: args.extensions_used,
+      wall_clock_ms: args.wall_clock_ms ?? 0,
+      wall_clock_limit_ms: args.wall_clock_limit_ms,
+      cost_usd: args.cost_usd ?? 0.0,
+      total_cost_limit_usd: args.total_cost_limit_usd,
+      consecutive_failures: args.consecutive_failures ?? 0,
+      consecutive_failure_limit: args.consecutive_failure_limit,
     },
     turn: {
       tool_call_count: args.turn_tool_count,
@@ -236,6 +245,12 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
       current_limit: args.current_limit,
       budget_max: args.budget_max,
       extensions_used: args.extensions_used,
+      wall_clock_ms: args.wall_clock_ms,
+      wall_clock_limit_ms: args.wall_clock_limit_ms,
+      cost_usd: args.cost_usd,
+      total_cost_limit_usd: args.total_cost_limit_usd,
+      consecutive_failures: args.consecutive_failures,
+      consecutive_failure_limit: args.consecutive_failure_limit,
       turn_tool_count: tool_count,
       turn_successful: turn_successful,
       turn_rejected: args.turn_rejected,

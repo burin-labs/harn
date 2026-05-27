@@ -153,6 +153,7 @@ type HarnAgentEventKind = string
 
 // HarnAgentEventKinds enumerates every wire value Harn currently emits for HarnAgentEventKind.
 var HarnAgentEventKinds = []HarnAgentEventKind{
+	"budget_circuit_breaker",
 	"budget_exhausted",
 	"composition_child_call",
 	"composition_child_result",

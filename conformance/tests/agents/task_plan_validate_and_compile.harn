@@ -23,6 +23,11 @@ pipeline main() {
       verify: {kind: "verify", verify: {command: "cargo test -p auth", expect_status: 0}},
     },
     edges: [{from: "discover", to: "implement"}, {from: "implement", to: "verify"}],
+    budgets: {
+      wall_clock_ms: 30000,
+      total_cost_usd: 0.25,
+      consecutive_failures: {max: 2, kinds: ["rate_limit"], paused_for_ms: 500},
+    },
     capabilities: {tools: ["read", "edit", "grep"], side_effect_level: "writes_files"},
     verification: {primary: "verify"},
     promotion_policy: {shadow_runs_required: 3, human_review_required: true},
@@ -33,11 +38,18 @@ pipeline main() {
   __io_println(report.graph_stats.node_count)
   __io_println(report.graph_stats.reachable_count)
   __io_println(report.budget_summary.max_nodes)
+  __io_println(report.budget_summary.wall_clock_ms)
   let compiled = task_plan_compile(plan)
   __io_println(compiled.ok)
   __io_println(compiled.workflow.entry)
   __io_println(compiled.workflow.nodes.implement.kind)
   __io_println(compiled.workflow.nodes.implement.mode)
+  let loop_budget = compiled.workflow.nodes.implement.model_policy.iteration_budget
+  __io_println(loop_budget.wall_clock_ms)
+  __io_println(loop_budget.total_cost_usd > 0.0)
+  __io_println(loop_budget.consecutive_failures.max)
+  __io_println(loop_budget.consecutive_failures.kinds[0])
+  __io_println(loop_budget.consecutive_failures.paused_for_ms)
   __io_println(compiled.workflow.nodes.verify.kind)
   __io_println(compiled.workflow.nodes.verify.verify.command)
   __io_println(compiled.workflow.nodes.implement.metadata.task_plan_kind)

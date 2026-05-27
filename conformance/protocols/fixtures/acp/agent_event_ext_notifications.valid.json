@@ -290,8 +290,22 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "budgetKind": "max_iterations",
+        "costUsd": 0.12,
         "kind": "budget_exhausted",
         "maxIterations": 8,
+        "sessionId": "session-1",
+        "wallClockMs": 1500
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "breakerKind": "consecutive_failures",
+        "consecutiveCount": 3,
+        "kind": "budget_circuit_breaker",
+        "pausedForMs": 2000,
         "sessionId": "session-1"
       }
     },

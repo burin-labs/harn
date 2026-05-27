@@ -1391,6 +1391,8 @@ async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             | "agent_loop_stall_warning"
             | "tool_format_override"
             | "tool_call_audit"
+            | "budget_exhausted"
+            | "budget_circuit_breaker"
             | "loop_checkpoint"
     ) {
         let role = if matches!(
@@ -1425,6 +1427,22 @@ fn build_agent_event(
             .and_then(|m| m.get(key))
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize
+    };
+    let get_u64 = |key: &str| -> u64 {
+        payload_obj
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    };
+    let get_opt_u64 = |key: &str| -> Option<u64> {
+        payload_obj
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_u64())
+    };
+    let get_opt_f64 = |key: &str| -> Option<f64> {
+        payload_obj
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_f64())
     };
     let get_string = |key: &str| -> String {
         payload_obj
@@ -1569,6 +1587,19 @@ fn build_agent_event(
                 .and_then(|m| m.get("metadata"))
                 .cloned()
                 .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
+        }),
+        "budget_exhausted" => Ok(AgentEvent::BudgetExhausted {
+            session_id: session_id.to_string(),
+            max_iterations: get_usize("max_iterations"),
+            kind: get_opt_string("kind"),
+            cost_usd: get_opt_f64("cost_usd"),
+            wall_clock_ms: get_opt_u64("wall_clock_ms"),
+        }),
+        "budget_circuit_breaker" => Ok(AgentEvent::BudgetCircuitBreaker {
+            session_id: session_id.to_string(),
+            kind: get_string("kind"),
+            consecutive_count: get_usize("consecutive_count"),
+            paused_for_ms: get_u64("paused_for_ms"),
         }),
         "tool_search_query" => Ok(AgentEvent::ToolSearchQuery {
             session_id: session_id.to_string(),

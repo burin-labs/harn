@@ -4,7 +4,7 @@
  * The runtime fires the `OnBudgetThreshold` lifecycle event whenever an
  * agent loop / pipeline crosses a configured budget threshold (cents,
  * tokens, thinking-tokens, etc.). Users register a handler closure to
- * decide what happens next. This module ships three canonical
+ * decide what happens next. This module ships four canonical
  * strategies so the common cases stay one-liners:
  *
  *   * `OnBudget.terminate` — hard stop. Emits a `budget_exceeded` audit
@@ -20,8 +20,11 @@
  *     `budget_warning` system_reminder so the agent's next turn sees
  *     the overrun, and returns `budget_state` unchanged so combinator
  *     chains see a passthrough.
+ *   * `OnBudget.replan` — forks the current session at the last known
+ *     good iteration, injects a generic replan reminder, and resumes
+ *     the fork when the budget snapshot carries a task.
  *
- * All three follow the `(harness, budget_state) -> result` shape, which
+ * All four follow the `(harness, budget_state) -> result` shape, which
  * is identical to the `(harness, return_value) -> return_value` contract
  * the rest of the lifecycle layer uses. That means every callback in
  * this module composes freely with `std/lifecycle/combinators`:
@@ -178,6 +181,105 @@ pub fn warn_and_continue(harness, budget_state) {
   return budget_state
 }
 
+fn __on_budget_int(value, fallback) {
+  let parsed = to_int(value ?? fallback)
+  if parsed == nil || parsed < 0 {
+    return fallback
+  }
+  return parsed
+}
+
+fn __on_budget_session_id(snapshot) {
+  let nested = snapshot?.session?.id
+  let direct = snapshot?.session_id
+  let current = agent_session_current_id()
+  let session_id = direct ?? nested ?? current ?? ""
+  return to_string(session_id)
+}
+
+fn __on_budget_replan_keep_first(src, snapshot, iteration) {
+  var keep_first = __on_budget_int(snapshot?.last_good_iteration, iteration)
+  let source = agent_session_snapshot(src) ?? {}
+  let max_events = len(source.messages ?? [])
+  if keep_first > max_events {
+    keep_first = max_events
+  }
+  return keep_first
+}
+
+fn __on_budget_replan_reminder(kind, iteration) {
+  return "Previous loop hit `" + kind + "` at iteration " + to_string(iteration)
+    + ". Restart from checkpoint with a different approach."
+}
+
+/**
+ * Replan budget strategy. Forks the active source session at
+ * `last_good_iteration`, injects a generic reminder describing the
+ * exhausted budget kind, and resumes the fork when `budget_state`
+ * carries `{task|message, system?, options?}`. Without a task it returns
+ * the fork envelope after injection, which lets orchestration code
+ * decide when to schedule the retry.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: ["budget_replan_missing_session"]
+ * @api_stability: experimental
+ * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.replan)
+ */
+pub fn replan(harness, budget_state) {
+  __on_budget_emit_audit(harness, "budget_replan", "replan", budget_state)
+  let snapshot = __on_budget_snapshot(budget_state)
+  let src = __on_budget_session_id(snapshot)
+  if src == "" {
+    throw {
+      category: "budget_exceeded",
+      kind: "terminal",
+      reason: "budget_replan_missing_session",
+      strategy: "replan",
+      budget_state: snapshot,
+      message: "OnBudget.replan requires a source session",
+    }
+  }
+  let iteration = __on_budget_int(snapshot?.iteration ?? snapshot?.n, 0)
+  let keep_first = __on_budget_replan_keep_first(src, snapshot, iteration)
+  let dst = snapshot?.dst_session_id
+  let forked = if dst != nil {
+    agent_session_fork_at(src, keep_first, to_string(dst))
+  } else {
+    agent_session_fork_at(src, keep_first)
+  }
+  let budget_kind = to_string(snapshot?.budget_kind ?? snapshot?.kind ?? "budget")
+  let reminder_body = __on_budget_replan_reminder(budget_kind, iteration)
+  agent_session_inject(
+    forked,
+    transcript_reminder_event(
+      {
+        body: reminder_body,
+        tags: ["on_budget", "replan"],
+        dedupe_key: "on_budget.replan:" + forked,
+        ttl_turns: 1,
+      },
+    ),
+  )
+  let task = snapshot?.task ?? snapshot?.message
+  let base_options = snapshot?.options ?? {}
+  let result = if task != nil {
+    agent_loop(task, snapshot?.system, base_options + {session_id: forked})
+  } else {
+    nil
+  }
+  return {
+    status: "replanned",
+    strategy: "replan",
+    session_id: forked,
+    source_session_id: src,
+    iteration: iteration,
+    last_good_iteration: keep_first,
+    reminder: reminder_body,
+    result: result,
+  }
+}
+
 /**
  * `OnBudget()` returns the named-strategy namespace as a dict so
  * callers can use dotted access (e.g. `OnBudget.terminate`) after a
@@ -193,5 +295,10 @@ pub fn warn_and_continue(harness, budget_state) {
  * @example: let OnBudget = OnBudget()
  */
 pub fn OnBudget() {
-  return {terminate: terminate, graceful_exit: graceful_exit, warn_and_continue: warn_and_continue}
+  return {
+    terminate: terminate,
+    graceful_exit: graceful_exit,
+    warn_and_continue: warn_and_continue,
+    replan: replan,
+  }
 }
