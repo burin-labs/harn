@@ -35,6 +35,7 @@ mod iter;
 pub(crate) mod json;
 mod json_query;
 pub(crate) mod json_stream;
+mod jsonrpc;
 mod junit;
 mod lifecycle_receipts;
 mod logging;
@@ -86,6 +87,7 @@ pub(crate) mod waitpoint;
 mod waitpoints;
 mod web;
 pub mod workflow_messages;
+mod xml;
 
 use crate::http::register_http_builtins;
 use crate::llm::{register_deferred_llm_builtins, register_llm_builtins};
@@ -106,6 +108,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     strings::register_string_builtins(vm);
     json::register_json_builtins(vm);
     json_stream::register_json_stream_builtins(vm);
+    xml::register_xml_builtins(vm);
     datetime::register_datetime_builtins(vm);
     calendar::register_calendar_builtins(vm);
     regex::register_regex_builtins(vm);
@@ -190,6 +193,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     assemble::register_assemble_context_builtin(vm);
     crate::egress::register_egress_builtins(vm);
     register_http_builtins(vm);
+    jsonrpc::register_jsonrpc_builtins(vm);
 }
 
 fn register_agent_stdlib_after_llm(vm: &mut Vm) {
@@ -299,6 +303,7 @@ pub fn reset_stdlib_state() {
     crate::egress::reset_egress_policy_for_host();
     hitl::reset_hitl_state();
     crate::http::reset_http_state();
+    jsonrpc::reset_jsonrpc_state();
     monitors::reset_monitor_state();
     waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();

@@ -6,6 +6,10 @@ use harn_lexer::{Lexer, Span, TokenKind};
 use harn_modules::DefKind;
 use harn_parser::{Node, SNode};
 use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::request::{
+    GotoDeclarationParams, GotoDeclarationResponse, GotoImplementationParams,
+    GotoImplementationResponse, GotoTypeDefinitionParams, GotoTypeDefinitionResponse,
+};
 use tower_lsp::lsp_types::*;
 
 use crate::constants::is_builtin;
@@ -77,6 +81,152 @@ impl HarnLsp {
         }
 
         Ok(None)
+    }
+
+    /// `textDocument/declaration` — for Harn there's no separate
+    /// declaration vs definition (no header files, no forward decls),
+    /// so this delegates to `goto_definition` for parity with editor
+    /// expectations.
+    pub(super) async fn handle_goto_declaration(
+        &self,
+        params: GotoDeclarationParams,
+    ) -> Result<Option<GotoDeclarationResponse>> {
+        self.handle_goto_definition(params).await
+    }
+
+    /// `textDocument/typeDefinition` — jumps to the type that the
+    /// symbol under the cursor *is*, which for Harn currently means
+    /// the same destination as `goto_definition` (the type's struct /
+    /// enum / interface declaration). The split exists so the IDE's
+    /// "go to type definition" command works without misfiring.
+    pub(super) async fn handle_goto_type_definition(
+        &self,
+        params: GotoTypeDefinitionParams,
+    ) -> Result<Option<GotoTypeDefinitionResponse>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let docs = self.documents.lock().unwrap();
+        let state = match docs.get(uri) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let source = state.source.clone();
+        let symbols = state.symbols.clone();
+        drop(docs);
+
+        let word = match word_at_position(&source, position) {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        // Look for a *type* declaration with the same name, preferring
+        // struct/enum/interface over plain variables/functions.
+        for sym in &symbols {
+            if sym.name == word
+                && matches!(
+                    sym.kind,
+                    HarnSymbolKind::Struct | HarnSymbolKind::Enum | HarnSymbolKind::Interface
+                )
+            {
+                let range = span_to_full_range(&sym.def_span, &source);
+                return Ok(Some(GotoTypeDefinitionResponse::Scalar(Location {
+                    uri: uri.clone(),
+                    range,
+                })));
+            }
+        }
+
+        if let Some(loc) = resolve_cross_file_definition(uri, &word) {
+            return Ok(Some(GotoTypeDefinitionResponse::Scalar(loc)));
+        }
+
+        Ok(None)
+    }
+
+    /// `textDocument/implementation` — for Harn this maps to "every
+    /// place the symbol is defined or used in a defining context",
+    /// which today is the same answer as `references` filtered to the
+    /// current document. Returning the references list keeps the IDE
+    /// from showing a "no implementation found" toast when there is in
+    /// fact one or more concrete definitions to jump to.
+    pub(super) async fn handle_goto_implementation(
+        &self,
+        params: GotoImplementationParams,
+    ) -> Result<Option<GotoImplementationResponse>> {
+        let proxy = ReferenceParams {
+            text_document_position: params.text_document_position_params,
+            work_done_progress_params: params.work_done_progress_params,
+            partial_result_params: params.partial_result_params,
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        };
+        Ok(self
+            .handle_references(proxy)
+            .await?
+            .map(GotoImplementationResponse::Array))
+    }
+
+    /// `textDocument/documentHighlight` — highlight every occurrence
+    /// of the symbol under the cursor inside the current document.
+    /// Used by editors to underline the symbol's siblings when the
+    /// cursor lands on it.
+    pub(super) async fn handle_document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let docs = self.documents.lock().unwrap();
+        let state = match docs.get(uri) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let source = state.source.clone();
+        let symbols = state.symbols.clone();
+        drop(docs);
+
+        let word = match word_at_position(&source, position) {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        let mut highlights: Vec<DocumentHighlight> = Vec::new();
+        let mut def_offsets = std::collections::HashSet::new();
+        for sym in &symbols {
+            if sym.name == word {
+                def_offsets.insert(sym.def_span.start);
+            }
+        }
+
+        let mut lexer = Lexer::new(&source);
+        if let Ok(tokens) = lexer.tokenize() {
+            for token in &tokens {
+                if let TokenKind::Identifier(ref name) = token.kind {
+                    if name == &word {
+                        let start = offset_to_position(&source, token.span.start);
+                        let end = offset_to_position(&source, token.span.end);
+                        let kind = if def_offsets.contains(&token.span.start) {
+                            DocumentHighlightKind::WRITE
+                        } else {
+                            DocumentHighlightKind::READ
+                        };
+                        highlights.push(DocumentHighlight {
+                            range: Range { start, end },
+                            kind: Some(kind),
+                        });
+                    }
+                }
+            }
+        }
+
+        if highlights.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(highlights))
+        }
     }
 
     pub(super) async fn handle_references(

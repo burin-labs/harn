@@ -1,0 +1,102 @@
+/**
+ * stdlib-toolkit demo: drive the new clone / merge / XML / formatting
+ * built-ins through a realistic system-prompt-assembly flow, then
+ * verify the toolkit primitives compose cleanly end-to-end.
+ *
+ * The scenario emulates a coding agent's pre-flight render step:
+ * starting from a `defaults` context, the script
+ *
+ *   1. deep-clones the defaults so per-task overrides don't mutate
+ *      shared state (`clone` / `deep_clone`)
+ *   2. deep-merges per-task overrides into the cloned context, so
+ *      nested `config` fields combine instead of replacing
+ *      (`deep_merge`)
+ *   3. deduplicates the `previous_chats` references the operator
+ *      attached (`unique`) and indexes the resulting list under
+ *      the chat ids the rest of the renderer expects
+ *      (`dict_from_pairs`)
+ *   4. renders an `<context>` XML block for the system prompt
+ *      (`to_xml`), the canonical shape coding-agent harnesses use
+ *      to feed JSON-shaped data into LLMs without manual
+ *      concatenation
+ *   5. round-trips the XML through `from_xml` so we exercise the
+ *      parser on the very same payload we just emitted
+ *   6. wraps and indents the resulting block to fit a 60-column
+ *      prompt margin (`word_wrap`, `indent`), and prepends a
+ *      `repeat("-", 60)` divider so the prompt frame is visible
+ *      in the receipt below
+ *
+ * The receipt at the end captures the materialized prompt + a
+ * structural summary the demo-gate smoke test asserts on so future
+ * regressions are visible.
+ *
+ * Designed to run fully offline against the bundled (empty) tape —
+ * every primitive is local-only.
+ */
+fn defaults() {
+  return {
+    config: {retries: 3, backoff: 100, retry_on: ["timeout", "rate_limit"]},
+    persona: "coding-agent",
+    previous_chats: [],
+  }
+}
+
+fn task_overrides() {
+  return {
+    config: {retries: 5, jitter: true},
+    previous_chats: ["x.jsonl", "y.jsonl", "x.jsonl", "z.jsonl"],
+    goal: "ship the stdlib-toolkit demo",
+  }
+}
+
+pipeline default(_task) {
+  // 1. Decouple shared defaults from per-task mutation so a future
+  //    multi-task scheduler can run several `default` pipelines in
+  //    parallel against the same defaults binding without
+  //    cross-contaminating them.
+  let isolated = deep_clone(defaults())
+  // 2. Layer task-specific overrides. `deep_merge` recurses into
+  //    `config` instead of clobbering it, so `retries: 5` lands but
+  //    `backoff: 100` and `retry_on` stick around.
+  let merged = deep_merge(isolated, task_overrides())
+  // 3. Operator-attached chat references frequently contain
+  //    duplicates because the picker dedupes on display order, not
+  //    on identity. `unique` collapses them in first-seen order;
+  //    `dict_from_pairs` indexes the result for the renderer.
+  let chats = unique(merged.previous_chats ?? [])
+  var pairs = []
+  for c in chats {
+    pairs = pairs + [[c, c]]
+  }
+  let chat_index = dict_from_pairs(pairs)
+  // 4. Render an XML context block the LLM is meant to absorb. The
+  //    `<previous_chats>` element gets repeated `<item>` children
+  //    automatically — the canonical shape for "list of strings"
+  //    fields in system prompts.
+  let context = {config: merged.config, goal: merged.goal, persona: merged.persona, previous_chats: chats}
+  let xml = to_xml(context, {pretty: true, root: "context"})
+  // 5. Round-trip through the parser so the demo asserts to_xml +
+  //    from_xml are inverses on real data. The runner just verifies
+  //    the parsed shape; the receipt below carries the comparison.
+  let parsed = from_xml(xml)
+  // 6. Frame the rendered context inside a 60-column margin with a
+  //    visible divider so it's easy to diff against future renders.
+  let divider = repeat("-", 60)
+  let wrapped = word_wrap(xml, 60)
+  let framed = "${divider}\n${indent(wrapped, "  ")}\n${divider}"
+  __io_println("=== stdlib-toolkit demo ===")
+  __io_println(framed)
+  __io_println("")
+  let receipt = {
+    receipt_kind: "stdlib_toolkit_receipt",
+    chat_index_keys: len(chat_index),
+    config_keys: len(merged.config),
+    merged_retries: merged.config.retries,
+    parse_root_keys: len(parsed.context ?? {}),
+    persona: merged.persona,
+    unique_chats: chats,
+    xml_chars: len(xml),
+  }
+  __io_println(json_stringify(receipt))
+  return receipt
+}

@@ -76,6 +76,68 @@ class HarnDebugAdapterFactory {
         return new vscode.DebugAdapterExecutable(dapPath);
     }
 }
+/**
+ * Surfaces "Tasks: Run Task" entries for each harn subcommand so users
+ * can wire `run`, `check`, `fmt`, `lint`, `test` into VS Code's task
+ * runner (and chain them in `tasks.json`) without writing the shell
+ * invocation by hand. The provider emits one task per command for the
+ * currently active workspace folder; problem matchers attached in
+ * package.json route diagnostics into the Problems panel.
+ */
+class HarnTaskProvider {
+    constructor(harnPath) {
+        this.harnPath = harnPath;
+    }
+    invalidate() {
+        this.cachedTasks = undefined;
+    }
+    provideTasks() {
+        if (!this.cachedTasks) {
+            this.cachedTasks = this.buildTasks();
+        }
+        return this.cachedTasks;
+    }
+    resolveTask(task) {
+        const def = task.definition;
+        if (def.type !== "harn" || !def.command) {
+            return undefined;
+        }
+        const scope = task.scope ?? vscode.TaskScope.Workspace;
+        return this.toTask(def, scope);
+    }
+    buildTasks() {
+        const commands = [
+            "run",
+            "check",
+            "fmt",
+            "lint",
+            "test",
+        ];
+        const scope = vscode.workspace.workspaceFolders?.[0] ?? vscode.TaskScope.Workspace;
+        return commands.map((command) => this.toTask({ type: "harn", command, file: "${file}", args: [] }, scope));
+    }
+    toTask(definition, scope) {
+        const args = [definition.command];
+        if (definition.file) {
+            args.push(definition.file);
+        }
+        if (definition.args && definition.args.length > 0) {
+            args.push(...definition.args);
+        }
+        const execution = new vscode.ProcessExecution(this.harnPath, args, {
+            cwd: definition.cwd ?? "${workspaceFolder}",
+        });
+        const matchers = ["$harn", "$harn-lint"];
+        const task = new vscode.Task(definition, scope, `harn ${definition.command}`, "harn", execution, matchers);
+        task.group =
+            definition.command === "test"
+                ? vscode.TaskGroup.Test
+                : definition.command === "check" || definition.command === "lint"
+                    ? vscode.TaskGroup.Build
+                    : undefined;
+        return task;
+    }
+}
 function activate(context) {
     const config = vscode.workspace.getConfiguration("harn");
     const harnPath = config.get("path", "harn");
@@ -128,7 +190,9 @@ function activate(context) {
     });
     const debugConfigProvider = vscode.debug.registerDebugConfigurationProvider("harn", new HarnDebugConfigurationProvider());
     const debugAdapterFactory = vscode.debug.registerDebugAdapterDescriptorFactory("harn", new HarnDebugAdapterFactory());
-    context.subscriptions.push(runCommand, fmtCommand, applyAllFixesCommand, debugConfigProvider, debugAdapterFactory);
+    const taskProvider = new HarnTaskProvider(harnPath);
+    const taskProviderDisposable = vscode.tasks.registerTaskProvider("harn", taskProvider);
+    context.subscriptions.push(runCommand, fmtCommand, applyAllFixesCommand, debugConfigProvider, debugAdapterFactory, taskProviderDisposable);
 }
 function deactivate() {
     return client?.stop();

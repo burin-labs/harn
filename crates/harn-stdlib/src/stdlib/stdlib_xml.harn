@@ -1,0 +1,52 @@
+// std/xml — Convert Harn values to and from XML.
+//
+// The primary motivator for these helpers is building XML-style system
+// prompts for `.harn.prompt` templates: a dict of context like
+// `{previous_chats: [...], guidelines: "..."}` collapses to a tagged
+// document that LLMs absorb well without manual string concatenation.
+//
+// Mapping:
+//   * dict → element per key (key is the tag name)
+//   * list → repeated `<item>...</item>` children (or `options.item_tag`)
+//   * string/int/float/bool → text node
+//   * nil → self-closing element
+//   * bytes → base64 text node tagged with `encoding="base64"`
+/**
+ * Options for `to_xml`.
+ *
+ * - `root` — top-level tag name (defaults to `"root"`).
+ * - `item_tag` — tag used for list children (defaults to `"item"`).
+ * - `pretty` — newline + 2-space indent per nesting level.
+ * - `declaration` — prepend `<?xml version="1.0" encoding="UTF-8"?>`.
+ */
+type XmlOptions = {root?: string, item_tag?: string, pretty?: bool, declaration?: bool}
+
+/**
+ * Render a value as XML. Dicts become tag trees; lists become repeated
+ * `<item>` children. Suitable for building tagged context blocks for
+ * LLM system prompts.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: to_xml({previous_chats: ["x.jsonl", "y.jsonl"]})
+ */
+pub fn to_xml(value, options: XmlOptions = {}) -> string {
+  return __to_xml(value, options ?? {})
+}
+
+/**
+ * Parse an XML document back into a Harn value. Repeated children with
+ * the same tag collapse into a list; attributes are exposed under
+ * `@attr`; mixed content's text is exposed under `@text`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [from_xml]
+ * @api_stability: stable
+ * @example: from_xml("<root><a>1</a></root>")
+ */
+pub fn from_xml(text: string) {
+  return __from_xml(text ?? "")
+}

@@ -588,4 +588,191 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
         crate::stdlib::template::pop_llm_render_context();
         Ok(VmValue::Nil)
     });
+
+    vm.register_builtin("repeat", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let count = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
+        if count <= 0 {
+            return Ok(VmValue::String(Rc::from("")));
+        }
+        // Reject pathological sizes so a typo doesn't try to allocate
+        // multi-gigabyte strings inside a script.
+        const MAX_OUT: usize = 1 << 24;
+        let total = s.len().saturating_mul(count as usize);
+        if total > MAX_OUT {
+            return Err(VmError::Runtime(format!(
+                "repeat: output would be {total} bytes (limit {MAX_OUT})"
+            )));
+        }
+        Ok(VmValue::String(Rc::from(s.repeat(count as usize))))
+    });
+
+    vm.register_builtin("indent", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        let prefix = args
+            .get(1)
+            .map(|a| a.display())
+            .unwrap_or_else(|| "  ".to_string());
+        if prefix.is_empty() || text.is_empty() {
+            return Ok(VmValue::String(Rc::from(text)));
+        }
+        let mut out = String::with_capacity(text.len() + prefix.len() * 4);
+        let mut first = true;
+        for line in text.split_inclusive('\n') {
+            // Don't pad blank lines — matches Python's textwrap.indent
+            // default behavior so callers don't get trailing whitespace
+            // on empty lines.
+            let visible = line.trim_end_matches('\n');
+            if !visible.is_empty() {
+                out.push_str(&prefix);
+            }
+            out.push_str(line);
+            first = false;
+        }
+        if first {
+            // text was empty — already handled above, but guard anyway.
+            return Ok(VmValue::String(Rc::from(text)));
+        }
+        Ok(VmValue::String(Rc::from(out)))
+    });
+
+    vm.register_builtin("dedent", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(dedent_str(&text))))
+    });
+
+    vm.register_builtin("word_wrap", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        let width = args.get(1).and_then(VmValue::as_int).unwrap_or(80).max(1) as usize;
+        Ok(VmValue::String(Rc::from(word_wrap_str(&text, width))))
+    });
+}
+
+/// Strips the common leading whitespace from every non-blank line. The
+/// minimum prefix length wins (tabs and spaces are compared verbatim,
+/// matching Python's `textwrap.dedent` semantics). Useful for heredoc-
+/// style `.harn.prompt` rendering where the surrounding code indents the
+/// content but the rendered prompt should appear flush-left.
+fn dedent_str(text: &str) -> String {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut shortest: Option<&str> = None;
+    for line in &lines {
+        let visible = line.trim_end_matches('\n');
+        if visible.trim().is_empty() {
+            continue;
+        }
+        let leading_len = visible.len() - visible.trim_start().len();
+        let leading = &visible[..leading_len];
+        shortest = Some(match shortest {
+            None => leading,
+            Some(prev) => common_prefix(prev, leading),
+        });
+        if shortest.map(str::is_empty).unwrap_or(false) {
+            break;
+        }
+    }
+    let prefix = shortest.unwrap_or("");
+    if prefix.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    for line in lines {
+        let visible = line.trim_end_matches('\n');
+        if visible.trim().is_empty() {
+            out.push_str(line);
+        } else if let Some(stripped) = line.strip_prefix(prefix) {
+            out.push_str(stripped);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
+    let end = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
+    // Walk back to a char boundary so multibyte content stays intact.
+    let mut end = end;
+    while end > 0 && !a.is_char_boundary(end) {
+        end -= 1;
+    }
+    &a[..end]
+}
+
+/// Greedy word-wrap that breaks on ASCII whitespace and preserves the
+/// original line structure (existing newlines split paragraphs). Words
+/// longer than `width` are emitted on their own line rather than split
+/// mid-token.
+fn word_wrap_str(text: &str, width: usize) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut first_line = true;
+    for line in text.split('\n') {
+        if !first_line {
+            out.push('\n');
+        }
+        first_line = false;
+        let mut col = 0usize;
+        let mut first_word = true;
+        for word in line.split_whitespace() {
+            let word_len = UnicodeSegmentation::graphemes(word, true).count();
+            if first_word {
+                out.push_str(word);
+                col = word_len;
+                first_word = false;
+            } else if col + 1 + word_len > width {
+                out.push('\n');
+                out.push_str(word);
+                col = word_len;
+            } else {
+                out.push(' ');
+                out.push_str(word);
+                col += 1 + word_len;
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{dedent_str, word_wrap_str};
+
+    #[test]
+    fn dedent_strips_minimum_common_prefix() {
+        let input = "    line one\n      line two\n    line three\n";
+        let result = dedent_str(input);
+        assert_eq!(result, "line one\n  line two\nline three\n");
+    }
+
+    #[test]
+    fn dedent_ignores_blank_lines_when_computing_prefix() {
+        let input = "  one\n\n  two\n";
+        let result = dedent_str(input);
+        assert_eq!(result, "one\n\ntwo\n");
+    }
+
+    #[test]
+    fn dedent_with_no_common_prefix_is_passthrough() {
+        let input = "  foo\nbar\n";
+        let result = dedent_str(input);
+        assert_eq!(result, "  foo\nbar\n");
+    }
+
+    #[test]
+    fn word_wrap_breaks_at_word_boundary() {
+        let result = word_wrap_str("the quick brown fox jumps over the lazy dog", 15);
+        assert_eq!(result, "the quick brown\nfox jumps over\nthe lazy dog");
+    }
+
+    #[test]
+    fn word_wrap_preserves_paragraphs() {
+        let result = word_wrap_str("alpha beta\ngamma delta", 20);
+        assert_eq!(result, "alpha beta\ngamma delta");
+    }
+
+    #[test]
+    fn word_wrap_long_word_keeps_word_intact() {
+        let result = word_wrap_str("aa supercalifragilistic bb", 5);
+        assert_eq!(result, "aa\nsupercalifragilistic\nbb");
+    }
 }

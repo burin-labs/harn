@@ -42,6 +42,72 @@ pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: Pi
   return __dict_pick_keys(d, selected_keys, drop_nil)
 }
 
+/**
+ * Recursively merges `b` into `a`. When both sides have a dict at the
+ * same key, the dicts are merged recursively; otherwise the right-hand
+ * value wins. Nil arguments are treated as empty dicts so variadic
+ * accumulators don't need a base case.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: deep_merge(defaults, overrides)
+ */
+pub fn deep_merge<V>(a: dict<string, V>, b: dict<string, V>) -> dict<string, V> {
+  return __deep_merge(a ?? {}, b ?? {})
+}
+
+/**
+ * Returns the list with duplicate entries removed, preserving the
+ * first-seen order. Equality is structural — dicts and lists with
+ * identical contents collapse to a single entry.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: unique(values)
+ */
+pub fn unique<T>(values: list<T>) -> list<T> {
+  return __list_unique(values ?? [])
+}
+
+/**
+ * Convert a list of `[key, value]` pairs (or `pair(key, value)`
+ * values) into a dict. Later pairs override earlier ones — matching
+ * `__dict_merge`. Pair with `map(items, { it -> [it.id, it] })` to
+ * build a lookup table from a list of records.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [TypeError]
+ * @api_stability: stable
+ * @example: dict_from_pairs([["a", 1], ["b", 2]])
+ */
+pub fn dict_from_pairs<V>(pairs: list<list<V>>) -> dict<string, V> {
+  return __dict_from_pairs(pairs ?? [])
+}
+
+/**
+ * Build a dict that indexes the items by the value returned from the
+ * key function. The last item per key wins, matching `dict_from_pairs`.
+ * Equivalent to `dict_from_pairs(map(items, { it -> [key_fn(it), it] }))`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [TypeError]
+ * @api_stability: stable
+ * @example: index_by(records, { r -> r.id })
+ */
+pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
+  var pairs = []
+  for item in items ?? [] {
+    pairs = pairs + [[to_string(key_fn(item)), item]]
+  }
+  return __dict_from_pairs(pairs)
+}
+
 // Check if a store key is stale (older than max_age_seconds).
 // Uses store_get/store_set convention: timestamps stored as key + "_ts".
 /**
