@@ -1157,6 +1157,7 @@ impl Chunk {
         Some(materialized)
     }
 
+    #[cfg(feature = "vm-bench-internals")]
     pub(crate) fn inline_cache_entry(&self, slot: usize) -> InlineCacheEntry {
         self.inline_caches
             .borrow()
@@ -1206,6 +1207,40 @@ impl Chunk {
                 argc,
                 target,
             } => Some((name_idx, argc, target)),
+            _ => None,
+        }
+    }
+
+    /// Property-cache fast path read. Returns the cached `(name_idx, target)`
+    /// pair by value when `slot` holds a `Property` entry, else `None`. The
+    /// outer `InlineCacheEntry` is the worst-case-sized variant (DirectCall
+    /// at ~48 bytes including padding); cloning it just to discard four other
+    /// variants in `try_cached_property`'s variant-check is wasted work. The
+    /// peek returns just the `Property` payload (`u16` + `PropertyCacheTarget`),
+    /// skipping the outer enum tag init and the padding-to-largest-variant
+    /// memcpy. Fires on every `Op::GetProperty` / `Op::GetPropertyOpt`
+    /// dispatch, which is the dominant opcode for any field-read-heavy code.
+    #[inline]
+    pub(crate) fn peek_property_cache(&self, slot: usize) -> Option<(u16, PropertyCacheTarget)> {
+        match self.inline_caches.borrow().get(slot)? {
+            InlineCacheEntry::Property { name_idx, target } => Some((*name_idx, target.clone())),
+            _ => None,
+        }
+    }
+
+    /// Direct-call cache state read. Returns just the inner `DirectCallState`
+    /// by value when `slot` holds a `DirectCall` entry, else `None`. Used by
+    /// both `try_cached_direct_call(_)` (steady-state Specialized hit check)
+    /// and `next_direct_call_entry` (Warmup → Specialized state-machine
+    /// transition). Peeking the inner state directly skips the outer
+    /// `InlineCacheEntry` discriminant check and tag init that the dispatcher
+    /// otherwise pays on every `Op::Call` (closure callee) and the named-fn
+    /// fast path inside `Op::CallBuiltin`. Single peek per dispatch covers
+    /// both the read check and the write-back computation.
+    #[inline]
+    pub(crate) fn peek_direct_call_state(&self, slot: usize) -> Option<DirectCallState> {
+        match self.inline_caches.borrow().get(slot)? {
+            InlineCacheEntry::DirectCall { state } => Some(state.clone()),
             _ => None,
         }
     }
@@ -1680,7 +1715,12 @@ impl Default for Chunk {
 
 #[cfg(test)]
 mod tests {
-    use super::{Chunk, InlineCacheEntry, MethodCacheTarget, Op, PropertyCacheTarget};
+    use std::rc::Rc;
+
+    use super::{
+        Chunk, DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget, Op,
+        PropertyCacheTarget,
+    };
     use crate::BuiltinId;
 
     #[test]
@@ -2151,6 +2191,7 @@ mod tests {
         let slot = chunk
             .inline_cache_slot(0)
             .expect("MethodCall registers a slot");
+
         chunk.set_inline_cache_entry(
             slot,
             InlineCacheEntry::Property {
@@ -2177,5 +2218,241 @@ mod tests {
         // silently regresses to the heavy `InlineCacheEntry::clone` path.
         fn assert_copy<T: Copy>() {}
         assert_copy::<super::MethodCacheTarget>();
+    }
+
+    // --- peek_property_cache contract ---
+    //
+    // The peek replaces the per-dispatch `InlineCacheEntry::clone` on the
+    // property-read path (`Op::GetProperty` / `Op::GetPropertyOpt`). It
+    // must return None for unrelated IC variants — silently mis-extracting
+    // a `Method` / `DirectCall` / `AdaptiveBinary` slot as `Property` would
+    // feed garbage into `try_cached_property` (wrong target match, possibly
+    // a panic on the field-name lookup). These tests pin the variant gate.
+
+    #[test]
+    fn peek_property_cache_returns_none_for_empty_slot() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetProperty, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("GetProperty registers a slot");
+        assert!(chunk.peek_property_cache(slot).is_none());
+    }
+
+    #[test]
+    fn peek_property_cache_returns_pair_after_warmup_for_dict_field() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetProperty, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("GetProperty registers a slot");
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::Property {
+                name_idx: 11,
+                target: PropertyCacheTarget::DictField(Rc::from("count")),
+            },
+        );
+        let (name_idx, target) = chunk
+            .peek_property_cache(slot)
+            .expect("warmed property slot peek");
+        assert_eq!(name_idx, 11);
+        match target {
+            PropertyCacheTarget::DictField(field) => assert_eq!(field.as_ref(), "count"),
+            other => panic!("expected DictField, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn peek_property_cache_returns_pair_for_unit_target() {
+        // Unit targets (eg. ListCount, ListEmpty, PairFirst) carry no Rc,
+        // so the cloned PropertyCacheTarget is a pure scalar move at the
+        // peek boundary. The hottest case in practice.
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetProperty, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("GetProperty registers a slot");
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::Property {
+                name_idx: 3,
+                target: PropertyCacheTarget::ListCount,
+            },
+        );
+        let (name_idx, target) = chunk
+            .peek_property_cache(slot)
+            .expect("warmed property slot peek");
+        assert_eq!(name_idx, 3);
+        assert_eq!(target, PropertyCacheTarget::ListCount);
+    }
+
+    #[test]
+    fn peek_property_cache_returns_none_for_non_property_variants() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u16(Op::GetProperty, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("GetProperty registers a slot");
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::Method {
+                name_idx: 0,
+                argc: 0,
+                target: MethodCacheTarget::ListCount,
+            },
+        );
+        assert!(chunk.peek_property_cache(slot).is_none());
+    }
+
+    #[test]
+    fn peek_property_cache_returns_none_for_out_of_bounds_slot() {
+        let chunk = Chunk::new();
+        assert!(chunk.peek_property_cache(0).is_none());
+        assert!(chunk.peek_property_cache(usize::MAX).is_none());
+    }
+
+    // --- peek_direct_call_state contract ---
+    //
+    // Used on both the hot Specialized-hit check path (`try_cached_direct_call`
+    // / `try_cached_named_direct_call`) and the state-machine write-back
+    // (`next_direct_call_entry`). Returning None for the non-DirectCall slot
+    // shapes is critical: a mis-extracted Method/Property/AdaptiveBinary slot
+    // would have the dispatcher attempt a closure call with the wrong argc
+    // or Rc::ptr_eq against an unrelated closure.
+
+    #[test]
+    fn peek_direct_call_state_returns_none_for_empty_slot() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u8(Op::Call, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("Op::Call registers a slot");
+        assert!(chunk.peek_direct_call_state(slot).is_none());
+    }
+
+    #[test]
+    fn peek_direct_call_state_returns_warmup_state() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u8(Op::Call, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("Op::Call registers a slot");
+        let target = synthetic_direct_call_target();
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::DirectCall {
+                state: DirectCallState::Warmup {
+                    argc: 2,
+                    target: target.clone(),
+                    hits: 1,
+                },
+            },
+        );
+        let state = chunk
+            .peek_direct_call_state(slot)
+            .expect("warmed direct-call slot peek");
+        match state {
+            DirectCallState::Warmup {
+                argc,
+                target: peeked_target,
+                hits,
+            } => {
+                assert_eq!(argc, 2);
+                assert_eq!(hits, 1);
+                assert_eq!(peeked_target, target);
+            }
+            other => panic!("expected Warmup, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn peek_direct_call_state_returns_specialized_state() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u8(Op::Call, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("Op::Call registers a slot");
+        let target = synthetic_direct_call_target();
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::DirectCall {
+                state: DirectCallState::Specialized {
+                    argc: 3,
+                    target: target.clone(),
+                    hits: 100,
+                    misses: 0,
+                },
+            },
+        );
+        let state = chunk
+            .peek_direct_call_state(slot)
+            .expect("warmed direct-call slot peek");
+        match state {
+            DirectCallState::Specialized {
+                argc,
+                target: peeked_target,
+                hits,
+                misses,
+            } => {
+                assert_eq!(argc, 3);
+                assert_eq!(hits, 100);
+                assert_eq!(misses, 0);
+                assert_eq!(peeked_target, target);
+            }
+            other => panic!("expected Specialized, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn peek_direct_call_state_returns_none_for_non_direct_call_variants() {
+        let mut chunk = Chunk::new();
+        chunk.emit_u8(Op::Call, 0, 1);
+        let slot = chunk
+            .inline_cache_slot(0)
+            .expect("Op::Call registers a slot");
+
+        chunk.set_inline_cache_entry(
+            slot,
+            InlineCacheEntry::Property {
+                name_idx: 0,
+                target: PropertyCacheTarget::ListCount,
+            },
+        );
+        assert!(chunk.peek_direct_call_state(slot).is_none());
+    }
+
+    #[test]
+    fn peek_direct_call_state_returns_none_for_out_of_bounds_slot() {
+        let chunk = Chunk::new();
+        assert!(chunk.peek_direct_call_state(0).is_none());
+        assert!(chunk.peek_direct_call_state(usize::MAX).is_none());
+    }
+
+    /// Build a synthetic `DirectCallTarget::Closure` for direct-call peek
+    /// tests. The closure has an empty body — the IC peek only inspects
+    /// the wrapping `Rc`, not the closure internals.
+    fn synthetic_direct_call_target() -> DirectCallTarget {
+        use crate::value::VmClosure;
+        use crate::{CompiledFunction, VmEnv};
+        let func = CompiledFunction {
+            name: "synthetic".to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: Vec::new(),
+            params: Vec::new(),
+            default_start: None,
+            chunk: Rc::new(Chunk::new()),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+            has_runtime_type_checks: false,
+        };
+        DirectCallTarget::Closure(Rc::new(VmClosure {
+            func: Rc::new(func),
+            env: VmEnv::new(),
+            source_dir: None,
+            module_functions: None,
+            module_state: None,
+        }))
     }
 }

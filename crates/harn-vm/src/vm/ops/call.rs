@@ -722,18 +722,16 @@ impl super::super::Vm {
     /// leaves `ip` untouched so [`execute_call_async`] can read the operand
     /// exactly once.
     pub(super) fn execute_call_sync(&mut self) -> Option<Result<(), VmError>> {
-        let (argc, cache_slot, cache_entry) = {
+        let (argc, cache_slot, cached_state) = {
             let frame = self.frames.last().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
             let argc = frame.chunk.code[frame.ip] as usize;
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cache_entry = cache_slot
-                .map(|slot| frame.chunk.inline_cache_entry(slot))
-                .unwrap_or(InlineCacheEntry::Empty);
-            (argc, cache_slot, cache_entry)
+            let cached_state = cache_slot.and_then(|slot| frame.chunk.peek_direct_call_state(slot));
+            (argc, cache_slot, cached_state)
         };
         let callee_idx = self.stack.len().checked_sub(argc + 1)?;
-        let closure = match self.try_cached_direct_call(&cache_entry, argc, callee_idx) {
+        let closure = match self.try_cached_direct_call(cached_state.as_ref(), argc, callee_idx) {
             Some(closure) => closure,
             None => match self.stack.get(callee_idx)? {
                 VmValue::Closure(c) => Rc::clone(c),
@@ -746,7 +744,7 @@ impl super::super::Vm {
 
         if let Some(slot) = cache_slot {
             let next_entry = Self::next_direct_call_entry(
-                cache_entry,
+                cached_state,
                 argc,
                 DirectCallTarget::Closure(Rc::clone(&closure)),
             );
@@ -767,18 +765,15 @@ impl super::super::Vm {
 
     fn try_cached_direct_call(
         &self,
-        cache: &InlineCacheEntry,
+        cached_state: Option<&DirectCallState>,
         argc: usize,
         callee_idx: usize,
     ) -> Option<Rc<VmClosure>> {
-        let InlineCacheEntry::DirectCall {
-            state:
-                DirectCallState::Specialized {
-                    argc: cached_argc,
-                    target: DirectCallTarget::Closure(cached_closure),
-                    ..
-                },
-        } = cache
+        let DirectCallState::Specialized {
+            argc: cached_argc,
+            target: DirectCallTarget::Closure(cached_closure),
+            ..
+        } = cached_state?
         else {
             return None;
         };
@@ -795,19 +790,16 @@ impl super::super::Vm {
     }
 
     fn next_direct_call_entry(
-        previous: InlineCacheEntry,
+        previous_state: Option<DirectCallState>,
         argc: usize,
         target: DirectCallTarget,
     ) -> InlineCacheEntry {
-        let state = match previous {
-            InlineCacheEntry::DirectCall {
-                state:
-                    DirectCallState::Warmup {
-                        argc: cached_argc,
-                        target: cached_target,
-                        hits,
-                    },
-            } if cached_argc == argc && cached_target == target => {
+        let state = match previous_state {
+            Some(DirectCallState::Warmup {
+                argc: cached_argc,
+                target: cached_target,
+                hits,
+            }) if cached_argc == argc && cached_target == target => {
                 let hits = hits.saturating_add(1);
                 if hits >= DIRECT_CALL_QUICKEN_THRESHOLD {
                     DirectCallState::Specialized {
@@ -820,23 +812,18 @@ impl super::super::Vm {
                     DirectCallState::Warmup { argc, target, hits }
                 }
             }
-            InlineCacheEntry::DirectCall {
-                state:
-                    DirectCallState::Specialized {
-                        argc: cached_argc,
-                        target: cached_target,
-                        hits,
-                        misses,
-                    },
-            } if cached_argc == argc && cached_target == target => DirectCallState::Specialized {
+            Some(DirectCallState::Specialized {
+                argc: cached_argc,
+                target: cached_target,
+                hits,
+                misses,
+            }) if cached_argc == argc && cached_target == target => DirectCallState::Specialized {
                 argc,
                 target,
                 hits: hits.saturating_add(1),
                 misses,
             },
-            InlineCacheEntry::DirectCall {
-                state: DirectCallState::Specialized { misses: 0, .. },
-            } => DirectCallState::Specialized {
+            Some(DirectCallState::Specialized { misses: 0, .. }) => DirectCallState::Specialized {
                 argc,
                 target,
                 hits: 1,
@@ -958,16 +945,14 @@ impl super::super::Vm {
     /// resolves synchronously in the hot case but still pays the
     /// future-state-machine tax.
     pub(super) fn execute_call_builtin_sync(&mut self) -> Option<Result<(), VmError>> {
-        let (name_idx, argc, cache_slot, cache_entry) = {
+        let (name_idx, argc, cache_slot, cached_state) = {
             let frame = self.frames.last().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
             let name_idx = frame.chunk.read_u16(frame.ip + 8) as usize;
             let argc = frame.chunk.code[frame.ip + 10] as usize;
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cache_entry = cache_slot
-                .map(|slot| frame.chunk.inline_cache_entry(slot))
-                .unwrap_or(InlineCacheEntry::Empty);
-            (name_idx, argc, cache_slot, cache_entry)
+            let cached_state = cache_slot.and_then(|slot| frame.chunk.peek_direct_call_state(slot));
+            (name_idx, argc, cache_slot, cached_state)
         };
         let frame = self.frames.last().unwrap();
         let name = Self::const_str(&frame.chunk.constants[name_idx]).ok()?;
@@ -980,7 +965,7 @@ impl super::super::Vm {
             return None;
         }
 
-        let closure = match self.try_cached_named_direct_call(&cache_entry, name, argc) {
+        let closure = match self.try_cached_named_direct_call(cached_state.as_ref(), name, argc) {
             Some(closure) => closure,
             None => self.resolve_named_closure(name)?,
         };
@@ -990,7 +975,7 @@ impl super::super::Vm {
 
         if let Some(slot) = cache_slot {
             let next_entry = Self::next_direct_call_entry(
-                cache_entry,
+                cached_state,
                 argc,
                 DirectCallTarget::Closure(Rc::clone(&closure)),
             );
@@ -1006,18 +991,15 @@ impl super::super::Vm {
 
     fn try_cached_named_direct_call(
         &self,
-        cache: &InlineCacheEntry,
+        cached_state: Option<&DirectCallState>,
         name: &str,
         argc: usize,
     ) -> Option<Rc<VmClosure>> {
-        let InlineCacheEntry::DirectCall {
-            state:
-                DirectCallState::Specialized {
-                    argc: cached_argc,
-                    target: DirectCallTarget::Closure(cached_closure),
-                    ..
-                },
-        } = cache
+        let DirectCallState::Specialized {
+            argc: cached_argc,
+            target: DirectCallTarget::Closure(cached_closure),
+            ..
+        } = cached_state?
         else {
             return None;
         };

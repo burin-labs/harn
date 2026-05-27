@@ -65,17 +65,11 @@ impl super::super::Vm {
     }
 
     fn try_cached_property(
-        cache: &InlineCacheEntry,
+        cache: Option<&(u16, PropertyCacheTarget)>,
         name_idx: u16,
         obj: &VmValue,
     ) -> Option<VmValue> {
-        let InlineCacheEntry::Property {
-            name_idx: cached_name_idx,
-            target,
-        } = cache
-        else {
-            return None;
-        };
+        let (cached_name_idx, target) = cache?;
         if *cached_name_idx != name_idx {
             return None;
         }
@@ -419,22 +413,22 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_get_property(&mut self, optional: bool) -> Result<(), VmError> {
-        let (name_idx, cache_slot, cache_entry) = {
+        let (name_idx, cache_slot, cached_property) = {
             let frame = self.frames.last_mut().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
             let name_idx = frame.chunk.read_u16(frame.ip);
             frame.ip += 2;
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cache_entry = cache_slot
-                .map(|slot| frame.chunk.inline_cache_entry(slot))
-                .unwrap_or(InlineCacheEntry::Empty);
-            (name_idx, cache_slot, cache_entry)
+            let cached_property = cache_slot.and_then(|slot| frame.chunk.peek_property_cache(slot));
+            (name_idx, cache_slot, cached_property)
         };
 
         let obj = self.pop()?;
         if optional && matches!(obj, VmValue::Nil) {
             self.stack.push(VmValue::Nil);
-        } else if let Some(result) = Self::try_cached_property(&cache_entry, name_idx, &obj) {
+        } else if let Some(result) =
+            Self::try_cached_property(cached_property.as_ref(), name_idx, &obj)
+        {
             self.stack.push(result);
         } else {
             let (result, target) = {
