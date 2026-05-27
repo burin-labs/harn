@@ -107,7 +107,7 @@ harn crystallize \
 
 The generated workflow is a reviewable skeleton. It contains explicit
 parameters, capability comments, side-effect comments, approval boundaries, and
-TODO comments for fuzzy segments that still require a model or reviewer.
+`review_required` comments for fuzzy segments that still require a model or reviewer.
 `--shadow-from` may be passed more than once. These directories are not used for
 mining; they are future/holdout traces that must match before promotion
 metadata can report the candidate as ready.
