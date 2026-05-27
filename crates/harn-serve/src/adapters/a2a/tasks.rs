@@ -13,14 +13,26 @@ impl A2aServer {
         let parts = message_parts(params)?;
         let text = message_text(params, &parts);
         let function = select_function(&self.catalog, params)?;
-        let arguments = message_arguments(
-            self.catalog
-                .function(&function)
-                .expect("selected function exists"),
-            params,
-            &parts,
-            &text,
-        )?;
+        let function_decl = self
+            .catalog
+            .function(&function)
+            .expect("selected function exists");
+        // Scope preflight: refuse the task before any state is allocated
+        // when the caller's credential cannot satisfy the function's
+        // `@scopes(...)` attribute. The REST adapter maps the carried
+        // `FORBIDDEN` status to HTTP 403; JSON-RPC peers see `-32003`
+        // with a structured `data` body.
+        if !function_decl.required_scopes.is_empty() {
+            let decision = self
+                .core
+                .auth_policy()
+                .authorize_with_scopes(&auth, &function_decl.required_scopes)
+                .await;
+            if let AuthorizationDecision::MissingScope { required, granted } = decision {
+                return Err(scope_mismatch_prepare_error(&required, &granted));
+            }
+        }
+        let arguments = message_arguments(function_decl, params, &parts, &text)?;
         let task_id = Uuid::now_v7().to_string();
         let cancel_token = Arc::new(AtomicBool::new(false));
         let context_id = params
@@ -120,15 +132,19 @@ impl A2aServer {
         match result {
             Ok(response) => self.complete_task(&task.id, response),
             // The dispatch core's `AuthPolicy.authorize` is what produces
-            // `DispatchError::Unauthorized`. It runs synchronously at the
-            // start of `core.dispatch` before any script work, so the
-            // policy denial is "the server declined this task" — A2A
-            // 0.3.0's `rejected` terminal state. Any post-policy auth
-            // failure (e.g. an LLM/HTTP 401 raised by the script itself)
-            // surfaces through `Execution(...)` with an `auth`-classified
-            // message and maps to non-terminal `auth-required` so the
-            // client can resupply credentials and resubscribe.
-            Err(DispatchError::Unauthorized(message)) => self.reject_task(&task.id, &message),
+            // `DispatchError::Unauthorized` and `Forbidden`. Both run
+            // synchronously at the start of `core.dispatch` before any
+            // script work, so the policy denial is "the server declined
+            // this task" — A2A 0.3.0's `rejected` terminal state. Any
+            // post-policy auth failure (e.g. an LLM/HTTP 401 raised by
+            // the script itself) surfaces through `Execution(...)` with
+            // an `auth`-classified message and maps to non-terminal
+            // `auth-required` so the client can resupply credentials and
+            // resubscribe.
+            Err(error @ DispatchError::Unauthorized(_))
+            | Err(error @ DispatchError::Forbidden { .. }) => {
+                self.reject_task(&task.id, &error.to_string());
+            }
             Err(DispatchError::Execution(message))
                 if matches!(
                     harn_vm::value::classify_error_message(&message),

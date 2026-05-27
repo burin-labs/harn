@@ -15,7 +15,8 @@ use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{stream, StreamExt};
 use harn_serve::{
     A2aHttpServeOptions, A2aServer, A2aServerConfig, AcpProfileConfig, ApiHttpServeOptions,
-    ApiKeyAuthConfig, ApiServer, ApiServerConfig, AuthMethodConfig, AuthPolicy, AuthRequest,
+    ApiKeyAuthConfig, ApiKeyEntry, ApiServer, ApiServerConfig, AuthMethodConfig, AuthPolicy,
+    AuthRequest,
     AuthorizationDecision, DispatchCore, DispatchCoreConfig, ExportCatalog, ExportedCallableKind,
     HmacAuthConfig, HttpTlsConfig, McpHttpServeOptions, McpServer, McpServerConfig,
     MCP_PROTOCOL_VERSION,
@@ -667,6 +668,17 @@ async fn authorize_script_rpc(
             -32001,
             &message,
         )),
+        // Defensive: this call site passes no per-route scopes, so the
+        // emptiness rule (`empty ⊆ anything`) makes `MissingScope`
+        // unreachable. If a future caller threads scopes through, fall
+        // back to the canonical forbidden envelope.
+        AuthorizationDecision::MissingScope { required, granted } => {
+            Err(harn_vm::jsonrpc::error_response(
+                request.get("id").cloned().unwrap_or(JsonValue::Null),
+                -32003,
+                &harn_serve::forbidden_message(&required, &granted),
+            ))
+        }
     }
 }
 
@@ -811,7 +823,10 @@ fn build_auth_policy(api_keys: &[String], hmac_secret: Option<&String>) -> AuthP
     let mut methods = Vec::new();
     if !api_keys.is_empty() {
         methods.push(AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-            keys: api_keys.iter().cloned().collect::<BTreeSet<_>>(),
+            keys: api_keys
+                .iter()
+                .map(|key| ApiKeyEntry::new(key.clone(), BTreeSet::new()))
+                .collect(),
         }));
     }
     if let Some(secret) = hmac_secret {
@@ -819,6 +834,7 @@ fn build_auth_policy(api_keys: &[String], hmac_secret: Option<&String>) -> AuthP
             shared_secret: secret.clone(),
             provider: "harn-serve".to_string(),
             timestamp_window: Duration::seconds(300),
+            granted_scopes: BTreeSet::new(),
         }));
     }
     AuthPolicy { methods }
@@ -936,9 +952,9 @@ mod tests {
     fn guard_serve_bind_auth_allows_public_bind_with_auth() {
         let bind: SocketAddr = "0.0.0.0:8080".parse().unwrap();
         let policy = AuthPolicy {
-            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-                keys: std::iter::once("test-key".to_string()).collect(),
-            })],
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single(
+                "test-key",
+            ))],
         };
         let tls = harn_serve::HttpTlsConfig::plain();
         let result = guard_serve_bind_auth("mcp", bind, &policy, &tls);

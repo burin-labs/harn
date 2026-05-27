@@ -600,6 +600,19 @@ pub(super) fn caller_label(params: &JsonValue) -> String {
         .to_string()
 }
 
+/// Construct the A2A prepare-error for a scope mismatch. Shared by the
+/// task-prepare scope preflight and any future preflight at the protocol
+/// layer so the wire format (`-32003`, `data.required_scopes`, etc.) and
+/// the HTTP status escalation (`403`) stay consistent.
+pub(super) fn scope_mismatch_prepare_error(
+    required: &std::collections::BTreeSet<String>,
+    granted: &std::collections::BTreeSet<String>,
+) -> A2aPrepareError {
+    A2aPrepareError::new(-32003, crate::forbidden_message(required, granted))
+        .with_status(axum::http::StatusCode::FORBIDDEN)
+        .with_data(crate::forbidden_data_payload(required, granted))
+}
+
 pub(super) fn select_function(
     catalog: &ExportCatalog,
     params: &JsonValue,
@@ -1140,6 +1153,14 @@ pub(super) fn a2a_worker_session_id(task_id: &str) -> String {
 pub(super) struct A2aPrepareError {
     code: i64,
     message: String,
+    /// HTTP status to surface when the JSON-RPC error is delivered over
+    /// the REST `/v1` binding. `None` means the binding's default
+    /// (`BAD_REQUEST`).
+    status: Option<axum::http::StatusCode>,
+    /// Structured payload attached to the JSON-RPC `error.data` field.
+    /// Lets callers like scope-preflight ship `required_scopes`/`granted_scopes`
+    /// without losing context in the message string.
+    data: Option<JsonValue>,
 }
 
 impl A2aPrepareError {
@@ -1147,10 +1168,40 @@ impl A2aPrepareError {
         Self {
             code,
             message: message.into(),
+            status: None,
+            data: None,
         }
     }
 
+    pub(super) fn with_status(mut self, status: axum::http::StatusCode) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    pub(super) fn with_data(mut self, data: JsonValue) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub(super) fn status_code(&self) -> Option<axum::http::StatusCode> {
+        self.status
+    }
+
     pub(super) fn with_id(self, rpc_id: JsonValue) -> JsonValue {
-        error_response(rpc_id, self.code, &self.message)
+        let mut error = json!({
+            "code": self.code,
+            "message": self.message,
+        });
+        if let Some(data) = self.data {
+            error
+                .as_object_mut()
+                .expect("error object")
+                .insert("data".to_string(), data);
+        }
+        json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "error": error,
+        })
     }
 }

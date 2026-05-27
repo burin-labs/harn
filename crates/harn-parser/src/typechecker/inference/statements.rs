@@ -1897,7 +1897,8 @@ impl TypeChecker {
             match attr.name.as_str() {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
-                | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy" => {}
+                | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy"
+                | "scopes" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,
@@ -2075,6 +2076,7 @@ impl TypeChecker {
             "command" => self.validate_command_args(attr),
             "serial" => self.validate_serial_args(attr),
             "heavy" => self.validate_heavy_args(attr),
+            "scopes" => self.validate_scopes_args(attr),
             "test" if !attr.args.is_empty() => {
                 self.warning_at(
                     Code::InvalidAttributeArgument,
@@ -2477,6 +2479,50 @@ impl TypeChecker {
                 "`@heavy(...)` must specify `threads: <positive int>`".to_string(),
                 attr.span,
             );
+        }
+    }
+
+    /// Validate `@scopes("a:b", "c:d", ...)`. Arguments must be string
+    /// literals (positional or named — the string value is what counts);
+    /// at least one is required, and each value should be a non-empty
+    /// `resource:action` shape. The shape is just a lint here so misspelled
+    /// scopes surface at typecheck instead of at the first 403.
+    fn validate_scopes_args(&mut self, attr: &Attribute) {
+        if attr.args.is_empty() {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                "`@scopes(...)` requires at least one scope literal, e.g. `@scopes(\"personas:read\")`"
+                    .to_string(),
+                attr.span,
+            );
+            return;
+        }
+        for arg in &attr.args {
+            let Some(value) = symbol_like_value(&arg.value.node) else {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    "`@scopes(...)` arguments must be string literals".to_string(),
+                    arg.span,
+                );
+                continue;
+            };
+            if value.is_empty() {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    "`@scopes(...)` arguments cannot be empty strings".to_string(),
+                    arg.span,
+                );
+                continue;
+            }
+            if !value.contains(':') {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!(
+                        "`@scopes({value:?})` should be a `resource:action` literal like `\"personas:read\"`"
+                    ),
+                    arg.span,
+                );
+            }
         }
     }
 

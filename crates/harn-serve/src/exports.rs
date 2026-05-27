@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harn_parser::{Node, TypeExpr};
+use harn_parser::{Attribute, Node, TypeExpr};
 
 use crate::DispatchError;
 
@@ -29,6 +29,12 @@ pub struct ExportedFunction {
     pub return_type: Option<TypeExpr>,
     pub input_schema: serde_json::Value,
     pub output_schema: Option<serde_json::Value>,
+    /// Scopes the caller's credential must carry to invoke this function.
+    /// Populated from `@scopes("...", "...")` attribute literals on the
+    /// declaration; empty when no attribute is present, meaning the route
+    /// is unrestricted beyond whatever scopes the auth method enforces
+    /// globally.
+    pub required_scopes: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,7 +54,7 @@ impl ExportCatalog {
 
         let mut functions = BTreeMap::new();
         for node in &program {
-            let (_, inner) = harn_parser::peel_attributes(node);
+            let (attrs, inner) = harn_parser::peel_attributes(node);
             let Node::FnDecl {
                 name,
                 params,
@@ -74,13 +80,14 @@ impl ExportCatalog {
                     output_schema: return_type
                         .as_ref()
                         .and_then(harn_vm::json_schema_for_type_expr),
+                    required_scopes: scopes_from_attributes(attrs),
                 },
             );
         }
 
         let has_public_exports = !functions.is_empty();
         for node in &program {
-            let (_, inner) = harn_parser::peel_attributes(node);
+            let (attrs, inner) = harn_parser::peel_attributes(node);
             let Node::Pipeline {
                 name,
                 params,
@@ -94,6 +101,7 @@ impl ExportCatalog {
             if has_public_exports && !*is_pub {
                 continue;
             }
+            let required_scopes = scopes_from_attributes(attrs);
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
@@ -105,6 +113,7 @@ impl ExportCatalog {
                     output_schema: return_type
                         .as_ref()
                         .and_then(harn_vm::json_schema_for_type_expr),
+                    required_scopes,
                 });
         }
 
@@ -149,6 +158,30 @@ fn pipeline_exported_params(params: &[String]) -> Vec<ExportedParam> {
         .collect()
 }
 
+/// Collect scope literals from any `@scopes(...)` attributes on a
+/// declaration. Both positional and named arguments are accepted (named
+/// args are useful for ergonomics like `@scopes(read: "personas:read")`
+/// in callers that prefer key-value form); only string literals
+/// contribute. Multiple `@scopes` attributes on the same declaration
+/// union into one set.
+fn scopes_from_attributes(attrs: &[Attribute]) -> BTreeSet<String> {
+    let mut set = BTreeSet::new();
+    for attr in attrs {
+        if attr.name != "scopes" {
+            continue;
+        }
+        for arg in &attr.args {
+            match &arg.value.node {
+                Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
+                    set.insert(value.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    set
+}
+
 fn pipeline_input_schema(params: &[String]) -> serde_json::Value {
     serde_json::json!({
         "type": "object",
@@ -189,6 +222,35 @@ pub fn greet(name: string, excited: bool = false) -> string {
             greet.output_schema.as_ref().expect("output")["type"],
             "string"
         );
+    }
+
+    #[test]
+    fn export_catalog_captures_scopes_attribute_from_function_decl() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server.harn");
+        std::fs::write(
+            &path,
+            r#"
+@scopes("personas:read", "sessions:write")
+pub fn list_sessions() -> string {
+  return "ok"
+}
+
+pub fn ping() -> string {
+  return "pong"
+}
+"#,
+        )
+        .expect("write script");
+
+        let catalog = ExportCatalog::from_path(&path).expect("catalog");
+        let list = catalog.function("list_sessions").expect("list_sessions");
+        assert_eq!(
+            list.required_scopes,
+            BTreeSet::from(["personas:read".to_string(), "sessions:write".to_string()])
+        );
+        let ping = catalog.function("ping").expect("ping");
+        assert!(ping.required_scopes.is_empty());
     }
 
     #[test]

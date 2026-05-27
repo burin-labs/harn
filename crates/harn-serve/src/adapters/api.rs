@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::convert::Infallible;
 use std::ffi::OsString;
 use std::net::SocketAddr;
@@ -1948,7 +1948,36 @@ async fn authorize(
             "unauthenticated",
             &message,
         )),
+        // Today this REST adapter calls `authorize` with no per-route
+        // scopes, so reaching `MissingScope` requires an explicit
+        // future caller. Wire it defensively so the surface returns the
+        // structured 403 rather than dropping into a non-exhaustive
+        // match panic.
+        AuthorizationDecision::MissingScope { required, granted } => Err(forbidden_api_error(
+            &required,
+            &granted,
+        )),
     }
+}
+
+/// Render a scope mismatch as the REST API's standard `forbidden` error
+/// payload, mirroring how `harn-cloud-gateway` reports the same case.
+/// Uses the same `kind`/`required_scopes`/`granted_scopes`/`missing_scopes`
+/// fields as the JSON-RPC adapters; the only difference is the REST
+/// adapter inlines them under a single `error` envelope object instead
+/// of nesting under `error.data`.
+fn forbidden_api_error(
+    required: &BTreeSet<String>,
+    granted: &BTreeSet<String>,
+) -> Response {
+    let mut body = crate::forbidden_data_payload(required, granted);
+    if let Some(map) = body.as_object_mut() {
+        map.insert(
+            "message".to_string(),
+            json!(crate::forbidden_message(required, granted)),
+        );
+    }
+    (StatusCode::FORBIDDEN, Json(json!({ "error": body }))).into_response()
 }
 
 fn headers_to_map(headers: &HeaderMap) -> BTreeMap<String, String> {
@@ -2425,9 +2454,7 @@ mod tests {
         let config = ApiServerConfig::for_pipeline(script.to_string_lossy().to_string())
             .with_auth_policy(AuthPolicy {
                 methods: vec![crate::auth::AuthMethodConfig::ApiKey(
-                    crate::auth::ApiKeyAuthConfig {
-                        keys: std::iter::once("secret".to_string()).collect(),
-                    },
+                    crate::auth::ApiKeyAuthConfig::single("secret"),
                 )],
             });
         let server = ApiServer::new(config);
