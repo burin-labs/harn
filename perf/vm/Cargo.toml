@@ -23,6 +23,11 @@ path = "bench_inline_cache_slot.rs"
 harness = false
 
 [[bench]]
+name = "bench_adaptive_binary_cache_read"
+path = "bench_adaptive_binary_cache_read.rs"
+harness = false
+
+[[bench]]
 name = "bench_vm_fixtures"
 path = "bench_vm_fixtures.rs"
 harness = false

@@ -57,34 +57,55 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_adaptive_binary(&mut self, op: AdaptiveBinaryOp) -> Result<(), VmError> {
-        let (cache_slot, cache_entry) = {
+        // Read the cache slot index from the flat side-table (O(1) `Vec`
+        // index after #2470) and, if a slot exists, peek the cached
+        // `AdaptiveBinaryState` by value. The peek avoids cloning the
+        // wrapping `InlineCacheEntry` enum — that clone used to fire on
+        // every dispatch of every binary op, paying a 24-32B memcpy
+        // that the variant-checking match would just throw away. Since
+        // `AdaptiveBinaryState: Copy`, the read here is a single scalar
+        // move (`u8`/`u64` fields, all stack-resident).
+        let (cache_slot, cached_state) = {
             let frame = self.frames.last().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cache_entry = cache_slot
-                .map(|slot| frame.chunk.inline_cache_entry(slot))
-                .unwrap_or(InlineCacheEntry::Empty);
-            (cache_slot, cache_entry)
+            let cached_state = cache_slot
+                .and_then(|slot| frame.chunk.peek_adaptive_binary_cache(slot))
+                .filter(|(cached_op, _)| *cached_op == op)
+                .map(|(_, state)| state);
+            (cache_slot, cached_state)
         };
 
         let b = self.pop()?;
         let a = self.pop()?;
         let shape = BinaryShape::for_values(op, &a, &b);
 
-        let result = if let Some((result, next_entry)) =
-            Self::try_specialized_binary(op, &cache_entry, &a, &b)
+        let result = if let Some((result, next_state)) =
+            Self::try_specialized_binary(op, cached_state, &a, &b)
         {
             if let Some(slot) = cache_slot {
                 let frame = self.frames.last().unwrap();
-                frame.chunk.set_inline_cache_entry(slot, next_entry);
+                frame.chunk.set_inline_cache_entry(
+                    slot,
+                    InlineCacheEntry::AdaptiveBinary {
+                        op,
+                        state: next_state,
+                    },
+                );
             }
             result
         } else {
             let result = Self::generic_binary_result(self, op, a, b)?;
             if let (Some(slot), Some(shape)) = (cache_slot, shape) {
-                let next_entry = Self::next_adaptive_binary_entry(op, cache_entry, shape);
+                let next_state = Self::next_adaptive_binary_state(cached_state, shape);
                 let frame = self.frames.last().unwrap();
-                frame.chunk.set_inline_cache_entry(slot, next_entry);
+                frame.chunk.set_inline_cache_entry(
+                    slot,
+                    InlineCacheEntry::AdaptiveBinary {
+                        op,
+                        state: next_state,
+                    },
+                );
             }
             result
         };
@@ -93,55 +114,55 @@ impl super::super::Vm {
         Ok(())
     }
 
+    /// Adaptive-binary specialization fast path. Takes the peeked
+    /// `Copy` `AdaptiveBinaryState` (already filtered for the current
+    /// op by [`execute_adaptive_binary`]) instead of `&InlineCacheEntry`,
+    /// so the helper no longer destructures the outer enum on every
+    /// dispatch. Returns `(result, next_state)` on a hit; the caller
+    /// is responsible for wrapping `next_state` into `InlineCacheEntry`
+    /// before writing it back through `set_inline_cache_entry`.
     fn try_specialized_binary(
         op: AdaptiveBinaryOp,
-        cache: &InlineCacheEntry,
+        cached_state: Option<AdaptiveBinaryState>,
         a: &VmValue,
         b: &VmValue,
-    ) -> Option<(VmValue, InlineCacheEntry)> {
-        let InlineCacheEntry::AdaptiveBinary {
-            op: cached_op,
-            state:
-                AdaptiveBinaryState::Specialized {
-                    shape,
-                    hits,
-                    misses,
-                },
-        } = cache
+    ) -> Option<(VmValue, AdaptiveBinaryState)> {
+        let AdaptiveBinaryState::Specialized {
+            shape,
+            hits,
+            misses,
+        } = cached_state?
         else {
             return None;
         };
-        if *cached_op != op || Some(*shape) != BinaryShape::for_values(op, a, b) {
+        if Some(shape) != BinaryShape::for_values(op, a, b) {
             return None;
         }
-        let result = Self::specialized_binary_result(op, *shape, a, b)?;
+        let result = Self::specialized_binary_result(op, shape, a, b)?;
         Some((
             result,
-            InlineCacheEntry::AdaptiveBinary {
-                op,
-                state: AdaptiveBinaryState::Specialized {
-                    shape: *shape,
-                    hits: hits.saturating_add(1),
-                    misses: *misses,
-                },
+            AdaptiveBinaryState::Specialized {
+                shape,
+                hits: hits.saturating_add(1),
+                misses,
             },
         ))
     }
 
-    fn next_adaptive_binary_entry(
-        op: AdaptiveBinaryOp,
-        previous: InlineCacheEntry,
+    /// Compute the next adaptive-binary cache state from the peeked
+    /// previous state and the freshly-observed `shape`. Operates on
+    /// `Copy` state directly — the helper no longer needs to take the
+    /// wrapping `InlineCacheEntry` by value (which used to force the
+    /// caller to clone the enum on the miss path too).
+    fn next_adaptive_binary_state(
+        previous: Option<AdaptiveBinaryState>,
         shape: BinaryShape,
-    ) -> InlineCacheEntry {
-        let state = match previous {
-            InlineCacheEntry::AdaptiveBinary {
-                op: cached_op,
-                state:
-                    AdaptiveBinaryState::Warmup {
-                        shape: cached,
-                        hits,
-                    },
-            } if cached_op == op && cached == shape => {
+    ) -> AdaptiveBinaryState {
+        match previous {
+            Some(AdaptiveBinaryState::Warmup {
+                shape: cached,
+                hits,
+            }) if cached == shape => {
                 let hits = hits.saturating_add(1);
                 if hits >= ADAPTIVE_QUICKEN_THRESHOLD {
                     AdaptiveBinaryState::Specialized {
@@ -153,30 +174,24 @@ impl super::super::Vm {
                     AdaptiveBinaryState::Warmup { shape, hits }
                 }
             }
-            InlineCacheEntry::AdaptiveBinary {
-                op: cached_op,
-                state:
-                    AdaptiveBinaryState::Specialized {
-                        shape: cached,
-                        hits,
-                        misses,
-                    },
-            } if cached_op == op && cached == shape => AdaptiveBinaryState::Specialized {
+            Some(AdaptiveBinaryState::Specialized {
+                shape: cached,
+                hits,
+                misses,
+            }) if cached == shape => AdaptiveBinaryState::Specialized {
                 shape,
                 hits: hits.saturating_add(1),
                 misses,
             },
-            InlineCacheEntry::AdaptiveBinary {
-                op: cached_op,
-                state: AdaptiveBinaryState::Specialized { misses: 0, .. },
-            } if cached_op == op => AdaptiveBinaryState::Specialized {
-                shape,
-                hits: 1,
-                misses: 1,
-            },
+            Some(AdaptiveBinaryState::Specialized { misses: 0, .. }) => {
+                AdaptiveBinaryState::Specialized {
+                    shape,
+                    hits: 1,
+                    misses: 1,
+                }
+            }
             _ => AdaptiveBinaryState::Warmup { shape, hits: 1 },
-        };
-        InlineCacheEntry::AdaptiveBinary { op, state }
+        }
     }
 
     fn generic_binary_result(
