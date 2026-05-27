@@ -2,7 +2,7 @@
  * No-credentials workflow fixture for the cross-platform release smoke
  * matrix. Drives the LLM call path through `provider: "mock"` so the
  * smoke runs without API keys, network, or platform-specific secret
- * stores. Mirrors conformance/tests/integration/llm_mock.harn but stays
+ * stores. Mirrors conformance/tests/scenarios/llm_mock.harn but stays
  * minimal: one canned response, one assertion, one deterministic
  * println so smoke output can be byte-compared on every platform.
  */

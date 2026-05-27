@@ -11,14 +11,16 @@ pub fn count_substring(haystack: string, needle: string) -> int {
 }
 
 /**
- * Sum `@xfail:` occurrences across every file under `root`. Skips
- * directories so binary fixtures never get string-decoded.
+ * Sum `@xfail:` occurrences across every `.harn` file under `root`.
+ * Only `.harn` files are counted: the marker is only meaningful inside
+ * conformance test source, and docs/fixtures may legitimately reference
+ * the literal `@xfail:` string when describing the convention.
  */
 pub fn count_xfail_markers(root: string) -> int {
   let entries = harness.fs.walk(root)
   var total = 0
   for entry in entries {
-    if entry.is_file {
+    if entry.is_file && entry.path.ends_with(".harn") {
       let text = try {
         harness.fs.read_text(entry.path)
       } catch (_) {

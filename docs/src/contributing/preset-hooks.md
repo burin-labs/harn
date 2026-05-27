@@ -83,7 +83,7 @@ prove it out.
 3. **Append it to the catalogue's rule list** in the
    `__cat_build(...)` call at the end of the builder.
 4. **Add a conformance fixture.** Each catalogue has a paired test
-   file under `conformance/tests/stdlib/tool_hooks_catalogue_<stack>.harn`
+   file under `conformance/tests/stdlib/tool_hooks/tool_hooks_catalogue_<stack>.harn`
    plus its `.expected`. Mirror the existing structure — one
    `tool_hooks_match` call per rule outcome (one hit, one miss). The
    `tool_hooks_catalogue_rust.harn` fixture is the canonical
@@ -211,4 +211,4 @@ Reviewers should check:
 - Epic: [#1884 — Preset run-command hook library](https://github.com/burin-labs/harn/issues/1884).
 - This guide: TH-08 ([#1901](https://github.com/burin-labs/harn/issues/1901)).
 - Catalogue source: [`crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn`](https://github.com/burin-labs/harn/blob/main/crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn).
-- Conformance suite: `conformance/tests/stdlib/tool_hooks_*.harn`.
+- Conformance suite: `conformance/tests/stdlib/tool_hooks/tool_hooks_*.harn`.

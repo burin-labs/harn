@@ -155,4 +155,4 @@ This module satisfies the OA-03 acceptance criteria from issue #1904:
   capabilities so embedders enforce RLS / tenant isolation.
 * Custom backend hook protocol documented above.
 * Conformance per backend (store / retrieve / refresh / delete) lives
-  in `conformance/tests/stdlib/oauth_storage.harn`.
+  in `conformance/tests/stdlib/oauth/oauth_storage.harn`.
