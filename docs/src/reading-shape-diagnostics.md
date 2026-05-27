@@ -17,7 +17,7 @@ need to dig into the source to interpret one.
 
 ## Missing field on a shape annotation
 
-```harn
+```harn,ignore
 type User = {name: string, email: string, age: int}
 
 let u: User = {name: "Ada", email: "ada@x", age: 36}

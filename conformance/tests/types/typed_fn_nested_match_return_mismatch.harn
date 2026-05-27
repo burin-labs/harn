@@ -1,0 +1,8 @@
+pipeline test(task) {
+  fn bad(value: string) -> int {
+    match value {
+      _ -> { return "wrong" }
+    }
+  }
+  bad("x")
+}

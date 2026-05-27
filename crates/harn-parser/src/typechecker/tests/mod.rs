@@ -18,6 +18,7 @@ mod narrowing;
 mod ownership;
 mod reachability;
 mod repair;
+mod soundness;
 mod strict_types;
 mod typing;
 

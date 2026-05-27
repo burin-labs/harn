@@ -188,17 +188,6 @@ impl TypeChecker {
         if Self::is_wildcard_type(expected) || Self::is_wildcard_type(actual) {
             return true;
         }
-        // Generic type parameters match anything.
-        if let TypeExpr::Named(name) = expected {
-            if scope.is_generic_type_param(name) {
-                return true;
-            }
-        }
-        if let TypeExpr::Named(name) = actual {
-            if scope.is_generic_type_param(name) {
-                return true;
-            }
-        }
         let expected = self.resolve_alias(expected, scope);
         let actual = self.resolve_alias(actual, scope);
 
@@ -214,6 +203,21 @@ impl TypeChecker {
             return self.types_compatible_at(Polarity::Covariant, &expected, inner, scope);
         }
 
+        // never is the bottom type: assignable to any type.
+        if matches!(actual, TypeExpr::Never) {
+            return true;
+        }
+        // Nothing is assignable to never (except never itself, handled above).
+        if matches!(expected, TypeExpr::Never) {
+            return false;
+        }
+        // `any` is the escape hatch; `unknown` is the safe top.
+        if matches!(&expected, TypeExpr::Named(n) if n == "any" || n == "unknown")
+            || matches!(&actual, TypeExpr::Named(n) if n == "any")
+        {
+            return true;
+        }
+
         // Interface satisfaction: if expected names an interface, check method compatibility.
         if let Some(iface_name) = Self::base_type_name(&expected) {
             if let Some(interface_info) = scope.get_interface(iface_name) {
@@ -224,6 +228,11 @@ impl TypeChecker {
                     }
                 }
                 if let Some(type_name) = Self::base_type_name(&actual) {
+                    if scope.is_generic_type_param(type_name)
+                        && scope.get_where_constraint(type_name) == Some(iface_name)
+                    {
+                        return true;
+                    }
                     return self.satisfies_interface(
                         type_name,
                         iface_name,
@@ -235,19 +244,20 @@ impl TypeChecker {
             }
         }
 
+        // Generic type parameters are abstract, not `any`: a value of
+        // unknown caller-chosen type `T` cannot flow into `int`, and an
+        // `int` cannot manufacture a value for arbitrary `T`. The same
+        // abstract parameter remains compatible with itself, while `any`,
+        // `unknown`, `never`, and interface-bound cases were handled above.
+        let expected_generic =
+            matches!(&expected, TypeExpr::Named(name) if scope.is_generic_type_param(name));
+        let actual_generic =
+            matches!(&actual, TypeExpr::Named(name) if scope.is_generic_type_param(name));
+        if expected_generic || actual_generic {
+            return matches!((&expected, &actual), (TypeExpr::Named(a), TypeExpr::Named(b)) if a == b);
+        }
+
         match (&expected, &actual) {
-            // never is the bottom type: assignable to any type.
-            (_, TypeExpr::Never) => true,
-            // Nothing is assignable to never (except never itself, handled above).
-            (TypeExpr::Never, _) => false,
-            // `any` is the top type (escape hatch): every type flows into `any`,
-            // and `any` flows back out to any concrete type with no narrowing required.
-            (TypeExpr::Named(n), _) if n == "any" => true,
-            (_, TypeExpr::Named(n)) if n == "any" => true,
-            // `unknown` is the safe top: every type flows into `unknown`, but
-            // `unknown` only flows back out to `unknown` itself (or `any`, via the
-            // arm above). Concrete uses require narrowing via `type_of` / `schema_is`.
-            (TypeExpr::Named(n), _) if n == "unknown" => true,
             // Reverse direction: `unknown` is not assignable to anything concrete.
             // The `(_, Named("unknown"))` arm deliberately falls through to `=> false`
             // below, producing a "expected T, got unknown" diagnostic.

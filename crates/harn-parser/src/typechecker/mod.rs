@@ -238,6 +238,7 @@ impl TypeChecker {
         source: &str,
     ) -> Vec<TypeDiagnostic> {
         self.source = Some(source.to_string());
+        self.strict_types = true;
         self.check_inner(program).0
     }
 

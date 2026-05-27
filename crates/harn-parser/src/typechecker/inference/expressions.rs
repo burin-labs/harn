@@ -18,6 +18,7 @@ use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::infer_binary_op_type;
+use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{builtin_return_type, InferredType, TypeScope};
 use super::super::union::simplify_union;
 use super::super::TypeChecker;
@@ -141,7 +142,51 @@ impl TypeChecker {
         }
     }
 
-    fn define_match_pattern_bindings(
+    fn infer_llm_call_result_type(
+        &self,
+        name: &str,
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> InferredType {
+        let (data_type, data_required) = self.llm_call_schema_data_type(args, scope)?;
+        let mut result = builtin_return_type(name)?;
+        let TypeExpr::Shape(fields) = &mut result else {
+            return Some(result);
+        };
+        if let Some(field) = fields.iter_mut().find(|field| field.name == "data") {
+            field.type_expr = data_type;
+            field.optional = !data_required;
+        }
+        Some(result)
+    }
+
+    fn llm_call_schema_data_type(
+        &self,
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> Option<(TypeExpr, bool)> {
+        let opts = args.get(2)?;
+        let Node::DictLiteral(entries) = &opts.node else {
+            return None;
+        };
+        let mut data_type = None;
+        let mut data_required = false;
+        for entry in entries {
+            let key = match &entry.key.node {
+                Node::StringLiteral(key) | Node::Identifier(key) => key.as_str(),
+                _ => continue,
+            };
+            if key == "schema" || key == "output_schema" {
+                data_type = schema_type_expr_from_node(&entry.value, scope);
+            } else if key == "output_validation" {
+                data_required =
+                    matches!(&entry.value.node, Node::StringLiteral(value) if value == "error");
+            }
+        }
+        data_type.map(|ty| (ty, data_required))
+    }
+
+    pub(in crate::typechecker) fn define_match_pattern_bindings(
         &self,
         pattern: &SNode,
         value_type: Option<&TypeExpr>,
@@ -210,7 +255,7 @@ impl TypeChecker {
         }
     }
 
-    fn define_enum_pattern_bindings(
+    pub(in crate::typechecker) fn define_enum_pattern_bindings(
         &self,
         enum_name: &str,
         variant: &str,
@@ -428,7 +473,12 @@ impl TypeChecker {
                         return Some(first_type);
                     }
                 }
-                // Generic builtins (llm_call, schema_parse/check/expect):
+                if name == "llm_call" || name == "llm_completion" {
+                    if let Some(result_type) = self.infer_llm_call_result_type(name, args, scope) {
+                        return Some(result_type);
+                    }
+                }
+                // Generic builtins (schema_parse/check/expect):
                 // bind T by walking each arg node against the param
                 // TypeExpr, then apply bindings to the declared return
                 // type. Falls through to `builtin_return_type` when no T

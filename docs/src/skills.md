@@ -153,6 +153,10 @@ silent empty substitution.
 
 ```harn
 let deploy = skill_find(skills, "deploy")
+guard deploy != nil else {
+  exit(1)
+}
+
 let rendered = skill_render(deploy, ["prod", "us-east-1"])
 // rendered now has $1 and $2 replaced with "prod" and "us-east-1".
 ```
