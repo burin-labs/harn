@@ -1,7 +1,7 @@
 use super::auth::{attach_legacy_deprecation_headers, should_stream_post_response};
 use super::*;
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, DispatchCoreConfig};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[tokio::test]
 async fn tools_list_exposes_public_functions() {
@@ -242,9 +242,7 @@ pub fn greet(name: string) -> string {
     .expect("write script");
     let mut config = DispatchCoreConfig::for_script(&script);
     config.auth_policy = crate::AuthPolicy {
-        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-            keys: BTreeSet::from(["secret".to_string()]),
-        })],
+        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
     };
     let core = DispatchCore::new(config).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));

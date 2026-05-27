@@ -849,6 +849,18 @@ impl AcpServer {
                     self.auth_required_data(),
                 );
             }
+            // ACP authentication doesn't bind a route, so this branch is
+            // unreachable unless a future caller threads per-route scopes
+            // through this code path. Forward as auth-required so the
+            // client knows to retry with a richer credential.
+            AuthorizationDecision::MissingScope { required, granted } => {
+                self.send_error_with_data(
+                    id,
+                    ACP_AUTH_REQUIRED_CODE,
+                    &crate::forbidden_message(&required, &granted),
+                    self.auth_required_data(),
+                );
+            }
         }
     }
 

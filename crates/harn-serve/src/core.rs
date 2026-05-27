@@ -166,8 +166,17 @@ impl DispatchCore {
     }
 
     pub async fn dispatch(&self, request: CallRequest) -> Result<CallResponse, DispatchError> {
-        let authorization = self.config.auth_policy.authorize(&request.auth).await;
         let trace_id = request.trace_id.clone().unwrap_or_default();
+        let function_scopes = self
+            .catalog
+            .function(&request.function)
+            .map(|function| function.required_scopes.clone())
+            .unwrap_or_default();
+        let authorization = self
+            .config
+            .auth_policy
+            .authorize_with_scopes(&request.auth, &function_scopes)
+            .await;
         match authorization {
             AuthorizationDecision::Authorized(_) => {}
             AuthorizationDecision::Rejected(message) => {
@@ -179,6 +188,17 @@ impl DispatchCore {
                 )
                 .await?;
                 return Err(DispatchError::Unauthorized(message));
+            }
+            AuthorizationDecision::MissingScope { required, granted } => {
+                let error = DispatchError::Forbidden { required, granted };
+                self.record_trust(
+                    &request,
+                    &trace_id,
+                    TrustOutcome::Denied,
+                    Some(error.message()),
+                )
+                .await?;
+                return Err(error);
             }
         }
 

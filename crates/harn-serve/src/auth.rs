@@ -10,6 +10,9 @@ use time::{Duration, OffsetDateTime};
 pub struct AuthenticatedPrincipal {
     pub subject: String,
     pub scheme: String,
+    /// Scopes the credential carries. Compared against the per-route
+    /// `required_scopes` passed to `AuthPolicy::authorize_with_scopes`.
+    pub granted_scopes: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,9 +61,38 @@ fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option
         .map(str::trim)
 }
 
+/// A single API key paired with the scopes the key grants. Two keys
+/// pointing at the same secret with different scope sets are treated as
+/// separate entries; the first match wins.
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiKeyEntry {
+    pub key: String,
+    pub scopes: BTreeSet<String>,
+}
+
+impl ApiKeyEntry {
+    pub fn new(key: impl Into<String>, scopes: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            key: key.into(),
+            scopes: scopes.into_iter().collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ApiKeyAuthConfig {
-    pub keys: BTreeSet<String>,
+    pub keys: Vec<ApiKeyEntry>,
+}
+
+impl ApiKeyAuthConfig {
+    /// Build a single-key config with no scopes (open-permissions).
+    /// Convenience for tests and configurations that don't care about
+    /// scope checks yet.
+    pub fn single(key: impl Into<String>) -> Self {
+        Self {
+            keys: vec![ApiKeyEntry::new(key.into(), [])],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,12 +100,18 @@ pub struct HmacAuthConfig {
     pub shared_secret: String,
     pub provider: String,
     pub timestamp_window: Duration,
+    /// Scopes any caller authenticated via this shared secret carries.
+    pub granted_scopes: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OAuth21AuthConfig {
     pub issuer: String,
     pub audience: Option<String>,
+    /// Scopes the OAuth method itself requires beyond any per-route check.
+    /// Independent from per-route `required_scopes` so an OAuth-only deployment
+    /// can pin a baseline (e.g. `harn:invoke`) without repeating it on every
+    /// route mount.
     pub required_scopes: BTreeSet<String>,
 }
 
@@ -92,7 +130,16 @@ pub struct AuthPolicy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AuthorizationDecision {
     Authorized(AuthenticatedPrincipal),
+    /// Authentication itself failed — no method accepted the credentials.
     Rejected(String),
+    /// Authentication succeeded but the principal lacks one or more scopes
+    /// required by the route. `required` is the full route requirement;
+    /// `granted` is what the credential actually carries. Both sets are
+    /// returned so the caller can render an actionable error body.
+    MissingScope {
+        required: BTreeSet<String>,
+        granted: BTreeSet<String>,
+    },
 }
 
 impl AuthPolicy {
@@ -119,23 +166,54 @@ impl AuthPolicy {
             .collect()
     }
 
+    /// Authenticate without checking any per-route scopes. Equivalent to
+    /// `authorize_with_scopes(request, &BTreeSet::new())`. Retained as the
+    /// short-form for callers that don't have route metadata (e.g. the
+    /// REST API adapter's static handlers).
     pub async fn authorize(&self, request: &AuthRequest) -> AuthorizationDecision {
-        if self.methods.is_empty() {
-            return AuthorizationDecision::Authorized(AuthenticatedPrincipal {
+        self.authorize_with_scopes(request, &BTreeSet::new()).await
+    }
+
+    /// Authenticate the request and verify the resulting principal's
+    /// `granted_scopes` ⊇ `required`. When the policy has no configured
+    /// methods, the request is accepted with no scopes granted; the scope
+    /// check then succeeds iff `required` is empty.
+    pub async fn authorize_with_scopes(
+        &self,
+        request: &AuthRequest,
+        required: &BTreeSet<String>,
+    ) -> AuthorizationDecision {
+        let principal = if self.methods.is_empty() {
+            AuthenticatedPrincipal {
                 subject: "anonymous".to_string(),
                 scheme: "none".to_string(),
-            });
-        }
-
-        let mut failures = Vec::new();
-        for method in &self.methods {
-            match authorize_method(method, request).await {
-                Ok(principal) => return AuthorizationDecision::Authorized(principal),
-                Err(message) => failures.push(message),
+                granted_scopes: BTreeSet::new(),
             }
-        }
+        } else {
+            let mut failures = Vec::new();
+            let mut chosen: Option<AuthenticatedPrincipal> = None;
+            for method in &self.methods {
+                match authorize_method(method, request).await {
+                    Ok(principal) => {
+                        chosen = Some(principal);
+                        break;
+                    }
+                    Err(message) => failures.push(message),
+                }
+            }
+            match chosen {
+                Some(principal) => principal,
+                None => return AuthorizationDecision::Rejected(failures.join("; ")),
+            }
+        };
 
-        AuthorizationDecision::Rejected(failures.join("; "))
+        if !required.is_subset(&principal.granted_scopes) {
+            return AuthorizationDecision::MissingScope {
+                required: required.clone(),
+                granted: principal.granted_scopes,
+            };
+        }
+        AuthorizationDecision::Authorized(principal)
     }
 }
 
@@ -229,13 +307,14 @@ async fn authorize_method(
             let Some(api_key) = request.api_key() else {
                 return Err("missing API key".to_string());
             };
-            if api_key_matches(&config.keys, api_key) {
-                Ok(AuthenticatedPrincipal {
+            let entry = match_api_key(&config.keys, api_key);
+            match entry {
+                Some(entry) => Ok(AuthenticatedPrincipal {
                     subject: "api-key".to_string(),
                     scheme: "api_key".to_string(),
-                })
-            } else {
-                Err("invalid API key".to_string())
+                    granted_scopes: entry.scopes.clone(),
+                }),
+                None => Err("invalid API key".to_string()),
             }
         }
         AuthMethodConfig::Hmac(config) => {
@@ -256,6 +335,7 @@ async fn authorize_method(
             Ok(AuthenticatedPrincipal {
                 subject: "hmac".to_string(),
                 scheme: "hmac".to_string(),
+                granted_scopes: config.granted_scopes.clone(),
             })
         }
         AuthMethodConfig::OAuth21(config) => {
@@ -280,14 +360,16 @@ async fn authorize_method(
             Ok(AuthenticatedPrincipal {
                 subject: claims.subject.clone(),
                 scheme: "oauth21".to_string(),
+                granted_scopes: claims.scopes.clone(),
             })
         }
     }
 }
 
-fn api_key_matches(keys: &BTreeSet<String>, candidate: &str) -> bool {
-    keys.iter()
-        .any(|key| key.as_bytes().ct_eq(candidate.as_bytes()).into())
+fn match_api_key<'a>(entries: &'a [ApiKeyEntry], candidate: &str) -> Option<&'a ApiKeyEntry> {
+    entries
+        .iter()
+        .find(|entry| entry.key.as_bytes().ct_eq(candidate.as_bytes()).into())
 }
 
 fn connector_error_message(error: ConnectorError) -> String {
@@ -302,12 +384,14 @@ mod tests {
     use hmac::{Hmac, KeyInit, Mac};
     use sha2::{Digest, Sha256};
 
+    fn scopes(items: &[&str]) -> BTreeSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
     #[tokio::test]
     async fn api_key_policy_accepts_matching_bearer_token() {
         let policy = AuthPolicy {
-            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-                keys: BTreeSet::from(["secret".to_string()]),
-            })],
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
         };
         let request = AuthRequest {
             headers: BTreeMap::from([("authorization".to_string(), "Bearer secret".to_string())]),
@@ -320,9 +404,7 @@ mod tests {
     #[tokio::test]
     async fn api_key_policy_accepts_case_insensitive_header_names() {
         let policy = AuthPolicy {
-            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-                keys: BTreeSet::from(["secret".to_string()]),
-            })],
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
         };
         let request = AuthRequest {
             headers: BTreeMap::from([("X-API-Key".to_string(), " secret ".to_string())]),
@@ -336,17 +418,14 @@ mod tests {
     fn acp_auth_methods_use_stable_kind_ids() {
         let policy = AuthPolicy {
             methods: vec![
-                AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-                    keys: BTreeSet::from(["secret".to_string()]),
-                }),
+                AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret")),
                 AuthMethodConfig::Hmac(HmacAuthConfig {
                     shared_secret: "shared-secret".to_string(),
                     provider: "harn-serve".to_string(),
                     timestamp_window: Duration::seconds(60),
+                    granted_scopes: BTreeSet::new(),
                 }),
-                AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-                    keys: BTreeSet::from(["second".to_string()]),
-                }),
+                AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("second")),
             ],
         };
 
@@ -378,6 +457,7 @@ mod tests {
                 shared_secret: "shared-secret".to_string(),
                 provider: "harn-serve".to_string(),
                 timestamp_window: Duration::seconds(60),
+                granted_scopes: BTreeSet::new(),
             })],
         };
         let request = AuthRequest {
@@ -398,7 +478,7 @@ mod tests {
             methods: vec![AuthMethodConfig::OAuth21(OAuth21AuthConfig {
                 issuer: "https://issuer.example".to_string(),
                 audience: Some("harn-serve".to_string()),
-                required_scopes: BTreeSet::from(["invoke".to_string()]),
+                required_scopes: scopes(&["invoke"]),
             })],
         };
         let request = AuthRequest {
@@ -406,7 +486,7 @@ mod tests {
                 subject: "alice".to_string(),
                 issuer: "https://issuer.example".to_string(),
                 audience: Some("harn-serve".to_string()),
-                scopes: BTreeSet::from(["invoke".to_string(), "read".to_string()]),
+                scopes: scopes(&["invoke", "read"]),
             }),
             ..AuthRequest::default()
         };
@@ -417,6 +497,7 @@ mod tests {
             AuthorizationDecision::Authorized(AuthenticatedPrincipal {
                 subject: "alice".to_string(),
                 scheme: "oauth21".to_string(),
+                granted_scopes: scopes(&["invoke", "read"]),
             })
         );
     }
@@ -444,6 +525,157 @@ mod tests {
         assert_eq!(
             decision,
             AuthorizationDecision::Rejected("oauth audience mismatch".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn api_key_policy_carries_per_key_scopes_into_principal() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                keys: vec![
+                    ApiKeyEntry::new("alice-key", ["personas:read".to_string()]),
+                    ApiKeyEntry::new(
+                        "bob-key",
+                        ["sessions:write".to_string(), "personas:read".to_string()],
+                    ),
+                ],
+            })],
+        };
+        let request = AuthRequest {
+            headers: BTreeMap::from([(
+                "authorization".to_string(),
+                "Bearer alice-key".to_string(),
+            )]),
+            ..AuthRequest::default()
+        };
+
+        let AuthorizationDecision::Authorized(principal) = policy.authorize(&request).await else {
+            panic!("expected Authorized");
+        };
+        assert_eq!(principal.granted_scopes, scopes(&["personas:read"]));
+    }
+
+    #[tokio::test]
+    async fn scope_check_rejects_principal_missing_required_scope() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                keys: vec![ApiKeyEntry::new(
+                    "limited-key",
+                    ["sessions:read".to_string()],
+                )],
+            })],
+        };
+        let request = AuthRequest {
+            headers: BTreeMap::from([(
+                "authorization".to_string(),
+                "Bearer limited-key".to_string(),
+            )]),
+            ..AuthRequest::default()
+        };
+
+        let decision = policy
+            .authorize_with_scopes(&request, &scopes(&["personas:read"]))
+            .await;
+        assert_eq!(
+            decision,
+            AuthorizationDecision::MissingScope {
+                required: scopes(&["personas:read"]),
+                granted: scopes(&["sessions:read"]),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_check_accepts_principal_with_superset_of_required_scopes() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                keys: vec![ApiKeyEntry::new(
+                    "admin-key",
+                    [
+                        "personas:read".to_string(),
+                        "sessions:read".to_string(),
+                        "sessions:write".to_string(),
+                    ],
+                )],
+            })],
+        };
+        let request = AuthRequest {
+            headers: BTreeMap::from([(
+                "authorization".to_string(),
+                "Bearer admin-key".to_string(),
+            )]),
+            ..AuthRequest::default()
+        };
+
+        let decision = policy
+            .authorize_with_scopes(&request, &scopes(&["personas:read", "sessions:read"]))
+            .await;
+        assert!(matches!(decision, AuthorizationDecision::Authorized(_)));
+    }
+
+    #[tokio::test]
+    async fn scope_check_short_circuits_to_rejected_when_authentication_fails() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
+        };
+        let request = AuthRequest::default();
+        let decision = policy
+            .authorize_with_scopes(&request, &scopes(&["personas:read"]))
+            .await;
+        assert!(matches!(decision, AuthorizationDecision::Rejected(_)));
+    }
+
+    #[tokio::test]
+    async fn hmac_principal_carries_configured_granted_scopes() {
+        let timestamp = OffsetDateTime::now_utc().unix_timestamp().to_string();
+        let body = b"{}";
+        let hash = Sha256::digest(body);
+        let body_hash = hex::encode(hash);
+        let signed = format!("POST\n/mcp\n{timestamp}\n{body_hash}");
+        let mut mac = Hmac::<Sha256>::new_from_slice(b"shared-secret").expect("mac key");
+        mac.update(signed.as_bytes());
+        let signature =
+            base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+        let authorization = format!("HMAC-SHA256 timestamp={timestamp},signature={signature}");
+
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::Hmac(HmacAuthConfig {
+                shared_secret: "shared-secret".to_string(),
+                provider: "harn-serve".to_string(),
+                timestamp_window: Duration::seconds(60),
+                granted_scopes: scopes(&["personas:read"]),
+            })],
+        };
+        let request = AuthRequest {
+            method: "POST".to_string(),
+            path: "/mcp".to_string(),
+            body: body.to_vec(),
+            headers: BTreeMap::from([("authorization".to_string(), authorization)]),
+            validated_oauth: None,
+        };
+
+        let decision = policy
+            .authorize_with_scopes(&request, &scopes(&["personas:read"]))
+            .await;
+        let AuthorizationDecision::Authorized(principal) = decision else {
+            panic!("expected Authorized");
+        };
+        assert_eq!(principal.granted_scopes, scopes(&["personas:read"]));
+    }
+
+    #[tokio::test]
+    async fn empty_policy_grants_no_scopes_so_required_scopes_reject() {
+        let policy = AuthPolicy::allow_all();
+        let request = AuthRequest::default();
+        let decision = policy
+            .authorize_with_scopes(&request, &scopes(&["personas:read"]))
+            .await;
+        assert_eq!(
+            decision,
+            AuthorizationDecision::MissingScope {
+                required: scopes(&["personas:read"]),
+                granted: BTreeSet::new(),
+            }
         );
     }
 }

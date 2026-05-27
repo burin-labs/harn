@@ -746,15 +746,12 @@ pub(super) fn server_with_api_key_policy(
     api_key: &str,
 ) -> (tempfile::TempDir, Arc<A2aServer>) {
     use crate::ApiKeyAuthConfig;
-    use std::collections::BTreeSet;
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");
     std::fs::write(&script, source).expect("write script");
     let mut config = DispatchCoreConfig::for_script(&script);
     config.auth_policy = AuthPolicy {
-        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
-            keys: BTreeSet::from([api_key.to_string()]),
-        })],
+        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single(api_key))],
     };
     let core = DispatchCore::new(config).expect("core");
     (dir, Arc::new(A2aServer::new(A2aServerConfig::new(core))))
@@ -1215,4 +1212,156 @@ pub fn triage(task: string) -> string {
     let envelope: JsonValue = serde_json::from_slice(&bytes).expect("envelope");
     assert_eq!(envelope["result"]["metadata"]["extendedAgentCard"], true);
     assert_eq!(envelope["result"]["metadata"]["principal"], "api-key");
+}
+
+/// End-to-end: a `.harn` handler declares `@scopes("personas:read")`,
+/// the auth policy maps API keys to granted-scope sets, and a caller
+/// presenting only `sessions:read` is refused with HTTP 403 plus the
+/// structured `forbidden` body that callers parse to render an
+/// actionable prompt.
+#[tokio::test]
+async fn message_send_rejects_scope_mismatch_with_http_403_and_structured_body() {
+    use crate::{ApiKeyAuthConfig, ApiKeyEntry};
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+@scopes("personas:read")
+pub fn list_personas(filter: string) -> string {
+  return filter
+}
+"#,
+    )
+    .expect("write script");
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.auth_policy = AuthPolicy {
+        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+            keys: vec![
+                ApiKeyEntry::new("admin-key", ["personas:read".to_string()]),
+                ApiKeyEntry::new("limited-key", ["sessions:read".to_string()]),
+            ],
+        })],
+    };
+    let core = DispatchCore::new(config).expect("core");
+    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let router = A2aServer::http_router(HttpState {
+        server,
+        public_url: "https://agent.example".to_string(),
+    });
+
+    let send_body = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0",
+        "id": "scope-1",
+        "method": "tasks/send_and_wait",
+        "params": {
+            "function": "list_personas",
+            "message": {
+                "parts": [{"type": "text", "text": "all"}]
+            }
+        }
+    }))
+    .expect("body");
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .header(axum::http::header::AUTHORIZATION, "Bearer limited-key")
+                .body(Body::from(send_body))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let body: JsonValue = serde_json::from_slice(&bytes).expect("body json");
+    assert_eq!(body["error"]["code"], -32003);
+    assert_eq!(body["error"]["data"]["kind"], "forbidden");
+    assert_eq!(
+        body["error"]["data"]["required_scopes"],
+        json!(["personas:read"])
+    );
+    assert_eq!(
+        body["error"]["data"]["granted_scopes"],
+        json!(["sessions:read"])
+    );
+    assert_eq!(
+        body["error"]["data"]["missing_scopes"],
+        json!(["personas:read"])
+    );
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("personas:read"),
+        "message should mention the missing scope: {body}"
+    );
+}
+
+#[tokio::test]
+async fn message_send_accepts_caller_with_sufficient_scopes() {
+    use crate::{ApiKeyAuthConfig, ApiKeyEntry};
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+@scopes("personas:read")
+pub fn list_personas(filter: string) -> string {
+  return filter
+}
+"#,
+    )
+    .expect("write script");
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.auth_policy = AuthPolicy {
+        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+            keys: vec![ApiKeyEntry::new("admin-key", ["personas:read".to_string()])],
+        })],
+    };
+    let core = DispatchCore::new(config).expect("core");
+    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let router = A2aServer::http_router(HttpState {
+        server,
+        public_url: "https://agent.example".to_string(),
+    });
+
+    let send_body = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0",
+        "id": "scope-ok",
+        "method": "tasks/send_and_wait",
+        "params": {
+            "function": "list_personas",
+            "message": {
+                "parts": [{"type": "text", "text": "engineers"}]
+            }
+        }
+    }))
+    .expect("body");
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/")
+                .header(axum::http::header::CONTENT_TYPE, "application/json")
+                .header(axum::http::header::AUTHORIZATION, "Bearer admin-key")
+                .body(Body::from(send_body))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let body: JsonValue = serde_json::from_slice(&bytes).expect("body json");
+    assert!(body.get("error").is_none(), "unexpected error: {body}");
 }

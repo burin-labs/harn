@@ -617,6 +617,17 @@ impl McpServer {
             AuthorizationDecision::Rejected(message) => {
                 Err(harn_vm::jsonrpc::error_response(id, -32001, &message))
             }
+            // `authorize()` passes an empty required-scopes set, so the
+            // emptiness rule (`empty ⊆ anything`) makes this branch
+            // unreachable. Treat as forbidden defensively if invariants
+            // ever shift.
+            AuthorizationDecision::MissingScope { required, granted } => {
+                Err(harn_vm::jsonrpc::error_response(
+                    id,
+                    -32003,
+                    &crate::forbidden_message(&required, &granted),
+                ))
+            }
         }
     }
 
@@ -739,6 +750,9 @@ impl McpServer {
             }
             Err(DispatchError::Unauthorized(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32001, &message)
+            }
+            Err(DispatchError::Forbidden { required, granted }) => {
+                forbidden_jsonrpc_error_response(job.request_id, &required, &granted)
             }
             Err(DispatchError::MissingExport(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
@@ -933,6 +947,25 @@ fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
         "resources/read" => Some(&READ),
         _ => None,
     }
+}
+
+/// Standard JSON-RPC error response for a scope mismatch. The error
+/// body carries the canonical `forbidden` payload so MCP clients can
+/// render an actionable prompt without parsing the message string.
+fn forbidden_jsonrpc_error_response(
+    id: JsonValue,
+    required: &std::collections::BTreeSet<String>,
+    granted: &std::collections::BTreeSet<String>,
+) -> JsonValue {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": -32003,
+            "message": crate::forbidden_message(required, granted),
+            "data": crate::forbidden_data_payload(required, granted),
+        }
+    })
 }
 
 fn requires_protocol_auth(method: &str) -> bool {

@@ -128,7 +128,9 @@ impl A2aServer {
                             deprecation,
                         )
                     }
-                    Err(response) => (RpcOutcome::Json(response.with_id(rpc_id)), deprecation),
+                    Err(error) => {
+                        return prepare_error_to_processed(error, rpc_id, deprecation);
+                    }
                 }
             }
             "message/stream" | "a2a.SendStreamingMessage" | "tasks/sendSubscribe" => {
@@ -147,7 +149,9 @@ impl A2aServer {
                         });
                         (RpcOutcome::Sse(rx), deprecation)
                     }
-                    Err(response) => (RpcOutcome::Json(response.with_id(rpc_id)), deprecation),
+                    Err(error) => {
+                        return prepare_error_to_processed(error, rpc_id, deprecation);
+                    }
                 }
             }
             "tasks/resubscribe" | "a2a.ResubscribeTask" => {
@@ -351,6 +355,21 @@ impl A2aServer {
                 deprecation: None,
                 status: Some(StatusCode::UNAUTHORIZED),
                 auth_challenge: Some(www_authenticate_header(policy)),
+            }),
+            // The protocol-level path passes no per-route scopes, so this
+            // arm is unreachable by construction. Per-route scope checks
+            // happen later when dispatch invokes the function and surface
+            // as `DispatchError::Forbidden`. Wire it defensively here in
+            // case future code paths feed scopes into this call.
+            AuthorizationDecision::MissingScope { required, granted } => Err(ProcessedRpc {
+                outcome: RpcOutcome::Json(error_response(
+                    rpc_id,
+                    -32003,
+                    &crate::forbidden_message(&required, &granted),
+                )),
+                deprecation: None,
+                status: Some(StatusCode::FORBIDDEN),
+                auth_challenge: None,
             }),
         }
     }
@@ -843,4 +862,23 @@ pub(super) fn sse_events(
 pub(super) fn empty_stream() -> UnboundedReceiver<JsonValue> {
     let (_tx, rx) = unbounded();
     rx
+}
+
+/// Convert a [`A2aPrepareError`] into a finished [`ProcessedRpc`]. Used by
+/// `message/send` and `message/stream` to short-circuit when scope
+/// preflight or other prepare-time validation rejects the request — the
+/// error's HTTP status preference is preserved so the REST `/v1` binding
+/// returns `403` for scope mismatches instead of the default 400.
+fn prepare_error_to_processed(
+    error: A2aPrepareError,
+    rpc_id: JsonValue,
+    deprecation: Option<&'static str>,
+) -> ProcessedRpc {
+    let status = error.status_code();
+    ProcessedRpc {
+        outcome: RpcOutcome::Json(error.with_id(rpc_id)),
+        deprecation,
+        status,
+        auth_challenge: None,
+    }
 }

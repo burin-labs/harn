@@ -31,14 +31,14 @@ pub use adapters::mcp::{
     McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
 };
 pub use auth::{
-    ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy, AuthRequest, AuthenticatedPrincipal,
-    AuthorizationDecision, HmacAuthConfig, OAuth21AuthConfig, OAuthClaims,
+    ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,
+    AuthenticatedPrincipal, AuthorizationDecision, HmacAuthConfig, OAuth21AuthConfig, OAuthClaims,
 };
 pub use core::{
     CallArguments, CallRequest, CallResponse, DispatchCore, DispatchCoreConfig, NoopVmConfigurator,
     VmConfigurator,
 };
-pub use error::DispatchError;
+pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
 pub use mcp_prompts::FilePromptCatalog;
 pub use replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
