@@ -277,6 +277,216 @@ impl MethodCacheReadFixture {
     }
 }
 
+/// Bytecode-length presets for the property-cache read microbench. Sweeps
+/// N adjacent `Op::GetProperty` slots, exercising the same cache-read
+/// shape that `execute_get_property` issues on every dispatch.
+pub const PROPERTY_CACHE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
+
+/// Microbench fixture for the property inline-cache read path.
+///
+/// `Chunk::inline_cache_entry` (the pre-optimization path) clones the
+/// wrapping `InlineCacheEntry` enum on every dispatch — a 32-48B memcpy
+/// (the wrapping enum is padded to the largest variant, `DirectCall`)
+/// that the variant-checking `let-else` in `try_cached_property`
+/// destructures and throws away. `Chunk::peek_property_cache` (the new
+/// path) returns just the `Property` payload (`u16 + PropertyCacheTarget`),
+/// skipping the outer enum tag init and the padding-to-largest-variant
+/// memcpy. The accumulator sums the cached `name_idx` so the optimizer
+/// cannot dead-code the loop.
+///
+/// The fixture pre-warms every slot to a unit `PropertyCacheTarget`
+/// (`ListCount`) — the hottest steady state for any property-access
+/// pipeline (`.count` on collections, `.first` / `.last`, etc.).
+pub struct PropertyCacheReadFixture {
+    chunk: Chunk,
+    offsets: Vec<usize>,
+    slots: Vec<usize>,
+}
+
+impl PropertyCacheReadFixture {
+    pub fn new(op_count: usize) -> Self {
+        use crate::chunk::{InlineCacheEntry, PropertyCacheTarget};
+        let mut chunk = Chunk::new();
+        let mut offsets = Vec::with_capacity(op_count);
+        for _ in 0..op_count {
+            offsets.push(chunk.code.len());
+            chunk.emit_u16(Op::GetProperty, 0, 1);
+        }
+        let mut slots = Vec::with_capacity(op_count);
+        for &offset in &offsets {
+            let slot = chunk
+                .inline_cache_slot(offset)
+                .expect("Op::GetProperty registers an inline-cache slot at emit time");
+            chunk.set_inline_cache_entry(
+                slot,
+                InlineCacheEntry::Property {
+                    name_idx: 7,
+                    target: PropertyCacheTarget::ListCount,
+                },
+            );
+            slots.push(slot);
+        }
+        Self {
+            chunk,
+            offsets,
+            slots,
+        }
+    }
+
+    pub fn op_count(&self) -> usize {
+        self.offsets.len()
+    }
+
+    /// Sweep all slots via the new peek path. Returns the sum of
+    /// observed `name_idx` values so the optimizer cannot dead-code
+    /// the loop.
+    pub fn invoke_peek(&self) -> usize {
+        let mut acc = 0usize;
+        for &slot in &self.slots {
+            if let Some((name_idx, _target)) = self.chunk.peek_property_cache(slot) {
+                acc = acc.wrapping_add(name_idx as usize);
+            }
+        }
+        acc
+    }
+
+    /// Control sweep using the pre-optimization `inline_cache_entry`
+    /// clone path. Same accumulator shape so the criterion bench can
+    /// A/B the two paths inside a single binary.
+    pub fn invoke_clone_control(&self) -> usize {
+        use crate::chunk::InlineCacheEntry;
+        let mut acc = 0usize;
+        for &slot in &self.slots {
+            let entry = self.chunk.inline_cache_entry(slot);
+            if let InlineCacheEntry::Property { name_idx, .. } = entry {
+                acc = acc.wrapping_add(name_idx as usize);
+            }
+        }
+        acc
+    }
+}
+
+/// Bytecode-length presets for the direct-call-state read microbench.
+/// Sweeps N adjacent `Op::Call` slots, exercising the same cache-read
+/// shape that `execute_call_sync` and `execute_call_builtin_sync` issue
+/// on every dispatch.
+pub const DIRECT_CALL_STATE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
+
+/// Microbench fixture for the direct-call inline-cache read path.
+///
+/// `Chunk::inline_cache_entry` (the pre-optimization path) clones the
+/// wrapping `InlineCacheEntry::DirectCall { state: DirectCallState }` on
+/// every dispatch, including the outer enum's tag init and 8 bytes of
+/// padding beyond the inner `DirectCallState`. `Chunk::peek_direct_call_state`
+/// returns just the inner `DirectCallState` (still cloned because it
+/// contains the `Rc<VmClosure>` cached target) — but skipping the outer
+/// wrap saves an enum-padded memcpy plus one branch in
+/// `try_cached_direct_call`'s variant check.
+///
+/// Pre-warms every slot to `Specialized { argc: 1, hits: 1000, misses: 0,
+/// target: Rc<VmClosure> }` — the steady state of any hot
+/// `x.map(predicate)`-style direct-call call site.
+pub struct DirectCallStateReadFixture {
+    chunk: Chunk,
+    offsets: Vec<usize>,
+    slots: Vec<usize>,
+}
+
+impl DirectCallStateReadFixture {
+    pub fn new(op_count: usize) -> Self {
+        use crate::chunk::{DirectCallState, DirectCallTarget, InlineCacheEntry};
+        let target_closure = synthetic_direct_call_closure();
+        let mut chunk = Chunk::new();
+        let mut offsets = Vec::with_capacity(op_count);
+        for _ in 0..op_count {
+            offsets.push(chunk.code.len());
+            chunk.emit_u8(Op::Call, 1, 1);
+        }
+        let mut slots = Vec::with_capacity(op_count);
+        for &offset in &offsets {
+            let slot = chunk
+                .inline_cache_slot(offset)
+                .expect("Op::Call registers an inline-cache slot at emit time");
+            chunk.set_inline_cache_entry(
+                slot,
+                InlineCacheEntry::DirectCall {
+                    state: DirectCallState::Specialized {
+                        argc: 1,
+                        target: DirectCallTarget::Closure(Rc::clone(&target_closure)),
+                        hits: 1_000,
+                        misses: 0,
+                    },
+                },
+            );
+            slots.push(slot);
+        }
+        Self {
+            chunk,
+            offsets,
+            slots,
+        }
+    }
+
+    pub fn op_count(&self) -> usize {
+        self.offsets.len()
+    }
+
+    /// Sweep all slots via the new peek path. Returns the sum of
+    /// observed `argc` values so the optimizer cannot dead-code the
+    /// loop.
+    pub fn invoke_peek(&self) -> usize {
+        use crate::chunk::DirectCallState;
+        let mut acc = 0usize;
+        for &slot in &self.slots {
+            if let Some(DirectCallState::Specialized { argc, .. }) =
+                self.chunk.peek_direct_call_state(slot)
+            {
+                acc = acc.wrapping_add(argc);
+            }
+        }
+        acc
+    }
+
+    /// Control sweep using the pre-optimization `inline_cache_entry`
+    /// clone path. Same accumulator shape.
+    pub fn invoke_clone_control(&self) -> usize {
+        use crate::chunk::{DirectCallState, InlineCacheEntry};
+        let mut acc = 0usize;
+        for &slot in &self.slots {
+            let entry = self.chunk.inline_cache_entry(slot);
+            if let InlineCacheEntry::DirectCall {
+                state: DirectCallState::Specialized { argc, .. },
+            } = entry
+            {
+                acc = acc.wrapping_add(argc);
+            }
+        }
+        acc
+    }
+}
+
+fn synthetic_direct_call_closure() -> Rc<VmClosure> {
+    let func = CompiledFunction {
+        name: "synthetic_direct_call_target".to_string(),
+        type_params: Vec::new(),
+        nominal_type_names: Vec::new(),
+        params: Vec::new(),
+        default_start: None,
+        chunk: Rc::new(Chunk::new()),
+        is_generator: false,
+        is_stream: false,
+        has_rest_param: false,
+        has_runtime_type_checks: false,
+    };
+    Rc::new(VmClosure {
+        func: Rc::new(func),
+        env: VmEnv::new(),
+        source_dir: None,
+        module_functions: None,
+        module_state: None,
+    })
+}
+
 pub struct NonModuleClosureCallFixture {
     capture_count: usize,
     last_capture_name: Option<String>,

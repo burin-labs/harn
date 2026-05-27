@@ -33,6 +33,16 @@ path = "bench_method_cache_read.rs"
 harness = false
 
 [[bench]]
+name = "bench_property_cache_read"
+path = "bench_property_cache_read.rs"
+harness = false
+
+[[bench]]
+name = "bench_direct_call_state_read"
+path = "bench_direct_call_state_read.rs"
+harness = false
+
+[[bench]]
 name = "bench_vm_fixtures"
 path = "bench_vm_fixtures.rs"
 harness = false
