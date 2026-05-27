@@ -12,7 +12,7 @@
       }
     ],
     "expected": {"kind": "exact", "name": "echo", "args": {"msg": "first"}},
-    "source": "harn:conformance/tests/integration/agent_loop_tool_caller_observes.harn",
+    "source": "harn:conformance/tests/scenarios/agent_loop_tool_caller_observes.harn",
     "tags": ["harn_seed", "simple"]
   },
   {
@@ -28,7 +28,7 @@
       }
     ],
     "expected": {"kind": "exact", "name": "read", "args": {"path": "src/lib.rs"}},
-    "source": "harn:conformance/tests/integration/native_tool_fallback_observability.harn",
+    "source": "harn:conformance/tests/scenarios/native_tool_fallback_observability.harn",
     "tags": ["harn_seed", "file"]
   },
   {
@@ -44,7 +44,7 @@
       }
     ],
     "expected": {"kind": "exact", "name": "greet", "args": {"name": "world"}},
-    "source": "harn:conformance/tests/integration/tool_registry.harn",
+    "source": "harn:conformance/tests/scenarios/tool_registry.harn",
     "tags": ["harn_seed", "simple"]
   },
   {
