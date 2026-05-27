@@ -131,9 +131,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("path", TY_STRING)],
         TY_DICT,
     ),
-    // project_root() -> string | nil. Resolves the repo root for the
-    // currently-executing source file.
-    BuiltinSignature::simple("project_root", &[], TY_STRING_OR_NIL),
     // project_scan_native(path?, options?) -> dict of evidence.
     BuiltinSignature::simple(
         "project_scan_native",

@@ -88,7 +88,7 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 // `regex` crate (supports `$1`, `${name}` backrefs). The `_all` spelling is
 // a discoverability alias on the same implementation.
 #[harn_builtin(
-    sig = "regex_replace(pattern: string?, replacement: string?, text: string?, flags?: string) -> string | nil",
+    sig = "regex_replace(pattern: string?, replacement: string?, text: string?, flags?: string) -> string",
     aliases = ["regex_replace_all"],
     category = "regex"
 )]
@@ -147,7 +147,7 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
-    sig = "regex_split(text: string?, pattern: string?, flags?: string) -> list | nil",
+    sig = "regex_split(text: string?, pattern: string?, flags?: string) -> list",
     category = "regex"
 )]
 fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

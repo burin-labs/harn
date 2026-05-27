@@ -1,78 +1,14 @@
 //! Connector, host, tool, and shell-facing builtin signatures.
 
-use super::shapes::TOOL_REGISTRY;
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT,
     TY_DICT_OR_NIL, TY_INT, TY_LIST, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 
 const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
-const TY_TOOL_REGISTRY: Ty = Ty::Union(&[TY_DICT, TY_CLOSURE]);
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
-    // Tool-hook catalogue primitive (TH-01 / epic #1884). `ToolRule` and
-    // `Catalogue` are tagged dicts; the registry composes catalogues so
-    // `preset_run_command` (TH-02) and downstream mode callbacks can layer
-    // matching/rewrite logic on top without redefining the data model.
-    BuiltinSignature::simple("catalogue", &[Param::new("config", TY_DICT)], TY_DICT),
-    BuiltinSignature::simple(
-        "connector_call",
-        &[
-            Param::new("provider", TY_STRING),
-            Param::new("method", TY_STRING),
-            Param::optional("params", TY_DICT),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "connector_shared_verify_jwt_inline",
-        &[
-            Param::new("token", TY_STRING),
-            Param::new("jwks", TY_DICT),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_DICT,
-    ),
     BuiltinSignature::simple("egress_policy", &[Param::new("config", TY_DICT)], TY_DICT),
-    // NetPolicy constructors (harn#1913). Each returns a tagged dict
-    // recognised by the dispatcher in `harn-vm/src/harness_net.rs`.
-    BuiltinSignature::simple(
-        "__net_policy_create",
-        &[Param::new("config", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__net_policy_domain",
-        &[Param::new("host", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__net_policy_domain_wildcard",
-        &[Param::new("pattern", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__net_policy_cidr",
-        &[Param::new("range", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__net_policy_host",
-        &[
-            Param::new("host", TY_STRING),
-            Param::optional("ports", TY_LIST),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic("exec", &[Param::new("command", TY_STRING)], TY_DICT),
-    BuiltinSignature::variadic(
-        "exec_at",
-        &[
-            Param::new("dir", TY_STRING),
-            Param::new("command", TY_STRING),
-        ],
-        TY_DICT,
-    ),
     BuiltinSignature::simple("git.conflicts", &[Param::new("repo", TY_STRING)], TY_DICT),
     BuiltinSignature::simple(
         "git.diff",
@@ -468,12 +404,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_BYTES_OR_NIL,
     ),
-    BuiltinSignature::simple("list_providers_native", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "load_skill",
-        &[Param::new("request", TY_STRING_OR_DICT)],
-        TY_STRING,
-    ),
     BuiltinSignature::simple(
         "mcp_call",
         &[
@@ -589,81 +519,9 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("name", TY_STRING)],
         TY_BOOL,
     ),
-    BuiltinSignature::simple("runtime_paths", &[], TY_DICT),
     BuiltinSignature::simple("sandbox_active_backend", &[], TY_STRING),
     BuiltinSignature::simple("sandbox_active_profile", &[], TY_STRING),
     BuiltinSignature::simple("sandbox_backend_available", &[], TY_BOOL),
-    BuiltinSignature::simple("shell", &[Param::new("command", TY_STRING)], TY_DICT),
-    BuiltinSignature::simple(
-        "shell_at",
-        &[
-            Param::new("dir", TY_STRING),
-            Param::new("command", TY_STRING),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("skill_count", &[Param::new("registry", TY_DICT)], TY_INT),
-    BuiltinSignature::simple(
-        "skill_define",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::new("name", TY_STRING),
-            Param::new("config", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "skill_describe",
-        &[Param::new("registry", TY_DICT)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "skill_find",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::new("name", TY_STRING),
-        ],
-        TY_DICT_OR_NIL,
-    ),
-    BuiltinSignature::simple("skill_list", &[Param::new("registry", TY_DICT)], TY_LIST),
-    BuiltinSignature::simple("skill_registry", &[], TY_DICT),
-    BuiltinSignature::simple(
-        "skill_remove",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::new("name", TY_STRING),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "skill_render",
-        &[
-            Param::new("skill", Ty::Union(&[TY_DICT, TY_STRING])),
-            Param::optional("arguments", TY_LIST),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "skill_select",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::new("names", TY_LIST),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "skill_who_signed",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::new("name", TY_STRING),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "skills_catalog_entries",
-        &[Param::new("registry", TY_DICT)],
-        TY_LIST,
-    ),
     BuiltinSignature::simple("sse_close", &[Param::new("stream", TY_STRING)], TY_BOOL),
     BuiltinSignature::simple(
         "sse_connect",
@@ -762,179 +620,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "sse_server_status",
         &[Param::new("stream", TY_STRING_OR_DICT)],
         TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_bind",
-        &[Param::optional("registry", TY_TOOL_REGISTRY)],
-        TY_DICT_OR_NIL,
-    ),
-    BuiltinSignature::simple(
-        "__host_current_tool_registry",
-        &[],
-        Ty::Union(&[TOOL_REGISTRY, TY_NIL]),
-    ),
-    BuiltinSignature::simple(
-        "tool_count",
-        &[Param::new("registry", TY_TOOL_REGISTRY)],
-        TY_INT,
-    ),
-    BuiltinSignature::simple("tool_def", &[Param::new("name", TY_STRING)], TY_DICT),
-    BuiltinSignature::simple(
-        "tool_define",
-        &[
-            Param::new("registry", TY_TOOL_REGISTRY),
-            Param::new("name", TY_STRING),
-            Param::new("description", TY_STRING),
-            Param::new("config", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_describe",
-        &[Param::new("registry", TY_TOOL_REGISTRY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "tool_find",
-        &[
-            Param::new("registry", TY_TOOL_REGISTRY),
-            Param::new("name", TY_STRING),
-        ],
-        TY_DICT_OR_NIL,
-    ),
-    BuiltinSignature::simple(
-        "tool_format_result",
-        &[Param::new("name", TY_STRING), Param::new("result", TY_ANY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("__tool_hooks_classifier_cache_clear", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "__tool_hooks_classifier_cache_get",
-        &[
-            Param::new("key", TY_STRING),
-            Param::optional("now_ms", TY_INT),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "__tool_hooks_classifier_cache_put",
-        &[
-            Param::new("key", TY_STRING),
-            Param::new("value", TY_ANY),
-            Param::optional("now_ms", TY_INT),
-            Param::optional("ttl_ms", TY_INT),
-        ],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "tool_hooks_emit_audit",
-        &[
-            Param::new("kind", TY_STRING),
-            Param::optional("payload", TY_ANY),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_hooks_filter",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::optional("stacks", TY_ANY),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_hooks_inject_reminder",
-        &[Param::new("options", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_hooks_list",
-        &[Param::new("registry", TY_DICT)],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "tool_hooks_match",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::new("command", TY_STRING),
-            Param::optional("context", TY_ANY),
-        ],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "tool_hooks_register",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::new("catalogue", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("tool_hooks_registry", &[], TY_DICT),
-    BuiltinSignature::simple(
-        "tool_hooks_unregister",
-        &[
-            Param::new("registry", TY_DICT),
-            Param::new("catalogue_id", TY_STRING),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_list",
-        &[Param::new("registry", TY_TOOL_REGISTRY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple("tool_parse_call", &[Param::new("text", TY_STRING)], TY_LIST),
-    BuiltinSignature::simple(
-        "tool_prompt",
-        &[Param::new("registry", TY_TOOL_REGISTRY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("tool_ref", &[Param::new("name", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple("tool_registry", &[], TOOL_REGISTRY),
-    BuiltinSignature::simple(
-        "tool_remove",
-        &[
-            Param::new("registry", TY_TOOL_REGISTRY),
-            Param::new("name", TY_STRING),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("tool_rule", &[Param::new("config", TY_DICT)], TY_DICT),
-    BuiltinSignature::simple(
-        "tool_schema",
-        &[
-            Param::new("registry", TY_TOOL_REGISTRY),
-            Param::optional("components", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_select",
-        &[
-            Param::new("registry", TY_TOOL_REGISTRY),
-            Param::new("names", TY_LIST),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_surface_validate",
-        &[
-            Param::optional("surface", TY_ANY),
-            Param::optional("input", TY_ANY),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "tool_synth_invoke",
-        &[Param::new("id", TY_STRING), Param::optional("args", TY_ANY)],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple("tool_synthesis_cache", &[], TY_LIST),
-    BuiltinSignature::simple("tool_synthesis_clear", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "tool_synthesize",
-        &[Param::new("spec", TY_DICT)],
-        TY_CLOSURE,
     ),
     BuiltinSignature::simple("transport_mock_calls", &[], TY_LIST),
     BuiltinSignature::simple("transport_mock_clear", &[], TY_NIL),
