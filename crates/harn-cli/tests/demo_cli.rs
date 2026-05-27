@@ -155,6 +155,33 @@ fn routing_policy_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn stdlib_toolkit_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("stdlib-toolkit");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "stdlib-toolkit demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("stdlib_toolkit_receipt"),
+        "stdlib-toolkit demo should emit the toolkit receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"merged_retries\":5"),
+        "deep_merge should land the per-task override:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"unique_chats\":[\"x.jsonl\",\"y.jsonl\",\"z.jsonl\"]"),
+        "unique should collapse the duplicate chat reference in first-seen order:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all
@@ -164,6 +191,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "review-captain",
         "provider-race",
         "routing-policy",
+        "stdlib-toolkit",
     ]
     .into_iter()
     .collect();

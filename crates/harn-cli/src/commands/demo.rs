@@ -62,6 +62,18 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/routing-policy/scenario.harn"),
         tape: include_str!("../../assets/demo/routing-policy/tape.jsonl"),
     },
+    Scenario {
+        id: "stdlib-toolkit",
+        title: "stdlib toolkit assembles an XML system-prompt context",
+        description: "Walk the new clone / deep_merge / unique / dict_from_pairs / to_xml / \
+                      from_xml / word_wrap / indent / repeat built-ins through a realistic \
+                      pre-flight render: layer per-task overrides onto a shared defaults dict, \
+                      dedupe the operator's `previous_chats` list, emit an XML `<context>` \
+                      block, round-trip it back through the parser, and frame the result in a \
+                      60-column prompt margin. Fully offline.",
+        script: include_str!("../../assets/demo/stdlib-toolkit/scenario.harn"),
+        tape: include_str!("../../assets/demo/stdlib-toolkit/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]
