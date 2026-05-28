@@ -475,6 +475,11 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   # scripts; the SystemTime::now reads are the fallback when no mock is
   # active. Routing through Clock would create a cycle.
   "crates/harn-vm/src/stdlib/clock.rs"
+  # `compaction.run` records actual host monotonic elapsed time in the
+  # `latency_ms` field of the result dict — the #2505 spec lists
+  # compaction latency as required telemetry, so the host wall clock is
+  # the source of truth (same shape as the allowlisted routing.rs).
+  "crates/harn-vm/src/stdlib/compaction.rs"
   # testbench/wasi_process.rs's #[cfg(test)] module compares real wall
   # time vs virtual time to prove that WASM-side `poll_oneoff` sleeps
   # don't actually block the host thread — the wall-clock read is the

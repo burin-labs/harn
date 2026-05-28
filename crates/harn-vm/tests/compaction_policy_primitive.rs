@@ -158,11 +158,11 @@ fn run_without_session_id_uses_current_session() {
     // stack; `compaction.run()` (no session arg) resolves it. From a
     // free-standing pipeline there is no current session, so we expect
     // an error — verifying the contract.
-    let err = run(r#"
+    let err = run(r"
 pipeline main(task) {
   compaction.run()
 }
-"#)
+")
     .expect_err("missing session id should error");
     assert!(
         err.contains("no `session_id` provided and no active agent session"),
