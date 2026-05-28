@@ -46,6 +46,22 @@ mod tests {
     use super::*;
     use crate::auth::{AuthPolicy, McpAllowlist, McpAllowlistTools};
     use harn_vm::mcp_host;
+    use std::sync::{Mutex, MutexGuard};
+
+    // Serializes the tests below: they mutate the process-global MCP host
+    // guard via `set_allowlist` / `reset_for_tests`, so when `cargo test`
+    // runs the suite in parallel a neighbour can race the install→assert
+    // window. Holding this lock for the duration of each test pins the
+    // global state to one test at a time.
+    static MCP_HOST_GUARD: Mutex<()> = Mutex::new(());
+
+    fn lock_mcp_host() -> MutexGuard<'static, ()> {
+        // Recover from a poisoned lock — a panic in one of these tests
+        // shouldn't cascade-fail the rest of the file.
+        MCP_HOST_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn policy_with(allowlist: Option<McpAllowlist>) -> AuthPolicy {
         AuthPolicy {
@@ -56,6 +72,7 @@ mod tests {
 
     #[test]
     fn install_with_none_clears_guard() {
+        let _serial = lock_mcp_host();
         mcp_host::reset_for_tests();
         install_mcp_host_allowlist(&policy_with(None));
         // No guard installed → spawn should not be denied by it. We
@@ -84,6 +101,7 @@ mod tests {
 
     #[test]
     fn tool_filter_only_admits_listed_tools() {
+        let _serial = lock_mcp_host();
         mcp_host::reset_for_tests();
         let mut allowlist = McpAllowlist::deny_all();
         let mut tools = std::collections::BTreeSet::new();
