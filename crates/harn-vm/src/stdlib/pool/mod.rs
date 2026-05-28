@@ -28,11 +28,9 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
-};
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1045,6 +1043,12 @@ fn ordered_pool_config(opts: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmV
     config
 }
 
+/// Create a named agent pool and register it in the local pool registry.
+#[harn_builtin(
+    sig = "__pool_create(options?: dict|nil) -> dict",
+    category = "pool",
+    runtime_only = true
+)]
 fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let opts = parse_options(args.first(), "pool_create")?;
     let name = parse_name(&opts).unwrap_or_else(|| format!("pool_{}", uuid::Uuid::now_v7()));
@@ -1165,6 +1169,12 @@ fn parse_durable_dir(opts: &BTreeMap<String, VmValue>) -> Result<Option<String>,
     }
 }
 
+/// Look up a pool by name or id; returns nil when missing.
+#[harn_builtin(
+    sig = "__pool_get(name_or_id: string|dict) -> dict|nil",
+    category = "pool",
+    runtime_only = true
+)]
 fn pool_get_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = args
         .first()
@@ -1187,6 +1197,8 @@ fn pool_get_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     Ok(snapshot)
 }
 
+/// List every pool registered in the local pool registry.
+#[harn_builtin(sig = "__pool_list() -> list", category = "pool")]
 fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut entries: Vec<Rc<RefCell<PoolEntry>>> =
         POOLS.with(|pools| pools.borrow().values().cloned().collect());
@@ -1199,6 +1211,8 @@ fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     )))
 }
 
+/// Return active + queued task count for a pool.
+#[harn_builtin(sig = "__pool_size(pool: dict) -> int", category = "pool")]
 fn pool_size_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pool_id = pool_id_from_value(
         args.first()
@@ -1217,11 +1231,15 @@ fn pool_size_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 /// from the on-disk JSONL artifact. Conformance fixtures use this to
 /// simulate "kill process → restart" without actually forking a new
 /// process. Returns `nil`.
+/// Drop the in-process pool registry; pipeline-scope pools reload from disk on next pool_create.
+#[harn_builtin(sig = "__pool_simulate_restart() -> nil", category = "pool")]
 fn pool_reload_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     reset_pool_state();
     Ok(VmValue::Nil)
 }
 
+/// Return the full pool snapshot for inspection.
+#[harn_builtin(sig = "__pool_snapshot(pool: dict) -> dict", category = "pool")]
 fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pool_id = pool_id_from_value(
         args.first().ok_or_else(|| {
@@ -1234,6 +1252,13 @@ fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(snapshot)
 }
 
+/// Submit a closure to a pool; spawns when a slot is free, otherwise queues.
+#[harn_builtin(
+    sig = "__pool_submit(pool: dict, closure: closure, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "pool",
+    runtime_only = true
+)]
 async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let pool_id = pool_id_from_value(
         args.first()
@@ -2308,6 +2333,13 @@ fn finalize_task(
     wake_space_waiters(pool);
 }
 
+/// Block until one or more pool task handles reach a terminal state.
+#[harn_builtin(
+    sig = "__pool_wait(handle_or_handles: dict|list) -> dict",
+    kind = "async",
+    category = "pool",
+    runtime_only = true
+)]
 async fn pool_wait_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = args
         .first()
@@ -2351,51 +2383,21 @@ async fn wait_single_task(value: &VmValue) -> Result<VmValue, VmError> {
     Ok(snapshot)
 }
 
-const POOL_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("__pool_create", pool_create_sync)
-        .signature("__pool_create(options?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Create a named agent pool and register it in the local pool registry."),
-    SyncBuiltin::new("__pool_get", pool_get_sync)
-        .signature("__pool_get(name_or_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Look up a pool by name or id; returns nil when missing."),
-    SyncBuiltin::new("__pool_list", pool_list_sync)
-        .signature("__pool_list()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("List every pool registered in the local pool registry."),
-    SyncBuiltin::new("__pool_size", pool_size_sync)
-        .signature("__pool_size(pool)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return active + queued task count for a pool."),
-    SyncBuiltin::new("__pool_snapshot", pool_snapshot_sync)
-        .signature("__pool_snapshot(pool)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return the full pool snapshot for inspection."),
-    SyncBuiltin::new("__pool_simulate_restart", pool_reload_sync)
-        .signature("__pool_simulate_restart()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Drop the in-process pool registry; pipeline-scope pools reload from disk on next pool_create."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &POOL_CREATE_SYNC_DEF,
+    &POOL_GET_SYNC_DEF,
+    &POOL_LIST_SYNC_DEF,
+    &POOL_SIZE_SYNC_DEF,
+    &POOL_SNAPSHOT_SYNC_DEF,
+    &POOL_RELOAD_SYNC_DEF,
+    &POOL_SUBMIT_BUILTIN_DEF,
+    &POOL_WAIT_BUILTIN_DEF,
 ];
-
-const POOL_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("__pool_submit", pool_submit_builtin)
-        .signature("__pool_submit(pool, closure, options?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Submit a closure to a pool; spawns when a slot is free, otherwise queues."),
-    async_builtin!("__pool_wait", pool_wait_builtin)
-        .signature("__pool_wait(handle_or_handles)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Block until one or more pool task handles reach a terminal state."),
-];
-
-const POOL_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("pool")
-    .sync(POOL_SYNC_PRIMITIVES)
-    .async_(POOL_ASYNC_PRIMITIVES);
 
 pub(crate) fn register_pool_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, POOL_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
 /// Drop all in-process pool registry state. Called from
