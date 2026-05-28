@@ -609,3 +609,132 @@ fn safe_text_patch_serializes_concurrent_staged_commits() {
     assert_eq!(applied, 1, "exactly one writer must commit");
     assert_eq!(stale_base, 1, "the other must observe stale_base");
 }
+
+#[test]
+fn safe_text_patch_disk_rejects_missing_parent_when_create_parents_false() {
+    let dir = TempDir::new().unwrap();
+    let nested = dir.path().join("missing-parent").join("file.txt");
+    let reg = registry();
+    let empty_hash = sha256_of(b"");
+
+    let err = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+        ("path", vm_string(&path_str(&nested))),
+        ("content", vm_string("never written\n")),
+        ("expected_hash", vm_string(&empty_hash)),
+        ("create_parents", VmValue::Bool(false)),
+    ]))
+    .expect_err("must reject when parent directory does not exist");
+    let message = format!("{err:?}");
+    assert!(
+        message.contains("parent directory") && message.contains("create_parents=true"),
+        "error must explain the cause and the fix: {message}"
+    );
+    assert!(
+        !nested.exists() && !nested.parent().unwrap().exists(),
+        "must not have written the file or created the parent directory"
+    );
+}
+
+#[test]
+fn read_text_rejects_non_utf8_with_clear_diagnostic() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("blob.bin");
+    fs::write(&file, [0xffu8, 0xfe, 0xfd]).unwrap();
+    let reg = registry();
+
+    let err = (reg.find("hostlib_fs_read_text").unwrap().handler)(&dict_arg(&[(
+        "path",
+        vm_string(&path_str(&file)),
+    )]))
+    .expect_err("must reject non-UTF8 input");
+    let message = format!("{err:?}");
+    assert!(
+        message.contains("UTF-8"),
+        "error must mention UTF-8 as the cause: {message}"
+    );
+}
+
+#[test]
+fn safe_text_patch_round_trips_large_payload() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("large.txt");
+    // ~1.5 MB — enough to verify the read + hash + write loop does not
+    // truncate or hash a sliced view of the bytes.
+    let payload = "abcdefghij".repeat(150_000);
+    fs::write(&file, &payload).unwrap();
+    let reg = registry();
+    let pre_hash = sha256_of(payload.as_bytes());
+
+    let new_payload = "xyzwvutsrq".repeat(150_000);
+    let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string(&new_payload)),
+        ("expected_hash", vm_string(&pre_hash)),
+    ]))
+    .unwrap();
+    assert_eq!(dict_str(&response, "result"), "applied");
+    assert_eq!(
+        dict_int(&response, "bytes_written") as usize,
+        new_payload.len()
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), new_payload);
+}
+
+#[test]
+fn emit_safe_text_patch_result_routes_to_active_session() {
+    use harn_vm::agent_events::{
+        register_wildcard_sink, unregister_wildcard_sink, AgentEvent, AgentEventSink,
+    };
+    use std::sync::{Arc, Mutex};
+
+    struct Capture {
+        events: Mutex<Vec<AgentEvent>>,
+    }
+    impl AgentEventSink for Capture {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.events.lock().unwrap().push(event.clone());
+        }
+    }
+
+    let sink = Arc::new(Capture {
+        events: Mutex::new(Vec::new()),
+    });
+    let handle = register_wildcard_sink(sink.clone());
+
+    let reg = registry();
+    let session = unique_session("emit-event");
+    let _guard = harn_vm::agent_sessions::enter_current_session(session.clone());
+
+    let response = (reg
+        .find("hostlib_fs_emit_safe_text_patch_result")
+        .unwrap()
+        .handler)(&dict_arg(&[
+        ("path", vm_string("/tmp/never-written.txt")),
+        ("result", vm_string("stale_base")),
+        ("hunks_count", VmValue::Int(3)),
+        ("bytes_written", VmValue::Int(0)),
+    ]))
+    .unwrap();
+    assert!(matches!(response, VmValue::Bool(true)));
+
+    let events = sink.events.lock().unwrap();
+    let event = events
+        .iter()
+        .find_map(|e| match e {
+            AgentEvent::SafeTextPatchResult {
+                session_id: sid,
+                path,
+                result,
+                hunks_count,
+                ..
+            } if sid == &session => Some((path.clone(), result.clone(), *hunks_count)),
+            _ => None,
+        })
+        .expect("event must route to the active session");
+    drop(events);
+    assert_eq!(event.0, "/tmp/never-written.txt");
+    assert_eq!(event.1, "stale_base");
+    assert_eq!(event.2, 3);
+
+    unregister_wildcard_sink(handle);
+}

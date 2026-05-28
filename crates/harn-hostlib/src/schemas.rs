@@ -670,6 +670,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "fs",
+        "emit_safe_text_patch_result",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/emit_safe_text_patch_result.request.json"),
+    ),
+    (
+        "fs",
+        "emit_safe_text_patch_result",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/emit_safe_text_patch_result.response.json"),
+    ),
+    (
+        "fs",
         "snapshot",
         SchemaKind::Request,
         include_str!("../schemas/fs/snapshot.request.json"),

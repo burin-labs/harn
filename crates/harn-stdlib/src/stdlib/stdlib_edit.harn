@@ -1067,12 +1067,24 @@ fn __edit_safe_patch_telemetry(result, hunks_count, failed_hunk_index) {
 fn __edit_safe_patch_result(ctx, fields = nil) {
   let extra = fields ?? {}
   let result = extra?.result ?? ctx.result
+  let matched = result == "applied" || result == "no_op"
   let failed_idx = extra?.failed_hunk_index
+  let bytes_written = extra?.bytes_written ?? 0
+  hostlib_fs_emit_safe_text_patch_result(
+    {
+      session_id: ctx.session_id,
+      path: ctx.path,
+      result: result,
+      hunks_count: ctx.hunks_count,
+      bytes_written: bytes_written,
+      failed_hunk_index: failed_idx,
+    },
+  )
   let base = {
-    ok: result == "applied" || result == "no_op",
+    ok: matched,
     result: result,
-    applied: false,
-    changed: false,
+    applied: matched,
+    dry_run: ctx.dry_run ?? false,
     path: ctx.path,
     before_sha256: ctx.before_hash,
     after_sha256: ctx.before_hash,
@@ -1082,9 +1094,8 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
     hunk_results: extra?.hunk_results ?? [],
     failed_hunk_index: failed_idx,
     failed_hunk_error_code: extra?.failed_hunk_error_code,
-    failed_hunk_message: extra?.failed_hunk_message,
     stale_base: result == "stale_base",
-    bytes_written: 0,
+    bytes_written: bytes_written,
     created: false,
     preview: nil,
     errors: [],
@@ -1131,13 +1142,16 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
  *
  * ## Result
  *
- * Returns `{ok, result, applied, changed, path, before_sha256,
+ * Returns `{ok, result, applied, dry_run, path, before_sha256,
  * after_sha256, current_hash, expected_hash, hunks_count,
- * hunk_results, failed_hunk_index?, stale_base, bytes_written,
- * preview?, telemetry, provenance}`. `result` is one of `applied`,
- * `no_op`, `stale_base`, `hunk_conflict`. `telemetry` carries
- * per-call counters hosts roll up into stale-base / hunk-conflict
- * rates and average hunks-per-patch.
+ * hunk_results, failed_hunk_index?, failed_hunk_error_code?,
+ * stale_base, bytes_written, created, preview?, errors, warnings,
+ * telemetry, provenance}`. `result` is one of `applied`, `no_op`,
+ * `stale_base`, `hunk_conflict`; `applied: true` means the matcher
+ * succeeded (mirrors `edit_apply_node`'s convention — `dry_run: true`
+ * keeps `applied` true while skipping the on-disk write). `telemetry`
+ * carries per-call counters hosts roll up into stale-base /
+ * hunk-conflict rates and average hunks-per-patch.
  *
  * @effects: [host, fs]
  * @allocation: heap
@@ -1158,10 +1172,12 @@ pub fn edit_safe_text_patch(params) {
   let current_hash = read_response?.sha256 ?? __edit_sha256(current_content)
   let ctx = {
     path: path,
+    session_id: session_id,
     before_hash: current_hash,
     current_hash: current_hash,
     expected_hash: expected_hash,
     hunks_count: len(hunks),
+    dry_run: dry_run,
     result: "applied",
     options: opts,
   }
@@ -1190,6 +1206,7 @@ pub fn edit_safe_text_patch(params) {
     let outcome = edit_apply_old_new_patch(working, hunk?.old_text, hunk?.new_text, hunk_opts)
     hunk_results = hunk_results + [outcome]
     if !outcome.ok {
+      let hunk_error_code = outcome?.error_code ?? "no_match"
       return __edit_safe_patch_result(
         ctx,
         {
@@ -1197,14 +1214,13 @@ pub fn edit_safe_text_patch(params) {
           after_sha256: __edit_sha256(working),
           hunk_results: hunk_results,
           failed_hunk_index: idx,
-          failed_hunk_error_code: outcome?.error_code,
-          failed_hunk_message: outcome?.message,
+          failed_hunk_error_code: hunk_error_code,
           errors: [
             {
               code: "hunk_conflict",
-              message: "hunk " + to_string(idx) + " rejected: " + outcome?.error_code ?? "no_match",
+              message: "hunk " + to_string(idx) + " rejected: " + hunk_error_code,
               hunk_index: idx,
-              hunk_error_code: outcome?.error_code,
+              hunk_error_code: hunk_error_code,
               hunk_message: outcome?.message,
             },
           ],
@@ -1214,8 +1230,8 @@ pub fn edit_safe_text_patch(params) {
     working = outcome.patched
     idx = idx + 1
   }
-  let after_hash = __edit_sha256(working)
   if dry_run {
+    let after_hash = __edit_sha256(working)
     let result_kind = if current_content == working {
       "no_op"
     } else {
@@ -1223,13 +1239,7 @@ pub fn edit_safe_text_patch(params) {
     }
     return __edit_safe_patch_result(
       ctx,
-      {
-        result: result_kind,
-        after_sha256: after_hash,
-        hunk_results: hunk_results,
-        changed: current_content != working,
-        preview: working,
-      },
+      {result: result_kind, after_sha256: after_hash, hunk_results: hunk_results, preview: working},
     )
   }
   let commit = hostlib_fs_safe_text_patch(
@@ -1244,12 +1254,13 @@ pub fn edit_safe_text_patch(params) {
   )
   let commit_result = commit?.result ?? "applied"
   let committed_hash = commit?.current_hash ?? current_hash
+  let committed_after = commit?.after_sha256 ?? current_hash
   if commit_result == "stale_base" {
     return __edit_safe_patch_result(
       ctx.merge({current_hash: committed_hash}),
       {
         result: "stale_base",
-        after_sha256: after_hash,
+        after_sha256: committed_after,
         hunk_results: hunk_results,
         errors: [
           {
@@ -1266,10 +1277,8 @@ pub fn edit_safe_text_patch(params) {
     ctx.merge({current_hash: committed_hash}),
     {
       result: commit_result,
-      after_sha256: commit?.after_sha256 ?? after_hash,
+      after_sha256: committed_after,
       hunk_results: hunk_results,
-      applied: commit?.applied ?? false,
-      changed: commit_result == "applied",
       bytes_written: commit?.bytes_written ?? 0,
       created: commit?.created ?? false,
     },

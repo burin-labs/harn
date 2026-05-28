@@ -782,6 +782,51 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::SafeTextPatchResult {
+                session_id,
+                path,
+                result,
+                hunks_count,
+                bytes_written,
+                failed_hunk_index,
+            } => {
+                let mut update = super::bridge::progress_update(
+                    "safe_text_patch",
+                    &format!("safe_text_patch: {result}"),
+                    None,
+                    None,
+                    None,
+                );
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "kind".to_string(),
+                    serde_json::Value::String("safe_text_patch_result".to_string()),
+                );
+                harn_meta.insert("path".to_string(), serde_json::Value::String(path.clone()));
+                harn_meta.insert(
+                    "result".to_string(),
+                    serde_json::Value::String(result.clone()),
+                );
+                harn_meta.insert(
+                    "hunksCount".to_string(),
+                    serde_json::Value::from(*hunks_count as u64),
+                );
+                harn_meta.insert(
+                    "bytesWritten".to_string(),
+                    serde_json::Value::from(*bytes_written),
+                );
+                if let Some(idx) = failed_hunk_index {
+                    harn_meta.insert(
+                        "failedHunkIndex".to_string(),
+                        serde_json::Value::from(*idx as u64),
+                    );
+                }
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             AgentEvent::ControlOutcome {
                 session_id,
                 control_id,

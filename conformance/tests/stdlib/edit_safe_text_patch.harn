@@ -73,6 +73,8 @@ pipeline default() {
   )
   __io_println(conflict_result.result)
   __io_println(conflict_result.failed_hunk_index)
+  __io_println(conflict_result.failed_hunk_error_code)
+  __io_println(contains(conflict_result.errors[0].message, "hunk 1 rejected: no_match"))
   __io_println(conflict_result.telemetry.hunk_conflict)
   __io_println(harness.fs.read_text(conflict_path) == conflict_before)
   // 4) Dry run renders the post-image into `preview` without touching disk.
@@ -88,6 +90,9 @@ pipeline default() {
     },
   )
   __io_println(preview_result.result)
+  __io_println(preview_result.applied)
+  __io_println(preview_result.dry_run)
+  __io_println(preview_result.bytes_written)
   __io_println(contains(preview_result.preview, "ALPHA"))
   __io_println(harness.fs.read_text(preview_path) == preview_before)
   // 5) Optional `expected_hash` — when omitted the call still applies and

@@ -21,8 +21,8 @@ use sha2::{Digest, Sha256};
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_string, optional_string_list, require_string,
-    str_value,
+    build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
+    require_string, str_value,
 };
 
 const SET_MODE_BUILTIN: &str = "hostlib_fs_set_mode";
@@ -31,6 +31,7 @@ const COMMIT_BUILTIN: &str = "hostlib_fs_commit_staged";
 const DISCARD_BUILTIN: &str = "hostlib_fs_discard_staged";
 const SAFE_TEXT_PATCH_BUILTIN: &str = "hostlib_fs_safe_text_patch";
 const READ_TEXT_BUILTIN: &str = "hostlib_fs_read_text";
+const EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN: &str = "hostlib_fs_emit_safe_text_patch_result";
 
 const MANIFEST_VERSION: u32 = 1;
 const STATE_REL: &[&str] = &[".harn", "state", "staged"];
@@ -71,6 +72,12 @@ impl HostlibCapability for FsCapability {
             safe_text_patch_builtin,
         );
         register(registry, READ_TEXT_BUILTIN, "read_text", read_text_builtin);
+        register(
+            registry,
+            EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN,
+            "emit_safe_text_patch_result",
+            emit_safe_text_patch_result_builtin,
+        );
     }
 }
 
@@ -561,6 +568,13 @@ impl SafeTextPatchResult {
     }
 }
 
+/// Format `bytes` as the `sha256:HEX` label used in `before_sha256` /
+/// `after_sha256` / `current_hash` / `expected_hash` everywhere in the
+/// safe-text-patch surface.
+fn hash_label(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
 /// Atomic compare-and-swap-style text write.
 ///
 /// Reads the current bytes at `path` through the staged-fs overlay (when a
@@ -591,7 +605,7 @@ pub fn safe_text_patch(
     overwrite: bool,
 ) -> Result<SafeTextPatchOutcome, HostlibError> {
     let new_bytes = content.as_bytes();
-    let after_hash = format!("sha256:{}", hex::encode(Sha256::digest(new_bytes)));
+    let after_hash = hash_label(new_bytes);
 
     if let Some(outcome) = safe_text_patch_staged(
         path,
@@ -665,7 +679,7 @@ fn safe_text_patch_staged(
             }
         },
     };
-    let current_hash = format!("sha256:{}", hex::encode(Sha256::digest(&existing_bytes)));
+    let current_hash = hash_label(&existing_bytes);
 
     if let Some(expected) = expected_hash {
         if expected != current_hash {
@@ -757,7 +771,7 @@ fn safe_text_patch_disk(
             });
         }
     };
-    let current_hash = format!("sha256:{}", hex::encode(Sha256::digest(&existing_bytes)));
+    let current_hash = hash_label(&existing_bytes);
 
     if let Some(expected) = expected_hash {
         if expected != current_hash {
@@ -786,18 +800,21 @@ fn safe_text_patch_disk(
             message: format!("`{}` exists and overwrite=false", path.display()),
         });
     }
-
-    crate::fs_snapshot::auto_capture_for_write(SAFE_TEXT_PATCH_BUILTIN, path);
-    if create_parents {
+    if !create_parents {
         if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                stdfs::create_dir_all(parent).map_err(|err| HostlibError::Backend {
+            if !parent.as_os_str().is_empty() && !parent.is_dir() {
+                return Err(HostlibError::Backend {
                     builtin: SAFE_TEXT_PATCH_BUILTIN,
-                    message: format!("mkdir `{}`: {err}", parent.display()),
-                })?;
+                    message: format!(
+                        "parent directory for `{}` does not exist (pass create_parents=true to mkdir)",
+                        path.display()
+                    ),
+                });
             }
         }
     }
+
+    crate::fs_snapshot::auto_capture_for_write(SAFE_TEXT_PATCH_BUILTIN, path);
     atomic_write(path, new_bytes).map_err(|err| HostlibError::Backend {
         builtin: SAFE_TEXT_PATCH_BUILTIN,
         message: format!("write `{}`: {err}", path.display()),
@@ -849,7 +866,7 @@ fn read_text_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let path = Path::new(&path_str);
 
     let (bytes, existed) = read_existing(READ_TEXT_BUILTIN, path, session_id.as_deref())?;
-    let hash = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
+    let hash = hash_label(&bytes);
     let content = match std::str::from_utf8(&bytes) {
         Ok(s) => s.to_string(),
         Err(err) => {
@@ -914,6 +931,51 @@ fn safe_text_patch_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ),
     ];
     Ok(build_dict(entries))
+}
+
+fn emit_safe_text_patch_result_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN, args)?;
+    let dict = raw.as_ref();
+
+    let path = require_string(EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN, dict, "path")?;
+    let result = require_string(EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN, dict, "result")?;
+    let hunks_count = optional_int(EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN, dict, "hunks_count", 0)?;
+    let bytes_written = optional_int(
+        EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN,
+        dict,
+        "bytes_written",
+        0,
+    )?;
+    let failed_hunk_index = match dict.get("failed_hunk_index") {
+        None | Some(VmValue::Nil) => None,
+        Some(VmValue::Int(n)) if *n >= 0 => Some(*n as usize),
+        Some(other) => {
+            return Err(HostlibError::InvalidParameter {
+                builtin: EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN,
+                param: "failed_hunk_index",
+                message: format!("expected non-negative integer, got {}", other.type_name()),
+            });
+        }
+    };
+    let session_id = optional_string(EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN, dict, "session_id")?
+        .or_else(harn_vm::agent_sessions::current_session_id);
+
+    if let Some(session_id) = session_id.filter(|s| !s.trim().is_empty()) {
+        harn_vm::agent_events::emit_event(&AgentEvent::SafeTextPatchResult {
+            session_id,
+            path,
+            result,
+            hunks_count: hunks_count.max(0) as usize,
+            bytes_written: bytes_written.max(0) as u64,
+            failed_hunk_index,
+        });
+        Ok(VmValue::Bool(true))
+    } else {
+        // Silently no-op when no session is active — telemetry without a
+        // session has nowhere to route. Caller can opt in by always
+        // passing session_id explicitly.
+        Ok(VmValue::Bool(false))
+    }
 }
 
 fn set_mode_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {

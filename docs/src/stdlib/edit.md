@@ -354,7 +354,7 @@ Backed by the `hostlib_fs_safe_text_patch` builtin (issue
 | `session_id` | no | Hostlib session whose staged-fs overlay should intercept the read and the write. |
 | `match_options` | no | Default `edit_apply_old_new_patch` options merged into every hunk. |
 | `dry_run` | no | When `true` the post-image is rendered into `preview` but no bytes are written. |
-| `create_parents` | no, default `true` | Create missing parent directories on write. |
+| `create_parents` | no, default `true` | Create missing parent directories on write. When `false`, a missing parent is a hard error (the call does **not** silently fall back to creating it). |
 | `overwrite` | no, default `true` | Allow replacing existing files. |
 
 ### Result
@@ -370,7 +370,14 @@ Every result carries `before_sha256` / `after_sha256` / `current_hash`,
 the per-hunk `hunk_results`, a `telemetry` envelope (`applied`,
 `stale_base`, `hunk_conflict`, `no_op` counters plus `hunks`), and a
 `provenance` envelope so hosts can roll up stale-base / hunk-conflict
-rates and average hunks-per-patch without re-parsing logs.
+rates and average hunks-per-patch without re-parsing logs. The same
+counters fire through the `SafeTextPatchResult` agent event so hosts
+that subscribe to the event stream see every terminal outcome without
+polling.
+
+`applied` is `true` whenever the hunk matcher succeeded — including
+when `dry_run: true` skipped the on-disk write. Distinguish the two
+via the `dry_run` field on the result, mirroring `edit_apply_node`.
 
 ### Worked example: two hunks under stale-base guarding
 
@@ -442,6 +449,76 @@ pipeline default() {
     },
   )
   __io_println(winner.result)                 // "applied"
+}
+```
+
+### Bounded retry loop on `stale_base`
+
+The natural pattern for hot paths: re-snapshot and re-apply against the
+overlay's actual hash, up to a small cap. Past the cap, surface the
+conflict to the caller rather than spinning forever.
+
+```harn,ignore
+import { edit_safe_text_patch } from "std/edit"
+
+fn rewrite(path, hunks, session_id) {
+  var attempt = 0
+  let max_attempts = 3
+  while attempt < max_attempts {
+    let snapshot = hostlib_fs_read_text({path: path, session_id: session_id})
+    let result = edit_safe_text_patch(
+      {
+        path: path,
+        expected_hash: snapshot.sha256,
+        hunks: hunks,
+        session_id: session_id,
+      },
+    )
+    if result.result != "stale_base" {
+      return result
+    }
+    attempt = attempt + 1
+  }
+  return {result: "stale_base_exhausted", attempts: max_attempts}
+}
+```
+
+### Preview an edit before writing
+
+`dry_run: true` runs the matcher and returns the post-image in
+`preview` without touching the file. `applied: true` plus
+`dry_run: true` together mean "the matcher succeeded but we did not
+write" — same convention as `edit_apply_node`.
+
+```harn,ignore
+import { edit_safe_text_patch } from "std/edit"
+
+pipeline default() {
+  let path = "src/lib.rs"
+  let snapshot = hostlib_fs_read_text({path: path})
+  let preview = edit_safe_text_patch(
+    {
+      path: path,
+      expected_hash: snapshot.sha256,
+      hunks: [{old_text: "return 1", new_text: "return 11"}],
+      dry_run: true,
+    },
+  )
+  __io_println(preview.applied)               // true (matcher succeeded)
+  __io_println(preview.dry_run)               // true (no write happened)
+  __io_println(preview.bytes_written)         // 0
+  // The file on disk is unchanged. `preview.preview` carries the
+  // post-image the real apply would produce — show it in a diff UI,
+  // gate on user approval, then re-run with `dry_run: false`.
+  if user_approves(preview.preview) {
+    edit_safe_text_patch(
+      {
+        path: path,
+        expected_hash: snapshot.sha256,
+        hunks: [{old_text: "return 1", new_text: "return 11"}],
+      },
+    )
+  }
 }
 ```
 

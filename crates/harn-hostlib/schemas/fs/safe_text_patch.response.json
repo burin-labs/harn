@@ -2,6 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/fs/safe_text_patch.response.json",
   "title": "fs.safe_text_patch response",
+  "$defs": {
+    "sha256Label": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
   "type": "object",
   "properties": {
     "path": { "type": "string" },
@@ -13,12 +19,14 @@
     "applied": { "type": "boolean" },
     "stale_base": { "type": "boolean" },
     "current_hash": {
-      "type": "string",
+      "allOf": [{ "$ref": "#/$defs/sha256Label" }],
       "description": "`sha256:HEX` of the observed pre-image. Echoed even on `stale_base` so the caller can re-read and retry without an extra hop."
     },
-    "before_sha256": { "type": "string" },
-    "after_sha256": { "type": "string" },
-    "expected_hash": { "type": ["string", "null"] },
+    "before_sha256": { "$ref": "#/$defs/sha256Label" },
+    "after_sha256": { "$ref": "#/$defs/sha256Label" },
+    "expected_hash": {
+      "oneOf": [{ "$ref": "#/$defs/sha256Label" }, { "type": "null" }]
+    },
     "created": { "type": "boolean" },
     "bytes_written": { "type": "integer", "minimum": 0 }
   },
@@ -30,6 +38,7 @@
     "current_hash",
     "before_sha256",
     "after_sha256",
+    "expected_hash",
     "created",
     "bytes_written"
   ],

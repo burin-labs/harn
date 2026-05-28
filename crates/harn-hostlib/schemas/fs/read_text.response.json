@@ -11,6 +11,7 @@
     },
     "sha256": {
       "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
       "description": "`sha256:HEX` of the bytes read. Pair this with `fs.safe_text_patch` as `expected_hash`."
     },
     "size": { "type": "integer", "minimum": 0 },
