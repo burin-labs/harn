@@ -420,69 +420,100 @@ impl ProjectEvidence {
 }
 
 pub(crate) fn register_project_builtins(vm: &mut Vm) {
-    vm.register_builtin("project_fingerprint", |args, _out| {
-        if args.len() > 1 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "project_fingerprint: expected at most 1 argument",
-            ))));
-        }
-        let path = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_else(|| ".".to_string());
-        let root = resolve_existing_directory(&path)?;
-        Ok(detect_project_fingerprint(&root).into_vm_value())
-    });
-
-    vm.register_builtin("project_scan_native", |args, _out| {
-        let path = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_else(|| ".".to_string());
-        let options = parse_project_options(args.get(1));
-        let root = resolve_existing_directory(&path)?;
-        Ok(scan_exact_directory(&root, &options).into_vm_value())
-    });
-
-    vm.register_builtin("project_scan_tree_native", |args, _out| {
-        let path = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_else(|| ".".to_string());
-        let options = parse_project_options(args.get(1));
-        let base = resolve_existing_directory(&path)?;
-        let tree = scan_project_tree(&base, &options)?;
-        Ok(VmValue::Dict(Rc::new(
-            tree.into_iter()
-                .map(|(rel, evidence)| (rel, evidence.into_vm_value()))
-                .collect(),
-        )))
-    });
-
-    vm.register_builtin("project_walk_tree_native", |args, _out| {
-        let path = args
-            .first()
-            .map(|value| value.display())
-            .unwrap_or_else(|| ".".to_string());
-        let options = parse_project_options(args.get(1));
-        let base = resolve_existing_directory(&path)?;
-        let tree = walk_project_tree(&base, &options)?;
-        Ok(VmValue::List(Rc::new(
-            tree.into_iter()
-                .map(ProjectTreeEntry::into_vm_value)
-                .collect(),
-        )))
-    });
-
-    vm.register_builtin("project_catalog_native", |_args, _out| {
-        let entries = project_catalog()
-            .iter()
-            .map(catalog_entry_value)
-            .collect::<Vec<_>>();
-        Ok(VmValue::List(Rc::new(entries)))
-    });
-
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
     register_project_enrich_builtin(vm);
+}
+
+pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
+    &PROJECT_FINGERPRINT_IMPL_DEF,
+    &PROJECT_SCAN_NATIVE_IMPL_DEF,
+    &PROJECT_SCAN_TREE_NATIVE_IMPL_DEF,
+    &PROJECT_WALK_TREE_NATIVE_IMPL_DEF,
+    &PROJECT_CATALOG_NATIVE_IMPL_DEF,
+];
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "project_fingerprint(path?: string) -> dict",
+    category = "project"
+)]
+fn project_fingerprint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() > 1 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(
+            "project_fingerprint: expected at most 1 argument",
+        ))));
+    }
+    let path = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_else(|| ".".to_string());
+    let root = resolve_existing_directory(&path)?;
+    Ok(detect_project_fingerprint(&root).into_vm_value())
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "project_scan_native(path?: string, options?: dict) -> dict",
+    category = "project"
+)]
+fn project_scan_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_else(|| ".".to_string());
+    let options = parse_project_options(args.get(1));
+    let root = resolve_existing_directory(&path)?;
+    Ok(scan_exact_directory(&root, &options).into_vm_value())
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "project_scan_tree_native(path?: string, options?: dict) -> dict",
+    category = "project"
+)]
+fn project_scan_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_else(|| ".".to_string());
+    let options = parse_project_options(args.get(1));
+    let base = resolve_existing_directory(&path)?;
+    let tree = scan_project_tree(&base, &options)?;
+    Ok(VmValue::Dict(Rc::new(
+        tree.into_iter()
+            .map(|(rel, evidence)| (rel, evidence.into_vm_value()))
+            .collect(),
+    )))
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "project_walk_tree_native(path?: string, options?: dict) -> list",
+    category = "project"
+)]
+fn project_walk_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_else(|| ".".to_string());
+    let options = parse_project_options(args.get(1));
+    let base = resolve_existing_directory(&path)?;
+    let tree = walk_project_tree(&base, &options)?;
+    Ok(VmValue::List(Rc::new(
+        tree.into_iter()
+            .map(ProjectTreeEntry::into_vm_value)
+            .collect(),
+    )))
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "project_catalog_native() -> list",
+    category = "project"
+)]
+fn project_catalog_native_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let entries = project_catalog()
+        .iter()
+        .map(catalog_entry_value)
+        .collect::<Vec<_>>();
+    Ok(VmValue::List(Rc::new(entries)))
 }
 
 pub(crate) fn project_scan_config_value(dir: &Path) -> VmValue {

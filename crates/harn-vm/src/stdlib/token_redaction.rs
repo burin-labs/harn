@@ -121,97 +121,147 @@ fn forward_event_to_events_sink(event: &RedactionEvent) {
 
 pub(crate) fn register_token_redaction_builtins(vm: &mut Vm) {
     ensure_audit_sink();
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("__token_redaction_register_pattern", |args, _out| {
-        let name = required_string_arg(args, 0, "__token_redaction_register_pattern", "name")?;
-        let regex_source =
-            required_string_arg(args, 1, "__token_redaction_register_pattern", "regex")?;
-        if name.is_empty() {
-            return Err(VmError::Runtime(
-                "__token_redaction_register_pattern: `name` must not be empty".to_string(),
-            ));
-        }
-        register_custom_pattern(&name, &regex_source).map_err(|message| {
-            VmError::Runtime(format!("token_redaction.register_pattern: {message}"))
-        })?;
-        Ok(VmValue::Nil)
-    });
+pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
+    &TOKEN_REDACTION_REGISTER_PATTERN_IMPL_DEF,
+    &TOKEN_REDACTION_CLEAR_CUSTOM_PATTERNS_IMPL_DEF,
+    &TOKEN_REDACTION_REDACT_IMPL_DEF,
+    &TOKEN_REDACTION_DEFAULT_PATTERNS_IMPL_DEF,
+    &TOKEN_REDACTION_CUSTOM_PATTERNS_IMPL_DEF,
+    &TOKEN_REDACTION_DRAIN_AUDIT_IMPL_DEF,
+];
 
-    vm.register_builtin("__token_redaction_clear_custom_patterns", |args, _out| {
-        if !args.is_empty() {
-            return Err(VmError::Runtime(
-                "__token_redaction_clear_custom_patterns: expected 0 arguments".to_string(),
-            ));
-        }
-        redact::clear_custom_patterns();
-        Ok(VmValue::Nil)
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__token_redaction_register_pattern(name: string, regex: string) -> nil",
+    category = "token_redaction"
+)]
+fn token_redaction_register_pattern_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let name = required_string_arg(args, 0, "__token_redaction_register_pattern", "name")?;
+    let regex_source = required_string_arg(args, 1, "__token_redaction_register_pattern", "regex")?;
+    if name.is_empty() {
+        return Err(VmError::Runtime(
+            "__token_redaction_register_pattern: `name` must not be empty".to_string(),
+        ));
+    }
+    register_custom_pattern(&name, &regex_source).map_err(|message| {
+        VmError::Runtime(format!("token_redaction.register_pattern: {message}"))
+    })?;
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("__token_redaction_redact", |args, _out| {
-        let text = required_string_arg(args, 0, "__token_redaction_redact", "text")?;
-        let policy = redact::current_policy();
-        let redacted = policy.redact_string(&text).into_owned();
-        Ok(VmValue::String(Rc::from(redacted.as_str())))
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__token_redaction_clear_custom_patterns() -> nil",
+    category = "token_redaction"
+)]
+fn token_redaction_clear_custom_patterns_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::Runtime(
+            "__token_redaction_clear_custom_patterns: expected 0 arguments".to_string(),
+        ));
+    }
+    redact::clear_custom_patterns();
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("__token_redaction_default_patterns", |args, _out| {
-        if !args.is_empty() {
-            return Err(VmError::Runtime(
-                "__token_redaction_default_patterns: expected 0 arguments".to_string(),
-            ));
-        }
-        let names: Vec<VmValue> = default_pattern_names()
-            .into_iter()
-            .map(|name| VmValue::String(Rc::from(name)))
-            .collect();
-        Ok(VmValue::List(Rc::new(names)))
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__token_redaction_redact(text: string) -> string",
+    category = "token_redaction"
+)]
+fn token_redaction_redact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = required_string_arg(args, 0, "__token_redaction_redact", "text")?;
+    let policy = redact::current_policy();
+    let redacted = policy.redact_string(&text).into_owned();
+    Ok(VmValue::String(Rc::from(redacted.as_str())))
+}
 
-    vm.register_builtin("__token_redaction_custom_patterns", |args, _out| {
-        if !args.is_empty() {
-            return Err(VmError::Runtime(
-                "__token_redaction_custom_patterns: expected 0 arguments".to_string(),
-            ));
-        }
-        let names: Vec<VmValue> = custom_pattern_names()
-            .into_iter()
-            .map(|name| VmValue::String(Rc::from(name.as_str())))
-            .collect();
-        Ok(VmValue::List(Rc::new(names)))
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__token_redaction_default_patterns() -> list",
+    category = "token_redaction"
+)]
+fn token_redaction_default_patterns_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::Runtime(
+            "__token_redaction_default_patterns: expected 0 arguments".to_string(),
+        ));
+    }
+    let names: Vec<VmValue> = default_pattern_names()
+        .into_iter()
+        .map(|name| VmValue::String(Rc::from(name)))
+        .collect();
+    Ok(VmValue::List(Rc::new(names)))
+}
 
-    vm.register_builtin("__token_redaction_drain_audit", |args, _out| {
-        if !args.is_empty() {
-            return Err(VmError::Runtime(
-                "__token_redaction_drain_audit: expected 0 arguments".to_string(),
-            ));
-        }
-        let events = drain_audit_ring();
-        let list: Vec<VmValue> = events
-            .into_iter()
-            .map(|event| {
-                let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
-                entry.insert(
-                    "code".to_string(),
-                    VmValue::String(Rc::from(TOKEN_REDACTION_DIAGNOSTIC)),
-                );
-                entry.insert(
-                    "pattern".to_string(),
-                    VmValue::String(Rc::from(event.pattern_name.as_str())),
-                );
-                entry.insert(
-                    "match_count".to_string(),
-                    VmValue::Int(event.match_count as i64),
-                );
-                entry.insert(
-                    "bytes_redacted".to_string(),
-                    VmValue::Int(event.bytes_redacted as i64),
-                );
-                VmValue::Dict(Rc::new(entry))
-            })
-            .collect();
-        Ok(VmValue::List(Rc::new(list)))
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__token_redaction_custom_patterns() -> list",
+    category = "token_redaction"
+)]
+fn token_redaction_custom_patterns_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::Runtime(
+            "__token_redaction_custom_patterns: expected 0 arguments".to_string(),
+        ));
+    }
+    let names: Vec<VmValue> = custom_pattern_names()
+        .into_iter()
+        .map(|name| VmValue::String(Rc::from(name.as_str())))
+        .collect();
+    Ok(VmValue::List(Rc::new(names)))
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__token_redaction_drain_audit() -> list",
+    category = "token_redaction"
+)]
+fn token_redaction_drain_audit_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::Runtime(
+            "__token_redaction_drain_audit: expected 0 arguments".to_string(),
+        ));
+    }
+    let events = drain_audit_ring();
+    let list: Vec<VmValue> = events
+        .into_iter()
+        .map(|event| {
+            let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
+            entry.insert(
+                "code".to_string(),
+                VmValue::String(Rc::from(TOKEN_REDACTION_DIAGNOSTIC)),
+            );
+            entry.insert(
+                "pattern".to_string(),
+                VmValue::String(Rc::from(event.pattern_name.as_str())),
+            );
+            entry.insert(
+                "match_count".to_string(),
+                VmValue::Int(event.match_count as i64),
+            );
+            entry.insert(
+                "bytes_redacted".to_string(),
+                VmValue::Int(event.bytes_redacted as i64),
+            );
+            VmValue::Dict(Rc::new(entry))
+        })
+        .collect();
+    Ok(VmValue::List(Rc::new(list)))
 }
 
 fn required_string_arg(

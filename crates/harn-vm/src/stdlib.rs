@@ -306,6 +306,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(path::MODULE_BUILTINS);
         out.extend_from_slice(postgres::MODULE_BUILTINS);
         out.extend_from_slice(process::MODULE_BUILTINS);
+        out.extend_from_slice(project::MODULE_BUILTINS);
         out.extend_from_slice(agents::records::MODULE_BUILTINS);
         out.extend_from_slice(regex::MODULE_BUILTINS);
         out.extend_from_slice(runtime_scope::MODULE_BUILTINS);
@@ -318,6 +319,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(testbench::MODULE_BUILTINS);
         out.extend_from_slice(timing::MODULE_BUILTINS);
         out.extend_from_slice(tool_hooks::MODULE_BUILTINS);
+        out.extend_from_slice(token_redaction::MODULE_BUILTINS);
         out.extend_from_slice(tools::MODULE_BUILTINS);
         out.extend_from_slice(tracing::MODULE_BUILTINS);
         out.extend_from_slice(triggers_stdlib::MODULE_BUILTINS);
