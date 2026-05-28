@@ -1049,6 +1049,10 @@ mod tests {
     #[test]
     fn lsp_registry_includes_runtime_metadata_only_llm_config_builtins() {
         assert!(is_builtin("provider_capabilities"));
+        // After #2575 migrated the LLM config builtins to
+        // `#[harn_builtin]`, the recorded signature includes parameter
+        // and return types — match the new shape directly rather than
+        // the legacy untyped string.
         assert_eq!(
             builtin_signature("provider_capabilities"),
             Some("provider_capabilities(provider: string, model?: string|nil) -> dict")

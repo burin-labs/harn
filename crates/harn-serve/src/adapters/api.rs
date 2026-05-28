@@ -96,6 +96,8 @@ impl ApiServer {
 
     pub async fn run_http(self: Arc<Self>, options: ApiHttpServeOptions) -> Result<(), String> {
         let router = api_router(self.state.clone());
+        let router =
+            crate::apply_transport_layers(router, &crate::TransportConfig::default_enabled());
         let router = crate::tls::apply_security_headers(router, &options.tls);
         let listener = crate::tls::bind_listener(options.bind)?;
         let local_addr = listener

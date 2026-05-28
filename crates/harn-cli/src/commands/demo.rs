@@ -98,6 +98,19 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/mcp-host/tape.jsonl"),
     },
     Scenario {
+        id: "http-transport",
+        title: "http_etag / http_choose / http_not_modified / http_upgrade_ws",
+        description: "Drive the A.12 transport-completeness builtins (#2515) offline: pick a \
+                      content type from a simulated `Accept` header via `http_choose`, derive a \
+                      strong ETag from the JSON payload, build the matching `http_not_modified` \
+                      envelope, and assemble the `http_upgrade_ws` envelope with subprotocol \
+                      negotiation. The conformance test in `crates/harn-serve/tests/\
+                      transport_conformance.rs` exercises the live HTTP / WS path; the demo \
+                      keeps the offline smoke covered.",
+        script: include_str!("../../assets/demo/http-transport/scenario.harn"),
+        tape: include_str!("../../assets/demo/http-transport/tape.jsonl"),
+    },
+    Scenario {
         id: "edit-rename-symbol",
         title: "edit.rename_symbol rewrites a Rust struct across the workspace",
         description: "Stage a tiny Rust workspace, build the typed symbol graph (#2434), then \

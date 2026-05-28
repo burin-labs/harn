@@ -260,6 +260,45 @@ fn edit_rename_symbol_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn http_transport_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("http-transport");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "http-transport demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("http_transport_receipt"),
+        "http-transport stdout missing receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"chose_content_type\":\"application/json\""),
+        "content negotiation must pick application/json from the simulated Accept:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"not_modified_status\":304"),
+        "http_not_modified must produce a 304 envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"upgrade_status\":101"),
+        "http_upgrade_ws must produce a 101 envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"upgrade_subprotocol\":\"v1.harn\""),
+        "WS subprotocol negotiation must pick v1.harn from the offered list:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all
@@ -272,6 +311,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "stdlib-toolkit",
         "compaction-policy",
         "edit-rename-symbol",
+        "http-transport",
     ]
     .into_iter()
     .collect();

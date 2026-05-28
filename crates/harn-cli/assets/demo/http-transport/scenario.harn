@@ -1,0 +1,66 @@
+/**
+ * http-transport demo: exercise the A.12 transport-completeness
+ * builtins (#2515) — content negotiation, ETag derivation, conditional
+ * 304 envelopes, and the WS-upgrade envelope shape.
+ *
+ * Scope (offline):
+ *   - Pick a content type from a simulated `Accept` header.
+ *   - Derive a strong ETag for a JSON payload.
+ *   - Build a `http_not_modified` envelope that mirrors what a `.harn`
+ *     handler returns when `If-None-Match` matches.
+ *   - Build a `http_upgrade_ws` envelope with subprotocol negotiation.
+ *   - Emit a receipt that captures every output so the tape stays
+ *     deterministic and the demo runs without a live HTTP server.
+ *
+ * Why a demo for this primitive: each of `http_etag`, `http_choose`,
+ * `http_not_modified`, and `http_upgrade_ws` is a new public builtin
+ * the demo gate watches. The scenario keeps the offline smoke path
+ * covered without spinning up a real axum listener — the
+ * transport-layer behaviour itself is covered by the conformance
+ * suite in `crates/harn-serve/tests/transport_conformance.rs`.
+ */
+fn payload() {
+  return {resource: {id: "r1", value: "ETag-stable across runs."}}
+}
+
+fn fake_request() {
+  return {
+    method: "GET",
+    path: "/v1/resource",
+    headers: {
+      "Sec-WebSocket-Protocol": "v0.harn, v1.harn",
+      Accept: "application/xml;q=0.5, application/json;q=0.9",
+    },
+  }
+}
+
+fn main(harness: Harness) {
+  let req = fake_request()
+  // 1. Content negotiation against a simulated `Accept` header.
+  let chosen = http_choose(req.headers.Accept, ["application/xml", "application/json", "text/plain"])
+  __io_println("chose: ${chosen}")
+  // 2. Compute a strong ETag from the serialized payload. The codec's
+  //    router-side ETag middleware mirrors this for the auto path;
+  //    handlers can also drive the value themselves (e.g. from a row
+  //    mtime).
+  let etag = http_etag(json_stringify(payload()))
+  __io_println("etag: ${etag}")
+  // 3. Build the conditional-GET reply for the matching case.
+  let not_modified = http_not_modified(etag, {"Cache-Control": "max-age=60"})
+  // 4. Construct the WS-upgrade envelope. With both client + server
+  //    offering `v1.harn`, that's the negotiated subprotocol.
+  let upgrade = http_upgrade_ws(req, {subprotocols: ["v1.harn", "v2.harn"], idle_ping_ms: 30000})
+  let receipt = {
+    receipt_kind: "http_transport_receipt",
+    chose_content_type: chosen,
+    etag: etag,
+    not_modified_status: not_modified.status,
+    not_modified_etag: not_modified.headers.ETag,
+    upgrade_status: upgrade.status,
+    upgrade_subprotocol: upgrade.ws_upgrade.subprotocol,
+    upgrade_offered_count: len(upgrade.ws_upgrade.offered),
+  }
+  __io_println("=== http-transport receipt ===")
+  __io_println(json_stringify(receipt))
+  return receipt
+}

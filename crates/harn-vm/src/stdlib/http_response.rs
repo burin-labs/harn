@@ -22,6 +22,8 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use sha2::{Digest, Sha256};
+
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -380,6 +382,33 @@ pub fn parse_envelope(value: &serde_json::Value) -> Option<HttpEnvelope> {
         .get("is_error")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let ws_upgrade = obj
+        .get("ws_upgrade")
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            let subprotocol = map
+                .get("subprotocol")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let offered = map
+                .get("offered")
+                .and_then(|v| v.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let idle_ping_ms = map.get("idle_ping_ms").and_then(|v| v.as_u64());
+            let max_message_bytes = map.get("max_message_bytes").and_then(|v| v.as_u64());
+            WsUpgradeSpec {
+                subprotocol,
+                offered,
+                idle_ping_ms,
+                max_message_bytes,
+            }
+        });
     Some(HttpEnvelope {
         status,
         body_kind,
@@ -387,6 +416,7 @@ pub fn parse_envelope(value: &serde_json::Value) -> Option<HttpEnvelope> {
         body,
         retry_ms,
         is_error,
+        ws_upgrade,
     })
 }
 
@@ -398,6 +428,19 @@ pub struct HttpEnvelope {
     pub body: Option<serde_json::Value>,
     pub retry_ms: Option<u64>,
     pub is_error: bool,
+    /// Populated when the handler returned an `http_upgrade_ws(...)`
+    /// envelope. The hosting adapter detects this and routes the
+    /// upgrade through `harn_serve::ws_route` instead of rendering the
+    /// 101 response as plain HTTP.
+    pub ws_upgrade: Option<WsUpgradeSpec>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WsUpgradeSpec {
+    pub subprotocol: Option<String>,
+    pub offered: Vec<String>,
+    pub idle_ping_ms: Option<u64>,
+    pub max_message_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +458,325 @@ impl HttpHeaderValue {
     }
 }
 
+#[harn_builtin(sig = "http_etag(body: any) -> string", category = "http_response")]
+fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let body = args
+        .first()
+        .ok_or_else(|| thrown_err("http_etag: body is required"))?;
+    let bytes = value_as_bytes(body);
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let digest = hasher.finalize();
+    Ok(VmValue::String(Rc::from(format!(
+        "\"{}\"",
+        hex::encode(digest)
+    ))))
+}
+
+#[harn_builtin(
+    sig = "http_choose(accept: string?, offers: list, default?: string?) -> string",
+    category = "http_response"
+)]
+fn http_choose_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let accept = optional_string_arg(args.first(), "http_choose", "accept")?;
+    let offers_value = args
+        .get(1)
+        .ok_or_else(|| thrown_err("http_choose: offers is required"))?;
+    let offers = expect_string_list(offers_value, "http_choose", "offers")?;
+    if offers.is_empty() {
+        return Err(thrown_err("http_choose: offers must be non-empty"));
+    }
+    let default = optional_string_arg(args.get(2), "http_choose", "default")?
+        .unwrap_or_else(|| offers[0].clone());
+
+    let chosen = match accept.as_deref() {
+        None | Some("") | Some("*/*") => default,
+        Some(header) => negotiate_accept(header, &offers).unwrap_or(default),
+    };
+    Ok(VmValue::String(Rc::from(chosen)))
+}
+
+fn optional_string_arg(
+    value: Option<&VmValue>,
+    builtin: &str,
+    arg_name: &str,
+) -> Result<Option<String>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) => Ok(Some(text.to_string())),
+        Some(other) => Err(thrown_err(format!(
+            "{builtin}: {arg_name} must be a string or nil (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn expect_string_list(
+    value: &VmValue,
+    builtin: &str,
+    arg_name: &str,
+) -> Result<Vec<String>, VmError> {
+    let items = match value {
+        VmValue::List(items) => items,
+        other => {
+            return Err(thrown_err(format!(
+                "{builtin}: {arg_name} must be a list (got {})",
+                other.type_name()
+            )));
+        }
+    };
+    items
+        .iter()
+        .map(|value| match value {
+            VmValue::String(text) => Ok(text.to_string()),
+            other => Err(thrown_err(format!(
+                "{builtin}: {arg_name} must contain strings (got {})",
+                other.type_name()
+            ))),
+        })
+        .collect()
+}
+
+#[harn_builtin(
+    sig = "http_not_modified(etag?: string?, headers?: dict) -> dict",
+    category = "http_response"
+)]
+fn http_not_modified_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut headers = parse_headers(args.get(1), "http_not_modified")?;
+    if let Some(etag) = args.first().and_then(string_or_nil) {
+        headers.insert("ETag".to_string(), VmValue::String(Rc::from(etag)));
+    }
+    Ok(envelope(304, VmValue::Nil, BODY_KIND_NONE, headers))
+}
+
+#[harn_builtin(
+    sig = "http_upgrade_ws(req: dict, options?: dict) -> dict",
+    category = "http_response"
+)]
+fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let req = args
+        .first()
+        .and_then(VmValue::as_dict)
+        .ok_or_else(|| thrown_err("http_upgrade_ws: req must be a dict"))?;
+    let options = args.get(1).and_then(VmValue::as_dict);
+
+    let request_subprotocols = req
+        .get("headers")
+        .and_then(VmValue::as_dict)
+        .and_then(|headers| header_lookup(headers, "sec-websocket-protocol"))
+        .map(|raw| {
+            raw.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let offered_subprotocols = options
+        .and_then(|opts| opts.get("subprotocols"))
+        .and_then(|value| match value {
+            VmValue::List(items) => Some(
+                items
+                    .iter()
+                    .filter_map(|v| match v {
+                        VmValue::String(s) => Some(s.to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    // Pick the first *client-preferred* subprotocol the server can
+    // serve. This must match the convention in
+    // `harn_serve::ws::negotiate_subprotocol` — if the two
+    // disagreed, the builtin's envelope would carry one subprotocol
+    // while the actual upgrade handshake echoed back another.
+    let negotiated = request_subprotocols
+        .iter()
+        .find(|client| offered_subprotocols.iter().any(|name| name == *client))
+        .cloned();
+
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "Upgrade".to_string(),
+        VmValue::String(Rc::from("websocket")),
+    );
+    headers.insert(
+        "Connection".to_string(),
+        VmValue::String(Rc::from("Upgrade")),
+    );
+    if let Some(name) = &negotiated {
+        headers.insert(
+            "Sec-WebSocket-Protocol".to_string(),
+            VmValue::String(Rc::from(name.clone())),
+        );
+    }
+
+    let idle_ping_ms = options
+        .and_then(|opts| opts.get("idle_ping_ms"))
+        .and_then(|v| v.as_int());
+    let max_message_bytes = options
+        .and_then(|opts| opts.get("max_message_bytes"))
+        .and_then(|v| v.as_int());
+
+    let mut env_map = envelope_map(101, VmValue::Nil, BODY_KIND_NONE, headers);
+    env_map.insert(
+        "ws_upgrade".to_string(),
+        VmValue::Dict(Rc::new({
+            let mut map = BTreeMap::new();
+            map.insert(
+                "subprotocol".to_string(),
+                match &negotiated {
+                    Some(name) => VmValue::String(Rc::from(name.clone())),
+                    None => VmValue::Nil,
+                },
+            );
+            map.insert(
+                "offered".to_string(),
+                VmValue::List(Rc::new(
+                    offered_subprotocols
+                        .iter()
+                        .map(|s| VmValue::String(Rc::from(s.clone())))
+                        .collect(),
+                )),
+            );
+            if let Some(ms) = idle_ping_ms {
+                map.insert("idle_ping_ms".to_string(), VmValue::Int(ms));
+            }
+            if let Some(bytes) = max_message_bytes {
+                map.insert("max_message_bytes".to_string(), VmValue::Int(bytes));
+            }
+            map
+        })),
+    );
+    Ok(VmValue::Dict(Rc::new(env_map)))
+}
+
+fn header_lookup(headers: &BTreeMap<String, VmValue>, name: &str) -> Option<String> {
+    let needle = name.to_ascii_lowercase();
+    headers
+        .iter()
+        .find(|(key, _)| key.to_ascii_lowercase() == needle)
+        .and_then(|(_, value)| match value {
+            VmValue::String(text) => Some(text.to_string()),
+            _ => None,
+        })
+}
+
+fn value_as_bytes(value: &VmValue) -> Vec<u8> {
+    match value {
+        VmValue::Bytes(bytes) => bytes.as_ref().clone(),
+        VmValue::String(text) => text.as_bytes().to_vec(),
+        VmValue::Nil => Vec::new(),
+        // For dicts / lists / structs, fall through to the stdlib JSON
+        // encoder so the ETag derives from a stable canonical form
+        // (dict keys sorted, bytes base64-tagged) rather than the
+        // less-stable `display()` representation. We reuse
+        // `stdlib::json` directly instead of reaching for the
+        // llm-helpers encoder so the abstraction boundary stays
+        // sibling-module, not cross-subsystem.
+        other => crate::stdlib::json::vm_value_to_json(other).into_bytes(),
+    }
+}
+
+/// Parse an HTTP `Accept` header and return the best matching offer.
+///
+/// Standard Q-value scoring per RFC 9110 §12.5.1: each media-range
+/// gets a `q` (1.0 by default); each offer is scored by its
+/// best-matching range, with ties broken by offer order. Wildcard
+/// matches (`type/*`, `*/*`) score below exact-type matches.
+fn negotiate_accept(header: &str, offers: &[String]) -> Option<String> {
+    let ranges: Vec<MediaRange> = header
+        .split(',')
+        .filter_map(MediaRange::parse)
+        .filter(|range| range.q > 0.0)
+        .collect();
+    if ranges.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<(usize, f32, u8)> = None;
+    for (index, offer) in offers.iter().enumerate() {
+        let (offer_type, offer_subtype) = split_media(offer)?;
+        for range in &ranges {
+            let score = range.match_score(offer_type, offer_subtype);
+            let Some(score) = score else { continue };
+            let q = range.q;
+            let candidate = (index, q, score);
+            best = Some(match best {
+                None => candidate,
+                Some(current) => {
+                    // Prefer higher q first; if equal, higher specificity;
+                    // if equal, earlier offer wins.
+                    if q > current.1
+                        || (q == current.1 && score > current.2)
+                        || (q == current.1 && score == current.2 && index < current.0)
+                    {
+                        candidate
+                    } else {
+                        current
+                    }
+                }
+            });
+        }
+    }
+    best.map(|(index, _, _)| offers[index].clone())
+}
+
+struct MediaRange<'a> {
+    type_: &'a str,
+    subtype: &'a str,
+    q: f32,
+}
+
+impl<'a> MediaRange<'a> {
+    fn parse(raw: &'a str) -> Option<Self> {
+        let trimmed = raw.trim();
+        let mut parts = trimmed.split(';');
+        let media = parts.next()?.trim();
+        let (type_, subtype) = split_media(media)?;
+        let mut q = 1.0;
+        for param in parts {
+            let param = param.trim();
+            if let Some(value) = param
+                .strip_prefix("q=")
+                .or_else(|| param.strip_prefix("Q="))
+            {
+                if let Ok(parsed) = value.trim().parse::<f32>() {
+                    if (0.0..=1.0).contains(&parsed) {
+                        q = parsed;
+                    }
+                }
+            }
+        }
+        Some(Self { type_, subtype, q })
+    }
+
+    fn match_score(&self, offer_type: &str, offer_subtype: &str) -> Option<u8> {
+        let type_match = self.type_ == "*" || self.type_.eq_ignore_ascii_case(offer_type);
+        let subtype_match = self.subtype == "*" || self.subtype.eq_ignore_ascii_case(offer_subtype);
+        if !type_match || !subtype_match {
+            return None;
+        }
+        Some(match (self.type_, self.subtype) {
+            ("*", _) => 1,
+            (_, "*") => 2,
+            _ => 3,
+        })
+    }
+}
+
+fn split_media(value: &str) -> Option<(&str, &str)> {
+    let mut iter = value.splitn(2, '/');
+    let type_ = iter.next()?.trim();
+    let subtype = iter.next()?.trim();
+    if type_.is_empty() || subtype.is_empty() {
+        return None;
+    }
+    Some((type_, subtype))
+}
+
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &HTTP_OK_IMPL_DEF,
     &HTTP_CREATED_IMPL_DEF,
@@ -423,6 +785,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &HTTP_REPLY_IMPL_DEF,
     &HTTP_STREAM_IMPL_DEF,
     &HTTP_SSE_IMPL_DEF,
+    &HTTP_ETAG_IMPL_DEF,
+    &HTTP_CHOOSE_IMPL_DEF,
+    &HTTP_NOT_MODIFIED_IMPL_DEF,
+    &HTTP_UPGRADE_WS_IMPL_DEF,
 ];
 
 #[cfg(test)]
@@ -655,5 +1021,226 @@ mod tests {
     fn parse_envelope_ignores_untagged_dicts() {
         let plain = serde_json::json!({"status": 200, "body": {}});
         assert!(parse_envelope(&plain).is_none());
+    }
+
+    #[test]
+    fn http_etag_is_quoted_hex_sha256_of_payload() {
+        let value = VmValue::String(Rc::from("hello"));
+        let etag = http_etag_impl(&[value], &mut String::new()).expect("etag");
+        match etag {
+            VmValue::String(text) => {
+                assert_eq!(
+                    text.as_ref(),
+                    "\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\""
+                );
+            }
+            other => panic!("expected string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_etag_stable_across_string_and_bytes_for_same_payload() {
+        let from_string =
+            http_etag_impl(&[VmValue::String(Rc::from("hello"))], &mut String::new()).unwrap();
+        let from_bytes = http_etag_impl(
+            &[VmValue::Bytes(Rc::new(b"hello".to_vec()))],
+            &mut String::new(),
+        )
+        .unwrap();
+        assert_eq!(from_string.display(), from_bytes.display());
+    }
+
+    #[test]
+    fn http_choose_returns_best_q_match() {
+        let accept = VmValue::String(Rc::from("application/xml;q=0.5, application/json;q=0.9"));
+        let offers = VmValue::List(Rc::new(vec![
+            VmValue::String(Rc::from("application/xml")),
+            VmValue::String(Rc::from("application/json")),
+        ]));
+        let chosen = http_choose_impl(&[accept, offers], &mut String::new()).unwrap();
+        assert_eq!(chosen.display(), "application/json");
+    }
+
+    #[test]
+    fn http_choose_prefers_specific_over_wildcard() {
+        let accept = VmValue::String(Rc::from("text/*;q=0.5, application/json"));
+        let offers = VmValue::List(Rc::new(vec![
+            VmValue::String(Rc::from("text/plain")),
+            VmValue::String(Rc::from("application/json")),
+        ]));
+        let chosen = http_choose_impl(&[accept, offers], &mut String::new()).unwrap();
+        assert_eq!(chosen.display(), "application/json");
+    }
+
+    #[test]
+    fn http_choose_returns_default_for_no_accept() {
+        let offers = VmValue::List(Rc::new(vec![
+            VmValue::String(Rc::from("text/plain")),
+            VmValue::String(Rc::from("application/json")),
+        ]));
+        let chosen = http_choose_impl(&[VmValue::Nil, offers], &mut String::new()).unwrap();
+        assert_eq!(chosen.display(), "text/plain");
+    }
+
+    #[test]
+    fn http_choose_overrides_default_with_explicit() {
+        let offers = VmValue::List(Rc::new(vec![
+            VmValue::String(Rc::from("text/plain")),
+            VmValue::String(Rc::from("application/json")),
+        ]));
+        let chosen = http_choose_impl(
+            &[
+                VmValue::Nil,
+                offers,
+                VmValue::String(Rc::from("application/json")),
+            ],
+            &mut String::new(),
+        )
+        .unwrap();
+        assert_eq!(chosen.display(), "application/json");
+    }
+
+    #[test]
+    fn http_choose_wildcard_accept_yields_default() {
+        let offers = VmValue::List(Rc::new(vec![VmValue::String(Rc::from("application/json"))]));
+        let chosen = http_choose_impl(
+            &[VmValue::String(Rc::from("*/*")), offers],
+            &mut String::new(),
+        )
+        .unwrap();
+        assert_eq!(chosen.display(), "application/json");
+    }
+
+    #[test]
+    fn http_not_modified_envelope_carries_etag() {
+        let etag = VmValue::String(Rc::from("\"abc\""));
+        let response = http_not_modified_impl(&[etag, VmValue::Nil], &mut String::new()).unwrap();
+        let map = dict(&response);
+        assert!(matches!(map.get("status"), Some(VmValue::Int(304))));
+        let headers = map
+            .get("headers")
+            .and_then(VmValue::as_dict)
+            .expect("headers");
+        assert_eq!(
+            headers.get("ETag").map(|v| v.display()).as_deref(),
+            Some("\"abc\"")
+        );
+    }
+
+    #[test]
+    fn http_upgrade_ws_envelope_negotiates_subprotocol() {
+        let req = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "headers".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "Sec-WebSocket-Protocol".to_string(),
+                VmValue::String(Rc::from("v0.harn, v1.harn")),
+            )]))),
+        )])));
+        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "subprotocols".to_string(),
+            VmValue::List(Rc::new(vec![
+                VmValue::String(Rc::from("v1.harn")),
+                VmValue::String(Rc::from("v2.harn")),
+            ])),
+        )])));
+        let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
+        let map = dict(&response);
+        assert!(matches!(map.get("status"), Some(VmValue::Int(101))));
+        let upgrade = map
+            .get("ws_upgrade")
+            .and_then(VmValue::as_dict)
+            .expect("ws_upgrade");
+        assert_eq!(
+            upgrade.get("subprotocol").map(|v| v.display()).as_deref(),
+            Some("v1.harn")
+        );
+        let headers = map
+            .get("headers")
+            .and_then(VmValue::as_dict)
+            .expect("headers");
+        assert_eq!(
+            headers.get("Upgrade").map(|v| v.display()).as_deref(),
+            Some("websocket")
+        );
+        assert_eq!(
+            headers
+                .get("Sec-WebSocket-Protocol")
+                .map(|v| v.display())
+                .as_deref(),
+            Some("v1.harn")
+        );
+    }
+
+    #[test]
+    fn http_upgrade_ws_picks_client_preferred_when_both_overlap() {
+        // Regression for the divergence between
+        // `http_upgrade_ws_impl`'s envelope-side negotiation and
+        // `harn_serve::ws::negotiate_subprotocol`'s wire-side
+        // negotiation. With client "v2.harn, v1.harn" and server
+        // ["v1.harn", "v2.harn"] the two implementations used to
+        // disagree (server-order picked v1; client-order picks v2).
+        // The envelope MUST match what the upgrade handshake echoes
+        // back, so we honour client preference everywhere.
+        let req = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "headers".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "Sec-WebSocket-Protocol".to_string(),
+                VmValue::String(Rc::from("v2.harn, v1.harn")),
+            )]))),
+        )])));
+        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "subprotocols".to_string(),
+            VmValue::List(Rc::new(vec![
+                VmValue::String(Rc::from("v1.harn")),
+                VmValue::String(Rc::from("v2.harn")),
+            ])),
+        )])));
+        let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
+        let upgrade = dict(&response)
+            .get("ws_upgrade")
+            .and_then(VmValue::as_dict)
+            .expect("ws_upgrade");
+        assert_eq!(
+            upgrade.get("subprotocol").map(|v| v.display()).as_deref(),
+            Some("v2.harn")
+        );
+    }
+
+    #[test]
+    fn parse_envelope_round_trips_ws_upgrade_marker() {
+        let req = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "headers".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "Sec-WebSocket-Protocol".to_string(),
+                VmValue::String(Rc::from("v1.harn")),
+            )]))),
+        )])));
+        let options = VmValue::Dict(Rc::new(BTreeMap::from([
+            (
+                "subprotocols".to_string(),
+                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("v1.harn"))])),
+            ),
+            ("idle_ping_ms".to_string(), VmValue::Int(15_000)),
+        ])));
+        let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
+        let json = vm_value_to_json(&response);
+        let envelope = parse_envelope(&json).expect("envelope parses");
+        let ws = envelope.ws_upgrade.expect("ws_upgrade present");
+        assert_eq!(ws.subprotocol.as_deref(), Some("v1.harn"));
+        assert_eq!(ws.offered, vec!["v1.harn"]);
+        assert_eq!(ws.idle_ping_ms, Some(15_000));
+        assert_eq!(envelope.status, 101);
+    }
+
+    #[test]
+    fn http_upgrade_ws_falls_through_when_no_subprotocols_offered() {
+        let req = VmValue::Dict(Rc::new(BTreeMap::new()));
+        let response = http_upgrade_ws_impl(&[req], &mut String::new()).unwrap();
+        let map = dict(&response);
+        let upgrade = map
+            .get("ws_upgrade")
+            .and_then(VmValue::as_dict)
+            .expect("ws_upgrade");
+        assert!(matches!(upgrade.get("subprotocol"), Some(VmValue::Nil)));
     }
 }

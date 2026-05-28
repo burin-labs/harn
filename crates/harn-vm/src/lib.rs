@@ -241,8 +241,8 @@ pub use stdlib::hitl::{
 };
 pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
 pub use stdlib::http_response::{
-    parse_envelope as parse_http_envelope, HttpEnvelope, HttpHeaderValue, HTTP_RESPONSE_TAG_KEY,
-    HTTP_RESPONSE_TAG_VERSION,
+    parse_envelope as parse_http_envelope, HttpEnvelope, HttpHeaderValue, WsUpgradeSpec,
+    HTTP_RESPONSE_TAG_KEY, HTTP_RESPONSE_TAG_VERSION,
 };
 pub use stdlib::io::{set_stdout_passthrough, take_stderr_buffer};
 pub use stdlib::long_running::cancel_handle as cancel_long_running_handle;
