@@ -35,11 +35,17 @@
 //! 3. Rejected dispatches surface as
 //!    [`crate::DispatchError::RateLimited`] → HTTP 429 with `Retry-After`
 //!    via [`crate::http_codec`].
-//! 4. Budget caps install on the dispatch's thread-local (the LLM
-//!    cost budget reuses `harn-vm`'s existing
-//!    [`harn_vm::install_llm_cost_budget`]; mid-call exhaustion raises a
-//!    typed runtime error which the codec maps to 429 with
-//!    `code = "budget_exceeded"`).
+//! 4. Budget caps install on the dispatch's thread-local via
+//!    `harn-vm` guards ([`harn_vm::install_llm_cost_budget`],
+//!    [`harn_vm::install_llm_token_budget`],
+//!    [`harn_vm::install_mcp_call_budget`],
+//!    [`harn_vm::install_pg_query_budget`]). Mid-call exhaustion raises a
+//!    `BudgetExceeded`-categorised runtime error which the codec maps to
+//!    429 with `code = "budget_exceeded"`. The `details.limit` field
+//!    names the dimension that fired using the same identifier as the
+//!    `@budget(...)` argument — one of `llm_cost_usd`, `llm_tokens`,
+//!    `mcp_calls`, or `pg_queries` — so clients can attribute the
+//!    rejection without parsing the message.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

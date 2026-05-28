@@ -382,6 +382,89 @@ async fn budget_exhaustion_renders_429_with_budget_exceeded_code() {
     assert_eq!(body["details"]["category"], "llm_cost_usd");
 }
 
+#[tokio::test]
+async fn pg_query_budget_rejects_third_query_as_429_via_dispatch() {
+    // End-to-end through `DispatchCore`: a handler declaring
+    // `@budget(pg_queries: 2)` runs three queries against a mock pool.
+    // The third is rejected at the `harness.pg.query` entry point with a
+    // `BudgetExceeded` error the codec renders as HTTP 429 carrying
+    // `details.category = "pg_queries"`. Uses a mock pool so the test
+    // needs no live Postgres and stays deterministic.
+    let dir = TempDir::new().expect("tempdir");
+    let path = write_script(
+        &dir,
+        r#"
+@budget(pg_queries: 2)
+pub fn run_queries() -> int {
+  let pool = pg_mock_pool([{sql: "SELECT 1", rows: []}])
+  pg_query(pool, "SELECT 1")
+  pg_query(pool, "SELECT 1")
+  pg_query(pool, "SELECT 1")
+  return 3
+}
+"#,
+    );
+
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&path)).expect("dispatch core");
+
+    let err = core
+        .dispatch(synth_request("run_queries"))
+        .await
+        .expect_err("third query must exceed pg_queries: 2");
+    let DispatchError::BudgetExceeded { category, .. } = &err else {
+        panic!("expected BudgetExceeded, got {err:?}");
+    };
+    assert_eq!(category, "pg_queries");
+
+    let request_id = fresh_request_id();
+    let response = axum_response_from_dispatch_error(err, &request_id);
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()),
+        Some("60"),
+    );
+    let bytes = axum::body::to_bytes(response.into_body(), 4_096)
+        .await
+        .expect("body bytes");
+    let body: Value = serde_json::from_slice(&bytes).expect("json body");
+    assert_eq!(body["code"], "budget_exceeded");
+    assert_eq!(body["details"]["category"], "pg_queries");
+}
+
+#[tokio::test]
+async fn mcp_call_budget_renders_429_with_mcp_calls_category() {
+    // The mcp-call charge site lives in `harn-vm`'s `mcp_host::call`
+    // (exercised directly in the harn-vm suite); here we lock in the
+    // harn-serve half of the contract — a `mcp_calls` budget exhaustion
+    // maps to HTTP 429 with `details.category = "mcp_calls"` through the
+    // shared codec every adapter uses.
+    let err = DispatchError::BudgetExceeded {
+        category: "mcp_calls".to_string(),
+        message: "mcp_calls budget exceeded: this dispatch attempted 3 of 2 permitted MCP calls"
+            .to_string(),
+    };
+    let request_id = fresh_request_id();
+    let response = axum_response_from_dispatch_error(err, &request_id);
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()),
+        Some("60"),
+    );
+    let bytes = axum::body::to_bytes(response.into_body(), 4_096)
+        .await
+        .expect("body bytes");
+    let body: Value = serde_json::from_slice(&bytes).expect("json body");
+    assert_eq!(body["code"], "budget_exceeded");
+    assert_eq!(body["details"]["category"], "mcp_calls");
+}
+
 /// Suppress an `AuthPolicy` warning that would otherwise complain when
 /// these tests run in a workspace that lints unused crate items.
 #[allow(dead_code)]

@@ -68,10 +68,12 @@ fn classify_vm_error(error: harn_vm::VmError) -> DispatchError {
 }
 
 /// Best-effort attempt to recover the specific budget dimension that
-/// fired (e.g. `llm_cost_usd`) from a `VmError`. The structured form
-/// (`VmError::Thrown(Dict)`) carries it as the `limit` field; for the
-/// categorised mid-call variant we fall back to inferring from the
-/// error message.
+/// fired (one of `llm_cost_usd`, `llm_tokens`, `mcp_calls`,
+/// `pg_queries`) from a `VmError` so per-class rejection telemetry stays
+/// accurate. The structured form (`VmError::Thrown(Dict)` — the
+/// preflight LLM check and the mcp/pg call-count guards) carries it as
+/// the `limit` field. The LLM cost/token guards raise the categorised
+/// mid-call variant instead, where we disambiguate on the message.
 fn budget_category_from_error(error: &harn_vm::VmError) -> Option<String> {
     match error {
         harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(d)) => d
@@ -79,20 +81,25 @@ fn budget_category_from_error(error: &harn_vm::VmError) -> Option<String> {
             .map(|value| value.display())
             .filter(|s| !s.is_empty()),
         harn_vm::VmError::CategorizedError { message, .. } if message.contains("LLM") => {
-            Some("llm_cost_usd".to_string())
+            if message.contains("token") {
+                Some("llm_tokens".to_string())
+            } else {
+                Some("llm_cost_usd".to_string())
+            }
         }
         _ => None,
     }
 }
 
 /// Install per-dispatch resource ceilings from the route's
-/// `@budget(...)` declaration. The LLM-cost and LLM-token caps route
-/// through `harn-vm`'s pre-existing per-thread counters; `pg_queries`
-/// and `mcp_calls` are parsed and reserved on the [`BudgetSpec`] but
-/// enforcement waits on their respective primitive integrations
-/// (Postgres hostlib A.3, the MCP host call-count meter) — both
-/// tracked as follow-ups so a runaway tool loop can be capped once
-/// the call sites exist.
+/// `@budget(...)` declaration. Every cap routes through a `harn-vm`
+/// per-thread counter installed for the lifetime of the returned guard:
+/// `llm_cost_usd` / `llm_tokens` meter LLM spend at the provider call
+/// site, while `mcp_calls` / `pg_queries` meter outbound tool-call and
+/// query counts at the MCP host and Postgres hostlib entry points. Each
+/// fires a `BudgetExceeded`-categorised error (mapped to HTTP 429 by
+/// [`classify_vm_error`]) the moment its ceiling is crossed, so a
+/// runaway `.harn` tool loop is capped at the dispatcher boundary.
 fn install_route_budget(spec: &BudgetSpec) -> Option<RouteBudgetGuard> {
     if spec.is_empty() {
         return None;
@@ -100,6 +107,8 @@ fn install_route_budget(spec: &BudgetSpec) -> Option<RouteBudgetGuard> {
     Some(RouteBudgetGuard {
         _llm_cost: spec.llm_cost_usd.map(harn_vm::install_llm_cost_budget),
         _llm_tokens: spec.llm_tokens.map(harn_vm::install_llm_token_budget),
+        _mcp_calls: spec.mcp_calls.map(harn_vm::install_mcp_call_budget),
+        _pg_queries: spec.pg_queries.map(harn_vm::install_pg_query_budget),
     })
 }
 
@@ -110,6 +119,8 @@ fn install_route_budget(spec: &BudgetSpec) -> Option<RouteBudgetGuard> {
 pub(crate) struct RouteBudgetGuard {
     _llm_cost: Option<harn_vm::LlmBudgetGuard>,
     _llm_tokens: Option<harn_vm::LlmTokenBudgetGuard>,
+    _mcp_calls: Option<harn_vm::McpCallBudgetGuard>,
+    _pg_queries: Option<harn_vm::PgQueryBudgetGuard>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1280,5 +1291,53 @@ pub fn whoami(harness: Harness) -> string {
             .expect("dispatch");
 
         assert_eq!(response.value, serde_json::json!("override-tenant"));
+    }
+
+    #[test]
+    fn budget_category_recovers_every_dimension() {
+        // Structured guards (mcp/pg call counts, LLM preflight) carry the
+        // dimension on the `limit` field.
+        let structured = |limit: &str| {
+            harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(std::rc::Rc::new(
+                std::collections::BTreeMap::from([
+                    (
+                        "category".to_string(),
+                        harn_vm::VmValue::String(std::rc::Rc::from("budget_exceeded")),
+                    ),
+                    (
+                        "limit".to_string(),
+                        harn_vm::VmValue::String(std::rc::Rc::from(limit)),
+                    ),
+                ]),
+            )))
+        };
+        assert_eq!(
+            budget_category_from_error(&structured("mcp_calls")).as_deref(),
+            Some("mcp_calls"),
+        );
+        assert_eq!(
+            budget_category_from_error(&structured("pg_queries")).as_deref(),
+            Some("pg_queries"),
+        );
+
+        // LLM cost/token mid-call exhaustion raises the categorised
+        // variant; the message disambiguates cost from tokens so the
+        // per-class telemetry is accurate.
+        let categorized = |message: &str| harn_vm::VmError::CategorizedError {
+            message: message.to_string(),
+            category: harn_vm::ErrorCategory::BudgetExceeded,
+        };
+        assert_eq!(
+            budget_category_from_error(&categorized("LLM budget exceeded: spent $0.01 of $0.00"))
+                .as_deref(),
+            Some("llm_cost_usd"),
+        );
+        assert_eq!(
+            budget_category_from_error(&categorized(
+                "LLM token budget exceeded: spent 11 of 10 tokens"
+            ))
+            .as_deref(),
+            Some("llm_tokens"),
+        );
     }
 }

@@ -15,6 +15,7 @@ pub(crate) mod aws_sigv4;
 pub mod bridge;
 mod builtin_id;
 pub mod bytecode_cache;
+pub mod call_budget;
 pub mod channel_guardrails;
 pub mod channels;
 pub mod checkpoint;
@@ -120,6 +121,10 @@ pub mod workspace_anchor;
 pub mod workspace_path;
 
 pub use builtin_id::BuiltinId;
+pub use call_budget::{
+    charge_mcp_call, charge_pg_query, install_mcp_call_budget, install_pg_query_budget,
+    McpCallBudgetGuard, PgQueryBudgetGuard,
+};
 pub use checkpoint::register_checkpoint_builtins;
 pub use chunk::*;
 pub use compiler::*;
@@ -427,5 +432,6 @@ pub fn reset_thread_local_state() {
     agent_sessions::reset_session_store();
     mcp_registry::reset();
     mcp_host::reset_for_tests();
+    call_budget::reset_call_budget_state();
     clock_mock::leak_audit::reset();
 }
