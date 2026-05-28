@@ -11,7 +11,10 @@ use uuid::Uuid;
 
 use super::event::{now_ms_and_rfc3339, AppendEvent, EventId, SessionEventKind, StoredEvent};
 use super::memory_helpers::{meta_for_create, validate_open};
-use super::signing::{chain_root_hash, compute_record_hash, verify_event};
+use super::signing::{
+    chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
+    verify_event,
+};
 use super::store::{
     CreateSession, EventPage, ForkResult, ListFilter, ReadRange, SessionId, SessionMeta,
     SessionStatus, SessionStore, Snapshot, SnapshotId, StoreError, StoreHooks, StoreResult,
@@ -57,10 +60,6 @@ impl MemorySessionStore {
             hooks: Arc::new(hooks),
         }
     }
-
-    pub fn hooks(&self) -> &StoreHooks {
-        &self.hooks
-    }
 }
 
 impl Default for MemorySessionStore {
@@ -84,6 +83,10 @@ fn apply_redaction(hooks: &StoreHooks, event: &mut AppendEvent) {
 
 #[async_trait]
 impl SessionStore for MemorySessionStore {
+    fn hooks(&self) -> &StoreHooks {
+        &self.hooks
+    }
+
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
         let meta = meta_for_create(request);
         let mut guard = lock(&self.inner);
@@ -159,13 +162,18 @@ impl SessionStore for MemorySessionStore {
         if let Some(signer) = self.hooks.event_signer.as_ref() {
             stored.signed_by = Some(signer.sign_event(&stored));
         }
+        let prev_root = record
+            .meta
+            .chain_root_hash
+            .clone()
+            .unwrap_or_else(chain_root_init);
         record.events.push(stored.clone());
         record.meta.event_count = record.events.len();
         record.meta.last_event_id = Some(event_id);
         let (updated_ms, updated_text) = (ts_ms, stored.ts.clone());
         record.meta.updated_at_ms = updated_ms;
         record.meta.updated_at = updated_text;
-        record.meta.chain_root_hash = Some(chain_root_hash(&record.events));
+        record.meta.chain_root_hash = Some(chain_root_fold(&prev_root, &stored.record_hash));
         Ok(stored)
     }
 
@@ -239,12 +247,13 @@ impl SessionStore for MemorySessionStore {
         child_meta.closed_at = None;
         child_meta.closed_at_ms = None;
         child_meta.soft_deleted_at_ms = None;
-        let copied_events: Vec<StoredEvent> = parent
+        let parent_events: Vec<StoredEvent> = parent
             .events
             .iter()
             .filter(|event| event.event_id <= at_event_id)
             .cloned()
             .collect();
+        let copied_events = re_anchor_events(&parent_events, &new_id);
         let copied_event_count = copied_events.len();
         child_meta.event_count = copied_event_count;
         child_meta.last_event_id = copied_events.last().map(|tail| tail.event_id);

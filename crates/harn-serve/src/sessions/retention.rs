@@ -2,15 +2,16 @@
 //!
 //! The policy is declarative — a sweep job calls
 //! [`crate::sessions::store::SessionStore::sweep_retention`] periodically and
-//! the predicates here decide which sessions to soft- or hard-delete.
-//! Archive integration (A.10 audit-sink pipeline) is a separate hook
-//! that runs alongside `hard_delete`; see [`ArchiveSink`].
+//! the predicates here decide which sessions to archive, soft-delete,
+//! or hard-delete. The sweep wires an optional [`ArchiveSink`] from
+//! `StoreHooks` into the lifecycle so closed sessions land in
+//! durable storage before they leave the store.
 
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::event::StoredEvent;
+use super::event::{EventId, StoredEvent};
 use super::store::{SessionMeta, SessionStatus};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +78,36 @@ impl RetentionPolicy {
         let elapsed_ms = now_ms.saturating_sub(soft_deleted_at);
         elapsed_ms as u64 >= self.grace_seconds.saturating_mul(1_000)
     }
+
+    /// Returns true when a Closed session has crossed
+    /// `min_age_before_archive_seconds`. The sweep emits the session
+    /// to the [`ArchiveSink`] (if configured) before soft-deleting,
+    /// so durable storage receives the events before they leave the
+    /// primary store.
+    pub fn should_archive(&self, session: &SessionMeta, now_ms: i64) -> bool {
+        if !matches!(session.status, SessionStatus::Closed) {
+            return false;
+        }
+        let Some(min_age) = self.min_age_before_archive_seconds else {
+            return false;
+        };
+        let age_ms = now_ms.saturating_sub(session.created_at_ms);
+        age_ms as u64 >= min_age.saturating_mul(1_000)
+    }
+}
+
+/// Snapshot persisted by the sweep when a session is finally
+/// hard-deleted. The audit pipeline keeps tombstones so a verifier
+/// can prove a session existed and was destroyed at a known time,
+/// even after every event row is gone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tombstone {
+    pub session_id: String,
+    pub tenant_id: Option<String>,
+    pub deleted_at_ms: i64,
+    pub deleted_at: String,
+    pub final_chain_root_hash: Option<String>,
+    pub final_event_id: Option<EventId>,
 }
 
 /// Sink that receives sessions on archival. Production wires this to
@@ -84,11 +115,24 @@ impl RetentionPolicy {
 /// every other transcript persistence path uses).
 #[async_trait::async_trait]
 pub trait ArchiveSink: Send + Sync {
+    /// Persist a session and its event chain to durable storage.
+    /// Called by [`crate::sessions::store::SessionStore::sweep_retention`]
+    /// when [`RetentionPolicy::should_archive`] is true, before the
+    /// session transitions to `SoftDeleted`.
     async fn archive(
         &self,
         session: &SessionMeta,
         events: &[StoredEvent],
     ) -> Result<(), super::store::StoreError>;
+
+    /// Persist a tombstone for a session about to be hard-deleted.
+    /// The default is a no-op for sinks that only care about archived
+    /// events; the cloud audit sink overrides to keep a permanent
+    /// record of every deletion.
+    async fn tombstone(&self, tombstone: &Tombstone) -> Result<(), super::store::StoreError> {
+        let _ = tombstone;
+        Ok(())
+    }
 }
 
 pub type SharedArchiveSink = Arc<dyn ArchiveSink>;
@@ -155,5 +199,21 @@ mod tests {
         let session = meta(SessionStatus::Closed, 0, None);
         assert!(!policy.should_soft_delete(&session, 4_000));
         assert!(policy.should_soft_delete(&session, 5_000));
+        assert!(!policy.should_archive(&session, 4_000));
+        assert!(policy.should_archive(&session, 5_000));
+    }
+
+    #[test]
+    fn should_archive_only_applies_to_closed_sessions() {
+        let policy = RetentionPolicy {
+            min_age_before_archive_seconds: Some(1),
+            ..RetentionPolicy::default()
+        };
+        let open = meta(SessionStatus::Open, 0, None);
+        let closed = meta(SessionStatus::Closed, 0, None);
+        let soft = meta(SessionStatus::SoftDeleted, 0, Some(0));
+        assert!(!policy.should_archive(&open, 60_000));
+        assert!(policy.should_archive(&closed, 60_000));
+        assert!(!policy.should_archive(&soft, 60_000));
     }
 }

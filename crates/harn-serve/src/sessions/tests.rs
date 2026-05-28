@@ -531,3 +531,269 @@ async fn signed_event_roundtrips_via_verify() {
     let verifying_key = signer.verifying_key();
     verify_event(&event, &verifying_key).expect("verify ok");
 }
+
+#[tokio::test]
+async fn list_tag_filter_matches_sessions_with_tag() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let primary = store
+            .create(CreateSession {
+                tags: vec!["alpha".into(), "primary".into()],
+                ..Default::default()
+            })
+            .await
+            .expect("create primary");
+        let secondary = store
+            .create(CreateSession {
+                tags: vec!["beta".into()],
+                ..Default::default()
+            })
+            .await
+            .expect("create secondary");
+        let _ = store
+            .create(CreateSession {
+                tags: vec![],
+                ..Default::default()
+            })
+            .await
+            .expect("create untagged");
+        let alpha = store
+            .list(ListFilter {
+                tag: Some("alpha".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("list alpha");
+        assert_eq!(alpha.len(), 1);
+        assert_eq!(alpha[0].id, primary.id);
+        let beta = store
+            .list(ListFilter {
+                tag: Some("beta".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("list beta");
+        assert_eq!(beta.len(), 1);
+        assert_eq!(beta[0].id, secondary.id);
+        let none = store
+            .list(ListFilter {
+                tag: Some("gamma".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("list gamma");
+        assert!(none.is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn list_cursor_paginates_in_creation_order() {
+    // Zero-pad ids so lexical ordering matches insertion order even
+    // when every session lands in the same wall-clock millisecond.
+    // Both backends order by `(created_at_ms, id)`, so same-ms sessions
+    // fall through to id ASC — the cursor walk is deterministic
+    // without any sleeps.
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            let meta = store
+                .create(CreateSession {
+                    id: Some(format!("session-{i:02}")),
+                    ..Default::default()
+                })
+                .await
+                .expect("create");
+            ids.push(meta.id);
+        }
+        let first_page = store
+            .list(ListFilter {
+                limit: Some(2),
+                ..Default::default()
+            })
+            .await
+            .expect("list page 1");
+        assert_eq!(first_page.len(), 2);
+        assert_eq!(first_page[0].id, ids[0]);
+        assert_eq!(first_page[1].id, ids[1]);
+        let cursor = first_page.last().unwrap().id.clone();
+        let second_page = store
+            .list(ListFilter {
+                limit: Some(2),
+                cursor: Some(cursor),
+                ..Default::default()
+            })
+            .await
+            .expect("list page 2");
+        assert_eq!(second_page.len(), 2);
+        assert_eq!(second_page[0].id, ids[2]);
+        assert_eq!(second_page[1].id, ids[3]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sweep_retention_archives_closed_sessions_before_soft_delete() {
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingSink {
+        archived: Mutex<Vec<(String, usize)>>,
+        tombstones: Mutex<Vec<Tombstone>>,
+    }
+    #[async_trait::async_trait]
+    impl ArchiveSink for RecordingSink {
+        async fn archive(&self, session: &SessionMeta, events: &[StoredEvent]) -> StoreResult<()> {
+            self.archived
+                .lock()
+                .unwrap()
+                .push((session.id.clone(), events.len()));
+            Ok(())
+        }
+        async fn tombstone(&self, tombstone: &Tombstone) -> StoreResult<()> {
+            self.tombstones.lock().unwrap().push(tombstone.clone());
+            Ok(())
+        }
+    }
+
+    let sink = Arc::new(RecordingSink::default());
+    let hooks = StoreHooks {
+        archive_sink: Some(sink.clone() as SharedArchiveSink),
+        ..Default::default()
+    };
+    let store: Arc<dyn SessionStore> = Arc::new(MemorySessionStore::with_hooks(hooks));
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create");
+    store
+        .append(
+            &meta.id,
+            AppendEvent::new(SessionEventKind::Message, json!({"text": "hi"})),
+        )
+        .await
+        .expect("append");
+    store.close(&meta.id).await.expect("close");
+
+    let now_ms = super::event::now_ms_and_rfc3339().0 + 60_000;
+    let policy = RetentionPolicy {
+        min_age_before_archive_seconds: Some(1),
+        grace_seconds: 1,
+        ..RetentionPolicy::default()
+    };
+    let report = store
+        .sweep_retention(&policy, now_ms)
+        .await
+        .expect("sweep archive");
+    assert_eq!(report.archived, 1);
+    assert_eq!(report.soft_deleted, 1);
+    assert_eq!(report.hard_deleted, 0);
+    let archived = sink.archived.lock().unwrap().clone();
+    assert_eq!(archived.len(), 1);
+    assert_eq!(archived[0].0, meta.id);
+    // Message + Receipt event from close = 2 events.
+    assert_eq!(archived[0].1, 2);
+
+    // Second sweep, past the grace window, hard-deletes and emits tombstone.
+    let later_ms = now_ms + 60_000;
+    let report = store
+        .sweep_retention(&policy, later_ms)
+        .await
+        .expect("sweep tombstone");
+    assert_eq!(report.hard_deleted, 1);
+    assert_eq!(report.tombstoned, 1);
+    let tombstones = sink.tombstones.lock().unwrap().clone();
+    assert_eq!(tombstones.len(), 1);
+    assert_eq!(tombstones[0].session_id, meta.id);
+    assert!(tombstones[0].final_chain_root_hash.is_some());
+}
+
+#[tokio::test]
+async fn fork_produces_self_contained_verifiable_chain() {
+    // Regression: prior sqlite fork rewrote `session_id` on copied
+    // events but kept the old `record_hash`, so `verify` on the child
+    // failed with HashMismatch (the stored hash no longer matched
+    // `compute_record_hash` against the new canonical bytes). Both
+    // backends now re-anchor copied events on the child's id so the
+    // child's chain stands alone and verify passes cleanly.
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create parent");
+        for i in 0..4 {
+            store
+                .append(
+                    &meta.id,
+                    AppendEvent::new(SessionEventKind::Message, json!({"i": i})),
+                )
+                .await
+                .expect("append");
+        }
+        let _ = store
+            .fork(&meta.id, 3, Some("forked-child".into()))
+            .await
+            .expect("fork");
+
+        let report = store.verify("forked-child").await.expect("verify child");
+        assert_eq!(report.event_count, 3);
+        assert!(
+            report.failures.is_empty(),
+            "child chain failed verification: {:?}",
+            report.failures
+        );
+
+        // The child's stored chain root must equal a from-scratch
+        // recompute over its own events — same invariant the append
+        // path enforces for non-forked sessions.
+        let described = store
+            .describe("forked-child")
+            .await
+            .expect("describe child");
+        assert_eq!(
+            described.chain_root_hash.as_deref(),
+            Some(report.chain_root_hash.as_str())
+        );
+
+        // Each copied event must report the child's session_id, not
+        // the parent's — otherwise downstream consumers (TUI session
+        // continuation, cloud verifier) would see events that look
+        // like they belong to a different session.
+        let page = store
+            .read("forked-child", ReadRange::default())
+            .await
+            .expect("read child");
+        for event in &page.events {
+            assert_eq!(event.session_id, "forked-child");
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn append_chain_root_matches_full_recompute() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        for i in 0..10 {
+            store
+                .append(
+                    &meta.id,
+                    AppendEvent::new(SessionEventKind::Message, json!({"i": i})),
+                )
+                .await
+                .expect("append");
+        }
+        let described = store.describe(&meta.id).await.expect("describe");
+        // The verify path replays the chain from genesis; the stored
+        // incremental root must equal it byte-for-byte.
+        let report = store.verify(&meta.id).await.expect("verify");
+        assert_eq!(
+            described.chain_root_hash.as_deref(),
+            Some(report.chain_root_hash.as_str())
+        );
+        assert!(report.failures.is_empty());
+    })
+    .await;
+}
