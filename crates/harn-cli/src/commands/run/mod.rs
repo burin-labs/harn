@@ -344,6 +344,16 @@ fn parse_source_for_run(
     source: &str,
     stderr: &mut String,
 ) -> Option<Vec<harn_parser::SNode>> {
+    // Mirror the lazy install on `parse_source_file` (lib.rs) so callers
+    // that go through `parse_source_for_run` directly — `execute_run`,
+    // `execute_run_with_sandbox_options`, the package_scaffold + playground
+    // tests — see the macro-emitted builtin slice before any typecheck
+    // pass touches a builtin name. Idempotent.
+    static INSTALL_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INSTALL_ONCE.get_or_init(|| {
+        harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+    });
+
     let mut lexer = harn_lexer::Lexer::new(source);
     let tokens = match lexer.tokenize() {
         Ok(tokens) => tokens,

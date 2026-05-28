@@ -2,8 +2,9 @@
 //!
 //! Each group is a `&'static [BuiltinSignature]` of entries describing one
 //! conceptual area (core stdlib, agents, flow predicates, integrations,
-//! etc.). They are concatenated and alphabetically sorted by
-//! [`super::all_signatures`] so binary-search lookups stay O(log N).
+//! etc.). [`super::lookup`] scans the installed slice first, then walks
+//! these groups linearly — O(N+M) per call but well below the typecheck
+//! hot path.
 
 mod agents;
 mod integrations;
