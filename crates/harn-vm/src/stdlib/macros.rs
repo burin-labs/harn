@@ -53,3 +53,31 @@ pub enum VmBuiltinHandler {
 
 /// `BuiltinDef` specialized to the VM's handler type.
 pub type VmBuiltinDef = BuiltinDef<VmBuiltinHandler>;
+
+/// Eager-registration helper: install every entry (name + aliases) on `vm`
+/// using the macro-emitted handler. The replacement for the legacy
+/// `register_builtin_group(vm, BuiltinGroup::new().sync(...))` shape —
+/// post-migration call sites just iterate a `&[&VmBuiltinDef]` slice and
+/// call this once per entry.
+pub fn register_builtin_defs(vm: &mut crate::vm::Vm, defs: &'static [&'static VmBuiltinDef]) {
+    for def in defs {
+        vm.register_builtin_def(def);
+    }
+}
+
+/// Deferred-registration helper: register names + aliases as deferred
+/// builtins on `vm`. The first time any of them dispatches, `registrar`
+/// runs (typically installs the LLM stack), which re-registers the real
+/// impls. Replaces `register_deferred_builtin_group` from the legacy DSL.
+pub fn register_deferred_builtin_defs(
+    vm: &mut crate::vm::Vm,
+    defs: &[&'static VmBuiltinDef],
+    registrar: fn(&mut crate::vm::Vm),
+) {
+    for def in defs {
+        vm.register_deferred_builtin(def.sig.name, registrar);
+        for alias in def.aliases {
+            vm.register_deferred_builtin(alias, registrar);
+        }
+    }
+}

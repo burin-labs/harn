@@ -1,30 +1,17 @@
 use std::rc::Rc;
 
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::registration::SyncBuiltin;
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::VmBuiltinArity;
 
 use super::{helpers, trace};
 
-pub(super) const LLM_TRACE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("agent_trace", agent_trace_builtin)
-        .signature("agent_trace()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return captured agent trace events for the current process."),
-    SyncBuiltin::new("agent_trace_summary", agent_trace_summary_builtin)
-        .signature("agent_trace_summary()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return a summarized view of captured agent trace events."),
-    SyncBuiltin::new(
-        "__host_typed_checkpoint_trace",
-        host_typed_checkpoint_trace_builtin,
-    )
-    .signature("__host_typed_checkpoint_trace(checkpoint)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Record a typed-output checkpoint event in the current agent trace."),
-];
-
+/// Return captured agent trace events for the current process.
+#[harn_builtin(
+    sig = "agent_trace() -> list",
+    category = "agent.trace",
+    runtime_only = true
+)]
 fn agent_trace_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let events = trace::peek_agent_trace();
     let list: Vec<VmValue> = events
@@ -35,11 +22,23 @@ fn agent_trace_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     Ok(VmValue::List(Rc::new(list)))
 }
 
+/// Return a summarized view of captured agent trace events.
+#[harn_builtin(
+    sig = "agent_trace_summary() -> dict",
+    category = "agent.trace",
+    runtime_only = true
+)]
 fn agent_trace_summary_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let summary = trace::agent_trace_summary();
     Ok(json_to_vm_value(&summary))
 }
 
+/// Record a typed-output checkpoint event in the current agent trace.
+#[harn_builtin(
+    sig = "__host_typed_checkpoint_trace(checkpoint: dict) -> nil",
+    category = "agent.trace",
+    runtime_only = true
+)]
 fn host_typed_checkpoint_trace_builtin(
     args: &[VmValue],
     _out: &mut String,

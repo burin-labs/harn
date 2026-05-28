@@ -16,21 +16,18 @@ use crate::orchestration::{
     push_command_policy, push_execution_policy, CapabilityPolicy, NestedExecutionGuard,
     NestedExecutionKind, ToolApprovalPolicy, NESTED_KIND_OPTION_KEY, NESTED_LABEL_OPTION_KEY,
 };
-use crate::stdlib::registration::{
-    register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
+use crate::stdlib::macros::{
+    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
 };
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
+use crate::vm::Vm;
 
 use super::cost::calculate_cost_for_provider;
 use super::permissions;
 use super::tools::build_assistant_response_message;
 
-const HOST_SESSION_INIT: &str = "__host_agent_session_init";
 const HOST_SESSION_FINALIZE: &str = "__host_agent_session_finalize";
-const HOST_SESSION_MESSAGES: &str = "__host_agent_session_messages";
 const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assistant";
-const HOST_SESSION_POP_LAST_ASSISTANT: &str = "__host_agent_session_pop_last_assistant";
 const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool_results";
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
@@ -39,19 +36,13 @@ const HOST_SESSION_PUSH_BRIDGE_INJECTION: &str = "__host_agent_session_push_brid
 const HOST_SESSION_PENDING_INJECTIONS: &str = "__host_agent_session_pending_injections";
 const HOST_SESSION_REVOKE_REMINDER: &str = "__host_agent_session_revoke_reminder";
 const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
-const HOST_SESSION_INJECT_FEEDBACK: &str = "__host_agent_session_inject_feedback";
 const HOST_SESSION_POST_EVENT: &str = "__host_agent_session_post_event";
 const HOST_SESSION_APPLY_REMINDER_POST_TURN: &str = "__host_agent_session_apply_reminder_post_turn";
 const HOST_SESSION_SET_ACTIVE_SKILLS: &str = "__host_agent_session_set_active_skills";
 const HOST_SESSION_ACTIVE_SKILLS: &str = "__host_agent_session_active_skills";
-const HOST_SESSION_RECORD_SKILL_EVENT: &str = "__host_agent_session_record_skill_event";
-const HOST_SESSION_COMPACT: &str = "__host_agent_session_compact_if_needed";
 const HOST_SESSION_REPLACE_MESSAGES: &str = "__host_agent_session_replace_messages";
 const HOST_SESSION_PROJECT_TURN: &str = "__host_agent_session_project_turn";
 const HOST_SESSION_CLAIM_TOOL_FORMAT: &str = "__host_agent_session_claim_tool_format";
-const HOST_SKILL_SCORE: &str = "__host_skill_score";
-const HOST_BUDGET_PRE_CALL: &str = "__host_agent_budget_pre_call_blocked";
-const HOST_AUTONOMY_BUDGET_CHECK: &str = "__host_autonomy_budget_check";
 const HOST_DAEMON_SNAPSHOT: &str = "__host_agent_daemon_snapshot";
 const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
@@ -211,6 +202,13 @@ fn now_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
+/// Initialize a Harn-driven agent session: open transcript, seed user message.
+#[harn_builtin(
+    sig = "__host_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> string",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let message = args.first().map(|v| v.display()).unwrap_or_default();
     let system = match args.get(1) {
@@ -495,6 +493,13 @@ fn agent_init_control_done(
     VmValue::Dict(Rc::new(control))
 }
 
+/// Tear down a Harn-driven agent session and emit the final result dict.
+#[harn_builtin(
+    sig = "__host_agent_session_finalize(session_id: string, status: dict) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args
         .first()
@@ -709,6 +714,12 @@ fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
     None
 }
 
+/// Return the visible message list for an agent session.
+#[harn_builtin(
+    sig = "__host_agent_session_messages(session_id: string) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_messages_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -761,6 +772,12 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
     json_to_vm(&msg)
 }
 
+/// Append the assistant turn from an llm_call result to the session log.
+#[harn_builtin(
+    sig = "__host_agent_session_record_assistant(session_id: string, llm_result: dict) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_record_assistant_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -798,6 +815,14 @@ fn host_agent_session_record_assistant_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Pop the trailing assistant turn from the session transcript. Used by
+/// step_judge replace mode to discard a vetoed turn before regeneration.
+/// Errors if the trailing message is not an assistant turn.
+#[harn_builtin(
+    sig = "__host_agent_session_pop_last_assistant(session_id: string) -> dict",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_pop_last_assistant_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -874,6 +899,12 @@ fn plan_artifact_from_result(result: &VmValue) -> Option<serde_json::Value> {
     ))
 }
 
+/// Append per-tool observation messages from a dispatch result.
+#[harn_builtin(
+    sig = "__host_agent_session_record_tool_results(session_id: string, dispatch: dict) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_record_tool_results_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -969,6 +1000,12 @@ fn host_agent_session_record_tool_results_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Accumulate token + cost usage from an llm_call result, return totals.
+#[harn_builtin(
+    sig = "__host_agent_session_record_usage(session_id: string, llm_result: dict) -> dict",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_record_usage_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1044,6 +1081,12 @@ fn host_agent_session_record_usage_builtin(
     Ok(VmValue::Dict(Rc::new(out)))
 }
 
+/// Drain pending runtime-feedback notes for a session (no-op shim).
+#[harn_builtin(
+    sig = "__host_agent_session_drain_feedback(session_id: string) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_drain_feedback_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1077,6 +1120,12 @@ fn host_agent_session_drain_feedback_builtin(
     Ok(VmValue::List(Rc::new(drained)))
 }
 
+/// Read accumulated token + cost totals for a session.
+#[harn_builtin(
+    sig = "__host_agent_session_totals(session_id: string) -> dict",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_totals_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1091,6 +1140,12 @@ fn host_agent_session_totals_builtin(
     Ok(VmValue::Dict(Rc::new(out)))
 }
 
+/// Append a runtime-feedback note to the session as a synthetic user turn.
+#[harn_builtin(
+    sig = "__host_agent_session_inject_feedback(session_id: string, kind: string, content: string) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_inject_feedback_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1111,6 +1166,13 @@ fn host_agent_session_inject_feedback_builtin(
 /// nudge a session that's already mid-loop without bypassing the
 /// canonical drain-at-turn-boundary path (e.g. "the GitHub PR you
 /// were waiting on just merged").
+/// Post an event into a running session's agent_inbox. Used by triggers,
+/// connectors, and external host integrations to nudge a mid-loop session.
+#[harn_builtin(
+    sig = "__host_agent_session_post_event(session_id: string, kind: string, content: string, source?: string|nil) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_post_event_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1144,6 +1206,12 @@ fn host_agent_session_post_event_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Apply reminder TTL lifecycle after an agent turn.
+#[harn_builtin(
+    sig = "__host_agent_session_apply_reminder_post_turn(session_id: string, turn?: dict|nil) -> dict",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_apply_reminder_post_turn_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1162,6 +1230,12 @@ fn host_agent_session_apply_reminder_post_turn_builtin(
     Ok(crate::stdlib::json_to_vm_value(&report))
 }
 
+/// Replace the session's active skill list.
+#[harn_builtin(
+    sig = "__host_agent_session_set_active_skills(session_id: string, skills: list) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_set_active_skills_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1180,6 +1254,12 @@ fn host_agent_session_set_active_skills_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Return the session's active skill list.
+#[harn_builtin(
+    sig = "__host_agent_session_active_skills(session_id: string) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_active_skills_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1199,6 +1279,12 @@ fn host_agent_session_active_skills_builtin(
     Ok(VmValue::List(Rc::new(list)))
 }
 
+/// Append a skill lifecycle event and notify live agent-event sinks.
+#[harn_builtin(
+    sig = "__host_agent_session_record_skill_event(session_id: string, kind: string, metadata: dict) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_record_skill_event_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1302,6 +1388,12 @@ fn host_agent_session_record_skill_event_builtin(
     Ok(VmValue::Nil)
 }
 
+/// No-op compaction hook; Harn implements compaction via llm_call.
+#[harn_builtin(
+    sig = "__host_agent_session_compact_if_needed(session_id: string, options: dict) -> dict",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_compact_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -1309,6 +1401,12 @@ fn host_agent_session_compact_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Replace the session's transcript message list (used by Harn-driven auto-compact).
+#[harn_builtin(
+    sig = "__host_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_replace_messages_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1342,6 +1440,13 @@ fn host_agent_session_replace_messages_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Score skills against the current task context.
+#[harn_builtin(
+    sig = "__host_skill_score(context: dict, registry: dict, options: dict) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_skill_score(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let context = args.first().cloned().unwrap_or(VmValue::Nil);
     let registry = args.get(1).cloned().unwrap_or(VmValue::Nil);
@@ -1355,6 +1460,12 @@ async fn host_skill_score(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     .await
 }
 
+/// Pre-call budget projection hook (returns false for now).
+#[harn_builtin(
+    sig = "__host_agent_budget_pre_call_blocked(session_id: string, envelope: dict) -> bool",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_budget_pre_call_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -1362,6 +1473,13 @@ fn host_agent_budget_pre_call_builtin(
     Ok(VmValue::Bool(false))
 }
 
+/// Emit an agent event and record transcript-backed event types.
+#[harn_builtin(
+    sig = "__host_agent_emit_event(session_id: string, event_type: string, payload: dict) -> nil",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
@@ -1748,6 +1866,12 @@ fn build_agent_event(
     }
 }
 
+/// Record a native→text tool-call fallback as a transcript event and trace counter.
+#[harn_builtin(
+    sig = "__host_agent_record_native_tool_fallback(session_id: string, payload: dict) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_record_native_tool_fallback_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1801,6 +1925,12 @@ fn host_agent_record_native_tool_fallback_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Record a transcript compaction as a transcript event and trace counter.
+#[harn_builtin(
+    sig = "__host_agent_record_compaction(session_id: string, payload: dict) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_record_compaction_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1893,6 +2023,15 @@ fn host_agent_record_compaction_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Project the session transcript through a policy, append a
+/// transcript.projection event, and return the projected messages
+/// with metadata.
+#[harn_builtin(
+    sig = "__host_agent_session_project_turn(session_id: string, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_session_project_turn(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
@@ -1929,6 +2068,12 @@ async fn host_agent_session_project_turn(args: Vec<VmValue>) -> Result<VmValue, 
     ))
 }
 
+/// Claim the session's tool_format contract; rejects mid-session changes.
+#[harn_builtin(
+    sig = "__host_agent_session_claim_tool_format(session_id: string, tool_format: string) -> dict",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_session_claim_tool_format_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1958,6 +2103,12 @@ fn host_agent_session_claim_tool_format_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Persist a daemon snapshot for a Harn-driven agent session.
+#[harn_builtin(
+    sig = "__host_agent_daemon_snapshot(session_id: string, options: dict) -> dict",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_agent_daemon_snapshot_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -2165,6 +2316,14 @@ async fn daemon_checkpoint_drain(
 /// `role_hint`, `propagate`, `preserve_on_compact`). Returns the
 /// reminder id so callers can correlate with later
 /// `ReminderEmitted` events.
+/// Push a system-reminder onto the session's host bridge queue;
+/// returns the reminder id. Inverse of drain_bridge_injections.
+#[harn_builtin(
+    sig = "__host_agent_session_push_bridge_injection(session_id: string, options: dict) -> string",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_session_push_bridge_injection(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     if session_id.trim().is_empty() {
@@ -2194,6 +2353,13 @@ async fn host_agent_session_push_bridge_injection(args: Vec<VmValue>) -> Result<
     Ok(VmValue::String(Rc::from(reminder_id)))
 }
 
+/// Return a FIFO snapshot of pending bridge user-message and reminder injections.
+#[harn_builtin(
+    sig = "__host_agent_session_pending_injections(session_id: string) -> list",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_session_pending_injections(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     if session_id.trim().is_empty() {
@@ -2210,6 +2376,13 @@ async fn host_agent_session_pending_injections(args: Vec<VmValue>) -> Result<VmV
     Ok(json_to_vm(&bridge.pending_injections_json().await))
 }
 
+/// Revoke a queued bridge reminder before an agent checkpoint drains it.
+#[harn_builtin(
+    sig = "__host_agent_session_revoke_reminder(session_id: string, reminder_id: string) -> bool",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_session_revoke_reminder(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     if session_id.trim().is_empty() {
@@ -2241,6 +2414,13 @@ async fn host_agent_session_revoke_reminder(args: Vec<VmValue>) -> Result<VmValu
     })))
 }
 
+/// Drain queued bridge transcript injections for a delivery checkpoint.
+#[harn_builtin(
+    sig = "__host_agent_session_drain_bridge_injections(session_id: string, checkpoint: dict) -> list",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_session_drain_bridge_injections(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -2270,6 +2450,13 @@ async fn host_agent_session_drain_bridge_injections(
     })))
 }
 
+/// Wait for daemon wake input or a timeout.
+#[harn_builtin(
+    sig = "__host_agent_daemon_wait(session_id: string, timeout_ms: int) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let timeout_ms = args
@@ -2324,6 +2511,13 @@ fn nil_json() -> serde_json::Value {
     serde_json::Value::Null
 }
 
+/// Check per-agent autonomy budget and return an approval-shaped denial.
+#[harn_builtin(
+    sig = "__host_autonomy_budget_check(session_id: string, budget_config: dict) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_autonomy_budget_check(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args
         .first()
@@ -2532,280 +2726,48 @@ fn parse_approval_policy(value: Option<&VmValue>) -> Result<Option<ToolApprovalP
         })
 }
 
-const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
-    SyncBuiltin::new(HOST_SESSION_MESSAGES, host_agent_session_messages_builtin)
-        .signature("__host_agent_session_messages(session_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return the visible message list for an agent session."),
-    SyncBuiltin::new(
-        HOST_SESSION_RECORD_ASSISTANT,
-        host_agent_session_record_assistant_builtin,
-    )
-    .signature("__host_agent_session_record_assistant(session_id, llm_result)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Append the assistant turn from an llm_call result to the session log."),
-    SyncBuiltin::new(
-        HOST_SESSION_POP_LAST_ASSISTANT,
-        host_agent_session_pop_last_assistant_builtin,
-    )
-    .signature("__host_agent_session_pop_last_assistant(session_id)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc(
-        "Pop the trailing assistant turn from the session transcript. Used by \
-         step_judge replace mode to discard a vetoed turn before regeneration. \
-         Errors if the trailing message is not an assistant turn.",
-    ),
-    SyncBuiltin::new(
-        HOST_SESSION_RECORD_TOOL_RESULTS,
-        host_agent_session_record_tool_results_builtin,
-    )
-    .signature("__host_agent_session_record_tool_results(session_id, dispatch)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Append per-tool observation messages from a dispatch result."),
-    SyncBuiltin::new(
-        HOST_SESSION_RECORD_USAGE,
-        host_agent_session_record_usage_builtin,
-    )
-    .signature("__host_agent_session_record_usage(session_id, llm_result)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Accumulate token + cost usage from an llm_call result, return totals."),
-    SyncBuiltin::new(
-        HOST_SESSION_DRAIN_FEEDBACK,
-        host_agent_session_drain_feedback_builtin,
-    )
-    .signature("__host_agent_session_drain_feedback(session_id)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Drain pending runtime-feedback notes for a session (no-op shim)."),
-    SyncBuiltin::new(HOST_SESSION_TOTALS, host_agent_session_totals_builtin)
-        .signature("__host_agent_session_totals(session_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Read accumulated token + cost totals for a session."),
-    SyncBuiltin::new(
-        HOST_SESSION_INJECT_FEEDBACK,
-        host_agent_session_inject_feedback_builtin,
-    )
-    .signature("__host_agent_session_inject_feedback(session_id, kind, content)")
-    .arity(VmBuiltinArity::Exact(3))
-    .doc("Append a runtime-feedback note to the session as a synthetic user turn."),
-    SyncBuiltin::new(
-        HOST_SESSION_POST_EVENT,
-        host_agent_session_post_event_builtin,
-    )
-    .signature("__host_agent_session_post_event(session_id, kind, content, source?)")
-    .arity(VmBuiltinArity::Range { min: 3, max: 4 })
-    .doc(
-        "Post an event into a running session's agent_inbox. Used by triggers, \
-             connectors, and external host integrations to nudge a mid-loop session.",
-    ),
-    SyncBuiltin::new(
-        HOST_SESSION_APPLY_REMINDER_POST_TURN,
-        host_agent_session_apply_reminder_post_turn_builtin,
-    )
-    .signature("__host_agent_session_apply_reminder_post_turn(session_id, turn?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .doc("Apply reminder TTL lifecycle after an agent turn."),
-    SyncBuiltin::new(
-        HOST_SESSION_SET_ACTIVE_SKILLS,
-        host_agent_session_set_active_skills_builtin,
-    )
-    .signature("__host_agent_session_set_active_skills(session_id, skills)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Replace the session's active skill list."),
-    SyncBuiltin::new(
-        HOST_SESSION_ACTIVE_SKILLS,
-        host_agent_session_active_skills_builtin,
-    )
-    .signature("__host_agent_session_active_skills(session_id)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Return the session's active skill list."),
-    SyncBuiltin::new(
-        HOST_SESSION_RECORD_SKILL_EVENT,
-        host_agent_session_record_skill_event_builtin,
-    )
-    .signature("__host_agent_session_record_skill_event(session_id, kind, metadata)")
-    .arity(VmBuiltinArity::Exact(3))
-    .doc("Append a skill lifecycle event and notify live agent-event sinks."),
-    SyncBuiltin::new(HOST_SESSION_COMPACT, host_agent_session_compact_builtin)
-        .signature("__host_agent_session_compact_if_needed(session_id, options)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("No-op compaction hook; Harn implements compaction via llm_call."),
-    SyncBuiltin::new(
-        HOST_SESSION_REPLACE_MESSAGES,
-        host_agent_session_replace_messages_builtin,
-    )
-    .signature("__host_agent_session_replace_messages(session_id, messages, summary?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .doc("Replace the session's transcript message list (used by Harn-driven auto-compact)."),
-    SyncBuiltin::new(HOST_BUDGET_PRE_CALL, host_agent_budget_pre_call_builtin)
-        .signature("__host_agent_budget_pre_call_blocked(session_id, envelope)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Pre-call budget projection hook (returns false for now)."),
-    SyncBuiltin::new(HOST_DAEMON_SNAPSHOT, host_agent_daemon_snapshot_builtin)
-        .signature("__host_agent_daemon_snapshot(session_id, options)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Persist a daemon snapshot for a Harn-driven agent session."),
-    SyncBuiltin::new(
-        HOST_SESSION_CLAIM_TOOL_FORMAT,
-        host_agent_session_claim_tool_format_builtin,
-    )
-    .signature("__host_agent_session_claim_tool_format(session_id, tool_format)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Claim the session's tool_format contract; rejects mid-session changes."),
-    SyncBuiltin::new(
-        HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK,
-        host_agent_record_native_tool_fallback_builtin,
-    )
-    .signature("__host_agent_record_native_tool_fallback(session_id, payload)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Record a native→text tool-call fallback as a transcript event and trace counter."),
-    SyncBuiltin::new(
-        HOST_AGENT_RECORD_COMPACTION,
-        host_agent_record_compaction_builtin,
-    )
-    .signature("__host_agent_record_compaction(session_id, payload)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Record a transcript compaction as a transcript event and trace counter."),
+const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
+    // sync
+    &HOST_AGENT_SESSION_MESSAGES_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_RECORD_ASSISTANT_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_POP_LAST_ASSISTANT_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_RECORD_TOOL_RESULTS_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_RECORD_USAGE_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_DRAIN_FEEDBACK_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_TOTALS_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_INJECT_FEEDBACK_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_POST_EVENT_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_APPLY_REMINDER_POST_TURN_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_SET_ACTIVE_SKILLS_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_ACTIVE_SKILLS_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_RECORD_SKILL_EVENT_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_COMPACT_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_REPLACE_MESSAGES_BUILTIN_DEF,
+    &HOST_AGENT_BUDGET_PRE_CALL_BUILTIN_DEF,
+    &HOST_AGENT_DAEMON_SNAPSHOT_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_CLAIM_TOOL_FORMAT_BUILTIN_DEF,
+    &HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK_BUILTIN_DEF,
+    &HOST_AGENT_RECORD_COMPACTION_BUILTIN_DEF,
+    // async
+    &HOST_AGENT_SESSION_INIT_DEF,
+    &HOST_AGENT_SESSION_FINALIZE_DEF,
+    &HOST_AGENT_EMIT_EVENT_DEF,
+    &HOST_SKILL_SCORE_DEF,
+    &HOST_AUTONOMY_BUDGET_CHECK_DEF,
+    &HOST_AGENT_SESSION_DRAIN_BRIDGE_INJECTIONS_DEF,
+    &HOST_AGENT_SESSION_PUSH_BRIDGE_INJECTION_DEF,
+    &HOST_AGENT_SESSION_PENDING_INJECTIONS_DEF,
+    &HOST_AGENT_SESSION_REVOKE_REMINDER_DEF,
+    &HOST_AGENT_DAEMON_WAIT_DEF,
+    &HOST_AGENT_SESSION_PROJECT_TURN_DEF,
 ];
 
-fn host_session_project_metadata() -> VmBuiltinMetadata {
-    VmBuiltinMetadata::async_static(HOST_SESSION_PROJECT_TURN)
-        .signature_static("__host_agent_session_project_turn(session_id, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .category_static("agent.host")
-        .doc_static(
-            "Project the session transcript through a policy, append a \
-             transcript.projection event, and return the projected messages \
-             with metadata.",
-        )
-}
-
-const HOST_SESSION_PRIMITIVES_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("agent.host")
-    .sync(HOST_SESSION_PRIMITIVES_SYNC);
-
 pub fn register_deferred_agent_session_host_primitives(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_group(vm, HOST_SESSION_PRIMITIVES_GROUP, registrar);
-    for name in [
-        HOST_SESSION_INIT,
-        HOST_SESSION_FINALIZE,
-        HOST_AGENT_EMIT_EVENT,
-        HOST_SKILL_SCORE,
-        HOST_AUTONOMY_BUDGET_CHECK,
-        HOST_SESSION_DRAIN_BRIDGE_INJECTIONS,
-        HOST_SESSION_PUSH_BRIDGE_INJECTION,
-        HOST_SESSION_PENDING_INJECTIONS,
-        HOST_SESSION_REVOKE_REMINDER,
-        HOST_DAEMON_WAIT,
-        HOST_SESSION_PROJECT_TURN,
-    ] {
-        vm.register_deferred_builtin(name, registrar);
-    }
+    register_deferred_builtin_defs(vm, HOST_SESSION_BUILTINS, registrar);
 }
 
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
-    register_builtin_group(vm, HOST_SESSION_PRIMITIVES_GROUP);
-
-    let init = VmBuiltinMetadata::async_static(HOST_SESSION_INIT)
-        .signature_static("__host_agent_session_init(message, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .category_static("agent.host")
-        .doc_static("Initialize a Harn-driven agent session: open transcript, seed user message.");
-    vm.register_async_builtin_with_metadata(init, |args| {
-        Box::pin(async move { host_agent_session_init(args).await })
-    });
-
-    let finalize = VmBuiltinMetadata::async_static(HOST_SESSION_FINALIZE)
-        .signature_static("__host_agent_session_finalize(session_id, status)")
-        .arity(VmBuiltinArity::Exact(2))
-        .category_static("agent.host")
-        .doc_static("Tear down a Harn-driven agent session and emit the final result dict.");
-    vm.register_async_builtin_with_metadata(finalize, |args| {
-        Box::pin(async move { host_agent_session_finalize(args).await })
-    });
-
-    let emit_event = VmBuiltinMetadata::async_static(HOST_AGENT_EMIT_EVENT)
-        .signature_static("__host_agent_emit_event(session_id, event_type, payload)")
-        .arity(VmBuiltinArity::Exact(3))
-        .category_static("agent.host")
-        .doc_static("Emit an agent event and record transcript-backed event types.");
-    vm.register_async_builtin_with_metadata(emit_event, |args| {
-        Box::pin(async move { host_agent_emit_event(args).await })
-    });
-
-    let skill_score = VmBuiltinMetadata::async_static(HOST_SKILL_SCORE)
-        .signature_static("__host_skill_score(context, registry, options)")
-        .arity(VmBuiltinArity::Exact(3))
-        .category_static("agent.host")
-        .doc_static("Score skills against the current task context.");
-    vm.register_async_builtin_with_metadata(skill_score, |args| {
-        Box::pin(async move { host_skill_score(args).await })
-    });
-
-    let budget_check = VmBuiltinMetadata::async_static(HOST_AUTONOMY_BUDGET_CHECK)
-        .signature_static("__host_autonomy_budget_check(session_id, budget_config)")
-        .arity(VmBuiltinArity::Exact(2))
-        .category_static("agent.host")
-        .doc_static("Check per-agent autonomy budget and return an approval-shaped denial.");
-    vm.register_async_builtin_with_metadata(budget_check, |args| {
-        Box::pin(async move { host_autonomy_budget_check(args).await })
-    });
-
-    let drain_bridge_injections =
-        VmBuiltinMetadata::async_static(HOST_SESSION_DRAIN_BRIDGE_INJECTIONS)
-            .signature_static(
-                "__host_agent_session_drain_bridge_injections(session_id, checkpoint)",
-            )
-            .arity(VmBuiltinArity::Exact(2))
-            .category_static("agent.host")
-            .doc_static("Drain queued bridge transcript injections for a delivery checkpoint.");
-    vm.register_async_builtin_with_metadata(drain_bridge_injections, |args| {
-        Box::pin(async move { host_agent_session_drain_bridge_injections(args).await })
-    });
-
-    let push_bridge_injection = VmBuiltinMetadata::async_static(HOST_SESSION_PUSH_BRIDGE_INJECTION)
-        .signature_static("__host_agent_session_push_bridge_injection(session_id, options)")
-        .arity(VmBuiltinArity::Exact(2))
-        .category_static("agent.host")
-        .doc_static(
-            "Push a system-reminder onto the session's host bridge queue; \
-                 returns the reminder id. Inverse of drain_bridge_injections.",
-        );
-    vm.register_async_builtin_with_metadata(push_bridge_injection, |args| {
-        Box::pin(async move { host_agent_session_push_bridge_injection(args).await })
-    });
-
-    let pending_injections = VmBuiltinMetadata::async_static(HOST_SESSION_PENDING_INJECTIONS)
-        .signature_static("__host_agent_session_pending_injections(session_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .category_static("agent.host")
-        .doc_static(
-            "Return a FIFO snapshot of pending bridge user-message and reminder injections.",
-        );
-    vm.register_async_builtin_with_metadata(pending_injections, |args| {
-        Box::pin(async move { host_agent_session_pending_injections(args).await })
-    });
-
-    let revoke_reminder = VmBuiltinMetadata::async_static(HOST_SESSION_REVOKE_REMINDER)
-        .signature_static("__host_agent_session_revoke_reminder(session_id, reminder_id)")
-        .arity(VmBuiltinArity::Exact(2))
-        .category_static("agent.host")
-        .doc_static("Revoke a queued bridge reminder before an agent checkpoint drains it.");
-    vm.register_async_builtin_with_metadata(revoke_reminder, |args| {
-        Box::pin(async move { host_agent_session_revoke_reminder(args).await })
-    });
-
-    let daemon_wait = VmBuiltinMetadata::async_static(HOST_DAEMON_WAIT)
-        .signature_static("__host_agent_daemon_wait(session_id, timeout_ms)")
-        .arity(VmBuiltinArity::Exact(2))
-        .category_static("agent.host")
-        .doc_static("Wait for daemon wake input or a timeout.");
-    vm.register_async_builtin_with_metadata(daemon_wait, |args| {
-        Box::pin(async move { host_agent_daemon_wait(args).await })
-    });
-
-    vm.register_async_builtin_with_metadata(host_session_project_metadata(), |args| {
-        Box::pin(async move { host_agent_session_project_turn(args).await })
-    });
+    register_builtin_defs(vm, HOST_SESSION_BUILTINS);
 }
 
 #[cfg(test)]
