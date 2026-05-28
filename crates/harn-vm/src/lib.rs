@@ -42,6 +42,7 @@ pub mod mcp_auth;
 pub mod mcp_card;
 pub mod mcp_elicit;
 pub mod mcp_file_upload;
+pub mod mcp_host;
 pub mod mcp_progress;
 pub mod mcp_protocol;
 pub mod mcp_registry;
@@ -165,6 +166,12 @@ pub use llm::trigger_predicate::TriggerPredicateBudget;
 pub use llm::{current_agent_session_id, register_session_end_hook};
 pub use mcp::{connect_mcp_server_from_json, connect_mcp_server_from_spec, register_mcp_builtins};
 pub use mcp_card::{fetch_server_card, load_server_card_from_path, CardError};
+pub use mcp_host::{
+    cache_stats as mcp_host_cache_stats, set_allowlist as set_mcp_host_allowlist,
+    AllowlistDecision as McpHostAllowlistDecision, AllowlistGuard as McpHostAllowlistGuard,
+    BreakerState as McpHostBreakerState, CacheStats as McpHostCacheStats, McpHostStatus,
+    SpawnOptions as McpHostSpawnOptions, SupervisionPolicy as McpHostSupervisionPolicy,
+};
 pub use mcp_registry::{
     active_handle as mcp_active_handle, ensure_active as mcp_ensure_active,
     get_registration as mcp_get_registration, install_active as mcp_install_active,
@@ -409,5 +416,6 @@ pub fn reset_thread_local_state() {
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();
     mcp_registry::reset();
+    mcp_host::reset_for_tests();
     clock_mock::leak_audit::reset();
 }

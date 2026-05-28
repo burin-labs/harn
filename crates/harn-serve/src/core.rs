@@ -216,6 +216,21 @@ impl DispatchCore {
                 .await?;
                 return Err(error);
             }
+            // MCP allowlist checks are enforced at the `harness.mcp.*`
+            // dispatch boundary inside harn-vm, not on the HTTP edge;
+            // surfacing the variant here would mean the policy was
+            // queried with a server/tool pair, which the HTTP dispatch
+            // path never does. Treat any leak as a policy bug.
+            AuthorizationDecision::McpNotAllowlisted { reason, .. } => {
+                self.record_trust(
+                    &request,
+                    &trace_id,
+                    TrustOutcome::Denied,
+                    Some(reason.clone()),
+                )
+                .await?;
+                return Err(DispatchError::Unauthorized(reason));
+            }
         }
 
         let function = self.catalog.function(&request.function).ok_or_else(|| {

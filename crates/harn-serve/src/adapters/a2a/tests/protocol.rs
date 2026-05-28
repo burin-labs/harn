@@ -752,6 +752,7 @@ pub(super) fn server_with_api_key_policy(
     let mut config = DispatchCoreConfig::for_script(&script);
     config.auth_policy = AuthPolicy {
         methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single(api_key))],
+        mcp_allowlist: None,
     };
     let core = DispatchCore::new(config).expect("core");
     (dir, Arc::new(A2aServer::new(A2aServerConfig::new(core))))
@@ -1243,6 +1244,7 @@ pub fn list_personas(filter: string) -> string {
                 ApiKeyEntry::new("limited-key", ["sessions:read".to_string()]),
             ],
         })],
+        mcp_allowlist: None,
     };
     let core = DispatchCore::new(config).expect("core");
     let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
@@ -1325,6 +1327,7 @@ pub fn list_personas(filter: string) -> string {
         methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
             keys: vec![ApiKeyEntry::new("admin-key", ["personas:read".to_string()])],
         })],
+        mcp_allowlist: None,
     };
     let core = DispatchCore::new(config).expect("core");
     let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));

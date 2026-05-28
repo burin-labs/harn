@@ -7,6 +7,7 @@ mod core;
 mod error;
 mod exports;
 mod mcp_context;
+pub mod mcp_host_bridge;
 mod mcp_prompts;
 pub mod permissions;
 #[cfg(test)]
@@ -33,8 +34,9 @@ pub use adapters::mcp::{
     McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
 };
 pub use auth::{
-    ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,
-    AuthenticatedPrincipal, AuthorizationDecision, HmacAuthConfig, OAuth21AuthConfig, OAuthClaims,
+    AllowlistOutcome, ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,
+    AuthenticatedPrincipal, AuthorizationDecision, HmacAuthConfig, McpAllowlist, McpAllowlistTools,
+    OAuth21AuthConfig, OAuthClaims,
 };
 pub use core::{
     CallArguments, CallRequest, CallResponse, DispatchCore, DispatchCoreConfig, NoopVmConfigurator,
@@ -42,6 +44,7 @@ pub use core::{
 };
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
+pub use mcp_host_bridge::install_mcp_host_allowlist;
 pub use mcp_prompts::FilePromptCatalog;
 pub use permissions::{
     ActionClass, AuditEntry, AuditFilter, AuditOutcome, DecisionScope, InMemoryConfig,

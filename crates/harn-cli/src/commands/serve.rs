@@ -155,16 +155,18 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
                 let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
                 let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
                 guard_serve_bind_auth("mcp", args.bind, &auth_policy, &tls)?;
-                crate::commands::run::RunFileMcpServeMode::Http {
-                    options: McpHttpServeOptions {
-                        bind: args.bind,
-                        path: args.path.clone(),
-                        sse_path: args.sse_path.clone(),
-                        messages_path: args.messages_path.clone(),
-                        tls,
+                crate::commands::run::RunFileMcpServeMode::Http(Box::new(
+                    crate::commands::run::RunFileMcpServeHttp {
+                        options: McpHttpServeOptions {
+                            bind: args.bind,
+                            path: args.path.clone(),
+                            sse_path: args.sse_path.clone(),
+                            messages_path: args.messages_path.clone(),
+                            tls,
+                        },
+                        auth_policy,
                     },
-                    auth_policy,
-                }
+                ))
             }
         };
         crate::commands::run::run_file_mcp_serve(&args.file, args.card.as_deref(), mode).await;
@@ -678,6 +680,18 @@ async fn authorize_script_rpc(
                 &harn_serve::forbidden_message(&required, &granted),
             ))
         }
+        // `authorize_mcp` is the only producer of this variant and
+        // belongs to the `harness.mcp.*` dispatch path inside harn-vm,
+        // not this MCP-server auth gate. Surfacing it here would
+        // indicate the wrong policy hook was called; render the
+        // policy's reason string under the standard 403 envelope.
+        AuthorizationDecision::McpNotAllowlisted { reason, .. } => {
+            Err(harn_vm::jsonrpc::error_response(
+                request.get("id").cloned().unwrap_or(JsonValue::Null),
+                -32003,
+                &reason,
+            ))
+        }
     }
 }
 
@@ -838,7 +852,10 @@ fn build_auth_policy(api_keys: &[String], hmac_secret: Option<&String>) -> AuthP
             tenant_id: None,
         }));
     }
-    AuthPolicy { methods }
+    AuthPolicy {
+        methods,
+        mcp_allowlist: None,
+    }
 }
 
 #[cfg(test)]
@@ -939,7 +956,10 @@ mod tests {
     #[test]
     fn guard_serve_bind_auth_refuses_public_bind_without_auth_or_tls() {
         let bind: SocketAddr = "0.0.0.0:8080".parse().unwrap();
-        let policy = AuthPolicy { methods: vec![] };
+        let policy = AuthPolicy {
+            methods: vec![],
+            mcp_allowlist: None,
+        };
         let tls = harn_serve::HttpTlsConfig::plain();
         let result = guard_serve_bind_auth("mcp", bind, &policy, &tls);
         let error = result.expect_err("public bind without auth should be refused");
@@ -956,6 +976,7 @@ mod tests {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single(
                 "test-key",
             ))],
+            mcp_allowlist: None,
         };
         let tls = harn_serve::HttpTlsConfig::plain();
         let result = guard_serve_bind_auth("mcp", bind, &policy, &tls);
@@ -968,7 +989,10 @@ mod tests {
     #[test]
     fn guard_serve_bind_auth_allows_loopback_without_auth() {
         let bind: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let policy = AuthPolicy { methods: vec![] };
+        let policy = AuthPolicy {
+            methods: vec![],
+            mcp_allowlist: None,
+        };
         let tls = harn_serve::HttpTlsConfig::plain();
         // Loopback + no auth is allowed (the function emits a WARN log
         // but does not refuse the start — the operator may be running
@@ -980,7 +1004,10 @@ mod tests {
     #[test]
     fn guard_serve_bind_auth_allows_public_bind_with_tls() {
         let bind: SocketAddr = "0.0.0.0:8080".parse().unwrap();
-        let policy = AuthPolicy { methods: vec![] };
+        let policy = AuthPolicy {
+            methods: vec![],
+            mcp_allowlist: None,
+        };
         let tls = harn_serve::HttpTlsConfig::self_signed_dev();
         let result = guard_serve_bind_auth("api", bind, &policy, &tls);
         assert!(

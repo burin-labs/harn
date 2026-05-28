@@ -85,6 +85,18 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/compaction-policy/scenario.harn"),
         tape: include_str!("../../assets/demo/compaction-policy/tape.jsonl"),
     },
+    Scenario {
+        id: "mcp-host",
+        title: "harn.mcp.* host primitive lazy-spawn + status round-trip",
+        description: "Drive the supervised MCP-host primitive (#2504): register two lazy MCP \
+                      server specs, snapshot the supervision status (restart_count, circuit, \
+                      cache_entries), stop one of them, and re-snapshot. Stays fully offline \
+                      because lazy spawn doesn't try to connect. The receipt asserts every \
+                      initial entry starts with the circuit closed and cache empty — the \
+                      invariants downstream observability hooks lean on.",
+        script: include_str!("../../assets/demo/mcp-host/scenario.harn"),
+        tape: include_str!("../../assets/demo/mcp-host/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]
