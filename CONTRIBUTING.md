@@ -179,8 +179,11 @@ The detection logic lives in
 flags additions to:
 
 - **Stdlib builtins** — `crates/harn-vm/src/stdlib/**/*.rs`: a new
-  `vm.register_builtin(...)`, `SyncBuiltin::new(...)`,
-  `async_builtin!(...)`, or `register_builtin_group(...)` call.
+  `#[harn_builtin]` annotation, or (in the few remaining unmigrated
+  modules) a new `vm.register_builtin(...)`, `SyncBuiltin::new(...)`,
+  `async_builtin!(...)`, or `register_builtin_group(...)` call. See
+  [Adding a stdlib builtin](#adding-a-stdlib-builtin) for the canonical
+  proc-macro pattern.
 - **Host capabilities** — `crates/harn-vm/src/stdlib/host.rs` (a new
   `("capability", "operation") =>` arm in
   `dispatch_builtin_host_operation`) or
@@ -270,6 +273,118 @@ than a primitive shipping into a release without a runnable example.
 | `harn-lsp` | Language Server Protocol implementation |
 | `harn-dap` | Debug Adapter Protocol implementation |
 | `harn-wasm` | WebAssembly target (built separately with wasm-pack) |
+
+## Adding a stdlib builtin
+
+New stdlib builtins are registered with the `#[harn_builtin]` proc-macro
+(crate: `harn-builtin-macros`). One annotation per Rust handler produces
+both the runtime entry and the parser `BuiltinSignature`, so there is no
+separate Rust-side signature table to keep in sync.
+
+```rust
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::value::{VmError, VmValue};
+use crate::vm::Vm;
+
+/// Sync builtin: short signature in Harn syntax, return type after `->`.
+#[harn_builtin(sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
+fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    // ... implementation returning Ok(VmValue::String(...)) ...
+}
+
+/// Async builtin: declare `kind = "async"` and write an `async fn`.
+#[harn_builtin(
+    sig = "with_autonomy_policy(policy: dict, fn: closure) -> any",
+    kind = "async",
+    category = "runtime_scope"
+)]
+async fn with_autonomy_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    // ... await your async work, return Ok(...) ...
+}
+
+/// Aliases share the impl + signature; each emits its own parser entry.
+#[harn_builtin(
+    sig = "render(template: string, vars: dict?) -> string",
+    aliases = ["render_prompt"],
+    category = "strings"
+)]
+fn render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    // ... `render` and `render_prompt` both dispatch here ...
+}
+
+/// Runtime-only: registered on the VM but suppressed from the parser
+/// signature set. Use for double-underscore internals (`__harn_*`) that
+/// scripts must not call directly.
+#[harn_builtin(
+    sig = "__harn_with_execution_policy_override(policy: dict, fn: closure) -> any",
+    kind = "async",
+    category = "runtime_scope",
+    runtime_only = true
+)]
+async fn harn_with_execution_policy_override_impl(
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    // ... internal-only handler body ...
+}
+
+/// Each module collects its emitted `*_DEF` statics into a single slice
+/// and exposes a small registrar that drains it. The slice is named
+/// `MODULE_BUILTINS` by convention so `stdlib::all_builtin_defs()` can
+/// concatenate every module's slice in one place.
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &BYTES_TO_HEX_IMPL_DEF,
+    // ... one entry per `#[harn_builtin]` fn in this file ...
+];
+
+pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+```
+
+Wire-up checklist:
+
+1. Annotate the handler with `#[harn_builtin(sig = "...", category = "...")]`.
+   The proc-macro emits a sibling `static <FN_NAME_UPPER>_DEF: VmBuiltinDef`.
+2. Append `&<FN_NAME_UPPER>_DEF` to the module's `MODULE_BUILTINS: &[&VmBuiltinDef]`.
+3. Add `out.extend_from_slice(<module>::MODULE_BUILTINS);` to
+   `stdlib::all_builtin_defs()` in
+   [`crates/harn-vm/src/stdlib.rs`](crates/harn-vm/src/stdlib.rs) (keep
+   the list alphabetical by module).
+4. Make sure your module's `register_*_builtins(vm)` is called from one of
+   `register_core_stdlib`, `register_io_stdlib`, or
+   `register_agent_stdlib_{before,after}_llm` in the same file.
+5. Add or update a `harn explain <name>` snapshot / conformance fixture
+   if the builtin is publicly callable.
+
+A handful of names (`len`, `split`, method-dispatched helpers, etc.) that
+the harn-parser unit tests reference directly without installing the
+macro slice still live as parser-only shadows in
+[`crates/harn-parser/src/builtin_signatures/signatures/stdlib.rs`](crates/harn-parser/src/builtin_signatures/signatures/stdlib.rs).
+Prefer `#[harn_builtin(parser_only = true)]` in the VM crate for new
+parser-only entries; only touch the parser-side shadow when you're
+adding a name the VM stdlib genuinely doesn't expose.
+
+### Deprecated registration DSL
+
+`crates/harn-vm/src/stdlib/registration.rs` (`SyncBuiltin`,
+`AsyncBuiltin`, `BuiltinGroup`, `register_builtin_group`,
+`async_builtin!`) is deprecated. It survives only for a small set of
+captured-state files that depend on closure-captured `Rc`/`Arc` handles
+that the proc-macro doesn't yet model. Do not extend it. New builtins
+must use `#[harn_builtin]`; the unmigrated holdouts will move once the
+captured-state shape lands a proc-macro-friendly equivalent.
+
+### Looking ahead
+
+Today every migrated module hand-rolls its `MODULE_BUILTINS` slice and
+`stdlib::all_builtin_defs()` lists each module by name. A planned
+follow-up will collapse those per-module slices into a single
+workspace-global slice via `linkme::distributed_slice`, so the macro
+expansion will register itself automatically and the central
+concatenation in `stdlib.rs` will go away. Until that lands, keep
+appending to `MODULE_BUILTINS` and `all_builtin_defs()` as above.
 
 ## Adding conformance tests
 

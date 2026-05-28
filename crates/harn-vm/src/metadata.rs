@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -671,26 +672,77 @@ fn resolve_scan_root(rel_dir: &str) -> PathBuf {
 
 /// Register metadata builtins on a VM.
 ///
-/// In standalone mode, these operate directly on the resolved Harn metadata
-/// state root.
-/// In bridge mode, these are registered **before** bridge builtins so the
-/// host can override them if needed (but typically the VM handles this natively).
+/// The per-VM `MetadataState` lives in a thread-local cell so the
+/// `#[harn_builtin]`-emitted handler fns can access it without closure
+/// capture (which the macro doesn't support). The Harn VM executes
+/// single-threaded per run, so each `register_metadata_builtins` call
+/// replaces the cell for that thread — matching the pre-migration
+/// `Rc<RefCell<State>>` semantics one-for-one.
 pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
-    let state = Rc::new(RefCell::new(MetadataState::new(base_dir)));
+    METADATA_STATE.with(|cell| {
+        *cell.borrow_mut() = Some(MetadataState::new(base_dir));
+    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    // metadata_get(dir, namespace?) -> dict | nil
-    let s = Rc::clone(&state);
-    vm.register_builtin("metadata_get", move |args, _out| {
-        let dir = args.first().map(|a| a.display()).unwrap_or_default();
-        let namespace = args.get(1).and_then(|a| {
-            if matches!(a, VmValue::Nil) {
-                None
-            } else {
-                Some(a.display())
-            }
-        });
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &METADATA_GET_IMPL_DEF,
+    &METADATA_RESOLVE_IMPL_DEF,
+    &METADATA_ENTRIES_IMPL_DEF,
+    &METADATA_SET_IMPL_DEF,
+    &METADATA_SAVE_IMPL_DEF,
+    &METADATA_STALE_IMPL_DEF,
+    &METADATA_REFRESH_HASHES_IMPL_DEF,
+    &METADATA_STATUS_IMPL_DEF,
+    &COMPUTE_CONTENT_HASH_IMPL_DEF,
+    &INVALIDATE_FACTS_IMPL_DEF,
+    &PATH_METADATA_GET_IMPL_DEF,
+    &PATH_METADATA_SET_IMPL_DEF,
+    &PATH_METADATA_ENTRIES_IMPL_DEF,
+    &SCAN_DIRECTORY_IMPL_DEF,
+];
 
-        let mut st = s.borrow_mut();
+thread_local! {
+    /// Active metadata state for the current thread's pipeline run.
+    /// Set by `register_metadata_builtins`; read by the
+    /// `#[harn_builtin]` handler fns below. `None` before the first
+    /// install — in that case the handlers return a clear runtime error
+    /// rather than a panic.
+    static METADATA_STATE: RefCell<Option<MetadataState>> = const { RefCell::new(None) };
+}
+
+fn with_state<R>(
+    fn_name: &'static str,
+    f: impl FnOnce(&mut MetadataState) -> Result<R, VmError>,
+) -> Result<R, VmError> {
+    METADATA_STATE.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let state = guard.as_mut().ok_or_else(|| {
+            VmError::Runtime(format!(
+                "{fn_name}: metadata builtins not registered for this VM"
+            ))
+        })?;
+        f(state)
+    })
+}
+
+#[harn_builtin(
+    sig = "metadata_get(dir: string, namespace?: string|nil) -> dict|nil",
+    category = "metadata"
+)]
+fn metadata_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dir = args.first().map(|a| a.display()).unwrap_or_default();
+    let namespace = args.get(1).and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
+    });
+
+    with_state("metadata_get", |st| {
         if let Some(ns) = namespace {
             match st.get_namespace(&dir, &ns) {
                 Some(fields) => {
@@ -703,7 +755,6 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
                 None => Ok(VmValue::Nil),
             }
         } else {
-            // Return all namespaces flattened.
             let resolved = st.resolve(&dir);
             let mut m = BTreeMap::new();
             for fields in resolved.namespaces.values() {
@@ -717,20 +768,23 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
                 Ok(VmValue::Dict(Rc::new(m)))
             }
         }
-    });
+    })
+}
 
-    // metadata_resolve(dir, namespace?) -> dict | nil
-    let s = Rc::clone(&state);
-    vm.register_builtin("metadata_resolve", move |args, _out| {
-        let dir = args.first().map(|a| a.display()).unwrap_or_default();
-        let namespace = args.get(1).and_then(|a| {
-            if matches!(a, VmValue::Nil) {
-                None
-            } else {
-                Some(a.display())
-            }
-        });
-        let mut st = s.borrow_mut();
+#[harn_builtin(
+    sig = "metadata_resolve(dir: string, namespace?: string|nil) -> dict|nil",
+    category = "metadata"
+)]
+fn metadata_resolve_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dir = args.first().map(|a| a.display()).unwrap_or_default();
+    let namespace = args.get(1).and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
+    });
+    with_state("metadata_resolve", |st| {
         let resolved = st.resolve(&dir);
         if let Some(ns) = namespace {
             match resolved.namespaces.get(&ns) {
@@ -742,19 +796,22 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
         } else {
             Ok(directory_metadata_to_vm(&resolved))
         }
-    });
+    })
+}
 
-    // metadata_entries(namespace?) -> list
-    let s = Rc::clone(&state);
-    vm.register_builtin("metadata_entries", move |args, _out| {
-        let namespace = args.first().and_then(|a| {
-            if matches!(a, VmValue::Nil) {
-                None
-            } else {
-                Some(a.display())
-            }
-        });
-        let mut st = s.borrow_mut();
+#[harn_builtin(
+    sig = "metadata_entries(namespace?: string|nil) -> list",
+    category = "metadata"
+)]
+fn metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let namespace = args.first().and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
+    });
+    with_state("metadata_entries", |st| {
         st.ensure_loaded();
         let directories: Vec<String> = st.entries.keys().cloned().collect();
         let mut items = Vec::new();
@@ -793,52 +850,58 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
             items.push(VmValue::Dict(Rc::new(item)));
         }
         Ok(VmValue::List(Rc::new(items)))
-    });
+    })
+}
 
-    // metadata_set(dir, namespace, data_dict)
-    let s = Rc::clone(&state);
-    vm.register_builtin("metadata_set", move |args, _out| {
-        let dir = args.first().map(|a| a.display()).unwrap_or_default();
-        let namespace = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let data_val = args.get(2).unwrap_or(&VmValue::Nil);
+#[harn_builtin(
+    sig = "metadata_set(dir: string, namespace: string, data: dict) -> nil",
+    category = "metadata"
+)]
+fn metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dir = args.first().map(|a| a.display()).unwrap_or_default();
+    let namespace = args.get(1).map(|a| a.display()).unwrap_or_default();
+    let data_val = args.get(2).cloned().unwrap_or(VmValue::Nil);
 
-        let mut data = BTreeMap::new();
-        if let VmValue::Dict(dict) = data_val {
-            for (k, v) in dict.iter() {
-                data.insert(k.clone(), vm_to_json(v));
-            }
+    let mut data = BTreeMap::new();
+    if let VmValue::Dict(dict) = &data_val {
+        for (k, v) in dict.iter() {
+            data.insert(k.clone(), vm_to_json(v));
         }
+    }
 
+    with_state("metadata_set", |st| {
         if !data.is_empty() {
-            s.borrow_mut().set_namespace(&dir, &namespace, data);
+            st.set_namespace(&dir, &namespace, data);
         }
         Ok(VmValue::Nil)
-    });
+    })
+}
 
-    // metadata_save()
-    let s = Rc::clone(&state);
-    vm.register_builtin("metadata_save", move |_args, _out| {
-        s.borrow_mut().save().map_err(VmError::Runtime)?;
+#[harn_builtin(sig = "metadata_save() -> nil", category = "metadata")]
+fn metadata_save_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    with_state("metadata_save", |st| {
+        st.save().map_err(VmError::Runtime)?;
         Ok(VmValue::Nil)
-    });
+    })
+}
 
-    // metadata_stale(project) -> {any_stale: bool, tier1: [dirs], tier2: [dirs]}
-    // Compare stored structureHash/contentHash against current filesystem state.
-    let s = Rc::clone(&state);
-    let base2 = base_dir.to_path_buf();
-    vm.register_builtin("metadata_stale", move |_args, _out| {
-        s.borrow_mut().ensure_loaded();
-        let state = s.borrow();
+#[harn_builtin(
+    sig = "metadata_stale(project?: string) -> dict",
+    category = "metadata"
+)]
+fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    with_state("metadata_stale", |st| {
+        st.ensure_loaded();
+        let base = st.base_dir.clone();
         let mut tier1_stale: Vec<VmValue> = Vec::new();
         let mut tier2_stale: Vec<VmValue> = Vec::new();
 
-        for (dir, meta) in &state.entries {
+        for (dir, meta) in &st.entries {
             let full_dir = if dir.is_empty() {
-                base2.clone()
+                base.clone()
             } else {
-                base2.join(dir)
+                base.join(dir)
             };
-            // Tier 1: structureHash — file list + sizes.
             if let Some(stored_hash) = meta
                 .namespaces
                 .get("classification")
@@ -848,11 +911,9 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
                 let current_hash = compute_structure_hash(&full_dir);
                 if current_hash != stored_hash {
                     tier1_stale.push(VmValue::String(Rc::from(dir.as_str())));
-                    // Structure changed — skip the tier 2 content check.
                     continue;
                 }
             }
-            // Tier 2: contentHash — file content digest.
             if let Some(stored_hash) = meta
                 .namespaces
                 .get("classification")
@@ -872,60 +933,62 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
         m.insert("tier1".to_string(), VmValue::List(Rc::new(tier1_stale)));
         m.insert("tier2".to_string(), VmValue::List(Rc::new(tier2_stale)));
         Ok(VmValue::Dict(Rc::new(m)))
-    });
+    })
+}
 
-    // metadata_refresh_hashes(project) -> nil
-    // Recompute and store structureHash for all directories.
-    let s = Rc::clone(&state);
-    let base3 = base_dir.to_path_buf();
-    vm.register_builtin("metadata_refresh_hashes", move |_args, _out| {
-        let mut state = s.borrow_mut();
-        state.ensure_loaded();
-        let dirs: Vec<String> = state.entries.keys().cloned().collect();
+#[harn_builtin(sig = "metadata_refresh_hashes() -> nil", category = "metadata")]
+fn metadata_refresh_hashes_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    with_state("metadata_refresh_hashes", |st| {
+        st.ensure_loaded();
+        let base = st.base_dir.clone();
+        let dirs: Vec<String> = st.entries.keys().cloned().collect();
         for dir in dirs {
             let full_dir = if dir.is_empty() {
-                base3.clone()
+                base.clone()
             } else {
-                base3.join(&dir)
+                base.join(&dir)
             };
             let hash = compute_structure_hash(&full_dir);
-            let entry = state.entries.entry(dir).or_default();
+            let entry = st.entries.entry(dir).or_default();
             let ns = entry
                 .namespaces
                 .entry("classification".to_string())
                 .or_default();
             ns.insert("structureHash".to_string(), serde_json::Value::String(hash));
         }
-        state.dirty = true;
+        st.dirty = true;
         Ok(VmValue::Nil)
-    });
+    })
+}
 
-    // metadata_status(namespace?) -> dict
-    let s = Rc::clone(&state);
-    let base4 = base_dir.to_path_buf();
-    vm.register_builtin("metadata_status", move |args, _out| {
-        let namespace = args.first().and_then(|a| {
-            if matches!(a, VmValue::Nil) {
-                None
-            } else {
-                Some(a.display())
-            }
-        });
-        s.borrow_mut().ensure_loaded();
-        let state = s.borrow();
+#[harn_builtin(
+    sig = "metadata_status(namespace?: string|nil) -> dict",
+    category = "metadata"
+)]
+fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let namespace = args.first().and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
+    });
+    with_state("metadata_status", |st| {
+        st.ensure_loaded();
+        let base = st.base_dir.clone();
         let mut namespaces = BTreeMap::new();
         let mut directories = Vec::new();
         let mut missing_structure_hash = Vec::new();
         let mut missing_content_hash = Vec::new();
-        for (dir, meta) in &state.entries {
+        for (dir, meta) in &st.entries {
             directories.push(VmValue::String(Rc::from(normalize_directory_key(dir))));
             for ns in meta.namespaces.keys() {
                 namespaces.insert(ns.clone(), VmValue::Bool(true));
             }
             let full_dir = if dir.is_empty() {
-                base4.clone()
+                base.clone()
             } else {
-                base4.join(dir)
+                base.join(dir)
             };
             let relevant = namespace
                 .as_ref()
@@ -942,11 +1005,11 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
                 }
             }
         }
-        let stale = metadata_stale_value(&state, &base4);
+        let stale = metadata_stale_value(st, &base);
         let mut result = BTreeMap::new();
         result.insert(
             "directory_count".to_string(),
-            VmValue::Int(state.entries.len() as i64),
+            VmValue::Int(st.entries.len() as i64),
         );
         result.insert(
             "namespace_count".to_string(),
@@ -976,106 +1039,117 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
         );
         result.insert("stale".to_string(), stale);
         Ok(VmValue::Dict(Rc::new(result)))
-    });
+    })
+}
 
-    // compute_content_hash(dir) -> string of file list + sizes + mtimes for staleness tracking.
-    let base = base_dir.to_path_buf();
-    vm.register_builtin("compute_content_hash", move |args, _out| {
-        let dir = args.first().map(|a| a.display()).unwrap_or_default();
+#[harn_builtin(
+    sig = "compute_content_hash(dir: string) -> string",
+    category = "metadata"
+)]
+fn compute_content_hash_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let dir = args.first().map(|a| a.display()).unwrap_or_default();
+    with_state("compute_content_hash", |st| {
         let full_dir = if dir.is_empty() {
-            base.clone()
+            st.base_dir.clone()
         } else {
-            base.join(&dir)
+            st.base_dir.join(&dir)
         };
         let hash = compute_content_hash_for_dir(&full_dir);
         Ok(VmValue::String(Rc::from(hash)))
+    })
+}
+
+/// invalidate_facts is a no-op: facts live in the metadata namespace.
+#[harn_builtin(sig = "invalidate_facts(dir?: string) -> nil", category = "metadata")]
+fn invalidate_facts_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Nil)
+}
+
+/// Reads metadata for an exact path. Files are addressed directly without
+/// inheritance from parent directories. Pass `{kind: "dir"}` to fall back
+/// to hierarchical directory resolution.
+#[harn_builtin(
+    sig = "path_metadata_get(path: string, namespace?: string|nil, opts?: dict|nil) -> dict|nil",
+    category = "metadata"
+)]
+fn path_metadata_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let namespace = args.get(1).and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
     });
-
-    // invalidate_facts is a no-op: facts live in the metadata namespace.
-    vm.register_builtin("invalidate_facts", |_args, _out| Ok(VmValue::Nil));
-
-    // path_metadata_get(path, namespace?, opts?) -> dict | nil
-    //
-    // Reads metadata for an exact path. Files are addressed directly without
-    // inheritance from parent directories. Pass `{kind: "dir"}` to fall back
-    // to hierarchical directory resolution.
-    let s = Rc::clone(&state);
-    vm.register_builtin("path_metadata_get", move |args, _out| {
-        let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let namespace = args.get(1).and_then(|a| {
-            if matches!(a, VmValue::Nil) {
-                None
+    let Some(kind) = parse_path_kind(args.get(2)) else {
+        return Err(VmError::Runtime(
+            "path_metadata_get: opts.kind must be \"file\" or \"dir\"".to_string(),
+        ));
+    };
+    with_state("path_metadata_get", |st| match kind {
+        PathKind::File => {
+            let Some(key) = normalize_file_key(&path) else {
+                return Ok(VmValue::Nil);
+            };
+            match namespace {
+                Some(ns) => match st.file_namespace(&key, &ns) {
+                    Some(fields) => Ok(namespace_fields_to_vm(&fields)),
+                    None => Ok(VmValue::Nil),
+                },
+                None => match st.file_entry(&key) {
+                    Some(meta) if !meta.namespaces.is_empty() => {
+                        Ok(directory_metadata_to_vm(&meta))
+                    }
+                    _ => Ok(VmValue::Nil),
+                },
+            }
+        }
+        PathKind::Dir => {
+            if let Some(ns) = namespace {
+                match st.get_namespace(&path, &ns) {
+                    Some(fields) => Ok(namespace_fields_to_vm(&fields)),
+                    None => Ok(VmValue::Nil),
+                }
             } else {
-                Some(a.display())
-            }
-        });
-        let Some(kind) = parse_path_kind(args.get(2)) else {
-            return Err(VmError::Runtime(
-                "path_metadata_get: opts.kind must be \"file\" or \"dir\"".to_string(),
-            ));
-        };
-        let mut st = s.borrow_mut();
-        match kind {
-            PathKind::File => {
-                let Some(key) = normalize_file_key(&path) else {
-                    return Ok(VmValue::Nil);
-                };
-                match namespace {
-                    Some(ns) => match st.file_namespace(&key, &ns) {
-                        Some(fields) => Ok(namespace_fields_to_vm(&fields)),
-                        None => Ok(VmValue::Nil),
-                    },
-                    None => match st.file_entry(&key) {
-                        Some(meta) if !meta.namespaces.is_empty() => {
-                            Ok(directory_metadata_to_vm(&meta))
-                        }
-                        _ => Ok(VmValue::Nil),
-                    },
-                }
-            }
-            PathKind::Dir => {
-                if let Some(ns) = namespace {
-                    match st.get_namespace(&path, &ns) {
-                        Some(fields) => Ok(namespace_fields_to_vm(&fields)),
-                        None => Ok(VmValue::Nil),
-                    }
+                let resolved = st.resolve(&path);
+                if resolved.namespaces.is_empty() {
+                    Ok(VmValue::Nil)
                 } else {
-                    let resolved = st.resolve(&path);
-                    if resolved.namespaces.is_empty() {
-                        Ok(VmValue::Nil)
-                    } else {
-                        Ok(directory_metadata_to_vm(&resolved))
-                    }
+                    Ok(directory_metadata_to_vm(&resolved))
                 }
             }
         }
-    });
+    })
+}
 
-    // path_metadata_set(path, namespace, data, opts?) -> nil
-    let s = Rc::clone(&state);
-    vm.register_builtin("path_metadata_set", move |args, _out| {
-        let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let namespace = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let data_val = args.get(2).unwrap_or(&VmValue::Nil);
-        let Some(kind) = parse_path_kind(args.get(3)) else {
-            return Err(VmError::Runtime(
-                "path_metadata_set: opts.kind must be \"file\" or \"dir\"".to_string(),
-            ));
-        };
-        if namespace.is_empty() {
-            return Err(VmError::Runtime(
-                "path_metadata_set: namespace must not be empty".to_string(),
-            ));
+#[harn_builtin(
+    sig = "path_metadata_set(path: string, namespace: string, data: dict, opts?: dict|nil) -> nil",
+    category = "metadata"
+)]
+fn path_metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let namespace = args.get(1).map(|a| a.display()).unwrap_or_default();
+    let data_val = args.get(2).cloned().unwrap_or(VmValue::Nil);
+    let Some(kind) = parse_path_kind(args.get(3)) else {
+        return Err(VmError::Runtime(
+            "path_metadata_set: opts.kind must be \"file\" or \"dir\"".to_string(),
+        ));
+    };
+    if namespace.is_empty() {
+        return Err(VmError::Runtime(
+            "path_metadata_set: namespace must not be empty".to_string(),
+        ));
+    }
+    let mut data = BTreeMap::new();
+    if let VmValue::Dict(dict) = &data_val {
+        for (k, v) in dict.iter() {
+            data.insert(k.clone(), vm_to_json(v));
         }
-        let mut data = BTreeMap::new();
-        if let VmValue::Dict(dict) = data_val {
-            for (k, v) in dict.iter() {
-                data.insert(k.clone(), vm_to_json(v));
-            }
-        }
-        if data.is_empty() {
-            return Ok(VmValue::Nil);
-        }
+    }
+    if data.is_empty() {
+        return Ok(VmValue::Nil);
+    }
+    with_state("path_metadata_set", |st| {
         match kind {
             PathKind::File => {
                 let Some(key) = normalize_file_key(&path) else {
@@ -1083,37 +1157,38 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
                         "path_metadata_set: {path:?} is not a valid file path"
                     )));
                 };
-                s.borrow_mut().set_file_namespace(&key, &namespace, data);
+                st.set_file_namespace(&key, &namespace, data);
             }
             PathKind::Dir => {
-                s.borrow_mut().set_namespace(&path, &namespace, data);
+                st.set_namespace(&path, &namespace, data);
             }
         }
         Ok(VmValue::Nil)
-    });
+    })
+}
 
-    // path_metadata_entries(namespace?, opts?) -> list of {kind, path, local}
-    //
-    // Lists stored file (and optionally directory) entries. Useful for
-    // iterating over precomputed enrichment artifacts.
-    let s = Rc::clone(&state);
-    vm.register_builtin("path_metadata_entries", move |args, _out| {
-        let namespace = args.first().and_then(|a| {
-            if matches!(a, VmValue::Nil) {
-                None
-            } else {
-                Some(a.display())
-            }
-        });
-        let Some(filter) = parse_path_kind_filter(args.get(1), PathKindFilter::File, true) else {
-            return Err(VmError::Runtime(
-                "path_metadata_entries: opts.kind must be \"file\", \"dir\", or \"all\""
-                    .to_string(),
-            ));
-        };
-        let include_files = matches!(filter, PathKindFilter::File | PathKindFilter::All);
-        let include_dirs = matches!(filter, PathKindFilter::Dir | PathKindFilter::All);
-        let mut st = s.borrow_mut();
+/// Lists stored file (and optionally directory) entries. Useful for
+/// iterating over precomputed enrichment artifacts.
+#[harn_builtin(
+    sig = "path_metadata_entries(namespace?: string|nil, opts?: dict|nil) -> list",
+    category = "metadata"
+)]
+fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let namespace = args.first().and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
+    });
+    let Some(filter) = parse_path_kind_filter(args.get(1), PathKindFilter::File, true) else {
+        return Err(VmError::Runtime(
+            "path_metadata_entries: opts.kind must be \"file\", \"dir\", or \"all\"".to_string(),
+        ));
+    };
+    let include_files = matches!(filter, PathKindFilter::File | PathKindFilter::All);
+    let include_dirs = matches!(filter, PathKindFilter::Dir | PathKindFilter::All);
+    with_state("path_metadata_entries", |st| {
         st.ensure_loaded();
         let mut items = Vec::new();
         if include_files {
@@ -1164,9 +1239,7 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
             }
         }
         Ok(VmValue::List(Rc::new(items)))
-    });
-
-    register_scan_builtins(vm);
+    })
 }
 
 /// Compute structure hash for a directory (file names + sizes).
@@ -1217,22 +1290,22 @@ fn fnv_hash(data: &[u8]) -> u64 {
     hash
 }
 
-/// Register scan_directory builtin: native Rust file enumeration.
-pub fn register_scan_builtins(vm: &mut Vm) {
-    // scan_directory(path?, pattern?) -> [{path, size, modified, is_dir}, ...]
-    vm.register_builtin("scan_directory", move |args, _out| {
-        let rel_dir = args.first().map(|a| a.display()).unwrap_or_default();
-        let options = parse_scan_options(args.get(1), args.get(2));
-        let scan_base = resolve_scan_root(".");
-        let full_dir = if rel_dir.is_empty() {
-            scan_base.clone()
-        } else {
-            scan_base.join(&rel_dir)
-        };
-        let mut results: Vec<VmValue> = Vec::new();
-        scan_dir_recursive(&full_dir, &scan_base, &options, &mut results, 0);
-        Ok(VmValue::List(Rc::new(results)))
-    });
+#[harn_builtin(
+    sig = "scan_directory(path?: string, pattern_or_options?: string|dict|nil, options?: dict|nil) -> list",
+    category = "metadata"
+)]
+fn scan_directory_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let rel_dir = args.first().map(|a| a.display()).unwrap_or_default();
+    let options = parse_scan_options(args.get(1), args.get(2));
+    let scan_base = resolve_scan_root(".");
+    let full_dir = if rel_dir.is_empty() {
+        scan_base.clone()
+    } else {
+        scan_base.join(&rel_dir)
+    };
+    let mut results: Vec<VmValue> = Vec::new();
+    scan_dir_recursive(&full_dir, &scan_base, &options, &mut results, 0);
+    Ok(VmValue::List(Rc::new(results)))
 }
 
 fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {

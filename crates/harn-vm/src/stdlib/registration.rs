@@ -1,4 +1,14 @@
 //! Compact registration DSL for low-level stdlib host primitives.
+//!
+//! **Deprecated.** New stdlib builtins MUST be registered with the
+//! `#[harn_builtin]` proc-macro (`crate::stdlib::macros::harn_builtin`). This
+//! module survives only for a handful of unmigrated captured-state callers
+//! (`runtime_context.rs`, `step_runtime.rs`, `checkpoint.rs`, `metadata.rs`,
+//! and similar) whose handlers close over `Rc`/`Arc` state that the macro
+//! doesn't yet model. Once those migrate this module will be removed.
+//!
+//! See `CONTRIBUTING.md` ("Adding a stdlib builtin") for the canonical
+//! `#[harn_builtin]` template.
 
 use std::future::Future;
 use std::pin::Pin;

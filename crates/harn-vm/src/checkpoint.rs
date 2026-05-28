@@ -4,12 +4,22 @@
 //! Checkpoints are persisted to `<state-root>/checkpoints/<pipeline>.json`
 //! and survive pipeline crashes/timeouts. On resume, a pipeline can skip
 //! already-processed items by checking `checkpoint_get`.
+//!
+//! The per-pipeline state is per-thread: `register_checkpoint_builtins`
+//! installs a fresh [`CheckpointState`] into a thread-local cell so the
+//! `#[harn_builtin]`-emitted handler fns can read/mutate it without
+//! capturing closures (which would block the macro path). Each VM that
+//! registers checkpoint builtins overrides the cell for its thread —
+//! since the Harn VM is single-threaded per execution, this is the
+//! intended scoping (each pipeline run installs its own state once at
+//! VM setup, then the handlers see it for the duration of the run).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -97,6 +107,31 @@ impl CheckpointState {
     }
 }
 
+thread_local! {
+    /// Active checkpoint state for the current thread's pipeline run.
+    /// Set by `register_checkpoint_builtins`; read by the
+    /// `#[harn_builtin]` handler fns. `None` before the first install
+    /// (i.e. when the checkpoint builtins haven't been registered for
+    /// this VM context) — in that case the handlers return a clear
+    /// runtime error rather than a panic.
+    static CHECKPOINT_STATE: RefCell<Option<CheckpointState>> = const { RefCell::new(None) };
+}
+
+fn with_state<R>(
+    fn_name: &'static str,
+    f: impl FnOnce(&mut CheckpointState) -> Result<R, VmError>,
+) -> Result<R, VmError> {
+    CHECKPOINT_STATE.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let state = guard.as_mut().ok_or_else(|| {
+            VmError::Runtime(format!(
+                "{fn_name}: checkpoint builtins not registered for this VM"
+            ))
+        })?;
+        f(state)
+    })
+}
+
 fn vm_to_json(val: &VmValue) -> serde_json::Value {
     match val {
         VmValue::String(s) => serde_json::Value::String(s.to_string()),
@@ -157,60 +192,104 @@ fn sanitize_pipeline_name(name: &str) -> String {
 /// Register checkpoint builtins on a VM.
 ///
 /// The pipeline name is used to namespace checkpoint files. If not provided,
-/// defaults to "default".
+/// defaults to "default". State is installed into a thread-local cell that
+/// the `#[harn_builtin]`-emitted handlers below read; subsequent calls on
+/// the same thread overwrite the state for that thread (the Harn VM
+/// executes single-threaded per run, so this matches the previous
+/// closure-captured `Rc<RefCell<State>>` semantics).
 pub fn register_checkpoint_builtins(vm: &mut Vm, base_dir: &Path, pipeline_name: &str) {
     let safe_name = sanitize_pipeline_name(pipeline_name);
-    let state = Rc::new(RefCell::new(CheckpointState::new(base_dir, &safe_name)));
-
-    // checkpoint(key, value) — persist a checkpoint immediately
-    let s = Rc::clone(&state);
-    vm.register_builtin("checkpoint", move |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        let value = args.get(1).unwrap_or(&VmValue::Nil);
-        let json_val = vm_to_json(value);
-        s.borrow_mut()
-            .set(key, json_val)
-            .map_err(VmError::Runtime)?;
-        Ok(VmValue::Nil)
+    CHECKPOINT_STATE.with(|cell| {
+        *cell.borrow_mut() = Some(CheckpointState::new(base_dir, &safe_name));
     });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    // checkpoint_get(key) -> value | nil
-    let s = Rc::clone(&state);
-    vm.register_builtin("checkpoint_get", move |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(s.borrow_mut().get(&key))
-    });
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &CHECKPOINT_IMPL_DEF,
+    &CHECKPOINT_GET_IMPL_DEF,
+    &CHECKPOINT_CLEAR_IMPL_DEF,
+    &CHECKPOINT_LIST_IMPL_DEF,
+    &CHECKPOINT_EXISTS_IMPL_DEF,
+    &CHECKPOINT_DELETE_IMPL_DEF,
+];
 
-    // checkpoint_clear() — clear all checkpoints for this pipeline
-    let s = Rc::clone(&state);
-    vm.register_builtin("checkpoint_clear", move |_args, _out| {
-        s.borrow_mut().clear().map_err(VmError::Runtime)?;
-        Ok(VmValue::Nil)
-    });
+#[harn_builtin(
+    sig = "checkpoint(key: string, value: any) -> nil",
+    category = "checkpoint",
+    doc = "Persist a checkpoint key/value pair to durable storage immediately."
+)]
+fn checkpoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    let value = args.get(1).unwrap_or(&VmValue::Nil);
+    let json_val = vm_to_json(value);
+    with_state("checkpoint", |state| {
+        state.set(key, json_val).map_err(VmError::Runtime)
+    })?;
+    Ok(VmValue::Nil)
+}
 
-    // checkpoint_list() -> [key1, key2, ...]
-    let s = Rc::clone(&state);
-    vm.register_builtin("checkpoint_list", move |_args, _out| {
-        let keys = s.borrow_mut().list();
+#[harn_builtin(
+    sig = "checkpoint_get(key: string) -> any",
+    category = "checkpoint",
+    doc = "Read a persisted checkpoint value, or nil if the key is absent."
+)]
+fn checkpoint_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    with_state("checkpoint_get", |state| Ok(state.get(&key)))
+}
+
+#[harn_builtin(
+    sig = "checkpoint_clear() -> nil",
+    category = "checkpoint",
+    doc = "Clear every checkpoint for the active pipeline."
+)]
+fn checkpoint_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    with_state("checkpoint_clear", |state| {
+        state.clear().map_err(VmError::Runtime)
+    })?;
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "checkpoint_list() -> list",
+    category = "checkpoint",
+    doc = "Return every checkpoint key for the active pipeline."
+)]
+fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    with_state("checkpoint_list", |state| {
+        let keys = state.list();
         Ok(VmValue::List(Rc::new(
             keys.into_iter()
                 .map(|k| VmValue::String(Rc::from(k)))
                 .collect(),
         )))
-    });
+    })
+}
 
-    // checkpoint_exists(key): true if key is present, even if its value is nil.
-    let s = Rc::clone(&state);
-    vm.register_builtin("checkpoint_exists", move |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::Bool(s.borrow_mut().exists(&key)))
-    });
+#[harn_builtin(
+    sig = "checkpoint_exists(key: string) -> bool",
+    category = "checkpoint",
+    doc = "Return true when the checkpoint key is present (even when its value is nil)."
+)]
+fn checkpoint_exists_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    with_state("checkpoint_exists", |state| {
+        Ok(VmValue::Bool(state.exists(&key)))
+    })
+}
 
-    // checkpoint_delete(key) — remove a single key from the checkpoint store
-    let s = Rc::clone(&state);
-    vm.register_builtin("checkpoint_delete", move |args, _out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        s.borrow_mut().delete(&key).map_err(VmError::Runtime)?;
-        Ok(VmValue::Nil)
-    });
+#[harn_builtin(
+    sig = "checkpoint_delete(key: string) -> nil",
+    category = "checkpoint",
+    doc = "Remove a single key from the checkpoint store."
+)]
+fn checkpoint_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    with_state("checkpoint_delete", |state| {
+        state.delete(&key).map_err(VmError::Runtime)
+    })?;
+    Ok(VmValue::Nil)
 }

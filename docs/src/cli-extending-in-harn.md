@@ -378,8 +378,10 @@ the canonical `harness.X.Y` sub-handle when the script receives a `Harness`
 parameter; top-level helpers remain aliases for scripts that run outside that
 shape. Add new capabilities the same way:
 
-1. Register the builtin in `crates/harn-vm/src/stdlib/<area>.rs` with
-   `register_builtin` and the matching `Harness` accessor.
+1. Register the builtin in `crates/harn-vm/src/stdlib/<area>.rs` with a
+   `#[harn_builtin]` annotation (see
+   [Adding a stdlib builtin](../../CONTRIBUTING.md#adding-a-stdlib-builtin))
+   and wire the matching `Harness` accessor.
 2. Drop a conformance fixture under `conformance/tests/host_<cap>_*`
    pinning the contract.
 3. Document the capability under `docs/src/host-capabilities/` and

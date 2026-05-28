@@ -26,6 +26,7 @@ use crate::orchestration::{
     HookEvent,
 };
 use crate::personas::StageDecl;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
 
 fn vm_str(value: &VmValue) -> Option<&str> {
@@ -972,17 +973,27 @@ pub fn completed_step_to_json(step: &CompletedStep) -> JsonValue {
     serde_json::to_value(step).unwrap_or(JsonValue::Null)
 }
 
-/// Register the `__register_step` host builtin. Compiler-emitted
-/// bytecode after every `@step` declaration calls it with
-/// `(function_name, metadata_dict)` so the runtime can later dispatch on
-/// the step's metadata when its function is invoked.
+/// Register the `__register_step` and `__register_persona` host builtins.
+/// Compiler-emitted bytecode after every `@step` / persona declaration
+/// calls these with `(function_name, metadata_dict)` so the runtime can
+/// later dispatch on the step's metadata when its function is invoked.
 pub fn register_step_builtins(vm: &mut crate::vm::Vm) {
-    vm.register_builtin("__register_step", |args, _out| {
-        register_step_from_dict(args.to_vec())
-    });
-    vm.register_builtin("__register_persona", |args, _out| {
-        register_persona_from_dict(args.to_vec())
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
+    &[&__REGISTER_STEP_DEF, &__REGISTER_PERSONA_DEF];
+
+#[harn_builtin(category = "step_runtime", runtime_only = true)]
+fn __register_step(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    register_step_from_dict(args.to_vec())
+}
+
+#[harn_builtin(category = "step_runtime", runtime_only = true)]
+fn __register_persona(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    register_persona_from_dict(args.to_vec())
 }
 
 #[cfg(test)]

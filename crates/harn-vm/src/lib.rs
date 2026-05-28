@@ -183,7 +183,7 @@ pub use mcp_server::{
     take_mcp_serve_prompts, take_mcp_serve_registry, take_mcp_serve_resource_templates,
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
 };
-pub use metadata::{register_metadata_builtins, register_scan_builtins};
+pub use metadata::register_metadata_builtins;
 pub use orchestration::{
     benchmark_adapted_replay_pair, benchmark_replay_trace, build_replay_benchmark_report,
     OpenCodeJsonlAdapter, ReplayBenchmarkCloudIngest, ReplayBenchmarkError,

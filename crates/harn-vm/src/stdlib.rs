@@ -1,4 +1,18 @@
 //! Standard library builtins for the Harn VM.
+//!
+//! New builtins are declared with the `#[harn_builtin]` proc-macro
+//! (`crate::stdlib::macros::harn_builtin`). Each annotation emits a sibling
+//! `static <FN>_DEF: VmBuiltinDef` carrying the signature, aliases, handler,
+//! and metadata; modules collect those into a `MODULE_BUILTINS: &[&VmBuiltinDef]`
+//! slice and expose a `register_<module>_builtins(vm)` that iterates it.
+//! `all_builtin_defs()` below concatenates every module's slice (alphabetical
+//! by module) and `register_vm_stdlib` installs the resulting signatures into
+//! the parser registry.
+//!
+//! The legacy DSL under [`registration`] (`SyncBuiltin`, `AsyncBuiltin`,
+//! `BuiltinGroup`, `register_builtin_group`) is deprecated and retained only
+//! for a small set of unmigrated callers. New code MUST use `#[harn_builtin]`.
+//! See `CONTRIBUTING.md` ("Adding a stdlib builtin") for the full template.
 
 pub mod macros;
 
@@ -254,7 +268,6 @@ fn stdlib_probe_vm() -> Vm {
     crate::store::register_store_builtins(&mut vm, &tmp);
     crate::checkpoint::register_checkpoint_builtins(&mut vm, &tmp, "default");
     crate::metadata::register_metadata_builtins(&mut vm, &tmp);
-    crate::metadata::register_scan_builtins(&mut vm);
     // Install the macro-emitted signatures into the parser registry so any
     // probe-driven name/metadata query (e.g. the alignment test) sees the
     // post-migration sig set. Idempotent under repeat install with the same
@@ -279,15 +292,18 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         let mut out: Vec<&'static macros::VmBuiltinDef> = Vec::new();
         out.extend_from_slice(agent_sessions::MODULE_BUILTINS);
         out.extend_from_slice(agent_state::MODULE_BUILTINS);
+        out.extend_from_slice(agents::MODULE_BUILTINS);
         out.extend_from_slice(agents_daemon::MODULE_BUILTINS);
         out.extend_from_slice(bytes::MODULE_BUILTINS);
         out.extend_from_slice(calendar::MODULE_BUILTINS);
         out.extend_from_slice(channel_guardrails::MODULE_BUILTINS);
+        out.extend_from_slice(crate::checkpoint::MODULE_BUILTINS);
         out.extend_from_slice(clock::MODULE_BUILTINS);
         out.extend_from_slice(collections::MODULE_BUILTINS);
         out.extend_from_slice(command_policy::MODULE_BUILTINS);
         out.extend_from_slice(compaction::MODULE_BUILTINS);
         out.extend_from_slice(compression::MODULE_BUILTINS);
+        out.extend_from_slice(concurrency::MODULE_BUILTINS);
         out.extend_from_slice(connectors::MODULE_BUILTINS);
         out.extend_from_slice(cookies::MODULE_BUILTINS);
         out.extend_from_slice(crypto::MODULE_BUILTINS);
@@ -309,6 +325,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(lifecycle_receipts::MODULE_BUILTINS);
         out.extend_from_slice(math::MODULE_BUILTINS);
         out.extend_from_slice(memory::MODULE_BUILTINS);
+        out.extend_from_slice(crate::metadata::MODULE_BUILTINS);
         out.extend_from_slice(monitors::MODULE_BUILTINS);
         out.extend_from_slice(multipart::MODULE_BUILTINS);
         out.extend_from_slice(net_policy::MODULE_BUILTINS);
@@ -327,6 +344,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(sets::MODULE_BUILTINS);
         out.extend_from_slice(shapes::MODULE_BUILTINS);
         out.extend_from_slice(skills::MODULE_BUILTINS);
+        out.extend_from_slice(crate::step_runtime::MODULE_BUILTINS);
         out.extend_from_slice(strings::MODULE_BUILTINS);
         out.extend_from_slice(supervisor::MODULE_BUILTINS);
         out.extend_from_slice(testbench::MODULE_BUILTINS);

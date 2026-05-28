@@ -131,46 +131,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
-        "host_call",
-        &[
-            Param::new("name", TY_STRING),
-            Param::optional("params", TY_DICT),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple("host_capabilities", &[], TY_DICT),
-    BuiltinSignature::simple(
-        "host_has",
-        &[
-            Param::new("capability", TY_STRING),
-            Param::optional("operation", TY_STRING),
-        ],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple(
-        "host_mock",
-        &[
-            Param::new("capability", TY_STRING),
-            Param::new("operation", TY_STRING),
-            Param::optional("result_or_config", TY_ANY),
-            Param::optional("params", TY_DICT),
-        ],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple("host_mock_calls", &[], TY_LIST),
-    BuiltinSignature::simple("host_mock_clear", &[], TY_NIL),
-    BuiltinSignature::simple("host_mock_pop_scope", &[], TY_NIL),
-    BuiltinSignature::simple("host_mock_push_scope", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "host_tool_call",
-        &[
-            Param::new("name", TY_STRING),
-            Param::optional("args", TY_ANY),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple("host_tool_list", &[], TY_LIST),
-    BuiltinSignature::simple(
         "http_delete",
         &[
             Param::new("url", TY_STRING),

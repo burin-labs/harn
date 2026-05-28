@@ -127,6 +127,11 @@ polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
   `README.md`, `CHANGELOG.md`, and conformance fixtures.
 - Keep stdlib registration authoritative. Linter and editor builtin awareness
   derives from the live stdlib.
+- Register new stdlib builtins with `#[harn_builtin]` (see
+  [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-stdlib-builtin)). The legacy
+  `SyncBuiltin` / `AsyncBuiltin` / `BuiltinGroup` / `register_builtin_group`
+  DSL in `crates/harn-vm/src/stdlib/registration.rs` is deprecated and only
+  survives for a handful of captured-state files; do not extend it.
 - Public CLI, builtin, or host-capability changes need user-facing docs and
   help text.
 - Prompt-template syntax changes also require

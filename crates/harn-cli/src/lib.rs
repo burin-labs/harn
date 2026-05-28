@@ -40,6 +40,23 @@ pub const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
 
 static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
 
+/// Install the macro-emitted builtin signature slice into the
+/// `harn_parser` registry the first time any harn-cli entry point parses
+/// or typechecks a script.
+///
+/// Every code path that drives the parser — `run()`, `execute_run()`,
+/// `parse_source_file()`, `analyze_file()`, every test harness — funnels
+/// through this single helper so the registry is always populated by the
+/// time the typechecker reads it. `install_builtin_signatures` is
+/// idempotent on identical `&'static` slices, so repeat calls are
+/// cheap (a `OnceLock::set` that no-ops after the first success).
+///
+/// Tests cannot rely on `run()` having executed, so they must reach the
+/// parser via one of these entry points (which always do call this).
+pub(crate) fn ensure_builtin_signatures_installed() {
+    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+}
+
 #[cfg(feature = "hostlib")]
 pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
     let _ = harn_hostlib::install_default(vm);
@@ -53,12 +70,7 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 pub fn run() {
     install_broken_pipe_panic_hook();
 
-    // Install the macro-emitted builtin signature slice into the parser
-    // registry BEFORE any script gets parsed. Without this, the typechecker
-    // falls back to the legacy static tables, which are missing the
-    // signatures for `#[harn_builtin]`-migrated entries (deep_clone,
-    // deep_merge, unique, dict_from_pairs, …).
-    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+    ensure_builtin_signatures_installed();
 
     let handle = thread::Builder::new()
         .name("harn-cli".to_string())
@@ -2752,16 +2764,7 @@ fn collect_structural_eval_runs(dir: &Path) -> Vec<harn_vm::orchestration::RunRe
 
 /// Exits on error.
 pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>) {
-    // Lazily install the macro-emitted builtin signatures so commands that
-    // bypass `run()` / `execute_run()` (playground, package_scaffold, bench,
-    // explain, precompile, pack, check/bundle, the run-tests harness…) still
-    // see a populated parser registry before the first typecheck pass.
-    // Idempotent — `all_builtin_signatures()` returns the same `&'static`
-    // slice on repeat calls.
-    static INSTALL_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    INSTALL_ONCE.get_or_init(|| {
-        harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
-    });
+    ensure_builtin_signatures_installed();
 
     let source = match fs::read_to_string(path) {
         Ok(s) => s,

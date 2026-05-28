@@ -18,6 +18,8 @@ pub(crate) fn analyze_file(
     config: &CheckConfig,
     module_graph: &harn_modules::ModuleGraph,
 ) -> Result<TypeCheckOutput, FileAnalysisError> {
+    crate::ensure_builtin_signatures_installed();
+
     let source = std::fs::read_to_string(path).map_err(FileAnalysisError::Read)?;
     let id = SourceId::path(path);
     analysis.set_source(id.clone(), source, SourceVersion(1));
