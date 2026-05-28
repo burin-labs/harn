@@ -12,80 +12,25 @@ use super::compact::{
     TRANSCRIPT_AUTO_COMPACT_BUILTIN_DEF,
 };
 use super::hooks::*;
-use super::host::*;
-use super::inspect::*;
+use super::host::{
+    HOST_WORKFLOW_FINALIZE_RUN_BUILTIN_DEF, HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN_DEF,
+    HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN_DEF, HOST_WORKFLOW_MAP_FINALIZE_BUILTIN_DEF,
+    HOST_WORKFLOW_MAP_PLAN_BUILTIN_DEF, HOST_WORKFLOW_PREPARE_RUN_BUILTIN_DEF,
+    HOST_WORKFLOW_RECORD_TRANSITIONS_BUILTIN_DEF, HOST_WORKFLOW_STAGE_COMPLETE_BUILTIN_DEF,
+    HOST_WORKFLOW_STAGE_PREPARE_BUILTIN_DEF,
+};
+use super::inspect::{
+    WORKFLOW_CLONE_BUILTIN_DEF, WORKFLOW_COMMIT_BUILTIN_DEF, WORKFLOW_DIFF_BUILTIN_DEF,
+    WORKFLOW_GRAPH_BUILTIN_DEF, WORKFLOW_INSERT_NODE_BUILTIN_DEF, WORKFLOW_INSPECT_BUILTIN_DEF,
+    WORKFLOW_POLICY_REPORT_BUILTIN_DEF, WORKFLOW_REPLACE_NODE_BUILTIN_DEF,
+    WORKFLOW_REWIRE_BUILTIN_DEF, WORKFLOW_SET_AUTO_COMPACT_BUILTIN_DEF,
+    WORKFLOW_SET_CONTEXT_POLICY_BUILTIN_DEF, WORKFLOW_SET_MODEL_POLICY_BUILTIN_DEF,
+    WORKFLOW_SET_OUTPUT_VISIBILITY_BUILTIN_DEF, WORKFLOW_VALIDATE_BUILTIN_DEF,
+};
 
 const WORKFLOW_STDLIB_ENTRYPOINT_CATEGORY: &str = "workflow.stdlib";
 
 const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("workflow_graph", workflow_graph_builtin)
-        .signature("workflow_graph(input?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Normalize a workflow value and return the canonical workflow graph dict."),
-    SyncBuiltin::new("workflow_validate", workflow_validate_builtin)
-        .signature("workflow_validate(input?, ceiling?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Validate a workflow graph against a capability policy ceiling."),
-    SyncBuiltin::new("workflow_inspect", workflow_inspect_builtin)
-        .signature("workflow_inspect(input?, ceiling?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Return normalized workflow graph shape and validation details."),
-    SyncBuiltin::new("workflow_policy_report", workflow_policy_report_builtin)
-        .signature("workflow_policy_report(graph, ceiling?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Report workflow and node policies against an effective ceiling."),
-    SyncBuiltin::new("workflow_clone", workflow_clone_builtin)
-        .signature("workflow_clone(graph)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Clone a workflow graph and append audit metadata."),
-    SyncBuiltin::new("workflow_insert_node", workflow_insert_node_builtin)
-        .signature("workflow_insert_node(graph, node, edge?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Insert a node and optional edge into a workflow graph."),
-    SyncBuiltin::new("workflow_replace_node", workflow_replace_node_builtin)
-        .signature("workflow_replace_node(graph, node_id, node)")
-        .arity(VmBuiltinArity::Exact(3))
-        .doc("Replace one node in a workflow graph."),
-    SyncBuiltin::new("workflow_rewire", workflow_rewire_builtin)
-        .signature("workflow_rewire(graph, from, to, branch?)")
-        .arity(VmBuiltinArity::Range { min: 3, max: 4 })
-        .doc("Replace outgoing edge wiring for one workflow graph node."),
-    SyncBuiltin::new(
-        "workflow_set_model_policy",
-        workflow_set_model_policy_builtin,
-    )
-    .signature("workflow_set_model_policy(graph, node_id, policy)")
-    .arity(VmBuiltinArity::Exact(3))
-    .doc("Set one node's model policy."),
-    SyncBuiltin::new(
-        "workflow_set_context_policy",
-        workflow_set_context_policy_builtin,
-    )
-    .signature("workflow_set_context_policy(graph, node_id, policy)")
-    .arity(VmBuiltinArity::Exact(3))
-    .doc("Set one node's context policy."),
-    SyncBuiltin::new(
-        "workflow_set_auto_compact",
-        workflow_set_auto_compact_builtin,
-    )
-    .signature("workflow_set_auto_compact(graph, node_id, policy)")
-    .arity(VmBuiltinArity::Exact(3))
-    .doc("Set one node's auto-compaction policy."),
-    SyncBuiltin::new(
-        "workflow_set_output_visibility",
-        workflow_set_output_visibility_builtin,
-    )
-    .signature("workflow_set_output_visibility(graph, node_id, visibility)")
-    .arity(VmBuiltinArity::Exact(3))
-    .doc("Set one node's output visibility policy."),
-    SyncBuiltin::new("workflow_diff", workflow_diff_builtin)
-        .signature("workflow_diff(left, right)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Compare two workflow graph values for canonical JSON changes."),
-    SyncBuiltin::new("workflow_commit", workflow_commit_builtin)
-        .signature("workflow_commit(graph, reason?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Validate and commit workflow graph audit metadata."),
     SyncBuiltin::new("register_tool_hook", register_tool_hook_builtin)
         .signature("register_tool_hook(config?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
@@ -155,72 +100,9 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("notify_file_edited(path, metadata?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
         .doc("Queue a `FileEdited` notification; hooks fire on the next agent-loop boundary."),
-    SyncBuiltin::new(
-        HOST_WORKFLOW_PREPARE_RUN_BUILTIN,
-        host_workflow_prepare_run_builtin,
-    )
-    .signature("__host_workflow_prepare_run(task, graph, artifacts?, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-    .doc("Prepare low-level workflow run state for the Harn stdlib workflow executor."),
-    SyncBuiltin::new(
-        HOST_WORKFLOW_RECORD_TRANSITIONS_BUILTIN,
-        host_workflow_record_transitions_builtin,
-    )
-    .signature("__host_workflow_record_transitions(state_id, ready_nodes, stage, edges)")
-    .arity(VmBuiltinArity::Exact(4))
-    .doc("Record workflow stage transitions and checkpoint low-level run state."),
-    SyncBuiltin::new(
-        HOST_WORKFLOW_FINALIZE_RUN_BUILTIN,
-        host_workflow_finalize_run_builtin,
-    )
-    .signature("__host_workflow_finalize_run(state_id, ready_nodes)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Finalize low-level workflow run state and persist the final checkpoint."),
-    SyncBuiltin::new(
-        HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN,
-        host_workflow_map_branch_artifact_builtin,
-    )
-    .signature("__host_workflow_map_branch_artifact(node_id, item, lineage)")
-    .arity(VmBuiltinArity::Exact(3))
-    .doc("Build the synthesized input artifact for one Harn-owned workflow map branch."),
 ];
 
 const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!(
-        HOST_WORKFLOW_STAGE_PREPARE_BUILTIN,
-        host_workflow_stage_prepare_builtin
-    )
-    .signature("__host_workflow_stage_prepare(state_id, node_id, ready_nodes, options?)")
-    .arity(VmBuiltinArity::Range { min: 3, max: 4 })
-    .doc("Prepare one low-level workflow stage and install its execution scope."),
-    async_builtin!(
-        HOST_WORKFLOW_STAGE_COMPLETE_BUILTIN,
-        host_workflow_stage_complete_builtin
-    )
-    .signature("__host_workflow_stage_complete(state_id, node_id, llm_result)")
-    .arity(VmBuiltinArity::Exact(3))
-    .doc("Complete one prepared low-level workflow stage and tear down its execution scope."),
-    async_builtin!(
-        HOST_WORKFLOW_MAP_PLAN_BUILTIN,
-        host_workflow_map_plan_builtin
-    )
-    .signature("__host_workflow_map_plan(node, artifacts)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Return the host-normalized execution plan for a workflow map stage."),
-    async_builtin!(
-        HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN,
-        host_workflow_map_execute_branch_builtin
-    )
-    .signature("__host_workflow_map_execute_branch(node_id, plan, item, branch_artifact, options?)")
-    .arity(VmBuiltinArity::Range { min: 4, max: 5 })
-    .doc("Execute one workflow map branch while Harn owns branch scheduling."),
-    async_builtin!(
-        HOST_WORKFLOW_MAP_FINALIZE_BUILTIN,
-        host_workflow_map_finalize_builtin
-    )
-    .signature("__host_workflow_map_finalize(strategy, total_items, completed, failures, produced)")
-    .arity(VmBuiltinArity::Exact(5))
-    .doc("Finalize a Harn-owned workflow map stage after branch settlement."),
     async_builtin!("__host_fire_session_hook", fire_session_hook_builtin)
         .signature("__host_fire_session_hook(event, payload?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
@@ -237,10 +119,36 @@ const WORKFLOW_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
     .async_(WORKFLOW_ASYNC_PRIMITIVES);
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    // compact (already migrated to #[harn_builtin] in stdlib/workflow/compact.rs)
     &SELECT_ARTIFACTS_ADAPTIVE_BUILTIN_DEF,
     &ESTIMATE_TOKENS_BUILTIN_DEF,
     &MICROCOMPACT_BUILTIN_DEF,
     &TRANSCRIPT_AUTO_COMPACT_BUILTIN_DEF,
+    // inspect (graph-shape builders + structural manipulation)
+    &WORKFLOW_GRAPH_BUILTIN_DEF,
+    &WORKFLOW_VALIDATE_BUILTIN_DEF,
+    &WORKFLOW_INSPECT_BUILTIN_DEF,
+    &WORKFLOW_POLICY_REPORT_BUILTIN_DEF,
+    &WORKFLOW_CLONE_BUILTIN_DEF,
+    &WORKFLOW_INSERT_NODE_BUILTIN_DEF,
+    &WORKFLOW_REPLACE_NODE_BUILTIN_DEF,
+    &WORKFLOW_REWIRE_BUILTIN_DEF,
+    &WORKFLOW_SET_MODEL_POLICY_BUILTIN_DEF,
+    &WORKFLOW_SET_CONTEXT_POLICY_BUILTIN_DEF,
+    &WORKFLOW_SET_AUTO_COMPACT_BUILTIN_DEF,
+    &WORKFLOW_SET_OUTPUT_VISIBILITY_BUILTIN_DEF,
+    &WORKFLOW_DIFF_BUILTIN_DEF,
+    &WORKFLOW_COMMIT_BUILTIN_DEF,
+    // host (low-level workflow runtime helpers, all runtime_only)
+    &HOST_WORKFLOW_PREPARE_RUN_BUILTIN_DEF,
+    &HOST_WORKFLOW_RECORD_TRANSITIONS_BUILTIN_DEF,
+    &HOST_WORKFLOW_FINALIZE_RUN_BUILTIN_DEF,
+    &HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN_DEF,
+    &HOST_WORKFLOW_STAGE_PREPARE_BUILTIN_DEF,
+    &HOST_WORKFLOW_STAGE_COMPLETE_BUILTIN_DEF,
+    &HOST_WORKFLOW_MAP_PLAN_BUILTIN_DEF,
+    &HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN_DEF,
+    &HOST_WORKFLOW_MAP_FINALIZE_BUILTIN_DEF,
 ];
 
 pub(crate) fn register_workflow_builtins(vm: &mut Vm) {

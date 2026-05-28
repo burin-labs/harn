@@ -12,7 +12,7 @@
 
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_LIST, TY_NIL,
-    TY_STRING, TY_STRING_OR_NIL,
+    TY_STRING,
 };
 
 /// `dict | Schema<any>` — schema aliases type-check as `Schema<T>` but
@@ -28,29 +28,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("options", TY_DICT)],
         TY_DICT,
     ),
-    // handoff_effects(source, ceiling?) -> typed effect set computed from a
-    // child agent's entrypoint Harn source,
-    // workflow_clone(workflow) -> cloned workflow graph dict.
-    BuiltinSignature::simple(
-        "workflow_clone",
-        &[Param::new("workflow", TY_DICT)],
-        TY_DICT,
-    ),
-    // workflow_commit(workflow, reason?) -> committed graph dict.
-    BuiltinSignature::simple(
-        "workflow_commit",
-        &[
-            Param::new("workflow", TY_DICT),
-            Param::optional("reason", TY_STRING_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    // workflow_diff(left, right) -> `{changed, left, right}` dict.
-    BuiltinSignature::simple(
-        "workflow_diff",
-        &[Param::new("left", TY_DICT), Param::new("right", TY_DICT)],
-        TY_DICT,
-    ),
     // workflow_execute(task, workflow, artifacts?, options?) — async;
     // runs the workflow and returns `{status, run, artifacts,
     // transcript, path}`.
@@ -64,108 +41,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
-    // workflow_graph(workflow?) -> normalized graph dict.
-    BuiltinSignature::simple(
-        "workflow_graph",
-        &[Param::optional("workflow", TY_DICT_OR_NIL)],
-        TY_DICT,
-    ),
-    // workflow_insert_node(workflow, node, edge?) -> updated graph dict.
-    BuiltinSignature::simple(
-        "workflow_insert_node",
-        &[
-            Param::new("workflow", TY_DICT),
-            Param::new("node", TY_DICT),
-            Param::optional("edge", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    // workflow_inspect(workflow, ceiling?) -> `{graph, validation,
-    // node_count, edge_count}` dict.
-    BuiltinSignature::simple(
-        "workflow_inspect",
-        &[
-            Param::optional("workflow", TY_DICT_OR_NIL),
-            Param::optional("ceiling", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    // workflow_policy_report(workflow, ceiling?) -> per-node policy
-    // report dict.
-    BuiltinSignature::simple(
-        "workflow_policy_report",
-        &[
-            Param::optional("workflow", TY_DICT_OR_NIL),
-            Param::optional("ceiling", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    // workflow_replace_node(workflow, node_id, node) -> updated graph
-    // dict.
-    BuiltinSignature::simple(
-        "workflow_replace_node",
-        &[
-            Param::new("workflow", TY_DICT),
-            Param::new("node_id", TY_STRING),
-            Param::new("node", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    // workflow_rewire(workflow, from, to, branch?) -> updated graph dict.
-    BuiltinSignature::simple(
-        "workflow_rewire",
-        &[
-            Param::new("workflow", TY_DICT),
-            Param::new("from", TY_STRING),
-            Param::new("to", TY_STRING),
-            Param::optional("branch", TY_STRING_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    // workflow_set_auto_compact(workflow, node_id, policy) -> updated
-    // graph dict.
-    BuiltinSignature::simple(
-        "workflow_set_auto_compact",
-        &[
-            Param::new("workflow", TY_DICT),
-            Param::new("node_id", TY_STRING),
-            Param::new("policy", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    // workflow_set_context_policy(workflow, node_id, policy) -> updated
-    // graph dict.
-    BuiltinSignature::simple(
-        "workflow_set_context_policy",
-        &[
-            Param::new("workflow", TY_DICT),
-            Param::new("node_id", TY_STRING),
-            Param::new("policy", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    // workflow_set_model_policy(workflow, node_id, policy) -> updated
-    // graph dict.
-    BuiltinSignature::simple(
-        "workflow_set_model_policy",
-        &[
-            Param::new("workflow", TY_DICT),
-            Param::new("node_id", TY_STRING),
-            Param::new("policy", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    // workflow_set_output_visibility(workflow, node_id, visibility) ->
-    // updated graph dict. `visibility` is `string | nil`.
-    BuiltinSignature::simple(
-        "workflow_set_output_visibility",
-        &[
-            Param::new("workflow", TY_DICT),
-            Param::new("node_id", TY_STRING),
-            Param::new("visibility", TY_STRING_OR_NIL),
-        ],
-        TY_DICT,
-    ),
     BuiltinSignature::simple(
         "workflow_typed_output_checkpoint",
         &[
@@ -174,16 +49,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("schema", TY_SCHEMA_VALUE),
             Param::optional("options", TY_DICT_OR_NIL),
             Param::optional("validator", Ty::Union(&[TY_CLOSURE, TY_NIL])),
-        ],
-        TY_DICT,
-    ),
-    // workflow_validate(workflow?, ceiling?) -> validation report dict
-    // (`{valid, errors, warnings, ...}`).
-    BuiltinSignature::simple(
-        "workflow_validate",
-        &[
-            Param::optional("workflow", TY_DICT_OR_NIL),
-            Param::optional("ceiling", TY_DICT_OR_NIL),
         ],
         TY_DICT,
     ),

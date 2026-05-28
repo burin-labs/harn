@@ -4,9 +4,17 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::orchestration::{normalize_workflow_value, ArtifactRecord, WorkflowEdge};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
 use super::super::parse_artifact_list;
+
+// Builtin-name string constants — referenced inside fn bodies for
+// error formatting. Only the ones that appear in error paths remain.
+const HOST_WORKFLOW_MAP_PLAN_BUILTIN: &str = "__host_workflow_map_plan";
+const HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN: &str = "__host_workflow_map_branch_artifact";
+const HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN: &str = "__host_workflow_map_execute_branch";
+const HOST_WORKFLOW_MAP_FINALIZE_BUILTIN: &str = "__host_workflow_map_finalize";
 
 use super::artifact::artifact_from_value;
 use super::convert::to_vm;
@@ -22,19 +30,12 @@ use super::state::{
     record_workflow_transitions, remove_workflow_state, workflow_control_to_vm,
 };
 
-pub(super) const HOST_WORKFLOW_PREPARE_RUN_BUILTIN: &str = "__host_workflow_prepare_run";
-pub(super) const HOST_WORKFLOW_STAGE_PREPARE_BUILTIN: &str = "__host_workflow_stage_prepare";
-pub(super) const HOST_WORKFLOW_STAGE_COMPLETE_BUILTIN: &str = "__host_workflow_stage_complete";
-pub(super) const HOST_WORKFLOW_RECORD_TRANSITIONS_BUILTIN: &str =
-    "__host_workflow_record_transitions";
-pub(super) const HOST_WORKFLOW_FINALIZE_RUN_BUILTIN: &str = "__host_workflow_finalize_run";
-pub(super) const HOST_WORKFLOW_MAP_PLAN_BUILTIN: &str = "__host_workflow_map_plan";
-pub(super) const HOST_WORKFLOW_MAP_BRANCH_ARTIFACT_BUILTIN: &str =
-    "__host_workflow_map_branch_artifact";
-pub(super) const HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN: &str =
-    "__host_workflow_map_execute_branch";
-pub(super) const HOST_WORKFLOW_MAP_FINALIZE_BUILTIN: &str = "__host_workflow_map_finalize";
-
+/// Prepare low-level workflow run state for the Harn stdlib workflow executor.
+#[harn_builtin(
+    sig = "__host_workflow_prepare_run(task: string, graph: dict, artifacts?: list|nil, options?: dict|nil) -> dict",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) fn host_workflow_prepare_run_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -55,6 +56,13 @@ pub(super) fn host_workflow_prepare_run_builtin(
     Ok(control)
 }
 
+/// Prepare one low-level workflow stage and install its execution scope.
+#[harn_builtin(
+    sig = "__host_workflow_stage_prepare(state_id: string, node_id: string, ready_nodes: list, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) async fn host_workflow_stage_prepare_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -75,6 +83,13 @@ pub(super) async fn host_workflow_stage_prepare_builtin(
     Ok(plan)
 }
 
+/// Complete one prepared low-level workflow stage and tear down its execution scope.
+#[harn_builtin(
+    sig = "__host_workflow_stage_complete(state_id: string, node_id: string, llm_result: any) -> dict",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) async fn host_workflow_stage_complete_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -104,6 +119,12 @@ pub(super) async fn host_workflow_stage_complete_builtin(
     Ok(VmValue::Dict(Rc::new(dict)))
 }
 
+/// Record workflow stage transitions and checkpoint low-level run state.
+#[harn_builtin(
+    sig = "__host_workflow_record_transitions(state_id: string, ready_nodes: list, stage: dict, edges: list) -> dict",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) fn host_workflow_record_transitions_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -134,6 +155,12 @@ pub(super) fn host_workflow_record_transitions_builtin(
     Ok(control)
 }
 
+/// Finalize low-level workflow run state and persist the final checkpoint.
+#[harn_builtin(
+    sig = "__host_workflow_finalize_run(state_id: string, ready_nodes: list) -> dict",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) fn host_workflow_finalize_run_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -145,6 +172,13 @@ pub(super) fn host_workflow_finalize_run_builtin(
     finalize_workflow_state(state)
 }
 
+/// Return the host-normalized execution plan for a workflow map stage.
+#[harn_builtin(
+    sig = "__host_workflow_map_plan(node: dict, artifacts: list) -> dict",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) async fn host_workflow_map_plan_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let node: crate::orchestration::WorkflowNode =
         parse_json_arg(args.first(), HOST_WORKFLOW_MAP_PLAN_BUILTIN)?;
@@ -153,6 +187,12 @@ pub(super) async fn host_workflow_map_plan_builtin(args: Vec<VmValue>) -> Result
     to_vm(&plan)
 }
 
+/// Build the synthesized input artifact for one Harn-owned workflow map branch.
+#[harn_builtin(
+    sig = "__host_workflow_map_branch_artifact(node_id: string, item: any, lineage: dict) -> dict",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) fn host_workflow_map_branch_artifact_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -172,6 +212,13 @@ pub(super) fn host_workflow_map_branch_artifact_builtin(
     to_vm(&map_branch_artifact(&node_id, &item, &lineage).normalize())
 }
 
+/// Execute one workflow map branch while Harn owns branch scheduling.
+#[harn_builtin(
+    sig = "__host_workflow_map_execute_branch(node_id: string, plan: dict, item: any, branch_artifact: dict, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) async fn host_workflow_map_execute_branch_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -260,6 +307,13 @@ pub(super) async fn host_workflow_map_execute_branch_builtin(
     to_vm(&branch)
 }
 
+/// Finalize a Harn-owned workflow map stage after branch settlement.
+#[harn_builtin(
+    sig = "__host_workflow_map_finalize(strategy: string, total_items: int, completed: list, failures: list, produced: list) -> dict",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) async fn host_workflow_map_finalize_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
