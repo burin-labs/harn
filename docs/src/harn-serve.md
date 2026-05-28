@@ -38,6 +38,34 @@ The `harn-serve` crate owns these pieces:
 This keeps adapter tickets focused on protocol mechanics such as discovery
 documents, streaming, progress notifications, or session semantics.
 
+## HTTP response codec
+
+For HTTP-shaped adapters (the local Agents API and any future REST
+surface), `.harn` handlers shape their replies with the `http_*`
+builtins. The handler returns the result of one of these — the
+adapter renders it into a real `axum::Response`:
+
+| Builtin                                          | Result                                                  |
+| ------------------------------------------------ | ------------------------------------------------------- |
+| `http_ok(body)`                                  | `200 OK` + JSON `body`                                  |
+| `http_created(body, location?)`                  | `201 Created` + optional `Location` header              |
+| `http_no_content()`                              | `204 No Content`, body suppressed                       |
+| `http_error(status, code, message, details?)`    | error envelope: `{ code, message, request_id, details? }` |
+| `http_stream(source, content_type?)`             | streamed body, `source` is a list or channel of chunks  |
+| `http_sse(source, retry_ms?)`                    | Server-Sent Events, `source` is a list or channel       |
+| `http_reply(status, body?, headers?)`            | low-level escape hatch for arbitrary 1xx-5xx codes      |
+
+Plain values returned from a handler still work — they degrade to
+`200 OK` with `Content-Type: application/json`. Untagged dicts that
+happen to have a `status` key are not picked up; only the tagged
+record from the builtins above is.
+
+Adapter-level dispatch failures (auth, scope, validation, execution)
+render through the same envelope, so callers see one consistent
+error shape regardless of who raised the error. The `request_id`
+field is filled in by the codec from the inbound request and is
+always present.
+
 ## Picking an adapter
 
 Choose the adapter based on the caller's mental model, not by protocol

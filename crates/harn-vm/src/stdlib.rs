@@ -33,6 +33,7 @@ pub(crate) mod harn_entry;
 pub(crate) mod hitl;
 mod hitl_read;
 pub mod host;
+pub mod http_response;
 pub(crate) mod io;
 mod iter;
 pub(crate) mod json;
@@ -139,6 +140,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     flow::register_flow_builtins(vm);
     lifecycle_receipts::register_lifecycle_receipt_builtins(vm);
     net_policy::register_net_policy_builtins(vm);
+    http_response::register_http_response_builtins(vm);
 }
 
 /// Register I/O builtins (requires OS access).
@@ -298,6 +300,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(hitl::MODULE_BUILTINS);
         out.extend_from_slice(hitl_read::MODULE_BUILTINS);
         out.extend_from_slice(host::MODULE_BUILTINS);
+        out.extend_from_slice(http_response::MODULE_BUILTINS);
         out.extend_from_slice(io::MODULE_BUILTINS);
         out.extend_from_slice(iter::MODULE_BUILTINS);
         out.extend_from_slice(json::MODULE_BUILTINS);
