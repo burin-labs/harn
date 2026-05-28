@@ -72,7 +72,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-release
+  # Scope by ref so a tag-push run does not contend with concurrent
+  # main-push runs from the same release commit (or vice versa). Without
+  # the ref scope a queued tag-push run could sit behind a long main-push
+  # detect-drift and be silently skipped if the GHA queue policy decides
+  # the queued run is stale — see harn#2547 for the v0.8.47 incident
+  # where the tag-push run was cancelled before reaching the publish
+  # step. Different `group` values run concurrently; crates.io
+  # publication is already idempotent (release_ship.sh skips
+  # already-published crates), and the tag-push and main-push paths can
+  # only ever publish the same version once anyway (the tag-push branch
+  # publishes from the pinned tag commit; the main-push branch only
+  # publishes when Cargo.toml is *ahead* of the latest tag, which by
+  # definition is a different version).
+  group: publish-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -149,18 +162,25 @@ jobs:
             echo "::notice::Cargo.toml=$CARGO_VERSION is behind latest tag $LATEST_TAG → publish job will skip."
           else
             DRIFT=false
-            # No drift on push-to-main: tag was already published by the
-            # tag-push trigger of this workflow (or by the build-release-
-            # binaries.yml tag trigger for the binaries). Confirm the
-            # release artifact actually shipped — a clear "already
-            # published" notice reads better than an unexplained
-            # "Publish release: skipped" job in the run UI.
+            # No version drift on push-to-main: tag was already published
+            # by the tag-push trigger of this workflow (or by the
+            # build-release-binaries.yml tag trigger for the binaries).
+            # Self-heal when that prior tag-push run didn't actually
+            # land everything (e.g. cancelled by concurrency policy as
+            # in the v0.8.47 incident, or the App-token publish step
+            # errored). If the GitHub release for $LATEST_TAG has fewer
+            # than the expected assets, force DRIFT=true so the publish
+            # job re-fires. release_ship.sh's per-crate publish is
+            # already idempotent — it skips crates already on crates.io
+            # — so re-running is a no-op for crates that landed and a
+            # recovery for those that didn't.
             if [[ "$EVENT_NAME" == "push" ]]; then
               ASSET_COUNT="$(gh release view "$LATEST_TAG" --json assets --jq '.assets | length' 2>/dev/null || echo 0)"
               if (( ASSET_COUNT >= 5 )); then
                 echo "::notice::$LATEST_TAG already published — $ASSET_COUNT assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended behavior under tag-first publishing."
               else
-                echo "::warning::$LATEST_TAG only has $ASSET_COUNT release assets (expected ≥5). The tag-push trigger of build-release-binaries.yml may have failed — re-fire it manually if so."
+                DRIFT=true
+                echo "::warning::$LATEST_TAG only has $ASSET_COUNT release assets (expected ≥5). Treating as drift and re-publishing from $LATEST_TAG to recover; release_ship.sh's per-crate publish is idempotent."
               fi
             else
               echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
@@ -170,6 +190,16 @@ jobs:
           if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DRIFT" == "false" && -n "$LATEST_TAG" ]]; then
             PUBLISH_REF="$LATEST_TAG"
             echo "::notice::Manual recovery has no tag drift; publishing from existing tag $LATEST_TAG instead of current main."
+          fi
+          # Self-heal recovery on push-to-main: when DRIFT was forced
+          # true above because the tag exists but the release is
+          # missing assets, the workspace at main may have advanced
+          # past the release commit. Pin the publish to the tag so
+          # crates.io content stays tied to the tagged commit, even if
+          # main moved.
+          if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "branch" && "$DRIFT" == "true" && "$CARGO_VERSION" == "$LATEST_VERSION" && -n "$LATEST_TAG" ]]; then
+            PUBLISH_REF="$LATEST_TAG"
+            echo "::notice::Self-heal recovery: publishing from existing tag $LATEST_TAG instead of current main so the release content stays tied to the tagged commit."
           fi
           {
             echo "drift=$DRIFT"
