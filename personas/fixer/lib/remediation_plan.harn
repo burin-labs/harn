@@ -1,0 +1,85 @@
+// Map Flow remediation atoms to std/edit plan ops.
+//
+// Fixer consumes inert remediation suggestions and proposes a follow-up
+// slice. The mutation half of that work routes through std/edit's
+// AST-precise primitives so the resulting atoms preserve language
+// structure rather than relying on freeform text patches. Each atom kind
+// picks the narrowest primitive that fits its shape; only text-shaped
+// remediations and unsupported-language atoms drop to safe_text_patch.
+//
+// Pure shape translation. No I/O. Easy to test from
+// `tests/remediation_plan_test.harn`.
+//
+// Reference: docs/src/cookbook.md#precise-edits-with-ast-tools.
+/**
+ * plan_for_atoms(atoms) -> {plan, fallbacks}.
+ *
+ * `atoms` is a list of remediation atom dicts in the shape:
+ *
+ *   { kind: "rewrite_node" | "insert_at_anchor" | "rename_symbol" | "text",
+ *     path?: string, query?: string, replacement?: string, position?: string,
+ *     content?: string, symbol_ref?: dict, new_name?: string, scope?: string,
+ *     old_text?: string, new_text?: string,
+ *     language_supports_ast?: bool }
+ *
+ * Returns `{plan, fallbacks}` where `plan` is an `edit_dry_run`-shaped
+ * list of plan ops and `fallbacks` lists atoms that could not be mapped
+ * to a structural op (and the reason why).
+ */
+pub fn plan_for_atoms(atoms) {
+  let input = atoms ?? []
+  var plan = []
+  var fallbacks = []
+  for atom in input {
+    let entry = _op_for_atom(atom)
+    if entry?.op != nil {
+      plan = plan + [entry.op]
+    } else {
+      fallbacks = fallbacks + [entry?.fallback]
+    }
+  }
+  return {plan: plan, fallbacks: fallbacks}
+}
+
+fn _op_for_atom(atom) {
+  let kind = atom?.kind ?? ""
+  let supports_ast = atom?.language_supports_ast ?? true
+  if kind == "rewrite_node" && supports_ast {
+    return {
+      op: {
+        op: "apply_node",
+        path: atom.path,
+        query: atom.query,
+        replacement: atom.replacement,
+        select: atom?.select ?? "unique",
+      },
+    }
+  }
+  if kind == "insert_at_anchor" && supports_ast {
+    return {
+      op: {
+        op: "insert_at_anchor",
+        path: atom.path,
+        query: atom.query,
+        position: atom?.position ?? "after",
+        content: atom.content,
+      },
+    }
+  }
+  if kind == "rename_symbol" && supports_ast {
+    // edit_dry_run delegates rename to the standalone primitive so the
+    // per-file metadata survives — fixer mirrors that contract.
+    return {op: nil, fallback: {atom: atom, reason: "rename_symbol_uses_standalone_primitive"}}
+  }
+  if kind == "text" || !supports_ast {
+    return {
+      op: {
+        op: "safe_text_patch",
+        path: atom.path,
+        old_text: atom?.old_text ?? "",
+        new_text: atom?.new_text ?? "",
+      },
+    }
+  }
+  return {op: nil, fallback: {atom: atom, reason: "unknown_remediation_atom_kind"}}
+}

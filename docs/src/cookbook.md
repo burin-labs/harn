@@ -200,6 +200,26 @@ pipeline default(task) {
 
 ## Precise edits with AST tools
 
+Agent-authored source mutations are easiest to keep correct when they speak
+the language of the tree, not the language of the diff. `std/edit` ships
+five primitives covering the common reaches. Pick by the **shape** of the
+change first; let the language-support table tie-break:
+
+| Shape | Reach for | Falls back to |
+|---|---|---|
+| Replace an existing node (function body, call expression, declaration) | [`edit_apply_node`](#how-to-rewrite-a-function-body-via-a-tree-sitter-query) | `edit_safe_text_patch` when the language has no grammar |
+| Add a sibling or child next to a node (new test, new import, new arm) | [`edit_insert_at_anchor`](#how-to-add-a-new-test-to-a-rust-mod) | `edit_safe_text_patch` |
+| Rename an identifier across the workspace | [`edit_rename_symbol`](#how-to-rename-a-symbol-across-the-workspace) | `edit_safe_text_patch` only when the language is out-of-batch |
+| Preview a multi-step plan before committing | [`edit_dry_run`](#how-to-preview-a-multi-step-edit-plan-and-approve) | (composes with all of the above) |
+| Anything else, or text-shaped change with collision risk | [`edit_safe_text_patch`](#how-to-apply-a-multi-hunk-text-patch-atomically) | — (this *is* the fallback) |
+
+The decision is the same one a human editor makes: structural changes
+through the AST, textual changes through the patch. A `system_reminder`
+that lifts this table into the agent's next-turn prompt — see
+[How to nudge an agent toward AST tools](#how-to-nudge-an-agent-toward-ast-tools)
+— is the smallest change that durably shifts a coding agent away from
+freeform text patches.
+
 ### How to rewrite a function body via a tree-sitter query
 
 `edit_apply_node` from [`std/edit`](./stdlib/edit.md) replaces AST nodes
@@ -465,6 +485,141 @@ Plan ops share a transient staged-fs session, so the second op sees
 the first op's pending write. That means several ops touching the
 same file collapse to one cumulative diff, which is the form a
 reviewer (human or LLM) actually wants.
+
+### How to rename a symbol across the workspace
+
+`edit_rename_symbol` resolves an identifier through the typed symbol
+graph from [`std/code_librarian`](./stdlib/code-librarian.md) and rewrites
+every identifier-context occurrence — never comments, never string
+literals, never partial-name matches — across every file in scope. It
+short-circuits with `result == "conflict"` if `new_name` already exists
+as an identifier in any file the rename would touch, so the workspace
+can't end up with two identically named definitions in the same scope.
+
+```harn,ignore
+import { edit_rename_symbol } from "std/edit"
+
+pipeline default(task) {
+  let result = edit_rename_symbol({
+    symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
+    new_name: "Gadget",
+    scope: "workspace",
+    dry_run: true,
+  })
+
+  if result.result != "applied" {
+    log("rename refused: ${result.result} — ${result.details ?? \"\"}")
+    return
+  }
+  for file in result.touched_files {
+    log("${file.path}: ${len(file.edits)} edit(s)")
+  }
+}
+```
+
+Drop `dry_run` to actually rewrite the files; pair the call with a
+`session_id` for full staged-fs atomicity across the rename plus any
+sibling writes. Supported languages on the first batch: Rust,
+TypeScript/TSX, JavaScript/JSX, Python, Swift, Go.
+
+For the full result shape (`touched_files[*].edits[*]` with byte and
+`(row, col)` spans, plus `conflicts[*]` shadow sites), see the deeper
+[Rename a symbol across the workspace](./cookbooks/rename-symbol.md)
+cookbook.
+
+### When AST tools won't work
+
+The AST primitives all require a tree-sitter grammar for the file's
+language. They return `result == "unsupported_language"` instead of
+silently mangling bytes. The supported set is intentionally
+narrower than what `tree-sitter` can parse — the host vendors only
+grammars that have been smoke-tested against the edit primitives.
+
+Reach for `edit_safe_text_patch` (or the lower-level
+`edit_apply_old_new_patch`) when:
+
+- the file's language is not in the supported batch (printable list
+  lives next to each primitive in [`std/edit`](./stdlib/edit.md));
+- the change is purely textual — `LICENSE` headers, `CHANGELOG.md`
+  entries, embedded SQL inside a string literal — and writing a
+  tree-sitter query would mean writing one that matches a comment or
+  string node anyway;
+- the agent reasoned in terms of literal lines and the model already
+  has the exact pre-image bytes in the prompt;
+- a sibling agent might be rewriting the same file concurrently and
+  you need a deterministic `stale_base` outcome rather than a tree
+  re-parse failure.
+
+`edit_safe_text_patch` is the safe-by-default text fallback: it
+hash-checks the pre-image against `expected_hash`, composes all hunks
+against the same staged-fs overlay, and either commits the post-image
+atomically or returns a single rejection result that the caller can
+react to.
+
+```harn,ignore
+import { edit_safe_text_patch } from "std/edit"
+
+pipeline default(task) {
+  let snapshot = hostlib_fs_read_text({path: "CHANGELOG.md"})
+  let result = edit_safe_text_patch({
+    path: "CHANGELOG.md",
+    expected_hash: snapshot.sha256,
+    hunks: [
+      {old_text: "## Unreleased\n", new_text: "## Unreleased\n\n- Fixed onboarding race.\n"},
+    ],
+  })
+  log(result.result)
+}
+```
+
+The progression — try the AST primitive first, drop to
+`edit_safe_text_patch` on `unsupported_language`, give up and ask the
+operator only when the patch also rejects — keeps the agent on the
+narrowest tool that can finish the job.
+
+### How to nudge an agent toward AST tools
+
+The point of these primitives is only realised when the agent *reaches*
+for them. The smallest change that durably moves a coding agent away
+from freeform text patches is one `system_reminder` lifted into the
+prompt for every coding-agent loop. Reminders are typed, ephemeral
+transcript injections with TTL and dedupe — see
+[System reminders](./system-reminders.md) for the lifecycle — so the
+snippet survives the next turn but does not bloat the durable transcript.
+
+The canonical body and producer wiring:
+
+```harn,ignore
+let edit_strategy_reminder = """
+Prefer the AST-precise primitives in std/edit when modifying source:
+- edit_apply_node for replacing a node (function body, call, decl).
+- edit_insert_at_anchor for adding a sibling/child (test, import, arm).
+- edit_rename_symbol for cross-file identifier renames.
+- edit_dry_run to preview a multi-op plan before committing.
+Fall back to edit_safe_text_patch only when the language has no
+tree-sitter grammar or the change is purely textual.
+"""
+
+let injected = transcript.inject_reminder(transcript(), {
+  body: edit_strategy_reminder,
+  tags: ["edit_strategy"],
+  dedupe_key: "edit_strategy:prefer_ast",
+  ttl_turns: 4,
+  preserve_on_compact: true,
+  propagate: "all",
+  role_hint: "developer",
+})
+```
+
+`propagate: "all"` lets sub-agents inherit the same guidance, and
+`preserve_on_compact: true` keeps it visible across the next compaction
+boundary. The `dedupe_key` makes the reminder safe to re-inject on
+every iteration (e.g. from a session_start hook) — the lifecycle
+collapses duplicates automatically.
+
+Lift the same body into a host-side reminder by sending an ACP
+`session/remind` notification with the same payload; see
+[System reminders > From a host bridge](./system-reminders.md#from-a-host-bridge).
 
 ## MCP servers
 

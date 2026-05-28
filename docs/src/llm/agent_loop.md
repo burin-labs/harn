@@ -701,6 +701,17 @@ agent_loop(task, system, {
 policy hook used by stall diagnostics so completion checks happen on a signal
 rather than a fixed "are you done?" prompt.
 
+## Editing source from inside an agent loop
+
+Agent loops that mutate code should reach for the AST-precise primitives in
+[`std/edit`](../stdlib/edit.md) before freeform text patches. The cookbook
+chapter [Precise edits with AST tools](../cookbook.md#precise-edits-with-ast-tools)
+walks through the decision tree (replace → `edit_apply_node`, add →
+`edit_insert_at_anchor`, rename → `edit_rename_symbol`, preview →
+`edit_dry_run`, text fallback → `edit_safe_text_patch`) and ships a
+`system_reminder` snippet you can lift into `agent_loop`'s session-start
+hook so the model carries the same decision tree into every coding turn.
+
 ## Daemon stdlib wrappers
 
 When you want a first-class daemon handle instead of wiring `agent_loop`
