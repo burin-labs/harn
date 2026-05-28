@@ -369,6 +369,46 @@ either primitive with a `session_id` to route the read + write through
 the staged filesystem (#1722) so the edit is atomic alongside other
 staged writes.
 
+### How to apply a multi-hunk text patch atomically
+
+`edit_safe_text_patch` is the right reach for text edits that touch
+the filesystem — it composes hunks against the staged-fs overlay,
+hash-checks the pre-image, and commits all-or-nothing. Use it when
+the change spans multiple regions of one file, when sibling agents
+might be editing the same file in parallel, or when the language
+has no tree-sitter grammar and you still need collision safety.
+
+```harn,ignore
+import { edit_safe_text_patch } from "std/edit"
+
+pipeline default(task) {
+  let snapshot = hostlib_fs_read_text({path: "src/lib.rs"})
+  let result = edit_safe_text_patch({
+    path: "src/lib.rs",
+    expected_hash: snapshot.sha256,
+    hunks: [
+      {old_text: "return 1", new_text: "return 11"},
+      {old_text: "return 3", new_text: "return 33"},
+    ],
+  })
+
+  if result.result == "stale_base" {
+    // Another writer landed first. Re-read and retry — never blind-write.
+    log("retrying — current hash is now ${result.current_hash}")
+    return
+  }
+  if result.result == "hunk_conflict" {
+    log("hunk ${result.failed_hunk_index} rejected: ${result.failed_hunk_error_code}")
+    return
+  }
+  log("applied ${result.hunks_count} hunks")
+}
+```
+
+The result carries a `telemetry` envelope (`applied`, `stale_base`,
+`hunk_conflict`, `no_op` counters plus `hunks`) so hosts can roll up
+collision rates without log scraping.
+
 ## MCP servers
 
 ### How to call an MCP server

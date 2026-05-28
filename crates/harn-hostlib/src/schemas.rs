@@ -634,6 +634,30 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "fs",
+        "safe_text_patch",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/safe_text_patch.request.json"),
+    ),
+    (
+        "fs",
+        "safe_text_patch",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/safe_text_patch.response.json"),
+    ),
+    (
+        "fs",
+        "read_text",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/read_text.request.json"),
+    ),
+    (
+        "fs",
+        "read_text",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/read_text.response.json"),
+    ),
+    (
+        "fs",
         "snapshot",
         SchemaKind::Request,
         include_str!("../schemas/fs/snapshot.request.json"),

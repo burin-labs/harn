@@ -13,6 +13,8 @@ The capability is registered by `harn_hostlib::install_default` as the
 | `hostlib_fs_staged_status` | Lists pending writes/deletes with byte counts and oldest pending age. |
 | `hostlib_fs_commit_staged` | Applies all pending changes, or only selected paths, to disk. |
 | `hostlib_fs_discard_staged` | Drops all pending changes, or only selected paths. |
+| `hostlib_fs_read_text` | Overlay-aware UTF-8 read returning `{ content, sha256, size, exists }`. Un-gated companion to the `tools/read_file` primitive — Harn scripts call it to snapshot pre-image hashes without enabling the deterministic-tools feature. |
+| `hostlib_fs_safe_text_patch` | Atomic compare-and-swap text write. Reads the overlay pre-image, rejects with `result: "stale_base"` if `expected_hash` diverges, writes through the overlay otherwise. Backs `std/edit`'s `edit_safe_text_patch` multi-hunk wrapper. |
 
 Staged data is stored below:
 

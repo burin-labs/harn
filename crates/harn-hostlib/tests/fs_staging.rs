@@ -350,3 +350,192 @@ fn staged_directory_overlay_preserves_missing_directory_errors() {
         "missing staged directories should not list as empty"
     );
 }
+
+fn sha256_of(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
+fn dict_str<'a>(value: &'a VmValue, key: &str) -> &'a str {
+    match dict_get(value, key) {
+        VmValue::String(s) => s.as_ref(),
+        other => panic!("expected string at `{key}`, got {other:?}"),
+    }
+}
+
+fn dict_bool(value: &VmValue, key: &str) -> bool {
+    match dict_get(value, key) {
+        VmValue::Bool(b) => *b,
+        other => panic!("expected bool at `{key}`, got {other:?}"),
+    }
+}
+
+fn dict_int(value: &VmValue, key: &str) -> i64 {
+    match dict_get(value, key) {
+        VmValue::Int(i) => *i,
+        other => panic!("expected int at `{key}`, got {other:?}"),
+    }
+}
+
+#[test]
+fn safe_text_patch_applies_when_expected_hash_matches() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("notes.txt");
+    fs::write(&file, "alpha\n").unwrap();
+    let reg = registry();
+    let pre_hash = sha256_of(b"alpha\n");
+    let after_hash = sha256_of(b"beta\n");
+
+    let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string("beta\n")),
+        ("expected_hash", vm_string(&pre_hash)),
+    ]))
+    .unwrap();
+    assert_eq!(dict_str(&response, "result"), "applied");
+    assert!(dict_bool(&response, "applied"));
+    assert!(!dict_bool(&response, "stale_base"));
+    assert_eq!(dict_str(&response, "current_hash"), pre_hash);
+    assert_eq!(dict_str(&response, "before_sha256"), pre_hash);
+    assert_eq!(dict_str(&response, "after_sha256"), after_hash);
+    assert_eq!(fs::read_to_string(&file).unwrap(), "beta\n");
+}
+
+#[test]
+fn safe_text_patch_rejects_stale_base_without_writing() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("notes.txt");
+    fs::write(&file, "concurrent winner\n").unwrap();
+    let reg = registry();
+    let stale_expected = sha256_of(b"caller-stale\n");
+    let actual_current = sha256_of(b"concurrent winner\n");
+
+    let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string("agent-edit\n")),
+        ("expected_hash", vm_string(&stale_expected)),
+    ]))
+    .unwrap();
+    assert_eq!(dict_str(&response, "result"), "stale_base");
+    assert!(!dict_bool(&response, "applied"));
+    assert!(dict_bool(&response, "stale_base"));
+    assert_eq!(dict_str(&response, "current_hash"), actual_current);
+    assert_eq!(dict_str(&response, "expected_hash"), stale_expected);
+    assert_eq!(fs::read_to_string(&file).unwrap(), "concurrent winner\n");
+}
+
+#[test]
+fn safe_text_patch_treats_missing_file_as_empty_pre_image() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("fresh.txt");
+    let reg = registry();
+    let empty_hash = sha256_of(b"");
+
+    let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string("hello\n")),
+        ("expected_hash", vm_string(&empty_hash)),
+    ]))
+    .unwrap();
+    assert_eq!(dict_str(&response, "result"), "applied");
+    assert!(dict_bool(&response, "created"));
+    assert_eq!(fs::read_to_string(&file).unwrap(), "hello\n");
+}
+
+#[test]
+fn safe_text_patch_short_circuits_on_no_op() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("idempotent.txt");
+    fs::write(&file, "same\n").unwrap();
+    let reg = registry();
+    let pre_hash = sha256_of(b"same\n");
+    let mtime_before = fs::metadata(&file).unwrap().modified().unwrap();
+
+    let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string("same\n")),
+        ("expected_hash", vm_string(&pre_hash)),
+    ]))
+    .unwrap();
+    assert_eq!(dict_str(&response, "result"), "no_op");
+    assert!(!dict_bool(&response, "applied"));
+    assert_eq!(dict_int(&response, "bytes_written"), 0);
+    let mtime_after = fs::metadata(&file).unwrap().modified().unwrap();
+    assert_eq!(
+        mtime_before, mtime_after,
+        "no_op must not touch the file on disk"
+    );
+}
+
+#[test]
+fn safe_text_patch_routes_through_staged_overlay() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("staged.txt");
+    fs::write(&file, "disk-original\n").unwrap();
+    let session = unique_session("safe-text-patch");
+    let reg = registry();
+
+    (reg.find("hostlib_fs_set_mode").unwrap().handler)(&dict_arg(&[
+        ("session_id", vm_string(&session)),
+        ("mode", vm_string("staged")),
+        ("root", vm_string(&path_str(dir.path()))),
+    ]))
+    .unwrap();
+
+    (reg.find("hostlib_tools_write_file").unwrap().handler)(&dict_arg(&[
+        ("session_id", vm_string(&session)),
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string("overlay-seed\n")),
+    ]))
+    .unwrap();
+
+    let overlay_hash = sha256_of(b"overlay-seed\n");
+    let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+        ("session_id", vm_string(&session)),
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string("overlay-final\n")),
+        ("expected_hash", vm_string(&overlay_hash)),
+    ]))
+    .unwrap();
+    assert_eq!(dict_str(&response, "result"), "applied");
+    assert_eq!(
+        dict_str(&response, "current_hash"),
+        overlay_hash,
+        "must hash the overlay pre-image, not the on-disk content"
+    );
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        "disk-original\n",
+        "working tree must stay untouched until commit"
+    );
+
+    let read = (reg.find("hostlib_tools_read_file").unwrap().handler)(&dict_arg(&[
+        ("session_id", vm_string(&session)),
+        ("path", vm_string(&path_str(&file))),
+    ]))
+    .unwrap();
+    assert_eq!(dict_str(&read, "content"), "overlay-final\n");
+
+    (reg.find("hostlib_fs_commit_staged").unwrap().handler)(&dict_arg(&[(
+        "session_id",
+        vm_string(&session),
+    )]))
+    .unwrap();
+    assert_eq!(fs::read_to_string(&file).unwrap(), "overlay-final\n");
+}
+
+#[test]
+fn safe_text_patch_skips_stale_base_when_no_expected_hash() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("unchecked.txt");
+    fs::write(&file, "anything\n").unwrap();
+    let reg = registry();
+
+    let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string("replaced\n")),
+    ]))
+    .unwrap();
+    assert_eq!(dict_str(&response, "result"), "applied");
+    assert_eq!(fs::read_to_string(&file).unwrap(), "replaced\n");
+}

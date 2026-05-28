@@ -214,6 +214,18 @@ agent to build a cumulative diff before touching the working tree.
   changes, or only the selected paths, and reports per-path failures.
 - `hostlib_fs_discard_staged({ session_id, paths? })` drops pending
   changes without mutating the working tree.
+- `hostlib_fs_read_text({ path, session_id? })` returns
+  `{ content, sha256, size, exists }` — overlay-aware UTF-8 read. Pair
+  the returned `sha256` with `hostlib_fs_safe_text_patch` to opt into
+  stale-base rejection without enabling the deterministic-tools
+  feature gate.
+- `hostlib_fs_safe_text_patch({ path, content, expected_hash?,
+  session_id?, create_parents?, overwrite? })` is an atomic
+  compare-and-swap text write: reads the pre-image through the
+  overlay, rejects with `result: "stale_base"` when `expected_hash`
+  diverges, otherwise writes `content` back through the same overlay.
+  `std/edit`'s `edit_safe_text_patch` is the Harn-facing wrapper that
+  composes multi-hunk patches on top of this builtin.
 
 While a session is in `staged` mode, `tools/write_file` and
 `tools/delete_file` write to `.harn/state/staged/<session_id>/` instead

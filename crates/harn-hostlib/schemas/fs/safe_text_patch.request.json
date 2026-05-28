@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/safe_text_patch.request.json",
+  "title": "fs.safe_text_patch request",
+  "description": "Atomic compare-and-swap text write. Reads the current bytes at `path` through the staged-fs overlay (when a session is active) and writes `content` only when the observed `sha256:HEX` matches `expected_hash`. Hosts use this to commit multi-hunk agent edits without losing concurrent writes from sibling agents.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string", "minLength": 1 },
+    "content": {
+      "type": "string",
+      "description": "Final post-image bytes (UTF-8). Multi-hunk callers compose the post-image in memory and submit it here."
+    },
+    "expected_hash": {
+      "type": ["string", "null"],
+      "description": "`sha256:HEX` snapshot the caller observed. When omitted the call skips the stale-base check and behaves as an unconditional write (still atomic through the staged-fs overlay)."
+    },
+    "session_id": {
+      "type": ["string", "null"],
+      "description": "Hostlib session whose staged-fs overlay should intercept the read and the write."
+    },
+    "create_parents": { "type": "boolean", "default": true },
+    "overwrite": { "type": "boolean", "default": true }
+  },
+  "required": ["path", "content"],
+  "additionalProperties": false
+}
