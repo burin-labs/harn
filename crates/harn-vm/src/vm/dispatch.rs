@@ -6,7 +6,8 @@ use crate::BuiltinId;
 
 use super::async_builtin::CURRENT_ASYNC_BUILTIN_CHILD_VM;
 use super::{
-    CallArgs, ScopeSpan, Vm, VmBuiltinDispatch, VmBuiltinEntry, VmBuiltinKind, VmBuiltinMetadata,
+    CallArgs, ScopeSpan, Vm, VmBuiltinArity, VmBuiltinDispatch, VmBuiltinEntry, VmBuiltinKind,
+    VmBuiltinMetadata,
 };
 
 impl Vm {
@@ -168,27 +169,19 @@ impl Vm {
         if def.parser_only {
             return;
         }
+        // Derive arity from the parsed `BuiltinSignature` so the discoverable
+        // metadata layer (harn explain, alignment-test metadata check) keeps
+        // parity with the pre-macro DSL builder.
+        let arity = arity_from_sig(&def.sig);
         let names = std::iter::once(def.sig.name).chain(def.aliases.iter().copied());
         for name in names {
             match def.handler {
                 VmBuiltinHandler::Sync(f) => {
-                    let mut meta = VmBuiltinMetadata::sync_static(name);
-                    if let Some(category) = def.category {
-                        meta = meta.category_static(category);
-                    }
-                    if let Some(doc) = def.doc {
-                        meta = meta.doc_static(doc);
-                    }
+                    let meta = builtin_def_metadata(def, name, arity, VmBuiltinKind::Sync);
                     self.register_builtin_with_metadata(meta, f);
                 }
                 VmBuiltinHandler::Async(f) => {
-                    let mut meta = VmBuiltinMetadata::async_static(name);
-                    if let Some(category) = def.category {
-                        meta = meta.category_static(category);
-                    }
-                    if let Some(doc) = def.doc {
-                        meta = meta.doc_static(doc);
-                    }
+                    let meta = builtin_def_metadata(def, name, arity, VmBuiltinKind::Async);
                     // Wrap the function pointer that already returns an
                     // AsyncBuiltinFuture so register_async_builtin_with_metadata's
                     // generic bound `F: Fn(Vec<VmValue>) -> Fut + 'static` is met.
@@ -625,6 +618,57 @@ impl Vm {
                 }
                 result
             }
+        }
+    }
+}
+
+/// Build the discoverable [`VmBuiltinMetadata`] for one entry of a
+/// `#[harn_builtin]`-emitted `VmBuiltinDef`, threading the optional
+/// category / doc / signature_text fields without duplicating the chain
+/// across the Sync / Async dispatch arms in `register_builtin_def`.
+fn builtin_def_metadata(
+    def: &'static crate::stdlib::macros::VmBuiltinDef,
+    name: &'static str,
+    arity: VmBuiltinArity,
+    kind: VmBuiltinKind,
+) -> VmBuiltinMetadata {
+    let mut meta = match kind {
+        VmBuiltinKind::Sync => VmBuiltinMetadata::sync_static(name),
+        VmBuiltinKind::Async => VmBuiltinMetadata::async_static(name),
+    }
+    .arity(arity);
+    if let Some(category) = def.category {
+        meta = meta.category_static(category);
+    }
+    if let Some(doc) = def.doc {
+        meta = meta.doc_static(doc);
+    }
+    if let Some(sig_text) = def.signature_text {
+        meta = meta.signature_static(sig_text);
+    }
+    meta
+}
+
+/// Derive a [`VmBuiltinArity`] from a parsed [`BuiltinSignature`]. Required
+/// params count toward the floor; optional params and `has_rest` widen the
+/// ceiling. Returns `Variadic` for `(...args: any)`-shaped sigs that have
+/// no required params, matching how the DSL builder previously declared
+/// `Variadic` explicitly.
+fn arity_from_sig(sig: &harn_builtin_meta::BuiltinSignature) -> VmBuiltinArity {
+    let required = sig.params.iter().filter(|p| !p.optional).count();
+    let total = sig.params.len();
+    if sig.has_rest {
+        if required == 0 {
+            VmBuiltinArity::Variadic
+        } else {
+            VmBuiltinArity::Min(required)
+        }
+    } else if required == total {
+        VmBuiltinArity::Exact(total)
+    } else {
+        VmBuiltinArity::Range {
+            min: required,
+            max: total,
         }
     }
 }

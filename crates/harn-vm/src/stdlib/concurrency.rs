@@ -6,11 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::shared_state::ScopedKey;
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
-};
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmAtomicHandle, VmChannelHandle, VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 struct CircuitState {
     failures: usize,
@@ -23,224 +21,65 @@ thread_local! {
     static CIRCUITS: RefCell<HashMap<String, CircuitState>> = RefCell::new(HashMap::new());
 }
 
-const CONCURRENCY_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("sync_release", sync_release_builtin)
-        .signature("sync_release(permit)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Release a synchronization permit."),
-    SyncBuiltin::new("channel", channel_builtin)
-        .signature("channel(name?, capacity?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Create an in-memory channel."),
-    SyncBuiltin::new("close_channel", close_channel_builtin)
-        .signature("close_channel(channel)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Mark a channel closed."),
-    SyncBuiltin::new("channel_is_closed", channel_is_closed_builtin)
-        .signature("channel_is_closed(channel)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return true if the channel has been marked closed."),
-    SyncBuiltin::new("try_receive", try_receive_builtin)
-        .signature("try_receive(channel)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Try to receive one channel value without blocking."),
-    SyncBuiltin::new("atomic", atomic_builtin)
-        .signature("atomic(initial?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Create an atomic integer handle."),
-    SyncBuiltin::new("atomic_get", atomic_get_builtin)
-        .signature("atomic_get(handle)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Read an atomic integer value."),
-    SyncBuiltin::new("atomic_set", atomic_set_builtin)
-        .signature("atomic_set(handle, value)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Set an atomic integer and return the previous value."),
-    SyncBuiltin::new("atomic_add", atomic_add_builtin)
-        .signature("atomic_add(handle, delta)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Add to an atomic integer and return the previous value."),
-    SyncBuiltin::new("atomic_cas", atomic_cas_builtin)
-        .signature("atomic_cas(handle, expected, value)")
-        .arity(VmBuiltinArity::Exact(3))
-        .doc("Compare and swap an atomic integer."),
-    SyncBuiltin::new("timer_start", timer_start_builtin)
-        .signature("timer_start(name?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Start a named timer and return its handle."),
-    SyncBuiltin::new("circuit_breaker", circuit_breaker_builtin)
-        .signature("circuit_breaker(name, threshold?, reset_ms?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Create or reset a named circuit breaker."),
-    SyncBuiltin::new("circuit_check", circuit_check_builtin)
-        .signature("circuit_check(name)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return the state of a named circuit breaker."),
-    SyncBuiltin::new("circuit_record_success", circuit_record_success_builtin)
-        .signature("circuit_record_success(name)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Record a successful call for a named circuit breaker."),
-    SyncBuiltin::new("circuit_record_failure", circuit_record_failure_builtin)
-        .signature("circuit_record_failure(name)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Record a failed call and return whether the circuit opened."),
-    SyncBuiltin::new("circuit_reset", circuit_reset_builtin)
-        .signature("circuit_reset(name)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Reset a named circuit breaker to closed."),
-    SyncBuiltin::new("timer_end", timer_end_builtin)
-        .signature("timer_end(timer)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("End a timer, print elapsed milliseconds, and return the elapsed time."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    // sync
+    &SYNC_RELEASE_BUILTIN_DEF,
+    &CHANNEL_BUILTIN_DEF,
+    &CLOSE_CHANNEL_BUILTIN_DEF,
+    &CHANNEL_IS_CLOSED_BUILTIN_DEF,
+    &TRY_RECEIVE_BUILTIN_DEF,
+    &ATOMIC_BUILTIN_DEF,
+    &ATOMIC_GET_BUILTIN_DEF,
+    &ATOMIC_SET_BUILTIN_DEF,
+    &ATOMIC_ADD_BUILTIN_DEF,
+    &ATOMIC_CAS_BUILTIN_DEF,
+    &TIMER_START_BUILTIN_DEF,
+    &CIRCUIT_BREAKER_BUILTIN_DEF,
+    &CIRCUIT_CHECK_BUILTIN_DEF,
+    &CIRCUIT_RECORD_SUCCESS_BUILTIN_DEF,
+    &CIRCUIT_RECORD_FAILURE_BUILTIN_DEF,
+    &CIRCUIT_RESET_BUILTIN_DEF,
+    &TIMER_END_BUILTIN_DEF,
+    // async — sync primitives
+    &SYNC_MUTEX_ACQUIRE_BUILTIN_DEF,
+    &SYNC_SEMAPHORE_ACQUIRE_BUILTIN_DEF,
+    &SYNC_GATE_ACQUIRE_BUILTIN_DEF,
+    &SYNC_RWLOCK_ACQUIRE_BUILTIN_DEF,
+    &SYNC_METRICS_BUILTIN_DEF,
+    // async — shared state
+    &SHARED_SCOPE_ID_BUILTIN_DEF,
+    &SHARED_CELL_BUILTIN_DEF,
+    &SHARED_GET_BUILTIN_DEF,
+    &SHARED_SNAPSHOT_BUILTIN_DEF,
+    &SHARED_SET_BUILTIN_DEF,
+    &SHARED_CAS_BUILTIN_DEF,
+    &SHARED_MAP_BUILTIN_DEF,
+    &SHARED_MAP_GET_BUILTIN_DEF,
+    &SHARED_MAP_SNAPSHOT_BUILTIN_DEF,
+    &SHARED_MAP_ENTRIES_BUILTIN_DEF,
+    &SHARED_MAP_SET_BUILTIN_DEF,
+    &SHARED_MAP_DELETE_BUILTIN_DEF,
+    &SHARED_MAP_CAS_BUILTIN_DEF,
+    &SHARED_METRICS_BUILTIN_DEF,
+    // async — mailbox
+    &MAILBOX_OPEN_BUILTIN_DEF,
+    &MAILBOX_LOOKUP_BUILTIN_DEF,
+    &MAILBOX_SEND_BUILTIN_DEF,
+    &MAILBOX_TRY_RECEIVE_BUILTIN_DEF,
+    &MAILBOX_RECEIVE_BUILTIN_DEF,
+    &MAILBOX_CLOSE_BUILTIN_DEF,
+    &MAILBOX_METRICS_BUILTIN_DEF,
+    // async — scheduler + channel
+    &SLEEP_BUILTIN_DEF,
+    &YIELD_NOW_BUILTIN_DEF,
+    &SEND_BUILTIN_DEF,
+    &RECEIVE_BUILTIN_DEF,
+    &SELECT_BUILTIN_DEF,
+    &SELECT_TIMEOUT_BUILTIN_DEF,
+    &SELECT_TRY_BUILTIN_DEF,
+    &SELECT_LIST_BUILTIN_DEF,
+    &CHANNEL_SELECT_BUILTIN_DEF,
 ];
-
-const CONCURRENCY_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("sync_mutex_acquire", sync_mutex_acquire_builtin)
-        .signature("sync_mutex_acquire(key?, timeout_ms?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Acquire a named mutex permit."),
-    async_builtin!("sync_semaphore_acquire", sync_semaphore_acquire_builtin)
-        .signature("sync_semaphore_acquire(key?, capacity?, permits?, timeout_ms?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 4 })
-        .doc("Acquire permits from a named semaphore."),
-    async_builtin!("sync_gate_acquire", sync_gate_acquire_builtin)
-        .signature("sync_gate_acquire(key?, limit?, timeout_ms?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 3 })
-        .doc("Acquire one permit from a named gate."),
-    async_builtin!("sync_rwlock_acquire", sync_rwlock_acquire_builtin)
-        .signature("sync_rwlock_acquire(key?, mode?, timeout_ms?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 3 })
-        .doc("Acquire a read or write permit from a named read-write lock."),
-    async_builtin!("sync_metrics", sync_metrics_builtin)
-        .signature("sync_metrics(kind?, key?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Return synchronization runtime metrics."),
-    async_builtin!("shared_scope_id", shared_scope_id_builtin)
-        .signature("shared_scope_id(scope?, options?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Resolve a shared-state scope identifier."),
-    async_builtin!("shared_cell", shared_cell_builtin)
-        .signature("shared_cell(options_or_key?, initial?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Open or create a scoped shared cell."),
-    async_builtin!("shared_get", shared_get_builtin)
-        .signature("shared_get(handle)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Read a shared cell value."),
-    async_builtin!("shared_snapshot", shared_snapshot_builtin)
-        .signature("shared_snapshot(handle)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return a shared cell snapshot."),
-    async_builtin!("shared_set", shared_set_builtin)
-        .signature("shared_set(handle, value)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Set a shared cell value."),
-    async_builtin!("shared_cas", shared_cas_builtin)
-        .signature("shared_cas(handle, expected, value)")
-        .arity(VmBuiltinArity::Exact(3))
-        .doc("Compare and swap a shared cell value."),
-    async_builtin!("shared_map", shared_map_builtin)
-        .signature("shared_map(options_or_key?, initial?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Open or create a scoped shared map."),
-    async_builtin!("shared_map_get", shared_map_get_builtin)
-        .signature("shared_map_get(handle, key, default?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Read a shared map entry."),
-    async_builtin!("shared_map_snapshot", shared_map_snapshot_builtin)
-        .signature("shared_map_snapshot(handle, key)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Return a shared map entry snapshot."),
-    async_builtin!("shared_map_entries", shared_map_entries_builtin)
-        .signature("shared_map_entries(handle)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return all shared map entries."),
-    async_builtin!("shared_map_set", shared_map_set_builtin)
-        .signature("shared_map_set(handle, key, value)")
-        .arity(VmBuiltinArity::Exact(3))
-        .doc("Set a shared map entry."),
-    async_builtin!("shared_map_delete", shared_map_delete_builtin)
-        .signature("shared_map_delete(handle, key)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Delete a shared map entry."),
-    async_builtin!("shared_map_cas", shared_map_cas_builtin)
-        .signature("shared_map_cas(handle, key, expected, value)")
-        .arity(VmBuiltinArity::Exact(4))
-        .doc("Compare and swap a shared map entry."),
-    async_builtin!("shared_metrics", shared_metrics_builtin)
-        .signature("shared_metrics(handle?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Return shared-state runtime metrics."),
-    async_builtin!("mailbox_open", mailbox_open_builtin)
-        .signature("mailbox_open(options_or_name?, capacity?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Open or create a scoped mailbox."),
-    async_builtin!("mailbox_lookup", mailbox_lookup_builtin)
-        .signature("mailbox_lookup(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Look up a scoped mailbox handle."),
-    async_builtin!("mailbox_send", mailbox_send_builtin)
-        .signature("mailbox_send(target, value)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Send a value to a mailbox."),
-    async_builtin!("mailbox_try_receive", mailbox_try_receive_builtin)
-        .signature("mailbox_try_receive(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Try to receive one mailbox value without blocking."),
-    async_builtin!("mailbox_receive", mailbox_receive_builtin)
-        .signature("mailbox_receive(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Receive one mailbox value."),
-    async_builtin!("mailbox_close", mailbox_close_builtin)
-        .signature("mailbox_close(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Close a scoped mailbox."),
-    async_builtin!("mailbox_metrics", mailbox_metrics_builtin)
-        .signature("mailbox_metrics(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return metrics for a scoped mailbox."),
-    async_builtin!("sleep", sleep_builtin)
-        .signature("sleep(ms)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Suspend execution for a duration in milliseconds."),
-    async_builtin!("yield_now", yield_now_builtin)
-        .signature("yield_now()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Yield cooperatively to other scheduled tasks."),
-    async_builtin!("send", send_builtin)
-        .signature("send(channel, value)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Send a value to a channel."),
-    async_builtin!("receive", receive_builtin)
-        .signature("receive(channel)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Receive one value from a channel."),
-    async_builtin!("select", select_builtin)
-        .signature("select(channels...)")
-        .arity(VmBuiltinArity::Min(1))
-        .doc("Wait until one of the provided channels yields a value."),
-    async_builtin!("__select_timeout", select_timeout_builtin)
-        .signature("__select_timeout(channels, timeout)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Select from a channel list with a timeout."),
-    async_builtin!("__select_try", select_try_builtin)
-        .signature("__select_try(channels)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Select from a channel list without blocking."),
-    async_builtin!("__select_list", select_list_builtin)
-        .signature("__select_list(channels)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Wait until one channel in a list yields a value."),
-    async_builtin!("channel_select", channel_select_builtin)
-        .signature("channel_select(channels, timeout_ms?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Select over a list of channels with an optional timeout."),
-];
-
-const CONCURRENCY_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("concurrency")
-    .sync(CONCURRENCY_SYNC_PRIMITIVES)
-    .async_(CONCURRENCY_ASYNC_PRIMITIVES);
 
 /// Build a select result dict with the given index, value, and channel name.
 fn select_result(index: usize, value: VmValue, channel_name: &str) -> VmValue {
@@ -476,9 +315,17 @@ fn current_async_vm(builtin: &str) -> Result<Vm, VmError> {
 }
 
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, CONCURRENCY_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
+#[harn_builtin(
+    sig = "sync_mutex_acquire(key?: string, timeout_ms?: int) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Acquire a named mutex permit."
+)]
 async fn sync_mutex_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("sync_mutex_acquire")?;
     let key = args
@@ -494,6 +341,12 @@ async fn sync_mutex_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErr
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "sync_semaphore_acquire(key?: string, capacity?: int, permits?: int, timeout_ms?: int) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Acquire permits from a named semaphore."
+)]
 async fn sync_semaphore_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("sync_semaphore_acquire")?;
     let key = args
@@ -518,6 +371,12 @@ async fn sync_semaphore_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, V
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "sync_gate_acquire(key?: string, limit?: int, timeout_ms?: int) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Acquire one permit from a named gate."
+)]
 async fn sync_gate_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("sync_gate_acquire")?;
     let key = args
@@ -534,6 +393,12 @@ async fn sync_gate_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErro
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "sync_rwlock_acquire(key?: string, mode?: string, timeout_ms?: int) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Acquire a read or write permit from a named read-write lock."
+)]
 async fn sync_rwlock_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     const RWLOCK_CAPACITY: u32 = 1024;
     let vm = current_async_vm("sync_rwlock_acquire")?;
@@ -570,6 +435,11 @@ async fn sync_rwlock_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "sync_release(permit: any) -> nil",
+    category = "concurrency",
+    doc = "Release a synchronization permit."
+)]
 fn sync_release_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::SyncPermit(permit)) = args.first() else {
         return Err(VmError::Runtime(
@@ -579,6 +449,12 @@ fn sync_release_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     Ok(VmValue::Bool(permit.release()))
 }
 
+#[harn_builtin(
+    sig = "sync_metrics(kind?: string, key?: string) -> dict",
+    kind = "async",
+    category = "concurrency",
+    doc = "Return synchronization runtime metrics."
+)]
 async fn sync_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("sync_metrics")?;
     let kind = args.first().map(|v| v.display());
@@ -586,6 +462,12 @@ async fn sync_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(vm.sync_runtime.metrics(kind.as_deref(), key.as_deref()))
 }
 
+#[harn_builtin(
+    sig = "shared_scope_id(scope?: any, options?: dict) -> string",
+    kind = "async",
+    category = "concurrency",
+    doc = "Resolve a shared-state scope identifier."
+)]
 async fn shared_scope_id_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_scope_id")?;
     let options = args.get(1).and_then(VmValue::as_dict);
@@ -598,6 +480,12 @@ async fn shared_scope_id_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     )?)))
 }
 
+#[harn_builtin(
+    sig = "shared_cell(options_or_key?: any, initial?: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Open or create a scoped shared cell."
+)]
 async fn shared_cell_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_cell")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -610,6 +498,12 @@ async fn shared_cell_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(shared_runtime.open_cell(scoped, initial))
 }
 
+#[harn_builtin(
+    sig = "shared_get(handle: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Read a shared cell value."
+)]
 async fn shared_get_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_get")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -620,6 +514,12 @@ async fn shared_get_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(shared_runtime.cell_get(&scoped))
 }
 
+#[harn_builtin(
+    sig = "shared_snapshot(handle: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Return a shared cell snapshot."
+)]
 async fn shared_snapshot_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_snapshot")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -630,6 +530,12 @@ async fn shared_snapshot_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     Ok(shared_runtime.cell_snapshot(&scoped))
 }
 
+#[harn_builtin(
+    sig = "shared_set(handle: any, value: any) -> nil",
+    kind = "async",
+    category = "concurrency",
+    doc = "Set a shared cell value."
+)]
 async fn shared_set_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_set")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -641,6 +547,12 @@ async fn shared_set_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(shared_runtime.cell_set(&scoped, value))
 }
 
+#[harn_builtin(
+    sig = "shared_cas(handle: any, expected: any, value: any) -> bool",
+    kind = "async",
+    category = "concurrency",
+    doc = "Compare and swap a shared cell value."
+)]
 async fn shared_cas_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 3 {
         return Err(VmError::Runtime(
@@ -657,6 +569,12 @@ async fn shared_cas_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     )))
 }
 
+#[harn_builtin(
+    sig = "shared_map(options_or_key?: any, initial?: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Open or create a scoped shared map."
+)]
 async fn shared_map_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_map")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -670,6 +588,12 @@ async fn shared_map_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(shared_runtime.open_map(scoped, initial))
 }
 
+#[harn_builtin(
+    sig = "shared_map_get(handle: any, key: any, default?: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Read a shared map entry."
+)]
 async fn shared_map_get_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -683,6 +607,12 @@ async fn shared_map_get_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     Ok(shared_runtime.map_get(&scoped, &args[1].display(), default))
 }
 
+#[harn_builtin(
+    sig = "shared_map_snapshot(handle: any, key: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Return a shared map entry snapshot."
+)]
 async fn shared_map_snapshot_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -695,6 +625,12 @@ async fn shared_map_snapshot_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
     Ok(shared_runtime.map_snapshot(&scoped, &args[1].display()))
 }
 
+#[harn_builtin(
+    sig = "shared_map_entries(handle: any) -> list",
+    kind = "async",
+    category = "concurrency",
+    doc = "Return all shared map entries."
+)]
 async fn shared_map_entries_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_map_entries")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -705,6 +641,12 @@ async fn shared_map_entries_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErr
     Ok(shared_runtime.map_entries(&scoped))
 }
 
+#[harn_builtin(
+    sig = "shared_map_set(handle: any, key: any, value: any) -> nil",
+    kind = "async",
+    category = "concurrency",
+    doc = "Set a shared map entry."
+)]
 async fn shared_map_set_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 3 {
         return Err(VmError::Runtime(
@@ -717,6 +659,12 @@ async fn shared_map_set_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     Ok(shared_runtime.map_set(&scoped, args[1].display(), args[2].clone()))
 }
 
+#[harn_builtin(
+    sig = "shared_map_delete(handle: any, key: any) -> nil",
+    kind = "async",
+    category = "concurrency",
+    doc = "Delete a shared map entry."
+)]
 async fn shared_map_delete_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -729,6 +677,12 @@ async fn shared_map_delete_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErro
     Ok(shared_runtime.map_delete(&scoped, &args[1].display()))
 }
 
+#[harn_builtin(
+    sig = "shared_map_cas(handle: any, key: any, expected: any, value: any) -> bool",
+    kind = "async",
+    category = "concurrency",
+    doc = "Compare and swap a shared map entry."
+)]
 async fn shared_map_cas_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 4 {
         return Err(VmError::Runtime(
@@ -746,6 +700,12 @@ async fn shared_map_cas_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     )))
 }
 
+#[harn_builtin(
+    sig = "shared_metrics(handle?: any) -> dict",
+    kind = "async",
+    category = "concurrency",
+    doc = "Return shared-state runtime metrics."
+)]
 async fn shared_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_metrics")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -761,6 +721,12 @@ async fn shared_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     Ok(shared_runtime.metrics(Some(&kind), Some(&scoped)))
 }
 
+#[harn_builtin(
+    sig = "mailbox_open(options_or_name?: any, capacity?: int) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Open or create a scoped mailbox."
+)]
 async fn mailbox_open_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_open")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -773,6 +739,12 @@ async fn mailbox_open_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(shared_runtime.open_mailbox(scoped, capacity))
 }
 
+#[harn_builtin(
+    sig = "mailbox_lookup(target: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Look up a scoped mailbox handle."
+)]
 async fn mailbox_lookup_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_lookup")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -783,6 +755,12 @@ async fn mailbox_lookup_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     Ok(shared_runtime.mailbox(&scoped).unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "mailbox_send(target: any, value: any) -> nil",
+    kind = "async",
+    category = "concurrency",
+    doc = "Send a value to a mailbox."
+)]
 async fn mailbox_send_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -804,6 +782,12 @@ async fn mailbox_send_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(ok))
 }
 
+#[harn_builtin(
+    sig = "mailbox_try_receive(target: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Try to receive one mailbox value without blocking."
+)]
 async fn mailbox_try_receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_try_receive")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -826,6 +810,12 @@ async fn mailbox_try_receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
     }
 }
 
+#[harn_builtin(
+    sig = "mailbox_receive(target: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Receive one mailbox value."
+)]
 async fn mailbox_receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_receive")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -872,6 +862,12 @@ async fn mailbox_receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     }
 }
 
+#[harn_builtin(
+    sig = "mailbox_close(target: any) -> nil",
+    kind = "async",
+    category = "concurrency",
+    doc = "Close a scoped mailbox."
+)]
 async fn mailbox_close_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_close")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -882,6 +878,12 @@ async fn mailbox_close_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(shared_runtime.close_mailbox(&scoped)))
 }
 
+#[harn_builtin(
+    sig = "mailbox_metrics(target: any) -> dict",
+    kind = "async",
+    category = "concurrency",
+    doc = "Return metrics for a scoped mailbox."
+)]
 async fn mailbox_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_metrics")?;
     let shared_runtime = vm.shared_state_runtime.clone();
@@ -892,6 +894,11 @@ async fn mailbox_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     Ok(shared_runtime.metrics(Some("mailbox"), Some(&scoped)))
 }
 
+#[harn_builtin(
+    sig = "channel(name?: string, capacity?: int) -> any",
+    category = "concurrency",
+    doc = "Create an in-memory channel."
+)]
 fn channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args
         .first()
@@ -909,6 +916,11 @@ fn channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     }))
 }
 
+#[harn_builtin(
+    sig = "close_channel(channel: any) -> nil",
+    category = "concurrency",
+    doc = "Mark a channel closed."
+)]
 fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -925,6 +937,11 @@ fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     }
 }
 
+#[harn_builtin(
+    sig = "channel_is_closed(channel: any) -> bool",
+    category = "concurrency",
+    doc = "Return true if the channel has been marked closed."
+)]
 fn channel_is_closed_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first() {
         Some(VmValue::Channel(ch)) => Ok(VmValue::Bool(ch.closed.load(Ordering::SeqCst))),
@@ -934,6 +951,11 @@ fn channel_is_closed_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
     }
 }
 
+#[harn_builtin(
+    sig = "try_receive(channel: any) -> any",
+    category = "concurrency",
+    doc = "Try to receive one channel value without blocking."
+)]
 fn try_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -955,6 +977,11 @@ fn try_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     }
 }
 
+#[harn_builtin(
+    sig = "atomic(initial?: any) -> any",
+    category = "concurrency",
+    doc = "Create an atomic integer handle."
+)]
 fn atomic_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let initial = match args.first() {
         Some(VmValue::Int(n)) => *n,
@@ -967,6 +994,11 @@ fn atomic_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     }))
 }
 
+#[harn_builtin(
+    sig = "atomic_get(handle: any) -> int",
+    category = "concurrency",
+    doc = "Read an atomic integer value."
+)]
 fn atomic_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if let Some(VmValue::Atomic(a)) = args.first() {
         Ok(VmValue::Int(a.value.load(Ordering::SeqCst)))
@@ -975,6 +1007,11 @@ fn atomic_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     }
 }
 
+#[harn_builtin(
+    sig = "atomic_set(handle: any, value: int) -> int",
+    category = "concurrency",
+    doc = "Set an atomic integer and return the previous value."
+)]
 fn atomic_set_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         if let (VmValue::Atomic(a), Some(val)) = (&args[0], args[1].as_int()) {
@@ -985,6 +1022,11 @@ fn atomic_set_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "atomic_add(handle: any, delta: int) -> int",
+    category = "concurrency",
+    doc = "Add to an atomic integer and return the previous value."
+)]
 fn atomic_add_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         if let (VmValue::Atomic(a), Some(delta)) = (&args[0], args[1].as_int()) {
@@ -995,6 +1037,11 @@ fn atomic_add_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "atomic_cas(handle: any, expected: int, value: int) -> bool",
+    category = "concurrency",
+    doc = "Compare and swap an atomic integer."
+)]
 fn atomic_cas_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 3 {
         if let (VmValue::Atomic(a), Some(expected), Some(new_val)) =
@@ -1009,6 +1056,12 @@ fn atomic_cas_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(VmValue::Bool(false))
 }
 
+#[harn_builtin(
+    sig = "sleep(ms?: any) -> nil",
+    kind = "async",
+    category = "concurrency",
+    doc = "Suspend execution for a duration in milliseconds."
+)]
 async fn sleep_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let ms = match args.first() {
         Some(VmValue::Duration(ms)) => (*ms).max(0) as u64,
@@ -1042,11 +1095,23 @@ async fn sleep_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "yield_now() -> nil",
+    kind = "async",
+    category = "concurrency",
+    doc = "Yield cooperatively to other scheduled tasks."
+)]
 async fn yield_now_builtin(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
     tokio::task::yield_now().await;
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "send(channel: any, value: any) -> nil",
+    kind = "async",
+    category = "concurrency",
+    doc = "Send a value to a channel."
+)]
 async fn send_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -1069,6 +1134,12 @@ async fn send_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 }
 
+#[harn_builtin(
+    sig = "receive(channel: any) -> any",
+    kind = "async",
+    category = "concurrency",
+    doc = "Receive one value from a channel."
+)]
 async fn receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -1095,6 +1166,12 @@ async fn receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 }
 
+#[harn_builtin(
+    sig = "select(...channels: any) -> dict",
+    kind = "async",
+    category = "concurrency",
+    doc = "Wait until one of the provided channels yields a value."
+)]
 async fn select_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -1120,6 +1197,12 @@ async fn select_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 }
 
+#[harn_builtin(
+    sig = "__select_timeout(channels: list, timeout: any) -> dict",
+    kind = "async",
+    category = "concurrency",
+    doc = "Select from a channel list with a timeout."
+)]
 async fn select_timeout_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -1152,6 +1235,12 @@ async fn select_timeout_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     }
 }
 
+#[harn_builtin(
+    sig = "__select_try(channels: list) -> dict",
+    kind = "async",
+    category = "concurrency",
+    doc = "Select from a channel list without blocking."
+)]
 async fn select_try_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -1174,6 +1263,12 @@ async fn select_try_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 }
 
+#[harn_builtin(
+    sig = "__select_list(channels: list) -> dict",
+    kind = "async",
+    category = "concurrency",
+    doc = "Wait until one channel in a list yields a value."
+)]
 async fn select_list_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -1200,6 +1295,12 @@ async fn select_list_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 }
 
+#[harn_builtin(
+    sig = "channel_select(channels: list, timeout_ms?: int) -> dict",
+    kind = "async",
+    category = "concurrency",
+    doc = "Select over a list of channels with an optional timeout."
+)]
 async fn channel_select_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let channels = require_channel_list(&args, "channel_select")?;
     let timeout_ms = optional_timeout_ms(args.get(1));
@@ -1220,6 +1321,11 @@ async fn channel_select_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     }
 }
 
+#[harn_builtin(
+    sig = "timer_start(name?: string) -> dict",
+    category = "concurrency",
+    doc = "Start a named timer and return its handle."
+)]
 fn timer_start_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args
         .first()
@@ -1235,6 +1341,11 @@ fn timer_start_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::Dict(Rc::new(timer)))
 }
 
+#[harn_builtin(
+    sig = "circuit_breaker(name: string, threshold?: int, reset_ms?: int) -> nil",
+    category = "concurrency",
+    doc = "Create or reset a named circuit breaker."
+)]
 fn circuit_breaker_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args
         .first()
@@ -1291,6 +1402,11 @@ fn optional_non_negative_u64_arg(
     }
 }
 
+#[harn_builtin(
+    sig = "circuit_check(name: string) -> string",
+    category = "concurrency",
+    doc = "Return the state of a named circuit breaker."
+)]
 fn circuit_check_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args
         .first()
@@ -1316,6 +1432,11 @@ fn circuit_check_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     Ok(VmValue::String(Rc::from(state)))
 }
 
+#[harn_builtin(
+    sig = "circuit_record_success(name: string) -> nil",
+    category = "concurrency",
+    doc = "Record a successful call for a named circuit breaker."
+)]
 fn circuit_record_success_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args
         .first()
@@ -1331,6 +1452,11 @@ fn circuit_record_success_builtin(args: &[VmValue], _out: &mut String) -> Result
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "circuit_record_failure(name: string) -> bool",
+    category = "concurrency",
+    doc = "Record a failed call and return whether the circuit opened."
+)]
 fn circuit_record_failure_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args
         .first()
@@ -1350,6 +1476,11 @@ fn circuit_record_failure_builtin(args: &[VmValue], _out: &mut String) -> Result
     Ok(VmValue::Bool(is_open))
 }
 
+#[harn_builtin(
+    sig = "circuit_reset(name: string) -> nil",
+    category = "concurrency",
+    doc = "Reset a named circuit breaker to closed."
+)]
 fn circuit_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args
         .first()
@@ -1365,6 +1496,11 @@ fn circuit_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "timer_end(timer: any) -> int",
+    category = "concurrency",
+    doc = "End a timer, print elapsed milliseconds, and return the elapsed time."
+)]
 fn timer_end_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let timer = match args.first() {
         Some(VmValue::Dict(d)) => d,

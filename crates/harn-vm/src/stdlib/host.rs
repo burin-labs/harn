@@ -5,12 +5,10 @@ use std::time::Instant;
 
 use serde_json::Value as JsonValue;
 
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
-};
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::clone_async_builtin_child_vm;
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every
@@ -21,56 +19,18 @@ fn audited_utc_now_rfc3339(capability_id: &'static str) -> String {
     dt.to_rfc3339()
 }
 
-const HOST_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("host_mock", host_mock_builtin)
-        .signature("host_mock(capability, op, response_or_config, params?)")
-        .arity(VmBuiltinArity::Range { min: 3, max: 4 })
-        .doc("Register a typed host mock for tests."),
-    SyncBuiltin::new("host_mock_clear", host_mock_clear_builtin)
-        .signature("host_mock_clear()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Clear typed host mocks and recorded calls."),
-    SyncBuiltin::new("host_mock_calls", host_mock_calls_builtin)
-        .signature("host_mock_calls()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return typed host mock invocations."),
-    SyncBuiltin::new("host_mock_push_scope", host_mock_push_scope_builtin)
-        .signature("host_mock_push_scope()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Push an isolated host mock scope."),
-    SyncBuiltin::new("host_mock_pop_scope", host_mock_pop_scope_builtin)
-        .signature("host_mock_pop_scope()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Pop the current isolated host mock scope."),
-    SyncBuiltin::new("host_capabilities", host_capabilities_builtin)
-        .signature("host_capabilities()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return the typed host capability manifest."),
-    SyncBuiltin::new("host_has", host_has_builtin)
-        .signature("host_has(capability, op?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Return whether a host capability or operation is available."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &HOST_MOCK_BUILTIN_DEF,
+    &HOST_MOCK_CLEAR_BUILTIN_DEF,
+    &HOST_MOCK_CALLS_BUILTIN_DEF,
+    &HOST_MOCK_PUSH_SCOPE_BUILTIN_DEF,
+    &HOST_MOCK_POP_SCOPE_BUILTIN_DEF,
+    &HOST_CAPABILITIES_BUILTIN_DEF,
+    &HOST_HAS_BUILTIN_DEF,
+    &HOST_CALL_BUILTIN_DEF,
+    &HOST_TOOL_LIST_BUILTIN_DEF,
+    &HOST_TOOL_CALL_BUILTIN_DEF,
 ];
-
-const HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("host_call", host_call_builtin)
-        .signature("host_call(name, args)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Invoke a host capability operation by capability.operation name."),
-    async_builtin!("host_tool_list", host_tool_list_builtin)
-        .signature("host_tool_list()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("List host tools exposed by the active bridge."),
-    async_builtin!("host_tool_call", host_tool_call_builtin)
-        .signature("host_tool_call(name, args?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Call a host tool exposed by the active bridge."),
-];
-
-const HOST_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("host")
-    .sync(HOST_SYNC_PRIMITIVES)
-    .async_(HOST_ASYNC_PRIMITIVES);
 
 #[derive(Clone)]
 struct HostMock {
@@ -1003,20 +963,28 @@ fn vm_string(value: &VmValue) -> Option<&str> {
 }
 
 pub(crate) fn register_host_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, HOST_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
+#[harn_builtin(
+    sig = "host_mock(capability: string, op: string, response_or_config?: any, params?: dict) -> nil",
+    category = "host"
+)]
 fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let host_mock = parse_host_mock(args)?;
     push_host_mock(host_mock);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(sig = "host_mock_clear() -> nil", category = "host")]
 fn host_mock_clear_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     reset_host_state();
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(sig = "host_mock_calls() -> list", category = "host")]
 fn host_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let calls = HOST_MOCK_CALLS.with(|calls| {
         calls
@@ -1028,11 +996,13 @@ fn host_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmVal
     Ok(VmValue::List(Rc::new(calls)))
 }
 
+#[harn_builtin(sig = "host_mock_push_scope() -> nil", category = "host")]
 fn host_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     push_host_mock_scope();
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(sig = "host_mock_pop_scope() -> nil", category = "host")]
 fn host_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !pop_host_mock_scope() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -1042,10 +1012,15 @@ fn host_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(sig = "host_capabilities() -> dict", category = "host")]
 fn host_capabilities_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(capability_manifest_with_mocks())
 }
 
+#[harn_builtin(
+    sig = "host_has(capability: string, op?: string) -> bool",
+    category = "host"
+)]
 fn host_has_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let capability = args.first().map(|a| a.display()).unwrap_or_default();
     let operation = args.get(1).map(|a| a.display());
@@ -1071,6 +1046,11 @@ fn host_has_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::Bool(has))
 }
 
+#[harn_builtin(
+    sig = "host_call(name: string, args?: dict) -> any",
+    kind = "async",
+    category = "host"
+)]
 async fn host_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     let params = args
@@ -1086,10 +1066,16 @@ async fn host_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     dispatch_host_operation(capability, operation, &params).await
 }
 
+#[harn_builtin(sig = "host_tool_list() -> list", kind = "async", category = "host")]
 async fn host_tool_list_builtin(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
     dispatch_host_tool_list().await
 }
 
+#[harn_builtin(
+    sig = "host_tool_call(name: string, args?: any) -> any",
+    kind = "async",
+    category = "host"
+)]
 async fn host_tool_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if name.is_empty() {

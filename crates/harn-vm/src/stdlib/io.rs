@@ -9,10 +9,10 @@ use std::sync::Mutex;
 #[cfg(unix)]
 use std::time::Instant;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{self, ErrorKind, OptionsParser};
-use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 use super::logging::{vm_build_log_line, vm_escape_json_str_quoted, VM_MIN_LOG_LEVEL};
 
@@ -81,151 +81,43 @@ thread_local! {
 
 static STDIN_READ_LOCK: Mutex<()> = Mutex::new(());
 
-const IO_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("log", log_builtin)
-        .signature("log(message)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Write a Harn-prefixed message to stdout."),
-    SyncBuiltin::new("color", color_builtin)
-        .signature("color(text, color)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Apply an ANSI foreground color when color output is enabled."),
-    SyncBuiltin::new("bold", bold_builtin)
-        .signature("bold(text)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Apply ANSI bold styling when color output is enabled."),
-    SyncBuiltin::new("dim", dim_builtin)
-        .signature("dim(text)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Apply ANSI dim styling when color output is enabled."),
-    SyncBuiltin::new("set_color_mode", set_color_mode_builtin)
-        .signature("set_color_mode(mode)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Set ANSI color handling to auto, always, or never."),
-    SyncBuiltin::new("__ansi_enabled", ansi_enabled_builtin)
-        .signature("__ansi_enabled(stream?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Return whether ANSI styling is enabled for stdin, stdout, or stderr."),
-    SyncBuiltin::new("read_stdin", read_stdin_builtin)
-        .signature("read_stdin()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Read all remaining stdin as a string."),
-    SyncBuiltin::new("__io_read_line", io_read_line_builtin)
-        .signature("__io_read_line(options?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Read one line from stdin with structured status metadata."),
-    SyncBuiltin::new("__io_write_stderr", io_write_stderr_builtin)
-        .signature("__io_write_stderr(message)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Write text to stderr without appending a newline."),
-    SyncBuiltin::new("__io_write_stdout", io_write_stdout_builtin)
-        .signature("__io_write_stdout(message)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Write text to stdout without appending a newline."),
-    SyncBuiltin::new("__io_print", io_print_builtin)
-        .signature("__io_print(args...)")
-        .arity(VmBuiltinArity::Variadic)
-        .doc("Internal compatibility bridge for stdout without newline."),
-    SyncBuiltin::new("__io_println", io_println_builtin)
-        .signature("__io_println(args...)")
-        .arity(VmBuiltinArity::Variadic)
-        .doc("Internal compatibility bridge for stdout with newline."),
-    SyncBuiltin::new("__io_eprint", io_eprint_builtin)
-        .signature("__io_eprint(message)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Internal compatibility bridge for stderr without newline."),
-    SyncBuiltin::new("__io_eprintln", io_eprintln_builtin)
-        .signature("__io_eprintln(message)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Internal compatibility bridge for stderr with newline."),
-    SyncBuiltin::new("is_stdin_tty", is_stdin_tty_builtin)
-        .signature("is_stdin_tty()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return whether stdin is attached to a terminal."),
-    SyncBuiltin::new("is_stdout_tty", is_stdout_tty_builtin)
-        .signature("is_stdout_tty()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return whether stdout is attached to a terminal."),
-    SyncBuiltin::new("is_stderr_tty", is_stderr_tty_builtin)
-        .signature("is_stderr_tty()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return whether stderr is attached to a terminal."),
-    SyncBuiltin::new("mock_stdin", mock_stdin_builtin)
-        .signature("mock_stdin(text)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Install mocked stdin text for tests."),
-    SyncBuiltin::new("unmock_stdin", unmock_stdin_builtin)
-        .signature("unmock_stdin()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Clear mocked stdin text and line state."),
-    SyncBuiltin::new("mock_tty", mock_tty_builtin)
-        .signature("mock_tty(stream, is_tty)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Override terminal detection for stdin, stdout, or stderr."),
-    SyncBuiltin::new("unmock_tty", unmock_tty_builtin)
-        .signature("unmock_tty()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Clear terminal detection overrides."),
-    SyncBuiltin::new("capture_stderr_start", capture_stderr_start_builtin)
-        .signature("capture_stderr_start()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Start capturing stderr into an in-memory buffer."),
-    SyncBuiltin::new("capture_stderr_take", capture_stderr_take_builtin)
-        .signature("capture_stderr_take()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Stop stderr capture and return the buffered text."),
-    SyncBuiltin::new("uuid", uuid_builtin)
-        .signature("uuid()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Generate a random version 4 UUID."),
-    SyncBuiltin::new("uuid_parse", uuid_parse_builtin)
-        .signature("uuid_parse(value)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Parse and normalize a UUID string, or return nil."),
-    SyncBuiltin::new("uuid_v7", uuid_v7_builtin)
-        .signature("uuid_v7()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Generate a time-ordered version 7 UUID."),
-    SyncBuiltin::new("uuid_v5", uuid_v5_builtin)
-        .signature("uuid_v5(namespace, name)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Generate a deterministic version 5 UUID."),
-    SyncBuiltin::new("uuid_nil", uuid_nil_builtin)
-        .signature("uuid_nil()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return the nil UUID."),
-    SyncBuiltin::new("log_debug", log_debug_builtin)
-        .signature("log_debug(message, fields?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Write a structured debug log line."),
-    SyncBuiltin::new("log_info", log_info_builtin)
-        .signature("log_info(message, fields?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Write a structured info log line."),
-    SyncBuiltin::new("log_warn", log_warn_builtin)
-        .signature("log_warn(message, fields?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Write a structured warning log line."),
-    SyncBuiltin::new("log_error", log_error_builtin)
-        .signature("log_error(message, fields?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Write a structured error log line."),
-    SyncBuiltin::new("log_set_level", log_set_level_builtin)
-        .signature("log_set_level(level)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Set the minimum structured log level."),
-    SyncBuiltin::new("progress", progress_builtin)
-        .signature("progress(phase, message, progress_or_options?, total?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-        .doc("Write a human-readable progress log line."),
-    SyncBuiltin::new("log_json", log_json_builtin)
-        .signature("log_json(key, value?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Write a structured JSON log line."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &LOG_BUILTIN_DEF,
+    &COLOR_BUILTIN_DEF,
+    &BOLD_BUILTIN_DEF,
+    &DIM_BUILTIN_DEF,
+    &SET_COLOR_MODE_BUILTIN_DEF,
+    &ANSI_ENABLED_BUILTIN_DEF,
+    &READ_STDIN_BUILTIN_DEF,
+    &IO_READ_LINE_BUILTIN_DEF,
+    &IO_WRITE_STDERR_BUILTIN_DEF,
+    &IO_WRITE_STDOUT_BUILTIN_DEF,
+    &IO_PRINT_BUILTIN_DEF,
+    &IO_PRINTLN_BUILTIN_DEF,
+    &IO_EPRINT_BUILTIN_DEF,
+    &IO_EPRINTLN_BUILTIN_DEF,
+    &IS_STDIN_TTY_BUILTIN_DEF,
+    &IS_STDOUT_TTY_BUILTIN_DEF,
+    &IS_STDERR_TTY_BUILTIN_DEF,
+    &MOCK_STDIN_BUILTIN_DEF,
+    &UNMOCK_STDIN_BUILTIN_DEF,
+    &MOCK_TTY_BUILTIN_DEF,
+    &UNMOCK_TTY_BUILTIN_DEF,
+    &CAPTURE_STDERR_START_BUILTIN_DEF,
+    &CAPTURE_STDERR_TAKE_BUILTIN_DEF,
+    &UUID_BUILTIN_DEF,
+    &UUID_PARSE_BUILTIN_DEF,
+    &UUID_V7_BUILTIN_DEF,
+    &UUID_V5_BUILTIN_DEF,
+    &UUID_NIL_BUILTIN_DEF,
+    &LOG_DEBUG_BUILTIN_DEF,
+    &LOG_INFO_BUILTIN_DEF,
+    &LOG_WARN_BUILTIN_DEF,
+    &LOG_ERROR_BUILTIN_DEF,
+    &LOG_SET_LEVEL_BUILTIN_DEF,
+    &PROGRESS_BUILTIN_DEF,
+    &LOG_JSON_BUILTIN_DEF,
 ];
-
-const IO_PRIMITIVES: BuiltinGroup<'static> =
-    BuiltinGroup::new().category("io").sync(IO_SYNC_PRIMITIVES);
 
 /// Reset all io thread-local state for test isolation.
 pub(crate) fn reset_io_state() {
@@ -654,15 +546,27 @@ fn ansi_enabled_for_stream(stream: &str) -> bool {
 }
 
 pub(crate) fn register_io_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, IO_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
+#[harn_builtin(
+    sig = "log(message: any) -> nil",
+    category = "io",
+    doc = "Write a Harn-prefixed message to stdout."
+)]
 fn log_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let msg = args.first().map(|a| a.display()).unwrap_or_default();
     write_stdout(out, &format!("[harn] {msg}\n"));
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "color(text: any, color: string) -> string",
+    category = "io",
+    doc = "Apply an ANSI foreground color when color output is enabled."
+)]
 fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     let name = args.get(1).map(|a| a.display()).unwrap_or_default();
@@ -672,6 +576,11 @@ fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     Ok(VmValue::String(Rc::from(ansi_colorize(&text, &name))))
 }
 
+#[harn_builtin(
+    sig = "bold(text: any) -> string",
+    category = "io",
+    doc = "Apply ANSI bold styling when color output is enabled."
+)]
 fn bold_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     if !ansi_enabled_for_stream("stdout") {
@@ -682,6 +591,11 @@ fn bold_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     ))))
 }
 
+#[harn_builtin(
+    sig = "dim(text: any) -> string",
+    category = "io",
+    doc = "Apply ANSI dim styling when color output is enabled."
+)]
 fn dim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     if !ansi_enabled_for_stream("stdout") {
@@ -692,6 +606,11 @@ fn dim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     ))))
 }
 
+#[harn_builtin(
+    sig = "set_color_mode(mode: string) -> nil",
+    category = "io",
+    doc = "Set ANSI color handling to auto, always, or never."
+)]
 fn set_color_mode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mode = args.first().map(|a| a.display()).unwrap_or_default();
     let parsed = match mode.as_str() {
@@ -708,6 +627,11 @@ fn set_color_mode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "__ansi_enabled(stream?: string) -> bool",
+    category = "io",
+    doc = "Return whether ANSI styling is enabled for stdin, stdout, or stderr."
+)]
 fn ansi_enabled_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let stream = args
         .first()
@@ -721,6 +645,11 @@ fn ansi_enabled_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     }
 }
 
+#[harn_builtin(
+    sig = "read_stdin() -> string",
+    category = "io",
+    doc = "Read all remaining stdin as a string."
+)]
 fn read_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     // Drain any remaining mocked stdin first.
     let mocked = STDIN_MOCK.with(|s| s.borrow_mut().take());
@@ -756,58 +685,113 @@ pub(crate) fn read_line_structured_value(args: &[VmValue]) -> Result<VmValue, Vm
     Ok(read_line_result(read_line_from_mock_or_real(&options)))
 }
 
+#[harn_builtin(
+    sig = "__io_read_line(options?: any) -> dict",
+    category = "io",
+    doc = "Read one line from stdin with structured status metadata."
+)]
 fn io_read_line_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     read_line_structured_value(args)
 }
 
+#[harn_builtin(
+    sig = "__io_write_stderr(message: any) -> nil",
+    category = "io",
+    doc = "Write text to stderr without appending a newline."
+)]
 fn io_write_stderr_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let msg = args.first().map(|a| a.display()).unwrap_or_default();
     write_stderr(&msg);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "__io_write_stdout(message: any) -> nil",
+    category = "io",
+    doc = "Write text to stdout without appending a newline."
+)]
 fn io_write_stdout_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let msg = args.first().map(|a| a.display()).unwrap_or_default();
     write_stdout(out, &msg);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "__io_print(...args: any) -> nil",
+    category = "io",
+    doc = "Internal compatibility bridge for stdout without newline."
+)]
 fn io_print_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let msg = args.first().map(|a| a.display()).unwrap_or_default();
     write_stdout(out, &msg);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "__io_println(...args: any) -> nil",
+    category = "io",
+    doc = "Internal compatibility bridge for stdout with newline."
+)]
 fn io_println_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let msg = args.first().map(|a| a.display()).unwrap_or_default();
     write_stdout(out, &format!("{msg}\n"));
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "__io_eprint(message: any) -> nil",
+    category = "io",
+    doc = "Internal compatibility bridge for stderr without newline."
+)]
 fn io_eprint_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let msg = args.first().map(|a| a.display()).unwrap_or_default();
     write_stderr(&msg);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "__io_eprintln(message: any) -> nil",
+    category = "io",
+    doc = "Internal compatibility bridge for stderr with newline."
+)]
 fn io_eprintln_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let msg = args.first().map(|a| a.display()).unwrap_or_default();
     write_stderr(&format!("{msg}\n"));
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "is_stdin_tty() -> bool",
+    category = "io",
+    doc = "Return whether stdin is attached to a terminal."
+)]
 fn is_stdin_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(is_tty_for("stdin")))
 }
 
+#[harn_builtin(
+    sig = "is_stdout_tty() -> bool",
+    category = "io",
+    doc = "Return whether stdout is attached to a terminal."
+)]
 fn is_stdout_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(is_tty_for("stdout")))
 }
 
+#[harn_builtin(
+    sig = "is_stderr_tty() -> bool",
+    category = "io",
+    doc = "Return whether stderr is attached to a terminal."
+)]
 fn is_stderr_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(is_tty_for("stderr")))
 }
 
+#[harn_builtin(
+    sig = "mock_stdin(text: string) -> nil",
+    category = "io",
+    doc = "Install mocked stdin text for tests."
+)]
 fn mock_stdin_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     STDIN_MOCK.with(|s| *s.borrow_mut() = Some(text));
@@ -815,12 +799,22 @@ fn mock_stdin_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "unmock_stdin() -> nil",
+    category = "io",
+    doc = "Clear mocked stdin text and line state."
+)]
 fn unmock_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     STDIN_MOCK.with(|s| *s.borrow_mut() = None);
     STDIN_LINES.with(|s| *s.borrow_mut() = None);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "mock_tty(stream: string, is_tty: bool) -> nil",
+    category = "io",
+    doc = "Override terminal detection for stdin, stdout, or stderr."
+)]
 fn mock_tty_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let stream = args.first().map(|a| a.display()).unwrap_or_default();
     let is_tty = matches!(args.get(1), Some(VmValue::Bool(true)));
@@ -840,27 +834,52 @@ fn mock_tty_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     })
 }
 
+#[harn_builtin(
+    sig = "unmock_tty() -> nil",
+    category = "io",
+    doc = "Clear terminal detection overrides."
+)]
 fn unmock_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     TTY_MOCK.with(|t| *t.borrow_mut() = TtyMock::default());
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "capture_stderr_start() -> nil",
+    category = "io",
+    doc = "Start capturing stderr into an in-memory buffer."
+)]
 fn capture_stderr_start_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     STDERR_CAPTURING.with(|c| *c.borrow_mut() = true);
     STDERR_BUFFER.with(|s| s.borrow_mut().clear());
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "capture_stderr_take() -> string",
+    category = "io",
+    doc = "Stop stderr capture and return the buffered text."
+)]
 fn capture_stderr_take_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let buf = STDERR_BUFFER.with(|s| std::mem::take(&mut *s.borrow_mut()));
     STDERR_CAPTURING.with(|c| *c.borrow_mut() = false);
     Ok(VmValue::String(Rc::from(buf)))
 }
 
+#[harn_builtin(
+    sig = "uuid() -> string",
+    category = "io",
+    doc = "Generate a random version 4 UUID."
+)]
 fn uuid_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(Rc::from(uuid::Uuid::new_v4().to_string())))
 }
 
+#[harn_builtin(
+    sig = "uuid_parse(value: any) -> string",
+    category = "io",
+    doc = "Parse and normalize a UUID string, or return nil."
+)]
 fn uuid_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw = args.first().map(|a| a.display()).unwrap_or_default();
     match uuid::Uuid::parse_str(&raw) {
@@ -869,10 +888,20 @@ fn uuid_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     }
 }
 
+#[harn_builtin(
+    sig = "uuid_v7() -> string",
+    category = "io",
+    doc = "Generate a time-ordered version 7 UUID."
+)]
 fn uuid_v7_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(Rc::from(uuid::Uuid::now_v7().to_string())))
 }
 
+#[harn_builtin(
+    sig = "uuid_v5(namespace: string, name: string) -> string",
+    category = "io",
+    doc = "Generate a deterministic version 5 UUID."
+)]
 fn uuid_v5_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -889,6 +918,11 @@ fn uuid_v5_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     )))
 }
 
+#[harn_builtin(
+    sig = "uuid_nil() -> string",
+    category = "io",
+    doc = "Return the nil UUID."
+)]
 fn uuid_nil_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(Rc::from(uuid::Uuid::nil().to_string())))
 }
@@ -937,26 +971,51 @@ pub(crate) fn read_password_legacy_value(prompt: &str) -> Result<VmValue, VmErro
     }
 }
 
+#[harn_builtin(
+    sig = "log_debug(message: any, fields?: dict) -> nil",
+    category = "io",
+    doc = "Write a structured debug log line."
+)]
 fn log_debug_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     vm_write_log("debug", 0, args, out);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "log_info(message: any, fields?: dict) -> nil",
+    category = "io",
+    doc = "Write a structured info log line."
+)]
 fn log_info_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     vm_write_log("info", 1, args, out);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "log_warn(message: any, fields?: dict) -> nil",
+    category = "io",
+    doc = "Write a structured warning log line."
+)]
 fn log_warn_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     vm_write_log("warn", 2, args, out);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "log_error(message: any, fields?: dict) -> nil",
+    category = "io",
+    doc = "Write a structured error log line."
+)]
 fn log_error_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     vm_write_log("error", 3, args, out);
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "log_set_level(level: string) -> nil",
+    category = "io",
+    doc = "Set the minimum structured log level."
+)]
 fn log_set_level_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let level_str = args.first().map(|a| a.display()).unwrap_or_default();
     match super::logging::vm_level_to_u8(&level_str) {
@@ -970,11 +1029,21 @@ fn log_set_level_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     }
 }
 
+#[harn_builtin(
+    sig = "progress(phase: string, message: string, progress_or_options?: any, total?: int) -> nil",
+    category = "io",
+    doc = "Write a human-readable progress log line."
+)]
 fn progress_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     write_stdout(out, &render_progress_line(args));
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "log_json(key: string, value?: any) -> nil",
+    category = "io",
+    doc = "Write a structured JSON log line."
+)]
 fn log_json_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     let value = args.get(1).cloned().unwrap_or(VmValue::Nil);

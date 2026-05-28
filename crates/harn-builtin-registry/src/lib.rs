@@ -38,6 +38,12 @@ pub struct BuiltinDef<H: 'static> {
     /// Human-readable doc, typically the leading `///` block from the impl
     /// function. Surfaced to LSP hover and `harn explain`.
     pub doc: Option<&'static str>,
+    /// Free-form Harn-style signature text (e.g. `"foo(a: dict) -> dict"`).
+    /// Populated by `#[harn_builtin]` from the `sig = "..."` literal so the
+    /// runtime metadata layer can surface the original source spelling
+    /// without re-rendering [`Self::sig`]. The DSL builder shape used to
+    /// store this via `.signature(...)`; the macro shape replaces it.
+    pub signature_text: Option<&'static str>,
     /// Set to `true` for builtins that exist in the parser registry but
     /// have no runtime entry (`len`, `split`, … — see
     /// `PARSER_ONLY_EXCEPTIONS` in the alignment test). The registry
@@ -60,6 +66,7 @@ impl<H: 'static> BuiltinDef<H> {
             handler,
             category: None,
             doc: None,
+            signature_text: None,
             parser_only: false,
             runtime_only: false,
         }

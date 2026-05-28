@@ -275,7 +275,9 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         // `#[harn_builtin]`. Order is alphabetical by module file name for
         // predictability.
         let mut out: Vec<&'static macros::VmBuiltinDef> = Vec::new();
+        out.extend_from_slice(agent_sessions::MODULE_BUILTINS);
         out.extend_from_slice(agent_state::MODULE_BUILTINS);
+        out.extend_from_slice(agents_daemon::MODULE_BUILTINS);
         out.extend_from_slice(bytes::MODULE_BUILTINS);
         out.extend_from_slice(calendar::MODULE_BUILTINS);
         out.extend_from_slice(channel_guardrails::MODULE_BUILTINS);
@@ -292,8 +294,11 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(durable_step::MODULE_BUILTINS);
         out.extend_from_slice(event_log::MODULE_BUILTINS);
         out.extend_from_slice(flow::MODULE_BUILTINS);
+        out.extend_from_slice(fs::MODULE_BUILTINS);
         out.extend_from_slice(hitl::MODULE_BUILTINS);
         out.extend_from_slice(hitl_read::MODULE_BUILTINS);
+        out.extend_from_slice(host::MODULE_BUILTINS);
+        out.extend_from_slice(io::MODULE_BUILTINS);
         out.extend_from_slice(iter::MODULE_BUILTINS);
         out.extend_from_slice(json::MODULE_BUILTINS);
         out.extend_from_slice(json_stream::MODULE_BUILTINS);

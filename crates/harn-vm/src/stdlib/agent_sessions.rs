@@ -10,214 +10,50 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::agent_sessions;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{self, ErrorKind};
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
-};
 use crate::value::{VmError, VmValue};
 
 /// Sessions raise catchable errors (callers may `try`/`recover`).
 const ERR_KIND: ErrorKind = ErrorKind::Thrown;
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 pub fn register_agent_session_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, AGENT_SESSION_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
-const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("agent_session_open", agent_session_open_builtin)
-        .signature("agent_session_open(id?, opts?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc(
-            "Open or create a first-class agent session. `opts` may carry a typed \
-             `workspace_anchor: {primary, additional_roots?, anchored_at?}` and \
-             `workspace_policy: {default_mount_mode?}` to pin workspace scope at \
-             open time.",
-        ),
-    SyncBuiltin::new("agent_session_exists", agent_session_exists_builtin)
-        .signature("agent_session_exists(id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return whether an agent session exists."),
-    SyncBuiltin::new("agent_session_length", agent_session_length_builtin)
-        .signature("agent_session_length(id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return the number of messages in an agent session."),
-    SyncBuiltin::new("agent_session_snapshot", agent_session_snapshot_builtin)
-        .signature("agent_session_snapshot(id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return the current transcript snapshot for an agent session."),
-    SyncBuiltin::new("agent_session_ancestry", agent_session_ancestry_builtin)
-        .signature("agent_session_ancestry(id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return parent, child, and root lineage for an agent session."),
-    SyncBuiltin::new("agent_session_current_id", agent_session_current_id_builtin)
-        .signature("agent_session_current_id()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return the innermost active agent session id."),
-    SyncBuiltin::new(
-        "agent_session_tool_format",
-        agent_session_tool_format_builtin,
-    )
-    .signature("agent_session_tool_format(id)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Return the claimed tool format for an agent session."),
-    SyncBuiltin::new(
-        "agent_session_system_prompt",
-        agent_session_system_prompt_builtin,
-    )
-    .signature("agent_session_system_prompt(id)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Return the session-level system prompt recorded for an agent session."),
-    SyncBuiltin::new(
-        "agent_session_workspace_anchor",
-        agent_session_workspace_anchor_builtin,
-    )
-    .signature("agent_session_workspace_anchor(id)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc(
-        "Return the typed workspace anchor for an agent session, or nil when none \
-         is pinned.",
-    ),
-    SyncBuiltin::new(
-        "agent_session_set_workspace_anchor",
-        agent_session_set_workspace_anchor_builtin,
-    )
-    .signature("agent_session_set_workspace_anchor(id, anchor)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc(
-        "Set or clear the typed workspace anchor for an agent session. Pass nil to \
-         clear; pass `{primary, additional_roots?, anchored_at?}` to set. Returns \
-         true when the value changed.",
-    ),
-    SyncBuiltin::new(
-        "agent_session_workspace_policy",
-        agent_session_workspace_policy_builtin,
-    )
-    .signature("agent_session_workspace_policy(id)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Return the session workspace policy defaults."),
-    SyncBuiltin::new(
-        "agent_session_set_workspace_policy",
-        agent_session_set_workspace_policy_builtin,
-    )
-    .signature("agent_session_set_workspace_policy(id, policy)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Set the session workspace policy defaults. Returns true when changed."),
-    SyncBuiltin::new("agent_session_add_root", agent_session_add_root_builtin)
-        .signature("agent_session_add_root(id, root, opts?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc(
-            "Mount an additional workspace root on an anchored session. Returns \
-             `{ok, mounted_at?, error?}`.",
-        ),
-    SyncBuiltin::new(
-        "agent_session_remove_root",
-        agent_session_remove_root_builtin,
-    )
-    .signature("agent_session_remove_root(id, root)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc(
-        "Remove one additional workspace root from an anchored session. Returns \
-         `{ok, error?}`.",
-    ),
-    SyncBuiltin::new("agent_session_list_roots", agent_session_list_roots_builtin)
-        .signature("agent_session_list_roots(id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return `{primary, additional}` for the session's mounted roots."),
-    SyncBuiltin::new(
-        "agent_session_claim_tool_format",
-        agent_session_claim_tool_format_builtin,
-    )
-    .signature("agent_session_claim_tool_format(id, tool_format)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Claim the tool format for an agent session."),
-    SyncBuiltin::new("agent_session_reset", agent_session_reset_builtin)
-        .signature("agent_session_reset(id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Reset an agent session transcript."),
-    SyncBuiltin::new("agent_session_fork", agent_session_fork_builtin)
-        .signature("agent_session_fork(src, dst?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Fork an agent session transcript."),
-    SyncBuiltin::new("agent_session_fork_at", agent_session_fork_at_builtin)
-        .signature("agent_session_fork_at(src, keep_first, dst?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Fork an agent session at a message boundary."),
-    SyncBuiltin::new("agent_session_close", agent_session_close_builtin)
-        .signature("agent_session_close(id, status?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Close an agent session and optionally record a close reason."),
-    SyncBuiltin::new("agent_session_trim", agent_session_trim_builtin)
-        .signature("agent_session_trim(id, keep_last)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Trim an agent session to the last N messages."),
-    SyncBuiltin::new("agent_session_inject", agent_session_inject_builtin)
-        .signature("agent_session_inject(id, message)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Inject one message into an agent session."),
-    SyncBuiltin::new("agent_session_post_event", agent_session_post_event_builtin)
-        .signature("agent_session_post_event(id, kind, content, source?)")
-        .arity(VmBuiltinArity::Range { min: 3, max: 4 })
-        .doc(
-            "Post an event into a running session's agent_inbox. Triggers, \
-         connectors, and external host integrations use this to nudge \
-         a mid-loop session; the next turn boundary (including the \
-         drain after compaction) surfaces the entry as feedback.",
-        ),
-    SyncBuiltin::new(
-        "agent_session_drain_inbox",
-        agent_session_drain_inbox_builtin,
-    )
-    .signature("agent_session_drain_inbox(id)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc(
-        "Drain every pending agent_inbox entry for a session. Each entry \
-         has {sequence, kind, content, source, ts_ms}.",
-    ),
-    SyncBuiltin::new(
-        "agent_session_seed_from_jsonl",
-        agent_session_seed_from_jsonl_builtin,
-    )
-    .signature("agent_session_seed_from_jsonl(jsonl_path, opts?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .doc("Seed a new agent session from an LLM transcript JSONL sidecar."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &AGENT_SESSION_OPEN_BUILTIN_DEF,
+    &AGENT_SESSION_EXISTS_BUILTIN_DEF,
+    &AGENT_SESSION_LENGTH_BUILTIN_DEF,
+    &AGENT_SESSION_SNAPSHOT_BUILTIN_DEF,
+    &AGENT_SESSION_ANCESTRY_BUILTIN_DEF,
+    &AGENT_SESSION_CURRENT_ID_BUILTIN_DEF,
+    &AGENT_SESSION_TOOL_FORMAT_BUILTIN_DEF,
+    &AGENT_SESSION_SYSTEM_PROMPT_BUILTIN_DEF,
+    &AGENT_SESSION_WORKSPACE_ANCHOR_BUILTIN_DEF,
+    &AGENT_SESSION_SET_WORKSPACE_ANCHOR_BUILTIN_DEF,
+    &AGENT_SESSION_WORKSPACE_POLICY_BUILTIN_DEF,
+    &AGENT_SESSION_SET_WORKSPACE_POLICY_BUILTIN_DEF,
+    &AGENT_SESSION_ADD_ROOT_BUILTIN_DEF,
+    &AGENT_SESSION_REMOVE_ROOT_BUILTIN_DEF,
+    &AGENT_SESSION_LIST_ROOTS_BUILTIN_DEF,
+    &AGENT_SESSION_CLAIM_TOOL_FORMAT_BUILTIN_DEF,
+    &AGENT_SESSION_RESET_BUILTIN_DEF,
+    &AGENT_SESSION_FORK_BUILTIN_DEF,
+    &AGENT_SESSION_FORK_AT_BUILTIN_DEF,
+    &AGENT_SESSION_CLOSE_BUILTIN_DEF,
+    &AGENT_SESSION_TRIM_BUILTIN_DEF,
+    &AGENT_SESSION_INJECT_BUILTIN_DEF,
+    &AGENT_SESSION_POST_EVENT_BUILTIN_DEF,
+    &AGENT_SESSION_DRAIN_INBOX_BUILTIN_DEF,
+    &AGENT_SESSION_SEED_FROM_JSONL_BUILTIN_DEF,
+    &AGENT_SESSION_REANCHOR_BUILTIN_DEF,
+    &AGENT_SESSION_COMPACT_BUILTIN_DEF,
+    &CANCEL_IN_FLIGHT_TOOL_CALL_BUILTIN_DEF,
 ];
-
-const AGENT_SESSION_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("agent_session_reanchor", agent_session_reanchor_builtin)
-        .signature("agent_session_reanchor(id, new_anchor, opts?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc(
-            "Atomically replace a session's primary workspace anchor (#2218). `opts` \
-             may set `carry_transcript` (default true), `compact` (default false), \
-             and `reason` for telemetry. `compact: true` is invalid with \
-             `carry_transcript: false`; when set, compaction runs before the swap so \
-             the resumed turn sees a digested transcript + the new anchor. Emits an \
-             `AnchorChanged` transcript event and a live `AgentEvent::AnchorChanged` \
-             notification. Returns `{ok, changed, session_id, anchor, compacted, error}`.",
-        ),
-    async_builtin!("agent_session_compact", agent_session_compact_builtin)
-        .signature("agent_session_compact(id, opts?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Compact an agent session transcript with the host compaction runtime."),
-    async_builtin!(
-        "cancel_in_flight_tool_call",
-        cancel_in_flight_tool_call_builtin
-    )
-    .signature("cancel_in_flight_tool_call(session_id, call_id, opts?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .doc(
-        "Abort a specific in-flight tool call. Targets one call rather \
-         than the whole session — returns {status, call_id, tool} where \
-         status is \"cancelled\", \"already_cancelled\", \"not_found\", \
-         or \"timeout\".",
-    ),
-];
-
-const AGENT_SESSION_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("agent.session")
-    .sync(AGENT_SESSION_SYNC_PRIMITIVES)
-    .async_(AGENT_SESSION_ASYNC_PRIMITIVES);
 
 fn err(msg: impl Into<String>) -> VmError {
     ERR_KIND.err(msg.into())
@@ -401,6 +237,11 @@ fn close_status_arg(args: &[VmValue]) -> Result<(String, String, serde_json::Val
 const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor", "workspace_policy"];
 const AGENT_SESSION_ADD_ROOT_OPT_KEYS: &[&str] = &["mount_mode", "reason"];
 
+#[harn_builtin(
+    sig = "agent_session_open(id?: string, opts?: dict) -> any",
+    category = "agent.session",
+    doc = "Open or create a first-class agent session. opts may carry workspace_anchor and workspace_policy."
+)]
 fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_opt(args, 0, "agent_session_open", "id")?;
     let opts = match args.get(1) {
@@ -450,6 +291,11 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     Ok(VmValue::String(Rc::from(resolved)))
 }
 
+#[harn_builtin(
+    sig = "agent_session_workspace_anchor(id: string) -> any",
+    category = "agent.session",
+    doc = "Return the typed workspace anchor for an agent session, or nil when none is pinned."
+)]
 fn agent_session_workspace_anchor_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -466,6 +312,11 @@ fn agent_session_workspace_anchor_builtin(
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "agent_session_set_workspace_anchor(id: string, anchor: any) -> bool",
+    category = "agent.session",
+    doc = "Set or clear the typed workspace anchor for an agent session."
+)]
 fn agent_session_set_workspace_anchor_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -493,6 +344,11 @@ fn agent_session_set_workspace_anchor_builtin(
     Ok(VmValue::Bool(changed))
 }
 
+#[harn_builtin(
+    sig = "agent_session_workspace_policy(id: string) -> dict",
+    category = "agent.session",
+    doc = "Return the session workspace policy defaults."
+)]
 fn agent_session_workspace_policy_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -507,6 +363,11 @@ fn agent_session_workspace_policy_builtin(
         })
 }
 
+#[harn_builtin(
+    sig = "agent_session_set_workspace_policy(id: string, policy: dict) -> bool",
+    category = "agent.session",
+    doc = "Set the session workspace policy defaults. Returns true when changed."
+)]
 fn agent_session_set_workspace_policy_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -527,6 +388,11 @@ fn agent_session_set_workspace_policy_builtin(
     Ok(VmValue::Bool(changed))
 }
 
+#[harn_builtin(
+    sig = "agent_session_add_root(id: string, root: string, opts?: dict) -> dict",
+    category = "agent.session",
+    doc = "Mount an additional workspace root on an anchored session."
+)]
 fn agent_session_add_root_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_add_root", "id")?;
     let root = arg_string_required(args, 1, "agent_session_add_root", "root")?;
@@ -552,6 +418,11 @@ fn agent_session_add_root_builtin(args: &[VmValue], _out: &mut String) -> Result
     )
 }
 
+#[harn_builtin(
+    sig = "agent_session_remove_root(id: string, root: string) -> dict",
+    category = "agent.session",
+    doc = "Remove one additional workspace root from an anchored session."
+)]
 fn agent_session_remove_root_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -564,6 +435,11 @@ fn agent_session_remove_root_builtin(
     })
 }
 
+#[harn_builtin(
+    sig = "agent_session_list_roots(id: string) -> dict",
+    category = "agent.session",
+    doc = "Return {primary, additional} for the session mounted roots."
+)]
 fn agent_session_list_roots_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -577,11 +453,21 @@ fn agent_session_list_roots_builtin(
     })))
 }
 
+#[harn_builtin(
+    sig = "agent_session_exists(id: string) -> bool",
+    category = "agent.session",
+    doc = "Return whether an agent session exists."
+)]
 fn agent_session_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_exists", "id")?;
     Ok(VmValue::Bool(agent_sessions::exists(&id)))
 }
 
+#[harn_builtin(
+    sig = "agent_session_length(id: string) -> int",
+    category = "agent.session",
+    doc = "Return the number of messages in an agent session."
+)]
 fn agent_session_length_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_length", "id")?;
     match agent_sessions::length(&id) {
@@ -592,11 +478,21 @@ fn agent_session_length_builtin(args: &[VmValue], _out: &mut String) -> Result<V
     }
 }
 
+#[harn_builtin(
+    sig = "agent_session_snapshot(id: string) -> any",
+    category = "agent.session",
+    doc = "Return the current transcript snapshot for an agent session."
+)]
 fn agent_session_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_snapshot", "id")?;
     Ok(agent_sessions::snapshot(&id).unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "agent_session_ancestry(id: string) -> dict",
+    category = "agent.session",
+    doc = "Return parent, child, and root lineage for an agent session."
+)]
 fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_ancestry", "id")?;
     let Some(ancestry) = agent_sessions::ancestry(&id) else {
@@ -627,6 +523,11 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
     ]))))
 }
 
+#[harn_builtin(
+    sig = "agent_session_current_id() -> string?",
+    category = "agent.session",
+    doc = "Return the innermost active agent session id."
+)]
 fn agent_session_current_id_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -636,6 +537,11 @@ fn agent_session_current_id_builtin(
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "agent_session_tool_format(id: string) -> string?",
+    category = "agent.session",
+    doc = "Return the claimed tool format for an agent session."
+)]
 fn agent_session_tool_format_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -651,6 +557,11 @@ fn agent_session_tool_format_builtin(
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "agent_session_system_prompt(id: string) -> string?",
+    category = "agent.session",
+    doc = "Return the session-level system prompt recorded for an agent session."
+)]
 fn agent_session_system_prompt_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -666,6 +577,11 @@ fn agent_session_system_prompt_builtin(
         .unwrap_or(VmValue::Nil))
 }
 
+#[harn_builtin(
+    sig = "agent_session_claim_tool_format(id: string, tool_format: string) -> nil",
+    category = "agent.session",
+    doc = "Claim the tool format for an agent session."
+)]
 fn agent_session_claim_tool_format_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -678,6 +594,11 @@ fn agent_session_claim_tool_format_builtin(
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "agent_session_reset(id: string) -> nil",
+    category = "agent.session",
+    doc = "Reset an agent session transcript."
+)]
 fn agent_session_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_reset", "id")?;
     if !agent_sessions::reset_transcript(&id) {
@@ -688,6 +609,11 @@ fn agent_session_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "agent_session_fork(src: string, dst?: string) -> string",
+    category = "agent.session",
+    doc = "Fork an agent session transcript."
+)]
 fn agent_session_fork_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let src = arg_string_required(args, 0, "agent_session_fork", "src")?;
     let dst = arg_string_opt(args, 1, "agent_session_fork", "dst")?;
@@ -704,6 +630,11 @@ fn agent_session_fork_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     }
 }
 
+#[harn_builtin(
+    sig = "agent_session_fork_at(src: string, keep_first: int, dst?: string) -> string",
+    category = "agent.session",
+    doc = "Fork an agent session at a message boundary."
+)]
 fn agent_session_fork_at_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let src = arg_string_required(args, 0, "agent_session_fork_at", "src")?;
     let keep_first = arg_int_required(args, 1, "agent_session_fork_at", "keep_first")?;
@@ -724,6 +655,11 @@ fn agent_session_fork_at_builtin(args: &[VmValue], _out: &mut String) -> Result<
     }
 }
 
+#[harn_builtin(
+    sig = "agent_session_close(id: string, status?: any) -> nil",
+    category = "agent.session",
+    doc = "Close an agent session and optionally record a close reason."
+)]
 fn agent_session_close_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_close", "id")?;
     if !agent_sessions::exists(&id) {
@@ -736,6 +672,11 @@ fn agent_session_close_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "agent_session_trim(id: string, keep_last: int) -> nil",
+    category = "agent.session",
+    doc = "Trim an agent session to the last N messages."
+)]
 fn agent_session_trim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_trim", "id")?;
     let keep_last = args
@@ -753,6 +694,11 @@ fn agent_session_trim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     Ok(VmValue::Int(kept as i64))
 }
 
+#[harn_builtin(
+    sig = "agent_session_inject(id: string, message: any) -> nil",
+    category = "agent.session",
+    doc = "Inject one message into an agent session."
+)]
 fn agent_session_inject_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let id = arg_string_required(args, 0, "agent_session_inject", "id")?;
     if !agent_sessions::exists(&id) {
@@ -768,6 +714,11 @@ fn agent_session_inject_builtin(args: &[VmValue], _out: &mut String) -> Result<V
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "agent_session_post_event(id: string, kind: string, content: any, source?: any) -> nil",
+    category = "agent.session",
+    doc = "Post an event into a running session agent_inbox."
+)]
 fn agent_session_post_event_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -791,6 +742,11 @@ fn agent_session_post_event_builtin(
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "agent_session_drain_inbox(id: string) -> list",
+    category = "agent.session",
+    doc = "Drain every pending agent_inbox entry for a session."
+)]
 fn agent_session_drain_inbox_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -826,6 +782,11 @@ const SEED_FROM_JSONL_OPT_KEYS: &[&str] = &[
     "model",
 ];
 
+#[harn_builtin(
+    sig = "agent_session_seed_from_jsonl(jsonl_path: string, opts?: dict) -> string",
+    category = "agent.session",
+    doc = "Seed a new agent session from an LLM transcript JSONL sidecar."
+)]
 fn agent_session_seed_from_jsonl_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -903,6 +864,12 @@ fn agent_session_seed_from_jsonl_builtin(
 
 const REANCHOR_OPT_KEYS: &[&str] = &["carry_transcript", "compact", "reason"];
 
+#[harn_builtin(
+    sig = "agent_session_reanchor(id: string, new_anchor: any, opts?: dict) -> dict",
+    kind = "async",
+    category = "agent.session",
+    doc = "Atomically replace a session primary workspace anchor (#2218)."
+)]
 async fn agent_session_reanchor_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let id = arg_string_required(&args, 0, "agent_session_reanchor", "id")?;
     if !agent_sessions::exists(&id) {
@@ -985,6 +952,12 @@ async fn agent_session_reanchor_builtin(args: Vec<VmValue>) -> Result<VmValue, V
     })))
 }
 
+#[harn_builtin(
+    sig = "agent_session_compact(id: string, opts?: dict) -> dict",
+    kind = "async",
+    category = "agent.session",
+    doc = "Compact an agent session transcript with the host compaction runtime."
+)]
 async fn agent_session_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let id = arg_string_required(&args, 0, "agent_session_compact", "id")?;
     if !agent_sessions::exists(&id) {
@@ -1140,6 +1113,12 @@ const CANCEL_TOOL_CALL_OPT_KEYS: &[&str] = &["reason", "inject_reminder", "timeo
 /// the issue spec (#2213).
 const CANCEL_TOOL_CALL_DEFAULT_TIMEOUT_MS: i64 = 5_000;
 
+#[harn_builtin(
+    sig = "cancel_in_flight_tool_call(session_id: string, call_id: string, opts?: dict) -> dict",
+    kind = "async",
+    category = "agent.session",
+    doc = "Abort a specific in-flight tool call."
+)]
 async fn cancel_in_flight_tool_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = arg_string_required(&args, 0, "cancel_in_flight_tool_call", "session_id")?;
     let call_id = arg_string_required(&args, 1, "cancel_in_flight_tool_call", "call_id")?;

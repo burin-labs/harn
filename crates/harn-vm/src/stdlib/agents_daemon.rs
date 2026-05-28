@@ -9,12 +9,10 @@ use std::sync::Arc;
 use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
 use crate::orchestration::DaemonEventKindRecord;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{self, ErrorKind};
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
-};
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 const SNAPSHOT_FILE: &str = "daemon.json";
 const META_FILE: &str = "daemon.meta.json";
@@ -22,35 +20,13 @@ const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 1024;
 const DAEMON_MONITOR_POLL_MS: u64 = 10;
 const DAEMON_STOP_WAIT_MS: u64 = 500;
 
-const DAEMON_SYNC_PRIMITIVES: &[SyncBuiltin] =
-    &[SyncBuiltin::new("daemon_snapshot", daemon_snapshot_builtin)
-        .signature("daemon_snapshot(handle)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Refresh and return a daemon snapshot with queued event state.")];
-
-const DAEMON_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("daemon_spawn", daemon_spawn_builtin)
-        .signature("daemon_spawn(config)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Spawn a persistent daemon agent worker."),
-    async_builtin!("daemon_trigger", daemon_trigger_builtin)
-        .signature("daemon_trigger(handle, payload)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Queue an event payload for a running daemon."),
-    async_builtin!("daemon_stop", daemon_stop_builtin)
-        .signature("daemon_stop(handle)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Stop a running daemon and persist its latest snapshot."),
-    async_builtin!("daemon_resume", daemon_resume_builtin)
-        .signature("daemon_resume(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Resume a daemon from persisted state."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &DAEMON_SNAPSHOT_BUILTIN_DEF,
+    &DAEMON_SPAWN_BUILTIN_DEF,
+    &DAEMON_TRIGGER_BUILTIN_DEF,
+    &DAEMON_STOP_BUILTIN_DEF,
+    &DAEMON_RESUME_BUILTIN_DEF,
 ];
-
-const DAEMON_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("agent.daemon")
-    .sync(DAEMON_SYNC_PRIMITIVES)
-    .async_(DAEMON_ASYNC_PRIMITIVES);
 
 fn default_event_queue_capacity() -> usize {
     DEFAULT_EVENT_QUEUE_CAPACITY
@@ -128,9 +104,16 @@ thread_local! {
 }
 
 pub fn register_daemon_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, DAEMON_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
+#[harn_builtin(
+    sig = "daemon_spawn(config: dict) -> dict",
+    kind = "async",
+    category = "agent.daemon"
+)]
 async fn daemon_spawn_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
         VmError::Runtime("daemon_spawn requires an async builtin VM context".to_string())
@@ -192,6 +175,11 @@ async fn daemon_spawn_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(summary)
 }
 
+#[harn_builtin(
+    sig = "daemon_trigger(handle: any, event: any) -> dict",
+    kind = "async",
+    category = "agent.daemon"
+)]
 async fn daemon_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = args
         .first()
@@ -244,6 +232,10 @@ async fn daemon_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     Ok(summary)
 }
 
+#[harn_builtin(
+    sig = "daemon_snapshot(handle: any) -> dict",
+    category = "agent.daemon"
+)]
 fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = args
         .first()
@@ -270,6 +262,11 @@ fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     })
 }
 
+#[harn_builtin(
+    sig = "daemon_stop(handle: any) -> dict",
+    kind = "async",
+    category = "agent.daemon"
+)]
 async fn daemon_stop_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = args
         .first()
@@ -324,6 +321,11 @@ async fn daemon_stop_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(summary)
 }
 
+#[harn_builtin(
+    sig = "daemon_resume(path: string) -> dict",
+    kind = "async",
+    category = "agent.daemon"
+)]
 async fn daemon_resume_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
         VmError::Runtime("daemon_resume requires an async builtin VM context".to_string())
