@@ -639,7 +639,7 @@ fn safe_text_patch_disk_rejects_missing_parent_when_create_parents_false() {
 fn read_text_rejects_non_utf8_with_clear_diagnostic() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("blob.bin");
-    fs::write(&file, &[0xffu8, 0xfe, 0xfd]).unwrap();
+    fs::write(&file, [0xffu8, 0xfe, 0xfd]).unwrap();
     let reg = registry();
 
     let err = (reg.find("hostlib_fs_read_text").unwrap().handler)(&dict_arg(&[(
