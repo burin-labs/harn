@@ -519,9 +519,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("name", TY_STRING)],
         TY_BOOL,
     ),
-    BuiltinSignature::simple("sandbox_active_backend", &[], TY_STRING),
-    BuiltinSignature::simple("sandbox_active_profile", &[], TY_STRING),
-    BuiltinSignature::simple("sandbox_backend_available", &[], TY_BOOL),
     BuiltinSignature::simple("sse_close", &[Param::new("stream", TY_STRING)], TY_BOOL),
     BuiltinSignature::simple(
         "sse_connect",

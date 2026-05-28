@@ -51,24 +51,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     // `__deep_merge`, `__dict_filter_nil`, `__dict_from_pairs`,
     // `__dict_merge`, `__list_unique`, `__dict_omit`, `__dict_pick`,
-    // `__dict_pick_keys` migrated to `#[harn_builtin]` in
-    // `harn-vm/src/stdlib/collections.rs`.
-    BuiltinSignature::simple(
-        "__from_xml",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__to_xml",
-        &[
-            Param::new("value", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_STRING,
-    ),
     BuiltinSignature::simple(
         "__files_upload",
         &[
@@ -99,40 +81,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("__io_println", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::simple("__io_eprint", &[Param::new("message", TY_ANY)], TY_NIL),
     BuiltinSignature::simple("__io_eprintln", &[Param::new("message", TY_ANY)], TY_NIL),
-    BuiltinSignature::simple(
-        "__oauth_storage_cloud_handle",
-        &[Param::new("scope", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__oauth_storage_delete",
-        &[Param::new("handle", TY_DICT), Param::new("key", TY_STRING)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "__oauth_storage_file_handle",
-        &[
-            Param::new("path", TY_STRING),
-            Param::new("encryption_key", Ty::Union(&[TY_STRING, TY_BYTES])),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__oauth_storage_get",
-        &[Param::new("handle", TY_DICT), Param::new("key", TY_STRING)],
-        TY_DICT_OR_NIL,
-    ),
-    BuiltinSignature::simple("__oauth_storage_memory_handle", &[], TY_DICT),
-    BuiltinSignature::simple(
-        "__oauth_storage_set",
-        &[
-            Param::new("handle", TY_DICT),
-            Param::new("key", TY_STRING),
-            Param::new("token_set", TY_DICT),
-            Param::optional("ttl_seconds", Ty::Union(&[TY_INT, TY_DURATION, TY_NIL])),
-        ],
-        TY_NIL,
-    ),
     BuiltinSignature::simple(
         "__oauth_dynreg_build_authorization_server_metadata",
         &[
@@ -172,23 +120,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "__oauth_dynreg_validate_metadata",
         &[Param::new("metadata", TY_DICT)],
         TY_DICT,
-    ),
-    BuiltinSignature::simple("__token_redaction_clear_custom_patterns", &[], TY_NIL),
-    BuiltinSignature::simple("__token_redaction_custom_patterns", &[], TY_LIST),
-    BuiltinSignature::simple("__token_redaction_default_patterns", &[], TY_LIST),
-    BuiltinSignature::simple("__token_redaction_drain_audit", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "__token_redaction_redact",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "__token_redaction_register_pattern",
-        &[
-            Param::new("name", TY_STRING),
-            Param::new("regex", TY_STRING),
-        ],
-        TY_NIL,
     ),
     BuiltinSignature::simple(
         "__ansi_enabled",
@@ -524,20 +455,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_LIST,
     ),
     BuiltinSignature::simple("flush_trigger_aggregations", &[], TY_NIL),
-    // CH-11 (#1911): channel guardrails middleware. Register/list/unregister
-    // run synchronously; the actual scan executes inside `emit_channel(...)`.
-    BuiltinSignature::simple(
-        "channel_guardrail_register",
-        &[Param::new("config", TY_DICT)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "channel_guardrail_unregister",
-        &[Param::new("id", TY_STRING)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple("channel_guardrail_list", &[], TY_LIST),
-    BuiltinSignature::simple("channel_guardrail_clear", &[], TY_NIL),
     BuiltinSignature::simple("file_exists", &[Param::new("path", TY_STRING)], TY_BOOL),
     BuiltinSignature::simple(
         "flat_map",
@@ -815,35 +732,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("mock_tty", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("unmock_tty", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("set_color_mode", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::simple("testbench_is_active", &[], TY_BOOL),
-    BuiltinSignature::simple("testbench_fs_diff", &[], TY_LIST),
-    BuiltinSignature::simple("testbench_clock_leaks", &[], TY_LIST),
     BuiltinSignature::variadic("walk_dir", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("move_file", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("read_lines", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("url_parse", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("url_build", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("query_parse", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("query_stringify", &[Param::new("args", TY_ANY)], TY_STRING),
     // Clone / merge / dedupe helpers — see crates/harn-vm/src/stdlib/collections.rs.
     // `clone`, `deep_clone`, `deep_merge`, `unique`,
-    // XML conversion — see crates/harn-vm/src/stdlib/xml.rs.
-    BuiltinSignature::simple(
-        "to_xml",
-        &[
-            Param::new("value", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "from_xml",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
     BuiltinSignature::simple(
         "jsonrpc_batch",
         &[
