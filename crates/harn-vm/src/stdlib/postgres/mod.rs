@@ -1857,6 +1857,12 @@ let locked_label = pg_transaction(db, {{ tx ->
 }})
 __io_println(locked_label)
 
+// --- pg_with_advisory_lock (RAII helper, exercises run_managed_transaction) ----
+let with_label = pg_with_advisory_lock(db, "release-cut", {{ tx ->
+  return pg_query_one(tx, "SELECT 'raii' AS label", []).label
+}})
+__io_println(with_label)
+
 // --- Schema introspection ------------------------------------------------
 let tables = pg_introspect_tables(db, {{schema: "{schema}"}})
 __io_println(len(tables))
@@ -1903,38 +1909,39 @@ pg_close(db)
                     vm.execute(&chunk).await.expect("execute v2 smoke source");
                     let lines: Vec<&str> = vm.output().lines().collect();
                     // Expected (in order):
-                    //   disabled            # circuit_state
-                    //   2                   # max_connections
-                    //   0                   # replicas
-                    //   locked              # advisory lock returned label
-                    //   1                   # tables in schema
-                    //   table               # kind
-                    //   2                   # columns count
-                    //   id:int4             # column 0 type
-                    //   tags:_text          # column 1 type (PG type is _text)
-                    //   1                   # one user-defined index (the explicit UNIQUE),
-                    //                       # plus the PK index → expect 2 below
-                    //   alpha,beta          # array decoding
-                    //   0                   # empty array length
-                    //   harn_v2_test:hello  # notification
+                    //   disabled            // circuit_state
+                    //   2                   // max_connections
+                    //   0                   // replicas
+                    //   locked              // pg_advisory_xact_lock path label
+                    //   raii                // pg_with_advisory_lock path label
+                    //   1                   // tables in schema
+                    //   table               // kind
+                    //   2                   // columns count
+                    //   id:int4             // column 0 type
+                    //   tags:_text          // column 1 type (PG type is _text)
+                    //   2                   // PK + explicit UNIQUE indexes
+                    //   alpha,beta          // array decoding
+                    //   0                   // empty array length
+                    //   harn_v2_test:hello  // notification
                     assert_eq!(lines[0], "disabled");
                     assert_eq!(lines[1], "2");
                     assert_eq!(lines[2], "0");
                     assert_eq!(lines[3], "locked");
-                    assert_eq!(lines[4], "1");
-                    assert_eq!(lines[5], "table");
-                    assert_eq!(lines[6], "2");
-                    assert_eq!(lines[7], "id:int4");
+                    assert_eq!(lines[4], "raii");
+                    assert_eq!(lines[5], "1");
+                    assert_eq!(lines[6], "table");
+                    assert_eq!(lines[7], "2");
+                    assert_eq!(lines[8], "id:int4");
                     assert!(
-                        lines[8] == "tags:_text" || lines[8] == "tags:text[]",
+                        lines[9] == "tags:_text" || lines[9] == "tags:text[]",
                         "tags column type unexpected: {}",
-                        lines[8]
+                        lines[9]
                     );
                     // PK index + the explicit UNIQUE = 2 indexes
-                    assert_eq!(lines[9], "2");
-                    assert_eq!(lines[10], "alpha,beta");
-                    assert_eq!(lines[11], "0");
-                    assert_eq!(lines[12], "harn_v2_test:hello");
+                    assert_eq!(lines[10], "2");
+                    assert_eq!(lines[11], "alpha,beta");
+                    assert_eq!(lines[12], "0");
+                    assert_eq!(lines[13], "harn_v2_test:hello");
                 })
                 .await;
         });
