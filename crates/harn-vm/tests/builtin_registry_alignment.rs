@@ -314,7 +314,6 @@ fn linkme_distributed_slice_populates_with_all_builtins() {
     );
     assert_eq!(
         linkme_count, manual_count,
-        "linkme slice and manual aggregator out of sync: linkme={}, manual={}",
-        linkme_count, manual_count
+        "linkme slice and manual aggregator out of sync: linkme={linkme_count}, manual={manual_count}"
     );
 }
