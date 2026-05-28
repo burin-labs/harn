@@ -106,7 +106,6 @@ async fn advisory_xact_op(args: &[VmValue], try_only: bool) -> Result<VmValue, V
         "pg_advisory_xact_lock"
     };
     let target = required_arg(args, 0, builtin, "transaction handle")?;
-    super::ensure_handle_kind(target, HANDLE_TX, builtin)?;
     let tx_id = handle_id(Some(target), HANDLE_TX, builtin)?;
     let key_value = required_arg(args, 1, builtin, "key")?;
     let options = args.get(2).and_then(VmValue::as_dict).cloned();

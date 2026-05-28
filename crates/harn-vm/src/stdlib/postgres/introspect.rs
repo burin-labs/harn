@@ -40,8 +40,8 @@ use crate::stdlib::macros::{
 use crate::value::{VmError, VmValue};
 
 use super::{
-    bind_params, ensure_handle_kind, handle_id, pool_arg, pool_record_by_id, required_arg,
-    row_to_value, runtime_error, validate_pg_identifier, HANDLE_POOL,
+    bind_params, handle_id, pool_arg, pool_record_by_id, required_arg, row_to_value, runtime_error,
+    validate_pg_identifier, HANDLE_POOL,
 };
 
 #[harn_builtin(
@@ -175,7 +175,6 @@ async fn pg_introspect_indexes_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
 )]
 async fn pg_pool_stats_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let pool_handle = required_arg(&args, 0, "pg_pool_stats", "pool handle")?;
-    ensure_handle_kind(pool_handle, HANDLE_POOL, "pg_pool_stats")?;
     let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_pool_stats")?;
     let record = pool_record_by_id(&pool_id)?;
     let pool = record.pool.as_ref();

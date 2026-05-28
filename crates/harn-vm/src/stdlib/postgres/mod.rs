@@ -1067,12 +1067,15 @@ pub(super) fn pool_record_from_handle(
 
 /// First-arg extractor for builtins that operate on the primary pool:
 /// validates that args\[0\] is a `pg_pool` handle and returns the live
-/// connection pool. Replaces 4-line
-/// `required_arg + ensure_handle_kind + handle_id + pool_by_id` preambles
-/// across the introspect and partition builtins.
+/// connection pool. Replaces the
+/// `required_arg + handle_id + pool_by_id` preamble across every
+/// introspection / partition / lock builtin.
+///
+/// `handle_id` already validates the handle kind, so we don't need
+/// `ensure_handle_kind` ahead of it — that helper exists for callers
+/// that want a kind check without also reading the id.
 pub(super) fn pool_arg(args: &[VmValue], builtin: &'static str) -> Result<Arc<PgPool>, VmError> {
     let handle = required_arg(args, 0, builtin, "pool handle")?;
-    ensure_handle_kind(handle, HANDLE_POOL, builtin)?;
     let id = handle_id(Some(handle), HANDLE_POOL, builtin)?;
     pool_by_id(&id)
 }
@@ -1130,19 +1133,6 @@ pub(super) fn handle_id(
         return Err(runtime_error(format!("{builtin}: handle is missing id")));
     }
     Ok(id)
-}
-
-pub(super) fn ensure_handle_kind(
-    value: &VmValue,
-    expected: &str,
-    builtin: &str,
-) -> Result<(), VmError> {
-    match handle_kind(value).as_deref() {
-        Some(actual) if actual == expected => Ok(()),
-        _ => Err(runtime_error(format!(
-            "{builtin}: expected {expected} handle"
-        ))),
-    }
 }
 
 pub(super) fn required_arg<'a>(
