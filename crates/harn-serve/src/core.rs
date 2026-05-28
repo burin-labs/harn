@@ -86,16 +86,21 @@ fn budget_category_from_error(error: &harn_vm::VmError) -> Option<String> {
 }
 
 /// Install per-dispatch resource ceilings from the route's
-/// `@budget(...)` declaration. Today the only enforced cap is
-/// `llm_cost_usd`, which routes through `harn-vm`'s pre-existing
-/// per-thread budget; future caps (mcp_calls, pg_queries) will land
-/// here alongside their respective primitive integrations.
+/// `@budget(...)` declaration. The LLM-cost and LLM-token caps route
+/// through `harn-vm`'s pre-existing per-thread counters; `pg_queries`
+/// and `mcp_calls` are parsed and reserved on the [`BudgetSpec`] but
+/// enforcement waits on their respective primitive integrations
+/// (Postgres hostlib A.3, the MCP host call-count meter) — both
+/// tracked as follow-ups so a runaway tool loop can be capped once
+/// the call sites exist.
 fn install_route_budget(spec: &BudgetSpec) -> Option<RouteBudgetGuard> {
     if spec.is_empty() {
         return None;
     }
-    let llm_guard = spec.llm_cost_usd.map(harn_vm::install_llm_cost_budget);
-    Some(RouteBudgetGuard { _llm: llm_guard })
+    Some(RouteBudgetGuard {
+        _llm_cost: spec.llm_cost_usd.map(harn_vm::install_llm_cost_budget),
+        _llm_tokens: spec.llm_tokens.map(harn_vm::install_llm_token_budget),
+    })
 }
 
 /// Aggregate of per-cap guards held for the lifetime of one dispatch.
@@ -103,7 +108,8 @@ fn install_route_budget(spec: &BudgetSpec) -> Option<RouteBudgetGuard> {
 /// nested dispatches safe even when guards land in different
 /// thread-locals.
 pub(crate) struct RouteBudgetGuard {
-    _llm: Option<harn_vm::LlmBudgetGuard>,
+    _llm_cost: Option<harn_vm::LlmBudgetGuard>,
+    _llm_tokens: Option<harn_vm::LlmTokenBudgetGuard>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

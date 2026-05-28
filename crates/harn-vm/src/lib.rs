@@ -164,7 +164,8 @@ pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
 pub use llm::trigger_predicate::TriggerPredicateBudget;
 pub use llm::{
-    current_agent_session_id, install_llm_cost_budget, register_session_end_hook, LlmBudgetGuard,
+    current_agent_session_id, install_llm_cost_budget, install_llm_token_budget,
+    register_session_end_hook, LlmBudgetGuard, LlmTokenBudgetGuard,
 };
 pub use mcp::{connect_mcp_server_from_json, connect_mcp_server_from_spec, register_mcp_builtins};
 pub use mcp_card::{fetch_server_card, load_server_card_from_path, CardError};
