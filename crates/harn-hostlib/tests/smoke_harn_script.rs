@@ -292,6 +292,7 @@ return {{
 
 #[test]
 fn end_to_end_apply_node_via_harn_script() {
+    permissions::reset();
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     let source_path = root.join("hello.rs");
@@ -305,6 +306,7 @@ fn end_to_end_apply_node_via_harn_script() {
     let path = &path_str;
     let script = format!(
         r#"
+let _enable = hostlib_enable("tools:deterministic")
 let preview = hostlib_ast_apply_node({{
     path: "{path}",
     query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
@@ -349,6 +351,7 @@ return {{
 
 #[test]
 fn end_to_end_insert_at_anchor_via_harn_script() {
+    permissions::reset();
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     let source_path = root.join("hello.rs");
@@ -362,6 +365,7 @@ fn end_to_end_insert_at_anchor_via_harn_script() {
     let path = &path_str;
     let script = format!(
         r#"
+let _enable = hostlib_enable("tools:deterministic")
 let preview = hostlib_ast_insert_at_anchor({{
     path: "{path}",
     query: "(function_item name: (identifier) @name (#eq? @name \"alpha\")) @anchor",

@@ -205,13 +205,15 @@ impl HostlibCapability for AstCapability {
             "bracket_balance",
             bracket_balance::run,
         );
-        register(
+        // These two write edited source back to disk, so they share the
+        // deterministic-tools gate with `tools::*` file I/O.
+        register_gated(
             registry,
             "hostlib_ast_apply_node",
             "apply_node",
             apply_node::run,
         );
-        register(
+        register_gated(
             registry,
             "hostlib_ast_insert_at_anchor",
             "insert_at_anchor",
@@ -233,5 +235,19 @@ fn register(
         module: "ast",
         method,
         handler,
+    });
+}
+
+fn register_gated(
+    registry: &mut BuiltinRegistry,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+) {
+    registry.register(RegisteredBuiltin {
+        name,
+        module: "ast",
+        method,
+        handler: crate::tools::permissions::gated_handler(name, runner),
     });
 }

@@ -174,25 +174,11 @@ fn register_gated(
     method: &'static str,
     runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
 ) {
-    let handler: SyncHandler = Arc::new(move |args: &[VmValue]| {
-        if !permissions::is_enabled(permissions::FEATURE_TOOLS_DETERMINISTIC) {
-            return Err(HostlibError::Backend {
-                builtin: name,
-                message: format!(
-                    "feature `{}` is not enabled in this session — call \
-                     `hostlib_enable(\"{}\")` before invoking deterministic tools",
-                    permissions::FEATURE_TOOLS_DETERMINISTIC,
-                    permissions::FEATURE_TOOLS_DETERMINISTIC
-                ),
-            });
-        }
-        runner(args)
-    });
     registry.register(RegisteredBuiltin {
         name,
         module: "tools",
         method,
-        handler,
+        handler: permissions::gated_handler(name, runner),
     });
 }
 

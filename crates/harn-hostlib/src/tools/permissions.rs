@@ -20,6 +20,12 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::sync::Arc;
+
+use harn_vm::VmValue;
+
+use crate::error::HostlibError;
+use crate::registry::SyncHandler;
 
 /// Feature key for the deterministic-tools surface.
 ///
@@ -59,4 +65,32 @@ pub fn is_enabled(feature: &str) -> bool {
 /// current thread without needing to reach for the builtin.
 pub fn enable_for_test() {
     enable(FEATURE_TOOLS_DETERMINISTIC);
+}
+
+/// Wrap a builtin runner so it executes only when the deterministic-tools
+/// feature has been enabled on the current thread, returning a descriptive
+/// error otherwise.
+///
+/// This is the single gating policy shared by every hostlib builtin that
+/// reads or writes arbitrary host filesystem paths — the `tools::*` file
+/// I/O surface plus the `fs::*` and `ast::*` edit helpers — so a script
+/// denied `tools:deterministic` cannot mutate the working tree through any
+/// of them.
+pub fn gated_handler(
+    name: &'static str,
+    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+) -> SyncHandler {
+    Arc::new(move |args: &[VmValue]| {
+        if !is_enabled(FEATURE_TOOLS_DETERMINISTIC) {
+            return Err(HostlibError::Backend {
+                builtin: name,
+                message: format!(
+                    "feature `{FEATURE_TOOLS_DETERMINISTIC}` is not enabled in this \
+                     session — call `hostlib_enable(\"{FEATURE_TOOLS_DETERMINISTIC}\")` \
+                     before invoking deterministic tools"
+                ),
+            });
+        }
+        runner(args)
+    })
 }

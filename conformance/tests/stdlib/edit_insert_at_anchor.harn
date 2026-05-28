@@ -12,6 +12,9 @@ fn write_fixture(dir: string, name: string, body: string) -> string {
 }
 
 pipeline default() {
+  // `hostlib_ast_insert_at_anchor` writes edited source to disk, so it
+  // requires the deterministic-tools feature gate (issue #2548).
+  hostlib_enable("tools:deterministic")
   let root = path_join(
     harness.fs.temp_dir(),
     "harn_edit_insert_at_anchor_" + to_string(harness.random.gen_range(100000, 999999)),
