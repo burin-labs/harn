@@ -583,8 +583,8 @@ mod tests {
     async fn dispatch_error_forbidden_includes_scope_details() {
         let response = axum_response_from_dispatch_error(
             DispatchError::Forbidden {
-                required: ["sessions:write".to_string()].into_iter().collect(),
-                granted: ["sessions:read".to_string()].into_iter().collect(),
+                required: std::iter::once("sessions:write".to_string()).collect(),
+                granted: std::iter::once("sessions:read".to_string()).collect(),
             },
             "req_xyz",
         );
@@ -675,11 +675,11 @@ pub fn handler() -> dict {
     #[tokio::test]
     async fn end_to_end_http_no_content() {
         let value = dispatch_value(
-            r#"
+            r"
 pub fn handler() -> dict {
   return http_no_content()
 }
-"#,
+",
             "handler",
         )
         .await

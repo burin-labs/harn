@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn http_ok_produces_tagged_envelope() {
         let body = VmValue::String(Rc::from("hello"));
-        let response = http_ok_impl(&[body.clone()], &mut String::new()).expect("ok");
+        let response = http_ok_impl(&[body], &mut String::new()).expect("ok");
         let map = dict(&response);
         assert_eq!(
             map.get(HTTP_RESPONSE_TAG_KEY).and_then(|v| match v {
