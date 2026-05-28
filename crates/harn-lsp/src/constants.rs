@@ -1051,7 +1051,7 @@ mod tests {
         assert!(is_builtin("provider_capabilities"));
         assert_eq!(
             builtin_signature("provider_capabilities"),
-            Some("provider_capabilities(provider, model?)")
+            Some("provider_capabilities(provider: string, model?: string|nil) -> dict")
         );
         assert!(builtin_doc("provider_capabilities")
             .expect("provider_capabilities doc")
@@ -1060,7 +1060,7 @@ mod tests {
         assert!(is_builtin("llm_available_providers"));
         assert_eq!(
             builtin_signature("llm_available_providers"),
-            Some("llm_available_providers()")
+            Some("llm_available_providers() -> list")
         );
         assert!(builtin_doc("llm_available_providers")
             .expect("llm_available_providers doc")
