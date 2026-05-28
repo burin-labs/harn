@@ -24,6 +24,7 @@ use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 
 use crate::stdlib::host::dispatch_host_operation;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -181,168 +182,201 @@ struct CachedEmbedding {
 }
 
 pub(crate) fn register_memory_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("__memory_store", |args| async move {
-        let namespace = required_string(&args, 0, "__memory_store", "namespace")?;
-        let key = required_string(&args, 1, "__memory_store", "key")?;
-        let value = args.get(2).cloned().ok_or_else(|| {
-            VmError::Runtime("__memory_store: `value` argument is required".to_string())
-        })?;
-        let tags = parse_tags(args.get(3), "__memory_store")?;
-        let options = args.get(4).and_then(VmValue::as_dict);
-        let root = memory_root(options);
-        let record = MemoryRecord {
-            id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
-            namespace: namespace.clone(),
-            key,
-            value: crate::llm::vm_value_to_json(&value),
-            text: value_to_search_text(&value),
-            tags,
-            stored_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
-            provenance: options
-                .and_then(|opts| opts.get("provenance"))
-                .map(crate::llm::vm_value_to_json),
-        };
-        append_event(&root, &namespace, &MemoryEvent::Store(record.clone()))?;
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-        let config = read_namespace_config(&root, &namespace)?;
-        let want_embed = option_bool(options, "embed").unwrap_or(false)
-            || (config.backend.uses_embeddings()
-                && option_bool(options, "skip_embed") != Some(true));
-        if want_embed {
-            let model_hint = option_string(options, "embed_model_hint")
-                .unwrap_or_else(|| config.model_hint().to_string());
-            let _ =
-                ensure_embedding(&root, &namespace, &searchable_text(&record), &model_hint).await?;
-        }
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &MEMORY_STORE_IMPL_DEF,
+    &MEMORY_RECALL_IMPL_DEF,
+    &MEMORY_OPEN_IMPL_DEF,
+    &MEMORY_SUMMARIZE_IMPL_DEF,
+    &MEMORY_FORGET_IMPL_DEF,
+];
 
-        Ok(memory_record_to_vm(&record, None))
-    });
+#[harn_builtin(
+    sig = "__memory_store(namespace: string, key: string, value: any, tags?: any, options?: dict) -> dict",
+    kind = "async",
+    category = "memory"
+)]
+async fn memory_store_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let namespace = required_string(&args, 0, "__memory_store", "namespace")?;
+    let key = required_string(&args, 1, "__memory_store", "key")?;
+    let value = args.get(2).cloned().ok_or_else(|| {
+        VmError::Runtime("__memory_store: `value` argument is required".to_string())
+    })?;
+    let tags = parse_tags(args.get(3), "__memory_store")?;
+    let options = args.get(4).and_then(VmValue::as_dict);
+    let root = memory_root(options);
+    let record = MemoryRecord {
+        id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+        namespace: namespace.clone(),
+        key,
+        value: crate::llm::vm_value_to_json(&value),
+        text: value_to_search_text(&value),
+        tags,
+        stored_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
+        provenance: options
+            .and_then(|opts| opts.get("provenance"))
+            .map(crate::llm::vm_value_to_json),
+    };
+    append_event(&root, &namespace, &MemoryEvent::Store(record.clone()))?;
 
-    vm.register_async_builtin("__memory_recall", |args| async move {
-        let namespace = required_string(&args, 0, "__memory_recall", "namespace")?;
-        let query = required_string(&args, 1, "__memory_recall", "query")?;
-        let limit = optional_usize(args.get(2))
-            .unwrap_or(DEFAULT_RECALL_LIMIT)
-            .clamp(1, MAX_RECALL_LIMIT);
-        let options = args.get(3).and_then(VmValue::as_dict);
-        let root = memory_root(options);
-        let config = read_namespace_config(&root, &namespace)?;
-        let mode = if let Some(raw) = option_string(options, "mode") {
-            RecallMode::parse(&raw, "__memory_recall")?
-        } else {
-            config.backend.default_recall_mode()
-        };
+    let config = read_namespace_config(&root, &namespace)?;
+    let want_embed = option_bool(options, "embed").unwrap_or(false)
+        || (config.backend.uses_embeddings() && option_bool(options, "skip_embed") != Some(true));
+    if want_embed {
         let model_hint = option_string(options, "embed_model_hint")
             .unwrap_or_else(|| config.model_hint().to_string());
+        let _ = ensure_embedding(&root, &namespace, &searchable_text(&record), &model_hint).await?;
+    }
 
-        let records = active_records(&root, &namespace)?;
-        let scored = score_records_async(
-            records,
-            &query,
-            mode,
-            &root,
-            &namespace,
-            &model_hint,
-            &config,
-        )
-        .await?;
-        Ok(VmValue::List(Rc::new(
-            scored
-                .into_iter()
-                .take(limit)
-                .map(|item| memory_record_to_vm(&item.record, Some(item.score)))
-                .collect(),
-        )))
-    });
+    Ok(memory_record_to_vm(&record, None))
+}
 
-    vm.register_async_builtin("__memory_open", |args| async move {
-        let namespace = required_string(&args, 0, "__memory_open", "namespace")?;
-        let options = args.get(1).and_then(VmValue::as_dict);
-        let backend = match option_string(options, "backend") {
-            Some(raw) => MemoryBackend::parse(&raw, "__memory_open")?,
-            None => MemoryBackend::Bm25,
-        };
-        let embed_model_hint = option_string(options, "embed_model_hint")
-            .or_else(|| option_string(options, "model_hint"));
-        let embed_dim = options
-            .and_then(|opts| opts.get("embed_dim"))
-            .and_then(coerce_usize);
-        let bm25_weight = options
-            .and_then(|opts| opts.get("bm25_weight"))
-            .and_then(coerce_finite_f64);
-        let cosine_weight = options
-            .and_then(|opts| opts.get("cosine_weight"))
-            .and_then(coerce_finite_f64);
-        if backend == MemoryBackend::Hybrid {
-            for (label, value) in [
-                ("bm25_weight", bm25_weight),
-                ("cosine_weight", cosine_weight),
-            ] {
-                if let Some(weight) = value {
-                    if weight < 0.0 {
-                        return Err(VmError::Runtime(format!(
-                            "__memory_open: `{label}` must be non-negative"
-                        )));
-                    }
+#[harn_builtin(
+    sig = "__memory_recall(namespace: string, query: string, limit?: int, options?: dict) -> list",
+    kind = "async",
+    category = "memory"
+)]
+async fn memory_recall_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let namespace = required_string(&args, 0, "__memory_recall", "namespace")?;
+    let query = required_string(&args, 1, "__memory_recall", "query")?;
+    let limit = optional_usize(args.get(2))
+        .unwrap_or(DEFAULT_RECALL_LIMIT)
+        .clamp(1, MAX_RECALL_LIMIT);
+    let options = args.get(3).and_then(VmValue::as_dict);
+    let root = memory_root(options);
+    let config = read_namespace_config(&root, &namespace)?;
+    let mode = if let Some(raw) = option_string(options, "mode") {
+        RecallMode::parse(&raw, "__memory_recall")?
+    } else {
+        config.backend.default_recall_mode()
+    };
+    let model_hint = option_string(options, "embed_model_hint")
+        .unwrap_or_else(|| config.model_hint().to_string());
+
+    let records = active_records(&root, &namespace)?;
+    let scored = score_records_async(
+        records,
+        &query,
+        mode,
+        &root,
+        &namespace,
+        &model_hint,
+        &config,
+    )
+    .await?;
+    Ok(VmValue::List(Rc::new(
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|item| memory_record_to_vm(&item.record, Some(item.score)))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "__memory_open(namespace: string, options?: dict) -> dict",
+    kind = "async",
+    category = "memory"
+)]
+async fn memory_open_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let namespace = required_string(&args, 0, "__memory_open", "namespace")?;
+    let options = args.get(1).and_then(VmValue::as_dict);
+    let backend = match option_string(options, "backend") {
+        Some(raw) => MemoryBackend::parse(&raw, "__memory_open")?,
+        None => MemoryBackend::Bm25,
+    };
+    let embed_model_hint =
+        option_string(options, "embed_model_hint").or_else(|| option_string(options, "model_hint"));
+    let embed_dim = options
+        .and_then(|opts| opts.get("embed_dim"))
+        .and_then(coerce_usize);
+    let bm25_weight = options
+        .and_then(|opts| opts.get("bm25_weight"))
+        .and_then(coerce_finite_f64);
+    let cosine_weight = options
+        .and_then(|opts| opts.get("cosine_weight"))
+        .and_then(coerce_finite_f64);
+    if backend == MemoryBackend::Hybrid {
+        for (label, value) in [
+            ("bm25_weight", bm25_weight),
+            ("cosine_weight", cosine_weight),
+        ] {
+            if let Some(weight) = value {
+                if weight < 0.0 {
+                    return Err(VmError::Runtime(format!(
+                        "__memory_open: `{label}` must be non-negative"
+                    )));
                 }
             }
         }
-        let event = OpenEvent {
-            id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
-            namespace: namespace.clone(),
-            backend,
-            embed_model_hint,
-            embed_dim,
-            bm25_weight,
-            cosine_weight,
-            opened_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
-        };
-        let root = memory_root(options);
-        append_event(&root, &namespace, &MemoryEvent::Open(event.clone()))?;
-        Ok(memory_open_to_vm(&event))
-    });
+    }
+    let event = OpenEvent {
+        id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+        namespace: namespace.clone(),
+        backend,
+        embed_model_hint,
+        embed_dim,
+        bm25_weight,
+        cosine_weight,
+        opened_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
+    };
+    let root = memory_root(options);
+    append_event(&root, &namespace, &MemoryEvent::Open(event.clone()))?;
+    Ok(memory_open_to_vm(&event))
+}
 
-    vm.register_builtin("__memory_summarize", |args, _out| {
-        let namespace = required_string(args, 0, "__memory_summarize", "namespace")?;
-        let window = args.get(1);
-        let options = args.get(2).and_then(VmValue::as_dict);
-        let root = memory_root(options);
-        let mut records = active_records(&root, &namespace)?;
-        records.sort_by(|left, right| {
-            left.1
-                .stored_at
-                .cmp(&right.1.stored_at)
-                .then_with(|| left.0.cmp(&right.0))
-        });
-        let selected = select_summary_records(records, window)?;
-        Ok(summary_to_vm(&namespace, selected))
+#[harn_builtin(
+    sig = "__memory_summarize(namespace: string, window?: any, options?: dict) -> dict",
+    category = "memory"
+)]
+fn memory_summarize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let namespace = required_string(args, 0, "__memory_summarize", "namespace")?;
+    let window = args.get(1);
+    let options = args.get(2).and_then(VmValue::as_dict);
+    let root = memory_root(options);
+    let mut records = active_records(&root, &namespace)?;
+    records.sort_by(|left, right| {
+        left.1
+            .stored_at
+            .cmp(&right.1.stored_at)
+            .then_with(|| left.0.cmp(&right.0))
     });
+    let selected = select_summary_records(records, window)?;
+    Ok(summary_to_vm(&namespace, selected))
+}
 
-    vm.register_builtin("__memory_forget", |args, _out| {
-        let namespace = required_string(args, 0, "__memory_forget", "namespace")?;
-        let predicate = args.get(1).cloned().ok_or_else(|| {
-            VmError::Runtime("__memory_forget: `predicate` argument is required".to_string())
-        })?;
-        let options = args.get(2).and_then(VmValue::as_dict);
-        let root = memory_root(options);
-        let active = active_records(&root, &namespace)?;
-        let predicate_json = crate::llm::vm_value_to_json(&predicate);
-        let forgotten_ids = active
-            .into_iter()
-            .filter_map(|(_, record)| {
-                predicate_matches_record(&predicate, &record).then_some(record.id)
-            })
-            .collect::<Vec<_>>();
-        let event = ForgetEvent {
-            id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
-            namespace: namespace.clone(),
-            predicate: predicate_json,
-            forgotten_ids,
-            forgotten_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
-        };
-        append_event(&root, &namespace, &MemoryEvent::Forget(event.clone()))?;
-        Ok(forget_result_to_vm(&event))
-    });
+#[harn_builtin(
+    sig = "__memory_forget(namespace: string, predicate: any, options?: dict) -> dict",
+    category = "memory"
+)]
+fn memory_forget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let namespace = required_string(args, 0, "__memory_forget", "namespace")?;
+    let predicate = args.get(1).cloned().ok_or_else(|| {
+        VmError::Runtime("__memory_forget: `predicate` argument is required".to_string())
+    })?;
+    let options = args.get(2).and_then(VmValue::as_dict);
+    let root = memory_root(options);
+    let active = active_records(&root, &namespace)?;
+    let predicate_json = crate::llm::vm_value_to_json(&predicate);
+    let forgotten_ids = active
+        .into_iter()
+        .filter_map(|(_, record)| {
+            predicate_matches_record(&predicate, &record).then_some(record.id)
+        })
+        .collect::<Vec<_>>();
+    let event = ForgetEvent {
+        id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+        namespace: namespace.clone(),
+        predicate: predicate_json,
+        forgotten_ids,
+        forgotten_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
+    };
+    append_event(&root, &namespace, &MemoryEvent::Forget(event.clone()))?;
+    Ok(forget_result_to_vm(&event))
 }
 
 fn required_string(

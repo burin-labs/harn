@@ -2752,6 +2752,17 @@ fn collect_structural_eval_runs(dir: &Path) -> Vec<harn_vm::orchestration::RunRe
 
 /// Exits on error.
 pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>) {
+    // Lazily install the macro-emitted builtin signatures so commands that
+    // bypass `run()` / `execute_run()` (playground, package_scaffold, bench,
+    // explain, precompile, pack, check/bundle, the run-tests harness…) still
+    // see a populated parser registry before the first typecheck pass.
+    // Idempotent — `all_builtin_signatures()` returns the same `&'static`
+    // slice on repeat calls.
+    static INSTALL_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INSTALL_ONCE.get_or_init(|| {
+        harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
+    });
+
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {

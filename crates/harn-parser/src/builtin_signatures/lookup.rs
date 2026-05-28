@@ -8,15 +8,29 @@
 
 use crate::ast::TypeExpr;
 
-use super::{all_signatures, BuiltinMetadata, BuiltinSignature, Ty, TyExt};
+use super::signatures;
+use super::{BuiltinMetadata, BuiltinSignature, Ty, TyExt};
 
-/// Binary-search the registry for a given name. O(log N).
+/// Linear scan of the installed slice plus the static groups for a given
+/// name. Installed entries win when both sides carry the same name (the
+/// `#[harn_builtin]`-emitted signature shadows any legacy static
+/// duplicate). O(N+M) per call where N+M ≈ 600 — well below any
+/// typecheck hot path, and explicitly NOT cached so installs after the
+/// first call are picked up without leaking an old merged slice.
 pub fn lookup(name: &str) -> Option<&'static BuiltinSignature> {
-    let signatures = all_signatures();
-    signatures
-        .binary_search_by_key(&name, |sig| sig.name)
-        .ok()
-        .map(|idx| &signatures[idx])
+    for sig in harn_builtin_registry::installed_signatures() {
+        if sig.name == name {
+            return Some(*sig);
+        }
+    }
+    for group in signatures::groups() {
+        for sig in group {
+            if sig.name == name {
+                return Some(sig);
+            }
+        }
+    }
+    None
 }
 
 /// Is `name` a builtin known to the parser?
@@ -24,9 +38,20 @@ pub fn is_builtin(name: &str) -> bool {
     lookup(name).is_some()
 }
 
-/// Every builtin name in alphabetical order.
+/// Every builtin name. Installed names come first, then any static-only
+/// names that aren't shadowed by installed entries. Output is NOT
+/// alphabetically sorted (callers that need that re-sort themselves).
 pub fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
-    all_signatures().iter().map(|sig| sig.name)
+    let installed = harn_builtin_registry::installed_signatures();
+    let installed_names: std::collections::HashSet<&'static str> =
+        installed.iter().map(|s| s.name).collect();
+    installed.iter().map(|s| s.name).chain(
+        signatures::groups()
+            .into_iter()
+            .flat_map(|g| g.iter())
+            .filter(move |s| !installed_names.contains(s.name))
+            .map(|s| s.name),
+    )
 }
 
 /// Iterate over every builtin's name and statically-known return-type
@@ -34,10 +59,25 @@ pub fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
 /// lightweight "what does this builtin return" view without bringing in
 /// the full type IR.
 pub fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
-    all_signatures().iter().map(|sig| BuiltinMetadata {
-        name: sig.name,
-        return_types: builtin_return_type_names(sig),
-    })
+    let installed = harn_builtin_registry::installed_signatures();
+    let installed_names: std::collections::HashSet<&'static str> =
+        installed.iter().map(|s| s.name).collect();
+    installed
+        .iter()
+        .map(|sig| BuiltinMetadata {
+            name: sig.name,
+            return_types: builtin_return_type_names(sig),
+        })
+        .chain(
+            signatures::groups()
+                .into_iter()
+                .flat_map(|g| g.iter())
+                .filter(move |s| !installed_names.contains(s.name))
+                .map(|sig| BuiltinMetadata {
+                    name: sig.name,
+                    return_types: builtin_return_type_names(sig),
+                }),
+        )
 }
 
 /// Statically-known return type for `name`, materialized as a [`TypeExpr`].

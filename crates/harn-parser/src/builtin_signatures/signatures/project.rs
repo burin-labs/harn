@@ -114,8 +114,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("namespace", TY_STRING_OR_NIL)],
         TY_DICT,
     ),
-    // project_catalog_native() -> list of catalog dict entries.
-    BuiltinSignature::simple("project_catalog_native", &[], TY_LIST),
     // project_enrich_native(path?, options?) -> dict (LLM-enriched evidence).
     BuiltinSignature::simple(
         "project_enrich_native",
@@ -124,43 +122,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("options", TY_DICT_OR_NIL),
         ],
         TY_DICT,
-    ),
-    // project_fingerprint(path?) -> ProjectFingerprint-shaped dict.
-    BuiltinSignature::simple(
-        "project_fingerprint",
-        &[Param::optional("path", TY_STRING)],
-        TY_DICT,
-    ),
-    // project_root() -> string | nil. Resolves the repo root for the
-    // currently-executing source file.
-    BuiltinSignature::simple("project_root", &[], TY_STRING_OR_NIL),
-    // project_scan_native(path?, options?) -> dict of evidence.
-    BuiltinSignature::simple(
-        "project_scan_native",
-        &[
-            Param::optional("path", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    // project_scan_tree_native(path?, options?) -> dict keyed by relative
-    // directory.
-    BuiltinSignature::simple(
-        "project_scan_tree_native",
-        &[
-            Param::optional("path", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    // project_walk_tree_native(path?, options?) -> list of tree entry dicts.
-    BuiltinSignature::simple(
-        "project_walk_tree_native",
-        &[
-            Param::optional("path", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_LIST,
     ),
     // scan_directory(path?, pattern_or_options?, options?) -> list of
     // {path, size, modified, is_dir} dicts. The middle arg may be either a

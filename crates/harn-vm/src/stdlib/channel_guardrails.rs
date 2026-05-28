@@ -14,6 +14,7 @@
 
 use std::rc::Rc;
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -22,46 +23,79 @@ fn err(message: impl Into<String>) -> VmError {
 }
 
 pub(crate) fn register_channel_guardrail_builtins(vm: &mut Vm) {
-    vm.register_builtin("channel_guardrail_register", |args, _out| {
-        let config = match args.first() {
-            Some(VmValue::Dict(d)) => d.as_ref().clone(),
-            Some(other) => {
-                return Err(err(format!(
-                    "channel_guardrail_register: config must be a dict, got {}",
-                    other.type_name()
-                )));
-            }
-            None => return Err(err("channel_guardrail_register: requires a config dict")),
-        };
-        let id = crate::channel_guardrails::register(&config)?;
-        Ok(VmValue::String(Rc::from(id)))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("channel_guardrail_unregister", |args, _out| {
-        let id = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => {
-                return Err(err(format!(
-                    "channel_guardrail_unregister: id must be a string, got {}",
-                    other.type_name()
-                )));
-            }
-            None => return Err(err("channel_guardrail_unregister: requires an id string")),
-        };
-        Ok(VmValue::Bool(crate::channel_guardrails::unregister(&id)))
-    });
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &CHANNEL_GUARDRAIL_REGISTER_IMPL_DEF,
+    &CHANNEL_GUARDRAIL_UNREGISTER_IMPL_DEF,
+    &CHANNEL_GUARDRAIL_LIST_IMPL_DEF,
+    &CHANNEL_GUARDRAIL_CLEAR_IMPL_DEF,
+];
 
-    vm.register_builtin("channel_guardrail_list", |_args, _out| {
-        let ids = crate::channel_guardrails::list_ids();
-        let values: Vec<VmValue> = ids
-            .into_iter()
-            .map(|id| VmValue::String(Rc::from(id)))
-            .collect();
-        Ok(VmValue::List(Rc::new(values)))
-    });
+#[harn_builtin(
+    sig = "channel_guardrail_register(config: dict) -> string",
+    category = "channel_guardrails"
+)]
+fn channel_guardrail_register_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let config = match args.first() {
+        Some(VmValue::Dict(d)) => d.as_ref().clone(),
+        Some(other) => {
+            return Err(err(format!(
+                "channel_guardrail_register: config must be a dict, got {}",
+                other.type_name()
+            )));
+        }
+        None => return Err(err("channel_guardrail_register: requires a config dict")),
+    };
+    let id = crate::channel_guardrails::register(&config)?;
+    Ok(VmValue::String(Rc::from(id)))
+}
 
-    vm.register_builtin("channel_guardrail_clear", |_args, _out| {
-        crate::channel_guardrails::clear();
-        Ok(VmValue::Nil)
-    });
+#[harn_builtin(
+    sig = "channel_guardrail_unregister(id: string) -> bool",
+    category = "channel_guardrails"
+)]
+fn channel_guardrail_unregister_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            return Err(err(format!(
+                "channel_guardrail_unregister: id must be a string, got {}",
+                other.type_name()
+            )));
+        }
+        None => return Err(err("channel_guardrail_unregister: requires an id string")),
+    };
+    Ok(VmValue::Bool(crate::channel_guardrails::unregister(&id)))
+}
+
+#[harn_builtin(
+    sig = "channel_guardrail_list() -> list",
+    category = "channel_guardrails"
+)]
+fn channel_guardrail_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let ids = crate::channel_guardrails::list_ids();
+    let values: Vec<VmValue> = ids
+        .into_iter()
+        .map(|id| VmValue::String(Rc::from(id)))
+        .collect();
+    Ok(VmValue::List(Rc::new(values)))
+}
+
+#[harn_builtin(
+    sig = "channel_guardrail_clear() -> nil",
+    category = "channel_guardrails"
+)]
+fn channel_guardrail_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    crate::channel_guardrails::clear();
+    Ok(VmValue::Nil)
 }

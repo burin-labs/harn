@@ -121,67 +121,114 @@ thread_local! {
 static STORE_ID_COUNTER: Mutex<u64> = Mutex::new(0);
 
 pub(crate) fn register_oauth_dynreg_builtins(vm: &mut Vm) {
-    vm.register_builtin("__oauth_dynreg_store_handle", |args, _out| {
-        if !args.is_empty() {
-            return Err(VmError::Runtime(
-                "__oauth_dynreg_store_handle: expected 0 arguments".to_string(),
-            ));
-        }
-        let id = next_store_id();
-        DYNREG_STORES.with(|stores| {
-            stores
-                .borrow_mut()
-                .insert(id.clone(), DynregStore::default());
-        });
-        Ok(store_handle(&id))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("__oauth_dynreg_validate_metadata", |args, _out| {
-        let metadata = require_dict_arg(args, 0, "__oauth_dynreg_validate_metadata", "metadata")?;
-        Ok(validate_metadata_value(&metadata))
-    });
+pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
+    &OAUTH_DYNREG_STORE_HANDLE_IMPL_DEF,
+    &OAUTH_DYNREG_VALIDATE_METADATA_IMPL_DEF,
+    &OAUTH_DYNREG_BUILD_CLIENT_METADATA_IMPL_DEF,
+    &OAUTH_DYNREG_BUILD_AUTHORIZATION_SERVER_METADATA_IMPL_DEF,
+    &OAUTH_DYNREG_REGISTER_IMPL_DEF,
+    &OAUTH_DYNREG_GET_IMPL_DEF,
+    &OAUTH_DYNREG_LIST_IMPL_DEF,
+];
 
-    vm.register_builtin("__oauth_dynreg_build_client_metadata", |args, _out| {
-        let metadata =
-            require_dict_arg(args, 0, "__oauth_dynreg_build_client_metadata", "metadata")?;
-        build_client_metadata_value(&metadata)
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_dynreg_store_handle() -> dict",
+    category = "oauth_dynreg"
+)]
+fn oauth_dynreg_store_handle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::Runtime(
+            "__oauth_dynreg_store_handle: expected 0 arguments".to_string(),
+        ));
+    }
+    let id = next_store_id();
+    DYNREG_STORES.with(|stores| {
+        stores
+            .borrow_mut()
+            .insert(id.clone(), DynregStore::default());
     });
+    Ok(store_handle(&id))
+}
 
-    vm.register_builtin(
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_dynreg_validate_metadata(metadata: dict) -> dict",
+    category = "oauth_dynreg"
+)]
+fn oauth_dynreg_validate_metadata_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let metadata = require_dict_arg(args, 0, "__oauth_dynreg_validate_metadata", "metadata")?;
+    Ok(validate_metadata_value(&metadata))
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_dynreg_build_client_metadata(metadata: dict) -> dict",
+    category = "oauth_dynreg"
+)]
+fn oauth_dynreg_build_client_metadata_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let metadata = require_dict_arg(args, 0, "__oauth_dynreg_build_client_metadata", "metadata")?;
+    build_client_metadata_value(&metadata)
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_dynreg_build_authorization_server_metadata(provider: dict, overrides?: dict) -> dict",
+    category = "oauth_dynreg"
+)]
+fn oauth_dynreg_build_authorization_server_metadata_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let provider = require_dict_arg(
+        args,
+        0,
         "__oauth_dynreg_build_authorization_server_metadata",
-        |args, _out| {
-            let provider = require_dict_arg(
-                args,
-                0,
-                "__oauth_dynreg_build_authorization_server_metadata",
-                "provider",
-            )?;
-            let overrides = optional_dict_arg(
-                args,
-                1,
-                "__oauth_dynreg_build_authorization_server_metadata",
-                "overrides",
-            )?;
-            build_authorization_server_metadata_value(&provider, overrides.as_ref())
-        },
-    );
+        "provider",
+    )?;
+    let overrides = optional_dict_arg(
+        args,
+        1,
+        "__oauth_dynreg_build_authorization_server_metadata",
+        "overrides",
+    )?;
+    build_authorization_server_metadata_value(&provider, overrides.as_ref())
+}
 
-    vm.register_builtin("__oauth_dynreg_register", |args, _out| {
-        let handle = require_handle(args, 0, "__oauth_dynreg_register")?;
-        let metadata = require_dict_arg(args, 1, "__oauth_dynreg_register", "metadata")?;
-        register_client_value(&handle, &metadata)
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_dynreg_register(handle: dict, metadata: dict) -> dict",
+    category = "oauth_dynreg"
+)]
+fn oauth_dynreg_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let handle = require_handle(args, 0, "__oauth_dynreg_register")?;
+    let metadata = require_dict_arg(args, 1, "__oauth_dynreg_register", "metadata")?;
+    register_client_value(&handle, &metadata)
+}
 
-    vm.register_builtin("__oauth_dynreg_get", |args, _out| {
-        let handle = require_handle(args, 0, "__oauth_dynreg_get")?;
-        let client_id = required_string_arg(args, 1, "__oauth_dynreg_get", "client_id")?;
-        Ok(get_client_value(&handle, &client_id))
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_dynreg_get(handle: dict, client_id: string) -> dict",
+    category = "oauth_dynreg"
+)]
+fn oauth_dynreg_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let handle = require_handle(args, 0, "__oauth_dynreg_get")?;
+    let client_id = required_string_arg(args, 1, "__oauth_dynreg_get", "client_id")?;
+    Ok(get_client_value(&handle, &client_id))
+}
 
-    vm.register_builtin("__oauth_dynreg_list", |args, _out| {
-        let handle = require_handle(args, 0, "__oauth_dynreg_list")?;
-        Ok(list_clients_value(&handle))
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_dynreg_list(handle: dict) -> list",
+    category = "oauth_dynreg"
+)]
+fn oauth_dynreg_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let handle = require_handle(args, 0, "__oauth_dynreg_list")?;
+    Ok(list_clients_value(&handle))
 }
 
 fn next_store_id() -> String {

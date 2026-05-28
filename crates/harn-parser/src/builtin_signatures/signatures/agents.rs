@@ -666,7 +666,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("model_id", TY_STRING)],
         TY_STRING,
     ),
-    BuiltinSignature::simple("llm_info", &[], TY_DICT),
     BuiltinSignature::simple("llm_mock", &[Param::new("config", TY_DICT)], TY_NIL),
     BuiltinSignature::simple("llm_mock_calls", &[], TY_LIST),
     BuiltinSignature::simple("llm_mock_clear", &[], TY_NIL),
@@ -751,7 +750,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         Ty::Named("channel"),
     ),
-    BuiltinSignature::simple("llm_usage", &[], TY_DICT),
     BuiltinSignature::simple(
         "parse_resume_conditions",
         &[Param::optional("conditions", RESUME_CONDITIONS_OR_NIL)],
@@ -986,58 +984,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     // Lifecycle replay determinism (#1861) — record / verify / replay
-    // suspension, resumption, and drain-decision receipts with signed
-    // timestamps and deterministic input fingerprints.
-    BuiltinSignature::simple(
-        "lifecycle_receipt_record_suspension",
-        &[Param::new("receipt", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "lifecycle_receipt_record_resumption",
-        &[Param::new("receipt", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "lifecycle_receipt_record_drain_decision",
-        &[Param::new("receipt", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("lifecycle_receipts_snapshot", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "verify_lifecycle_receipt_signature",
-        &[
-            Param::new("kind", TY_STRING),
-            Param::new("payload", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "lifecycle_resume_input_hash",
-        &[Param::new("input", TY_ANY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "lifecycle_drain_decision_prompt_hash",
-        &[Param::new("prompt", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "lifecycle_replay_resume_input",
-        &[
-            Param::new("receipt", TY_DICT),
-            Param::optional("candidate", TY_ANY),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "lifecycle_replay_drain_decision",
-        &[
-            Param::new("receipt", TY_DICT),
-            Param::optional("candidate_prompt", TY_STRING_OR_NIL),
-        ],
-        TY_DICT,
-    ),
+    // suspension, resumption,
     BuiltinSignature::simple(
         "transcript_reset",
         &[Param::optional("opts", TY_DICT)],

@@ -2,11 +2,11 @@
 //!
 //! Each group is a `&'static [BuiltinSignature]` of entries describing one
 //! conceptual area (core stdlib, agents, flow predicates, integrations,
-//! etc.). They are concatenated and alphabetically sorted by
-//! [`super::all_signatures`] so binary-search lookups stay O(log N).
+//! etc.). [`super::lookup`] scans the installed slice first, then walks
+//! these groups linearly — O(N+M) per call but well below the typecheck
+//! hot path.
 
 mod agents;
-mod flow;
 mod integrations;
 mod project;
 mod schema;
@@ -20,11 +20,10 @@ pub(crate) use super::types::{
     TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 
-pub(crate) fn groups() -> [&'static [BuiltinSignature]; 7] {
+pub(crate) fn groups() -> [&'static [BuiltinSignature]; 6] {
     [
         stdlib::SIGNATURES,
         agents::SIGNATURES,
-        flow::SIGNATURES,
         integrations::SIGNATURES,
         project::SIGNATURES,
         schema::SIGNATURES,

@@ -235,18 +235,45 @@ pub fn active_backend_available() -> bool {
 /// Intended for diagnostics, `harn doctor`, and conformance fixtures —
 /// not as a way to mutate runtime sandbox behavior from a script.
 pub fn register_sandbox_builtins(vm: &mut Vm) {
-    vm.register_builtin("sandbox_active_backend", |_args, _out| {
-        Ok(VmValue::String(Rc::from(active_backend_name())))
-    });
-    vm.register_builtin("sandbox_backend_available", |_args, _out| {
-        Ok(VmValue::Bool(active_backend_available()))
-    });
-    vm.register_builtin("sandbox_active_profile", |_args, _out| {
-        let profile = crate::orchestration::current_execution_policy()
-            .map(|policy| policy.sandbox_profile)
-            .unwrap_or(SandboxProfile::Unrestricted);
-        Ok(VmValue::String(Rc::from(profile.as_str())))
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
+    &SANDBOX_ACTIVE_BACKEND_IMPL_DEF,
+    &SANDBOX_BACKEND_AVAILABLE_IMPL_DEF,
+    &SANDBOX_ACTIVE_PROFILE_IMPL_DEF,
+];
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "sandbox_active_backend() -> string",
+    category = "sandbox"
+)]
+fn sandbox_active_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(active_backend_name())))
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "sandbox_backend_available() -> bool",
+    category = "sandbox"
+)]
+fn sandbox_backend_available_impl(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(VmValue::Bool(active_backend_available()))
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "sandbox_active_profile() -> string",
+    category = "sandbox"
+)]
+fn sandbox_active_profile_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let profile = crate::orchestration::current_execution_policy()
+        .map(|policy| policy.sandbox_profile)
+        .unwrap_or(SandboxProfile::Unrestricted);
+    Ok(VmValue::String(Rc::from(profile.as_str())))
 }
 
 pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {

@@ -6,8 +6,7 @@ use super::shapes::{
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL,
-    TY_DURATION, TY_FLOAT, TY_INT, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING,
-    TY_STRING_OR_NIL,
+    TY_DURATION, TY_FLOAT, TY_INT, TY_LIST, TY_NEVER, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
 // `string | dict` — used by waitpoint and daemon handles which accept either
@@ -50,98 +49,8 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("options", TY_DICT_OR_NIL)],
         TY_NIL,
     ),
-    BuiltinSignature::variadic("__calendar_add", &[Param::new("args", TY_ANY)], TY_NUMBER),
-    BuiltinSignature::variadic(
-        "__calendar_add_business_days",
-        &[Param::new("args", TY_ANY)],
-        TY_NUMBER,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_boundary",
-        &[Param::new("args", TY_ANY)],
-        TY_NUMBER,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_business_days_between",
-        &[Param::new("args", TY_ANY)],
-        TY_INT,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_business_window",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_countries",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_country_info",
-        &[Param::new("args", TY_ANY)],
-        TY_ANY,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_date_range",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_from_local",
-        &[Param::new("args", TY_ANY)],
-        TY_NUMBER,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_holidays",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_is_business_day",
-        &[Param::new("args", TY_ANY)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_is_holiday",
-        &[Param::new("args", TY_ANY)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_next_business_day",
-        &[Param::new("args", TY_ANY)],
-        TY_NUMBER,
-    ),
-    BuiltinSignature::variadic(
-        "__calendar_next_weekday",
-        &[Param::new("args", TY_ANY)],
-        TY_NUMBER,
-    ),
-    BuiltinSignature::variadic("__calendar_parts", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic(
-        "__calendar_supported_holiday_calendars",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
     // `__deep_merge`, `__dict_filter_nil`, `__dict_from_pairs`,
     // `__dict_merge`, `__list_unique`, `__dict_omit`, `__dict_pick`,
-    // `__dict_pick_keys` migrated to `#[harn_builtin]` in
-    // `harn-vm/src/stdlib/collections.rs`.
-    BuiltinSignature::simple(
-        "__from_xml",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__to_xml",
-        &[
-            Param::new("value", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_STRING,
-    ),
     BuiltinSignature::simple(
         "__files_upload",
         &[
@@ -172,81 +81,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("__io_println", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::simple("__io_eprint", &[Param::new("message", TY_ANY)], TY_NIL),
     BuiltinSignature::simple("__io_eprintln", &[Param::new("message", TY_ANY)], TY_NIL),
-    BuiltinSignature::simple(
-        "__json_stream_validate_chunk",
-        &[
-            Param::new("handle", TY_STRING),
-            Param::new("chunk", Ty::Union(&[TY_STRING, TY_BYTES])),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__json_stream_validate_create",
-        &[Param::new("schema", TY_DICT)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "__json_stream_validate_finalize",
-        &[Param::new("handle", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__json_stream_validator",
-        &[Param::new("schema", TY_DICT)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "__json_stream_validator_feed",
-        &[
-            Param::new("handle", TY_STRING),
-            Param::new("chunk", Ty::Union(&[TY_STRING, TY_BYTES])),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "__json_stream_validator_status",
-        &[Param::new("handle", TY_STRING)],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "__json_stream_validator_value",
-        &[Param::new("handle", TY_STRING)],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "__oauth_storage_cloud_handle",
-        &[Param::new("scope", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__oauth_storage_delete",
-        &[Param::new("handle", TY_DICT), Param::new("key", TY_STRING)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "__oauth_storage_file_handle",
-        &[
-            Param::new("path", TY_STRING),
-            Param::new("encryption_key", Ty::Union(&[TY_STRING, TY_BYTES])),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__oauth_storage_get",
-        &[Param::new("handle", TY_DICT), Param::new("key", TY_STRING)],
-        TY_DICT_OR_NIL,
-    ),
-    BuiltinSignature::simple("__oauth_storage_memory_handle", &[], TY_DICT),
-    BuiltinSignature::simple(
-        "__oauth_storage_set",
-        &[
-            Param::new("handle", TY_DICT),
-            Param::new("key", TY_STRING),
-            Param::new("token_set", TY_DICT),
-            Param::optional("ttl_seconds", Ty::Union(&[TY_INT, TY_DURATION, TY_NIL])),
-        ],
-        TY_NIL,
-    ),
     BuiltinSignature::simple(
         "__oauth_dynreg_build_authorization_server_metadata",
         &[
@@ -287,72 +121,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("metadata", TY_DICT)],
         TY_DICT,
     ),
-    BuiltinSignature::simple("__token_redaction_clear_custom_patterns", &[], TY_NIL),
-    BuiltinSignature::simple("__token_redaction_custom_patterns", &[], TY_LIST),
-    BuiltinSignature::simple("__token_redaction_default_patterns", &[], TY_LIST),
-    BuiltinSignature::simple("__token_redaction_drain_audit", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "__token_redaction_redact",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "__token_redaction_register_pattern",
-        &[
-            Param::new("name", TY_STRING),
-            Param::new("regex", TY_STRING),
-        ],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "__timing_end",
-        &[
-            Param::new("handle", TY_DICT),
-            Param::optional("final_attributes", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__timing_event",
-        &[
-            Param::new("handle", TY_DICT),
-            Param::new("name", TY_STRING),
-            Param::optional("attributes", TY_DICT_OR_NIL),
-        ],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple("__timing_now_monotonic_ms", &[], TY_INT),
-    BuiltinSignature::simple(
-        "__timing_start",
-        &[
-            Param::new("name", TY_STRING),
-            Param::optional("attributes", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
     BuiltinSignature::simple(
         "__ansi_enabled",
         &[Param::optional("stream", TY_STRING)],
         TY_BOOL,
     ),
-    BuiltinSignature::simple(
-        "__lifecycle_span_end",
-        &[Param::new("span_id", TY_INT)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "__lifecycle_span_start",
-        &[Param::new("name", TY_STRING)],
-        TY_INT,
-    ),
-    BuiltinSignature::variadic("__obs_auto_backend", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("__obs_configure", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("__obs_emit", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("__obs_end_span", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("__obs_events", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("__obs_events_take", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("__obs_reset", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("__obs_start_span", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::simple(
         "__llm_cache_key",
         &[
@@ -361,15 +134,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("options", TY_DICT_OR_NIL),
         ],
         TY_STRING,
-    ),
-    BuiltinSignature::simple("__pop_llm_render_context", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "__push_llm_render_context",
-        &[
-            Param::new("provider", TY_STRING),
-            Param::optional("model", TY_STRING),
-        ],
-        TY_BOOL,
     ),
     BuiltinSignature::simple("__select_list", &[Param::new("channels", TY_LIST)], TY_DICT),
     BuiltinSignature::simple(
@@ -412,83 +176,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_INT,
     ),
     BuiltinSignature::simple(
-        "__waitpoint_cancel",
-        &[
-            Param::new("handle", TY_STRING_OR_DICT),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__waitpoint_complete",
-        &[
-            Param::new("handle", TY_STRING_OR_DICT),
-            Param::optional("value", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__waitpoint_create",
-        &[Param::optional(
-            "options",
-            Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]),
-        )],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__waitpoint_wait",
-        &[
-            Param::new("handles", Ty::Union(&[TY_STRING, TY_DICT, TY_LIST])),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        Ty::Union(&[TY_DICT, TY_LIST]),
-    ),
-    BuiltinSignature::simple(
-        "__web_extract_html",
-        &[
-            Param::new("html", TY_STRING),
-            Param::optional("source_url", TY_STRING_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__web_origin_url",
-        &[
-            Param::new("url", TY_STRING),
-            Param::optional("path", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "__web_resolve_url",
-        &[
-            Param::new("base_url", TY_STRING),
-            Param::new("href", TY_STRING),
-        ],
-        TY_STRING_OR_NIL,
-    ),
-    BuiltinSignature::simple("abs", &[Param::new("value", TY_NUMBER)], TY_NUMBER),
-    BuiltinSignature::simple("acos", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
-    BuiltinSignature::simple("addr_of", &[Param::new("value", TY_ANY)], TY_STRING),
-    BuiltinSignature::simple("advance_time", &[Param::new("ms", TY_INT)], TY_INT),
-    BuiltinSignature::simple(
         "append_file",
         &[
             Param::new("path", TY_STRING),
             Param::new("content", TY_STRING),
         ],
         TY_NIL,
-    ),
-    BuiltinSignature::simple("arch", &[], TY_STRING),
-    BuiltinSignature::simple("asin", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
-    BuiltinSignature::simple(
-        "ask_user",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_ANY,
     ),
     BuiltinSignature::simple(
         "assert",
@@ -515,13 +208,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("message", TY_STRING),
         ],
         TY_NIL,
-    ),
-    BuiltinSignature::simple("asset_root", &[], TY_STRING),
-    BuiltinSignature::simple("atan", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
-    BuiltinSignature::simple(
-        "atan2",
-        &[Param::new("y", TY_NUMBER), Param::new("x", TY_NUMBER)],
-        TY_FLOAT,
     ),
     BuiltinSignature::simple(
         "atomic",
@@ -562,112 +248,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_INT,
     ),
     BuiltinSignature::simple("await", &[Param::new("handle", Ty::Named("task"))], TY_ANY),
-    BuiltinSignature::simple("aws_sigv4_headers", &[Param::new("spec", TY_DICT)], TY_DICT),
-    BuiltinSignature::simple("base32_decode", &[Param::new("text", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple(
-        "base32_encode",
-        &[Param::new("input", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("base64_decode", &[Param::new("text", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple(
-        "base64_encode",
-        &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "base64url_decode",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "base64url_encode",
-        &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("basename", &[Param::new("path", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple(
-        "blake3",
-        &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
-        TY_STRING,
-    ),
     BuiltinSignature::simple("bold", &[Param::new("text", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple("brotli_decode", &[Param::new("input", TY_BYTES)], TY_BYTES),
-    BuiltinSignature::simple(
-        "brotli_encode",
-        &[
-            Param::new("input", Ty::Union(&[TY_BYTES, TY_STRING])),
-            Param::optional("quality", TY_INT),
-        ],
-        TY_BYTES,
-    ),
-    BuiltinSignature::simple(
-        "bytes_concat",
-        &[Param::new("left", TY_BYTES), Param::new("right", TY_BYTES)],
-        TY_BYTES,
-    ),
-    BuiltinSignature::simple(
-        "bytes_eq",
-        &[Param::new("left", TY_BYTES), Param::new("right", TY_BYTES)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple(
-        "bytes_from_base64",
-        &[Param::new("text", TY_STRING)],
-        TY_BYTES,
-    ),
-    BuiltinSignature::simple("bytes_from_hex", &[Param::new("text", TY_STRING)], TY_BYTES),
-    BuiltinSignature::simple(
-        "bytes_from_string",
-        &[Param::new("text", TY_STRING)],
-        TY_BYTES,
-    ),
-    BuiltinSignature::simple("bytes_len", &[Param::new("input", TY_BYTES)], TY_INT),
-    BuiltinSignature::simple(
-        "bytes_slice",
-        &[
-            Param::new("input", TY_BYTES),
-            Param::new("start", TY_INT),
-            Param::new("end", TY_INT),
-        ],
-        TY_BYTES,
-    ),
-    BuiltinSignature::simple(
-        "bytes_to_base64",
-        &[Param::new("input", TY_BYTES)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "bytes_to_base64url",
-        &[Param::new("input", Ty::Union(&[TY_BYTES, TY_STRING]))],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("bytes_to_hex", &[Param::new("input", TY_BYTES)], TY_STRING),
-    BuiltinSignature::simple(
-        "bytes_to_string",
-        &[Param::new("input", TY_BYTES)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "bytes_to_string_lossy",
-        &[Param::new("input", TY_BYTES)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "camel_to_kebab",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "camel_to_pascal",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "camel_to_snake",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
     BuiltinSignature::simple("cancel", &[Param::new("handle", Ty::Named("task"))], TY_NIL),
     BuiltinSignature::simple(
         "cancel_graceful",
@@ -679,7 +260,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple("capture_stderr_start", &[], TY_NIL),
     BuiltinSignature::simple("capture_stderr_take", &[], TY_STRING),
-    BuiltinSignature::simple("ceil", &[Param::new("value", TY_NUMBER)], TY_INT),
     BuiltinSignature::simple(
         "channel",
         &[
@@ -746,40 +326,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
-        "command_llm_risk_scan",
-        &[
-            Param::new("ctx", TY_DICT),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("command_policy", &[Param::new("config", TY_DICT)], TY_DICT),
-    BuiltinSignature::simple("command_policy_pop", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "command_policy_push",
-        &[Param::new("policy", TY_DICT)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "command_result_scan",
-        &[Param::new("ctx", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("command_risk_scan", &[Param::new("ctx", TY_DICT)], TY_DICT),
-    BuiltinSignature::simple(
-        "constant_time_eq",
-        &[Param::new("a", TY_STRING), Param::new("b", TY_STRING)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple(
-        "contains",
-        &[
-            Param::new("haystack", Ty::Union(&[TY_STRING, TY_LIST])),
-            Param::new("needle", TY_ANY),
-        ],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple(
         "composition_binding_manifest",
         &[
             Param::new("tools", Ty::Union(&[TY_LIST, TY_DICT])),
@@ -818,102 +364,10 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
-        "cookie_delete",
-        &[
-            Param::new("name", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "cookie_parse",
-        &[Param::new(
-            "header",
-            Ty::Union(&[TY_STRING, TY_DICT, TY_LIST]),
-        )],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "cookie_round_trip",
-        &[
-            Param::new(
-                "request_or_set_cookie",
-                Ty::Union(&[TY_STRING, TY_DICT, TY_LIST]),
-            ),
-            Param::optional("set_cookie", Ty::Union(&[TY_STRING, TY_DICT, TY_LIST])),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "cookie_serialize",
-        &[
-            Param::new("name", TY_STRING),
-            Param::new("value", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "cookie_sign",
-        &[
-            Param::new("value", TY_STRING),
-            Param::new("secret", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "cookie_verify",
-        &[
-            Param::new("signed", TY_STRING),
-            Param::new("secret", TY_STRING),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
         "copy_file",
         &[Param::new("src", TY_STRING), Param::new("dst", TY_STRING)],
         TY_NIL,
     ),
-    BuiltinSignature::simple(
-        "correction_query",
-        &[Param::optional("filters", TY_DICT_OR_NIL)],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "correction_record",
-        &[Param::new("correction", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "corrections.query",
-        &[Param::optional("filters", TY_DICT_OR_NIL)],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "corrections.record",
-        &[Param::new("correction", TY_DICT)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("cos", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
-    BuiltinSignature::simple("crypto_random_bytes", &[Param::new("n", TY_INT)], TY_BYTES),
-    BuiltinSignature::simple("current_policy", &[], TY_ANY),
-    BuiltinSignature::simple(
-        "csv_parse",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "csv_stringify",
-        &[
-            Param::new("rows", TY_LIST),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("cwd", &[], TY_STRING),
     BuiltinSignature::simple(
         "daemon_resume",
         &[Param::new("path", TY_STRING)],
@@ -943,59 +397,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         DAEMON_SUMMARY,
     ),
     BuiltinSignature::simple(
-        "date_add",
-        &[
-            Param::new("timestamp", Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT])),
-            Param::new("duration", TY_DURATION),
-        ],
-        TY_NUMBER,
-    ),
-    BuiltinSignature::simple(
-        "date_diff",
-        &[
-            Param::new("a", Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT])),
-            Param::new("b", Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT])),
-        ],
-        TY_DURATION,
-    ),
-    BuiltinSignature::simple(
-        "date_format",
-        &[
-            Param::new("timestamp", Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT])),
-            Param::optional("format", TY_STRING),
-            Param::optional("timezone", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "date_from_components",
-        &[
-            Param::new("components", TY_DICT),
-            Param::optional("timezone", TY_STRING_OR_NIL),
-        ],
-        TY_NUMBER,
-    ),
-    BuiltinSignature::simple(
-        "date_in_zone",
-        &[
-            Param::new("timestamp", Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT])),
-            Param::new("timezone", TY_STRING),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("date_iso", &[], TY_STRING),
-    BuiltinSignature::simple("date_now", &[], TY_DICT),
-    BuiltinSignature::simple("date_now_iso", &[], TY_STRING),
-    BuiltinSignature::simple("date_parse", &[Param::new("text", TY_STRING)], TY_NUMBER),
-    BuiltinSignature::simple(
-        "date_to_zone",
-        &[
-            Param::new("timestamp", Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT])),
-            Param::new("timezone", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
         "dedup_by",
         &[
             Param::new("items", TY_LIST),
@@ -1019,13 +420,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple("delete_file", &[Param::new("path", TY_STRING)], TY_NIL),
     BuiltinSignature::simple("dim", &[Param::new("text", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple("dirname", &[Param::new("path", TY_STRING)], TY_STRING),
-    // `drop(handle)` — close a stdlib handle deterministically. Dispatch is
-    // by runtime value tag; values that don't carry a close hook are a
-    // silent no-op. Compiled in automatically for `owned<T>` bindings at
-    // scope exit; callers may also invoke explicitly in user `defer { ... }`
-    // blocks when they need fine-grained control.
-    BuiltinSignature::simple("drop", &[Param::new("handle", TY_ANY)], TY_NIL),
     BuiltinSignature::simple(
         "drop_while",
         // <T> List<T> -> ((T) -> bool) -> List<T>. Skips the leading run
@@ -1036,127 +430,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_LIST,
     ),
-    BuiltinSignature::simple(
-        "dual_control",
-        &[
-            Param::new("n", TY_INT),
-            Param::new("m", TY_INT),
-            Param::new("action", TY_CLOSURE),
-            Param::optional("approvers", TY_LIST),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "duration_days",
-        &[Param::new("count", TY_NUMBER)],
-        TY_DURATION,
-    ),
-    BuiltinSignature::simple(
-        "duration_hours",
-        &[Param::new("count", TY_NUMBER)],
-        TY_DURATION,
-    ),
-    BuiltinSignature::simple(
-        "duration_minutes",
-        &[Param::new("count", TY_NUMBER)],
-        TY_DURATION,
-    ),
-    BuiltinSignature::simple(
-        "duration_ms",
-        &[Param::new("count", TY_NUMBER)],
-        TY_DURATION,
-    ),
-    BuiltinSignature::simple(
-        "duration_seconds",
-        &[Param::new("count", TY_NUMBER)],
-        TY_DURATION,
-    ),
-    BuiltinSignature::simple(
-        "duration_to_human",
-        &[Param::new("duration", TY_DURATION)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "duration_to_seconds",
-        &[Param::new("duration", TY_DURATION)],
-        TY_INT,
-    ),
     BuiltinSignature::simple("e", &[], TY_FLOAT),
-    BuiltinSignature::simple("ed25519_keypair", &[], TY_DICT),
-    BuiltinSignature::simple(
-        "ed25519_sign",
-        &[
-            Param::new("private_hex", TY_STRING),
-            Param::new("message", Ty::Union(&[TY_STRING, TY_BYTES])),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "ed25519_verify",
-        &[
-            Param::new("public_hex", TY_STRING),
-            Param::new("message", Ty::Union(&[TY_STRING, TY_BYTES])),
-            Param::new("signature_hex", TY_STRING),
-        ],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple("elapsed", &[], TY_INT),
-    BuiltinSignature::simple(
-        "enable_tracing",
-        &[Param::optional("enabled", TY_BOOL)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "ends_with",
-        &[
-            Param::new("text", TY_STRING),
-            Param::new("suffix", TY_STRING),
-        ],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple("entries", &[Param::new("dict", TY_DICT)], TY_LIST),
-    BuiltinSignature::simple("env", &[Param::new("name", TY_STRING)], TY_STRING_OR_NIL),
-    BuiltinSignature::simple(
-        "env_or",
-        &[Param::new("name", TY_STRING), Param::new("default", TY_ANY)],
-        TY_ANY,
-    ),
     BuiltinSignature::simple("error_category", &[Param::new("error", TY_ANY)], TY_STRING),
-    BuiltinSignature::simple(
-        "escalate_to",
-        &[
-            Param::new("role", TY_STRING),
-            Param::new("reason", TY_STRING),
-        ],
-        TY_DICT,
-    ),
     BuiltinSignature::simple(
         "estimate_tokens",
         &[Param::new("messages", TY_LIST)],
         TY_INT,
-    ),
-    BuiltinSignature::simple(
-        "event_log.emit",
-        &[
-            Param::new("topic", TY_STRING),
-            Param::new("kind", TY_STRING),
-            Param::optional("payload", TY_ANY),
-            Param::optional("headers", TY_DICT_OR_NIL),
-        ],
-        TY_INT,
-    ),
-    BuiltinSignature::simple(
-        "event_log.latest",
-        &[Param::new("topic", TY_STRING)],
-        Ty::Union(&[TY_INT, TY_NIL]),
-    ),
-    BuiltinSignature::simple(
-        "event_log.subscribe",
-        &[
-            Param::new("topic_or_options", Ty::Union(&[TY_STRING, TY_DICT])),
-            Param::optional("from_cursor", Ty::Union(&[TY_INT, TY_NIL])),
-        ],
-        Ty::Named("stream"),
     ),
     BuiltinSignature::simple(
         "emit_channel",
@@ -1176,34 +455,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_LIST,
     ),
     BuiltinSignature::simple("flush_trigger_aggregations", &[], TY_NIL),
-    // CH-11 (#1911): channel guardrails middleware. Register/list/unregister
-    // run synchronously; the actual scan executes inside `emit_channel(...)`.
-    BuiltinSignature::simple(
-        "channel_guardrail_register",
-        &[Param::new("config", TY_DICT)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "channel_guardrail_unregister",
-        &[Param::new("id", TY_STRING)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple("channel_guardrail_list", &[], TY_LIST),
-    BuiltinSignature::simple("channel_guardrail_clear", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "event_log_emit",
-        &[
-            Param::new("topic", TY_STRING),
-            Param::new("kind", TY_STRING),
-            Param::optional("payload", TY_ANY),
-            Param::optional("headers", TY_DICT_OR_NIL),
-        ],
-        TY_INT,
-    ),
-    BuiltinSignature::simple("execution_root", &[], TY_STRING),
-    BuiltinSignature::simple("exit", &[Param::optional("code", TY_INT)], TY_NEVER),
-    BuiltinSignature::simple("exp", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
-    BuiltinSignature::simple("extname", &[Param::new("path", TY_STRING)], TY_STRING),
     BuiltinSignature::simple("file_exists", &[Param::new("path", TY_STRING)], TY_BOOL),
     BuiltinSignature::simple(
         "flat_map",
@@ -1212,15 +463,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("callback", TY_CLOSURE),
         ],
         TY_LIST,
-    ),
-    BuiltinSignature::simple("floor", &[Param::new("value", TY_NUMBER)], TY_INT),
-    BuiltinSignature::variadic(
-        "format",
-        &[
-            Param::new("template", TY_STRING),
-            Param::optional("rest", TY_ANY),
-        ],
-        TY_STRING,
     ),
     BuiltinSignature::simple(
         "glob",
@@ -1239,202 +481,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
-    BuiltinSignature::simple("gzip_decode", &[Param::new("input", TY_BYTES)], TY_BYTES),
-    BuiltinSignature::simple(
-        "gzip_encode",
-        &[
-            Param::new("input", Ty::Union(&[TY_BYTES, TY_STRING])),
-            Param::optional("level", TY_INT),
-        ],
-        TY_BYTES,
-    ),
-    BuiltinSignature::simple("handler_context", &[], Ty::Union(&[TY_DICT, TY_NIL])),
-    BuiltinSignature::simple("hash_value", &[Param::new("value", TY_ANY)], TY_INT),
-    BuiltinSignature::simple("hex_decode", &[Param::new("text", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple("hex_encode", &[Param::new("input", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple(
-        "hitl_pending",
-        &[Param::optional("filters", TY_DICT_OR_NIL)],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "hmac_sha1",
-        &[
-            Param::new("key", TY_STRING),
-            Param::new("message", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "hmac_sha256",
-        &[
-            Param::new("key", TY_STRING),
-            Param::new("message", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "hmac_sha256_base64",
-        &[
-            Param::new("key", TY_STRING),
-            Param::new("message", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("home_dir", &[], TY_STRING),
-    BuiltinSignature::simple("hostname", &[], TY_STRING),
     BuiltinSignature::simple("is_cancelled", &[], TY_BOOL),
-    BuiltinSignature::simple("is_err", &[Param::new("value", TY_ANY)], TY_BOOL),
-    BuiltinSignature::simple("is_infinite", &[Param::new("value", TY_NUMBER)], TY_BOOL),
-    BuiltinSignature::simple("is_nan", &[Param::new("value", TY_NUMBER)], TY_BOOL),
-    BuiltinSignature::simple("is_ok", &[Param::new("value", TY_ANY)], TY_BOOL),
     BuiltinSignature::simple("is_rate_limited", &[Param::new("error", TY_ANY)], TY_BOOL),
-    BuiltinSignature::simple(
-        "is_same",
-        &[Param::new("a", TY_ANY), Param::new("b", TY_ANY)],
-        TY_BOOL,
-    ),
     BuiltinSignature::simple("is_stderr_tty", &[], TY_BOOL),
     BuiltinSignature::simple("is_stdin_tty", &[], TY_BOOL),
     BuiltinSignature::simple("is_stdout_tty", &[], TY_BOOL),
     BuiltinSignature::simple("is_timeout", &[Param::new("error", TY_ANY)], TY_BOOL),
-    BuiltinSignature::simple(
-        "iter",
-        &[Param::new(
-            "value",
-            Ty::Union(&[
-                TY_LIST,
-                TY_DICT,
-                TY_STRING,
-                Ty::Named("set"),
-                Ty::Named("range"),
-                Ty::Named("iter"),
-                Ty::Named("Generator"),
-                Ty::Named("stream"),
-                Ty::Named("channel"),
-            ]),
-        )],
-        Ty::Named("iter"),
-    ),
-    BuiltinSignature::simple(
-        "join",
-        &[
-            Param::new("items", TY_LIST),
-            Param::optional("separator", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "jq",
-        &[
-            Param::new("value", TY_ANY),
-            Param::new("expression", TY_STRING),
-        ],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
-        "jq_first",
-        &[
-            Param::new("value", TY_ANY),
-            Param::new("expression", TY_STRING),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "json_extract",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("key", TY_STRING),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple("json_parse", &[Param::new("text", TY_STRING)], TY_ANY),
-    BuiltinSignature::simple(
-        "json_pointer",
-        &[
-            Param::new("value", TY_ANY),
-            Param::new("pointer", TY_STRING),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "json_pointer_delete",
-        &[
-            Param::new("value", TY_ANY),
-            Param::new("pointer", TY_STRING),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "json_pointer_set",
-        &[
-            Param::new("value", TY_ANY),
-            Param::new("pointer", TY_STRING),
-            Param::new("replacement", TY_ANY),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple("json_stringify", &[Param::new("value", TY_ANY)], TY_STRING),
-    BuiltinSignature::simple(
-        "json_stringify_pretty",
-        &[Param::new("value", TY_ANY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "json_validate",
-        &[Param::new("value", TY_ANY), Param::new("schema", TY_DICT)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple(
-        "jwt_sign",
-        &[
-            Param::new("algorithm", TY_STRING),
-            Param::new("claims", TY_DICT),
-            Param::new("private_key", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "jwt_verify",
-        &[
-            Param::new("algorithm", TY_STRING),
-            Param::new("token", TY_STRING),
-            Param::new("key", TY_STRING),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "kebab_to_camel",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "kebab_to_snake",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("keys", &[Param::new("dict", TY_DICT)], TY_LIST),
-    BuiltinSignature::simple(
-        "len",
-        &[Param::new(
-            "value",
-            Ty::Union(&[
-                TY_STRING,
-                TY_BYTES,
-                TY_LIST,
-                TY_DICT,
-                Ty::Named("set"),
-                Ty::Named("range"),
-                TY_NIL,
-            ]),
-        )],
-        TY_INT,
-    ),
     BuiltinSignature::simple("list_dir", &[Param::optional("path", TY_STRING)], TY_LIST),
-    BuiltinSignature::simple("ln", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
     BuiltinSignature::simple("log", &[Param::new("message", TY_ANY)], TY_NIL),
-    BuiltinSignature::simple("log10", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
-    BuiltinSignature::simple("log2", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
     BuiltinSignature::simple(
         "log_debug",
         &[
@@ -1476,12 +530,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_NIL,
     ),
-    BuiltinSignature::simple("lowercase", &[Param::new("text", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple(
-        "lowercase_first",
-        &[Param::new("text", TY_STRING)],
-        TY_STRING,
-    ),
     BuiltinSignature::simple(
         "take_while",
         // <T> List<T> -> ((T) -> bool) -> List<T>. Returns the longest
@@ -1492,113 +540,19 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_LIST,
     ),
-    BuiltinSignature::variadic("trust.policy_for", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("trust.query", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("trust.record", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("trust.score", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("trust.verify_chain", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic(
-        "trust_graph_policy_for",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic("trust_graph_query", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic(
-        "trust_graph_record",
-        &[Param::new("args", TY_ANY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::variadic(
-        "trust_graph_verify_chain",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic("trust_query", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("trust_record", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("trigger_fire", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic(
-        "trigger_inspect_action_graph",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic(
-        "trigger_inspect_dlq",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic(
-        "trigger_inspect_lifecycle",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic("trigger_list", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("trigger_register", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("trigger_replay", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic(
-        "trigger_test_harness",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic(
-        "webhook_intake_register",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic(
-        "webhook_intake_feed",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic(
-        "webhook_intake_deregister",
-        &[Param::new("args", TY_ANY)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::variadic(
-        "webhook_intake_list",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic(
-        "webhook_intake_recent",
-        &[Param::new("args", TY_ANY)],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic("max", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("mean", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::variadic("md5", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("median", &[Param::new("args", TY_ANY)], TY_FLOAT),
     BuiltinSignature::variadic("metrics_inc", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("microcompact", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("min", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("mkdir", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::simple(
         "mkdtemp",
         &[Param::optional("prefix", TY_STRING)],
         TY_STRING,
     ),
-    BuiltinSignature::variadic("month_name", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic(
         "monitor_wait_for_native",
         &[Param::new("args", TY_ANY)],
         TY_ANY,
     ),
-    BuiltinSignature::variadic(
-        "multipart_field_bytes",
-        &[Param::new("args", TY_ANY)],
-        TY_BYTES,
-    ),
-    BuiltinSignature::variadic(
-        "multipart_field_text",
-        &[Param::new("args", TY_ANY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::variadic(
-        "multipart_form_data",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic("multipart_parse", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("mailbox_close", &[Param::new("args", TY_ANY)], TY_BOOL),
     BuiltinSignature::variadic("mailbox_lookup", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("mailbox_metrics", &[Param::new("args", TY_ANY)], TY_DICT),
@@ -1606,41 +560,8 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("mailbox_receive", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("mailbox_send", &[Param::new("args", TY_ANY)], TY_BOOL),
     BuiltinSignature::variadic("mailbox_try_receive", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("pair", &[Param::new("args", TY_ANY)], Ty::Named("pair")),
-    BuiltinSignature::variadic("parallel_race", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("pascal_to_camel", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("pascal_to_snake", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("path_basename", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("path_extension", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("path_is_absolute", &[Param::new("args", TY_ANY)], TY_BOOL),
-    BuiltinSignature::variadic("path_is_relative", &[Param::new("args", TY_ANY)], TY_BOOL),
     BuiltinSignature::variadic("path_join", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("path_normalize", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("path_parent", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("path_parts", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("path_relative_to", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("path_segments", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("path_stem", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("path_to_native", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("path_to_posix", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic(
-        "path_with_extension",
-        &[Param::new("args", TY_ANY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::variadic("path_with_stem", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic(
-        "path_workspace_info",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic(
-        "path_workspace_normalize",
-        &[Param::new("args", TY_ANY)],
-        TY_STRING_OR_NIL,
-    ),
     BuiltinSignature::variadic("partition", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("percentile", &[Param::new("args", TY_ANY)], TY_FLOAT),
     BuiltinSignature::variadic("pg_close", &[Param::new("args", TY_ANY)], TY_BOOL),
     BuiltinSignature::variadic("pg_connect", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("pg_execute", &[Param::new("args", TY_ANY)], TY_DICT),
@@ -1651,7 +572,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("pg_query_one", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("pg_transaction", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("pi", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::variadic("pid", &[Param::new("args", TY_ANY)], TY_INT),
     BuiltinSignature::simple("pipeline_lifecycle_audit_log_snapshot", &[], TY_LIST),
     BuiltinSignature::simple("pipeline_lifecycle_audit_log_take", &[], TY_LIST),
     BuiltinSignature::simple(
@@ -1659,39 +579,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("callback", TY_ANY)],
         TY_NIL,
     ),
-    BuiltinSignature::variadic("plan_artifact", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("plan_entries", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("platform", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("pow", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("progress", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic(
-        "prompt_mark_rendered",
-        &[Param::new("args", TY_ANY)],
-        TY_INT,
-    ),
-    BuiltinSignature::variadic("random", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::variadic("random_choice", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("random_int", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("random_shuffle", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("range", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("read_file", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("read_file_bytes", &[Param::new("args", TY_ANY)], TY_BYTES),
     BuiltinSignature::variadic("read_file_result", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("receive", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("request_approval", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("regex_captures", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic(
-        "regex_match",
-        &[Param::new("args", TY_ANY)],
-        TY_STRING_OR_NIL,
-    ),
-    BuiltinSignature::variadic("regex_replace", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic(
-        "regex_replace_all",
-        &[Param::new("args", TY_ANY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::variadic("regex_split", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("register_tool_hook", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::simple(
         "register_persona_hook",
@@ -1733,17 +626,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::variadic("notify_file_edited", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("render", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("render_prompt", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("render_string", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic(
-        "render_with_provenance",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic("replace", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("round", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("rng_seed", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("runtime_context", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic(
         "runtime_context_clear",
@@ -1780,69 +662,9 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("secret_get", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("secret_scan", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("self_review", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("set", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("set_add", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("set_contains", &[Param::new("args", TY_ANY)], TY_BOOL),
-    BuiltinSignature::variadic("set_difference", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("set_intersect", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("set_is_disjoint", &[Param::new("args", TY_ANY)], TY_BOOL),
-    BuiltinSignature::variadic("set_is_subset", &[Param::new("args", TY_ANY)], TY_BOOL),
-    BuiltinSignature::variadic("set_is_superset", &[Param::new("args", TY_ANY)], TY_BOOL),
-    BuiltinSignature::variadic("set_remove", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic(
-        "set_symmetric_difference",
-        &[Param::new("args", TY_ANY)],
-        TY_ANY,
-    ),
-    BuiltinSignature::variadic("set_union", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("session_cookie", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic(
-        "session_from_cookies",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
-    BuiltinSignature::variadic("session_sign", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("session_verify", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("sha224", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("sha256", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::simple(
-        "sha256_base64url",
-        &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "sha256_hex",
-        &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
-        TY_STRING,
-    ),
-    BuiltinSignature::variadic("sha384", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("sha512", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("sha512_256", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("sign", &[Param::new("args", TY_ANY)], TY_INT),
-    BuiltinSignature::variadic("signed_url", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("sin", &[Param::new("args", TY_ANY)], TY_FLOAT),
     BuiltinSignature::variadic("sleep", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("snake_to_camel", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("snake_to_kebab", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("snake_to_pascal", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("source_dir", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("spawn", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::simple("spawn_captured", &[Param::new("opts", TY_DICT)], TY_DICT),
-    BuiltinSignature::variadic("split", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("sqrt", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("starts_with", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("stat", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("stddev", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::simple(
-        "step.inspect",
-        &[Param::optional(
-            "namespace_or_options",
-            Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]),
-        )],
-        TY_LIST,
-    ),
-    BuiltinSignature::variadic("step.run", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("str_pad", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("stream", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("stream.broadcast", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("stream.collect", &[Param::new("args", TY_ANY)], TY_LIST),
@@ -1860,7 +682,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("stream.tap", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("stream.throttle", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("stream.zip", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("substring", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("supervisor_events", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("supervisor_metrics", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("supervisor_start", &[Param::new("args", TY_ANY)], TY_DICT),
@@ -1876,47 +697,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("args", TY_ANY)],
         TY_ANY,
     ),
-    BuiltinSignature::variadic("tan", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::variadic("tar_create", &[Param::new("args", TY_ANY)], TY_BYTES),
-    BuiltinSignature::variadic("tar_extract", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("task_current", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("temp_dir", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::simple("term_height", &[], TY_INT),
-    BuiltinSignature::simple("term_width", &[], TY_INT),
     BuiltinSignature::variadic("throw_error", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("timer_end", &[Param::new("args", TY_ANY)], TY_INT),
     BuiltinSignature::variadic("timer_start", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("timestamp", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::variadic("title_case", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("to_float", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::variadic("to_int", &[Param::new("args", TY_ANY)], TY_INT),
-    BuiltinSignature::variadic("to_list", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("to_string", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("toml_parse", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("toml_stringify", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("trace_end", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("trace_id", &[Param::new("args", TY_ANY)], TY_STRING_OR_NIL),
-    BuiltinSignature::variadic("trace_spans", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("trace_start", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("trace_summary", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("trim", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("try_receive", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("type_of", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("unicode_graphemes", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic(
-        "unicode_normalize",
-        &[Param::new("args", TY_ANY)],
-        TY_STRING,
-    ),
-    BuiltinSignature::variadic("unreachable", &[Param::new("args", TY_ANY)], TY_NEVER),
-    BuiltinSignature::variadic("unwrap", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("unwrap_err", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("unwrap_or", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("uppercase", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("uppercase_first", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("url_decode", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("url_encode", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("username", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("uuid", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("uuid_nil", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic(
@@ -1926,50 +712,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::variadic("uuid_v5", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("uuid_v7", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("variance", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::variadic("values", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("verify_signed_url", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("vision_ocr", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("waitpoint_cancel", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("waitpoint_complete", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("waitpoint_create", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("waitpoint_wait", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("weekday_name", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("window", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("with_rate_limit", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::simple(
-        "with_approval_policy",
-        &[Param::new("policy", TY_DICT), Param::new("fn", TY_CLOSURE)],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "with_autonomy_policy",
-        &[Param::new("policy", TY_DICT), Param::new("fn", TY_CLOSURE)],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "with_command_policy",
-        &[Param::new("policy", TY_DICT), Param::new("fn", TY_CLOSURE)],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "with_dynamic_permissions",
-        &[Param::new("policy", TY_DICT), Param::new("fn", TY_CLOSURE)],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "with_execution_policy",
-        &[Param::new("policy", TY_DICT), Param::new("fn", TY_CLOSURE)],
-        TY_ANY,
-    ),
     BuiltinSignature::variadic("write_file", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("write_file_bytes", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("zip_create", &[Param::new("args", TY_ANY)], TY_BYTES),
-    BuiltinSignature::variadic("zip_extract", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("zstd_decode", &[Param::new("args", TY_ANY)], TY_BYTES),
-    BuiltinSignature::variadic("zstd_encode", &[Param::new("args", TY_ANY)], TY_BYTES),
-    BuiltinSignature::variadic("yaml_parse", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("yaml_stringify", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::simple("yield_now", &[], TY_NIL),
     BuiltinSignature::variadic(
         "read_stdin",
@@ -1981,70 +732,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("mock_tty", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("unmock_tty", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("set_color_mode", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("sleep_ms", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("monotonic_ms", &[Param::new("args", TY_ANY)], TY_INT),
-    BuiltinSignature::variadic("now_ms", &[Param::new("args", TY_ANY)], TY_INT),
-    BuiltinSignature::variadic("mock_time", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("unmock_time", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::simple("testbench_is_active", &[], TY_BOOL),
-    BuiltinSignature::simple("testbench_fs_diff", &[], TY_LIST),
-    BuiltinSignature::simple("testbench_clock_leaks", &[], TY_LIST),
     BuiltinSignature::variadic("walk_dir", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("move_file", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("read_lines", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("parse_junit_xml", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("url_parse", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("url_build", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("query_parse", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("query_stringify", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("sha3_256", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("sha3_512", &[Param::new("args", TY_ANY)], TY_STRING),
-    BuiltinSignature::variadic("x25519_keypair", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("x25519_agree", &[Param::new("args", TY_ANY)], TY_STRING),
     // Clone / merge / dedupe helpers — see crates/harn-vm/src/stdlib/collections.rs.
-    // `clone`, `deep_clone`, `deep_merge`, `unique`, `dict_from_pairs`
-    // migrated to `#[harn_builtin]` in
-    // `harn-vm/src/stdlib/collections.rs`.
-    // String formatting helpers — see crates/harn-vm/src/stdlib/strings.rs.
-    BuiltinSignature::simple(
-        "repeat",
-        &[Param::new("text", TY_STRING), Param::new("count", TY_INT)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "indent",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("prefix", TY_STRING),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("dedent", &[Param::new("text", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple(
-        "word_wrap",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("width", TY_INT),
-        ],
-        TY_STRING,
-    ),
-    // XML conversion — see crates/harn-vm/src/stdlib/xml.rs.
-    BuiltinSignature::simple(
-        "to_xml",
-        &[
-            Param::new("value", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "from_xml",
-        &[
-            Param::new("text", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
+    // `clone`, `deep_clone`, `deep_merge`, `unique`,
     BuiltinSignature::simple(
         "jsonrpc_batch",
         &[
@@ -2065,4 +757,47 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_ANY,
     ),
+    // Parser-only shadows for migrated builtins that harn-parser unit
+    // tests reference by name. The runtime-installed slice from
+    // `#[harn_builtin]` shadows these at driver startup; without these
+    // five entries, pure-parser tests that never call
+    // `install_builtin_signatures` (lookup_hits_and_misses,
+    // return_type_*_variant, test_builtin_arg_type_mismatch,
+    // test_builtin_arity_warning, test_builtin_return_type_inference,
+    // never_tail_expression_satisfies_return_type, …) can't find these
+    // names.
+    BuiltinSignature::variadic("snake_to_camel", &[Param::new("args", TY_ANY)], TY_STRING),
+    BuiltinSignature::simple("env", &[Param::new("name", TY_STRING)], TY_STRING_OR_NIL),
+    BuiltinSignature::simple("json_parse", &[Param::new("text", TY_STRING)], TY_ANY),
+    BuiltinSignature::simple(
+        "len",
+        &[Param::new(
+            "value",
+            Ty::Union(&[
+                TY_STRING,
+                TY_BYTES,
+                TY_LIST,
+                TY_DICT,
+                Ty::Named("set"),
+                Ty::Named("range"),
+                TY_NIL,
+            ]),
+        )],
+        TY_INT,
+    ),
+    BuiltinSignature::variadic("to_int", &[Param::new("args", TY_ANY)], TY_INT),
+    BuiltinSignature::variadic("type_of", &[Param::new("args", TY_ANY)], TY_STRING),
+    BuiltinSignature::variadic("unreachable", &[Param::new("args", TY_ANY)], TY_NEVER),
+    // Harness method targets — typechecker resolves `harness.crypto.sha256`
+    // / `harness.term.width` / `harness.term.height` via
+    // `harness_methods::harness_*_ambient` to these builtin names. Pure-
+    // parser tests need them in the registry to type-check the namespace
+    // call sites.
+    BuiltinSignature::simple(
+        "sha256_hex",
+        &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple("term_width", &[], TY_INT),
+    BuiltinSignature::simple("term_height", &[], TY_INT),
 ];

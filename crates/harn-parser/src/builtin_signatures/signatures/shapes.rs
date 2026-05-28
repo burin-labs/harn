@@ -710,12 +710,6 @@ pub(crate) const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("state", TY_STRING),
 ]);
 
-/// `tool_registry()` and related host-current registry lookups.
-pub(crate) const TOOL_REGISTRY: Ty = Ty::Shape(&[
-    ShapeFieldDescriptor::new("_type", Ty::LitString("tool_registry")),
-    ShapeFieldDescriptor::new("tools", TY_LIST),
-]);
-
 /// Token and provider-cache accounting embedded in `llm_call` results.
 pub(crate) const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("input_tokens", TY_INT),

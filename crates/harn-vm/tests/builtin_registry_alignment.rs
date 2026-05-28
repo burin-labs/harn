@@ -155,11 +155,6 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_workflow_stage_complete",
     "__host_workflow_stage_prepare",
     "__harn_with_execution_policy_override",
-    "__memory_forget",
-    "__memory_open",
-    "__memory_recall",
-    "__memory_store",
-    "__memory_summarize",
     "__make_struct",
     "__pool_create",
     "__pool_get",
@@ -172,7 +167,6 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__range__",
     "__register_persona",
     "__register_step",
-    "__testing_call_body",
 ];
 
 #[test]

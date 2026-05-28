@@ -95,56 +95,102 @@ struct FileEnvelope {
 }
 
 pub(crate) fn register_oauth_storage_builtins(vm: &mut Vm) {
-    vm.register_builtin("__oauth_storage_memory_handle", |args, _out| {
-        if !args.is_empty() {
-            return Err(VmError::Runtime(
-                "__oauth_storage_memory_handle: expected 0 arguments".to_string(),
-            ));
-        }
-        Ok(memory_handle())
-    });
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
 
-    vm.register_builtin("__oauth_storage_file_handle", |args, _out| {
-        let path = required_string_arg(args, 0, "__oauth_storage_file_handle", "path")?;
-        let secret = required_bytes_or_string(args, 1, "__oauth_storage_file_handle")?;
-        Ok(file_handle(&path, &secret))
-    });
+pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
+    &OAUTH_STORAGE_MEMORY_HANDLE_IMPL_DEF,
+    &OAUTH_STORAGE_FILE_HANDLE_IMPL_DEF,
+    &OAUTH_STORAGE_CLOUD_HANDLE_IMPL_DEF,
+    &OAUTH_STORAGE_GET_IMPL_DEF,
+    &OAUTH_STORAGE_SET_IMPL_DEF,
+    &OAUTH_STORAGE_DELETE_IMPL_DEF,
+];
 
-    vm.register_builtin("__oauth_storage_cloud_handle", |args, _out| {
-        let scope = required_string_arg(args, 0, "__oauth_storage_cloud_handle", "scope")?;
-        let kind = match scope.as_str() {
-            "session" => KIND_HARN_CLOUD_SESSION,
-            "org" => KIND_HARN_CLOUD_ORG,
-            other => {
-                return Err(VmError::Runtime(format!(
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_storage_memory_handle() -> dict",
+    category = "oauth_storage"
+)]
+fn oauth_storage_memory_handle_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::Runtime(
+            "__oauth_storage_memory_handle: expected 0 arguments".to_string(),
+        ));
+    }
+    Ok(memory_handle())
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_storage_file_handle(path: string, secret: any) -> dict",
+    category = "oauth_storage"
+)]
+fn oauth_storage_file_handle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let path = required_string_arg(args, 0, "__oauth_storage_file_handle", "path")?;
+    let secret = required_bytes_or_string(args, 1, "__oauth_storage_file_handle")?;
+    Ok(file_handle(&path, &secret))
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_storage_cloud_handle(scope: string) -> dict",
+    category = "oauth_storage"
+)]
+fn oauth_storage_cloud_handle_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let scope = required_string_arg(args, 0, "__oauth_storage_cloud_handle", "scope")?;
+    let kind = match scope.as_str() {
+        "session" => KIND_HARN_CLOUD_SESSION,
+        "org" => KIND_HARN_CLOUD_ORG,
+        other => {
+            return Err(VmError::Runtime(format!(
                 "__oauth_storage_cloud_handle: scope must be \"session\" or \"org\", got `{other}`"
             )))
-            }
-        };
-        Ok(cloud_handle(kind))
-    });
+        }
+    };
+    Ok(cloud_handle(kind))
+}
 
-    vm.register_async_builtin("__oauth_storage_get", |args| async move {
-        let handle = require_handle(&args, 0, "__oauth_storage_get")?;
-        let key = required_string_arg(&args, 1, "__oauth_storage_get", "key")?;
-        backend_get(&handle, &key).await
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_storage_get(handle: dict, key: string) -> any",
+    kind = "async",
+    category = "oauth_storage"
+)]
+async fn oauth_storage_get_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let handle = require_handle(&args, 0, "__oauth_storage_get")?;
+    let key = required_string_arg(&args, 1, "__oauth_storage_get", "key")?;
+    backend_get(&handle, &key).await
+}
 
-    vm.register_async_builtin("__oauth_storage_set", |args| async move {
-        let handle = require_handle(&args, 0, "__oauth_storage_set")?;
-        let key = required_string_arg(&args, 1, "__oauth_storage_set", "key")?;
-        let token_dict = require_dict_arg(&args, 2, "__oauth_storage_set", "token_set")?;
-        let ttl = optional_int_arg(&args, 3, "__oauth_storage_set", "ttl_seconds")?;
-        backend_set(&handle, &key, &token_dict, ttl).await?;
-        Ok(VmValue::Nil)
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_storage_set(handle: dict, key: string, token_set: dict, ttl_seconds?: int) -> nil",
+    kind = "async",
+    category = "oauth_storage"
+)]
+async fn oauth_storage_set_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let handle = require_handle(&args, 0, "__oauth_storage_set")?;
+    let key = required_string_arg(&args, 1, "__oauth_storage_set", "key")?;
+    let token_dict = require_dict_arg(&args, 2, "__oauth_storage_set", "token_set")?;
+    let ttl = optional_int_arg(&args, 3, "__oauth_storage_set", "ttl_seconds")?;
+    backend_set(&handle, &key, &token_dict, ttl).await?;
+    Ok(VmValue::Nil)
+}
 
-    vm.register_async_builtin("__oauth_storage_delete", |args| async move {
-        let handle = require_handle(&args, 0, "__oauth_storage_delete")?;
-        let key = required_string_arg(&args, 1, "__oauth_storage_delete", "key")?;
-        backend_delete(&handle, &key).await?;
-        Ok(VmValue::Nil)
-    });
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_storage_delete(handle: dict, key: string) -> nil",
+    kind = "async",
+    category = "oauth_storage"
+)]
+async fn oauth_storage_delete_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let handle = require_handle(&args, 0, "__oauth_storage_delete")?;
+    let key = required_string_arg(&args, 1, "__oauth_storage_delete", "key")?;
+    backend_delete(&handle, &key).await?;
+    Ok(VmValue::Nil)
 }
 
 fn memory_handle() -> VmValue {

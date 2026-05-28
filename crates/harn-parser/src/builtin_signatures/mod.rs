@@ -1,8 +1,8 @@
 //! Single source of truth for builtin function signatures used by the parser
 //! and runtime VM: identifier resolution, typo suggestions, return-type
 //! inference, static arity & per-arg type checks, runtime arity & type
-//! enforcement, and lint awareness all consult the registry returned by
-//! [`all_signatures`].
+//! enforcement, and lint awareness all consult the registry through the
+//! [`lookup`] / [`is_builtin`] helpers.
 //!
 //! ## Architecture
 //!
@@ -19,17 +19,16 @@
 //! at driver startup via [`harn_builtin_registry::install_builtin_signatures`].
 //!
 //! During migration the legacy static `signatures::groups()` tables remain
-//! as a fallback so unmigrated builtins still type-check. As modules port
-//! to `#[harn_builtin]` their entries move out of the static tables into
-//! the macro-emitted `MODULE_BUILTINS` slices. Once all signatures have
-//! migrated the static tables are deleted.
+//! as a fallback so unmigrated builtins still type-check. Lookups always
+//! consult installed entries first and fall through to the static tables;
+//! installed wins on name collisions. As modules port to `#[harn_builtin]`
+//! their entries move out of the static tables into the macro-emitted
+//! `MODULE_BUILTINS` slices. Once all signatures have migrated the static
+//! tables are deleted.
 
 mod lookup;
 mod signatures;
 mod types;
-
-use std::collections::HashSet;
-use std::sync::OnceLock;
 
 pub use lookup::{
     builtin_return_type, is_builtin, is_untyped_boundary_source, iter_builtin_metadata,
@@ -44,55 +43,22 @@ pub use types::{
 
 pub use harn_builtin_registry::install_builtin_signatures;
 
-/// Every builtin known to the parser, sorted alphabetically by name.
-///
-/// During migration this concatenates:
-///
-/// 1. The runtime-installed slice (drivers populate via
-///    [`install_builtin_signatures`] with the `#[harn_builtin]`-emitted defs).
-/// 2. The legacy static `signatures::groups()` tables for builtins that
-///    haven't yet ported to the proc-macro.
-///
-/// Duplicates by name are resolved in favour of the runtime-installed entry.
-pub fn all_signatures() -> &'static [BuiltinSignature] {
-    static ALL_SIGNATURES: OnceLock<Vec<BuiltinSignature>> = OnceLock::new();
-
-    ALL_SIGNATURES
-        .get_or_init(|| {
-            let installed = harn_builtin_registry::installed_signatures();
-            let installed_names: HashSet<&'static str> = installed.iter().map(|s| s.name).collect();
-
-            let mut signatures: Vec<BuiltinSignature> = installed.iter().map(|sig| **sig).collect();
-
-            for group in signatures::groups() {
-                for sig in group {
-                    if installed_names.contains(sig.name) {
-                        continue;
-                    }
-                    signatures.push(*sig);
-                }
-            }
-            signatures.sort_by_key(|sig| sig.name);
-            signatures
-        })
-        .as_slice()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::TypeExpr;
+    use std::collections::HashSet;
 
     #[test]
-    fn builtin_signatures_sorted() {
-        let mut prev = "";
-        for sig in all_signatures() {
-            assert!(
-                sig.name > prev,
-                "BUILTIN_SIGNATURES not sorted: `{prev}` must come before `{}`",
-                sig.name
-            );
-            prev = sig.name;
+    fn iter_builtin_names_is_unique() {
+        // Sanity-check that no name is exposed twice across the
+        // installed slice + static groups. Installed entries take
+        // priority on collisions inside `lookup`, but the
+        // `iter_builtin_names` helper already filters static names that
+        // are shadowed, so the output should be deduped.
+        let mut seen = HashSet::new();
+        for name in iter_builtin_names() {
+            assert!(seen.insert(name), "duplicate builtin name in iter: {name}");
         }
     }
 
