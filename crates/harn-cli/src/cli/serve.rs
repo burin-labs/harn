@@ -5,6 +5,34 @@ use clap::{Args, Subcommand, ValueEnum};
 
 use super::ProfileArgs;
 
+/// Observability dev-routing chosen at server startup. Maps to a single
+/// concrete backend installed via
+/// [`harn_vm::install_obs_default_backend`] before any handler runs;
+/// `.harn` code can still override this with `obs.configure(...)` at
+/// runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+#[clap(rename_all = "snake_case")]
+pub(crate) enum ServeObsMode {
+    /// Resolve from environment variables (`OTEL_EXPORTER_OTLP_ENDPOINT`,
+    /// `HONEYCOMB_API_KEY`, etc.) the same way `obs.auto_backend()` does.
+    #[default]
+    Auto,
+    /// Pretty-print spans/metrics/logs to stdout. Convenient for local
+    /// development where you want the server output in the same stream
+    /// as the rest of the .harn handler's logs.
+    Stdout,
+    /// Pretty-print to stderr — keeps stdout clean for response bodies
+    /// or piping handler output into another tool.
+    Stderr,
+    /// Force the OTel exporter even if no env-var is set. Falls back to
+    /// the OpenTelemetry SDK default endpoint (`localhost:4318`).
+    Otel,
+    /// Disable observability emission entirely — primitive events still
+    /// touch the in-process buffer (so `obs.events()` works for tests)
+    /// but nothing leaves the process.
+    Off,
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct ServeArgs {
     #[command(subcommand)]
@@ -42,6 +70,9 @@ pub(crate) struct ServeAcpArgs {
         value_parser = clap::builder::BoolishValueParser::new()
     )]
     pub trace: bool,
+    /// Where to route `harness.obs.*` spans/metrics/logs.
+    #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
+    pub obs: ServeObsMode,
     #[command(flatten)]
     pub profile: ProfileArgs,
     /// Path to the .harn file to serve.
@@ -78,6 +109,9 @@ pub(crate) struct A2aServeArgs {
     /// PEM-encoded private key for in-process HTTPS termination.
     #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
     pub key: Option<PathBuf>,
+    /// Where to route `harness.obs.*` spans/metrics/logs.
+    #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
+    pub obs: ServeObsMode,
     /// Path to the .harn file to serve.
     pub file: String,
 }
@@ -118,6 +152,9 @@ pub(crate) struct ApiServeArgs {
         value_parser = clap::builder::BoolishValueParser::new()
     )]
     pub trace: bool,
+    /// Where to route `harness.obs.*` spans/metrics/logs.
+    #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
+    pub obs: ServeObsMode,
     #[command(flatten)]
     pub profile: ProfileArgs,
     /// Path to the `.harn` agent file to serve.
@@ -171,6 +208,9 @@ pub(crate) struct ServeMcpArgs {
     /// as a static resource at `well-known://mcp-card`.
     #[arg(long = "card", value_name = "PATH_OR_JSON")]
     pub card: Option<String>,
+    /// Where to route `harness.obs.*` spans/metrics/logs.
+    #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
+    pub obs: ServeObsMode,
     /// Path to the `.harn` file whose exported `pub fn` entrypoints are
     /// served. Scripts that instead call `mcp_tools(registry)` /
     /// `mcp_resource(...)` / `mcp_prompt(...)` are detected and served

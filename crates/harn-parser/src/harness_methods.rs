@@ -132,6 +132,19 @@ pub fn harness_tenant_ambient(method: &str) -> Option<&'static str> {
     }
 }
 
+pub fn harness_obs_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "span" | "start_span" => Some("__obs_start_span"),
+        "end_span" => Some("__obs_end_span"),
+        "log" => Some("__obs_emit"),
+        "counter" => Some("__obs_counter"),
+        "histogram" => Some("__obs_histogram"),
+        "gauge" => Some("__obs_gauge"),
+        "request_id" => Some("__obs_request_id"),
+        _ => None,
+    }
+}
+
 pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'static str> {
     match sub_handle {
         "stdio" => harness_stdio_ambient(method),
@@ -146,6 +159,7 @@ pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'st
         "system" => harness_system_ambient(method),
         "llm" => harness_llm_ambient(method),
         "tenant" => harness_tenant_ambient(method),
+        "obs" => harness_obs_ambient(method),
         _ => None,
     }
 }
@@ -164,6 +178,7 @@ pub fn harness_type_sub_handle(type_name: &str) -> Option<&'static str> {
         "HarnessSystem" => Some("system"),
         "HarnessLlm" => Some("llm"),
         "HarnessTenant" => Some("tenant"),
+        "HarnessObs" => Some("obs"),
         _ => None,
     }
 }

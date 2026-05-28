@@ -56,6 +56,25 @@ pub(crate) fn reset_observability_state() {
     OBS_STATE.with(|state| *state.borrow_mut() = ObsState::default());
 }
 
+/// Replace the active observability backend with a single named
+/// backend. Callers pass values like `"pretty_stdout"`, `"pretty_stderr"`,
+/// or `"otel"` — anything [`normalize_backend`] accepts. Errors when the
+/// kind is unknown so the CLI can surface a typo before the server
+/// boots.
+///
+/// This wires the same routing the `__obs_configure` builtin would
+/// install, but without going through the Harn-script surface — used by
+/// `harn serve --obs <MODE>` to seed routing before any handler runs.
+pub fn install_default_backend(kind: &str) -> Result<(), String> {
+    let backend = serde_json::json!({ "kind": kind, "id": kind });
+    normalize_backend(&backend)?;
+    OBS_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.config.backend = backend;
+    });
+    Ok(())
+}
+
 pub(crate) fn register_observability_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
@@ -185,6 +204,58 @@ fn obs_auto_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(json_to_vm_value(&resolve_auto_backend()))
 }
 
+/// Instrument kind for the standard metric primitives. Each variant
+/// maps to the OTel instrument with matching semantics — counter is
+/// monotonic-add, histogram records a distribution observation, gauge
+/// sets a current value.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum MetricInstrument {
+    Counter,
+    Histogram,
+    Gauge,
+}
+
+impl MetricInstrument {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            MetricInstrument::Counter => "counter",
+            MetricInstrument::Histogram => "histogram",
+            MetricInstrument::Gauge => "gauge",
+        }
+    }
+}
+
+#[harn_builtin(
+    sig = "__obs_counter(...args: any) -> list",
+    category = "observability"
+)]
+fn obs_counter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    emit_instrument_from_args(MetricInstrument::Counter, args)
+}
+
+#[harn_builtin(
+    sig = "__obs_histogram(...args: any) -> list",
+    category = "observability"
+)]
+fn obs_histogram_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    emit_instrument_from_args(MetricInstrument::Histogram, args)
+}
+
+#[harn_builtin(sig = "__obs_gauge(...args: any) -> list", category = "observability")]
+fn obs_gauge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    emit_instrument_from_args(MetricInstrument::Gauge, args)
+}
+
+#[harn_builtin(
+    sig = "__obs_request_id(...args: any) -> string|nil",
+    category = "observability"
+)]
+fn obs_request_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(crate::observability::request_id::current_request_id()
+        .map(|id| VmValue::String(Rc::from(id.as_str())))
+        .unwrap_or(VmValue::Nil))
+}
+
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &OBS_CONFIGURE_IMPL_DEF,
     &OBS_RESET_IMPL_DEF,
@@ -194,7 +265,115 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &OBS_EVENTS_IMPL_DEF,
     &OBS_EVENTS_TAKE_IMPL_DEF,
     &OBS_AUTO_BACKEND_IMPL_DEF,
+    &OBS_COUNTER_IMPL_DEF,
+    &OBS_HISTOGRAM_IMPL_DEF,
+    &OBS_GAUGE_IMPL_DEF,
+    &OBS_REQUEST_ID_IMPL_DEF,
 ];
+
+/// Common entry point for the counter/histogram/gauge builtins and for
+/// the typed `harness.obs.{counter,histogram,gauge}` methods.
+///
+/// `attrs` keys are validated against
+/// [`crate::observability::vocabulary`]; unknown keys under a known
+/// `harn.<ns>.*` prefix raise a runtime audit error (`HARN-OBS-002`) so
+/// typos surface at the call site, not at dashboard time. Keys outside
+/// the `harn.*` vocabulary pass through unchanged (host- or
+/// user-emitted business tags).
+pub(crate) fn emit_instrument(
+    instrument: MetricInstrument,
+    name: String,
+    value: serde_json::Value,
+    attrs: serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, VmError> {
+    validate_vocabulary(&attrs, instrument.as_str(), &name)?;
+    let mut event = base_event("metric", &name, Some(attrs), None, Some(value))?;
+    event.insert(
+        "instrument".to_string(),
+        serde_json::Value::String(instrument.as_str().to_string()),
+    );
+    Ok(emit_event(event, None))
+}
+
+/// Typed start_span helper backing both `__obs_start_span` and
+/// `harness.obs.start_span`. Returns the span dict as a `VmValue`.
+pub(crate) fn start_span_typed(
+    name: String,
+    attrs: serde_json::Map<String, serde_json::Value>,
+) -> Result<VmValue, VmError> {
+    validate_vocabulary(&attrs, "span", &name)?;
+    let args = vec![
+        VmValue::String(Rc::from(name.as_str())),
+        json_to_vm_value(&serde_json::Value::Object(attrs)),
+    ];
+    obs_start_span_impl(&args, &mut String::new())
+}
+
+/// Typed end_span helper. `span_handle` must be the dict returned by
+/// [`start_span_typed`]. Closing the innermost span by passing `nil` is
+/// the documented imperative-style fallback.
+pub(crate) fn end_span_typed(span_handle: VmValue) {
+    let args = [span_handle];
+    let _ = obs_end_span_impl(&args, &mut String::new());
+}
+
+/// Typed log helper backing `harness.obs.log`. `level` defaults to
+/// `"info"` when empty.
+pub(crate) fn log_typed(
+    message: String,
+    level: String,
+    fields: serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, VmError> {
+    validate_vocabulary(&fields, "log", &message)?;
+    let level = if level.is_empty() {
+        "info".to_string()
+    } else {
+        level
+    };
+    let event = base_event("log", &message, Some(fields), Some(level), None)?;
+    Ok(emit_event(event, None))
+}
+
+fn emit_instrument_from_args(
+    instrument: MetricInstrument,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
+    let name = string_arg(args.first(), "__obs_metric", "name")?;
+    let value_arg = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let value_json = vm_value_to_json(&value_arg);
+    if !matches!(
+        value_json,
+        serde_json::Value::Number(_) | serde_json::Value::Null
+    ) {
+        return Err(VmError::Runtime(format!(
+            "__obs_{}: value must be a number, got {}",
+            instrument.as_str(),
+            value_arg.type_name()
+        )));
+    }
+    let attrs = object_arg(args.get(2), "__obs_metric", "attrs")?;
+    let emitted = emit_instrument(instrument, name, value_json, attrs)?;
+    Ok(json_to_vm_value(&emitted))
+}
+
+/// Validate attribute keys against the standardised vocabulary
+/// (`crate::observability::vocabulary`). Unknown keys under a known
+/// `harn.<ns>.*` prefix raise `HARN-OBS-002` so primitives can't drift
+/// from the published schema undetected.
+fn validate_vocabulary(
+    attrs: &serde_json::Map<String, serde_json::Value>,
+    surface: &str,
+    name: &str,
+) -> Result<(), VmError> {
+    for key in attrs.keys() {
+        if crate::observability::vocabulary::is_violation(key) {
+            return Err(VmError::Runtime(format!(
+                "HARN-OBS-002: {surface} `{name}` attribute `{key}` is not declared in the harn.* observability vocabulary"
+            )));
+        }
+    }
+    Ok(())
+}
 
 fn parse_config(value: &VmValue) -> Result<ObsConfig, VmError> {
     if matches!(value, VmValue::Nil) {
@@ -359,6 +538,21 @@ fn enrich_event(event: &mut serde_json::Map<String, serde_json::Value>, span: Op
             }
         }
     }
+    // Cross-cutting attributes from the dispatching host's ambient
+    // scopes — populated once on every event so primitive emit sites
+    // don't have to thread them through method signatures. Stored as
+    // top-level keys (not under `fields`) so backends with native
+    // request/tenant indexing surface them without descending.
+    if !event.contains_key("request_id") {
+        if let Some(id) = crate::observability::request_id::current_request_id() {
+            event.insert("request_id".to_string(), serde_json::Value::String(id));
+        }
+    }
+    if !event.contains_key("tenant_id") {
+        if let Some(tenant) = crate::harness_tenant::current_tenant_id() {
+            event.insert("tenant_id".to_string(), serde_json::Value::String(tenant.0));
+        }
+    }
 }
 
 fn route_backends(
@@ -422,7 +616,9 @@ fn normalize_backend(value: &serde_json::Value) -> Result<serde_json::Value, Str
     match kind {
         "auto" => normalize_backend(&resolve_auto_backend()),
         "compose" => Ok(value.clone()),
-        "otel" | "splunk_hec" | "honeycomb" | "pretty_stderr" | "test" => Ok(value.clone()),
+        "otel" | "splunk_hec" | "honeycomb" | "pretty_stderr" | "pretty_stdout" | "test" => {
+            Ok(value.clone())
+        }
         "" => Err("backend.kind is required".to_string()),
         other => Err(format!("unknown backend `{other}`")),
     }
@@ -484,7 +680,7 @@ fn format_backend_payloads(
         "otel" => otel_payload(event),
         "splunk_hec" => splunk_payload(event),
         "honeycomb" => honeycomb_payload(event),
-        "pretty_stderr" => pretty_payload(event),
+        "pretty_stderr" | "pretty_stdout" => pretty_payload(event),
         "test" => event.clone(),
         _ => audit_payload(&format!("unknown backend `{kind}`"), true),
     };
@@ -613,17 +809,28 @@ fn audit_payload(message: &str, pretty_stderr: bool) -> serde_json::Value {
 }
 
 fn maybe_write_pretty(payload: &serde_json::Value) {
-    let is_pretty =
-        payload.get("format").and_then(serde_json::Value::as_str) == Some("pretty_stderr");
-    if !is_pretty || VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) > 1 {
+    let format = payload
+        .get("format")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let to_stdout = match format {
+        "pretty_stderr" => false,
+        "pretty_stdout" => true,
+        _ => return,
+    };
+    if VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) > 1 {
         return;
     }
     if let Some(line) = payload.get("payload").and_then(serde_json::Value::as_str) {
-        eprintln!("{line}");
+        if to_stdout {
+            println!("{line}");
+        } else {
+            eprintln!("{line}");
+        }
     }
 }
 
-fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
+pub(crate) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
     match value {
         VmValue::Nil => serde_json::Value::Null,
         VmValue::Bool(value) => serde_json::json!(value),

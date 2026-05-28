@@ -168,7 +168,7 @@ pub(crate) use run::RunArgs;
 pub(crate) use runs::{ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use serve::{
     A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs, ServeCommand,
-    ServeMcpArgs, ServeTlsMode,
+    ServeMcpArgs, ServeObsMode, ServeTlsMode,
 };
 pub(crate) use session::{
     SessionArgs, SessionCommand, SessionExportArgs, SessionImportArgs, SessionSchemaArgs,

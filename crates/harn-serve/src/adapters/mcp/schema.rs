@@ -9,6 +9,7 @@ pub(super) fn build_call_request(
     auth: AuthRequest,
     cancel_token: Arc<AtomicBool>,
     progress: Option<harn_vm::mcp_progress::ProgressContext>,
+    request_id: Option<String>,
 ) -> Result<CallRequest, String> {
     let arguments = match arguments {
         JsonValue::Null => CallArguments::Named(BTreeMap::new()),
@@ -36,6 +37,7 @@ pub(super) fn build_call_request(
         agent_session_id: None,
         progress,
         tenant_id: None,
+        request_id,
     })
 }
 

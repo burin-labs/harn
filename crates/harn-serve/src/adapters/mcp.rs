@@ -728,6 +728,7 @@ impl McpServer {
             job.context.auth,
             cancel_token,
             progress_ctx,
+            Some(mcp_request_id_to_string(&job.request_id)),
         ) {
             Ok(request) => request,
             Err(error) => {
@@ -935,6 +936,18 @@ impl McpServer {
 /// cache hints) when the connection has been promoted to Modern. Legacy
 /// responses pass through byte-for-byte so existing 2025-11-25 clients
 /// see no wire change.
+/// Render a JSON-RPC request id into a stable string for the obs
+/// ambient `request_id`. Numbers and strings round-trip as-is; `null`
+/// and any other unexpected shape fall back to a fresh `req_*` id so
+/// every dispatch still carries one through to `harness.obs.*`.
+fn mcp_request_id_to_string(id: &JsonValue) -> String {
+    match id {
+        JsonValue::String(text) => text.clone(),
+        JsonValue::Number(number) => number.to_string(),
+        _ => crate::http_codec::fresh_request_id(),
+    }
+}
+
 fn envelope(
     mut response: JsonValue,
     mode: McpProtocolMode,

@@ -154,6 +154,66 @@ pub fn metric(name: string, value, fields: dict = {}) {
 }
 
 /**
+ * counter records a monotonic increment for the named counter
+ * instrument. Backends with native counter support (OTLP, OpenMetrics)
+ * round-trip this as `Sum`-typed metric points.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: counter("harn.session.put_total", 1, {"harn.session.outcome": "ok"})
+ */
+pub fn counter(name: string, value = 1, attrs: dict = {}) {
+  return __obs_counter(name, value, attrs)
+}
+
+/**
+ * histogram records a distribution observation (e.g. duration in ms).
+ * Backends with native histogram support bucket the value; otherwise
+ * the value lands as a generic observation alongside `counter`/`gauge`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: histogram("harn.pg.duration_ms", 42, {"harn.pg.query_name": "users.by_id"})
+ */
+pub fn histogram(name: string, value, attrs: dict = {}) {
+  return __obs_histogram(name, value, attrs)
+}
+
+/**
+ * gauge sets the current value of the named gauge instrument. Backends
+ * with native gauge support replace the prior value; aggregating
+ * exporters keep only the most recent reading.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: gauge("harn.mcp.restart_count", 3, {"harn.mcp.server": "fs"})
+ */
+pub fn gauge(name: string, value, attrs: dict = {}) {
+  return __obs_gauge(name, value, attrs)
+}
+
+/**
+ * request_id returns the ambient request id pushed by the dispatching
+ * host (e.g. `harn-serve`'s HTTP/ACP adapters). `nil` when no host is
+ * bound — useful for tests and standalone `harn run`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: let id = request_id()
+ */
+pub fn request_id() {
+  return __obs_request_id()
+}
+
+/**
  * event emits an arbitrary structured observation. It is the shared
  * primitive underneath logs, metrics, and span lifecycle events.
  *
@@ -252,6 +312,10 @@ pub fn obs() -> dict {
     log: { message, level = "info", fields = {} -> log(message, level, fields) },
     log_in_span: { handle, message, level = "info", fields = {} -> log_in_span(handle, message, level, fields) },
     metric: { name, value, fields = {} -> metric(name, value, fields) },
+    counter: { name, value = 1, attrs = {} -> counter(name, value, attrs) },
+    histogram: { name, value, attrs = {} -> histogram(name, value, attrs) },
+    gauge: { name, value, attrs = {} -> gauge(name, value, attrs) },
+    request_id: { -> request_id() },
     event: { record -> event(record) },
     events: { -> events() },
     events_take: { -> events_take() },

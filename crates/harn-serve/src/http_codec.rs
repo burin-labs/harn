@@ -724,6 +724,7 @@ mod tests {
             agent_session_id: None,
             progress: None,
             tenant_id: None,
+            request_id: None,
         };
         core.dispatch(request).await.map(|response| response.value)
     }
@@ -942,5 +943,116 @@ pub fn handler() -> dict {
 
         // Untagged values produce None as well.
         assert!(classify_ws_upgrade(&synth_call(json!({"ok": true}))).is_none());
+    }
+
+    // --- harness.obs.request_id propagation (issue #2513 / A.10) ----
+
+    async fn dispatch_with_request_id(
+        script: &str,
+        function: &str,
+        request_id: Option<String>,
+    ) -> Result<Value, DispatchError> {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("handler.harn");
+        std::fs::write(&path, script).expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&path))?;
+        let request = CallRequest {
+            adapter: "test".into(),
+            function: function.into(),
+            arguments: CallArguments::Positional(Vec::new()),
+            auth: Default::default(),
+            caller: "test".into(),
+            replay_key: Some(format!("e2e-obs-{function}-{request_id:?}")),
+            trace_id: None,
+            parent_span_id: None,
+            metadata: BTreeMap::new(),
+            cancel_token: None,
+            agent_session_id: None,
+            progress: None,
+            tenant_id: None,
+            request_id,
+        };
+        core.dispatch(request).await.map(|response| response.value)
+    }
+
+    #[tokio::test]
+    async fn handler_sees_dispatch_request_id_via_harness_obs() {
+        let value = dispatch_with_request_id(
+            r#"
+pub fn handler(harness: Harness) -> string {
+  let id = harness.obs.request_id()
+  return id ?? "MISSING"
+}
+"#,
+            "handler",
+            Some("req_obs_smoke".to_string()),
+        )
+        .await
+        .expect("dispatch");
+        assert_eq!(value, Value::String("req_obs_smoke".to_string()));
+    }
+
+    #[tokio::test]
+    async fn handler_request_id_is_nil_when_host_did_not_bind_one() {
+        let value = dispatch_with_request_id(
+            r#"
+pub fn handler(harness: Harness) -> string {
+  let id = harness.obs.request_id()
+  return id ?? "MISSING"
+}
+"#,
+            "handler",
+            None,
+        )
+        .await
+        .expect("dispatch");
+        assert_eq!(value, Value::String("MISSING".to_string()));
+    }
+
+    #[tokio::test]
+    async fn harness_obs_instruments_emit_vocabulary_valid_metrics() {
+        // The handler emits one of each instrument variant. The call
+        // must not error, and the returned dict must record the emit
+        // outcome so the test can assert that each instrument went
+        // through the typed surface (not the raw `obs.metric` fallback).
+        let value = dispatch_with_request_id(
+            r#"
+pub fn handler(harness: Harness) -> dict {
+  harness.obs.counter("harn.session.put_total", 1, {"harn.session.op": "put"})
+  harness.obs.histogram("harn.pg.duration_ms", 42, {"harn.pg.query_name": "users.by_id"})
+  harness.obs.gauge("harn.mcp.restart_count", 0, {"harn.mcp.server": "fs"})
+  return {ok: true}
+}
+"#,
+            "handler",
+            Some("req_metrics".to_string()),
+        )
+        .await
+        .expect("dispatch");
+        assert_eq!(value, serde_json::json!({"ok": true}));
+    }
+
+    #[tokio::test]
+    async fn harness_obs_rejects_attribute_outside_published_vocabulary() {
+        // A primitive emit site that drifts off the vocabulary (here a
+        // typo'd `harn.mcp.boops`) must fail dispatch — the audit
+        // contract (`HARN-OBS-002`) is what keeps the published schema
+        // stable across A/E ports.
+        let error = dispatch_with_request_id(
+            r#"
+pub fn handler(harness: Harness) -> string {
+  harness.obs.counter("harn.mcp.calls", 1, {"harn.mcp.boops": "wat"})
+  return "ok"
+}
+"#,
+            "handler",
+            Some("req_violation".to_string()),
+        )
+        .await
+        .expect_err("expected vocabulary violation");
+        assert!(
+            error.to_string().contains("HARN-OBS-002"),
+            "unexpected error: {error}"
+        );
     }
 }
