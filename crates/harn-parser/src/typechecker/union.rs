@@ -213,7 +213,45 @@ pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Opt
         (TypeExpr::DictType(key, value), TypeExpr::Named(name)) if name == "dict" => {
             Some(TypeExpr::DictType(key.clone(), value.clone()))
         }
-        (TypeExpr::Shape(_), TypeExpr::Shape(fields)) => Some(TypeExpr::Shape(fields.clone())),
+        (TypeExpr::Shape(current_fields), TypeExpr::Shape(schema_fields)) => {
+            // Width subtyping: a value typed `current` already has every
+            // field in `current_fields`; `schema_is(x, S)` only confirms
+            // the value matches `schema_fields` (it adds information, it
+            // does not remove it). Returning just `schema_fields` would
+            // drop the fields we already knew about. Merge instead:
+            //   - keep every field in `current_fields`
+            //   - intersect overlapping field types (the value satisfies
+            //     both annotations)
+            //   - mark overlapping fields required when either side
+            //     required them (the post-check value definitely has the
+            //     field if either annotation says so)
+            //   - append schema-only required fields (the check confirmed
+            //     they are present); skip schema-only optional fields
+            //     (the check tells us nothing new about them).
+            let mut merged: Vec<ShapeField> = Vec::with_capacity(current_fields.len());
+            for field in current_fields {
+                if let Some(schema_field) = schema_fields.iter().find(|f| f.name == field.name) {
+                    let intersected = intersect_types(&field.type_expr, &schema_field.type_expr)?;
+                    merged.push(ShapeField {
+                        name: field.name.clone(),
+                        type_expr: intersected,
+                        optional: field.optional && schema_field.optional,
+                    });
+                } else {
+                    merged.push(field.clone());
+                }
+            }
+            for schema_field in schema_fields {
+                if schema_field.optional {
+                    continue;
+                }
+                if merged.iter().any(|f| f.name == schema_field.name) {
+                    continue;
+                }
+                merged.push(schema_field.clone());
+            }
+            Some(TypeExpr::Shape(merged))
+        }
         (TypeExpr::List(current_inner), TypeExpr::List(schema_inner)) => {
             intersect_types(current_inner, schema_inner)
                 .map(|inner| TypeExpr::List(Box::new(inner)))

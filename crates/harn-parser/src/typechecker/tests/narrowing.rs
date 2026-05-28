@@ -640,3 +640,45 @@ fn test_match_or_pattern_on_literal_union_narrows_to_sub_union() {
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
+
+#[test]
+fn test_schema_is_shape_narrowing_preserves_current_fields() {
+    // `schema_is(x, S)` confirms that `x` matches `S` — it adds
+    // information, it does not remove it. Width subtyping says a value
+    // typed `{a: int, b: string}` already has both fields, so the
+    // truthy branch must still permit `x.a` after narrowing against a
+    // schema that only mentions `b`.
+    let errs = errors(
+        r#"type Tag = {b: string}
+
+pipeline t(task) {
+  fn check(x: {a: int, b: string}) {
+    if schema_is(x, Tag) {
+      let _a: int = x.a
+      let _b: string = x.b
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_schema_is_shape_narrowing_adds_schema_only_required_field() {
+    // A schema-only required field is confirmed present by the
+    // matched check, so the truthy branch should expose it alongside
+    // the existing fields.
+    let errs = errors(
+        r#"type WithTag = {kind: string}
+
+pipeline t(task) {
+  fn check(x: {a: int}) {
+    if schema_is(x, WithTag) {
+      let _a: int = x.a
+      let _kind: string = x.kind
+    }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
