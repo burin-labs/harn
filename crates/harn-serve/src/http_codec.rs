@@ -330,17 +330,27 @@ fn http_headers(map: &std::collections::BTreeMap<String, HttpHeaderValue>) -> He
 /// number of headers (`content-type`, `cache-control` for SSE) which a
 /// caller-supplied value should be free to override.
 fn merge_headers(target: &mut HeaderMap, source: HeaderMap) {
+    // `HeaderMap::into_iter` yields `Some(name)` once per key and then
+    // `None` for each continuation value of that same key. We need to
+    // track the most-recently-seen name so multi-valued envelope
+    // headers (Link preload hints, Set-Cookie, etc.) survive the merge.
     let mut seen_in_source: std::collections::HashSet<HeaderName> =
         std::collections::HashSet::new();
+    let mut current_name: Option<HeaderName> = None;
     for (name, value) in source {
-        let Some(name) = name else { continue };
+        if let Some(name) = name {
+            current_name = Some(name);
+        }
+        let Some(name) = current_name.as_ref() else {
+            continue;
+        };
         if seen_in_source.insert(name.clone()) {
             // First occurrence: clear any default the underlying
             // primitive may have set, then insert the caller's value.
             target.insert(name.clone(), value);
         } else {
-            // Repeats (e.g. multi-value Set-Cookie) append.
-            target.append(name, value);
+            // Repeats (e.g. multi-value Set-Cookie or Link) append.
+            target.append(name.clone(), value);
         }
     }
 }
@@ -873,6 +883,58 @@ pub fn handler() -> dict {
         let response = axum_response_from_call(synth_call(value), "req_e2e");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(body_text(response).await, "first second");
+    }
+
+    #[tokio::test]
+    async fn end_to_end_http_push_hints_emits_repeated_link_headers() {
+        let value = dispatch_value(
+            r#"
+pub fn handler() -> dict {
+  return http_push_hints(http_ok({page: "home"}), ["/main.css", "/app.js", "/hero.webp"])
+}
+"#,
+            "handler",
+        )
+        .await
+        .expect("dispatch");
+        let response = axum_response_from_call(synth_call(value), "req_e2e");
+        assert_eq!(response.status(), StatusCode::OK);
+        let links: Vec<String> = response
+            .headers()
+            .get_all(header::LINK)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            links,
+            vec![
+                "</main.css>; rel=preload; as=style",
+                "</app.js>; rel=preload; as=script",
+                "</hero.webp>; rel=preload; as=image",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn end_to_end_handler_sets_x_compress_never_marker() {
+        // The marker rides through the codec on the envelope's headers
+        // dict; the transport stack's strip layer is responsible for
+        // removing it before the response leaves the server. Here we
+        // verify the codec faithfully renders the header — the strip
+        // behaviour is covered by transport_conformance.rs.
+        let value = dispatch_value(
+            r#"
+pub fn handler() -> dict {
+  return http_reply(200, {ok: true}, {"x-compress": "never"})
+}
+"#,
+            "handler",
+        )
+        .await
+        .expect("dispatch");
+        let response = axum_response_from_call(synth_call(value), "req_e2e");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers().get("x-compress").unwrap(), "never");
     }
 
     #[tokio::test]

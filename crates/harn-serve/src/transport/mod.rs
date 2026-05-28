@@ -22,14 +22,27 @@
 //! handlers via builtins in `harn_vm::stdlib::http_response` and
 //! `harn_vm::stdlib::multipart`.
 
-use axum::http::HeaderValue;
+use axum::http::{Extensions, HeaderMap, HeaderValue, StatusCode, Version};
+use axum::middleware::{self, Next};
 use axum::Router;
-use tower_http::compression::CompressionLayer;
+use tower_http::compression::predicate::{And, DefaultPredicate};
+use tower_http::compression::{CompressionLayer, Predicate};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 mod etag;
 
 pub use etag::compute_strong_etag;
+
+/// Handler-set marker that opts the response out of compression. The
+/// custom [`Predicate`] honours it; an outer middleware strips the
+/// header before the response leaves the server so clients never see
+/// the implementation detail.
+///
+/// `x-compress: never` is the only value that disables compression;
+/// any other value (or absence of the header) leaves the default
+/// predicate logic in effect.
+pub const COMPRESSION_OPT_OUT_HEADER: &str = "x-compress";
+pub const COMPRESSION_OPT_OUT_VALUE: &str = "never";
 
 /// Bodies under this threshold skip compression entirely. Below ~512
 /// bytes the encoder overhead (header framing + minimum CRC) usually
@@ -115,6 +128,10 @@ pub fn apply_transport_layers(mut router: Router, config: &TransportConfig) -> R
     }
     if config.compression {
         router = router.layer(compression_layer());
+        // The strip layer sits outside compression so the predicate sees
+        // the marker on the response-path return; the strip runs after
+        // and the client never observes the implementation header.
+        router = router.layer(middleware::from_fn(strip_compression_marker));
     }
     if let Some(cors) = &config.cors {
         router = router.layer(build_cors_layer(cors));
@@ -122,12 +139,58 @@ pub fn apply_transport_layers(mut router: Router, config: &TransportConfig) -> R
     router
 }
 
-fn compression_layer() -> CompressionLayer {
+fn compression_layer() -> CompressionLayer<And<HeaderOptOutPredicate, DefaultPredicate>> {
     CompressionLayer::new()
         .gzip(true)
         .br(true)
         .zstd(true)
-        .compress_when(tower_http::compression::DefaultPredicate::new())
+        .compress_when(HeaderOptOutPredicate.and(DefaultPredicate::new()))
+}
+
+/// Returns `false` (i.e. don't compress) when the response carries
+/// `x-compress: never`. Any other header value, or absence of the
+/// header, defers to the next predicate in the chain. Implemented via
+/// the closure-form [`Predicate`] blanket impl so the trait method
+/// resolves through axum's re-exported `HeaderMap`/`StatusCode` types
+/// without pulling in a direct `http-body` dependency.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HeaderOptOutPredicate;
+
+impl Predicate for HeaderOptOutPredicate {
+    fn should_compress<B>(&self, response: &axum::http::Response<B>) -> bool {
+        opt_out_predicate(
+            response.status(),
+            response.version(),
+            response.headers(),
+            response.extensions(),
+        )
+    }
+}
+
+fn opt_out_predicate(
+    _status: StatusCode,
+    _version: Version,
+    headers: &HeaderMap,
+    _extensions: &Extensions,
+) -> bool {
+    !headers
+        .get_all(COMPRESSION_OPT_OUT_HEADER)
+        .iter()
+        .any(|value| {
+            value
+                .to_str()
+                .map(|s| s.eq_ignore_ascii_case(COMPRESSION_OPT_OUT_VALUE))
+                .unwrap_or(false)
+        })
+}
+
+async fn strip_compression_marker(
+    req: axum::extract::Request,
+    next: Next,
+) -> axum::response::Response {
+    let mut response = next.run(req).await;
+    response.headers_mut().remove(COMPRESSION_OPT_OUT_HEADER);
+    response
 }
 
 fn build_cors_layer(config: &CorsConfig) -> CorsLayer {
@@ -194,6 +257,7 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use axum::http::{header, Method, Request, StatusCode};
+    use axum::response::IntoResponse;
     use axum::routing::get;
     use tower::ServiceExt;
 
@@ -302,6 +366,90 @@ mod tests {
         assert!(!response
             .headers()
             .contains_key("access-control-allow-origin"));
+    }
+
+    #[tokio::test]
+    async fn handler_x_compress_never_skips_compression_and_strips_marker() {
+        let app = apply_transport_layers(
+            Router::new().route(
+                "/raw",
+                get(|| async {
+                    let mut response = axum::Json(serde_json::json!({
+                        "data": "x".repeat(2048),
+                    }))
+                    .into_response();
+                    response.headers_mut().insert(
+                        COMPRESSION_OPT_OUT_HEADER,
+                        HeaderValue::from_static(COMPRESSION_OPT_OUT_VALUE),
+                    );
+                    response
+                }),
+            ),
+            &TransportConfig::default_enabled(),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/raw")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            !response.headers().contains_key(header::CONTENT_ENCODING),
+            "x-compress: never must skip compression",
+        );
+        assert!(
+            !response.headers().contains_key(COMPRESSION_OPT_OUT_HEADER),
+            "marker header must be stripped before flushing to client",
+        );
+    }
+
+    #[tokio::test]
+    async fn handler_x_compress_other_value_still_compresses() {
+        let app = apply_transport_layers(
+            Router::new().route(
+                "/maybe",
+                get(|| async {
+                    let mut response = axum::Json(serde_json::json!({
+                        "data": "x".repeat(2048),
+                    }))
+                    .into_response();
+                    // Anything other than the literal "never" leaves
+                    // the default predicate in charge.
+                    response
+                        .headers_mut()
+                        .insert(COMPRESSION_OPT_OUT_HEADER, HeaderValue::from_static("auto"));
+                    response
+                }),
+            ),
+            &TransportConfig::default_enabled(),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/maybe")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .map(HeaderValue::to_str)
+                .transpose()
+                .unwrap(),
+            Some("gzip"),
+        );
+        // Strip layer is unconditional — the marker is removed even
+        // when the value didn't disable compression.
+        assert!(!response.headers().contains_key(COMPRESSION_OPT_OUT_HEADER));
     }
 
     #[tokio::test]
