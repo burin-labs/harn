@@ -32,76 +32,23 @@ use self::agents_workers::{
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::agent_events::WorkerEvent;
 use crate::orchestration::{ArtifactRecord, ContextPolicy, MutationSessionRecord};
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
-};
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
-const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("__host_worker_list", list_agents_builtin)
-        .signature("__host_worker_list()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("List local host worker summaries."),
-    SyncBuiltin::new(
-        "__host_resume_conditions_parse",
-        parse_resume_conditions_builtin,
-    )
-    .signature("__host_resume_conditions_parse(conditions?)")
-    .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-    .doc("Validate and normalize agent resume conditions."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &LIST_AGENTS_BUILTIN_DEF,
+    &PARSE_RESUME_CONDITIONS_BUILTIN_DEF,
+    &SUB_AGENT_RUN_BUILTIN_DEF,
+    &SPAWN_AGENT_BUILTIN_DEF,
+    &SEND_INPUT_BUILTIN_DEF,
+    &WORKER_TRIGGER_BUILTIN_DEF,
+    &WAIT_AGENT_BUILTIN_DEF,
+    &RESUME_AGENT_BUILTIN_DEF,
+    &SUSPEND_AGENT_BUILTIN_DEF,
+    &TOP_LEVEL_AGENT_SUSPEND_BUILTIN_DEF,
+    &CLOSE_AGENT_BUILTIN_DEF,
 ];
-
-const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("__host_sub_agent_run", sub_agent_run_builtin)
-        .signature("__host_sub_agent_run(request)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Run or spawn a normalized Harn-authored sub-agent request."),
-    async_builtin!("__host_worker_spawn", spawn_agent_builtin)
-        .signature("__host_worker_spawn(config)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Spawn a workflow, stage, or sub-agent host worker."),
-    async_builtin!("__host_worker_send_input", send_input_builtin)
-        .signature("__host_worker_send_input(worker, task)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Resume a stopped host worker with new task input."),
-    async_builtin!("__host_worker_trigger", worker_trigger_builtin)
-        .signature("__host_worker_trigger(worker, payload)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Trigger an awaiting retriggerable host worker."),
-    async_builtin!("__host_worker_wait", wait_agent_builtin)
-        .signature("__host_worker_wait(worker_or_workers)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Wait for one or more host workers to reach a terminal state."),
-    async_builtin!("__host_worker_resume", resume_agent_builtin)
-        .signature(
-            "__host_worker_resume(worker_or_snapshot, input_or_options?, continue_transcript?)",
-        )
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Resume a suspended or persisted worker into the local host worker registry."),
-    async_builtin!("__host_worker_suspend", suspend_agent_builtin)
-        .signature("__host_worker_suspend(worker, reason, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Cooperatively suspend a host worker at the next turn boundary."),
-    async_builtin!(
-        "__host_top_level_agent_suspend",
-        top_level_agent_suspend_builtin
-    )
-    .signature(
-        "__host_top_level_agent_suspend(session_id, task, system, options, reason, conditions?, iteration?)",
-    )
-    .arity(VmBuiltinArity::Range { min: 5, max: 7 })
-    .doc("Persist a top-level agent_loop suspend checkpoint as a resumable worker."),
-    async_builtin!("__host_worker_close", close_agent_builtin)
-        .signature("__host_worker_close(worker)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Cancel a host worker and emit the cancellation lifecycle event."),
-];
-
-const AGENT_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("agent.worker")
-    .sync(AGENT_SYNC_PRIMITIVES)
-    .async_(AGENT_ASYNC_PRIMITIVES);
 
 pub(crate) fn reset_agent_worker_state() {
     reset_worker_registry();
@@ -454,11 +401,20 @@ async fn wait_for_worker_terminal(
 }
 
 pub(crate) fn register_agent_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, AGENT_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
     records::register_record_builtins(vm);
     workflow::register_workflow_builtins(vm);
 }
 
+#[harn_builtin(
+    sig = "__host_sub_agent_run(request: dict) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Run or spawn a normalized Harn-authored sub-agent request."
+)]
 async fn sub_agent_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let request = parse_sub_agent_request(&args)?;
     if !request.background {
@@ -559,6 +515,13 @@ fn worker_mode_label(config: &WorkerConfig) -> &'static str {
     }
 }
 
+#[harn_builtin(
+    sig = "__host_worker_spawn(config: dict) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Spawn a workflow, stage, or sub-agent host worker."
+)]
 async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let config = args
         .first()
@@ -569,6 +532,13 @@ async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     finalize_and_run_worker(state, wait, "spawn_agent worker").await
 }
 
+#[harn_builtin(
+    sig = "__host_worker_send_input(worker: any, task: any) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Resume a stopped host worker with new task input."
+)]
 async fn send_input_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -598,6 +568,13 @@ async fn send_input_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     })
 }
 
+#[harn_builtin(
+    sig = "__host_worker_trigger(worker: any, payload: any) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Trigger an awaiting retriggerable host worker."
+)]
 async fn worker_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -664,6 +641,13 @@ async fn worker_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
 /// snapshot. Terminal states (`completed`/`failed`/`cancelled`/
 /// `interrupted`) are rejected — the caller can spawn a fresh worker
 /// instead.
+#[harn_builtin(
+    sig = "__host_worker_suspend(worker: any, reason: any, options?: dict) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Cooperatively suspend a host worker at the next turn boundary."
+)]
 async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = args
         .first()
@@ -952,6 +936,13 @@ pub(crate) fn all_registered_worker_ids() -> Vec<String> {
     WORKER_REGISTRY.with(|registry| registry.borrow().keys().cloned().collect())
 }
 
+#[harn_builtin(
+    sig = "__host_top_level_agent_suspend(session_id: string, task: any, system: any, options: dict, reason: any, conditions?: any, iteration?: int) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Persist a top-level agent_loop suspend checkpoint as a resumable worker."
+)]
 async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args
         .first()
@@ -1297,6 +1288,13 @@ fn apply_resume_transcript_policy(
     worker.transcript = summary_only_resume_transcript(worker.transcript.take(), digest);
 }
 
+#[harn_builtin(
+    sig = "__host_worker_resume(worker_or_snapshot: any, input_or_options?: any, continue_transcript?: bool) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Resume a suspended or persisted worker into the local host worker registry."
+)]
 async fn resume_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target_value = args
         .first()
@@ -1827,6 +1825,13 @@ fn cold_load_worker(snapshot_target: &str) -> Result<Rc<RefCell<WorkerState>>, V
     Ok(state)
 }
 
+#[harn_builtin(
+    sig = "__host_worker_wait(worker_or_workers: any) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Wait for one or more host workers to reach a terminal state."
+)]
 async fn wait_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = args
         .first()
@@ -1848,6 +1853,13 @@ async fn wait_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(summary)
 }
 
+#[harn_builtin(
+    sig = "__host_worker_close(worker: any) -> any",
+    kind = "async",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Cancel a host worker and emit the cancellation lifecycle event."
+)]
 async fn close_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = args
         .first()
@@ -1883,6 +1895,12 @@ async fn close_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(summary)
 }
 
+#[harn_builtin(
+    sig = "__host_worker_list() -> list",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "List local host worker summaries."
+)]
 fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let workers = WORKER_REGISTRY.with(|registry| {
         registry
@@ -2054,6 +2072,12 @@ fn parse_resume_conditions_value(value: Option<&VmValue>) -> Result<VmValue, VmE
     )))
 }
 
+#[harn_builtin(
+    sig = "__host_resume_conditions_parse(conditions?: any) -> any",
+    category = "agent.worker",
+    runtime_only = true,
+    doc = "Validate and normalize agent resume conditions."
+)]
 fn parse_resume_conditions_builtin(
     args: &[VmValue],
     _out: &mut String,
