@@ -110,11 +110,13 @@ Wrap intermediate steps inside a transaction so the outer commit can keep
 the surviving writes while the rolled-back ones disappear:
 
 ```harn
+let drop_inner = true
+
 pg_transaction(db, { tx ->
   pg_execute(tx, "insert into entries (id, label) values ($1, $2)", [1, "outer"])
   pg_savepoint(tx, "before_inner")
   pg_execute(tx, "insert into entries (id, label) values ($1, $2)", [2, "inner"])
-  if (should_drop_inner()) {
+  if drop_inner {
     pg_rollback_to_savepoint(tx, "before_inner")
   }
   pg_release_savepoint(tx, "before_inner")
