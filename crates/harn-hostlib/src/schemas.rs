@@ -558,6 +558,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/code_index/freshness.response.json"),
     ),
+    (
+        "code_index",
+        "rename_symbol",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/rename_symbol.request.json"),
+    ),
+    (
+        "code_index",
+        "rename_symbol",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/rename_symbol.response.json"),
+    ),
     // scanner/
     (
         "scanner",

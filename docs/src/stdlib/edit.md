@@ -9,6 +9,10 @@ source files. Three flavors live side by side:
 - `edit_insert_at_anchor` — AST-precise insert before/after/inside an
   anchor node. The default reach for adding a new function, import,
   test case, or match arm.
+- `edit_rename_symbol` — safe cross-file rename driven by the typed
+  symbol graph (#2434). The default reach when one identifier needs
+  to flip across the workspace without colliding on partial-name
+  matches.
 - `edit_apply_old_new_patch` — collision-aware old/new text patch
   with exact / line / structural matching modes. The default reach
   when the language has no tree-sitter grammar or when the model
@@ -183,9 +187,9 @@ pipeline default() {
 - The language has no tree-sitter grammar (returns
   `result == "unsupported_language"`). Fall back to
   `edit_apply_old_new_patch`.
-- The change crosses files (rename-style refactors). The
-  [umbrella epic](https://github.com/burin-labs/harn/issues/2497) ships
-  `edit_rename_symbol` for that case, backed by the
+- The change crosses files (rename-style refactors). Reach for
+  [`edit_rename_symbol`](#edit_rename_symbol--safe-cross-file-rename)
+  below — it's backed by the
   [#2434](https://github.com/burin-labs/harn/issues/2434) symbol graph.
 - The change is sub-token (rewrite a single identifier inside a larger
   expression). The minimum granularity for `apply_node` is one
@@ -459,6 +463,74 @@ The pure helpers (`edit_apply_old_new_patch`, `edit_splice_lines`,
 operate on in-memory strings without a path. `edit_safe_text_patch`
 is the recommended entry point any time the call ends with a write
 back to disk.
+
+## `edit_rename_symbol` — safe cross-file rename
+
+`edit_rename_symbol({symbol_ref, new_name, scope, ...})` is the cross-file
+counterpart of `edit_apply_node`. It resolves `symbol_ref` against the
+typed symbol graph (#2434), walks every file in scope with tree-sitter
+to collect identifier-context byte spans for `symbol_ref.name`, and
+refuses to write if `new_name` already exists as an identifier in any
+rewritten file (shadow check).
+
+Backed by the `hostlib_code_index_rename_symbol` builtin (issue
+[#2508](https://github.com/burin-labs/harn/issues/2508)) under the
+`std/edit` umbrella epic
+[#2497](https://github.com/burin-labs/harn/issues/2497).
+
+### Parameters
+
+| Field | Required | Notes |
+|---|---|---|
+| `symbol_ref` | yes | `{name, path, line?, kind?}`. `line` (1-based) and `kind` (`"Function" \| "Type" \| "Module"`) disambiguate when several symbols in the workspace share a name. |
+| `new_name` | yes | Replacement identifier. Must be a valid identifier token and differ from `symbol_ref.name`. |
+| `scope` | yes | `"file"` \| `"module"` \| `"workspace"`. `file` and `module` are aliases today (one Module node per file); `workspace` follows REFS edges and a textual sweep across the index. |
+| `session_id` | no | Routes reads + writes through staged-fs (#1722). |
+| `dry_run` | no | When `true`, the host validates end-to-end (parse, conflict, syntax) and returns the planned edits without writing. |
+| `validate` | no, default `true` | Re-parse every rewritten file; reject on ERROR / MISSING nodes. |
+
+Supported languages (first batch): Rust, TypeScript/TSX, JavaScript/JSX,
+Python, Swift, Go. Other languages return `result ==
+"unsupported_language"` instead of silently misrewriting.
+
+### Result tags
+
+| `result` | meaning |
+|---|---|
+| `"applied"` | rename succeeded (or, with `dry_run`, would have). `touched_files[*].edits[*]` carries byte and `(row, col)` spans for every occurrence. |
+| `"conflict"` | `new_name` is already an identifier in at least one file the rename would touch. `conflicts[*]` names the shadow sites. |
+| `"no_match"` | `symbol_ref` did not resolve in the typed graph. |
+| `"ambiguous_symbol"` | multiple symbols share `symbol_ref.name`; pass `line` / `kind` to disambiguate. Candidate list surfaces in the response's `warnings` field. |
+| `"unsupported_language"` | an in-scope file uses a grammar outside the first batch. |
+| `"invalid_identifier"` | `new_name` is empty or shaped wrong for any in-scope language. |
+| `"syntax_error"` | a rewritten file failed re-parse with `validate=true`. |
+
+### Atomicity
+
+When `session_id` is supplied AND the session is in `staged` mode,
+every touched file lands in the overlay; one `hostlib_fs_commit_staged`
+call flips them atomically. Without a session, the host still buffers
+the full plan in memory and only writes after pre-flight validation
+passes, so a clean run is all-or-nothing modulo mid-call disk failures.
+
+```harn,ignore
+import { edit_rename_symbol } from "std/edit"
+
+let result = edit_rename_symbol({
+  symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
+  new_name: "Gadget",
+  scope: "workspace",
+})
+if !result.ok && result.result == "conflict" {
+  for site in result.conflicts {
+    println("would shadow " + site.shadow + " at " + site.path)
+  }
+}
+```
+
+See the cookbook recipe [Rename a symbol across the
+workspace](../cookbooks/rename-symbol.md) for the end-to-end staged
+flow.
 
 ## See also
 

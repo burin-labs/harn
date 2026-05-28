@@ -121,6 +121,8 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_cypher",
             "hostlib_code_index_branch_overlay",
             "hostlib_code_index_freshness",
+            // Cross-file safe rename (#2508).
+            "hostlib_code_index_rename_symbol",
         ]
     );
     // Without a populated workspace, code-index read methods return empty

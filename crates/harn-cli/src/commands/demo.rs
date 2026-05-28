@@ -97,6 +97,19 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/mcp-host/scenario.harn"),
         tape: include_str!("../../assets/demo/mcp-host/tape.jsonl"),
     },
+    Scenario {
+        id: "edit-rename-symbol",
+        title: "edit.rename_symbol rewrites a Rust struct across the workspace",
+        description: "Stage a tiny Rust workspace, build the typed symbol graph (#2434), then \
+                      drive `edit_rename_symbol` (#2508) through dry-run + applied + conflict \
+                      paths: a workspace-scoped plan with per-edit byte/(row,col) spans, the \
+                      same plan committed for real with identifier-context rewrites (skipping \
+                      string literals and comments), and a follow-up rename whose new name \
+                      already shadows another identifier — host short-circuits without \
+                      touching disk. Fully offline.",
+        script: include_str!("../../assets/demo/edit-rename-symbol/scenario.harn"),
+        tape: include_str!("../../assets/demo/edit-rename-symbol/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]
