@@ -131,13 +131,101 @@ pub(super) fn extract_type_of_var(node: &SNode) -> Option<String> {
     None
 }
 
+/// Width subtyping for `Shape ∩ Shape`. Pulled out of `intersect_types`
+/// so the arm body in the big match stays short and the merge invariant
+/// reads top-down. See `intersect_types` for why we merge instead of
+/// returning the schema's fields verbatim.
+fn intersect_shapes(
+    current_fields: &[ShapeField],
+    schema_fields: &[ShapeField],
+) -> Option<TypeExpr> {
+    // Width subtyping: a value typed `current` already has every field
+    // in `current_fields`; `schema_is(x, S)` only confirms the value
+    // matches `schema_fields` (it adds information, it does not remove
+    // it). Returning just `schema_fields` would drop the fields we
+    // already knew about. Merge instead:
+    //   - keep every field in `current_fields`
+    //   - intersect overlapping field types (the value satisfies both
+    //     annotations)
+    //   - mark overlapping fields required when either side required
+    //     them (the post-check value definitely has the field if either
+    //     annotation says so)
+    //   - append schema-only required fields (the check confirmed they
+    //     are present); skip schema-only optional fields (the check
+    //     tells us nothing new about them).
+    let mut merged: Vec<ShapeField> = Vec::with_capacity(current_fields.len());
+    for field in current_fields {
+        if let Some(schema_field) = schema_fields.iter().find(|f| f.name == field.name) {
+            let intersected = intersect_types(&field.type_expr, &schema_field.type_expr)?;
+            merged.push(ShapeField {
+                name: field.name.clone(),
+                type_expr: intersected,
+                optional: field.optional && schema_field.optional,
+            });
+        } else {
+            merged.push(field.clone());
+        }
+    }
+    for schema_field in schema_fields {
+        if schema_field.optional {
+            continue;
+        }
+        if merged.iter().any(|f| f.name == schema_field.name) {
+            continue;
+        }
+        merged.push(schema_field.clone());
+    }
+    Some(TypeExpr::Shape(merged))
+}
+
+/// Distribute an intersection over a union: keep the members that overlap
+/// the other side, dropping the empty intersections. Used by both halves
+/// of the `(Union, _) / (_, Union)` symmetry — `flip` controls which side
+/// `member` lands on in the recursive call so the operation stays
+/// commutative without forcing equal-by-construction operands.
+fn intersect_union_with(members: &[TypeExpr], other: &TypeExpr, flip: bool) -> Option<TypeExpr> {
+    let kept = members
+        .iter()
+        .filter_map(|member| {
+            if flip {
+                intersect_types(other, member)
+            } else {
+                intersect_types(member, other)
+            }
+        })
+        .collect::<Vec<_>>();
+    match kept.len() {
+        0 => None,
+        1 => kept.into_iter().next(),
+        _ => Some(TypeExpr::Union(kept)),
+    }
+}
+
 pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Option<TypeExpr> {
+    // `owned<T>` is transparent to the underlying handle type at the
+    // type-equality boundary (the ownership marker only drives the
+    // HARN-OWN-005 leak lint, not value shape). Strip the marker before
+    // descending so `intersect_types(owned<channel>, channel)` succeeds
+    // the same way `intersect_types(channel, channel)` would — then
+    // re-wrap if EITHER side carried it, since the intersection of a
+    // marked-and-unmarked pair is the more specific (marked) form.
+    match (current, schema_type) {
+        (TypeExpr::Owned(c), TypeExpr::Owned(s)) => {
+            return intersect_types(c, s).map(|t| TypeExpr::Owned(Box::new(t)));
+        }
+        (TypeExpr::Owned(inner), other) | (other, TypeExpr::Owned(inner)) => {
+            return intersect_types(inner, other).map(|t| TypeExpr::Owned(Box::new(t)));
+        }
+        _ => {}
+    }
+
     match (current, schema_type) {
         // Literal intersections: two equal literals keep the literal.
         (TypeExpr::LitString(a), TypeExpr::LitString(b)) if a == b => {
             Some(TypeExpr::LitString(a.clone()))
         }
         (TypeExpr::LitInt(a), TypeExpr::LitInt(b)) if a == b => Some(TypeExpr::LitInt(*a)),
+
         // Intersecting a literal with its base type keeps the literal.
         (TypeExpr::LitString(s), TypeExpr::Named(n))
         | (TypeExpr::Named(n), TypeExpr::LitString(s))
@@ -150,128 +238,80 @@ pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Opt
         {
             Some(TypeExpr::LitInt(*v))
         }
-        (TypeExpr::Union(members), other) => {
-            let kept = members
-                .iter()
-                .filter_map(|member| intersect_types(member, other))
-                .collect::<Vec<_>>();
-            match kept.len() {
-                0 => None,
-                1 => kept.into_iter().next(),
-                _ => Some(TypeExpr::Union(kept)),
-            }
-        }
-        (other, TypeExpr::Union(members)) => {
-            let kept = members
-                .iter()
-                .filter_map(|member| intersect_types(other, member))
-                .collect::<Vec<_>>();
-            match kept.len() {
-                0 => None,
-                1 => kept.into_iter().next(),
-                _ => Some(TypeExpr::Union(kept)),
-            }
-        }
+
+        // Union distributes over the other side; the `flip` argument
+        // preserves the original operand order so commutativity is
+        // observed without aliasing the helper's recursive calls.
+        (TypeExpr::Union(members), other) => intersect_union_with(members, other, false),
+        (other, TypeExpr::Union(members)) => intersect_union_with(members, other, true),
+
         (TypeExpr::Named(left), TypeExpr::Named(right)) if left == right => {
             Some(TypeExpr::Named(left.clone()))
         }
-        (TypeExpr::Named(name), TypeExpr::Shape(fields)) if name == "dict" => {
+
+        // Named-as-runtime-kind ↔ parameterised constructor. Each pair is
+        // symmetric — the same `Some(parameterised.clone())` result
+        // regardless of operand order — so collapse the two arms into one
+        // OR-pattern. The kind table mirrors `member_matches_runtime_kind`
+        // and `VmValue::type_name`; keep them aligned if either changes.
+        (TypeExpr::Named(name), TypeExpr::Shape(fields))
+        | (TypeExpr::Shape(fields), TypeExpr::Named(name))
+            if name == "dict" =>
+        {
             Some(TypeExpr::Shape(fields.clone()))
         }
-        (TypeExpr::Shape(fields), TypeExpr::Named(name)) if name == "dict" => {
-            Some(TypeExpr::Shape(fields.clone()))
+        (TypeExpr::Named(name), TypeExpr::DictType(key, value))
+        | (TypeExpr::DictType(key, value), TypeExpr::Named(name))
+            if name == "dict" =>
+        {
+            Some(TypeExpr::DictType(key.clone(), value.clone()))
         }
-        (TypeExpr::Named(name), TypeExpr::List(inner)) if name == "list" => {
+        (TypeExpr::Named(name), TypeExpr::List(inner))
+        | (TypeExpr::List(inner), TypeExpr::Named(name))
+            if name == "list" =>
+        {
             Some(TypeExpr::List(inner.clone()))
         }
-        (TypeExpr::List(inner), TypeExpr::Named(name)) if name == "list" => {
-            Some(TypeExpr::List(inner.clone()))
+        (TypeExpr::Named(name), TypeExpr::Iter(inner))
+        | (TypeExpr::Iter(inner), TypeExpr::Named(name))
+            if name == "iter" =>
+        {
+            Some(TypeExpr::Iter(inner.clone()))
         }
         (TypeExpr::Named(name), TypeExpr::Generator(inner))
-            if name == "generator" || name == "Generator" =>
-        {
-            Some(TypeExpr::Generator(inner.clone()))
-        }
-        (TypeExpr::Generator(inner), TypeExpr::Named(name))
+        | (TypeExpr::Generator(inner), TypeExpr::Named(name))
             if name == "generator" || name == "Generator" =>
         {
             Some(TypeExpr::Generator(inner.clone()))
         }
         (TypeExpr::Named(name), TypeExpr::Stream(inner))
+        | (TypeExpr::Stream(inner), TypeExpr::Named(name))
             if name == "stream" || name == "Stream" =>
         {
             Some(TypeExpr::Stream(inner.clone()))
         }
-        (TypeExpr::Stream(inner), TypeExpr::Named(name))
-            if name == "stream" || name == "Stream" =>
-        {
-            Some(TypeExpr::Stream(inner.clone()))
+
+        // Parameterised ∩ Parameterised: keep the kind, intersect the
+        // payload. `intersect_shapes` carries the width-subtyping merge.
+        (TypeExpr::Shape(c), TypeExpr::Shape(s)) => intersect_shapes(c, s),
+        (TypeExpr::List(c), TypeExpr::List(s)) => {
+            intersect_types(c, s).map(|i| TypeExpr::List(Box::new(i)))
         }
-        (TypeExpr::Named(name), TypeExpr::DictType(key, value)) if name == "dict" => {
-            Some(TypeExpr::DictType(key.clone(), value.clone()))
+        (TypeExpr::Iter(c), TypeExpr::Iter(s)) => {
+            intersect_types(c, s).map(|i| TypeExpr::Iter(Box::new(i)))
         }
-        (TypeExpr::DictType(key, value), TypeExpr::Named(name)) if name == "dict" => {
-            Some(TypeExpr::DictType(key.clone(), value.clone()))
+        (TypeExpr::Generator(c), TypeExpr::Generator(s)) => {
+            intersect_types(c, s).map(|i| TypeExpr::Generator(Box::new(i)))
         }
-        (TypeExpr::Shape(current_fields), TypeExpr::Shape(schema_fields)) => {
-            // Width subtyping: a value typed `current` already has every
-            // field in `current_fields`; `schema_is(x, S)` only confirms
-            // the value matches `schema_fields` (it adds information, it
-            // does not remove it). Returning just `schema_fields` would
-            // drop the fields we already knew about. Merge instead:
-            //   - keep every field in `current_fields`
-            //   - intersect overlapping field types (the value satisfies
-            //     both annotations)
-            //   - mark overlapping fields required when either side
-            //     required them (the post-check value definitely has the
-            //     field if either annotation says so)
-            //   - append schema-only required fields (the check confirmed
-            //     they are present); skip schema-only optional fields
-            //     (the check tells us nothing new about them).
-            let mut merged: Vec<ShapeField> = Vec::with_capacity(current_fields.len());
-            for field in current_fields {
-                if let Some(schema_field) = schema_fields.iter().find(|f| f.name == field.name) {
-                    let intersected = intersect_types(&field.type_expr, &schema_field.type_expr)?;
-                    merged.push(ShapeField {
-                        name: field.name.clone(),
-                        type_expr: intersected,
-                        optional: field.optional && schema_field.optional,
-                    });
-                } else {
-                    merged.push(field.clone());
-                }
-            }
-            for schema_field in schema_fields {
-                if schema_field.optional {
-                    continue;
-                }
-                if merged.iter().any(|f| f.name == schema_field.name) {
-                    continue;
-                }
-                merged.push(schema_field.clone());
-            }
-            Some(TypeExpr::Shape(merged))
+        (TypeExpr::Stream(c), TypeExpr::Stream(s)) => {
+            intersect_types(c, s).map(|i| TypeExpr::Stream(Box::new(i)))
         }
-        (TypeExpr::List(current_inner), TypeExpr::List(schema_inner)) => {
-            intersect_types(current_inner, schema_inner)
-                .map(|inner| TypeExpr::List(Box::new(inner)))
-        }
-        (TypeExpr::Generator(current_inner), TypeExpr::Generator(schema_inner)) => {
-            intersect_types(current_inner, schema_inner)
-                .map(|inner| TypeExpr::Generator(Box::new(inner)))
-        }
-        (TypeExpr::Stream(current_inner), TypeExpr::Stream(schema_inner)) => {
-            intersect_types(current_inner, schema_inner)
-                .map(|inner| TypeExpr::Stream(Box::new(inner)))
-        }
-        (
-            TypeExpr::DictType(current_key, current_value),
-            TypeExpr::DictType(schema_key, schema_value),
-        ) => {
-            let key = intersect_types(current_key, schema_key)?;
-            let value = intersect_types(current_value, schema_value)?;
+        (TypeExpr::DictType(ck, cv), TypeExpr::DictType(sk, sv)) => {
+            let key = intersect_types(ck, sk)?;
+            let value = intersect_types(cv, sv)?;
             Some(TypeExpr::DictType(Box::new(key), Box::new(value)))
         }
+
         // `unknown` and `any` are top types in the value-narrowing
         // direction — a successful `schema_is(x, S)` proves `x` matches
         // `S`, so the truthy branch can narrow to `S` regardless of how
@@ -279,12 +319,12 @@ pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Opt
         // `let x: unknown = …` stays `unknown` after `schema_is` (the
         // refinement set is empty), and field access on the narrowed
         // value triggers spurious "property access on unknown" warnings.
-        (TypeExpr::Named(name), other) if matches!(name.as_str(), "unknown" | "any") => {
+        (TypeExpr::Named(name), other) | (other, TypeExpr::Named(name))
+            if matches!(name.as_str(), "unknown" | "any") =>
+        {
             Some(other.clone())
         }
-        (current, TypeExpr::Named(name)) if matches!(name.as_str(), "unknown" | "any") => {
-            Some(current.clone())
-        }
+
         _ => None,
     }
 }

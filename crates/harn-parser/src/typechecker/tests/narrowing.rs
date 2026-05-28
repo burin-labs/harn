@@ -682,3 +682,46 @@ pipeline t(task) {
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
+
+#[test]
+fn test_schema_is_narrows_iter_union() {
+    // `iter<T>` had no entry in `intersect_types`, so narrowing an
+    // `iter<int> | string` union via `schema_is(x, iter<int>)` used to
+    // drop both members and leave `x` un-narrowed. Verify the truthy
+    // branch now exposes the iter element type so a typed bind succeeds.
+    let errs = errors(
+        r"type IterInt = iter<int>
+pipeline t(task) {
+  fn check(x: iter<int> | string) {
+    if schema_is(x, IterInt) {
+      let _i: iter<int> = x
+    }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_schema_is_narrows_owned_union_and_preserves_marker() {
+    // Two regressions in one fixture. (1) `owned<T>` had no entry in
+    // `intersect_types`, so a `owned<channel> | nil` union narrowed via
+    // `schema_is(x, channel)` used to drop the owned member entirely and
+    // leave the binding un-narrowed. (2) The intersection must preserve
+    // the ownership annotation so the HARN-OWN-005 leak lint keeps
+    // tracking the binding — the truthy branch's `let _c: owned<channel>
+    // = x` only typechecks if the narrowed type is `owned<channel>`, not
+    // a stripped `channel`.
+    let errs = errors(
+        r"type Ch = channel
+pipeline t(task) {
+  fn check(x: owned<channel> | nil) {
+    if schema_is(x, Ch) {
+      let _c: owned<channel> = x
+      drop(_c)
+    }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
