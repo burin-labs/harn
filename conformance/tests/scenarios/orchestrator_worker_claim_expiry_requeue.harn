@@ -77,22 +77,44 @@ pipeline default(task) {
       && first_data.responses[0].outcome?.status == "dlq"
       && first_data.responses[0].outcome?.error != nil,
   )
-  sleep(120ms)
-  let second = exec(
-    harn_bin,
-    "orchestrator",
-    "queue",
-    "--config",
-    path_join(ok_consumer_dir, "harn.toml"),
-    "--state-dir",
-    state_dir,
-    "drain",
-    "triage",
-    "--consumer-id",
-    "consumer-b",
-    "--json",
-  )
-  let second_data = json_parse(second.stdout)
+  // Poll the second drain until the expired claim is reclaimed. A bare
+  // `sleep(120ms)` was the original wait, but under heavy parallel
+  // cargo load the second subprocess can cold-start and call
+  // `claim_next` while the first drain's last 25ms heartbeat is still
+  // alive (TTL = 50ms, heartbeat = TTL/2), so the second drain saw
+  // zero ready jobs and the assertions tripped. Re-running `drain` is
+  // idempotent — a no-op drain returns `drained:0` without consuming
+  // state — so retrying until the reclaim lands is safe. Budget is
+  // generous enough to absorb GHA-runner stalls without making the
+  // happy path slower than the original wait.
+  var second = nil
+  var second_data = nil
+  let claim_reclaim_deadline = harness.clock.now_ms() + 5000
+  while harness.clock.now_ms() < claim_reclaim_deadline {
+    second = exec(
+      harn_bin,
+      "orchestrator",
+      "queue",
+      "--config",
+      path_join(ok_consumer_dir, "harn.toml"),
+      "--state-dir",
+      state_dir,
+      "drain",
+      "triage",
+      "--consumer-id",
+      "consumer-b",
+      "--json",
+    )
+    if second.success {
+      let parsed = json_parse(second.stdout)
+      if parsed.drained == 1 && parsed.acked == 1 && parsed.deferred == 0 {
+        second_data = parsed
+        break
+      }
+      second_data = parsed
+    }
+    sleep(50ms)
+  }
   __io_println(
     second.success && second_data.drained == 1 && second_data.acked == 1
       && second_data.deferred == 0,
