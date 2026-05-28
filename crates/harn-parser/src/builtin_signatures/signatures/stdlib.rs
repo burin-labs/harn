@@ -1,8 +1,7 @@
 //! Core stdlib builtin signatures that are not in the higher-level namespaces.
 
 use super::shapes::{
-    DAEMON_CONFIG, DAEMON_SUMMARY, IO_RESULT_ENVELOPE, PAGER_OPTIONS, READ_LINE_OPTIONS,
-    SIGNAL_HANDLER_OPTIONS,
+    DAEMON_CONFIG, DAEMON_SUMMARY, IO_RESULT_ENVELOPE, READ_LINE_OPTIONS, SIGNAL_HANDLER_OPTIONS,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL,
@@ -164,17 +163,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("signal", TY_STRING)],
         TY_NIL,
     ),
-    BuiltinSignature::simple("__tui_clear", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "__tui_page",
-        &[Param::new("options", PAGER_OPTIONS)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__tui_terminal_width",
-        &[Param::optional("default_width", TY_INT)],
-        TY_INT,
-    ),
     BuiltinSignature::simple(
         "append_file",
         &[
@@ -302,7 +290,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple("circuit_reset", &[Param::new("name", TY_STRING)], TY_NIL),
-    BuiltinSignature::simple("clear_path_scope_guard", &[], TY_NIL),
     BuiltinSignature::simple("clear_tool_hooks", &[], TY_NIL),
     BuiltinSignature::simple("clear_persona_hooks", &[], TY_NIL),
     BuiltinSignature::simple("clear_session_hooks", &[], TY_NIL),
@@ -613,11 +600,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "register_checkpoint_hook",
         &[Param::new("kinds", TY_ANY), Param::new("handler", TY_ANY)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "register_path_scope_guard",
-        &[Param::optional("opts", TY_DICT_OR_NIL)],
         TY_NIL,
     ),
     BuiltinSignature::simple(
