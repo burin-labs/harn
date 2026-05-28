@@ -28,6 +28,7 @@ use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use harn_serve::{
     apply_transport_layers, ws_route, CorsConfig, TransportConfig, WsConfig, WsMessage, WsSession,
+    COMPRESSION_OPT_OUT_HEADER, COMPRESSION_OPT_OUT_VALUE,
 };
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -59,6 +60,35 @@ async fn snapshot(State(state): State<AppState>) -> Response {
     Json((*state.payload).clone()).into_response()
 }
 
+async fn raw_binary_with_compress_optout() -> Response {
+    let payload = vec![0u8; 4096];
+    let mut response = payload.into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        COMPRESSION_OPT_OUT_HEADER,
+        HeaderValue::from_static(COMPRESSION_OPT_OUT_VALUE),
+    );
+    response
+}
+
+async fn page_with_push_hints(State(state): State<AppState>) -> Response {
+    let mut response = Json((*state.payload).clone()).into_response();
+    let headers = response.headers_mut();
+    headers.append(
+        header::LINK,
+        HeaderValue::from_static("</main.css>; rel=preload; as=style"),
+    );
+    headers.append(
+        header::LINK,
+        HeaderValue::from_static("</app.js>; rel=preload; as=script"),
+    );
+    response
+}
+
 async fn upload_count(mut multipart: Multipart) -> Response {
     let mut parts = 0u32;
     let mut total = 0u64;
@@ -77,6 +107,8 @@ fn build_app() -> Router {
     };
     let routes = Router::new()
         .route("/v1/resource", get(snapshot))
+        .route("/v1/page", get(page_with_push_hints))
+        .route("/v1/raw", get(raw_binary_with_compress_optout))
         .route("/v1/upload", post(upload_count))
         .route("/v1/ws", ws_route(echo_ws, WsConfig::default()))
         .with_state(state);
@@ -295,5 +327,74 @@ async fn cors_unknown_origin_does_not_expose_allow_headers() {
         allow_origin.and_then(|v| v.to_str().ok()),
         Some("https://evil.example.com"),
         "unknown origin must not be mirrored back",
+    );
+}
+
+#[tokio::test]
+async fn handler_x_compress_never_disables_compression_and_strips_marker() {
+    let request = Request::builder()
+        .uri("/v1/raw")
+        .header(header::ACCEPT_ENCODING, "gzip, br, zstd")
+        .body(Body::empty())
+        .unwrap();
+    let response = http_request(request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        !response.headers().contains_key(header::CONTENT_ENCODING),
+        "x-compress: never must skip compression even when client accepts every codec",
+    );
+    assert!(
+        !response.headers().contains_key(COMPRESSION_OPT_OUT_HEADER),
+        "marker header must be stripped before flushing to client",
+    );
+    // The raw body must round-trip unmodified so non-gzip clients can
+    // consume it directly.
+    let bytes = read_body_bytes(response).await;
+    assert_eq!(bytes.len(), 4096);
+    assert!(bytes.iter().all(|b| *b == 0));
+}
+
+#[tokio::test]
+async fn route_without_marker_still_compresses() {
+    // Sanity check that the opt-out is scoped to the route that sets
+    // the marker — other JSON routes must keep negotiating compression.
+    let request = Request::builder()
+        .uri("/v1/resource")
+        .header(header::ACCEPT_ENCODING, "gzip")
+        .body(Body::empty())
+        .unwrap();
+    let response = http_request(request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_ENCODING)
+            .and_then(|v| v.to_str().ok()),
+        Some("gzip"),
+        "routes without the marker continue to negotiate compression",
+    );
+}
+
+#[tokio::test]
+async fn handler_push_hints_emit_link_headers_through_transport_stack() {
+    let request = Request::builder()
+        .uri("/v1/page")
+        .body(Body::empty())
+        .unwrap();
+    let response = http_request(request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let links: Vec<String> = response
+        .headers()
+        .get_all(header::LINK)
+        .iter()
+        .map(|v| v.to_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        links,
+        vec![
+            "</main.css>; rel=preload; as=style",
+            "</app.js>; rel=preload; as=script",
+        ],
+        "Link preload hints must survive the compression + cors layer stack",
     );
 }

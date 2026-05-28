@@ -550,6 +550,124 @@ fn http_not_modified_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 #[harn_builtin(
+    sig = "http_push_hints(envelope: dict, paths: list) -> dict",
+    category = "http_response"
+)]
+fn http_push_hints_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    // Pull the inbound envelope. We require it to be a tagged
+    // `http_response` envelope so the codec on the other side actually
+    // applies the Link headers — wrapping a plain dict would silently
+    // no-op once it reached the wire.
+    let envelope = args
+        .first()
+        .and_then(VmValue::as_dict)
+        .ok_or_else(|| thrown_err("http_push_hints: envelope must be a dict"))?;
+    if !is_http_response_envelope(envelope) {
+        return Err(thrown_err(
+            "http_push_hints: envelope must be an http_response envelope \
+             (use http_ok, http_reply, etc. before calling this)",
+        ));
+    }
+
+    let paths = match args.get(1) {
+        Some(VmValue::List(items)) => items.clone(),
+        Some(other) => {
+            return Err(thrown_err(format!(
+                "http_push_hints: paths must be a list (got {})",
+                other.type_name()
+            )));
+        }
+        None => {
+            return Err(thrown_err("http_push_hints: paths is required"));
+        }
+    };
+
+    let mut new_links: Vec<String> = Vec::with_capacity(paths.len());
+    for item in paths.iter() {
+        match item {
+            VmValue::String(text) => {
+                let path = text.as_ref();
+                if path.is_empty() {
+                    return Err(thrown_err(
+                        "http_push_hints: paths must not contain empty strings",
+                    ));
+                }
+                new_links.push(format_link_header(path));
+            }
+            other => {
+                return Err(thrown_err(format!(
+                    "http_push_hints: paths must contain strings (got {})",
+                    other.type_name()
+                )));
+            }
+        }
+    }
+
+    if new_links.is_empty() {
+        return Ok(VmValue::Dict(envelope.clone().into()));
+    }
+
+    let mut envelope_map = (*envelope).clone();
+    let mut headers = envelope_map
+        .get("headers")
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+
+    // Preserve any pre-existing Link header(s) the handler already set.
+    let mut combined: Vec<VmValue> = match headers.get("Link") {
+        Some(VmValue::String(existing)) => vec![VmValue::String(existing.clone())],
+        Some(VmValue::List(items)) => items.iter().cloned().collect(),
+        _ => Vec::new(),
+    };
+    combined.extend(
+        new_links
+            .into_iter()
+            .map(|link| VmValue::String(Rc::from(link))),
+    );
+
+    headers.insert("Link".to_string(), VmValue::List(Rc::new(combined)));
+    envelope_map.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
+    Ok(VmValue::Dict(Rc::new(envelope_map)))
+}
+
+fn is_http_response_envelope(map: &BTreeMap<String, VmValue>) -> bool {
+    matches!(
+        map.get(HTTP_RESPONSE_TAG_KEY),
+        Some(VmValue::String(tag)) if tag.as_ref() == HTTP_RESPONSE_TAG_VERSION,
+    )
+}
+
+fn format_link_header(path: &str) -> String {
+    match infer_preload_as(path) {
+        Some(kind) => format!("<{path}>; rel=preload; as={kind}"),
+        None => format!("<{path}>; rel=preload"),
+    }
+}
+
+/// Map the asset extension to its `as=` attribute per the HTML living
+/// standard's [destination table]. Unknown extensions emit a bare
+/// `rel=preload` and let the browser decline the hint rather than
+/// guessing — `as=` mismatch silently invalidates the preload.
+///
+/// [destination table]: https://html.spec.whatwg.org/multipage/links.html#link-type-preload
+fn infer_preload_as(path: &str) -> Option<&'static str> {
+    // Strip any query string / fragment before extension lookup. Paths
+    // like `/main.js?v=42` should still infer `script`.
+    let pre_query = path.split(['?', '#']).next().unwrap_or(path);
+    let dot = pre_query.rfind('.')?;
+    let ext = &pre_query[dot + 1..];
+    Some(match ext.to_ascii_lowercase().as_str() {
+        "css" => "style",
+        "js" | "mjs" => "script",
+        "json" => "fetch",
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "avif" | "ico" => "image",
+        "woff" | "woff2" | "ttf" | "otf" => "font",
+        _ => return None,
+    })
+}
+
+#[harn_builtin(
     sig = "http_upgrade_ws(req: dict, options?: dict) -> dict",
     category = "http_response"
 )]
@@ -788,6 +906,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &HTTP_ETAG_IMPL_DEF,
     &HTTP_CHOOSE_IMPL_DEF,
     &HTTP_NOT_MODIFIED_IMPL_DEF,
+    &HTTP_PUSH_HINTS_IMPL_DEF,
     &HTTP_UPGRADE_WS_IMPL_DEF,
 ];
 
@@ -1125,6 +1244,119 @@ mod tests {
             headers.get("ETag").map(|v| v.display()).as_deref(),
             Some("\"abc\"")
         );
+    }
+
+    #[test]
+    fn http_push_hints_appends_link_headers_with_inferred_as() {
+        let envelope = http_ok_impl(
+            &[VmValue::Dict(Rc::new(BTreeMap::new()))],
+            &mut String::new(),
+        )
+        .unwrap();
+        let paths = VmValue::List(Rc::new(vec![
+            VmValue::String(Rc::from("/main.css")),
+            VmValue::String(Rc::from("/app.js")),
+            VmValue::String(Rc::from("/hero.webp")),
+            VmValue::String(Rc::from("/inter.woff2")),
+            VmValue::String(Rc::from("/manifest.json")),
+            VmValue::String(Rc::from("/unknown.xyz")),
+        ]));
+        let response =
+            http_push_hints_impl(&[envelope, paths], &mut String::new()).expect("push_hints");
+        let map = dict(&response);
+        let headers = map
+            .get("headers")
+            .and_then(VmValue::as_dict)
+            .expect("headers");
+        let links = match headers.get("Link") {
+            Some(VmValue::List(items)) => items.clone(),
+            other => panic!("Link should be a list, got {other:?}"),
+        };
+        let rendered: Vec<String> = links
+            .iter()
+            .map(|v| match v {
+                VmValue::String(s) => s.to_string(),
+                other => panic!("Link entry is not a string: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            rendered,
+            vec![
+                "</main.css>; rel=preload; as=style",
+                "</app.js>; rel=preload; as=script",
+                "</hero.webp>; rel=preload; as=image",
+                "</inter.woff2>; rel=preload; as=font",
+                "</manifest.json>; rel=preload; as=fetch",
+                "</unknown.xyz>; rel=preload",
+            ]
+        );
+    }
+
+    #[test]
+    fn http_push_hints_handles_querystring_in_path() {
+        let envelope = http_ok_impl(&[VmValue::Nil], &mut String::new()).unwrap();
+        let paths = VmValue::List(Rc::new(vec![VmValue::String(Rc::from(
+            "/static/app.js?v=42",
+        ))]));
+        let response =
+            http_push_hints_impl(&[envelope, paths], &mut String::new()).expect("push_hints");
+        let map = dict(&response);
+        let headers = map
+            .get("headers")
+            .and_then(VmValue::as_dict)
+            .expect("headers");
+        let links = match headers.get("Link") {
+            Some(VmValue::List(items)) => items.clone(),
+            other => panic!("Link should be a list, got {other:?}"),
+        };
+        assert_eq!(
+            links[0].display(),
+            "</static/app.js?v=42>; rel=preload; as=script"
+        );
+    }
+
+    #[test]
+    fn http_push_hints_rejects_untagged_envelope() {
+        let plain = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "status".to_string(),
+            VmValue::Int(200),
+        )])));
+        let paths = VmValue::List(Rc::new(vec![VmValue::String(Rc::from("/main.css"))]));
+        let result = http_push_hints_impl(&[plain, paths], &mut String::new());
+        assert!(
+            matches!(result, Err(VmError::Thrown(_))),
+            "untagged dict should be rejected, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn http_push_hints_preserves_existing_link_header() {
+        let envelope = http_reply_impl(
+            &[
+                VmValue::Int(200),
+                VmValue::Dict(Rc::new(BTreeMap::new())),
+                VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "Link".to_string(),
+                    VmValue::String(Rc::from("</legacy.css>; rel=preload; as=style")),
+                )]))),
+            ],
+            &mut String::new(),
+        )
+        .unwrap();
+        let paths = VmValue::List(Rc::new(vec![VmValue::String(Rc::from("/app.js"))]));
+        let response = http_push_hints_impl(&[envelope, paths], &mut String::new()).unwrap();
+        let map = dict(&response);
+        let headers = map
+            .get("headers")
+            .and_then(VmValue::as_dict)
+            .expect("headers");
+        let links = match headers.get("Link") {
+            Some(VmValue::List(items)) => items.clone(),
+            other => panic!("Link should be a list once preloads are added, got {other:?}"),
+        };
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].display(), "</legacy.css>; rel=preload; as=style");
+        assert_eq!(links[1].display(), "</app.js>; rel=preload; as=script");
     }
 
     #[test]

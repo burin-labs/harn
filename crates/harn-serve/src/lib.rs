@@ -74,8 +74,9 @@ pub use sessions::{
 };
 pub use tls::{bind_listener, HstsConfig, HttpTlsConfig};
 pub use transport::{
-    apply_transport_layers, compute_strong_etag, CorsConfig, TransportConfig,
-    COMPRESSION_MIN_SIZE_BYTES,
+    apply_transport_layers, compute_strong_etag, CorsConfig, HeaderOptOutPredicate,
+    TransportConfig, COMPRESSION_MIN_SIZE_BYTES, COMPRESSION_OPT_OUT_HEADER,
+    COMPRESSION_OPT_OUT_VALUE,
 };
 pub use ws::{
     ws_route, WsConfig, WsError, WsMessage, WsSession, DEFAULT_IDLE_PING_MS,

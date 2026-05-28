@@ -1,7 +1,8 @@
 /**
  * http-transport demo: exercise the A.12 transport-completeness
  * builtins (#2515) — content negotiation, ETag derivation, conditional
- * 304 envelopes, and the WS-upgrade envelope shape.
+ * 304 envelopes, the WS-upgrade envelope shape, and the HTTP/2-style
+ * push-hint builder.
  *
  * Scope (offline):
  *   - Pick a content type from a simulated `Accept` header.
@@ -9,15 +10,18 @@
  *   - Build a `http_not_modified` envelope that mirrors what a `.harn`
  *     handler returns when `If-None-Match` matches.
  *   - Build a `http_upgrade_ws` envelope with subprotocol negotiation.
+ *   - Wrap an `http_ok` envelope with `http_push_hints` so the codec
+ *     emits one `Link: <...>; rel=preload; as=...` header per asset.
  *   - Emit a receipt that captures every output so the tape stays
  *     deterministic and the demo runs without a live HTTP server.
  *
  * Why a demo for this primitive: each of `http_etag`, `http_choose`,
- * `http_not_modified`, and `http_upgrade_ws` is a new public builtin
- * the demo gate watches. The scenario keeps the offline smoke path
- * covered without spinning up a real axum listener — the
- * transport-layer behaviour itself is covered by the conformance
- * suite in `crates/harn-serve/tests/transport_conformance.rs`.
+ * `http_not_modified`, `http_upgrade_ws`, and `http_push_hints` is a
+ * public builtin the demo gate watches. The scenario keeps the
+ * offline smoke path covered without spinning up a real axum
+ * listener — the transport-layer behaviour itself is covered by the
+ * conformance suite in
+ * `crates/harn-serve/tests/transport_conformance.rs`.
  */
 fn payload() {
   return {resource: {id: "r1", value: "ETag-stable across runs."}}
@@ -50,6 +54,10 @@ fn main(harness: Harness) {
   // 4. Construct the WS-upgrade envelope. With both client + server
   //    offering `v1.harn`, that's the negotiated subprotocol.
   let upgrade = http_upgrade_ws(req, {subprotocols: ["v1.harn", "v2.harn"], idle_ping_ms: 30000})
+  // 5. Wrap an http_ok envelope with preload hints. The codec turns
+  //    each entry into a separate `Link: <path>; rel=preload; as=...`
+  //    header so HTTP/2-enabled clients can prefetch the asset.
+  let page = http_push_hints(http_ok({title: "home"}), ["/main.css", "/app.js", "/hero.webp"])
   let receipt = {
     receipt_kind: "http_transport_receipt",
     chose_content_type: chosen,
@@ -59,6 +67,9 @@ fn main(harness: Harness) {
     upgrade_status: upgrade.status,
     upgrade_subprotocol: upgrade.ws_upgrade.subprotocol,
     upgrade_offered_count: len(upgrade.ws_upgrade.offered),
+    page_status: page.status,
+    page_link_count: len(page.headers.Link),
+    page_first_link: page.headers.Link[0],
   }
   __io_println("=== http-transport receipt ===")
   __io_println(json_stringify(receipt))
