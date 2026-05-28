@@ -1,119 +1,10 @@
-//! Project, metadata, checkpoint, and store builtin signatures.
+//! Project + store builtin signatures that haven't migrated to
+//! `#[harn_builtin]` yet. Metadata/checkpoint/scan entries now ship from
+//! their stdlib modules.
 
-use super::{
-    BuiltinSignature, Param, Ty, TY_ANY, TY_DICT, TY_DICT_OR_NIL, TY_LIST, TY_NIL, TY_STRING,
-    TY_STRING_OR_NIL,
-};
+use super::{BuiltinSignature, Param, TY_ANY, TY_DICT, TY_DICT_OR_NIL, TY_LIST, TY_NIL, TY_STRING};
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
-    // checkpoint(key, value) — persist a checkpoint immediately. value may
-    // be any VM value (serialized via JSON).
-    BuiltinSignature::simple(
-        "checkpoint",
-        &[Param::new("key", TY_STRING), Param::new("value", TY_ANY)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple("checkpoint_clear", &[], TY_NIL),
-    BuiltinSignature::simple("checkpoint_delete", &[Param::new("key", TY_STRING)], TY_NIL),
-    BuiltinSignature::simple(
-        "checkpoint_exists",
-        &[Param::new("key", TY_STRING)],
-        Ty::Named("bool"),
-    ),
-    // checkpoint_get(key) -> stored value | nil. Stored values round-trip
-    // through JSON, so the static type is dynamic.
-    BuiltinSignature::simple("checkpoint_get", &[Param::new("key", TY_STRING)], TY_ANY),
-    BuiltinSignature::simple("checkpoint_list", &[], TY_LIST),
-    // compute_content_hash(dir) — fnv hash of file list + sizes + mtimes.
-    BuiltinSignature::simple(
-        "compute_content_hash",
-        &[Param::new("dir", TY_STRING)],
-        TY_STRING,
-    ),
-    // invalidate_facts(dir?) — metadata invalidation is namespace-driven.
-    BuiltinSignature::variadic(
-        "invalidate_facts",
-        &[Param::optional("dir", TY_STRING)],
-        TY_NIL,
-    ),
-    // metadata_entries(namespace?) -> list of {dir, local, resolved} dicts.
-    BuiltinSignature::simple(
-        "metadata_entries",
-        &[Param::optional("namespace", TY_STRING_OR_NIL)],
-        TY_LIST,
-    ),
-    // metadata_get(dir, namespace?) -> dict | nil
-    BuiltinSignature::simple(
-        "metadata_get",
-        &[
-            Param::new("dir", TY_STRING),
-            Param::optional("namespace", TY_STRING_OR_NIL),
-        ],
-        TY_DICT_OR_NIL,
-    ),
-    BuiltinSignature::simple("metadata_refresh_hashes", &[], TY_NIL),
-    // metadata_resolve(dir, namespace?) -> dict | nil
-    BuiltinSignature::simple(
-        "metadata_resolve",
-        &[
-            Param::new("dir", TY_STRING),
-            Param::optional("namespace", TY_STRING_OR_NIL),
-        ],
-        TY_DICT_OR_NIL,
-    ),
-    BuiltinSignature::simple("metadata_save", &[], TY_NIL),
-    // metadata_set(dir, namespace, data)
-    BuiltinSignature::simple(
-        "metadata_set",
-        &[
-            Param::new("dir", TY_STRING),
-            Param::new("namespace", TY_STRING),
-            Param::new("data", TY_DICT),
-        ],
-        TY_NIL,
-    ),
-    // metadata_stale(project?) -> {any_stale: bool, tier1: list, tier2: list}
-    BuiltinSignature::simple(
-        "metadata_stale",
-        &[Param::optional("project", TY_STRING)],
-        TY_DICT,
-    ),
-    // path_metadata_get(path, namespace?, opts?) -> dict | nil
-    BuiltinSignature::simple(
-        "path_metadata_get",
-        &[
-            Param::new("path", TY_STRING),
-            Param::optional("namespace", TY_STRING_OR_NIL),
-            Param::optional("opts", TY_DICT_OR_NIL),
-        ],
-        TY_DICT_OR_NIL,
-    ),
-    // path_metadata_set(path, namespace, data, opts?) -> nil
-    BuiltinSignature::simple(
-        "path_metadata_set",
-        &[
-            Param::new("path", TY_STRING),
-            Param::new("namespace", TY_STRING),
-            Param::new("data", TY_DICT),
-            Param::optional("opts", TY_DICT_OR_NIL),
-        ],
-        TY_NIL,
-    ),
-    // path_metadata_entries(namespace?, opts?) -> list of {kind, path, local, resolved?}
-    BuiltinSignature::simple(
-        "path_metadata_entries",
-        &[
-            Param::optional("namespace", TY_STRING_OR_NIL),
-            Param::optional("opts", TY_DICT_OR_NIL),
-        ],
-        TY_LIST,
-    ),
-    // metadata_status(namespace?) -> dict
-    BuiltinSignature::simple(
-        "metadata_status",
-        &[Param::optional("namespace", TY_STRING_OR_NIL)],
-        TY_DICT,
-    ),
     // project_enrich_native(path?, options?) -> dict (LLM-enriched evidence).
     BuiltinSignature::simple(
         "project_enrich_native",
@@ -122,21 +13,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("options", TY_DICT_OR_NIL),
         ],
         TY_DICT,
-    ),
-    // scan_directory(path?, pattern_or_options?, options?) -> list of
-    // {path, size, modified, is_dir} dicts. The middle arg may be either a
-    // glob pattern string or an options dict.
-    BuiltinSignature::simple(
-        "scan_directory",
-        &[
-            Param::optional("path", TY_STRING),
-            Param::optional(
-                "pattern_or_options",
-                Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]),
-            ),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_LIST,
     ),
     BuiltinSignature::simple("store_clear", &[], TY_NIL),
     BuiltinSignature::simple("store_delete", &[Param::new("key", TY_STRING)], TY_NIL),

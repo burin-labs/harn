@@ -268,7 +268,6 @@ fn stdlib_probe_vm() -> Vm {
     crate::store::register_store_builtins(&mut vm, &tmp);
     crate::checkpoint::register_checkpoint_builtins(&mut vm, &tmp, "default");
     crate::metadata::register_metadata_builtins(&mut vm, &tmp);
-    crate::metadata::register_scan_builtins(&mut vm);
     // Install the macro-emitted signatures into the parser registry so any
     // probe-driven name/metadata query (e.g. the alignment test) sees the
     // post-migration sig set. Idempotent under repeat install with the same
@@ -326,6 +325,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(lifecycle_receipts::MODULE_BUILTINS);
         out.extend_from_slice(math::MODULE_BUILTINS);
         out.extend_from_slice(memory::MODULE_BUILTINS);
+        out.extend_from_slice(crate::metadata::MODULE_BUILTINS);
         out.extend_from_slice(monitors::MODULE_BUILTINS);
         out.extend_from_slice(multipart::MODULE_BUILTINS);
         out.extend_from_slice(net_policy::MODULE_BUILTINS);
