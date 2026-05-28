@@ -307,11 +307,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple("e", &[], TY_FLOAT),
     BuiltinSignature::simple(
-        "estimate_tokens",
-        &[Param::new("messages", TY_LIST)],
-        TY_INT,
-    ),
-    BuiltinSignature::simple(
         "emit_channel",
         &[
             Param::new("name", TY_STRING),
@@ -357,7 +352,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_LIST,
     ),
     BuiltinSignature::variadic("metrics_inc", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("microcompact", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic(
         "monitor_wait_for_native",
         &[Param::new("args", TY_ANY)],

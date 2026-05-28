@@ -689,14 +689,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_LIST,
     ),
     BuiltinSignature::simple(
-        "transcript_auto_compact",
-        &[
-            Param::new("messages", TY_LIST),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_LIST,
-    ),
-    BuiltinSignature::simple(
         "transcript_compact",
         &[
             Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),

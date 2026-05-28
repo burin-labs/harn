@@ -30,17 +30,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     // handoff_effects(source, ceiling?) -> typed effect set computed from a
     // child agent's entrypoint Harn source,
-    // select_artifacts_adaptive(artifacts, policy?) -> list of selected
-    // artifacts after dedup, microcompaction, and policy-driven
-    // selection.
-    BuiltinSignature::simple(
-        "select_artifacts_adaptive",
-        &[
-            Param::optional("artifacts", Ty::Union(&[TY_LIST, TY_NIL])),
-            Param::optional("policy", TY_DICT_OR_NIL),
-        ],
-        TY_LIST,
-    ),
     // workflow_clone(workflow) -> cloned workflow graph dict.
     BuiltinSignature::simple(
         "workflow_clone",
