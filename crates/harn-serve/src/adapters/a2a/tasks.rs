@@ -119,6 +119,7 @@ impl A2aServer {
                 agent_session_id: Some(session_id.clone()),
                 progress: None,
                 tenant_id: None,
+                request_id: Some(task.id.clone()),
             })
             .await;
 

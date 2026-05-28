@@ -260,6 +260,44 @@ fn edit_rename_symbol_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn obs_primitive_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("obs-primitive");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "obs-primitive demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("obs_primitive_receipt={"),
+        "obs-primitive demo should emit the receipt envelope:\n{}",
+        outcome.stdout
+    );
+    // The session_put helper opens one span, records three instruments,
+    // and emits one structured log under that span.
+    assert!(
+        outcome.stdout.contains("span_end_count: 1"),
+        "obs-primitive must close exactly one span:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("metric_count: 3"),
+        "obs-primitive must record counter/histogram/gauge (3 metrics):\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("log_count: 1"),
+        "obs-primitive must emit one structured log:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("request_id: <unbound>"),
+        "obs-primitive runs standalone — request_id should be unbound until \
+         `harn serve --obs stdout` pushes one:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all
@@ -272,6 +310,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "stdlib-toolkit",
         "compaction-policy",
         "edit-rename-symbol",
+        "obs-primitive",
     ]
     .into_iter()
     .collect();

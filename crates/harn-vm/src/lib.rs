@@ -149,7 +149,7 @@ pub use corrections::{
 };
 pub use harness::{
     DenyEvent, Harness, HarnessCall, HarnessClock, HarnessCrypto, HarnessEnv, HarnessFs,
-    HarnessKind, HarnessLlm, HarnessNet, HarnessProcess, HarnessRandom, HarnessStdio,
+    HarnessKind, HarnessLlm, HarnessNet, HarnessObs, HarnessProcess, HarnessRandom, HarnessStdio,
     HarnessSystem, HarnessTenant, HarnessTerm, MockAwareClock, MockHarnessBuilder, VmHarness,
 };
 pub use harness_net::{
@@ -184,6 +184,8 @@ pub use mcp_server::{
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
 };
 pub use metadata::register_metadata_builtins;
+pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};
+pub use observability::request_id::{current_request_id, enter_request_id, RequestIdScopeGuard};
 pub use orchestration::{
     benchmark_adapted_replay_pair, benchmark_replay_trace, build_replay_benchmark_report,
     OpenCodeJsonlAdapter, ReplayBenchmarkCloudIngest, ReplayBenchmarkError,
@@ -246,6 +248,7 @@ pub use stdlib::http_response::{
 };
 pub use stdlib::io::{set_stdout_passthrough, take_stderr_buffer};
 pub use stdlib::long_running::cancel_handle as cancel_long_running_handle;
+pub use stdlib::observability::install_default_backend as install_obs_default_backend;
 pub use stdlib::secret_scan::{
     append_secret_scan_audit, audit_secret_scan_active, scan_content as secret_scan_content,
     SecretFinding, SECRET_SCAN_AUDIT_TOPIC,
