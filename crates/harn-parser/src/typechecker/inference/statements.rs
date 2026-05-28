@@ -783,7 +783,7 @@ impl TypeChecker {
                 else_body,
             } => {
                 self.check_node(condition, scope);
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements_with_lint(condition, scope);
 
                 let mut then_scope = scope.child();
                 refs.apply_truthy(&mut then_scope);
@@ -866,7 +866,7 @@ impl TypeChecker {
 
             Node::WhileLoop { condition, body } => {
                 self.check_node(condition, scope);
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements_with_lint(condition, scope);
                 let mut loop_scope = scope.child();
                 refs.apply_truthy(&mut loop_scope);
                 self.check_block(body, &mut loop_scope);
@@ -1388,7 +1388,7 @@ impl TypeChecker {
                 false_expr,
             } => {
                 self.check_node(condition, scope);
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements_with_lint(condition, scope);
 
                 let mut true_scope = scope.child();
                 refs.apply_truthy(&mut true_scope);
@@ -1412,7 +1412,7 @@ impl TypeChecker {
                 else_body,
             } => {
                 self.check_node(condition, scope);
-                let refs = Self::extract_refinements(condition, scope);
+                let refs = self.extract_refinements_with_lint(condition, scope);
 
                 let mut else_scope = scope.child();
                 refs.apply_falsy(&mut else_scope);

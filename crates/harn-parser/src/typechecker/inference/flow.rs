@@ -110,7 +110,220 @@ fn format_discriminant(v: &DiscriminantValue) -> String {
     }
 }
 
+/// Compile-time evaluation of a boolean condition over literal operands and
+/// the short-circuit / negation rules. Returns `Some(value)` only when the
+/// truthiness is determinable from the AST alone — leaves are limited to
+/// literal forms (matching `VmValue::is_truthy` semantics for the same node
+/// kinds), and the recursion mirrors how `&&` / `||` short-circuit at
+/// runtime. Returns `None` for any sub-expression whose truthiness depends
+/// on a runtime value.
+fn evaluate_constant_bool(condition: &SNode) -> Option<bool> {
+    match &condition.node {
+        Node::BoolLiteral(b) => Some(*b),
+        Node::NilLiteral => Some(false),
+        Node::IntLiteral(v) => Some(*v != 0),
+        Node::FloatLiteral(v) => Some(*v != 0.0),
+        Node::StringLiteral(s) | Node::RawStringLiteral(s) => Some(!s.is_empty()),
+        Node::BinaryOp { op, left, right } if op == "&&" || op == "||" => {
+            let lv = evaluate_constant_bool(left);
+            let rv = evaluate_constant_bool(right);
+            if op == "&&" {
+                match (lv, rv) {
+                    // Either side known-falsy collapses `&&` to falsy.
+                    (Some(false), _) | (_, Some(false)) => Some(false),
+                    (Some(true), Some(true)) => Some(true),
+                    _ => None,
+                }
+            } else {
+                match (lv, rv) {
+                    // Either side known-truthy collapses `||` to truthy.
+                    (Some(true), _) | (_, Some(true)) => Some(true),
+                    (Some(false), Some(false)) => Some(false),
+                    _ => None,
+                }
+            }
+        }
+        Node::UnaryOp { op, operand } if op == "!" => evaluate_constant_bool(operand).map(|b| !b),
+        _ => None,
+    }
+}
+
 impl TypeChecker {
+    /// Wrap `extract_refinements` with the [`Code::LintVacuousCondition`]
+    /// emission pass. Callers that own `&mut self` (every `if` / `while` /
+    /// `guard` site) should prefer this over the bare associated form so the
+    /// lint fires consistently. The `&self`-only call site in `infer_type`'s
+    /// ternary arm still calls the bare form — a small, deliberate coverage
+    /// gap that mirrors how the rest of the typechecker emits diagnostics.
+    pub(in crate::typechecker) fn extract_refinements_with_lint(
+        &mut self,
+        condition: &SNode,
+        scope: &TypeScope,
+    ) -> Refinements {
+        self.lint_vacuous_condition(condition, scope);
+        Self::extract_refinements(condition, scope)
+    }
+
+    /// Walk a boolean condition reporting `HARN-LNT-058`. Two patterns fire:
+    ///
+    /// 1. The whole subexpression reduces to a constant via
+    ///    [`evaluate_constant_bool`]. One warning at the subexpression's
+    ///    span; no descent (children are dead).
+    /// 2. The subexpression is `schema_is(x, S)` / `is_type(x, S)` and
+    ///    `x`'s static type makes the predicate's answer known.
+    ///
+    /// `&&` and `||` re-enter with the refined scope so a nested predicate
+    /// sees the narrowings the left-hand operand established.
+    fn lint_vacuous_condition(&mut self, condition: &SNode, scope: &TypeScope) {
+        if let Some(value) = evaluate_constant_bool(condition) {
+            let (state, dead_branch) = if value {
+                ("truthy", "falsy")
+            } else {
+                ("falsy", "truthy")
+            };
+            self.warning_at(
+                Code::LintVacuousCondition,
+                format!("condition is statically always {state}; the {dead_branch} branch is unreachable"),
+                condition.span,
+            );
+            return;
+        }
+        match &condition.node {
+            Node::BinaryOp { op, left, right } if op == "&&" || op == "||" => {
+                self.lint_vacuous_condition(left, scope);
+                let left_ref = Self::extract_refinements(left, scope);
+                let mut right_scope = scope.child();
+                if op == "&&" {
+                    left_ref.apply_truthy(&mut right_scope);
+                } else {
+                    left_ref.apply_falsy(&mut right_scope);
+                }
+                self.lint_vacuous_condition(right, &right_scope);
+            }
+            Node::UnaryOp { op, operand } if op == "!" => {
+                self.lint_vacuous_condition(operand, scope);
+            }
+            Node::FunctionCall { name, args, .. }
+                if (name == "schema_is" || name == "is_type") && args.len() == 2 =>
+            {
+                self.check_vacuous_schema_call(name, args, condition.span, scope);
+            }
+            _ => {}
+        }
+    }
+
+    fn check_vacuous_schema_call(
+        &mut self,
+        name: &str,
+        args: &[SNode],
+        span: Span,
+        scope: &TypeScope,
+    ) {
+        let Node::Identifier(var_name) = &args[0].node else {
+            return;
+        };
+        let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) else {
+            return;
+        };
+        let Some(Some(var_type)) = scope.get_var(var_name).cloned() else {
+            return;
+        };
+
+        // Open top types — schema_is is genuinely informative here.
+        let resolved_var = self.resolve_alias(&var_type, scope);
+        if matches!(&resolved_var, TypeExpr::Named(n) if n == "unknown" || n == "any") {
+            return;
+        }
+
+        if self.schema_is_definitely_satisfied(&resolved_var, &schema_type, scope) {
+            self.emit_vacuous_schema_warning(name, var_name, span, true);
+            return;
+        }
+
+        // `intersect_types == None` is the existing check the refinement
+        // extractor uses to collapse the truthy branch, so reusing it keeps
+        // the lint perfectly aligned with the narrower's view.
+        if intersect_types(&resolved_var, &schema_type).is_none() {
+            self.emit_vacuous_schema_warning(name, var_name, span, false);
+        }
+    }
+
+    fn emit_vacuous_schema_warning(
+        &mut self,
+        name: &str,
+        var_name: &str,
+        span: Span,
+        always_true: bool,
+    ) {
+        let (verdict, reason, dead_branch) = if always_true {
+            (
+                "always true",
+                "is statically known to match the schema",
+                "falsy",
+            )
+        } else {
+            (
+                "always false",
+                "'s static type cannot match the schema",
+                "truthy",
+            )
+        };
+        self.warning_at(
+            Code::LintVacuousCondition,
+            format!(
+                "`{name}({var_name}, …)` is {verdict} here: `{var_name}`{reason}, so the {dead_branch} branch is unreachable"
+            ),
+            span,
+        );
+    }
+
+    /// Strict structural subtype check used by the vacuous-schema lint.
+    /// Unlike `types_compatible`, this REJECTS optional-vs-required field
+    /// mismatches on shapes — `schema_is` is a runtime presence check, so
+    /// `{b: string?}` is *not* a guaranteed subtype of `{b: string}` (the
+    /// runtime value can lack `b`). All other relations defer to
+    /// `types_compatible`, which already handles unions, named-type aliases,
+    /// numeric widening, and literal-vs-base intersections.
+    fn schema_is_definitely_satisfied(
+        &self,
+        var_type: &TypeExpr,
+        schema_type: &TypeExpr,
+        scope: &TypeScope,
+    ) -> bool {
+        let var = self.resolve_alias(var_type, scope);
+        let schema = self.resolve_alias(schema_type, scope);
+
+        // Reject open top types on either side.
+        if matches!(&var, TypeExpr::Named(n) if n == "unknown" || n == "any")
+            || matches!(&schema, TypeExpr::Named(n) if n == "unknown" || n == "any")
+        {
+            return false;
+        }
+
+        match (&var, &schema) {
+            (TypeExpr::Shape(actual_fields), TypeExpr::Shape(expected_fields)) => {
+                expected_fields.iter().all(|expected| {
+                    if expected.optional {
+                        return true;
+                    }
+                    actual_fields.iter().any(|actual| {
+                        actual.name == expected.name
+                            && !actual.optional
+                            && self.schema_is_definitely_satisfied(
+                                &actual.type_expr,
+                                &expected.type_expr,
+                                scope,
+                            )
+                    })
+                })
+            }
+            (TypeExpr::Union(members), _) => members
+                .iter()
+                .all(|m| self.schema_is_definitely_satisfied(m, &schema, scope)),
+            _ => self.types_compatible(&schema, &var, scope),
+        }
+    }
+
     /// Extract bidirectional type refinements from a condition expression.
     pub(in crate::typechecker) fn extract_refinements(
         condition: &SNode,

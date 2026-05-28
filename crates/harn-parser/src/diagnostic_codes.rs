@@ -333,6 +333,7 @@ diagnostic_codes! {
     LintAmbientEnvBuiltin, "HARN-LNT-055", Lnt, "ambient env builtin replaced by `harness.env.*`";
     LintAmbientRandomBuiltin, "HARN-LNT-056", Lnt, "ambient random builtin replaced by `harness.random.*`";
     LintAmbientNetBuiltin, "HARN-LNT-057", Lnt, "ambient net builtin replaced by `harness.net.*`";
+    LintVacuousCondition, "HARN-LNT-058", Lnt, "if / while / guard condition is statically known to always succeed or always fail";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";
