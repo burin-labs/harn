@@ -725,3 +725,313 @@ pipeline t(task) {
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
+
+// HARN-LNT-058 — vacuous-condition lint. The lint fires on
+// statically-determined `if` / `while` / `guard` conditions, covering both
+// constant-evaluable booleans and `schema_is` / `is_type` checks whose
+// answer is fixed by the variable's static type.
+
+#[test]
+fn test_vacuous_condition_lint_schema_is_always_true_width_subtype() {
+    // `x: {a, b}` is a width-subtype of `Tag = {b: string}`, so the
+    // `schema_is` check cannot fail at runtime.
+    let warns = warnings(
+        r"type Tag = {b: string}
+pipeline t(task) {
+  fn check(x: {a: int, b: string}) {
+    if schema_is(x, Tag) {
+      let _b: string = x.b
+    }
+  }
+}",
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("always true")),
+        "expected always-true warning, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_schema_is_always_false_disjoint() {
+    // `x: int` and a shape schema are disjoint denotations: no scalar
+    // value satisfies a shape match, so the truthy branch is dead.
+    let warns = warnings(
+        r"type Tag = {kind: string}
+pipeline t(task) {
+  fn check(x: int) {
+    if schema_is(x, Tag) {
+      log(x)
+    }
+  }
+}",
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("always false")),
+        "expected always-false warning, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_silent_on_unknown() {
+    // `unknown` is the open-world top — schema_is is genuinely informative
+    // and the lint must stay silent.
+    let warns = warnings(
+        r#"type Tag = {b: string}
+pipeline t(task) {
+  fn check(x: unknown) {
+    if schema_is(x, Tag) {
+      log("ok")
+    }
+  }
+}"#,
+    );
+    assert!(
+        !warns
+            .iter()
+            .any(|w| w.contains("always true") || w.contains("always false")),
+        "expected no vacuous-condition warning on unknown var, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_respects_optional_field() {
+    // An optional field in the variable can be absent at runtime, so
+    // `schema_is` against a required field is NOT statically true.
+    let warns = warnings(
+        r"type Tag = {b: string}
+pipeline t(task) {
+  fn check(x: {b: string?}) {
+    if schema_is(x, Tag) {
+      let _b: string = x.b
+    }
+  }
+}",
+    );
+    assert!(
+        !warns.iter().any(|w| w.contains("always true")),
+        "optional-vs-required mismatch must not fire always-true, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_skips_bare_true_literal() {
+    // `if true { … }` is the canonical Harn block-scope idiom — the
+    // conformance suite uses it intentionally. Skip the lint on bare
+    // literals so we don't spam every block-scope use; the compound-
+    // folding tests below still catch the cases that *are* mistakes.
+    let warns = warnings(
+        r#"pipeline t(task) {
+  if true {
+    log("always runs")
+  }
+}"#,
+    );
+    assert!(
+        !warns.iter().any(|w| w.contains("always truthy")),
+        "bare `if true` is a block-scope idiom and must not fire, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_skips_bare_false_literal() {
+    // `if false { … }` is the canonical disable-block idiom (used when
+    // temporarily turning a branch off during refactor) — skip it for
+    // the same reason as `if true`.
+    let warns = warnings(
+        r#"pipeline t(task) {
+  if false {
+    log("never runs")
+  }
+}"#,
+    );
+    assert!(
+        !warns.iter().any(|w| w.contains("always falsy")),
+        "bare `if false` is a disable-block idiom and must not fire, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_constant_or_short_circuit() {
+    // `true || _` collapses to always-truthy regardless of the RHS.
+    let warns = warnings(
+        r#"pipeline t(task) {
+  fn check(x: int) {
+    if true || x > 0 {
+      log("always runs")
+    }
+  }
+}"#,
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("always truthy")),
+        "expected `true || _` short-circuit warning, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_constant_and_short_circuit() {
+    // `_ && false` collapses to always-falsy regardless of the LHS.
+    let warns = warnings(
+        r#"pipeline t(task) {
+  fn check(x: int) {
+    if x > 0 && false {
+      log("never runs")
+    }
+  }
+}"#,
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("always falsy")),
+        "expected `_ && false` short-circuit warning, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_negated_constant() {
+    let warns = warnings(
+        r#"pipeline t(task) {
+  if !true {
+    log("never runs")
+  }
+}"#,
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("always falsy")),
+        "expected `!true` warning, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_silent_on_normal_narrowing() {
+    // A real refinement (a tagged shape union partitioned by `schema_is`
+    // matching one variant) must not fire either lint message — the
+    // partition is genuine, not vacuous.
+    let warns = warnings(
+        r#"type A = {kind: "a"}
+pipeline t(task) {
+  fn check(x: {kind: "a", extra: int} | {kind: "b"}) {
+    if schema_is(x, A) {
+      log(x)
+    }
+  }
+}"#,
+    );
+    assert!(
+        !warns
+            .iter()
+            .any(|w| w.contains("always true") || w.contains("always false")),
+        "real narrowing must stay silent, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_fires_for_is_type_alias() {
+    // `is_type` shares the dispatcher with `schema_is` — the same lint
+    // must fire for it without a second registration.
+    let warns = warnings(
+        r"type Tag = {b: string}
+pipeline t(task) {
+  fn check(x: {a: int, b: string}) {
+    if is_type(x, Tag) {
+      let _b: string = x.b
+    }
+  }
+}",
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("is_type") && w.contains("always true")),
+        "expected `is_type` always-true warning, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_descends_through_negation() {
+    // `!schema_is(x, S)` is just an inversion — the underlying predicate
+    // is still statically determined, so the walker must descend into
+    // the operand and emit the lint there.
+    let warns = warnings(
+        r"type Tag = {b: string}
+pipeline t(task) {
+  fn check(x: {a: int, b: string}) {
+    if !schema_is(x, Tag) {
+      log(x)
+    }
+  }
+}",
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("schema_is") && w.contains("always true")),
+        "expected `schema_is` always-true through negation, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_fires_in_while_condition() {
+    // `while` runs the same condition-extraction pipeline as `if`. Bare
+    // `while true { … }` is the idiomatic infinite-loop spelling, so the
+    // lint skips it; a compound condition that folds to the same answer
+    // is what we want to catch — `while (cond || true)` is almost always
+    // a refactor leftover.
+    let warns = warnings(
+        r#"pipeline t(task) {
+  fn check(cond: bool) {
+    while cond || true {
+      log("forever")
+      break
+    }
+  }
+}"#,
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("always truthy")),
+        "expected compound-folded `while` warning, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_fires_in_guard_condition() {
+    // `guard <cond> else { ... }`: a vacuous compound condition makes
+    // either the guard's pass-through or its else-block dead. Use a
+    // compound folder (not a bare literal) so the idiomatic-bare carve-
+    // out doesn't apply.
+    let warns = warnings(
+        r"pipeline t(task) {
+  fn check(cond: bool) -> int {
+    guard cond && false else { return 0 }
+    return 1
+  }
+}",
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("always falsy")),
+        "expected compound-folded `guard` warning, got: {warns:?}"
+    );
+}
+
+#[test]
+fn test_vacuous_condition_lint_sees_nil_refined_scope_for_rhs() {
+    // After `x != nil && schema_is(x, S)`, the right operand sees an
+    // x that the narrower already stripped of `nil`. The lint must walk
+    // the &&'s right operand in that refined scope so it agrees with the
+    // narrower's view of `x`'s type.
+    let warns = warnings(
+        r"type Tag = {b: string}
+pipeline t(task) {
+  fn check(x: {a: int, b: string} | nil) {
+    if x != nil && schema_is(x, Tag) {
+      let _b: string = x.b
+    }
+  }
+}",
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("schema_is") && w.contains("always true")),
+        "expected schema_is to be vacuous after `x != nil` narrowing, got: {warns:?}"
+    );
+}

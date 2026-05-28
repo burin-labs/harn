@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 57
+      "count": 58
     },
     {
       "id": "FMT",
@@ -2224,6 +2224,15 @@
         "HARN-NAM-101",
         "HARN-LNT-001"
       ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-058",
+      "category": "LNT",
+      "summary": "if / while / guard condition is statically known to always succeed or always fail",
+      "repairs": [],
+      "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
     },
