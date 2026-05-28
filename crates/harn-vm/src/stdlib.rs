@@ -65,7 +65,7 @@ mod multipart;
 mod net_policy;
 mod oauth_dynreg;
 mod oauth_storage;
-mod observability;
+pub(crate) mod observability;
 mod options;
 mod path;
 pub(crate) mod path_scope_guard;

@@ -111,6 +111,18 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/http-transport/tape.jsonl"),
     },
     Scenario {
+        id: "obs-primitive",
+        title: "harness.obs.* spans + counter/histogram/gauge + audit roundtrip",
+        description: "Drive the standardized observability primitive (#2513): open a span over a \
+                      simulated `harn.session.put`, record one of each instrument variant \
+                      (counter / histogram / gauge), emit a structured log inside the span, then \
+                      drain the in-process buffer and surface a receipt of events-by-kind plus \
+                      the bound request_id. Validates vocabulary at emit time and routes through \
+                      the `test` backend so the scenario stays fully offline.",
+        script: include_str!("../../assets/demo/obs-primitive/scenario.harn"),
+        tape: include_str!("../../assets/demo/obs-primitive/tape.jsonl"),
+    },
+    Scenario {
         id: "edit-rename-symbol",
         title: "edit.rename_symbol rewrites a Rust struct across the workspace",
         description: "Stage a tiny Rust workspace, build the typed symbol graph (#2434), then \

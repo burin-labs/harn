@@ -26,7 +26,8 @@ use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::cli::{
-    A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeTlsMode,
+    A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeObsMode,
+    ServeTlsMode,
 };
 
 /// Default 10 MiB request-body cap applied to every `harn serve` HTTP
@@ -34,6 +35,22 @@ use crate::cli::{
 /// listener so large/runaway POSTs cannot exhaust process memory while
 /// axum buffers a request.
 pub(crate) const SERVE_DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+
+/// Install the observability backend chosen by `harn serve --obs
+/// <MODE>` before any handler runs. `Auto` defers to environment
+/// detection (existing behaviour); the rest pin a single backend so the
+/// operator gets predictable routing.
+fn apply_obs_mode(mode: ServeObsMode) -> Result<(), String> {
+    let backend = match mode {
+        ServeObsMode::Auto => return Ok(()),
+        ServeObsMode::Stdout => "pretty_stdout",
+        ServeObsMode::Stderr => "pretty_stderr",
+        ServeObsMode::Otel => "otel",
+        ServeObsMode::Off => "test",
+    };
+    harn_vm::install_obs_default_backend(backend)
+        .map_err(|error| format!("--obs {backend}: {error}"))
+}
 
 /// Refuse to start an unauthenticated HTTP serve adapter on a
 /// non-loopback bind. When the bind is loopback (`127.0.0.0/8`, `::1`)
@@ -70,6 +87,7 @@ fn guard_serve_bind_auth(
 }
 
 pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
+    apply_obs_mode(args.obs)?;
     crate::acp::run_acp_server(
         Some(&args.file),
         build_auth_policy(&args.api_key, args.hmac_secret.as_ref()),
@@ -84,6 +102,7 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
 }
 
 pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
+    apply_obs_mode(args.obs)?;
     let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
     let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
     let bind = args
@@ -107,6 +126,7 @@ pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
 }
 
 pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
+    apply_obs_mode(args.obs)?;
     let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
     let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
     guard_serve_bind_auth("api", args.bind, &auth_policy, &tls)?;
@@ -128,6 +148,7 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
 }
 
 pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
+    apply_obs_mode(args.obs)?;
     if args.transport == McpServeTransport::Stdio
         && (!args.api_key.is_empty() || args.hmac_secret.is_some())
     {

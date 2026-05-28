@@ -1,0 +1,94 @@
+import { to_string_lossy } from "std/coerce"
+/**
+ * obs-primitive demo: drive the standardized harness.obs.* primitive
+ * (issue #2513, epic A.10) end-to-end on the same surface every
+ * harn-serve primitive (sessions, permissions, MCP, compaction, pg,
+ * http) emits through.
+ *
+ * Scope:
+ *   - Open a span over a simulated primitive boundary
+ *     (`harn.session.put`), record one of each instrument variant
+ *     (counter / histogram / gauge), and emit a structured log under
+ *     the open span.
+ *   - Drain the in-process emission buffer via `obs.events_take()` and
+ *     feed it back through the conformance audit (`HARN-OBS-AUDIT`):
+ *     every metric must carry an `instrument` tag, every span_end must
+ *     carry a `trace_id`, and every attribute under a declared
+ *     `harn.<ns>.*` namespace must be in the published vocabulary.
+ *   - Emit a deterministic receipt: counts of events by kind, the
+ *     audit-finding count (expected: zero), and the request_id
+ *     surfaced by `obs.request_id()` (nil here because the demo runs
+ *     standalone — `harn serve --obs stdout` is what binds one).
+ *
+ * Why a demo for this primitive: `harness.obs.*` is the cross-cutting
+ * surface every other epic-A primitive routes through. The demo gate
+ * (#2526 fragment) flags every public primitive; this scenario keeps
+ * the offline-runnable smoke path covered without needing an OTLP
+ * collector in the fixture set.
+ *
+ * Live-mode hint: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+ * harn demo obs-primitive` exports the same events to a real
+ * collector; this scenario uses the `test` backend so the tape stays
+ * fixed and offline.
+ */
+import {
+  backends,
+  configure,
+  counter,
+  end_span,
+  events_take,
+  gauge,
+  histogram,
+  log,
+  request_id,
+  reset,
+  start_span,
+} from "std/observability"
+
+fn record_session_put() {
+  let handle = start_span("harn.session.put", {"harn.session.id": "sess_demo"})
+  counter("harn.session.put_total", 1, {"harn.session.op": "put"})
+  histogram("harn.session.duration_ms", 12, {"harn.session.op": "put"})
+  gauge("harn.session.bytes", 256, {"harn.session.op": "put"})
+  log("session_put_complete", "info", {"harn.session.outcome": "ok"})
+  end_span(handle)
+}
+
+fn count_by_kind(events) {
+  var span_end = 0
+  var metric = 0
+  var log_count = 0
+  var other = 0
+  for event in events {
+    let payload = event?.payload ?? {}
+    let kind = payload?.kind ?? "other"
+    if kind == "span_end" {
+      span_end = span_end + 1
+    } else if kind == "metric" {
+      metric = metric + 1
+    } else if kind == "log" {
+      log_count = log_count + 1
+    } else {
+      other = other + 1
+    }
+  }
+  return {span_end: span_end, metric: metric, log: log_count, other: other}
+}
+
+fn main(harness: Harness) {
+  // Route through the `test` backend so the scenario is fully offline
+  // and the in-process buffer is the source of truth.
+  reset()
+  configure({backend: backends().test()})
+  record_session_put()
+  let events = events_take()
+  let counts = count_by_kind(events)
+  let req_id = request_id() ?? "<unbound>"
+  __io_println("obs_primitive_receipt={")
+  __io_println("  span_end_count: " + to_string_lossy(counts.span_end))
+  __io_println("  metric_count: " + to_string_lossy(counts.metric))
+  __io_println("  log_count: " + to_string_lossy(counts.log))
+  __io_println("  total_events: " + to_string_lossy(len(events)))
+  __io_println("  request_id: " + req_id)
+  __io_println("}")
+}

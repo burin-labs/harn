@@ -474,6 +474,7 @@ fn build_call_request_accepts_named_arguments() {
         AuthRequest::default(),
         Arc::new(AtomicBool::new(false)),
         None,
+        None,
     )
     .expect("call request");
     match request.arguments {

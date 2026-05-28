@@ -88,6 +88,7 @@ impl crate::vm::Vm {
             HarnessKind::Crypto => self.call_harness_crypto_method(handle, method, args),
             HarnessKind::Llm => self.call_harness_llm_method(handle, method),
             HarnessKind::Tenant => self.call_harness_tenant_method(handle, method, args),
+            HarnessKind::Obs => self.call_harness_obs_method(handle, method, args).await,
         }
     }
 
@@ -290,6 +291,88 @@ impl crate::vm::Vm {
             "try_id" => Ok(crate::harness_tenant::current_tenant_id()
                 .map(|tenant| vm_string(tenant.0))
                 .unwrap_or(VmValue::Nil)),
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
+    async fn call_harness_obs_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        use crate::stdlib::observability::{
+            emit_instrument, end_span_typed, log_typed, start_span_typed, MetricInstrument,
+        };
+
+        match method {
+            "request_id" => {
+                require_no_args(handle, method, args)?;
+                Ok(crate::observability::request_id::current_request_id()
+                    .map(vm_string)
+                    .unwrap_or(VmValue::Nil))
+            }
+            "start_span" => {
+                let name = obs_string_arg(handle, method, args.first(), "name")?;
+                let attrs = obs_attrs_arg(handle, method, args.get(1))?;
+                start_span_typed(name, attrs)
+            }
+            "end_span" => {
+                let handle_arg = args.first().cloned().unwrap_or(VmValue::Nil);
+                end_span_typed(handle_arg);
+                Ok(VmValue::Nil)
+            }
+            "span" => {
+                let name = obs_string_arg(handle, method, args.first(), "name")?;
+                let attrs = obs_attrs_arg(handle, method, args.get(1))?;
+                let callback = args.get(2).cloned().unwrap_or(VmValue::Nil);
+                let span_handle = start_span_typed(name, attrs)?;
+                // No callback → imperative mode: hand the span handle
+                // back so the caller can close it with `end_span` later.
+                // The other branches always close before returning so
+                // an erroring closure can't leak a span.
+                let closure = match callback {
+                    VmValue::Nil => return Ok(span_handle),
+                    VmValue::Closure(closure) => closure,
+                    other => {
+                        end_span_typed(span_handle);
+                        return Err(VmError::TypeError(format!(
+                            "{}.span callback must be a closure or nil, got {}",
+                            handle.type_name(),
+                            other.type_name()
+                        )));
+                    }
+                };
+                let result = self.call_closure_pub(&closure, &[]).await;
+                end_span_typed(span_handle);
+                result
+            }
+            "log" => {
+                // Argument order matches `std/observability::log`:
+                // `(message, level = "info", fields = {})`. Keeping the
+                // two surfaces in lockstep means a script that imports
+                // either one round-trips identically.
+                let message = obs_string_arg(handle, method, args.first(), "message")?;
+                let level = obs_optional_string_arg(handle, method, args.get(1), "level")?
+                    .unwrap_or_else(|| "info".to_string());
+                let fields = obs_attrs_arg(handle, method, args.get(2))?;
+                let emitted = log_typed(message, level, fields)?;
+                Ok(crate::stdlib::json_to_vm_value(&emitted))
+            }
+            "counter" | "histogram" | "gauge" => {
+                let instrument = match method {
+                    "counter" => MetricInstrument::Counter,
+                    "histogram" => MetricInstrument::Histogram,
+                    "gauge" => MetricInstrument::Gauge,
+                    _ => unreachable!("outer match restricts the arm"),
+                };
+                let name = obs_string_arg(handle, method, args.first(), "name")?;
+                let value_arg = args.get(1).cloned().unwrap_or(VmValue::Nil);
+                let value_json = obs_number_arg(handle, method, &value_arg)?;
+                let attrs = obs_attrs_arg(handle, method, args.get(2))?;
+                let emitted = emit_instrument(instrument, name, value_json, attrs)?;
+                Ok(crate::stdlib::json_to_vm_value(&emitted))
+            }
             _ => Err(method_unsupported(handle, method)),
         }
     }
@@ -890,6 +973,13 @@ impl crate::vm::Vm {
                 // and assert `harness.tenant.id()` returns the pushed
                 // id. No mock-only state is needed.
                 self.call_harness_tenant_method(handle, method, args)
+            }
+            HarnessKind::Obs => {
+                // Mock mode shares the same OBS_STATE thread-local as
+                // real mode — fixtures already drive `__obs_*` via
+                // `std/observability` and expect the same emissions to
+                // surface through `harness.obs.*` calls.
+                self.call_harness_obs_method(handle, method, args).await
             }
         }
     }
@@ -1533,6 +1623,101 @@ fn method_unsupported(handle: &VmHarness, method: &str) -> VmError {
         "value of type {} has no method `{method}`",
         handle.type_name()
     ))
+}
+
+fn require_no_args(handle: &VmHarness, method: &str, args: &[VmValue]) -> Result<(), VmError> {
+    if args.is_empty() {
+        return Ok(());
+    }
+    Err(VmError::TypeError(format!(
+        "{}.{method} takes no arguments",
+        handle.type_name()
+    )))
+}
+
+fn obs_string_arg(
+    handle: &VmHarness,
+    method: &str,
+    value: Option<&VmValue>,
+    field: &str,
+) -> Result<String, VmError> {
+    match value {
+        Some(VmValue::String(text)) => Ok(text.to_string()),
+        Some(other) => Err(VmError::TypeError(format!(
+            "{}.{method} expects {field}: string, got {}",
+            handle.type_name(),
+            other.type_name()
+        ))),
+        None => Err(VmError::TypeError(format!(
+            "{}.{method} missing required {field}",
+            handle.type_name()
+        ))),
+    }
+}
+
+/// Like [`obs_string_arg`] but treats a missing slot or explicit `nil`
+/// as `None` so the caller can apply a default — used for `level` on
+/// `harness.obs.log`, where the user-facing surface defaults to
+/// `"info"`.
+fn obs_optional_string_arg(
+    handle: &VmHarness,
+    method: &str,
+    value: Option<&VmValue>,
+    field: &str,
+) -> Result<Option<String>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) => Ok(Some(text.to_string())),
+        Some(other) => Err(VmError::TypeError(format!(
+            "{}.{method} expects {field}: string, got {}",
+            handle.type_name(),
+            other.type_name()
+        ))),
+    }
+}
+
+fn obs_attrs_arg(
+    handle: &VmHarness,
+    method: &str,
+    value: Option<&VmValue>,
+) -> Result<serde_json::Map<String, serde_json::Value>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(serde_json::Map::new()),
+        // `VmValue::Dict` always lowers to `serde_json::Value::Object`,
+        // so the conversion never returns another variant here — the
+        // explicit Object pattern keeps the call site total without
+        // adding a dead arm.
+        Some(value @ VmValue::Dict(_)) => {
+            let serde_json::Value::Object(map) =
+                crate::stdlib::observability::vm_value_to_json(value)
+            else {
+                unreachable!("Dict lowers to Object");
+            };
+            Ok(map)
+        }
+        Some(other) => Err(VmError::TypeError(format!(
+            "{}.{method} expects attrs: dict, got {}",
+            handle.type_name(),
+            other.type_name()
+        ))),
+    }
+}
+
+fn obs_number_arg(
+    handle: &VmHarness,
+    method: &str,
+    value: &VmValue,
+) -> Result<serde_json::Value, VmError> {
+    match value {
+        VmValue::Int(n) => Ok(serde_json::json!(*n)),
+        VmValue::Float(n) => Ok(serde_json::json!(*n)),
+        VmValue::Duration(ms) => Ok(serde_json::json!(*ms)),
+        other => Err(VmError::TypeError(format!(
+            "{}.{method} expects value: number, got {}",
+            handle.type_name(),
+            other.type_name()
+        ))),
+    }
 }
 
 fn sleep_ms_arg(args: &[VmValue]) -> Result<i64, VmError> {

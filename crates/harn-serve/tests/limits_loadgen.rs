@@ -43,6 +43,7 @@ fn synth_request(function: &str) -> CallRequest {
         agent_session_id: None,
         progress: None,
         tenant_id: None,
+        request_id: None,
     }
 }
 

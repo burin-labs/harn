@@ -151,6 +151,15 @@ pub struct CallRequest {
     /// its own store before forwarding the call). When `None`, the
     /// tenant is sourced from the authenticated principal.
     pub tenant_id: Option<TenantId>,
+    /// Request id pushed onto the ambient observability scope for the
+    /// dispatched `.harn` callee. The HTTP/ACP/MCP/A2A adapters mint
+    /// one per ingress (honouring `X-Request-Id` when present, falling
+    /// back to [`crate::http_codec::fresh_request_id`]) so that every
+    /// span/log/metric emitted under the dispatch carries the same id
+    /// and the standard error envelope (A.4) round-trips it back to
+    /// the caller. `None` for tests / in-process callers with no
+    /// ingress to mint against.
+    pub request_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -501,6 +510,7 @@ impl DispatchCore {
 
         let tenant_id = request.tenant_id.clone();
         let budget = function.budget.clone();
+        let request_id = request.request_id.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -511,6 +521,7 @@ impl DispatchCore {
                 });
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
                 let _budget_guard = budget.as_ref().and_then(install_route_budget);
+                let _request_id_guard = request_id.map(harn_vm::enter_request_id);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -578,6 +589,7 @@ impl DispatchCore {
 
         let tenant_id = request.tenant_id.clone();
         let budget = function.budget.clone();
+        let request_id = request.request_id.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -588,6 +600,7 @@ impl DispatchCore {
                 });
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
                 let _budget_guard = budget.as_ref().and_then(install_route_budget);
+                let _request_id_guard = request_id.map(harn_vm::enter_request_id);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -846,6 +859,7 @@ pub fn greet(name: string) -> string {
                 agent_session_id: None,
                 progress: None,
                 tenant_id: None,
+                request_id: None,
             })
             .await
             .expect("dispatch");
@@ -887,6 +901,7 @@ pipeline default(task) {
                 agent_session_id: None,
                 progress: None,
                 tenant_id: None,
+                request_id: None,
             })
             .await
             .expect("dispatch");
@@ -945,6 +960,7 @@ pub fn greet(name: string) -> string {
                 agent_session_id: None,
                 progress: None,
                 tenant_id: None,
+                request_id: None,
             })
             .await
             .expect("dispatch");
@@ -982,6 +998,7 @@ pub fn inspect(upload: string) -> string {
             agent_session_id: None,
             progress: None,
             tenant_id: None,
+            request_id: None,
         };
 
         let first = core
@@ -1034,6 +1051,7 @@ pub fn greet(name: string) -> string {
                 agent_session_id: None,
                 progress: None,
                 tenant_id: None,
+                request_id: None,
             })
             .await
             .expect("dispatch");
@@ -1083,6 +1101,7 @@ pub fn spin() -> string {
                 agent_session_id: None,
                 progress: None,
                 tenant_id: None,
+                request_id: None,
             })
             .await
             .expect("dispatch");
@@ -1143,6 +1162,7 @@ pub fn whoami(harness: Harness) -> string {
                 agent_session_id: None,
                 progress: None,
                 tenant_id: None,
+                request_id: None,
             })
             .await
             .expect("dispatch");
@@ -1191,6 +1211,7 @@ pub fn whoami(harness: Harness) -> string {
                 agent_session_id: None,
                 progress: None,
                 tenant_id: None,
+                request_id: None,
             })
             .await
             .expect_err("missing tenant should error");
@@ -1253,6 +1274,7 @@ pub fn whoami(harness: Harness) -> string {
                 agent_session_id: None,
                 progress: None,
                 tenant_id: Some(harn_vm::TenantId::new("override-tenant")),
+                request_id: None,
             })
             .await
             .expect("dispatch");

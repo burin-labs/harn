@@ -49,6 +49,12 @@ pub enum HarnessKind {
     /// the dispatching host bound to this call. See
     /// [`crate::harness_tenant`].
     Tenant,
+    /// Observability sub-handle: spans, counter/histogram/gauge
+    /// instruments, structured logs, and the ambient request_id
+    /// surfaced by the dispatching host. See
+    /// [`crate::observability::request_id`] and
+    /// [`crate::observability::vocabulary`].
+    Obs,
 }
 
 impl HarnessKind {
@@ -70,6 +76,7 @@ impl HarnessKind {
             HarnessKind::System => "HarnessSystem",
             HarnessKind::Llm => "HarnessLlm",
             HarnessKind::Tenant => "HarnessTenant",
+            HarnessKind::Obs => "HarnessObs",
         }
     }
 
@@ -90,6 +97,7 @@ impl HarnessKind {
             HarnessKind::System => Some("system"),
             HarnessKind::Llm => Some("llm"),
             HarnessKind::Tenant => Some("tenant"),
+            HarnessKind::Obs => Some("obs"),
         }
     }
 
@@ -108,6 +116,7 @@ impl HarnessKind {
             "system" => Some(HarnessKind::System),
             "llm" => Some(HarnessKind::Llm),
             "tenant" => Some(HarnessKind::Tenant),
+            "obs" => Some(HarnessKind::Obs),
             _ => None,
         }
     }
@@ -126,6 +135,7 @@ impl HarnessKind {
         HarnessKind::System,
         HarnessKind::Llm,
         HarnessKind::Tenant,
+        HarnessKind::Obs,
     ];
 
     /// Every kind a Harn-script type annotation may reference.
@@ -143,6 +153,7 @@ impl HarnessKind {
         HarnessKind::System,
         HarnessKind::Llm,
         HarnessKind::Tenant,
+        HarnessKind::Obs,
     ];
 }
 
@@ -677,6 +688,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.obs`.
+    pub fn obs(&self) -> HarnessObs {
+        HarnessObs {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Lower this handle into the `VmValue::Harness` payload.
     pub fn into_vm_value(self) -> crate::value::VmValue {
         crate::value::VmValue::harness(VmHarness {
@@ -791,6 +809,20 @@ pub struct HarnessTenant {
     inner: Arc<HarnessInner>,
 }
 
+/// obs sub-handle: `span` / `start_span` / `end_span` / `counter` /
+/// `histogram` / `gauge` / `log` / `request_id`. Wraps the existing
+/// `__obs_*` builtins and the request_id ambient pushed by the
+/// dispatching host (see [`crate::observability::request_id`]) behind a
+/// typed surface so handlers don't reach into the lower-level builtins
+/// directly. Backend selection / exporter wiring still lives in
+/// [`crate::events`] (OTel sink) and `std/observability` (`configure`,
+/// backend factories) — the sub-handle is the *emit-side* surface that
+/// every harn-serve primitive shares.
+#[derive(Debug, Clone)]
+pub struct HarnessObs {
+    inner: Arc<HarnessInner>,
+}
+
 macro_rules! sub_handle_inner {
     ($($ty:ty),* $(,)?) => {
         $(
@@ -815,6 +847,7 @@ sub_handle_inner!(
     HarnessSystem,
     HarnessLlm,
     HarnessTenant,
+    HarnessObs,
 );
 
 impl HarnessClock {
@@ -1013,6 +1046,7 @@ mod tests {
             r"fn main(harness: Harness) { harness.system.cpu() }",
             r"fn main(harness: Harness) { harness.llm.catalog() }",
             r"fn main(harness: Harness) { harness.tenant.id() }",
+            r#"fn main(harness: Harness) { harness.obs.log("blocked", "info", {}) }"#,
         ] {
             let error = run_harness_source(source, harness.clone()).expect_err("call denied");
             assert!(
@@ -1041,6 +1075,7 @@ mod tests {
                 (HarnessKind::System, "cpu"),
                 (HarnessKind::Llm, "catalog"),
                 (HarnessKind::Tenant, "id"),
+                (HarnessKind::Obs, "log"),
             ]
         );
         assert_eq!(events[0].args, vec!["blocked"]);
