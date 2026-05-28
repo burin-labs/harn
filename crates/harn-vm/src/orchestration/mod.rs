@@ -45,6 +45,9 @@ pub use compaction::*;
 mod compact_lifecycle;
 pub use compact_lifecycle::*;
 
+mod compaction_policy_registry;
+pub use compaction_policy_registry::*;
+
 pub mod agent_inbox;
 
 mod artifacts;

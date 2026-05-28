@@ -15,6 +15,7 @@ mod channels;
 pub(crate) mod clock;
 pub(crate) mod collections;
 mod command_policy;
+pub(crate) mod compaction;
 mod compression;
 mod concurrency;
 mod connectors;
@@ -191,6 +192,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     path_scope_guard::register_path_scope_guard_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
+    compaction::register_compaction_builtins(vm);
     transcript_project::register_transcript_projection_builtins(vm);
     assemble::register_assemble_context_builtin(vm);
     crate::egress::register_egress_builtins(vm);
@@ -279,6 +281,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(clock::MODULE_BUILTINS);
         out.extend_from_slice(collections::MODULE_BUILTINS);
         out.extend_from_slice(command_policy::MODULE_BUILTINS);
+        out.extend_from_slice(compaction::MODULE_BUILTINS);
         out.extend_from_slice(compression::MODULE_BUILTINS);
         out.extend_from_slice(connectors::MODULE_BUILTINS);
         out.extend_from_slice(cookies::MODULE_BUILTINS);
@@ -426,6 +429,7 @@ pub fn reset_stdlib_state() {
     waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();
     triggers_stdlib::reset_auto_resume_timeouts();
+    compaction::reset_compaction_state();
     agents::reset_agent_worker_state();
     pool::reset_pool_state();
     postgres::reset_postgres_state();

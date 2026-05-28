@@ -1,0 +1,82 @@
+/**
+ * compaction-policy demo: drive the new `compaction.{policy,check,run}`
+ * primitive through a realistic pre-turn / mid-turn flow.
+ *
+ * The scenario emulates how a coding-agent host would now write its
+ * compaction loop (post-#2505): one policy declaration, a cheap check
+ * on every turn, and a run that funnels through the canonical lifecycle
+ * when the check fires.
+ *
+ *   1. Open an agent session and seed three short messages.
+ *   2. Declare a per-session policy with a turn-count threshold and a
+ *      custom summarize closure so the demo runs fully offline.
+ *   3. Call `compaction.check(session_id)` — the threshold's been
+ *      crossed (3 messages > max_turns=2), so the decision returns
+ *      `compact_now` with the trigger and engine strategy filled in.
+ *   4. Call `compaction.run(session_id)` to drive the existing #2323
+ *      lifecycle. The custom strategy folds the archived messages into
+ *      a single summary string and the result carries the latency and
+ *      archived count for telemetry.
+ *   5. Re-check: with the transcript now compacted to the summary plus
+ *      the kept tail, the decision flips back to `defer`.
+ *
+ * The receipt at the end captures the policy snapshot, both check
+ * decisions, and the run outcome so future regressions are visible.
+ *
+ * Fully offline — the custom strategy short-circuits any LLM call.
+ */
+pipeline default(_task) {
+  let session = agent_session_open("compaction-policy-demo")
+  agent_session_inject(
+    session,
+    {role: "user", content: "Investigate the parser regression in stdlib."},
+  )
+  agent_session_inject(
+    session,
+    {role: "assistant", content: "The root cause is in diagnostic recovery."},
+  )
+  agent_session_inject(
+    session,
+    {role: "user", content: "Capture the next command and the failing test names."},
+  )
+  // 1. Declare the policy. `summarize-then-prune` is the default
+  //    strategy choice for IDE-style hosts; we override at run time to
+  //    a `custom` strategy so the demo can finish without an LLM call.
+  let policy = compaction
+    .policy({session_id: session, strategy: "summarize-then-prune", max_turns: 2, keep_last: 1})
+  // 2. Cheap per-turn check. No mutation; safe to call before every
+  //    LLM round-trip.
+  let pre_decision = compaction.check(session)
+  // 3. Run the compaction through the canonical lifecycle. The plan
+  //    overrides the policy's strategy because the demo has no LLM in
+  //    its tape; production callers usually pass `nil` here.
+  let outcome = compaction
+    .run(
+    session,
+    {
+      strategy: "custom",
+      summarize_fn: { archived, _reminders -> {summary: "compacted " + to_string(len(archived)) + " messages"} },
+    },
+  )
+  // 4. Re-check post-run.
+  let post_decision = compaction.check(session)
+  __io_println("=== compaction-policy demo ===")
+  __io_println("pre.action  = " + pre_decision["action"])
+  __io_println("pre.trigger = " + pre_decision["trigger"])
+  __io_println("run.engine  = " + outcome["engine_strategy"])
+  __io_println("run.kept    = " + to_string(outcome["messages_after"]))
+  __io_println("post.action = " + post_decision["action"])
+  let receipt = {
+    receipt_kind: "compaction_policy_demo",
+    policy_strategy: policy["strategy"],
+    pre_decision_action: pre_decision["action"],
+    pre_decision_trigger: pre_decision["trigger"],
+    archived_messages: outcome["archived_messages"],
+    messages_after: outcome["messages_after"],
+    engine_strategy: outcome["engine_strategy"],
+    latency_ms_is_int: type_of(outcome["latency_ms"]) == "int",
+    post_decision_action: post_decision["action"],
+  }
+  __io_println(json_stringify(receipt))
+  return receipt
+}
