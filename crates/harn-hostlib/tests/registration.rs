@@ -41,6 +41,7 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_bracket_balance",
             "hostlib_ast_apply_node",
             "hostlib_ast_insert_at_anchor",
+            "hostlib_ast_dry_run",
         ]
     );
     // Each AST builtin must reject empty input with a structured
@@ -64,6 +65,7 @@ fn ast_capability_registers_documented_methods() {
         ("hostlib_ast_bracket_balance", "source"),
         ("hostlib_ast_apply_node", "path"),
         ("hostlib_ast_insert_at_anchor", "path"),
+        ("hostlib_ast_dry_run", "plan"),
     ];
     for (name, expected_param) in expected_missing {
         let entry = registry.find(name).expect("registered");

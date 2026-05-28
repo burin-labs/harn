@@ -412,6 +412,178 @@ return {{
 }
 
 #[test]
+fn end_to_end_dry_run_via_harn_script() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let source_path = root.join("greet.rs");
+    let original = "fn greet(name: &str) -> String {\n    format!(\"hi {name}\")\n}\n";
+    fs::write(&source_path, original).unwrap();
+    let path_str = source_path.to_string_lossy().replace('\\', "/");
+
+    // Two ops in one plan: AST-precise replacement and a follow-up
+    // text patch on the same file. The plan dispatcher should see the
+    // first op's pending write when running the second, and produce a
+    // single per-file diff that carries both edits.
+    let path = &path_str;
+    let script = format!(
+        r#"
+let bundle = hostlib_ast_dry_run({{
+    plan: [
+        {{
+            op: "apply_node",
+            path: "{path}",
+            query: "(function_item body: (block) @target)",
+            replacement: "{{ format!(\"hi {{name}}!\") }}",
+            select: "first",
+        }},
+        {{
+            op: "safe_text_patch",
+            path: "{path}",
+            old_text: "fn greet",
+            new_text: "fn greeter",
+        }},
+    ],
+}})
+let diff = bundle.per_file_unified_diff[0]
+return {{
+    result: bundle.result,
+    files_touched: bundle.summary.files_touched,
+    ops_applied: bundle.summary.ops_applied,
+    ops_rejected: bundle.summary.ops_rejected,
+    has_unified_header: contains(diff.diff, "--- a/") && contains(diff.diff, "+++ b/"),
+    has_hunk_header: contains(diff.diff, "@@ -"),
+    rename_visible: contains(diff.diff, "fn greeter"),
+    body_visible: contains(diff.diff, "hi {{name}}!"),
+    lines_added: diff.lines_added,
+    lines_removed: diff.lines_removed,
+}}
+"#,
+    );
+
+    let (result, _) = run_harn(&script);
+    let dict = match &result {
+        VmValue::Dict(d) => d,
+        other => panic!("expected dict, got {other:?}"),
+    };
+    let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
+
+    assert!(matches!(get("result"), VmValue::String(s) if s.as_ref() == "ok"));
+    assert!(matches!(get("files_touched"), VmValue::Int(1)));
+    assert!(matches!(get("ops_applied"), VmValue::Int(2)));
+    assert!(matches!(get("ops_rejected"), VmValue::Int(0)));
+    assert!(matches!(get("has_unified_header"), VmValue::Bool(true)));
+    assert!(matches!(get("has_hunk_header"), VmValue::Bool(true)));
+    assert!(matches!(get("rename_visible"), VmValue::Bool(true)));
+    assert!(matches!(get("body_visible"), VmValue::Bool(true)));
+    assert!(matches!(get("lines_added"), VmValue::Int(n) if *n >= 1));
+    assert!(matches!(get("lines_removed"), VmValue::Int(n) if *n >= 1));
+
+    // Critically: the on-disk file is byte-identical to the original.
+    let on_disk = std::fs::read_to_string(&source_path).expect("read");
+    assert_eq!(on_disk, original);
+}
+
+#[test]
+fn dry_run_diff_is_git_apply_check_compatible() {
+    // Validates the spec acceptance for issue #2510: the unified-diff
+    // output round-trips through `git apply --check` against the
+    // original tree. Skipped when `git` is not on PATH so the suite
+    // stays usable in stripped CI images.
+    if std::process::Command::new("git")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| !s.success())
+        .unwrap_or(true)
+    {
+        eprintln!("skipping: `git` not on PATH");
+        return;
+    }
+
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let source_path = root.join("module.rs");
+    let original = "fn alpha() {\n    let x = 1;\n}\n\nfn beta() {\n    let y = 2;\n}\n";
+    fs::write(&source_path, original).unwrap();
+    let path_str = source_path.to_string_lossy().replace('\\', "/");
+
+    let path = &path_str;
+    let script = format!(
+        r#"
+let bundle = hostlib_ast_dry_run({{
+    plan: [
+        {{
+            op: "apply_node",
+            path: "{path}",
+            query: "(function_item name: (identifier) @name (#eq? @name \"beta\") body: (block) @target)",
+            replacement: "{{ let y = 42; }}",
+        }},
+    ],
+}})
+return bundle.per_file_unified_diff[0].diff
+"#,
+    );
+
+    let (result, _) = run_harn(&script);
+    let diff_text = match &result {
+        VmValue::String(s) => s.to_string(),
+        other => panic!("expected diff string, got {other:?}"),
+    };
+    assert!(!diff_text.is_empty(), "expected non-empty diff");
+
+    // Initialize a tiny git repo and stage a file at the same path the
+    // diff references, so `git apply --check` can resolve `a/<path>`
+    // against the working tree.
+    let repo = TempDir::new().unwrap();
+    let repo_root = repo.path();
+    let init = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main"])
+        .current_dir(repo_root)
+        .status()
+        .expect("git init");
+    assert!(init.success());
+    // `git apply` resolves `a/<path>` relative to the repo root, so
+    // rewrite the diff headers to point at a flat in-repo file.
+    let relative_diff = diff_text
+        .replace(&format!("a/{path_str}"), "a/work.rs")
+        .replace(&format!("b/{path_str}"), "b/work.rs");
+    fs::write(repo_root.join("work.rs"), original).unwrap();
+    let add = std::process::Command::new("git")
+        .args(["add", "work.rs"])
+        .current_dir(repo_root)
+        .status()
+        .expect("git add work.rs");
+    assert!(add.success());
+
+    let check = std::process::Command::new("git")
+        .args(["apply", "--check", "-"])
+        .current_dir(repo_root)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn git apply");
+    {
+        use std::io::Write;
+        check
+            .stdin
+            .as_ref()
+            .expect("stdin")
+            .write_all(relative_diff.as_bytes())
+            .unwrap();
+    }
+    let out = check.wait_with_output().expect("wait git apply");
+    assert!(
+        out.status.success(),
+        "`git apply --check` rejected the diff:\nstdout={}\nstderr={}\ndiff=\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+        relative_diff,
+    );
+}
+
+#[test]
 fn end_to_end_code_index_via_harn_script() {
     let dir = TempDir::new().unwrap();
     let root = dir.path();

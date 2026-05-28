@@ -1,0 +1,891 @@
+//! `ast.dry_run` — render a multi-op edit plan to a unified diff bundle
+//! without committing anything to disk.
+//!
+//! The runner opens a *transient* staged-fs session (see
+//! [`crate::fs`]), dispatches each plan op through its op-specific
+//! handler with that session id wired in, then walks the resulting
+//! overlay to produce a per-file unified diff plus a roll-up summary.
+//! When every op has been processed the transient session is discarded,
+//! so the on-disk tree is byte-identical before and after the call.
+//!
+//! ## Wire shape
+//!
+//! Request (see `schemas/ast/dry_run.request.json`):
+//!
+//! ```json
+//! {
+//!   "plan": [
+//!     { "op": "apply_node",       "path": "...", "query": "...", "replacement": "...", "select": "first" },
+//!     { "op": "insert_at_anchor", "path": "...", "query": "...", "position": "first_child", "content": "..." },
+//!     { "op": "safe_text_patch",  "path": "...", "old_text": "...", "new_text": "..." },
+//!     { "op": "rename_symbol",    "symbol_ref": "...", "new_name": "..." }
+//!   ]
+//! }
+//! ```
+//!
+//! Response (see `schemas/ast/dry_run.response.json`):
+//!
+//! ```json
+//! {
+//!   "result": "ok" | "partial" | "no_ops_applied",
+//!   "per_file_unified_diff": [{ "path": "...", "diff": "...", "lines_added": N, "lines_removed": N }],
+//!   "summary": {
+//!     "files_touched": N,
+//!     "lines_added": N,
+//!     "lines_removed": N,
+//!     "ops_applied": N,
+//!     "ops_rejected": N
+//!   },
+//!   "ops": [{ "op": "...", "applied": bool, "result": "applied"|"rejected"|..., "details": "..." }]
+//! }
+//! ```
+//!
+//! The diff format is standard unified diff, compatible with
+//! `git apply --check`. New files use `--- /dev/null`; deleted files
+//! use `+++ /dev/null`. Missing trailing newlines surface as the
+//! conventional `\ No newline at end of file` markers.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+use harn_vm::VmValue;
+
+use crate::error::HostlibError;
+use crate::fs::FsMode;
+use crate::tools::args::{build_dict, dict_arg, optional_string, require_string, str_value};
+
+use super::unified_diff::{render as render_unified_diff, ChangeKind};
+
+const BUILTIN: &str = "hostlib_ast_dry_run";
+const TRANSIENT_PREFIX: &str = "__edit_dry_run__-";
+
+/// Entry point registered as the `hostlib_ast_dry_run` builtin.
+pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(BUILTIN, args)?;
+    let dict = raw.as_ref();
+    let plan = require_plan(dict)?;
+
+    let session_id = transient_session_id();
+    crate::fs::set_mode(&session_id, FsMode::Staged, None)?;
+
+    let mut op_outcomes: Vec<OpOutcome> = Vec::with_capacity(plan.len());
+    let mut touched: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut applied_count = 0usize;
+    let mut rejected_count = 0usize;
+
+    for (index, op_value) in plan.into_iter().enumerate() {
+        let outcome = dispatch_op(&session_id, index, &op_value);
+        match &outcome {
+            OpOutcome::Applied { path, .. } => {
+                applied_count += 1;
+                touched.insert(path.clone());
+            }
+            OpOutcome::Rejected { .. } | OpOutcome::Error { .. } => {
+                rejected_count += 1;
+            }
+        }
+        op_outcomes.push(outcome);
+    }
+
+    let mut per_file_diffs: Vec<FileDiffEntry> = Vec::new();
+    let mut lines_added_total = 0usize;
+    let mut lines_removed_total = 0usize;
+
+    for path in touched.iter() {
+        let (before, before_existed) = read_before(path);
+        let after = read_after(path, &session_id).unwrap_or_default();
+        let kind = if !before_existed {
+            ChangeKind::Create
+        } else if after.is_empty() {
+            // staged-fs deletes show up here too (delete entries return
+            // a NotFound when read). For now, dry_run treats them as
+            // file deletions.
+            ChangeKind::Delete
+        } else {
+            ChangeKind::Modify
+        };
+        let display = path.to_string_lossy().into_owned();
+        let diff = render_unified_diff(&display, &before, &after, kind);
+        lines_added_total += diff.lines_added;
+        lines_removed_total += diff.lines_removed;
+        per_file_diffs.push(FileDiffEntry {
+            path: display,
+            diff: diff.text,
+            lines_added: diff.lines_added,
+            lines_removed: diff.lines_removed,
+        });
+    }
+
+    // Always discard the transient session so nothing leaks to disk.
+    let _ = crate::fs::discard_staged(&session_id, &[]);
+
+    let result_kind = if applied_count == 0 {
+        "no_ops_applied"
+    } else if rejected_count == 0 {
+        "ok"
+    } else {
+        "partial"
+    };
+
+    Ok(build_response(
+        result_kind,
+        &per_file_diffs,
+        SummaryCounts {
+            files_touched: per_file_diffs.len(),
+            lines_added: lines_added_total,
+            lines_removed: lines_removed_total,
+            ops_applied: applied_count,
+            ops_rejected: rejected_count,
+        },
+        &op_outcomes,
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Request parsing
+// ---------------------------------------------------------------------------
+
+fn require_plan(
+    dict: &BTreeMap<String, VmValue>,
+) -> Result<Vec<Rc<BTreeMap<String, VmValue>>>, HostlibError> {
+    match dict.get("plan") {
+        None | Some(VmValue::Nil) => Err(HostlibError::MissingParameter {
+            builtin: BUILTIN,
+            param: "plan",
+        }),
+        Some(VmValue::List(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for (idx, item) in items.iter().enumerate() {
+                match item {
+                    VmValue::Dict(d) => out.push(d.clone()),
+                    other => {
+                        return Err(HostlibError::InvalidParameter {
+                            builtin: BUILTIN,
+                            param: "plan",
+                            message: format!(
+                                "plan[{idx}]: expected dict op, got {}",
+                                other.type_name()
+                            ),
+                        });
+                    }
+                }
+            }
+            Ok(out)
+        }
+        Some(other) => Err(HostlibError::InvalidParameter {
+            builtin: BUILTIN,
+            param: "plan",
+            message: format!("expected list of op dicts, got {}", other.type_name()),
+        }),
+    }
+}
+
+fn transient_session_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{TRANSIENT_PREFIX}{pid}-{nanos}-{counter}")
+}
+
+// ---------------------------------------------------------------------------
+// Op dispatch
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+enum OpOutcome {
+    Applied {
+        op: &'static str,
+        path: PathBuf,
+        details: String,
+        match_count: usize,
+    },
+    Rejected {
+        op: String,
+        reason: &'static str,
+        details: String,
+        path: Option<String>,
+    },
+    Error {
+        op: String,
+        message: String,
+    },
+}
+
+fn dispatch_op(session_id: &str, index: usize, raw: &Rc<BTreeMap<String, VmValue>>) -> OpOutcome {
+    let dict = raw.as_ref();
+    let op_name = match dict.get("op") {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            return OpOutcome::Error {
+                op: "<unknown>".into(),
+                message: format!(
+                    "plan[{index}].op: expected string, got {}",
+                    other.type_name()
+                ),
+            };
+        }
+        None => {
+            return OpOutcome::Error {
+                op: "<unknown>".into(),
+                message: format!("plan[{index}].op: missing"),
+            };
+        }
+    };
+
+    match op_name.as_str() {
+        "apply_node" => run_apply_node(session_id, raw),
+        "insert_at_anchor" => run_insert_at_anchor(session_id, raw),
+        "safe_text_patch" => run_safe_text_patch(session_id, raw),
+        "rename_symbol" => OpOutcome::Rejected {
+            op: op_name,
+            reason: "use_standalone",
+            details: "rename_symbol is a workspace-level operation backed by the typed symbol graph (#2434); \
+                      its preview surface returns per-file edit metadata that the unified-diff bundle here \
+                      would lose. Call `edit_rename_symbol({..., dry_run: true})` directly for the preview."
+                .into(),
+            path: optional_string(BUILTIN, dict, "path").ok().flatten(),
+        },
+        other => OpOutcome::Rejected {
+            op: other.to_string(),
+            reason: "unknown_op",
+            details: format!(
+                "unrecognized op `{other}`; expected one of \
+                 [apply_node, insert_at_anchor, safe_text_patch, rename_symbol]"
+            ),
+            path: optional_string(BUILTIN, dict, "path").ok().flatten(),
+        },
+    }
+}
+
+fn run_apply_node(session_id: &str, raw: &Rc<BTreeMap<String, VmValue>>) -> OpOutcome {
+    delegate_to_builtin(session_id, raw, "apply_node", super::apply_node::run)
+}
+
+fn run_insert_at_anchor(session_id: &str, raw: &Rc<BTreeMap<String, VmValue>>) -> OpOutcome {
+    delegate_to_builtin(
+        session_id,
+        raw,
+        "insert_at_anchor",
+        super::insert_at_anchor::run,
+    )
+}
+
+/// Forward an op dict to one of the AST builtin runners with our
+/// transient session wired in, then parse its tagged-union response
+/// back into an [`OpOutcome`]. The `dry_run` / `session_id` fields are
+/// always overridden so the write lands in the overlay, never on disk —
+/// even if the caller passed conflicting values.
+fn delegate_to_builtin(
+    session_id: &str,
+    raw: &Rc<BTreeMap<String, VmValue>>,
+    op_label: &'static str,
+    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+) -> OpOutcome {
+    let mut forwarded: BTreeMap<String, VmValue> = (**raw).clone();
+    forwarded.remove("op");
+    forwarded.insert("session_id".to_string(), str_value(session_id));
+    forwarded.insert("dry_run".to_string(), VmValue::Bool(false));
+    let request = VmValue::Dict(Rc::new(forwarded));
+    match runner(&[request]) {
+        Ok(VmValue::Dict(result)) => parse_builtin_outcome(&result, op_label),
+        Ok(_) => OpOutcome::Error {
+            op: op_label.into(),
+            message: format!("{op_label} returned non-dict result"),
+        },
+        Err(err) => OpOutcome::Error {
+            op: op_label.into(),
+            message: err.to_string(),
+        },
+    }
+}
+
+fn parse_builtin_outcome(
+    result: &Rc<BTreeMap<String, VmValue>>,
+    op_label: &'static str,
+) -> OpOutcome {
+    let result_str = match result.get("result") {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return OpOutcome::Error {
+                op: op_label.into(),
+                message: format!("{op_label} response missing `result`"),
+            }
+        }
+    };
+    let path = match result.get("path") {
+        Some(VmValue::String(s)) => Some(s.to_string()),
+        _ => None,
+    };
+    if result_str == "applied" {
+        let match_count = match result.get("match_count") {
+            Some(VmValue::Int(n)) => *n as usize,
+            _ => 0,
+        };
+        let path = path.as_ref().map(PathBuf::from).unwrap_or_default();
+        OpOutcome::Applied {
+            op: op_label,
+            path,
+            details: format!("{op_label}: applied with {match_count} match(es)"),
+            match_count,
+        }
+    } else {
+        OpOutcome::Rejected {
+            op: op_label.into(),
+            reason: classify_builtin_failure(&result_str),
+            details: match result.get("details") {
+                Some(VmValue::String(s)) => s.to_string(),
+                _ => result_str.clone(),
+            },
+            path,
+        }
+    }
+}
+
+fn classify_builtin_failure(result: &str) -> &'static str {
+    match result {
+        "no_match" => "no_match",
+        "ambiguous" => "ambiguous",
+        "invalid_query" => "invalid_query",
+        "invalid_anchor" => "invalid_anchor",
+        "unsupported_language" => "unsupported_language",
+        "syntax_error" => "syntax_error",
+        _ => "rejected",
+    }
+}
+
+fn run_safe_text_patch(session_id: &str, raw: &Rc<BTreeMap<String, VmValue>>) -> OpOutcome {
+    let dict = raw.as_ref();
+    let path_str = match require_string(BUILTIN, dict, "path") {
+        Ok(s) => s,
+        Err(err) => {
+            return OpOutcome::Error {
+                op: "safe_text_patch".into(),
+                message: err.to_string(),
+            };
+        }
+    };
+    let old_text = match require_string(BUILTIN, dict, "old_text") {
+        Ok(s) => s,
+        Err(err) => {
+            return OpOutcome::Error {
+                op: "safe_text_patch".into(),
+                message: err.to_string(),
+            };
+        }
+    };
+    let new_text = match require_string(BUILTIN, dict, "new_text") {
+        Ok(s) => s,
+        Err(err) => {
+            return OpOutcome::Error {
+                op: "safe_text_patch".into(),
+                message: err.to_string(),
+            };
+        }
+    };
+
+    if old_text.is_empty() {
+        return OpOutcome::Rejected {
+            op: "safe_text_patch".into(),
+            reason: "empty_old_text",
+            details: "safe_text_patch requires non-empty `old_text`".into(),
+            path: Some(path_str),
+        };
+    }
+    if old_text == new_text {
+        return OpOutcome::Rejected {
+            op: "safe_text_patch".into(),
+            reason: "no_op",
+            details: "safe_text_patch is a no-op (old_text == new_text)".into(),
+            path: Some(path_str),
+        };
+    }
+
+    let path = PathBuf::from(&path_str);
+    let source = match read_for_session(&path, session_id) {
+        Ok(s) => s,
+        Err(err) => {
+            return OpOutcome::Rejected {
+                op: "safe_text_patch".into(),
+                reason: "read_failed",
+                details: err.to_string(),
+                path: Some(path_str),
+            };
+        }
+    };
+    let match_count = source.matches(&old_text).count();
+    if match_count == 0 {
+        return OpOutcome::Rejected {
+            op: "safe_text_patch".into(),
+            reason: "no_match",
+            details: "old_text did not match exactly".into(),
+            path: Some(path_str),
+        };
+    }
+    if match_count > 1 {
+        return OpOutcome::Rejected {
+            op: "safe_text_patch".into(),
+            reason: "ambiguous",
+            details: format!("old_text matched {match_count} regions"),
+            path: Some(path_str),
+        };
+    }
+    let patched = source.replacen(&old_text, &new_text, 1);
+    if let Err(err) = write_for_session(&path, &patched, session_id) {
+        return OpOutcome::Error {
+            op: "safe_text_patch".into(),
+            message: err.to_string(),
+        };
+    }
+    OpOutcome::Applied {
+        op: "safe_text_patch",
+        path,
+        details: "safe_text_patch: replaced unique exact match".into(),
+        match_count: 1,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// I/O helpers — routed through staged-fs so reads see prior in-plan writes
+// ---------------------------------------------------------------------------
+
+fn read_for_session(path: &Path, session_id: &str) -> Result<String, HostlibError> {
+    let bytes = if let Some(result) = crate::fs::read(path, Some(session_id)) {
+        result.map_err(|err| HostlibError::Backend {
+            builtin: BUILTIN,
+            message: format!("read `{}`: {err}", path.display()),
+        })?
+    } else {
+        std::fs::read(path).map_err(|err| HostlibError::Backend {
+            builtin: BUILTIN,
+            message: format!("read `{}`: {err}", path.display()),
+        })?
+    };
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn write_for_session(path: &Path, contents: &str, session_id: &str) -> Result<(), HostlibError> {
+    let outcome = crate::fs::stage_write_or_none(
+        BUILTIN,
+        path,
+        contents.as_bytes(),
+        true,
+        true,
+        Some(session_id),
+    )?;
+    if outcome.is_some() {
+        Ok(())
+    } else {
+        Err(HostlibError::Backend {
+            builtin: BUILTIN,
+            message: "transient dry-run session is not in staged mode".into(),
+        })
+    }
+}
+
+fn read_before(path: &Path) -> (String, bool) {
+    match std::fs::read(path) {
+        Ok(bytes) => (String::from_utf8_lossy(&bytes).into_owned(), true),
+        Err(_) => (String::new(), false),
+    }
+}
+
+fn read_after(path: &Path, session_id: &str) -> Option<String> {
+    match crate::fs::read(path, Some(session_id))? {
+        Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+        Err(_) => Some(String::new()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Response shaping
+// ---------------------------------------------------------------------------
+
+struct FileDiffEntry {
+    path: String,
+    diff: String,
+    lines_added: usize,
+    lines_removed: usize,
+}
+
+struct SummaryCounts {
+    files_touched: usize,
+    lines_added: usize,
+    lines_removed: usize,
+    ops_applied: usize,
+    ops_rejected: usize,
+}
+
+fn build_response(
+    result: &str,
+    per_file: &[FileDiffEntry],
+    summary: SummaryCounts,
+    op_outcomes: &[OpOutcome],
+) -> VmValue {
+    let per_file_value = VmValue::List(Rc::new(
+        per_file
+            .iter()
+            .map(|entry| {
+                build_dict([
+                    ("path", str_value(&entry.path)),
+                    ("diff", str_value(&entry.diff)),
+                    ("lines_added", VmValue::Int(entry.lines_added as i64)),
+                    ("lines_removed", VmValue::Int(entry.lines_removed as i64)),
+                ])
+            })
+            .collect(),
+    ));
+    let summary_value = build_dict([
+        ("files_touched", VmValue::Int(summary.files_touched as i64)),
+        ("lines_added", VmValue::Int(summary.lines_added as i64)),
+        ("lines_removed", VmValue::Int(summary.lines_removed as i64)),
+        ("ops_applied", VmValue::Int(summary.ops_applied as i64)),
+        ("ops_rejected", VmValue::Int(summary.ops_rejected as i64)),
+    ]);
+    let ops_value = VmValue::List(Rc::new(
+        op_outcomes.iter().map(op_outcome_to_value).collect(),
+    ));
+
+    build_dict([
+        ("result", str_value(result)),
+        ("per_file_unified_diff", per_file_value),
+        ("summary", summary_value),
+        ("ops", ops_value),
+    ])
+}
+
+fn op_outcome_to_value(outcome: &OpOutcome) -> VmValue {
+    match outcome {
+        OpOutcome::Applied {
+            op,
+            path,
+            details,
+            match_count,
+        } => build_dict([
+            ("op", str_value(*op)),
+            ("applied", VmValue::Bool(true)),
+            ("result", str_value("applied")),
+            ("path", str_value(path.to_string_lossy())),
+            ("details", str_value(details)),
+            ("match_count", VmValue::Int(*match_count as i64)),
+        ]),
+        OpOutcome::Rejected {
+            op,
+            reason,
+            details,
+            path,
+        } => {
+            let mut entries: Vec<(&'static str, VmValue)> = vec![
+                ("op", str_value(op)),
+                ("applied", VmValue::Bool(false)),
+                ("result", str_value("rejected")),
+                ("reason", str_value(*reason)),
+                ("details", str_value(details)),
+            ];
+            if let Some(path) = path {
+                entries.push(("path", str_value(path)));
+            }
+            build_dict(entries)
+        }
+        OpOutcome::Error { op, message } => build_dict([
+            ("op", str_value(op)),
+            ("applied", VmValue::Bool(false)),
+            ("result", str_value("error")),
+            ("details", str_value(message)),
+        ]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn vm_string(s: &str) -> VmValue {
+        VmValue::String(Rc::from(s))
+    }
+
+    fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
+        let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
+        for (k, v) in pairs {
+            map.insert((*k).to_string(), v.clone());
+        }
+        VmValue::Dict(Rc::new(map))
+    }
+
+    fn vm_list(items: &[VmValue]) -> VmValue {
+        VmValue::List(Rc::new(items.to_vec()))
+    }
+
+    fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
+        match value {
+            VmValue::Dict(d) => d.get(key).expect("missing field"),
+            _ => panic!("expected dict"),
+        }
+    }
+
+    fn s(value: &VmValue) -> String {
+        match value {
+            VmValue::String(s) => s.to_string(),
+            other => panic!("expected string, got {other:?}"),
+        }
+    }
+
+    fn write_temp(extension: &str, source: &str) -> NamedTempFile {
+        let mut file = tempfile::Builder::new()
+            .suffix(&format!(".{extension}"))
+            .tempfile()
+            .expect("temp file");
+        file.write_all(source.as_bytes()).expect("write");
+        file
+    }
+
+    fn invoke(payload: VmValue) -> VmValue {
+        run(&[payload]).expect("dry_run runs")
+    }
+
+    #[test]
+    fn empty_plan_emits_no_ops_applied() {
+        let result = invoke(vm_dict(&[("plan", vm_list(&[]))]));
+        assert_eq!(s(field(&result, "result")), "no_ops_applied");
+        let summary = field(&result, "summary");
+        assert_eq!(
+            match field(summary, "files_touched") {
+                VmValue::Int(n) => *n,
+                _ => panic!(),
+            },
+            0
+        );
+    }
+
+    #[test]
+    fn apply_node_op_produces_diff_without_touching_disk() {
+        let source = "fn alpha() { 1 }\n";
+        let file = write_temp("rs", source);
+        let path = file.path().to_string_lossy().to_string();
+        let op = vm_dict(&[
+            ("op", vm_string("apply_node")),
+            ("path", vm_string(&path)),
+            ("query", vm_string("(function_item body: (block) @target)")),
+            ("replacement", vm_string("{ 2 }")),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
+        assert_eq!(s(field(&result, "result")), "ok");
+        let per_file = match field(&result, "per_file_unified_diff") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(per_file.len(), 1);
+        let entry = &per_file[0];
+        let diff = s(field(entry, "diff"));
+        assert!(diff.contains("--- a/"));
+        assert!(diff.contains("+++ b/"));
+        assert!(diff.contains("@@ -"));
+        assert!(diff.contains("-fn alpha() { 1 }"));
+        assert!(diff.contains("+fn alpha() { 2 }"));
+        // Disk is untouched.
+        let on_disk = std::fs::read_to_string(file.path()).expect("read");
+        assert_eq!(on_disk, source);
+    }
+
+    #[test]
+    fn safe_text_patch_op_uses_exact_match() {
+        let source = "const x = 1;\nconst y = 2;\n";
+        let file = write_temp("ts", source);
+        let path = file.path().to_string_lossy().to_string();
+        let op = vm_dict(&[
+            ("op", vm_string("safe_text_patch")),
+            ("path", vm_string(&path)),
+            ("old_text", vm_string("const y = 2;")),
+            ("new_text", vm_string("const y = 42;")),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
+        assert_eq!(s(field(&result, "result")), "ok");
+        let per_file = match field(&result, "per_file_unified_diff") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        let entry = &per_file[0];
+        let diff = s(field(entry, "diff"));
+        assert!(diff.contains("-const y = 2;"));
+        assert!(diff.contains("+const y = 42;"));
+        let on_disk = std::fs::read_to_string(file.path()).expect("read");
+        assert_eq!(on_disk, source);
+    }
+
+    #[test]
+    fn safe_text_patch_rejects_ambiguous_match() {
+        let source = "todo\ntodo\n";
+        let file = write_temp("txt", source);
+        let path = file.path().to_string_lossy().to_string();
+        let op = vm_dict(&[
+            ("op", vm_string("safe_text_patch")),
+            ("path", vm_string(&path)),
+            ("old_text", vm_string("todo")),
+            ("new_text", vm_string("done")),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
+        assert_eq!(s(field(&result, "result")), "no_ops_applied");
+        let ops = match field(&result, "ops") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(s(field(&ops[0], "result")), "rejected");
+        assert_eq!(s(field(&ops[0], "reason")), "ambiguous");
+    }
+
+    #[test]
+    fn insert_at_anchor_first_child_prepends_to_block() {
+        let source = "fn run() {\n    let x = 1;\n}\n";
+        let file = write_temp("rs", source);
+        let path = file.path().to_string_lossy().to_string();
+        let op = vm_dict(&[
+            ("op", vm_string("insert_at_anchor")),
+            ("path", vm_string(&path)),
+            ("query", vm_string("(function_item body: (block) @anchor)")),
+            ("position", vm_string("first_child")),
+            // first_child inserts at the start_byte of the first named
+            // child — the source's indent is already in place, so the
+            // content carries only the new statement plus a trailing
+            // indent for the bumped-down original line.
+            ("content", vm_string("let inserted = true;\n    ")),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
+        assert_eq!(s(field(&result, "result")), "ok");
+        let per_file = match field(&result, "per_file_unified_diff") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        let diff = s(field(&per_file[0], "diff"));
+        assert!(diff.contains("+    let inserted = true;"));
+    }
+
+    #[test]
+    fn insert_at_anchor_after_appends_after_anchor() {
+        let source = "fn one() {}\nfn two() {}\n";
+        let file = write_temp("rs", source);
+        let path = file.path().to_string_lossy().to_string();
+        let op = vm_dict(&[
+            ("op", vm_string("insert_at_anchor")),
+            ("path", vm_string(&path)),
+            (
+                "query",
+                vm_string(r#"(function_item name: (identifier) @name (#eq? @name "one")) @anchor"#),
+            ),
+            ("position", vm_string("after")),
+            ("content", vm_string("\nfn one_b() {}")),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
+        assert_eq!(s(field(&result, "result")), "ok");
+        let per_file = match field(&result, "per_file_unified_diff") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        let diff = s(field(&per_file[0], "diff"));
+        assert!(diff.contains("+fn one_b() {}"));
+    }
+
+    #[test]
+    fn rename_symbol_op_points_callers_at_standalone_primitive() {
+        let op = vm_dict(&[
+            ("op", vm_string("rename_symbol")),
+            ("symbol_ref", vm_string("crate::alpha")),
+            ("new_name", vm_string("beta")),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
+        let ops = match field(&result, "ops") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(s(field(&ops[0], "result")), "rejected");
+        assert_eq!(s(field(&ops[0], "reason")), "use_standalone");
+    }
+
+    #[test]
+    fn multi_op_plan_aggregates_per_file_and_summary() {
+        let source = "fn a() { 1 }\nfn b() { 2 }\n";
+        let file = write_temp("rs", source);
+        let path = file.path().to_string_lossy().to_string();
+        let op1 = vm_dict(&[
+            ("op", vm_string("apply_node")),
+            ("path", vm_string(&path)),
+            ("query", vm_string("(function_item body: (block) @target)")),
+            ("replacement", vm_string("{ 99 }")),
+            ("select", vm_string("first")),
+        ]);
+        let op2 = vm_dict(&[
+            ("op", vm_string("apply_node")),
+            ("path", vm_string(&path)),
+            ("query", vm_string("(function_item body: (block) @target)")),
+            ("replacement", vm_string("{ 100 }")),
+            ("select", vm_string("nth")),
+            ("nth", VmValue::Int(2)),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op1, op2]))]));
+        // Sequential ops in one plan share the staged session, so the
+        // second op sees the first op's pending write — the resulting
+        // diff carries both replacements for the same file.
+        assert_eq!(s(field(&result, "result")), "ok");
+        let per_file = match field(&result, "per_file_unified_diff") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(per_file.len(), 1);
+        let diff = s(field(&per_file[0], "diff"));
+        assert!(diff.contains("+fn a() { 99 }"));
+        assert!(diff.contains("+fn b() { 100 }"));
+        let summary = field(&result, "summary");
+        assert_eq!(
+            match field(summary, "ops_applied") {
+                VmValue::Int(n) => *n,
+                _ => panic!(),
+            },
+            2
+        );
+    }
+
+    #[test]
+    fn unknown_op_is_rejected() {
+        let op = vm_dict(&[
+            ("op", vm_string("blow_up_the_world")),
+            ("path", vm_string("/nope")),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
+        let ops = match field(&result, "ops") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(s(field(&ops[0], "reason")), "unknown_op");
+    }
+
+    #[test]
+    fn diff_is_git_apply_check_compatible() {
+        let source = "let a = 1;\nlet b = 2;\nlet c = 3;\nlet d = 4;\nlet e = 5;\n";
+        let file = write_temp("ts", source);
+        let path = file.path().to_string_lossy().to_string();
+        let op = vm_dict(&[
+            ("op", vm_string("safe_text_patch")),
+            ("path", vm_string(&path)),
+            ("old_text", vm_string("let c = 3;")),
+            ("new_text", vm_string("let c = 30;")),
+        ]);
+        let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
+        let per_file = match field(&result, "per_file_unified_diff") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        let diff = s(field(&per_file[0], "diff"));
+        // Spot-check the hunk header shape; full `git apply --check`
+        // round-trip lives in the conformance suite.
+        assert!(diff.contains("@@ -1,5 +1,5 @@") || diff.contains("@@ -"));
+        assert!(diff.contains(" let a = 1;"));
+        assert!(diff.contains("-let c = 3;"));
+        assert!(diff.contains("+let c = 30;"));
+    }
+}

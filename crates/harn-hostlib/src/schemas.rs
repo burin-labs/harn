@@ -193,6 +193,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/ast/insert_at_anchor.response.json"),
     ),
+    (
+        "ast",
+        "dry_run",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/dry_run.request.json"),
+    ),
+    (
+        "ast",
+        "dry_run",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/dry_run.response.json"),
+    ),
     // code_index/
     (
         "code_index",

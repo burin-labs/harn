@@ -17,6 +17,9 @@ source files. Three flavors live side by side:
   with exact / line / structural matching modes. The default reach
   when the language has no tree-sitter grammar or when the model
   reasoned in terms of literal lines.
+- `edit_dry_run` — render a multi-op plan to a per-file unified diff
+  without touching disk. The default reach when an agent wants to
+  "measure twice, cut once" before committing a multi-step edit.
 - Validators and helpers — `edit_changed_regions`,
   `edit_validate_changed_regions`, `edit_check_lazy_truncation`,
   `edit_explain_whitespace_difference`, `edit_strip_line_number_prefixes`.
@@ -608,6 +611,121 @@ if !result.ok && result.result == "conflict" {
 See the cookbook recipe [Rename a symbol across the
 workspace](../cookbooks/rename-symbol.md) for the end-to-end staged
 flow.
+
+## `edit_dry_run` — preview a multi-op plan
+
+`edit_dry_run({plan: [op, op, ...]})` runs the plan through a transient
+staged-fs (#1722) overlay, renders one unified diff per touched file,
+then discards the overlay — so the working tree is byte-identical
+before and after the call. Plan ops share that transient session, so
+the second op sees the first op's pending write and the response
+collapses to one diff per file even when several ops touch it.
+
+Backed by the `hostlib_ast_dry_run` builtin (issue
+[#2510](https://github.com/burin-labs/harn/issues/2510)).
+
+### Plan shape
+
+Each op carries an `op` tag:
+
+| `op` | Required fields | Notes |
+|---|---|---|
+| `apply_node` | `path`, `query`, `replacement` | Same shape as `edit_apply_node`. Optional: `select`, `nth`, `target_capture`, `language`, `validate`. |
+| `insert_at_anchor` | `path`, `query`, `position`, `content` | `position` ∈ `before \| after \| first_child \| last_child`. Anchor must match exactly once. |
+| `safe_text_patch` | `path`, `old_text`, `new_text` | Exact unique-match text replacement. |
+| `rename_symbol` | `symbol_ref`, `new_name` | Workspace-level cross-file rename. Rejected with `reason: "use_standalone"` — call [`edit_rename_symbol({..., dry_run: true})`](#edit_rename_symbol--safe-cross-file-rename) directly so the response keeps the per-file `touched_files` / `conflicts` metadata a unified diff would lose. |
+
+### Result
+
+```text
+{
+  result: "ok" | "partial" | "no_ops_applied",
+  per_file_unified_diff: [
+    { path, diff, lines_added, lines_removed },
+    ...
+  ],
+  summary: {
+    files_touched,
+    lines_added,
+    lines_removed,
+    ops_applied,
+    ops_rejected,
+  },
+  ops: [
+    { op, applied, result: "applied"|"rejected"|"error", reason?, details, path?, match_count? },
+    ...
+  ],
+}
+```
+
+The `diff` field is standard unified diff (compatible with
+`git apply --check`): `---`/`+++` headers, `@@ -a,b +c,d @@` hunk
+markers, three lines of leading and trailing context, and the
+conventional `\ No newline at end of file` annotations when either
+side lacks a trailing newline. New files use `--- /dev/null`; deleted
+files use `+++ /dev/null`.
+
+### Worked example: preview before approving
+
+```harn,ignore
+import "std/edit"
+
+pipeline default() {
+  let bundle = edit_dry_run(
+    {
+      plan: [
+        {
+          op: "apply_node",
+          path: "src/lib.rs",
+          query: "(function_item body: (block) @target)",
+          replacement: "{ format!(\"hi {name}!\") }",
+          select: "first",
+        },
+        {op: "safe_text_patch", path: "src/lib.rs", old_text: "fn greet", new_text: "fn greeter"},
+      ],
+    },
+  )
+  __io_println(bundle.result)                     // "ok"
+  __io_println(bundle.summary.ops_applied == 2)   // true
+  __io_println(bundle.summary.files_touched == 1) // true
+  // `bundle.per_file_unified_diff[0].diff` is the patch you'd show
+  // a reviewer or feed to `git apply` to commit the plan.
+}
+```
+
+### Rejected ops keep the plan moving
+
+A rejected op never aborts the plan. The dispatcher records the
+failure on `ops[i]` and continues. `result: "partial"` flags a plan
+that mixed successes and failures; `"no_ops_applied"` covers the
+fully-rejected case.
+
+```harn,ignore
+import "std/edit"
+
+pipeline default() {
+  let bundle = edit_dry_run(
+    {
+      plan: [
+        // Applied.
+        {
+          op: "apply_node",
+          path: "src/lib.rs",
+          query: "(function_item body: (block) @target)",
+          replacement: "{ 42 }",
+          select: "first",
+        },
+        // Rejected — no_match.
+        {op: "safe_text_patch", path: "src/lib.rs", old_text: "missing", new_text: "x"},
+      ],
+    },
+  )
+  __io_println(bundle.result)                       // "partial"
+  __io_println(bundle.ops[0].applied)               // true
+  __io_println(bundle.ops[1].applied)               // false
+  __io_println(bundle.ops[1].reason)                // "no_match"
+}
+```
 
 ## See also
 

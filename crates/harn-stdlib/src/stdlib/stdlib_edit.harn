@@ -1343,3 +1343,55 @@ pub fn edit_rename_symbol(params) {
     provenance: provenance,
   }
 }
+
+/**
+ * Render a multi-op edit plan as a per-file unified-diff bundle without
+ * committing anything to disk. The host opens a *transient* staged-fs
+ * (#1722) session, dispatches each op through its op-specific handler
+ * with that session id wired in, walks the resulting overlay to produce
+ * the diff, then discards the session — so the on-disk tree is
+ * byte-identical before and after the call.
+ *
+ * `plan` is an ordered list of operations. Each op carries an `op` tag:
+ *
+ * - `{op: "apply_node", path, query, replacement, select?, nth?, target_capture?, language?, validate?}`
+ * - `{op: "insert_at_anchor", path, query, position, content, target_capture?, language?, validate?}`
+ *   — `position` ∈ `before | after | first_child | last_child`.
+ * - `{op: "safe_text_patch", path, old_text, new_text}` — exact unique match.
+ * - `{op: "rename_symbol", symbol_ref, new_name, scope?}` — cross-file
+ *   rename via the typed symbol graph (#2434).
+ *
+ * Returns `{ok, result, per_file_unified_diff, summary, ops, provenance,
+ *           errors, warnings}` where `per_file_unified_diff` carries
+ * `{path, diff, lines_added, lines_removed}` per touched file. The diff
+ * format is standard unified diff, compatible with `git apply --check`.
+ * `result` is one of `ok | partial | no_ops_applied`.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_dry_run({plan: [{op: "apply_node", path: "src/lib.rs", query: query, replacement: "{ 42 }"}]})
+ */
+pub fn edit_dry_run(params) {
+  let plan = params?.plan ?? []
+  let raw = hostlib_ast_dry_run({plan: plan})
+  let payload = raw ?? {}
+  let summary = payload?.summary ?? {}
+  return {
+    ok: payload?.result ?? "no_ops_applied" != "no_ops_applied",
+    result: payload?.result ?? "no_ops_applied",
+    per_file_unified_diff: payload?.per_file_unified_diff ?? [],
+    summary: {
+      files_touched: summary?.files_touched ?? 0,
+      lines_added: summary?.lines_added ?? 0,
+      lines_removed: summary?.lines_removed ?? 0,
+      ops_applied: summary?.ops_applied ?? 0,
+      ops_rejected: summary?.ops_rejected ?? 0,
+    },
+    ops: payload?.ops ?? [],
+    errors: [],
+    warnings: [],
+    provenance: {module: "std/edit", helper: "edit_dry_run", caller: params?.provenance},
+  }
+}

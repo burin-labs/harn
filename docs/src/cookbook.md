@@ -409,6 +409,63 @@ The result carries a `telemetry` envelope (`applied`, `stale_base`,
 `hunk_conflict`, `no_op` counters plus `hunks`) so hosts can roll up
 collision rates without log scraping.
 
+### How to preview a multi-step edit plan and approve
+
+When an agent needs to chain several edits — rewrite a body, rename
+the function, insert a new statement — running them one at a time
+risks landing the first edit before the second is validated.
+`edit_dry_run` measures twice: it runs the whole plan against a
+transient staged-fs overlay, renders one unified diff per touched
+file, then discards the overlay. Nothing reaches disk until the
+caller commits.
+
+The diff is standard unified diff with `@@ -a,b +c,d @@` hunks, so
+it round-trips through `git apply` and renders cleanly in any
+reviewer UI.
+
+```harn,ignore
+import "std/edit"
+
+pipeline default(task) {
+  let bundle = edit_dry_run({
+    plan: [
+      {
+        op: "apply_node",
+        path: "src/lib.rs",
+        query: "(function_item body: (block) @target)",
+        replacement: "{ format!(\"hi {name}!\") }",
+        select: "first",
+      },
+      {op: "safe_text_patch", path: "src/lib.rs", old_text: "fn greet", new_text: "fn greeter"},
+    ],
+  })
+
+  if bundle.result == "ok" {
+    // Surface the diff to the operator for approval. The path of
+    // least resistance: pipe the bundle to a HITL reviewer, then
+    // re-run the same ops without dry_run to commit them.
+    for file in bundle.per_file_unified_diff {
+      log("---- ${file.path} (+${file.lines_added} / -${file.lines_removed})")
+      log(file.diff)
+    }
+  } else {
+    // `partial` or `no_ops_applied` — inspect bundle.ops[i].reason
+    // to learn why each op was rejected (no_match, ambiguous,
+    // invalid_query, syntax_error, …).
+    for op in bundle.ops {
+      if !op.applied {
+        log("REJECTED ${op.op}: ${op.reason} — ${op.details}")
+      }
+    }
+  }
+}
+```
+
+Plan ops share a transient staged-fs session, so the second op sees
+the first op's pending write. That means several ops touching the
+same file collapse to one cumulative diff, which is the form a
+reviewer (human or LLM) actually wants.
+
 ## MCP servers
 
 ### How to call an MCP server
