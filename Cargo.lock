@@ -2498,6 +2498,7 @@ dependencies = [
  "filetime",
  "futures",
  "globset",
+ "harn-clock",
  "harn-hostlib",
  "harn-parser",
  "harn-vm",

@@ -243,7 +243,9 @@ pub(crate) use self::call::{
     structured_output_errors, structured_safe_envelope_err, structured_safe_envelope_ok,
     SchemaLoopOutcome,
 };
-pub use self::cost::{calculate_cost_for_provider, peek_total_cost};
+pub use self::cost::{
+    calculate_cost_for_provider, install_llm_cost_budget, peek_total_cost, LlmBudgetGuard,
+};
 pub use self::healthcheck::{
     build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,
     ProviderHealthcheckOptions, ProviderHealthcheckResult,

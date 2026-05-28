@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 thread_local! {
@@ -18,6 +18,40 @@ pub(crate) fn reset_cost_state() {
 
 pub fn peek_total_cost() -> f64 {
     LLM_ACCUMULATED_COST.with(|acc| *acc.borrow())
+}
+
+/// RAII guard installed by [`install_llm_cost_budget`]. Restores the
+/// prior ceiling (and accumulated total) on drop so nested dispatches
+/// (a handler that re-enters the dispatcher) cannot leak a tighter
+/// budget into the outer scope, or a wider one back into a finished
+/// inner scope.
+#[must_use = "dropping the guard immediately restores the prior LLM cost budget"]
+pub struct LlmBudgetGuard {
+    previous_budget: Option<f64>,
+    previous_accumulated: f64,
+}
+
+impl Drop for LlmBudgetGuard {
+    fn drop(&mut self) {
+        LLM_BUDGET.with(|b| *b.borrow_mut() = self.previous_budget);
+        LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = self.previous_accumulated);
+    }
+}
+
+/// Pin the per-call LLM cost ceiling at `max_cost_usd` for the lifetime
+/// of the returned guard. Sourced from `@budget(llm_cost_usd = …)` on
+/// `.harn` handlers in `harn-serve`; mid-call exhaustion raises a
+/// `BudgetExceeded`-categorised error which adapter codecs render as
+/// HTTP 429.
+pub fn install_llm_cost_budget(max_cost_usd: f64) -> LlmBudgetGuard {
+    let previous_budget = LLM_BUDGET.with(|b| b.borrow().to_owned());
+    let previous_accumulated = LLM_ACCUMULATED_COST.with(|a| *a.borrow());
+    LLM_BUDGET.with(|b| *b.borrow_mut() = Some(max_cost_usd.max(0.0)));
+    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
+    LlmBudgetGuard {
+        previous_budget,
+        previous_accumulated,
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -499,9 +533,10 @@ pub(crate) fn accumulate_cost_for_provider(
         if let Some(max) = *budget.borrow() {
             let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
             if total > max {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "LLM budget exceeded: spent ${total:.4} of ${max:.4} budget"
-                )))));
+                return Err(categorized_error(
+                    format!("LLM budget exceeded: spent ${total:.4} of ${max:.4} budget"),
+                    ErrorCategory::BudgetExceeded,
+                ));
             }
         }
         Ok(())

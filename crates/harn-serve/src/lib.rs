@@ -7,6 +7,7 @@ mod core;
 mod error;
 mod exports;
 pub mod http_codec;
+pub mod limits;
 mod mcp_context;
 pub mod mcp_host_bridge;
 mod mcp_prompts;
@@ -48,6 +49,11 @@ pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, Exporte
 pub use http_codec::{
     axum_response_from_call, axum_response_from_dispatch_error, decode_call_response,
     dispatch_error_payload, fresh_request_id, HttpCodecOutcome, SseEventSpec,
+};
+pub use limits::{
+    Algorithm, BudgetSpec, InMemoryLimitStore, LimitContext, LimitDecision, LimitGuard,
+    LimitRegistry, LimitScope, LimitStats, LimitStore, Quota, QuotaWindow, RouteLimits,
+    TenantOverride,
 };
 pub use mcp_host_bridge::install_mcp_host_allowlist;
 pub use mcp_prompts::FilePromptCatalog;
