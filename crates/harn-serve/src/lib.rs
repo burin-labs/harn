@@ -11,6 +11,7 @@ mod mcp_prompts;
 #[cfg(test)]
 mod protocol_fixture_tests;
 mod replay;
+pub mod sessions;
 pub mod tls;
 
 /// Default 10 MiB body size cap applied to every HTTP router exposed by
@@ -42,4 +43,11 @@ pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
 pub use mcp_prompts::FilePromptCatalog;
 pub use replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
+pub use sessions::{
+    sessions_router, AppendEvent, CreateSession, EventId, EventPage, ForkResult, ListFilter,
+    MemorySessionStore, ReadRange, RetentionPolicy, SessionEventKind, SessionId, SessionMeta,
+    SessionSigner, SessionStatus, SessionStore, SharedSessionStore, Snapshot, SnapshotId,
+    SqliteSessionStore, StoreError, StoreHooks, StoreResult, StoredEvent, SweepReport,
+    TruncateResult, VerifyFailure, VerifyReport,
+};
 pub use tls::{bind_listener, HstsConfig, HttpTlsConfig};
