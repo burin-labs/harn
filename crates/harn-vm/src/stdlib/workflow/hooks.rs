@@ -3,10 +3,16 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
 pub(super) type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
 
+/// Register low-level pre/post tool hooks for workflow execution.
+#[harn_builtin(
+    sig = "register_tool_hook(config?: dict|nil) -> nil",
+    category = "workflow.host"
+)]
 pub(super) fn register_tool_hook_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -97,6 +103,8 @@ pub(super) fn register_tool_hook_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Clear registered low-level workflow tool hooks.
+#[harn_builtin(sig = "clear_tool_hooks() -> nil", category = "workflow.host")]
 pub(super) fn clear_tool_hooks_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -155,6 +163,11 @@ pub(super) fn required_hook_closure(
     }
 }
 
+/// Register a persona lifecycle hook for matching persona names.
+#[harn_builtin(
+    sig = "register_persona_hook(persona_pattern: string, event: string, handler: closure) -> nil",
+    category = "workflow.host"
+)]
 pub(super) fn register_persona_hook_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -173,6 +186,11 @@ pub(super) fn register_persona_hook_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Register a persona step lifecycle hook for one named step.
+#[harn_builtin(
+    sig = "register_step_hook(persona_pattern: string, step_name: string, event: string, handler: closure) -> nil",
+    category = "workflow.host"
+)]
 pub(super) fn register_step_hook_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -201,6 +219,8 @@ pub(super) fn register_step_hook_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Clear registered persona and step lifecycle hooks.
+#[harn_builtin(sig = "clear_persona_hooks() -> nil", category = "workflow.host")]
 pub(super) fn clear_persona_hooks_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -209,6 +229,11 @@ pub(super) fn clear_persona_hooks_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Register a session-level lifecycle hook.
+#[harn_builtin(
+    sig = "register_session_hook(event: string, pattern_or_handler: string|closure, handler?: closure) -> nil",
+    category = "workflow.host"
+)]
 pub(super) fn register_session_hook_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -236,6 +261,8 @@ pub(super) fn register_session_hook_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Clear registered session-level lifecycle hooks.
+#[harn_builtin(sig = "clear_session_hooks() -> nil", category = "workflow.host")]
 pub(super) fn clear_session_hooks_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -250,6 +277,11 @@ pub(super) fn clear_session_hooks_builtin(
 /// or the wildcard `"*"` / `nil` to subscribe to every seam. The handler
 /// receives the `LoopCheckpoint` payload `{session_id, iteration, kind,
 /// delivered, inbox_delivered, dispatch_skipped}`.
+/// Register a hook covering one or more agent-loop checkpoint seams.
+#[harn_builtin(
+    sig = "register_checkpoint_hook(kinds: string|list|nil, handler: closure) -> nil",
+    category = "workflow.host"
+)]
 pub(super) fn register_checkpoint_hook_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -394,6 +426,11 @@ fn reminder_provider_event_list(
     }
 }
 
+/// Register a system-reminder provider closure for agent lifecycle events.
+#[harn_builtin(
+    sig = "register_reminder_provider(config: dict) -> nil",
+    category = "workflow.host"
+)]
 pub(super) fn register_reminder_provider_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -444,6 +481,8 @@ pub(super) fn register_reminder_provider_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Clear registered user-defined system-reminder providers.
+#[harn_builtin(sig = "clear_reminder_providers() -> nil", category = "workflow.host")]
 pub(super) fn clear_reminder_providers_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -456,6 +495,11 @@ pub(super) fn clear_reminder_providers_builtin(
 /// declared steps complete (signature `fn(harness, return_value)`). Last-
 /// write-wins; the callback's return value replaces the pipeline's return
 /// value when the lifecycle runs.
+/// Register a callback invoked after the pipeline's declared steps complete.
+#[harn_builtin(
+    sig = "pipeline_on_finish(callback: closure) -> nil",
+    category = "workflow.host"
+)]
 pub(super) fn pipeline_on_finish_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -469,6 +513,11 @@ pub(super) fn pipeline_on_finish_builtin(
 /// and clear the log. Surfaces the lifecycle audit channel to Harn so
 /// conformance fixtures, replay oracles, and presets can introspect what
 /// drain/abandon/handoff_to recorded without depending on Rust internals.
+/// Return and clear every entry recorded via harness.emit_audit during this pipeline run.
+#[harn_builtin(
+    sig = "pipeline_lifecycle_audit_log_take() -> list",
+    category = "workflow.host"
+)]
 pub(super) fn pipeline_lifecycle_audit_log_take_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -480,6 +529,11 @@ pub(super) fn pipeline_lifecycle_audit_log_take_builtin(
 
 /// Non-destructive variant: read entries without consuming them. Used by
 /// presets that want to peek without disturbing the replay log.
+/// Return every entry recorded via harness.emit_audit without clearing the log.
+#[harn_builtin(
+    sig = "pipeline_lifecycle_audit_log_snapshot() -> list",
+    category = "workflow.host"
+)]
 pub(super) fn pipeline_lifecycle_audit_log_snapshot_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -495,6 +549,12 @@ pub(super) fn pipeline_lifecycle_audit_log_snapshot_builtin(
 /// on while the loop runs and back off when it exits. Lifecycle hooks
 /// fired from within the loop (e.g. `OnDrainDecision`) observe this as
 /// true.
+/// Return true while the settlement-agent drain loop is running on this thread.
+#[harn_builtin(
+    sig = "__host_settlement_agent_active() -> bool",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) fn settlement_agent_active_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -510,6 +570,13 @@ pub(super) fn settlement_agent_active_builtin(
 ///
 /// Returns a dict shaped like:
 ///   { control: "allow" | "block" | "decision", reason?, decision? }
+/// Fire a session-level lifecycle hook and return its control flow.
+#[harn_builtin(
+    sig = "__host_fire_session_hook(event: string, payload?: dict|nil) -> dict",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) async fn fire_session_hook_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let event_name = args
         .first()
@@ -569,6 +636,11 @@ pub(super) async fn fire_session_hook_builtin(args: Vec<VmValue>) -> Result<VmVa
 /// that a file was edited. Records a `file_edited` advisory event on
 /// the active transcript so replay tooling can see it, and queues VM
 /// closure handlers for the next async-builtin boundary.
+/// Queue a `FileEdited` notification; hooks fire on the next agent-loop boundary.
+#[harn_builtin(
+    sig = "notify_file_edited(path: string, metadata?: dict|nil) -> nil",
+    category = "workflow.host"
+)]
 pub(super) fn notify_file_edited_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -589,6 +661,13 @@ pub(super) fn notify_file_edited_builtin(
 /// notifications recorded since the last drain. Returns the list of
 /// drained paths so callers (the agent loop) can record them on the
 /// transcript or pass them to follow-up tools.
+/// Drain the FileEdited queue, fire matching hooks, return the drained paths.
+#[harn_builtin(
+    sig = "__host_drain_file_edits(session_id?: string|nil) -> list",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
 pub(super) async fn drain_file_edits_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args.first().map(VmValue::display).unwrap_or_default();
     let drained = crate::orchestration::drain_file_edits();

@@ -221,10 +221,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple("circuit_reset", &[Param::new("name", TY_STRING)], TY_NIL),
-    BuiltinSignature::simple("clear_tool_hooks", &[], TY_NIL),
-    BuiltinSignature::simple("clear_persona_hooks", &[], TY_NIL),
-    BuiltinSignature::simple("clear_session_hooks", &[], TY_NIL),
-    BuiltinSignature::simple("clear_reminder_providers", &[], TY_NIL),
     BuiltinSignature::simple(
         "close_channel",
         &[Param::new("channel", Ty::Named("channel"))],
@@ -375,51 +371,8 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("pg_query_one", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("pg_transaction", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("pi", &[Param::new("args", TY_ANY)], TY_FLOAT),
-    BuiltinSignature::simple("pipeline_lifecycle_audit_log_snapshot", &[], TY_LIST),
-    BuiltinSignature::simple("pipeline_lifecycle_audit_log_take", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "pipeline_on_finish",
-        &[Param::new("callback", TY_ANY)],
-        TY_NIL,
-    ),
     BuiltinSignature::variadic("receive", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("request_approval", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("register_tool_hook", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::simple(
-        "register_persona_hook",
-        &[
-            Param::new("persona_pattern", TY_STRING),
-            Param::new("event", TY_STRING),
-            Param::new("handler", TY_ANY),
-        ],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "register_step_hook",
-        &[
-            Param::new("persona_pattern", TY_STRING),
-            Param::new("step_name", TY_STRING),
-            Param::new("event", TY_STRING),
-            Param::new("handler", TY_ANY),
-        ],
-        TY_NIL,
-    ),
-    BuiltinSignature::variadic(
-        "register_session_hook",
-        &[Param::new("args", TY_ANY)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "register_checkpoint_hook",
-        &[Param::new("kinds", TY_ANY), Param::new("handler", TY_ANY)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "register_reminder_provider",
-        &[Param::new("config", TY_DICT)],
-        TY_NIL,
-    ),
-    BuiltinSignature::variadic("notify_file_edited", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("runtime_context", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic(
         "runtime_context_clear",
