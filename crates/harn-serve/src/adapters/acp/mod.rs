@@ -861,6 +861,19 @@ impl AcpServer {
                     self.auth_required_data(),
                 );
             }
+            // `authorize_mcp` is the only producer of this variant and
+            // belongs to the harn-vm `harness.mcp.*` dispatch path, not
+            // ACP authentication. Surfacing it here would mean policy
+            // wiring leaked; forward as auth-required with the
+            // policy's reason so the operator can debug.
+            AuthorizationDecision::McpNotAllowlisted { reason, .. } => {
+                self.send_error_with_data(
+                    id,
+                    ACP_AUTH_REQUIRED_CODE,
+                    &reason,
+                    self.auth_required_data(),
+                );
+            }
         }
     }
 

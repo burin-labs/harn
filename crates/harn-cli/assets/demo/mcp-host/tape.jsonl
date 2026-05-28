@@ -1,0 +1,1 @@
+{"_note": "intentionally minimal — the mcp-host scenario does not call llm_call, but the demo framework requires a non-empty tape so every scenario has a deterministic --llm-mock replay file."}

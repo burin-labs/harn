@@ -1,0 +1,92 @@
+/**
+ * mcp-host demo: drive the supervised MCP-host primitive (#2504) on
+ * registration and status surfaces that work offline.
+ *
+ * Scope:
+ *   - Register two lazy MCP server specs via `harn.mcp.spawn` (lazy =
+ *     no eager connect, so we don't need a live MCP server bundled).
+ *   - Snapshot `harn.mcp.status()` and emit a receipt that proves the
+ *     registry view, supervision counters, circuit-breaker state, and
+ *     cache slot all line up with a freshly-registered lazy server.
+ *   - Issue a graceful `harn.mcp.stop` against one of the registrations
+ *     and re-snapshot to show the deregistration path.
+ *
+ * Why a demo for this primitive: `harness.mcp.*` is a new public host
+ * surface that downstream callers (TUI, BurinCore, harn-cloud) will
+ * lean on. The demo gate (#2526 fragment) flags every public primitive,
+ * and this scenario keeps the offline-runnable smoke path covered
+ * without needing a live MCP server in the fixture set.
+ *
+ * Live-mode hint: `harn demo mcp-host --live` against a server with an
+ * MCP server actually configured will exercise `harn.mcp.tools` and
+ * `harn.mcp.call`; this scenario stays in lazy-mode by design so the
+ * tape stays small and offline.
+ */
+fn server_specs() {
+  return [
+    {name: "alpha", transport: "stdio", command: "/bin/true", args: []},
+    {name: "beta", transport: "http", url: "http://127.0.0.1:1/mcp", protocol_mode: "rc"},
+  ]
+}
+
+pipeline default(_task) {
+  // 1. Register both servers lazily — no eager connect, so the demo
+  //    runs even without a network or a bundled MCP fixture.
+  for spec in server_specs() {
+    let id = harn.mcp.spawn(spec, {lazy: true})
+    __io_println("spawned ${id} (lazy)")
+  }
+  // 2. Snapshot the host's view of every registered server. Each entry
+  //    carries supervision counters (restart_count, consecutive_failures,
+  //    circuit) plus the lazy/active/ref_count registry triple.
+  let after_spawn = harn.mcp.status()
+  __io_println("=== status after spawn ===")
+  for entry in after_spawn {
+    __io_println(json_stringify(entry))
+  }
+  // 3. Stop one of the registrations to release the handle. Stop on a
+  //    never-connected lazy server is a no-op against the registry —
+  //    the spec stays so a future `spawn` (or declarative reload)
+  //    immediately re-finds it. The supervision counters reset
+  //    regardless, which is the bit `status()` reflects.
+  harn.mcp.stop("alpha")
+  let after_stop = harn.mcp.status()
+  __io_println("=== status after stop alpha ===")
+  for entry in after_stop {
+    __io_println(json_stringify(entry))
+  }
+  let receipt = {
+    receipt_kind: "mcp_host_receipt",
+    registered_after_spawn: len(after_spawn),
+    registered_after_stop: len(after_stop),
+    every_initial_entry_is_lazy: all_lazy(after_spawn),
+    every_initial_entry_circuit_closed: all_closed(after_spawn),
+  }
+  __io_println("=== mcp-host receipt ===")
+  __io_println(json_stringify(receipt))
+  return receipt
+}
+
+/**
+ * Compact predicates so the receipt stays small. The status entry
+ * shape is documented in `crates/harn-vm/src/mcp_host.rs::McpHostStatus`.
+ */
+fn all_lazy(entries) {
+  var ok = true
+  for entry in entries {
+    if !entry.lazy {
+      ok = false
+    }
+  }
+  return ok
+}
+
+fn all_closed(entries) {
+  var ok = true
+  for entry in entries {
+    if entry.circuit != "closed" {
+      ok = false
+    }
+  }
+  return ok
+}

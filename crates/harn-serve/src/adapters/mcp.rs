@@ -629,6 +629,13 @@ impl McpServer {
                     &crate::forbidden_message(&required, &granted),
                 ))
             }
+            // `authorize_mcp` is the only producer of this variant and
+            // is never called from this adapter — keep the match
+            // exhaustive without a wildcard so adding new variants
+            // continues to break here on purpose.
+            AuthorizationDecision::McpNotAllowlisted { reason, .. } => {
+                Err(harn_vm::jsonrpc::error_response(id, -32003, &reason))
+            }
         }
     }
 

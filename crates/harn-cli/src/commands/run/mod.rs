@@ -159,10 +159,12 @@ fn build_run_json_sink(
 
 pub(crate) enum RunFileMcpServeMode {
     Stdio,
-    Http {
-        options: harn_serve::McpHttpServeOptions,
-        auth_policy: harn_serve::AuthPolicy,
-    },
+    Http(Box<RunFileMcpServeHttp>),
+}
+
+pub(crate) struct RunFileMcpServeHttp {
+    pub options: harn_serve::McpHttpServeOptions,
+    pub auth_policy: harn_serve::AuthPolicy,
 }
 
 /// Core builtins that are never denied, even when using `--allow`.
@@ -2565,10 +2567,11 @@ pub(crate) async fn run_file_mcp_serve(
                         process::exit(1);
                     }
                 }
-                RunFileMcpServeMode::Http {
-                    options,
-                    auth_policy,
-                } => {
+                RunFileMcpServeMode::Http(http) => {
+                    let RunFileMcpServeHttp {
+                        options,
+                        auth_policy,
+                    } = *http;
                     if let Err(e) = crate::commands::serve::run_script_mcp_http_server(
                         server,
                         vm,

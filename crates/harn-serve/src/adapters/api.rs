@@ -2316,6 +2316,15 @@ async fn authorize(
         AuthorizationDecision::MissingScope { required, granted } => {
             Err(forbidden_api_error(&required, &granted))
         }
+        // `authorize_mcp` is the only call site that produces this
+        // variant. The REST API edge never invokes it, so any leak here
+        // is a policy-wiring bug — surface a 403 with the policy's own
+        // reason string so the upstream operator gets actionable text.
+        AuthorizationDecision::McpNotAllowlisted { reason, .. } => Err(api_error(
+            StatusCode::FORBIDDEN,
+            "mcp_not_allowlisted",
+            &reason,
+        )),
     }
 }
 
@@ -2812,6 +2821,7 @@ mod tests {
                 methods: vec![crate::auth::AuthMethodConfig::ApiKey(
                     crate::auth::ApiKeyAuthConfig::single("secret"),
                 )],
+                mcp_allowlist: None,
             });
         let server = ApiServer::new(config);
         let response = api_router(server.state)

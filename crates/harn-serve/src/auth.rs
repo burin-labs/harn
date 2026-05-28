@@ -170,6 +170,93 @@ pub enum AuthMethodConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct AuthPolicy {
     pub methods: Vec<AuthMethodConfig>,
+    /// Per-tenant MCP allowlist (#2504, A.7). `None` means allow-all —
+    /// every hosted MCP server and every tool on it is callable. When
+    /// `Some`, only the listed (server, tool) pairs are reachable.
+    pub mcp_allowlist: Option<McpAllowlist>,
+}
+
+/// Tenant-scoped allowlist for the `harness.mcp.*` host primitive.
+/// Each entry maps an MCP server name to the tools that tenant is
+/// allowed to invoke on it. An entry whose tool set is `All` allows
+/// every tool the server advertises; an explicit `Only(...)` set
+/// restricts callers to the named tools (case-sensitive match against
+/// the server-advertised tool name).
+///
+/// The list is checked at *dispatch* time — before any network traffic
+/// — and surfaces a typed [`AuthorizationDecision::McpNotAllowlisted`]
+/// variant so callers can render an actionable error body without
+/// guessing which check fired.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct McpAllowlist {
+    pub servers: BTreeMap<String, McpAllowlistTools>,
+}
+
+/// Tool-level allowlist filter for a single MCP server. `All` allows
+/// every tool the server reports; `Only` restricts to the named set.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum McpAllowlistTools {
+    All,
+    Only(BTreeSet<String>),
+}
+
+impl McpAllowlist {
+    /// Empty allowlist — denies every server. Useful as a tenant-level
+    /// default-deny that operators then layer permits on top of.
+    pub fn deny_all() -> Self {
+        Self::default()
+    }
+
+    /// Convenience: allow every tool on every named server. Equivalent
+    /// to inserting `(name, McpAllowlistTools::All)` for each name.
+    pub fn allow_servers(names: impl IntoIterator<Item = String>) -> Self {
+        let servers = names
+            .into_iter()
+            .map(|name| (name, McpAllowlistTools::All))
+            .collect();
+        Self { servers }
+    }
+
+    /// Insert / replace the entry for `server`. `tools` is the explicit
+    /// allowlist for that server; pass [`McpAllowlistTools::All`] to
+    /// allow every tool. Returns `&mut self` to support builder-style
+    /// composition.
+    pub fn allow(&mut self, server: impl Into<String>, tools: McpAllowlistTools) -> &mut Self {
+        self.servers.insert(server.into(), tools);
+        self
+    }
+
+    /// Resolve a (server, tool) pair against the allowlist.
+    ///
+    /// - `server` not present → denied (server not allowlisted)
+    /// - server present with `All` tools → allowed regardless of `tool`
+    /// - server present with `Only(set)`:
+    ///   - `tool == Some(name)` and `name ∈ set` → allowed
+    ///   - `tool == Some(name)` and `name ∉ set` → denied (tool not allowlisted)
+    ///   - `tool == None` (spawn check, no specific tool yet) → allowed
+    pub fn check(&self, server: &str, tool: Option<&str>) -> AllowlistOutcome {
+        let Some(entry) = self.servers.get(server) else {
+            return AllowlistOutcome::ServerDenied;
+        };
+        match (entry, tool) {
+            (McpAllowlistTools::All, _) => AllowlistOutcome::Allow,
+            (McpAllowlistTools::Only(_), None) => AllowlistOutcome::Allow,
+            (McpAllowlistTools::Only(set), Some(name)) if set.contains(name) => {
+                AllowlistOutcome::Allow
+            }
+            (McpAllowlistTools::Only(_), Some(_)) => AllowlistOutcome::ToolDenied,
+        }
+    }
+}
+
+/// Result of evaluating an [`McpAllowlist`] against a (server, tool)
+/// pair. Mirrors [`AuthorizationDecision::McpNotAllowlisted`] without
+/// the principal/scope context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AllowlistOutcome {
+    Allow,
+    ServerDenied,
+    ToolDenied,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,6 +271,16 @@ pub enum AuthorizationDecision {
     MissingScope {
         required: BTreeSet<String>,
         granted: BTreeSet<String>,
+    },
+    /// The credential authenticated and met any scope requirements, but
+    /// the per-tenant MCP allowlist (#2504) refused the (server, tool)
+    /// pair. `reason` is a short, user-facing explanation; `server` and
+    /// `tool` echo what was attempted so the caller can render a
+    /// targeted error.
+    McpNotAllowlisted {
+        server: String,
+        tool: Option<String>,
+        reason: String,
     },
 }
 
@@ -269,6 +366,48 @@ impl AuthPolicy {
             };
         }
         AuthorizationDecision::Authorized(principal)
+    }
+
+    /// Evaluate the per-tenant MCP allowlist for a (`server`, `tool`)
+    /// pair. Returns [`AuthorizationDecision::Authorized`] with an
+    /// anonymous principal when no allowlist is configured (allow-all),
+    /// and otherwise dispatches against [`McpAllowlist::check`].
+    ///
+    /// `tool == None` is the spawn-time check — the caller has not yet
+    /// chosen a specific tool, only a server. For that path we accept
+    /// any server present in the allowlist regardless of its tool
+    /// filter; the per-tool check still fires on each subsequent
+    /// `call`.
+    pub fn authorize_mcp(&self, server: &str, tool: Option<&str>) -> AuthorizationDecision {
+        let Some(allowlist) = &self.mcp_allowlist else {
+            return AuthorizationDecision::Authorized(AuthenticatedPrincipal {
+                subject: "anonymous".to_string(),
+                scheme: "none".to_string(),
+                granted_scopes: BTreeSet::new(),
+                tenant_id: None,
+            });
+        };
+        match allowlist.check(server, tool) {
+            AllowlistOutcome::Allow => AuthorizationDecision::Authorized(AuthenticatedPrincipal {
+                subject: "anonymous".to_string(),
+                scheme: "none".to_string(),
+                granted_scopes: BTreeSet::new(),
+                tenant_id: None,
+            }),
+            AllowlistOutcome::ServerDenied => AuthorizationDecision::McpNotAllowlisted {
+                server: server.to_string(),
+                tool: tool.map(str::to_string),
+                reason: format!("MCP server '{server}' is not on the tenant allowlist"),
+            },
+            AllowlistOutcome::ToolDenied => AuthorizationDecision::McpNotAllowlisted {
+                server: server.to_string(),
+                tool: tool.map(str::to_string),
+                reason: format!(
+                    "MCP tool '{}' on server '{server}' is not on the tenant allowlist",
+                    tool.unwrap_or("<unknown>")
+                ),
+            },
+        }
     }
 }
 
@@ -457,6 +596,7 @@ mod tests {
     async fn api_key_policy_accepts_matching_bearer_token() {
         let policy = AuthPolicy {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([("authorization".to_string(), "Bearer secret".to_string())]),
@@ -470,6 +610,7 @@ mod tests {
     async fn api_key_policy_accepts_case_insensitive_header_names() {
         let policy = AuthPolicy {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([("X-API-Key".to_string(), " secret ".to_string())]),
@@ -493,6 +634,7 @@ mod tests {
                 }),
                 AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("second")),
             ],
+            mcp_allowlist: None,
         };
 
         let methods = policy.acp_auth_methods();
@@ -526,6 +668,7 @@ mod tests {
                 granted_scopes: BTreeSet::new(),
                 tenant_id: None,
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             method: "POST".to_string(),
@@ -549,6 +692,7 @@ mod tests {
                 required_scopes: scopes(&["invoke"]),
                 tenant_id: None,
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             validated_oauth: Some(OAuthClaims {
@@ -582,6 +726,7 @@ mod tests {
                 required_scopes: BTreeSet::new(),
                 tenant_id: None,
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             validated_oauth: Some(OAuthClaims {
@@ -613,6 +758,7 @@ mod tests {
                     ),
                 ],
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([(
@@ -637,6 +783,7 @@ mod tests {
                     ["sessions:read".to_string()],
                 )],
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([(
@@ -671,6 +818,7 @@ mod tests {
                     ],
                 )],
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([(
@@ -690,6 +838,7 @@ mod tests {
     async fn scope_check_short_circuits_to_rejected_when_authentication_fails() {
         let policy = AuthPolicy {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
+            mcp_allowlist: None,
         };
         let request = AuthRequest::default();
         let decision = policy
@@ -719,6 +868,7 @@ mod tests {
                 granted_scopes: scopes(&["personas:read"]),
                 tenant_id: None,
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             method: "POST".to_string(),
@@ -744,6 +894,7 @@ mod tests {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
                 keys: vec![ApiKeyEntry::new("tenant-key", []).with_tenant("acme")],
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([(
@@ -765,6 +916,7 @@ mod tests {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
                 keys: vec![ApiKeyEntry::new("key", []).with_tenant("baseline")],
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([("authorization".to_string(), "Bearer key".to_string())]),
@@ -787,6 +939,7 @@ mod tests {
                 required_scopes: BTreeSet::new(),
                 tenant_id: Some(TenantId::new("policy-default")),
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             validated_oauth: Some(OAuthClaims {
@@ -814,6 +967,7 @@ mod tests {
                 required_scopes: BTreeSet::new(),
                 tenant_id: Some(TenantId::new("policy-default")),
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             validated_oauth: Some(OAuthClaims {

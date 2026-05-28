@@ -243,6 +243,7 @@ pub fn greet(name: string) -> string {
     let mut config = DispatchCoreConfig::for_script(&script);
     config.auth_policy = crate::AuthPolicy {
         methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
+        mcp_allowlist: None,
     };
     let core = DispatchCore::new(config).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));

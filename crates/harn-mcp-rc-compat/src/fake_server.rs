@@ -382,6 +382,16 @@ fn handle_tools_call(
         "content": [{"type": "text", "text": format!("ok:{}", args)}],
         "isError": false,
     });
+    // The CacheHints behavior also exercises tool-call caching so the
+    // supervised host primitive (#2504) has a real wire to validate
+    // against. List/read hints were already exercised on `tools/list`
+    // above; the tool-call hint completes the matrix.
+    if behavior == FakeServerBehavior::CacheHints {
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("ttlMs".to_string(), json!(60_000_u64));
+            obj.insert("cacheScope".to_string(), json!("public"));
+        }
+    }
     if behavior == FakeServerBehavior::Legacy202511 {
         result = json!({
             "content": [{"type": "text", "text": format!("ok:{}", args)}],

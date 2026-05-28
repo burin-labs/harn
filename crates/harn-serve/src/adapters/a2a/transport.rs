@@ -371,6 +371,15 @@ impl A2aServer {
                 status: Some(StatusCode::FORBIDDEN),
                 auth_challenge: None,
             }),
+            // `authorize_mcp` is the only producer of this variant and
+            // is invoked from harn-vm, not from this A2A adapter.
+            // Surfacing it here would imply a wiring bug; treat as 403.
+            AuthorizationDecision::McpNotAllowlisted { reason, .. } => Err(ProcessedRpc {
+                outcome: RpcOutcome::Json(error_response(rpc_id, -32003, &reason)),
+                deprecation: None,
+                status: Some(StatusCode::FORBIDDEN),
+                auth_challenge: None,
+            }),
         }
     }
 }

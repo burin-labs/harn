@@ -1788,6 +1788,20 @@ pub(crate) async fn call_mcp_tool(
     tool_name: &str,
     arguments: serde_json::Value,
 ) -> Result<serde_json::Value, VmError> {
+    let (content, _hint) = call_mcp_tool_with_hint(client, tool_name, arguments).await?;
+    Ok(content)
+}
+
+/// Variant of [`call_mcp_tool`] that also returns the MCP cache hint
+/// from the underlying envelope (when present). Used by
+/// [`crate::mcp_host`] so the supervised host can populate its
+/// per-(server, tool, args-hash) response cache from the same envelope
+/// the unwrapping path consumes — no second network round-trip.
+pub(crate) async fn call_mcp_tool_with_hint(
+    client: &VmMcpClientHandle,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<(serde_json::Value, Option<McpCacheHint>), VmError> {
     // Attach a unique progress token so the server can emit
     // `notifications/progress` updates that we route back into the
     // active session's `agent_inbox`. Tokens are scoped to the active
@@ -1838,23 +1852,28 @@ pub(crate) async fn call_mcp_tool(
         return Err(VmError::Thrown(VmValue::String(Rc::from(error_text))));
     }
 
+    let cache_hint = McpCacheHint::from_result(&result);
     let content = result
         .get("content")
         .and_then(|c| c.as_array())
         .cloned()
         .unwrap_or_default();
 
-    if content.len() == 1 && content[0].get("type").and_then(|t| t.as_str()) == Some("text") {
-        if let Some(text) = content[0].get("text").and_then(|t| t.as_str()) {
-            return Ok(serde_json::Value::String(text.to_string()));
-        }
-    }
-
-    if content.is_empty() {
-        Ok(serde_json::Value::Null)
-    } else {
-        Ok(serde_json::Value::Array(content))
-    }
+    let unwrapped =
+        if content.len() == 1 && content[0].get("type").and_then(|t| t.as_str()) == Some("text") {
+            if let Some(text) = content[0].get("text").and_then(|t| t.as_str()) {
+                serde_json::Value::String(text.to_string())
+            } else if content.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::Value::Array(content)
+            }
+        } else if content.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::Array(content)
+        };
+    Ok((unwrapped, cache_hint))
 }
 
 #[derive(Clone, Debug)]
@@ -1979,6 +1998,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     vm.register_builtin("harn.mcp.roots", mcp_roots_builtin);
     crate::mcp_file_upload::register_mcp_file_upload_builtins(vm);
     register_harn_mcp_namespace(vm);
+    register_supervised_mcp_host_builtins(vm);
 
     vm.register_async_builtin("mcp_connect", |args| async move {
         let command = args.first().map(|a| a.display()).unwrap_or_default();
@@ -2450,6 +2470,38 @@ fn register_harn_mcp_namespace(vm: &mut Vm) {
             "upload_file".to_string(),
             VmValue::BuiltinRef(Rc::from("harn.mcp.upload_file")),
         ),
+        // Supervised host primitive (#2504, A.7). spawn/tools/call/stop
+        // route to `crate::mcp_host` and add restart-budget, circuit
+        // breaker, response cache, and allowlist enforcement on top of
+        // the lazy-boot `mcp_registry` they share.
+        (
+            "spawn".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.spawn")),
+        ),
+        (
+            "tools".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.tools")),
+        ),
+        (
+            "call".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.call")),
+        ),
+        (
+            "stop".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.stop")),
+        ),
+        (
+            "discover".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.discover")),
+        ),
+        (
+            "reload".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.reload")),
+        ),
+        (
+            "status".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.status")),
+        ),
     ])));
     vm.set_global(
         "harn",
@@ -2462,6 +2514,148 @@ fn register_harn_mcp_namespace(vm: &mut Vm) {
             ("mcp".to_string(), mcp_namespace),
         ]))),
     );
+}
+
+/// Register the supervised MCP host builtins owned by [`crate::mcp_host`].
+/// Each builtin is a thin adapter that converts VM values to/from JSON
+/// and delegates to the host module. The host module owns supervision
+/// state, the response cache, allowlist enforcement, and tracing spans.
+fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
+    vm.register_async_builtin("harn.mcp.spawn", |args| async move {
+        let spec_value = args
+            .first()
+            .ok_or_else(|| VmError::Runtime("harn.mcp.spawn: spec dict is required".into()))?;
+        let spec = vm_value_to_serde(spec_value);
+        let options: crate::mcp_host::SpawnOptions = match args.get(1) {
+            Some(VmValue::Dict(_)) => {
+                let options_json = vm_value_to_serde(args.get(1).unwrap());
+                serde_json::from_value(options_json).map_err(|e| {
+                    VmError::Runtime(format!("harn.mcp.spawn: invalid options dict: {e}"))
+                })?
+            }
+            _ => Default::default(),
+        };
+        let name = crate::mcp_host::spawn(spec, options).await?;
+        Ok(VmValue::String(Rc::from(name)))
+    });
+
+    vm.register_async_builtin("harn.mcp.tools", |args| async move {
+        let name = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            Some(other) => other.display(),
+            None => {
+                return Err(VmError::Runtime(
+                    "harn.mcp.tools: server name (string) is required".into(),
+                ));
+            }
+        };
+        let tools = crate::mcp_host::tools(&name).await?;
+        Ok(VmValue::List(Rc::new(
+            tools.iter().map(json_to_vm_value).collect(),
+        )))
+    });
+
+    vm.register_async_builtin("harn.mcp.call", |args| async move {
+        let name = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            Some(other) => other.display(),
+            None => {
+                return Err(VmError::Runtime(
+                    "harn.mcp.call: server name (string) is required".into(),
+                ));
+            }
+        };
+        let tool = match args.get(1) {
+            Some(VmValue::String(s)) => s.to_string(),
+            Some(other) => other.display(),
+            None => {
+                return Err(VmError::Runtime(
+                    "harn.mcp.call: tool name (string) is required".into(),
+                ));
+            }
+        };
+        let tool_args = match args.get(2) {
+            Some(VmValue::Dict(d)) => {
+                let obj: serde_json::Map<String, serde_json::Value> = d
+                    .iter()
+                    .map(|(k, v)| (k.clone(), vm_value_to_serde(v)))
+                    .collect();
+                serde_json::Value::Object(obj)
+            }
+            Some(VmValue::Nil) | None => serde_json::json!({}),
+            Some(other) => vm_value_to_serde(other),
+        };
+        let result = crate::mcp_host::call(&name, &tool, tool_args).await?;
+        Ok(json_to_vm_value(&result))
+    });
+
+    vm.register_builtin("harn.mcp.stop", |args, _out| {
+        let name = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            Some(other) => other.display(),
+            None => {
+                return Err(VmError::Runtime(
+                    "harn.mcp.stop: server name (string) is required".into(),
+                ));
+            }
+        };
+        crate::mcp_host::stop(&name)?;
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("harn.mcp.reload", |args, _out| {
+        let name = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            Some(other) => other.display(),
+            None => {
+                return Err(VmError::Runtime(
+                    "harn.mcp.reload: server name (string) is required".into(),
+                ));
+            }
+        };
+        crate::mcp_host::reload(&name)?;
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_async_builtin("harn.mcp.discover", |_args| async move {
+        let entries = crate::mcp_host::discover().await?;
+        Ok(VmValue::List(Rc::new(
+            entries.iter().map(json_to_vm_value).collect(),
+        )))
+    });
+
+    vm.register_builtin("harn.mcp.status", |_args, _out| {
+        let entries = crate::mcp_host::status();
+        let list: Vec<VmValue> = entries
+            .into_iter()
+            .map(|s| {
+                let mut dict = BTreeMap::new();
+                dict.insert("name".to_string(), VmValue::String(Rc::from(s.name)));
+                dict.insert("active".to_string(), VmValue::Bool(s.active));
+                dict.insert("lazy".to_string(), VmValue::Bool(s.lazy));
+                dict.insert("ref_count".to_string(), VmValue::Int(s.ref_count as i64));
+                dict.insert(
+                    "restart_count".to_string(),
+                    VmValue::Int(s.restart_count as i64),
+                );
+                dict.insert(
+                    "consecutive_failures".to_string(),
+                    VmValue::Int(s.consecutive_failures as i64),
+                );
+                dict.insert(
+                    "circuit".to_string(),
+                    VmValue::String(Rc::from(s.circuit.as_str())),
+                );
+                dict.insert("ejected".to_string(), VmValue::Bool(s.ejected));
+                dict.insert(
+                    "cache_entries".to_string(),
+                    VmValue::Int(s.cache_entries as i64),
+                );
+                VmValue::Dict(Rc::new(dict))
+            })
+            .collect();
+        Ok(VmValue::List(Rc::new(list)))
+    });
 }
 
 #[cfg(test)]
