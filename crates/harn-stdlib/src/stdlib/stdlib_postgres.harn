@@ -5,7 +5,7 @@
  * module carries the public handle and result shapes so import-aware
  * tools and the typechecker know what scripts get back from the runtime.
  *
- * Surface (issue #2500):
+ * v1 surface (issue #2500):
  *
  *   let pool = pg_pool("env:DATABASE_URL", {max_connections: 5})
  *   pg_execute(pool, "insert into ledger (id, amount) values ($1, $2)", [id, amount])
@@ -23,6 +23,45 @@
  *
  *   pg_migrate(pool, {dir: "./migrations"})  // applies pending .sql files
  *
+ * v2 surface (issue #2512):
+ *
+ *   // Advisory locks (transaction-scoped, auto-released on commit/rollback).
+ *   pg_transaction(pool, { tx ->
+ *     pg_advisory_xact_lock(tx, "release-cut", {tenant_namespace: true})
+ *     // ...
+ *   })
+ *   pg_with_advisory_lock(pool, 0x1234, { tx -> /* exclusive section */ })
+ *
+ *   // LISTEN/NOTIFY with auto-reconnect (sqlx's PgListener).
+ *   let listener = pg_listen(pool, ["receipts.updated", "captain.notice"])
+ *   let notification = pg_listener_recv(listener, 5000)  // timeout in ms
+ *   pg_listener_close(listener)
+ *   pg_notify(pool, "receipts.updated", {receipt_id: "r1"})
+ *
+ *   // Pool + statement-cache + circuit-breaker observability.
+ *   let stats = pg_pool_stats(pool)
+ *     // → {size, idle, in_use, max_connections, statement_cache_capacity,
+ *     //    replicas, circuit_state, circuit_failures, circuit_opened_at_ms}
+ *
+ *   // Schema introspection.
+ *   pg_introspect_tables(pool, {schema: "public"})
+ *   pg_introspect_columns(pool, "receipts")
+ *   pg_introspect_indexes(pool, "receipts")
+ *
+ *   // Declarative partition helpers.
+ *   pg_partition_attach(pool, "events", "events_2026_05",
+ *                       {from: "2026-05-01", to: "2026-06-01"})
+ *   pg_partition_detach(pool, "events", "events_2026_03")
+ *   pg_partition_prune(pool, "events", "2026-01-01")
+ *
+ *   // Read-replica routing (per-query opt-in).
+ *   let pool = pg_pool("env:DATABASE_URL", {
+ *     max_connections: 10,
+ *     replicas: ["env:DATABASE_REPLICA_URL", "env:DATABASE_REPLICA2_URL"],
+ *     circuit_breaker: {failure_threshold: 5, reset_after_ms: 30000},
+ *   })
+ *   pg_query(pool, "select * from receipts where id = $1", [id], {read_only: true})
+ *
  * `pg_mock_pool(fixtures)` returns a deterministic mock so unit tests do
  * not need a live database.
  */
@@ -31,6 +70,8 @@ type PgPool = {_type: "pg_pool", id: string}
 type PgTx = {_type: "pg_tx", id: string}
 
 type PgMockPool = {_type: "pg_mock_pool", id: string}
+
+type PgListener = {_type: "pg_listener", id: string}
 
 type PgHandle = PgPool | PgTx | PgMockPool
 
@@ -44,3 +85,29 @@ type PgMigrateResult = {
   duration_ms: int,
   table: string,
 }
+
+type PgPoolStats = {
+  size: int,
+  idle: int,
+  in_use: int,
+  max_connections: int,
+  statement_cache_capacity: int,
+  replicas: int,
+  circuit_state: string,
+  circuit_failures: int,
+  circuit_opened_at_ms: int?,
+}
+
+type PgIntrospectedTable = {schema: string, table: string, kind: string}
+
+type PgIntrospectedColumn = {
+  column: string,
+  type: string,
+  data_type: string,
+  nullable: bool,
+  default: string?,
+}
+
+type PgIntrospectedIndex = {index: string, columns: list<string>, unique: bool, primary: bool}
+
+type PgNotification = {channel: string, payload: string, process_id: int}
