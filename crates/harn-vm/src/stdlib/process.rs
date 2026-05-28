@@ -690,34 +690,6 @@ fn project_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 const PATH_BUILTINS: &[&VmBuiltinDef] = &[&SOURCE_DIR_IMPL_DEF, &PROJECT_ROOT_IMPL_DEF];
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    // process builtins
-    &ENV_IMPL_DEF,
-    &ENV_OR_IMPL_DEF,
-    &EXIT_IMPL_DEF,
-    &EXEC_IMPL_DEF,
-    &SHELL_IMPL_DEF,
-    &EXEC_AT_IMPL_DEF,
-    &SHELL_AT_IMPL_DEF,
-    &USERNAME_IMPL_DEF,
-    &HOSTNAME_IMPL_DEF,
-    &PLATFORM_IMPL_DEF,
-    &ARCH_IMPL_DEF,
-    &HOME_DIR_IMPL_DEF,
-    &PID_IMPL_DEF,
-    &DATE_ISO_IMPL_DEF,
-    &CWD_IMPL_DEF,
-    &EXECUTION_ROOT_IMPL_DEF,
-    &ASSET_ROOT_IMPL_DEF,
-    &RUNTIME_PATHS_IMPL_DEF,
-    &SPAWN_CAPTURED_IMPL_DEF,
-    &TERM_WIDTH_IMPL_DEF,
-    &TERM_HEIGHT_IMPL_DEF,
-    // path builtins (register_path_builtins)
-    &SOURCE_DIR_IMPL_DEF,
-    &PROJECT_ROOT_IMPL_DEF,
-];
-
 fn vm_output_to_value(output: std::process::Output) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert(

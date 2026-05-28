@@ -70,6 +70,12 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 pub fn run() {
     install_broken_pipe_panic_hook();
 
+    // Defeat rlib dead-code stripping of `#[harn_builtin]`-emitted statics
+    // (linkme issue #36). Without this touch the linker can drop every
+    // builtin's distributed-slice entry, leaving `ALL_BUILTIN_DEFS` empty
+    // and surfacing as a swarm of `HARN-NAM-002` errors at first call.
+    harn_vm::stdlib::force_link();
+
     ensure_builtin_signatures_installed();
 
     let handle = thread::Builder::new()

@@ -278,96 +278,43 @@ fn stdlib_probe_vm() -> Vm {
 
 /// Aggregate of every `#[harn_builtin]`-emitted `VmBuiltinDef` in the stdlib.
 ///
-/// Each migrated module exposes a `MODULE_BUILTINS: &[&VmBuiltinDef]` slice;
-/// they're concatenated here in deterministic alphabetical-by-module order.
-/// Returned with `'static` lifetime so the slice can be installed into the
-/// parser registry without leaking.
+/// Backed by the `linkme::distributed_slice` declared on
+/// [`crate::stdlib::macros::ALL_BUILTIN_DEFS`] — every annotated fn
+/// contributes one entry automatically at link time, eliminating the
+/// per-module `MODULE_BUILTINS` arrays and the hand-maintained aggregator
+/// that used to live here.
+///
+/// **Force-link warning** (linkme issue #36): rlib dead-code stripping
+/// can drop these statics when `harn-vm` is linked transitively. Every
+/// binary that exercises builtins (`harn-cli`, `harn-lsp`, `harn-lint`,
+/// `harn-serve`, `harn-dap`) calls [`force_link`] near `main()` to defeat
+/// the stripping. The alignment test
+/// `linkme_distributed_slice_populates_with_all_builtins` catches a silent
+/// regression by asserting the slice is non-empty.
 pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
-    use std::sync::OnceLock;
-    static AGG: OnceLock<Vec<&'static macros::VmBuiltinDef>> = OnceLock::new();
-    AGG.get_or_init(|| {
-        // Per-module slices are pushed here as modules migrate to
-        // `#[harn_builtin]`. Order is alphabetical by module file name for
-        // predictability.
-        let mut out: Vec<&'static macros::VmBuiltinDef> = Vec::new();
-        out.extend_from_slice(agent_sessions::MODULE_BUILTINS);
-        out.extend_from_slice(agent_state::MODULE_BUILTINS);
-        out.extend_from_slice(agents::MODULE_BUILTINS);
-        out.extend_from_slice(agents_daemon::MODULE_BUILTINS);
-        out.extend_from_slice(bytes::MODULE_BUILTINS);
-        out.extend_from_slice(calendar::MODULE_BUILTINS);
-        out.extend_from_slice(channel_guardrails::MODULE_BUILTINS);
-        out.extend_from_slice(crate::checkpoint::MODULE_BUILTINS);
-        out.extend_from_slice(clock::MODULE_BUILTINS);
-        out.extend_from_slice(collections::MODULE_BUILTINS);
-        out.extend_from_slice(command_policy::MODULE_BUILTINS);
-        out.extend_from_slice(compaction::MODULE_BUILTINS);
-        out.extend_from_slice(compression::MODULE_BUILTINS);
-        out.extend_from_slice(concurrency::MODULE_BUILTINS);
-        out.extend_from_slice(connectors::MODULE_BUILTINS);
-        out.extend_from_slice(cookies::MODULE_BUILTINS);
-        out.extend_from_slice(crypto::MODULE_BUILTINS);
-        out.extend_from_slice(csv::MODULE_BUILTINS);
-        out.extend_from_slice(datetime::MODULE_BUILTINS);
-        out.extend_from_slice(durable_step::MODULE_BUILTINS);
-        out.extend_from_slice(event_log::MODULE_BUILTINS);
-        out.extend_from_slice(flow::MODULE_BUILTINS);
-        out.extend_from_slice(fs::MODULE_BUILTINS);
-        out.extend_from_slice(hitl::MODULE_BUILTINS);
-        out.extend_from_slice(hitl_read::MODULE_BUILTINS);
-        out.extend_from_slice(host::MODULE_BUILTINS);
-        out.extend_from_slice(http_response::MODULE_BUILTINS);
-        out.extend_from_slice(io::MODULE_BUILTINS);
-        out.extend_from_slice(iter::MODULE_BUILTINS);
-        out.extend_from_slice(json::MODULE_BUILTINS);
-        out.extend_from_slice(json_stream::MODULE_BUILTINS);
-        out.extend_from_slice(junit::MODULE_BUILTINS);
-        out.extend_from_slice(lifecycle_receipts::MODULE_BUILTINS);
-        out.extend_from_slice(math::MODULE_BUILTINS);
-        out.extend_from_slice(memory::MODULE_BUILTINS);
-        out.extend_from_slice(crate::metadata::MODULE_BUILTINS);
-        out.extend_from_slice(monitors::MODULE_BUILTINS);
-        out.extend_from_slice(multipart::MODULE_BUILTINS);
-        out.extend_from_slice(net_policy::MODULE_BUILTINS);
-        out.extend_from_slice(oauth_dynreg::MODULE_BUILTINS);
-        out.extend_from_slice(oauth_storage::MODULE_BUILTINS);
-        out.extend_from_slice(observability::MODULE_BUILTINS);
-        out.extend_from_slice(path::MODULE_BUILTINS);
-        out.extend_from_slice(path_scope_guard::MODULE_BUILTINS);
-        out.extend_from_slice(pool::MODULE_BUILTINS);
-        out.extend_from_slice(postgres::MODULE_BUILTINS);
-        out.extend_from_slice(process::MODULE_BUILTINS);
-        out.extend_from_slice(project::MODULE_BUILTINS);
-        out.extend_from_slice(agents::records::MODULE_BUILTINS);
-        out.extend_from_slice(regex::MODULE_BUILTINS);
-        out.extend_from_slice(runtime_scope::MODULE_BUILTINS);
-        out.extend_from_slice(sandbox::MODULE_BUILTINS);
-        out.extend_from_slice(sets::MODULE_BUILTINS);
-        out.extend_from_slice(shapes::MODULE_BUILTINS);
-        out.extend_from_slice(skills::MODULE_BUILTINS);
-        out.extend_from_slice(crate::step_runtime::MODULE_BUILTINS);
-        out.extend_from_slice(strings::MODULE_BUILTINS);
-        out.extend_from_slice(supervisor::MODULE_BUILTINS);
-        out.extend_from_slice(testbench::MODULE_BUILTINS);
-        out.extend_from_slice(testing::MODULE_BUILTINS);
-        out.extend_from_slice(timing::MODULE_BUILTINS);
-        out.extend_from_slice(tool_hooks::MODULE_BUILTINS);
-        out.extend_from_slice(token_redaction::MODULE_BUILTINS);
-        out.extend_from_slice(tools::MODULE_BUILTINS);
-        out.extend_from_slice(tracing::MODULE_BUILTINS);
-        out.extend_from_slice(triggers_stdlib::MODULE_BUILTINS);
-        out.extend_from_slice(tui::MODULE_BUILTINS);
-        out.extend_from_slice(types::MODULE_BUILTINS);
-        out.extend_from_slice(url_parse::MODULE_BUILTINS);
-        out.extend_from_slice(waitpoint::MODULE_BUILTINS);
-        out.extend_from_slice(waitpoints::MODULE_BUILTINS);
-        out.extend_from_slice(web::MODULE_BUILTINS);
-        out.extend_from_slice(workflow_messages::MODULE_BUILTINS);
-        out.extend_from_slice(agents::workflow::MODULE_BUILTINS);
-        out.extend_from_slice(xml::MODULE_BUILTINS);
-        out
-    })
-    .as_slice()
+    &macros::ALL_BUILTIN_DEFS
+}
+
+/// Force-link entry point: a `pub fn` that touches `ALL_BUILTIN_DEFS` so
+/// the linker keeps every `#[harn_builtin]`-emitted static. Drivers
+/// (`harn-cli`, `harn-lsp`, etc.) call this once at startup. Doing nothing
+/// at runtime is fine — the side effect is purely a link-time signal.
+///
+/// See [`linkme issue #36`](https://github.com/dtolnay/linkme/issues/36)
+/// for why the explicit touch is necessary on every supported target.
+pub fn force_link() {
+    // `black_box` prevents LLVM from constant-folding the length read away.
+    // The `>= 1` guard never trips at runtime but is a load-bearing safety
+    // net: it converts a silent slice-empty regression into a panic that
+    // surfaces at the first builtin call instead of a confusing
+    // `HARN-NAM-002` somewhere down the line.
+    let len = std::hint::black_box(macros::ALL_BUILTIN_DEFS.len());
+    assert!(
+        len >= 1,
+        "linkme distributed_slice ALL_BUILTIN_DEFS is empty — \
+         the binary is missing `harn_vm::stdlib::force_link()` at startup, \
+         or the linker stripped the harn-vm rlib statics (see linkme issue #36)"
+    );
 }
 
 /// Driver-facing helper: flatten the macro-emitted `BuiltinDef`s into a

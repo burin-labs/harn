@@ -17,6 +17,19 @@ pub use harn_builtin_meta::{
     TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 pub use harn_builtin_registry::BuiltinDef;
+// Re-export so the `#[harn_builtin]` proc-macro can name the
+// distributed-slice attribute without each call-site importing linkme.
+pub use linkme::distributed_slice;
+
+/// Workspace-global registry of `#[harn_builtin]`-emitted definitions.
+/// Each annotated fn contributes one entry via
+/// `#[linkme::distributed_slice(ALL_BUILTIN_DEFS)]`, so there is no
+/// per-module `MODULE_BUILTINS` slice to maintain. The CLI / LSP / lint /
+/// serve / dap binaries force-link `harn-vm` to defeat rlib dead-code
+/// stripping (linkme issue #36) so every static lands in this slice at
+/// link time.
+#[linkme::distributed_slice]
+pub static ALL_BUILTIN_DEFS: [&'static VmBuiltinDef];
 
 /// Pinned future returned by async builtin handlers.
 pub type AsyncBuiltinFuture = Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>;
