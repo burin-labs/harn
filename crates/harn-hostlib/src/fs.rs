@@ -570,6 +570,18 @@ impl SafeTextPatchResult {
 /// mutating any state. On a hash match the post-image is written through
 /// the same overlay path, keeping the read and the write atomic with
 /// respect to other staged-fs consumers in the same process.
+///
+/// Atomicity:
+///
+/// - When a session is in staged mode, the read, hash check, and write
+///   all happen under a single acquisition of the sessions mutex, so a
+///   sibling thread cannot stage a write into the window between the
+///   pre-image snapshot and the commit.
+/// - When the call routes through disk (no active session, or session in
+///   immediate mode), the write goes through an atomic rename-into-place
+///   so partial-write tearing is impossible. Cross-process races are
+///   intentionally out of scope — the staged-fs overlay is the
+///   collision-rejection layer.
 pub fn safe_text_patch(
     path: &Path,
     content: &str,
@@ -578,10 +590,174 @@ pub fn safe_text_patch(
     create_parents: bool,
     overwrite: bool,
 ) -> Result<SafeTextPatchOutcome, HostlibError> {
-    let (existing_bytes, existed) = read_existing(SAFE_TEXT_PATCH_BUILTIN, path, session_id)?;
-    let current_hash = format!("sha256:{}", hex::encode(Sha256::digest(&existing_bytes)));
     let new_bytes = content.as_bytes();
     let after_hash = format!("sha256:{}", hex::encode(Sha256::digest(new_bytes)));
+
+    if let Some(outcome) = safe_text_patch_staged(
+        path,
+        new_bytes,
+        expected_hash,
+        session_id,
+        create_parents,
+        overwrite,
+        &after_hash,
+    )? {
+        return Ok(outcome);
+    }
+
+    safe_text_patch_disk(
+        path,
+        new_bytes,
+        expected_hash,
+        create_parents,
+        overwrite,
+        after_hash,
+    )
+}
+
+/// Atomic CAS path for a session in `staged` mode. Holds the sessions
+/// mutex through the entire read → hash → check → write so concurrent
+/// agents in the same process cannot race the snapshot. Returns `None`
+/// when no session is active or the session is in `immediate` mode, so
+/// the caller can fall through to the disk path.
+#[allow(clippy::too_many_arguments)]
+fn safe_text_patch_staged(
+    path: &Path,
+    new_bytes: &[u8],
+    expected_hash: Option<&str>,
+    session_id: Option<&str>,
+    create_parents: bool,
+    overwrite: bool,
+    after_hash: &str,
+) -> Result<Option<SafeTextPatchOutcome>, HostlibError> {
+    let Some(session) = active_session_id(session_id) else {
+        return Ok(None);
+    };
+    let mut guard = sessions()
+        .lock()
+        .expect("hostlib fs session mutex poisoned");
+    let mut state = state_for_locked(&mut guard, &session, None)?;
+    if state.mode != FsMode::Staged {
+        guard.insert(session, state);
+        return Ok(None);
+    }
+
+    let key = normalize_logical(path);
+    let (existing_bytes, existed) = match overlay_read(&state, path) {
+        Some(Ok(bytes)) => (bytes, true),
+        Some(Err(err)) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
+        Some(Err(err)) => {
+            guard.insert(session, state);
+            return Err(HostlibError::Backend {
+                builtin: SAFE_TEXT_PATCH_BUILTIN,
+                message: format!("read `{}`: {err}", path.display()),
+            });
+        }
+        None => match stdfs::read(path) {
+            Ok(bytes) => (bytes, true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
+            Err(err) => {
+                guard.insert(session, state);
+                return Err(HostlibError::Backend {
+                    builtin: SAFE_TEXT_PATCH_BUILTIN,
+                    message: format!("read `{}`: {err}", path.display()),
+                });
+            }
+        },
+    };
+    let current_hash = format!("sha256:{}", hex::encode(Sha256::digest(&existing_bytes)));
+
+    if let Some(expected) = expected_hash {
+        if expected != current_hash {
+            guard.insert(session, state);
+            return Ok(Some(SafeTextPatchOutcome {
+                result: SafeTextPatchResult::StaleBase,
+                current_hash,
+                after_hash: after_hash.to_string(),
+                created: false,
+                bytes_written: 0,
+            }));
+        }
+    }
+
+    if existed && existing_bytes == new_bytes {
+        guard.insert(session, state);
+        return Ok(Some(SafeTextPatchOutcome {
+            result: SafeTextPatchResult::NoOp,
+            current_hash,
+            after_hash: after_hash.to_string(),
+            created: false,
+            bytes_written: 0,
+        }));
+    }
+
+    let overlay_existed = overlay_exists(&state, &key);
+    if overlay_existed && !overwrite {
+        guard.insert(session, state);
+        return Err(HostlibError::Backend {
+            builtin: SAFE_TEXT_PATCH_BUILTIN,
+            message: format!("`{}` exists and overwrite=false", key.display()),
+        });
+    }
+    if !create_parents && !parent_exists(&state, &key) {
+        guard.insert(session, state);
+        return Err(HostlibError::Backend {
+            builtin: SAFE_TEXT_PATCH_BUILTIN,
+            message: format!("parent directory for `{}` does not exist", key.display()),
+        });
+    }
+
+    let body_hash = write_body(&state, new_bytes).map_err(|err| HostlibError::Backend {
+        builtin: SAFE_TEXT_PATCH_BUILTIN,
+        message: err,
+    })?;
+    state.entries.insert(
+        key.clone(),
+        StagedEntry::Write {
+            body_hash,
+            len: new_bytes.len() as u64,
+            created_at_ms: now_ms(),
+        },
+    );
+    persist_state(&state, "safe_text_patch", Some(&key)).map_err(|err| HostlibError::Backend {
+        builtin: SAFE_TEXT_PATCH_BUILTIN,
+        message: err,
+    })?;
+    emit_staged_update(&state);
+    guard.insert(session, state);
+
+    Ok(Some(SafeTextPatchOutcome {
+        result: SafeTextPatchResult::Applied,
+        current_hash,
+        after_hash: after_hash.to_string(),
+        created: !existed,
+        bytes_written: new_bytes.len(),
+    }))
+}
+
+/// Disk path for callers without an active staged session. Uses
+/// `atomic_write` so the post-image lands via rename-into-place rather
+/// than an open/truncate/write/close sequence — readers either see the
+/// pre-image or the post-image, never a torn write.
+fn safe_text_patch_disk(
+    path: &Path,
+    new_bytes: &[u8],
+    expected_hash: Option<&str>,
+    create_parents: bool,
+    overwrite: bool,
+    after_hash: String,
+) -> Result<SafeTextPatchOutcome, HostlibError> {
+    let (existing_bytes, existed) = match stdfs::read(path) {
+        Ok(bytes) => (bytes, true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
+        Err(err) => {
+            return Err(HostlibError::Backend {
+                builtin: SAFE_TEXT_PATCH_BUILTIN,
+                message: format!("read `{}`: {err}", path.display()),
+            });
+        }
+    };
+    let current_hash = format!("sha256:{}", hex::encode(Sha256::digest(&existing_bytes)));
 
     if let Some(expected) = expected_hash {
         if expected != current_hash {
@@ -604,24 +780,6 @@ pub fn safe_text_patch(
             bytes_written: 0,
         });
     }
-
-    if let Some(outcome) = stage_write_or_none(
-        SAFE_TEXT_PATCH_BUILTIN,
-        path,
-        new_bytes,
-        create_parents,
-        overwrite,
-        session_id,
-    )? {
-        return Ok(SafeTextPatchOutcome {
-            result: SafeTextPatchResult::Applied,
-            current_hash,
-            after_hash,
-            created: outcome.created,
-            bytes_written: outcome.bytes_written,
-        });
-    }
-
     if existed && !overwrite {
         return Err(HostlibError::Backend {
             builtin: SAFE_TEXT_PATCH_BUILTIN,
@@ -640,7 +798,7 @@ pub fn safe_text_patch(
             }
         }
     }
-    stdfs::write(path, new_bytes).map_err(|err| HostlibError::Backend {
+    atomic_write(path, new_bytes).map_err(|err| HostlibError::Backend {
         builtin: SAFE_TEXT_PATCH_BUILTIN,
         message: format!("write `{}`: {err}", path.display()),
     })?;

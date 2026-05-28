@@ -539,3 +539,73 @@ fn safe_text_patch_skips_stale_base_when_no_expected_hash() {
     assert_eq!(dict_str(&response, "result"), "applied");
     assert_eq!(fs::read_to_string(&file).unwrap(), "replaced\n");
 }
+
+/// Regression: with multiple agents driving the same staged session, the
+/// read → CAS check → write inside `hostlib_fs_safe_text_patch` must hold
+/// the sessions mutex through the whole operation. Otherwise a sibling
+/// agent can stage a write between the snapshot and the commit and have
+/// its bytes silently clobbered.
+///
+/// The test drives the staged overlay from two threads anchored on the
+/// same `expected_hash`. Exactly one of them must succeed; the other
+/// must report `stale_base`. If the helper races, both succeed and the
+/// later one wins — which is the bug.
+#[test]
+fn safe_text_patch_serializes_concurrent_staged_commits() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("contended.txt");
+    fs::write(&file, "v0\n").unwrap();
+    let session = unique_session("safe-text-patch-race");
+    let reg = Arc::new(registry());
+
+    (reg.find("hostlib_fs_set_mode").unwrap().handler)(&dict_arg(&[
+        ("session_id", vm_string(&session)),
+        ("mode", vm_string("staged")),
+        ("root", vm_string(&path_str(dir.path()))),
+    ]))
+    .unwrap();
+
+    let pre_hash = sha256_of(b"v0\n");
+    let path_s = path_str(&file);
+    let mut handles = Vec::new();
+    for label in ["A", "B"] {
+        let reg = Arc::clone(&reg);
+        let session = session.clone();
+        let pre_hash = pre_hash.clone();
+        let path_s = path_s.clone();
+        let body = format!("winner-{label}\n");
+        handles.push(thread::spawn(move || {
+            // tools:deterministic is thread-local; each spawned thread
+            // must re-enable the gate the registry helper installed on
+            // the main thread before driving any gated builtin. The
+            // safe-text-patch primitive itself is un-gated, but we
+            // enable here so future maintainers don't trip when adding
+            // a `tools_*` call to the race scenario.
+            permissions::enable_for_test();
+            let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
+                ("session_id", vm_string(&session)),
+                ("path", vm_string(&path_s)),
+                ("content", vm_string(&body)),
+                ("expected_hash", vm_string(&pre_hash)),
+            ]))
+            .unwrap();
+            dict_str(&response, "result").to_string()
+        }));
+    }
+
+    let mut applied = 0;
+    let mut stale_base = 0;
+    for handle in handles {
+        let result = handle.join().unwrap();
+        match result.as_str() {
+            "applied" => applied += 1,
+            "stale_base" => stale_base += 1,
+            other => panic!("unexpected result `{other}`"),
+        }
+    }
+    assert_eq!(applied, 1, "exactly one writer must commit");
+    assert_eq!(stale_base, 1, "the other must observe stale_base");
+}
