@@ -290,8 +290,10 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(durable_step::MODULE_BUILTINS);
         out.extend_from_slice(event_log::MODULE_BUILTINS);
         out.extend_from_slice(flow::MODULE_BUILTINS);
+        out.extend_from_slice(fs::MODULE_BUILTINS);
         out.extend_from_slice(hitl::MODULE_BUILTINS);
         out.extend_from_slice(hitl_read::MODULE_BUILTINS);
+        out.extend_from_slice(host::MODULE_BUILTINS);
         out.extend_from_slice(iter::MODULE_BUILTINS);
         out.extend_from_slice(json::MODULE_BUILTINS);
         out.extend_from_slice(json_stream::MODULE_BUILTINS);

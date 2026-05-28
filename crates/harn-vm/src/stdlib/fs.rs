@@ -6,10 +6,10 @@ use std::time::SystemTime;
 use std::{cell::RefCell, thread_local};
 
 use crate::runtime_limits::RuntimeLimits;
-use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::testbench::overlay_fs::helpers as overlay;
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 thread_local! {
     static FILE_TEXT_CACHE: RefCell<BTreeMap<PathBuf, FileTextCacheEntry>> = const { RefCell::new(BTreeMap::new()) };
@@ -17,92 +17,27 @@ thread_local! {
 
 const FILE_TEXT_CACHE_MAX_ENTRIES: usize = RuntimeLimits::DEFAULT.max_file_text_cache_entries;
 
-const FS_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("read_file", read_file_builtin)
-        .signature("read_file(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Read an entire UTF-8 file or embedded stdlib prompt asset."),
-    SyncBuiltin::new("read_file_result", read_file_result_builtin)
-        .signature("read_file_result(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Read a UTF-8 file and return Result.Ok or Result.Err."),
-    SyncBuiltin::new("read_file_bytes", read_file_bytes_builtin)
-        .signature("read_file_bytes(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Read an entire file as bytes."),
-    SyncBuiltin::new("write_file", write_file_builtin)
-        .signature("write_file(path, content)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Write UTF-8 text to a file."),
-    SyncBuiltin::new("write_file_bytes", write_file_bytes_builtin)
-        .signature("write_file_bytes(path, content)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Write bytes to a file."),
-    SyncBuiltin::new("file_exists", file_exists_builtin)
-        .signature("file_exists(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return whether a file-system path exists."),
-    SyncBuiltin::new("delete_file", delete_file_builtin)
-        .signature("delete_file(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Delete a file or directory."),
-    SyncBuiltin::new("append_file", append_file_builtin)
-        .signature("append_file(path, content)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Append UTF-8 text to a file."),
-    SyncBuiltin::new("list_dir", list_dir_builtin)
-        .signature("list_dir(path?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Return sorted directory entry names."),
-    SyncBuiltin::new("mkdir", mkdir_builtin)
-        .signature("mkdir(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Create a directory and any missing parents."),
-    SyncBuiltin::new("path_join", path_join_builtin)
-        .signature("path_join(args...)")
-        .arity(VmBuiltinArity::Variadic)
-        .doc("Join path segments with the platform path separator."),
-    SyncBuiltin::new("copy_file", copy_file_builtin)
-        .signature("copy_file(src, dst)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Copy a file to a destination path."),
-    SyncBuiltin::new("temp_dir", temp_dir_builtin)
-        .signature("temp_dir()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return the host temporary directory path."),
-    SyncBuiltin::new("mkdtemp", mkdtemp_builtin)
-        .signature("mkdtemp(prefix?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc(
-            "Create a new uniquely-named directory under the host temp dir and return its \
-             absolute path. The caller owns the directory's lifecycle — it is NOT cleaned up \
-             automatically; pair with `delete_file(path)` when finished. Optional `prefix` is \
-             prepended to the random suffix (default `\"harn-\"`).",
-        ),
-    SyncBuiltin::new("stat", stat_builtin)
-        .signature("stat(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return metadata for a file-system path."),
-    SyncBuiltin::new("move_file", move_file_builtin)
-        .signature("move_file(src, dst)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Move a file to a destination path."),
-    SyncBuiltin::new("read_lines", read_lines_builtin)
-        .signature("read_lines(path)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Read a UTF-8 file as a list of lines."),
-    SyncBuiltin::new("walk_dir", walk_dir_builtin)
-        .signature("walk_dir(path, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Recursively list files and directories."),
-    SyncBuiltin::new("glob", glob_builtin)
-        .signature("glob(pattern, base_or_options?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Match files under a base directory using a glob pattern."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &READ_FILE_BUILTIN_DEF,
+    &READ_FILE_RESULT_BUILTIN_DEF,
+    &READ_FILE_BYTES_BUILTIN_DEF,
+    &WRITE_FILE_BUILTIN_DEF,
+    &WRITE_FILE_BYTES_BUILTIN_DEF,
+    &FILE_EXISTS_BUILTIN_DEF,
+    &DELETE_FILE_BUILTIN_DEF,
+    &APPEND_FILE_BUILTIN_DEF,
+    &LIST_DIR_BUILTIN_DEF,
+    &MKDIR_BUILTIN_DEF,
+    &PATH_JOIN_BUILTIN_DEF,
+    &COPY_FILE_BUILTIN_DEF,
+    &TEMP_DIR_BUILTIN_DEF,
+    &MKDTEMP_BUILTIN_DEF,
+    &STAT_BUILTIN_DEF,
+    &MOVE_FILE_BUILTIN_DEF,
+    &READ_LINES_BUILTIN_DEF,
+    &WALK_DIR_BUILTIN_DEF,
+    &GLOB_BUILTIN_DEF,
 ];
-
-const FS_PRIMITIVES: BuiltinGroup<'static> =
-    BuiltinGroup::new().category("fs").sync(FS_SYNC_PRIMITIVES);
 
 #[derive(Clone)]
 struct FileTextCacheEntry {
@@ -338,9 +273,16 @@ fn write_cached_text(path: PathBuf, content: Rc<str>) {
 }
 
 pub(crate) fn register_fs_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, FS_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
+#[harn_builtin(
+    sig = "read_file(path: string) -> string",
+    category = "fs",
+    doc = "Read an entire UTF-8 file or embedded stdlib prompt asset."
+)]
 fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(source) = crate::stdlib_modules::get_stdlib_prompt_asset(&path) {
@@ -373,6 +315,11 @@ fn read_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     }
 }
 
+#[harn_builtin(
+    sig = "read_file_result(path: string) -> dict",
+    category = "fs",
+    doc = "Read a UTF-8 file and return Result.Ok or Result.Err."
+)]
 fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(source) = crate::stdlib_modules::get_stdlib_prompt_asset(&path) {
@@ -407,6 +354,11 @@ fn read_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
     }
 }
 
+#[harn_builtin(
+    sig = "read_file_bytes(path: string) -> bytes",
+    category = "fs",
+    doc = "Read an entire file as bytes."
+)]
 fn read_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = resolve_fs_path(&path);
@@ -424,6 +376,11 @@ fn read_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     }
 }
 
+#[harn_builtin(
+    sig = "write_file(path: string, content: string) -> nil",
+    category = "fs",
+    doc = "Write UTF-8 text to a file."
+)]
 fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         let path = args[0].display();
@@ -447,6 +404,11 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "write_file_bytes(path: string, content: bytes) -> nil",
+    category = "fs",
+    doc = "Write bytes to a file."
+)]
 fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         let path = args[0].display();
@@ -487,6 +449,11 @@ fn queue_file_edited_for(resolved: &std::path::Path, operation: &str, bytes: usi
     );
 }
 
+#[harn_builtin(
+    sig = "file_exists(path: string) -> bool",
+    category = "fs",
+    doc = "Return whether a file-system path exists."
+)]
 fn file_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = resolve_fs_path(&path);
@@ -498,6 +465,11 @@ fn file_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::Bool(overlay::exists(&resolved)))
 }
 
+#[harn_builtin(
+    sig = "delete_file(path: string) -> nil",
+    category = "fs",
+    doc = "Delete a file or directory."
+)]
 fn delete_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = resolve_fs_path(&path);
@@ -535,6 +507,11 @@ fn delete_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "append_file(path: string, content: string) -> nil",
+    category = "fs",
+    doc = "Append UTF-8 text to a file."
+)]
 fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         let path = args[0].display();
@@ -560,6 +537,11 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "list_dir(path?: string) -> list",
+    category = "fs",
+    doc = "Return sorted directory entry names."
+)]
 fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args
         .first()
@@ -589,6 +571,11 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::List(Rc::new(result)))
 }
 
+#[harn_builtin(
+    sig = "mkdir(path: string) -> nil",
+    category = "fs",
+    doc = "Create a directory and any missing parents."
+)]
 fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = resolve_fs_path(&path);
@@ -606,6 +593,11 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "path_join(...args: any) -> string",
+    category = "fs",
+    doc = "Join path segments with the platform path separator."
+)]
 fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut path = std::path::PathBuf::new();
     for arg in args {
@@ -616,6 +608,11 @@ fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     )))
 }
 
+#[harn_builtin(
+    sig = "copy_file(src: string, dst: string) -> nil",
+    category = "fs",
+    doc = "Copy a file to a destination path."
+)]
 fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         let src = args[0].display();
@@ -646,12 +643,22 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "temp_dir() -> string",
+    category = "fs",
+    doc = "Return the host temporary directory path."
+)]
 fn temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::String(Rc::from(
         std::env::temp_dir().to_string_lossy().into_owned().as_str(),
     )))
 }
 
+#[harn_builtin(
+    sig = "mkdtemp(prefix?: string) -> string",
+    category = "fs",
+    doc = "Create a new uniquely-named directory under the host temp dir and return its absolute path. The caller owns the directory lifecycle."
+)]
 fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw_prefix = args
         .first()
@@ -690,6 +697,11 @@ fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     )))
 }
 
+#[harn_builtin(
+    sig = "stat(path: string) -> dict",
+    category = "fs",
+    doc = "Return metadata for a file-system path."
+)]
 fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = resolve_fs_path(&path);
@@ -720,6 +732,11 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     Ok(VmValue::Dict(Rc::new(info)))
 }
 
+#[harn_builtin(
+    sig = "move_file(src: string, dst: string) -> nil",
+    category = "fs",
+    doc = "Move a file to a destination path."
+)]
 fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -764,6 +781,11 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::Nil)
 }
 
+#[harn_builtin(
+    sig = "read_lines(path: string) -> list",
+    category = "fs",
+    doc = "Read a UTF-8 file as a list of lines."
+)]
 fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = resolve_fs_path(&path);
@@ -785,6 +807,11 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(VmValue::List(Rc::new(lines)))
 }
 
+#[harn_builtin(
+    sig = "walk_dir(path: string, options?: dict) -> list",
+    category = "fs",
+    doc = "Recursively list files and directories."
+)]
 fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let root = args.first().map(|a| a.display()).unwrap_or_default();
     if root.is_empty() {
@@ -824,6 +851,11 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(VmValue::List(Rc::new(entries)))
 }
 
+#[harn_builtin(
+    sig = "glob(pattern: string, base_or_options?: any, options?: dict) -> list",
+    category = "fs",
+    doc = "Match files under a base directory using a glob pattern."
+)]
 fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pattern = args.first().map(|a| a.display()).unwrap_or_default();
     if pattern.is_empty() {

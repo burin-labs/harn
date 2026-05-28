@@ -181,6 +181,18 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         ))
     };
 
+    // Surface the human-readable sig text (e.g. `"foo(a: dict) -> dict"`)
+    // through to the runtime metadata layer so `harn explain` /
+    // `harn-vm-tools` / the alignment-test metadata check keep parity
+    // with the pre-migration DSL builder.
+    let signature_text_expr = match &attrs.sig {
+        Some(sig_lit) => {
+            let raw = sig_lit.value();
+            quote!(::core::option::Option::Some(#raw))
+        }
+        None => quote!(::core::option::Option::None),
+    };
+
     let aliases = attrs.aliases.iter().map(|s| quote!(#s));
     let aliases_arr = quote!(&[#(#aliases),*]);
 
@@ -271,6 +283,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
             handler: #handler_expr,
             category: #category,
             doc: #doc,
+            signature_text: #signature_text_expr,
             parser_only: #parser_only,
             runtime_only: #runtime_only,
         };
