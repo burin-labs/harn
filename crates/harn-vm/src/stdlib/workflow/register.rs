@@ -1,12 +1,16 @@
 //! Top-level workflow executor and builtin registration.
 
 use crate::stdlib::harn_entry::register_harn_entrypoint_category;
+use crate::stdlib::macros::VmBuiltinDef;
 use crate::stdlib::registration::{
     async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::vm::{Vm, VmBuiltinArity};
 
-use super::compact::*;
+use super::compact::{
+    ESTIMATE_TOKENS_BUILTIN_DEF, MICROCOMPACT_BUILTIN_DEF, SELECT_ARTIFACTS_ADAPTIVE_BUILTIN_DEF,
+    TRANSCRIPT_AUTO_COMPACT_BUILTIN_DEF,
+};
 use super::hooks::*;
 use super::host::*;
 use super::inspect::*;
@@ -152,21 +156,6 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
         .doc("Queue a `FileEdited` notification; hooks fire on the next agent-loop boundary."),
     SyncBuiltin::new(
-        "select_artifacts_adaptive",
-        select_artifacts_adaptive_builtin,
-    )
-    .signature("select_artifacts_adaptive(artifacts?, policy?)")
-    .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-    .doc("Select workflow artifacts according to a context policy."),
-    SyncBuiltin::new("estimate_tokens", estimate_tokens_builtin)
-        .signature("estimate_tokens(messages?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Estimate tokens for a list of message objects."),
-    SyncBuiltin::new("microcompact", microcompact_builtin)
-        .signature("microcompact(text, max_chars?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Compact long tool output with the host microcompaction primitive."),
-    SyncBuiltin::new(
         HOST_WORKFLOW_PREPARE_RUN_BUILTIN,
         host_workflow_prepare_run_builtin,
     )
@@ -232,10 +221,6 @@ const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     .signature("__host_workflow_map_finalize(strategy, total_items, completed, failures, produced)")
     .arity(VmBuiltinArity::Exact(5))
     .doc("Finalize a Harn-owned workflow map stage after branch settlement."),
-    async_builtin!("transcript_auto_compact", transcript_auto_compact_builtin)
-        .signature("transcript_auto_compact(messages, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Apply the workflow/agent transcript auto-compaction primitive to a message list."),
     async_builtin!("__host_fire_session_hook", fire_session_hook_builtin)
         .signature("__host_fire_session_hook(event, payload?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
@@ -251,7 +236,17 @@ const WORKFLOW_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
     .sync(WORKFLOW_SYNC_PRIMITIVES)
     .async_(WORKFLOW_ASYNC_PRIMITIVES);
 
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &SELECT_ARTIFACTS_ADAPTIVE_BUILTIN_DEF,
+    &ESTIMATE_TOKENS_BUILTIN_DEF,
+    &MICROCOMPACT_BUILTIN_DEF,
+    &TRANSCRIPT_AUTO_COMPACT_BUILTIN_DEF,
+];
+
 pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
     register_builtin_group(vm, WORKFLOW_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
     register_harn_entrypoint_category(vm, WORKFLOW_STDLIB_ENTRYPOINT_CATEGORY);
 }

@@ -3,11 +3,17 @@
 use std::rc::Rc;
 
 use crate::orchestration::ArtifactRecord;
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
 use super::super::{parse_artifact_list, parse_context_policy};
 use super::convert::to_vm;
 
+/// Select workflow artifacts according to a context policy.
+#[harn_builtin(
+    sig = "select_artifacts_adaptive(artifacts?: list|nil, policy?: dict|nil) -> list",
+    category = "workflow.host"
+)]
 pub(super) fn select_artifacts_adaptive_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -20,6 +26,11 @@ pub(super) fn select_artifacts_adaptive_builtin(
     to_vm(&selected)
 }
 
+/// Estimate tokens for a list of message objects.
+#[harn_builtin(
+    sig = "estimate_tokens(messages?: list) -> int",
+    category = "workflow.host"
+)]
 pub(super) fn estimate_tokens_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -39,6 +50,11 @@ pub(super) fn estimate_tokens_builtin(
     Ok(VmValue::Int(tokens as i64))
 }
 
+/// Compact long tool output with the host microcompaction primitive.
+#[harn_builtin(
+    sig = "microcompact(text: string, max_chars?: int) -> string",
+    category = "workflow.host"
+)]
 pub(super) fn microcompact_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -65,6 +81,12 @@ fn non_negative_usize(value: &VmValue, builtin: &str, key: &str) -> Result<usize
     }
 }
 
+/// Apply the workflow/agent transcript auto-compaction primitive to a message list.
+#[harn_builtin(
+    sig = "transcript_auto_compact(messages: list, options?: dict|nil) -> list",
+    kind = "async",
+    category = "workflow.host"
+)]
 pub(super) async fn transcript_auto_compact_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
