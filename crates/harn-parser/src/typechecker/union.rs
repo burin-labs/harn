@@ -12,6 +12,36 @@ use crate::ast::*;
 
 use super::scope::{InferredType, TypeScope};
 
+/// Collapse a list of type members into a single `TypeExpr`: empty → the
+/// caller-supplied `empty` (typically `Never` or another sentinel), single
+/// → that member, multiple → `wrap(members)`. Used by the 0/1/many fan-out
+/// pattern that recurs across union narrowing and intersection collapsing.
+pub(super) fn collapse_members(
+    members: Vec<TypeExpr>,
+    empty: TypeExpr,
+    wrap: fn(Vec<TypeExpr>) -> TypeExpr,
+) -> TypeExpr {
+    match members.len() {
+        0 => empty,
+        1 => members.into_iter().next().expect("len == 1"),
+        _ => wrap(members),
+    }
+}
+
+/// Like [`collapse_members`] but returns `None` for empty input — the
+/// shape callers want when "no remaining members" should propagate as
+/// "no narrowing".
+pub(super) fn collapse_members_opt(
+    members: Vec<TypeExpr>,
+    wrap: fn(Vec<TypeExpr>) -> TypeExpr,
+) -> Option<TypeExpr> {
+    match members.len() {
+        0 => None,
+        1 => Some(members.into_iter().next().expect("len == 1")),
+        _ => Some(wrap(members)),
+    }
+}
+
 /// Simplify a union by flattening nested unions, removing `Never` members,
 /// deduplicating, and collapsing single-member unions.
 pub(super) fn simplify_union(members: Vec<TypeExpr>) -> TypeExpr {
@@ -19,11 +49,7 @@ pub(super) fn simplify_union(members: Vec<TypeExpr>) -> TypeExpr {
     for member in members {
         collect_simplified_union_member(member, &mut filtered);
     }
-    match filtered.len() {
-        0 => TypeExpr::Never,
-        1 => filtered.into_iter().next().unwrap(),
-        _ => TypeExpr::Union(filtered),
-    }
+    collapse_members(filtered, TypeExpr::Never, TypeExpr::Union)
 }
 
 fn collect_simplified_union_member(member: TypeExpr, filtered: &mut Vec<TypeExpr>) {
@@ -95,11 +121,11 @@ pub(super) fn remove_from_union(members: &[TypeExpr], to_remove: &str) -> Inferr
         .filter(|m| !member_matches_runtime_kind(m, to_remove))
         .cloned()
         .collect();
-    match remaining.len() {
-        0 => Some(TypeExpr::Never),
-        1 => Some(remaining.into_iter().next().unwrap()),
-        _ => Some(TypeExpr::Union(remaining)),
-    }
+    Some(collapse_members(
+        remaining,
+        TypeExpr::Never,
+        TypeExpr::Union,
+    ))
 }
 
 /// Narrow a union to the (possibly parameterised) members whose
@@ -112,11 +138,7 @@ pub(super) fn narrow_to_single(members: &[TypeExpr], target: &str) -> InferredTy
         .filter(|m| member_matches_runtime_kind(m, target))
         .cloned()
         .collect();
-    match matched.len() {
-        0 => None,
-        1 => Some(matched.into_iter().next().unwrap()),
-        _ => Some(TypeExpr::Union(matched)),
-    }
+    collapse_members_opt(matched, TypeExpr::Union)
 }
 
 /// Extract the variable name from a `type_of(x)` call.
@@ -194,11 +216,7 @@ fn intersect_union_with(members: &[TypeExpr], other: &TypeExpr, flip: bool) -> O
             }
         })
         .collect::<Vec<_>>();
-    match kept.len() {
-        0 => None,
-        1 => kept.into_iter().next(),
-        _ => Some(TypeExpr::Union(kept)),
-    }
+    collapse_members_opt(kept, TypeExpr::Union)
 }
 
 pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Option<TypeExpr> {

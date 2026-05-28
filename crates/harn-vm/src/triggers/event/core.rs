@@ -182,6 +182,12 @@ impl TriggerEvent {
     pub fn mark_dedupe_claimed(&mut self) {
         self.dedupe_claimed = true;
     }
+
+    /// Dotted `provider.kind` identifier used for trust-graph subject
+    /// labels, predicate-eval prefixes, and dispatcher topic suffixes.
+    pub fn qualified_kind(&self) -> String {
+        format!("{}.{}", self.provider.as_str(), self.kind)
+    }
 }
 
 /// Header-focused name for the unified [`crate::redact::RedactionPolicy`].

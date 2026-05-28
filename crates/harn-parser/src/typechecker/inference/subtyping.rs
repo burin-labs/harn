@@ -14,6 +14,7 @@ use crate::ast::*;
 
 use super::super::format::format_type;
 use super::super::scope::{Polarity, TypeScope};
+use super::super::union::collapse_members;
 use super::super::TypeChecker;
 
 impl TypeChecker {
@@ -613,13 +614,9 @@ fn instantiate_alias_distributive(
         }
         variants = next;
     }
-    let mut results: Vec<TypeExpr> = variants
+    let results: Vec<TypeExpr> = variants
         .into_iter()
         .map(|bindings| TypeChecker::apply_type_bindings(body, &bindings))
         .collect();
-    if results.len() == 1 {
-        results.pop().unwrap()
-    } else {
-        TypeExpr::Union(results)
-    }
+    collapse_members(results, TypeExpr::Never, TypeExpr::Union)
 }
