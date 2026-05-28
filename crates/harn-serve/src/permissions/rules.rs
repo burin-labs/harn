@@ -300,9 +300,8 @@ mod tests {
         .unwrap();
         rule.ensure_compiled().unwrap();
         let now = OffsetDateTime::now_utc();
-        let req = request("s1", "alice", "fs.read", "src/x");
-        assert!(rule.matches(&req, now));
-        let mut other = req.clone();
+        let mut other = request("s1", "alice", "fs.read", "src/x");
+        assert!(rule.matches(&other, now));
         other.workspace_id = Some("ws-other".to_string());
         assert!(!rule.matches(&other, now));
     }

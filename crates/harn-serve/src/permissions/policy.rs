@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn lint_rejects_empty_and_invalid_globs() {
         let mut policy = PermissionPolicy::empty();
-        policy.read = vec!["".to_string(), "src/[".to_string()];
+        policy.read = vec![String::new(), "src/[".to_string()];
         let errors = policy.lint().expect_err("expected lint errors");
         assert!(errors
             .iter()
