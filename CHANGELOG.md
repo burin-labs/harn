@@ -8,6 +8,185 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.47
+
+### Added
+
+- **`tenant_id` propagation through `harn-serve`.** `AuthRequest`,
+  `AuthenticatedPrincipal`, `OAuthClaims`, `ApiKeyEntry`, `HmacAuthConfig`,
+  `OAuth21AuthConfig`, and `CallRequest` now carry an optional
+  `TenantId`. `DispatchCore` resolves it (request override → principal →
+  none), installs a `harn_vm::enter_tenant` scope for the dispatched
+  callable, records it as a trust-graph metadata field, and surfaces it
+  as a `tenant_id` span attribute on `harn_serve.dispatch`.
+- **`harness.tenant.id()` ambient.** New `HarnessTenant` sub-handle
+  (typechecked, dispatched through `HarnessKind::Tenant`) returns the
+  active tenant id string and raises a typed `ErrorCategory::Auth`
+  runtime error when no tenant is bound. `harness.tenant.try_id()`
+  returns `nil` instead for branchable callers.
+- **DispatchCore auto-injects the `harness` capability handle.**
+  Exported `pub fn foo(harness: Harness, ...)` now receives the runtime
+  handle without the caller having to encode one through `CallArguments`
+  — closes a pre-existing gap where dispatched scripts could not reach
+  any `harness.*` surface.
+- **Postgres bindings reach v1 (issue #2500).** `std/postgres` now exposes
+  explicit savepoint control (`pg_savepoint`, `pg_release_savepoint`,
+  `pg_rollback_to_savepoint`) with double-quoted identifier validation,
+  a `pg_migrate(pool, {dir, table?, dry_run?})` runner that applies
+  `.sql` files in lexicographic order under a Postgres advisory lock and
+  records `(name, applied_at, checksum)` in a configurable
+  `harn_migrations` ledger, NUMERIC column decoding via
+  `rust_decimal::Decimal::to_string` so callers round-trip lossless
+  precision through JSON, and `duration_ms` telemetry on every
+  `pg_execute` and `pg_migrate` result.
+- **`harn-serve::sessions` session-store primitive (#2502).** New
+  `crates/harn-serve/src/sessions/` module owns the agent-session /
+  transcript primitive: typed event taxonomy (`Message`, `ToolCall`,
+  `ToolResult`, `Plan`, `Compaction`, `SystemReminder`, `Hypothesis`,
+  `Receipt`, `Reminder`, `PermissionDecision`, and arbitrary
+  `Custom { type, payload }`), append-only event log with
+  monotonic-per-session `event_id`s and a sha256 record-hash chain,
+  fork/truncate, snapshot/replay, optional per-event and per-receipt
+  Ed25519 signatures, a redaction processor hook plugged into
+  `harn_vm::redact::RedactionPolicy`, declarative per-tenant
+  `RetentionPolicy` with soft-delete + grace + sweep, and a composable
+  axum `sessions_router` mounting create/list/read/append/fork/truncate/
+  snapshot/replay/close/verify/hard_delete under any prefix the caller
+  picks. Two backends ship today — `MemorySessionStore` and
+  `SqliteSessionStore` — both passing the same behavioural test suite.
+  The Postgres backend lands once `harn-hostlib::postgres` (#2500) is
+  available; the trait surface is wide enough to drop a `PgSessionStore`
+  in without changing callers.
+- **harn-serve permission primitive (#2503).** A single authoritative
+  permission module (`harn_serve::permissions`) now owns declared
+  [`PermissionPolicy`] (read/write/exec/net globs, llm provider list
+  with optional cost ceiling, redaction patterns, content-hashed
+  versioning, parse-time lint), persistent [`RememberRule`]s with
+  per-tenant + session/workspace/user/always scope and optional
+  `expires_at` auto-expiry, the [`PermissionStore`] trait + in-memory
+  implementation that ties evaluation and audit together, and a
+  REST surface under `/v1/permissions/*` (policy / rules / history /
+  check). The existing `/v1/permission-requests/{id}/respond`
+  endpoint accepts new `scope`, `expires_at`, `remember`,
+  `action_pattern`, and `target_pattern` fields so an approver can
+  pin the verdict as a remember-rule at any scope in one round-trip.
+  Subsumes the parallel permission stacks in
+  `burin-code/tui/util/permission-policy.ts`,
+  `BurinApp/Services/Agent/IDEAgentDelegate.swift`, and the cloud
+  gateway middleware once consumers migrate (siblings C/D/E).
+- **`compaction.{policy,check,run}` primitive in harn-serve (#2505).**
+  Lifts compaction *policy* (when + how to compact) into the runtime so
+  every consumer surface (TUI, IDE, harn-cloud) sees the same trigger
+  semantics and telemetry shape instead of reimplementing thresholds.
+  `compaction.policy(opts)` declares per-session strategy + thresholds
+  (`max_tokens`, `max_turns`, `safety_ratio`, `keep_last`,
+  `summarize_fn`, ...); `compaction.check(session_id?)` returns a
+  `{action: compact_now | defer | abandon, ...}` decision without
+  mutating state; `compaction.run(session_id?, plan?)` drives the
+  canonical #2323 lifecycle and returns the compacted transcript.
+  Strategy registry — `summarize | summarize-then-prune | head+tail |
+  window | observation_mask | custom(fn)` — lowers to existing engine
+  strategies, with `summarize-then-prune` declaring a deterministic
+  truncate fallback. Telemetry rides on the existing
+  `AgentEvent::TranscriptCompacted`; latency lands on the result dict.
+- **`edit_insert_at_anchor` — AST-precise insert relative to an anchor (#2507).**
+  New `std/edit` primitive (backed by `hostlib_ast_insert_at_anchor`) for
+  splicing a sibling or child node next to a Tree-Sitter anchor. `position`
+  picks `before` / `after` / `first_child` / `last_child`; the anchor must
+  match exactly one node; content is re-indented to the inferred target
+  depth and validated by re-parsing. Companion to `edit_apply_node` from
+  #2506 — where `apply_node` *replaces* a span, `insert_at_anchor` *adds*
+  one. Routes through staged-fs (#1722) so the insert is atomic alongside
+  siblings. Lands the second stdlib child of epic #2497; the shared edit
+  helpers (`read_source`, `write_source`, `first_syntax_error`,
+  `resolve_target_capture`, …) now live in `ast/edit_common.rs` instead
+  of being duplicated across primitives.
+- **`std/edit`: `edit_safe_text_patch` with staged-fs collision
+  rejection.** New `edit_safe_text_patch({path, expected_hash, hunks,
+  ...})` helper reads the target file through the staged-fs overlay
+  (#1722), runs each `{old_text, new_text}` hunk through the
+  `edit_apply_old_new_patch` matcher against the running post-image,
+  and commits all-or-nothing through a new atomic
+  `hostlib_fs_safe_text_patch` builtin. When the observed pre-image
+  hash diverges from `expected_hash` the call returns
+  `result == "stale_base"` with the actual `current_hash` echoed back
+  so callers re-read and retry instead of blind-writing over a
+  concurrent agent's edit. Per-call `telemetry` carries `applied`,
+  `stale_base`, `hunk_conflict`, and `no_op` counters plus
+  `hunks` count so hosts roll up collision rates without log
+  scraping. Paired with a new un-gated `hostlib_fs_read_text` that
+  returns `{content, sha256, size, exists}` so Harn callers can
+  snapshot the overlay pre-image without enabling the deterministic
+  tools feature. Closes #2509 under the AST-precise edit primitive
+  epic [#2497](https://github.com/burin-labs/harn/issues/2497).
+- **Local OTLP exporter auto-registration.** `harn-vm` ships an
+  `events::install_otel_sink_from_env` helper that wires the existing
+  `OtelSink` (`crates/harn-vm/src/events.rs`) into the thread-local
+  event-sink chain whenever `HARN_OTEL_ENDPOINT` (or the standard
+  `OTEL_EXPORTER_OTLP_ENDPOINT`) is set. `harn-cli`'s `async_main` calls
+  it once at startup so every subcommand — `harn run`, `harn serve acp`,
+  evals — exports spans through the OTLP/HTTP collector at the
+  configured endpoint. Honors `HARN_OTEL_SERVICE_NAME` /
+  `OTEL_SERVICE_NAME` (default `"harn"`) and `HARN_OTEL_HEADERS` /
+  `OTEL_EXPORTER_OTLP_HEADERS` for header-based auth (e.g. Honeycomb
+  team ID). The auto-registered batch processor uses the host's tokio
+  runtime; a paired `events::shutdown_otel_sink` drains the queue
+  before the runtime exits so short-lived `harn run` invocations never
+  drop tail-end spans. Redaction stays under the active policy
+  (`crate::redact::current_policy`), unchanged from the pre-existing
+  `OtelSink` contract.
+- **`#[harn_builtin]` proc-macro for stdlib registration.** Three new crates
+  (`harn-builtin-meta`, `harn-builtin-registry`, `harn-builtin-macros`)
+  replace the two-sided builtin registration system. A single annotated
+  function now emits both the runtime `vm.register_builtin_def` entry and
+  the parser `BuiltinSignature`. ~25 stdlib modules and ~412 builtins
+  ported in this PR; remaining modules continue to work via the parser's
+  static signature fallback during the incremental migration.
+
+### Changed
+
+- **Towncrier-style changelog fragments.** PRs can now drop a single
+  `changelog.d/<id>.<category>.md` file (categories: `breaking`, `added`,
+  `changed`, `deprecated`, `removed`, `fixed`, `security`) instead of
+  hand-editing `## Unreleased`. At release time the bump fleet's
+  `release_harn.harn` assembles the fragments into the Unreleased block
+  (preserving any operator-authored bullets) and stages the fragment files
+  for deletion in the same release commit. Removes `## Unreleased` as a
+  merge-conflict hot spot for parallel PRs. Direct edits to `CHANGELOG.md`
+  remain accepted (legacy path). A soft `Changelog fragment` CI gate flags
+  PRs that change user-visible code without a fragment; the
+  `no-changelog-needed` label bypasses it.
+
+### Removed
+
+- **Static builtin signature cleanup.** Deleted 506 dead static
+  `BuiltinSignature` literals from
+  `crates/harn-parser/src/builtin_signatures/signatures/*.rs` that were
+  duplicates of `#[harn_builtin]`-installed sigs. The merge logic in
+  `all_signatures()` already prefers runtime-installed entries over
+  the static fallback, so these duplicates were unreachable. Deleted
+  `flow.rs` and `schema.rs` entirely (100% migrated). LOC delta:
+  -2191 net.
+- **`regex_replace` and `regex_split` return type fix.** PR #2531
+  inadvertently widened `regex_replace(...) -> string | nil` and
+  `regex_split(...) -> list | nil`, breaking downstream `.harn`
+  callers that expected the original `string` / `list` returns. The
+  nil return is only reached on arity-violation (caught at the
+  arity check before the impl in normal use). Tightened both back
+  to match the pre-migration contracts.
+
+### Fixed
+
+- **Typechecker: `schema_is(x, S)` on a shape value no longer drops fields the
+  variable was already known to have.** When `x` was typed as a shape, the
+  truthy branch previously narrowed to the schema's shape verbatim, discarding
+  every field the existing annotation declared — so e.g. `if schema_is(x, {b:
+  string}) { x.a }` on `x: {a: int, b: string}` falsely reported `a` missing.
+  Width subtyping says the value still has those fields after the check, so the
+  intersection now keeps the current shape's fields, intersects overlapping
+  field types, and appends schema-only required fields that the matched check
+  proves are present.
+
 ## v0.8.46
 
 ### Added
