@@ -35,6 +35,21 @@ pub(crate) struct ObjectField {
     pub(crate) examples: Vec<serde_json::Value>,
 }
 
+/// Collapse a list of `TypeExpr` into a single value: empty → `Unknown`,
+/// single → that member, multiple → `wrap(members)`. Centralises the
+/// 0/1/many fan-out used by `enum`, `oneOf`/`anyOf`, `allOf`, and the
+/// multi-type `"type": ["string", "null"]` syntax in JSON Schema.
+pub(super) fn collapse_members(
+    members: Vec<TypeExpr>,
+    wrap: fn(Vec<TypeExpr>) -> TypeExpr,
+) -> TypeExpr {
+    match members.len() {
+        0 => TypeExpr::Unknown,
+        1 => members.into_iter().next().expect("len == 1"),
+        _ => wrap(members),
+    }
+}
+
 /// If a union already contains a primitive `null`, keep it as-is; otherwise
 /// return the type unchanged. This exists so we don't end up with `T | null | null`.
 pub(super) fn merge_nullable(ty: TypeExpr) -> TypeExpr {

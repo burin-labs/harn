@@ -33,7 +33,7 @@ impl Dispatcher {
     ) -> Result<(), DispatchError> {
         let mut record = TrustRecord::new(
             binding.id.as_str().to_string(),
-            format!("{}.{}", event.provider.as_str(), event.kind),
+            event.qualified_kind(),
             None,
             outcome,
             event.trace_id.0.clone(),

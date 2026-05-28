@@ -26,8 +26,8 @@ use super::super::scope::{
     TypeAliasInfo, TypeScope,
 };
 use super::super::union::{
-    discriminant_field, narrow_shape_union_by_tag, narrow_to_single, simplify_union, without_nil,
-    DiscriminantValue,
+    collapse_members_opt, discriminant_field, narrow_shape_union_by_tag, narrow_to_single,
+    simplify_union, without_nil, DiscriminantValue,
 };
 use super::super::{InlayHintInfo, TypeChecker};
 use super::flow::{pattern_alternatives, resolve_union_shape_members};
@@ -2872,11 +2872,7 @@ fn narrow_union_by_arm_pattern(pattern: &SNode, members: &[TypeExpr]) -> Option<
             }
         }
     }
-    match collected.len() {
-        0 => None,
-        1 => Some(collected.into_iter().next().unwrap()),
-        _ => Some(TypeExpr::Union(collected)),
-    }
+    collapse_members_opt(collected, TypeExpr::Union)
 }
 
 fn narrow_union_leaf(node: &Node, members: &[TypeExpr]) -> Option<TypeExpr> {
@@ -2934,9 +2930,5 @@ fn narrow_shape_union_by_arm_pattern(
             matched.push(shape);
         }
     }
-    match matched.len() {
-        0 => None,
-        1 => Some(matched.into_iter().next().unwrap()),
-        _ => Some(TypeExpr::Union(matched)),
-    }
+    collapse_members_opt(matched, TypeExpr::Union)
 }

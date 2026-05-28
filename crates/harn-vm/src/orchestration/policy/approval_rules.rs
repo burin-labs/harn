@@ -902,22 +902,30 @@ fn first_sensitive_candidate(
     policy: &ToolApprovalPolicy,
     ctx: &EvaluationContext,
 ) -> Option<String> {
-    let patterns = if policy.sensitive_path_patterns.is_empty() {
-        default_sensitive_path_patterns()
-    } else {
-        policy.sensitive_path_patterns.clone()
-    };
+    let custom = &policy.sensitive_path_patterns;
     ctx.path_candidates
         .iter()
         .chain(ctx.string_candidates.iter())
-        .find(|candidate| is_sensitive_path_candidate(candidate, &patterns))
+        .find(|candidate| {
+            if custom.is_empty() {
+                is_sensitive_path_candidate(
+                    candidate,
+                    DEFAULT_SENSITIVE_PATH_PATTERNS.iter().copied(),
+                )
+            } else {
+                is_sensitive_path_candidate(candidate, custom.iter().map(String::as_str))
+            }
+        })
         .cloned()
 }
 
-fn is_sensitive_path_candidate(candidate: &str, patterns: &[String]) -> bool {
+fn is_sensitive_path_candidate<'a>(
+    candidate: &str,
+    patterns: impl IntoIterator<Item = &'a str>,
+) -> bool {
     let normalized = candidate.replace('\\', "/").to_ascii_lowercase();
     let basename = normalized.rsplit('/').next().unwrap_or(normalized.as_str());
-    patterns.iter().any(|pattern| {
+    patterns.into_iter().any(|pattern| {
         let pattern = pattern.to_ascii_lowercase();
         super::super::glob_match(&pattern, &normalized)
             || super::super::glob_match(&pattern, basename)
@@ -925,24 +933,19 @@ fn is_sensitive_path_candidate(candidate: &str, patterns: &[String]) -> bool {
     })
 }
 
-fn default_sensitive_path_patterns() -> Vec<String> {
-    [
-        ".env",
-        ".env.*",
-        "**/.env",
-        "**/.env.*",
-        "id_rsa",
-        "id_ed25519",
-        "**/.aws/credentials",
-        "**/.npmrc",
-        "**/.netrc",
-        "*.pem",
-        "*.key",
-    ]
-    .iter()
-    .map(|value| value.to_string())
-    .collect()
-}
+const DEFAULT_SENSITIVE_PATH_PATTERNS: &[&str] = &[
+    ".env",
+    ".env.*",
+    "**/.env",
+    "**/.env.*",
+    "id_rsa",
+    "id_ed25519",
+    "**/.aws/credentials",
+    "**/.npmrc",
+    "**/.netrc",
+    "*.pem",
+    "*.key",
+];
 
 fn under_external_root(path: &str, roots: &[String]) -> bool {
     if roots.is_empty() {

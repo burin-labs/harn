@@ -23,6 +23,7 @@ use harn_lexer::Span;
 use super::super::format::format_type;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{is_builtin, EnumDeclInfo, FnSignature, StructDeclInfo, TypeScope};
+use super::super::union::collapse_members_opt;
 use super::super::union::without_nil;
 use super::super::TypeChecker;
 
@@ -61,11 +62,7 @@ impl TypeChecker {
                 members.push(field.type_expr.clone());
             }
         }
-        match members.len() {
-            0 => None,
-            1 => Some(members.into_iter().next().unwrap()),
-            _ => Some(TypeExpr::Union(members)),
-        }
+        collapse_members_opt(members, TypeExpr::Union)
     }
 
     fn builtin_uses_strict_llm_option_keys(name: &str, param_name: &str) -> bool {

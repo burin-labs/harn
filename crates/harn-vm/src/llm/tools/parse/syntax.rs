@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use super::super::ts_value_parser::TsValueParser;
 
 /// Strip leaked thinking tags from model output. Some models (Qwen, Gemma)
@@ -128,7 +130,11 @@ pub(super) fn collapse_blank_lines(text: &str) -> String {
 /// Models sometimes emit these as failed tool-call attempts. If left in prose
 /// they accumulate in conversation history and cause duplication loops.
 pub(super) fn strip_empty_fences(text: &str) -> String {
-    let re = regex::Regex::new(r"(?m)^[ \t]*```[^\n]*\n\s*```[ \t]*\n?").unwrap();
+    static EMPTY_FENCE_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = EMPTY_FENCE_RE.get_or_init(|| {
+        regex::Regex::new(r"(?m)^[ \t]*```[^\n]*\n\s*```[ \t]*\n?")
+            .expect("strip_empty_fences regex is statically valid")
+    });
     re.replace_all(text, "").to_string()
 }
 

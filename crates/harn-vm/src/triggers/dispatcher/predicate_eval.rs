@@ -127,7 +127,7 @@ impl Dispatcher {
                 event,
                 replay_of_event_id,
                 binding.id.as_str(),
-                &format!("{}.{}", event.provider.as_str(), event.kind),
+                &event.qualified_kind(),
                 autonomy_tier,
                 &mut self.cancel_tx.subscribe(),
                 binding

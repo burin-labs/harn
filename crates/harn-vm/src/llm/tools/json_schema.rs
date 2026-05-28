@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::components::{ref_name_from_pointer, resolve_json_ref, ComponentRegistry};
 use super::params::extract_examples;
-use super::type_expr::{merge_nullable, ObjectField, TypeExpr};
+use super::type_expr::{collapse_members, merge_nullable, ObjectField, TypeExpr};
 use crate::value::VmValue;
 
 /// Convert a JSON Schema fragment into a TypeExpr, recursing through
@@ -53,11 +53,7 @@ pub(crate) fn json_schema_to_type_expr(
             .iter()
             .map(|value| TypeExpr::Literal(value.clone()))
             .collect();
-        return match members.len() {
-            0 => TypeExpr::Unknown,
-            1 => members.into_iter().next().unwrap(),
-            _ => TypeExpr::Union(members),
-        };
+        return collapse_members(members, TypeExpr::Union);
     }
 
     // oneOf / anyOf — union. Render both the same way for our purposes
@@ -69,10 +65,9 @@ pub(crate) fn json_schema_to_type_expr(
                 .map(|value| json_schema_to_type_expr(value, root, registry))
                 .filter(|ty| !matches!(ty, TypeExpr::Unknown))
                 .collect();
-            return match members.len() {
-                0 => TypeExpr::Unknown,
-                1 => members.into_iter().next().unwrap(),
-                _ => merge_nullable(TypeExpr::Union(members)),
+            return match collapse_members(members, TypeExpr::Union) {
+                TypeExpr::Union(members) => merge_nullable(TypeExpr::Union(members)),
+                other => other,
             };
         }
     }
@@ -84,11 +79,7 @@ pub(crate) fn json_schema_to_type_expr(
             .map(|value| json_schema_to_type_expr(value, root, registry))
             .filter(|ty| !matches!(ty, TypeExpr::Unknown))
             .collect();
-        return match members.len() {
-            0 => TypeExpr::Unknown,
-            1 => members.into_iter().next().unwrap(),
-            _ => TypeExpr::Intersection(members),
-        };
+        return collapse_members(members, TypeExpr::Intersection);
     }
 
     // type — may be a string (`"string"`) or an array of strings (`["string", "null"]`).
@@ -107,11 +98,7 @@ pub(crate) fn json_schema_to_type_expr(
                         .map(|kind| TypeExpr::Primitive(kind.to_string()))
                 })
                 .collect();
-            match primitives.len() {
-                0 => TypeExpr::Unknown,
-                1 => primitives.into_iter().next().unwrap(),
-                _ => TypeExpr::Union(primitives),
-            }
+            collapse_members(primitives, TypeExpr::Union)
         }
         Some(serde_json::Value::String(kind)) => match kind.as_str() {
             "array" => {
