@@ -572,7 +572,7 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    sig = "mkdir(path: string) -> nil",
+    sig = "mkdir(path: string, recursive?: bool) -> nil",
     category = "fs",
     doc = "Create a directory and any missing parents."
 )]
