@@ -22,6 +22,15 @@
 //! as `pg:<pg_channel>` for direct composition with the trigger DSL.
 //! Production code can keep the explicit pull-loop form; the bridge is
 //! sugar for one-line subscriptions.
+//!
+//! **Lifecycle**: listeners pin a connection from the pool for as long
+//! as they're alive. Always call `pg_listener_close(listener)` — Harn
+//! has no Drop semantics, so a forgotten listener leaks the connection
+//! until `reset_postgres_state()` is called (typically only at VM
+//! teardown). For the common request/response pattern, prefer
+//! `bridge_to_channel: true` + a trigger; the dedicated pull loop is
+//! only worth it for long-running consumers that already manage their
+//! own lifecycle.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
