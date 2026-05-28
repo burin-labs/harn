@@ -87,8 +87,8 @@ pipeline default(task) {
   // state — so retrying until the reclaim lands is safe. Budget is
   // generous enough to absorb GHA-runner stalls without making the
   // happy path slower than the original wait.
-  var second = null
-  var second_data = null
+  var second = nil
+  var second_data = nil
   let claim_reclaim_deadline = harness.clock.now_ms() + 5000
   while harness.clock.now_ms() < claim_reclaim_deadline {
     second = exec(
