@@ -631,6 +631,7 @@ mod tests {
             cancel_token: None,
             agent_session_id: None,
             progress: None,
+            tenant_id: None,
         };
         core.dispatch(request).await.map(|response| response.value)
     }
