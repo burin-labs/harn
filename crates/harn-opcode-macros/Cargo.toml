@@ -1,0 +1,19 @@
+[package]
+name = "harn-opcode-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "define_opcodes! proc-macro: emits the VM Op enum, sync/async dispatch, disassembly, and classification helpers from a single declarative table."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+
+[lints]
+workspace = true

@@ -2465,6 +2465,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-opcode-macros"
+version = "0.8.47"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "harn-orchestration-perf"
 version = "0.0.0"
 dependencies = [
@@ -2568,6 +2577,7 @@ dependencies = [
  "harn-ir",
  "harn-lexer",
  "harn-modules",
+ "harn-opcode-macros",
  "harn-parser",
  "harn-stdlib",
  "hex",
