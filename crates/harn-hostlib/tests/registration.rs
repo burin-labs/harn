@@ -177,6 +177,7 @@ fn fs_capability_registers_documented_methods() {
             "hostlib_fs_discard_staged",
             "hostlib_fs_safe_text_patch",
             "hostlib_fs_read_text",
+            "hostlib_fs_emit_safe_text_patch_result",
         ]
     );
     let expected_missing: &[(&str, &str)] = &[
@@ -186,6 +187,7 @@ fn fs_capability_registers_documented_methods() {
         ("hostlib_fs_discard_staged", "session_id"),
         ("hostlib_fs_safe_text_patch", "path"),
         ("hostlib_fs_read_text", "path"),
+        ("hostlib_fs_emit_safe_text_patch_result", "path"),
     ];
     for (name, expected_param) in expected_missing {
         let entry = registry.find(name).expect("registered");

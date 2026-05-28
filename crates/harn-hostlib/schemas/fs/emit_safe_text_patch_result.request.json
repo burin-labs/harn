@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/emit_safe_text_patch_result.request.json",
+  "title": "fs.emit_safe_text_patch_result request",
+  "description": "Emit a per-call `SafeTextPatchResult` agent event so hosts can roll up stale-base / hunk-conflict rates and average hunks-per-patch without scraping result dicts out of pipeline logs. Called by `std/edit`'s `edit_safe_text_patch` at every terminal return path (applied / no_op / stale_base / hunk_conflict). Silently no-ops when no session is active.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string", "minLength": 1 },
+    "result": {
+      "type": "string",
+      "enum": ["applied", "no_op", "stale_base", "hunk_conflict"]
+    },
+    "hunks_count": { "type": "integer", "minimum": 0, "default": 0 },
+    "bytes_written": { "type": "integer", "minimum": 0, "default": 0 },
+    "failed_hunk_index": { "type": ["integer", "null"], "minimum": 0 },
+    "session_id": { "type": ["string", "null"] }
+  },
+  "required": ["path", "result"],
+  "additionalProperties": false
+}

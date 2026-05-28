@@ -426,6 +426,20 @@ pub enum AgentEvent {
         pending_count: usize,
         total_bytes: u64,
     },
+    /// Per-call outcome of `hostlib_fs_safe_text_patch`. Hosts subscribe to
+    /// this to roll up stale-base / hunk-conflict rates and average
+    /// hunks-per-patch without scraping result dicts out of pipeline logs.
+    /// Fired from both the staged-overlay and direct-disk code paths so
+    /// the rollup is comprehensive.
+    SafeTextPatchResult {
+        session_id: String,
+        path: String,
+        result: String,
+        hunks_count: usize,
+        bytes_written: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failed_hunk_index: Option<usize>,
+    },
     /// ACP control-plane arbitration outcome. Emitted for accepted,
     /// idempotent, and rejected controls so replay/audit consumers can show
     /// who acted and why a late or unauthorized action lost.
@@ -685,6 +699,7 @@ impl AgentEvent {
             | Self::Handoff { session_id, .. }
             | Self::FsWatch { session_id, .. }
             | Self::StagedWritesPending { session_id, .. }
+            | Self::SafeTextPatchResult { session_id, .. }
             | Self::ControlOutcome { session_id, .. }
             | Self::WorkerUpdate { session_id, .. }
             | Self::HitlRequested { session_id, .. }
