@@ -2,22 +2,96 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 thread_local! {
     static LLM_BUDGET: RefCell<Option<f64>> = const { RefCell::new(None) };
     static LLM_ACCUMULATED_COST: RefCell<f64> = const { RefCell::new(0.0) };
+    static LLM_TOKEN_BUDGET: RefCell<Option<u64>> = const { RefCell::new(None) };
+    static LLM_ACCUMULATED_TOKENS: RefCell<u64> = const { RefCell::new(0) };
 }
 
 /// Reset thread-local cost state. Call between test runs to avoid leaking.
 pub(crate) fn reset_cost_state() {
     LLM_BUDGET.with(|b| *b.borrow_mut() = None);
     LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
+    LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = None);
+    LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 0);
 }
 
 pub fn peek_total_cost() -> f64 {
     LLM_ACCUMULATED_COST.with(|acc| *acc.borrow())
+}
+
+/// RAII guard installed by [`install_llm_cost_budget`]. Restores the
+/// prior ceiling (and accumulated total) on drop so nested dispatches
+/// (a handler that re-enters the dispatcher) cannot leak a tighter
+/// budget into the outer scope, or a wider one back into a finished
+/// inner scope.
+#[must_use = "dropping the guard immediately restores the prior LLM cost budget"]
+pub struct LlmBudgetGuard {
+    previous_budget: Option<f64>,
+    previous_accumulated: f64,
+}
+
+impl Drop for LlmBudgetGuard {
+    fn drop(&mut self) {
+        LLM_BUDGET.with(|b| *b.borrow_mut() = self.previous_budget);
+        LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = self.previous_accumulated);
+    }
+}
+
+/// Pin the per-call LLM cost ceiling at `max_cost_usd` for the lifetime
+/// of the returned guard. Sourced from `@budget(llm_cost_usd = …)` on
+/// `.harn` handlers in `harn-serve`; mid-call exhaustion raises a
+/// `BudgetExceeded`-categorised error which adapter codecs render as
+/// HTTP 429.
+pub fn install_llm_cost_budget(max_cost_usd: f64) -> LlmBudgetGuard {
+    let previous_budget = LLM_BUDGET.with(|b| b.borrow().to_owned());
+    let previous_accumulated = LLM_ACCUMULATED_COST.with(|a| *a.borrow());
+    LLM_BUDGET.with(|b| *b.borrow_mut() = Some(max_cost_usd.max(0.0)));
+    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
+    LlmBudgetGuard {
+        previous_budget,
+        previous_accumulated,
+    }
+}
+
+/// RAII guard for [`install_llm_token_budget`]. Pairs the dispatch-level
+/// token cap with the cost-cap guard so `@budget(llm_tokens, llm_cost_usd)`
+/// both restore on drop.
+#[must_use = "dropping the guard immediately restores the prior LLM token budget"]
+pub struct LlmTokenBudgetGuard {
+    previous_budget: Option<u64>,
+    previous_accumulated: u64,
+}
+
+impl Drop for LlmTokenBudgetGuard {
+    fn drop(&mut self) {
+        LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = self.previous_budget);
+        LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = self.previous_accumulated);
+    }
+}
+
+/// Pin the per-dispatch LLM token ceiling (input + output combined) at
+/// `max_tokens` for the lifetime of the returned guard. Sourced from
+/// `@budget(llm_tokens: …)` on `.harn` handlers in `harn-serve`. Like
+/// the cost-cap variant, mid-stream exhaustion raises a
+/// `BudgetExceeded`-categorised error that adapters render as HTTP 429.
+pub fn install_llm_token_budget(max_tokens: u64) -> LlmTokenBudgetGuard {
+    let previous_budget = LLM_TOKEN_BUDGET.with(|b| *b.borrow());
+    let previous_accumulated = LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow());
+    LLM_TOKEN_BUDGET.with(|b| *b.borrow_mut() = Some(max_tokens));
+    LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 0);
+    LlmTokenBudgetGuard {
+        previous_budget,
+        previous_accumulated,
+    }
+}
+
+pub fn peek_total_tokens() -> u64 {
+    LLM_ACCUMULATED_TOKENS.with(|acc| *acc.borrow())
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -489,6 +563,25 @@ pub(crate) fn accumulate_cost_for_provider(
     // the per-call cost is zero — token-only step budgets need the
     // count regardless of pricing.
     crate::step_runtime::record_step_llm_usage(model, input_tokens, output_tokens, cost)?;
+    let total_tokens = input_tokens.max(0) as u64 + output_tokens.max(0) as u64;
+    if total_tokens > 0 {
+        LLM_ACCUMULATED_TOKENS.with(|acc| {
+            let mut slot = acc.borrow_mut();
+            *slot = slot.saturating_add(total_tokens);
+        });
+        LLM_TOKEN_BUDGET.with(|budget| {
+            if let Some(max) = *budget.borrow() {
+                let total = LLM_ACCUMULATED_TOKENS.with(|acc| *acc.borrow());
+                if total > max {
+                    return Err(categorized_error(
+                        format!("LLM token budget exceeded: spent {total} of {max} tokens"),
+                        ErrorCategory::BudgetExceeded,
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+    }
     if cost == 0.0 {
         return Ok(());
     }
@@ -499,9 +592,10 @@ pub(crate) fn accumulate_cost_for_provider(
         if let Some(max) = *budget.borrow() {
             let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
             if total > max {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "LLM budget exceeded: spent ${total:.4} of ${max:.4} budget"
-                )))));
+                return Err(categorized_error(
+                    format!("LLM budget exceeded: spent ${total:.4} of ${max:.4} budget"),
+                    ErrorCategory::BudgetExceeded,
+                ));
             }
         }
         Ok(())
@@ -1109,5 +1203,53 @@ mod tests {
         assert!((cache_hit_ratio(1000, 250, 0) - 0.25).abs() < f64::EPSILON);
         assert!((cache_hit_ratio(100, 900, 0) - 0.9).abs() < f64::EPSILON);
         assert_eq!(cache_hit_ratio(0, 0, 0), 0.0);
+    }
+
+    #[test]
+    fn token_budget_guard_restores_prior_state_on_drop() {
+        let _guard_outer = crate::llm::env_lock().lock().unwrap();
+        reset_cost_state();
+
+        let outer = install_llm_token_budget(100);
+        assert_eq!(peek_total_tokens(), 0);
+        // Simulate accumulation by writing the thread-local directly.
+        LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 50);
+
+        // Nested guard wipes accumulation and installs a tighter cap.
+        {
+            let _inner = install_llm_token_budget(10);
+            assert_eq!(peek_total_tokens(), 0);
+            LLM_ACCUMULATED_TOKENS.with(|a| *a.borrow_mut() = 5);
+        }
+
+        // Outer scope restored on inner drop.
+        assert_eq!(peek_total_tokens(), 50);
+        drop(outer);
+        assert_eq!(peek_total_tokens(), 0);
+
+        reset_cost_state();
+    }
+
+    #[test]
+    fn token_budget_raises_categorized_error_when_exhausted() {
+        let _guard_outer = crate::llm::env_lock().lock().unwrap();
+        reset_cost_state();
+        let _budget = install_llm_token_budget(10);
+
+        // First call within budget — admits.
+        let first = accumulate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 5, 0);
+        assert!(first.is_ok());
+
+        // Second call pushes over — raises BudgetExceeded.
+        let second = accumulate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 8, 0);
+        match second {
+            Err(VmError::CategorizedError { category, message }) => {
+                assert_eq!(category, ErrorCategory::BudgetExceeded);
+                assert!(message.contains("token budget"), "got: {message}");
+            }
+            other => panic!("expected BudgetExceeded, got {other:?}"),
+        }
+
+        reset_cost_state();
     }
 }

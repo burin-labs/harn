@@ -773,6 +773,12 @@ impl McpServer {
                 mode,
                 None,
             ),
+            Err(error @ DispatchError::RateLimited { .. })
+            | Err(error @ DispatchError::BudgetExceeded { .. }) => envelope(
+                harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.message())),
+                mode,
+                None,
+            ),
         };
         notify(response);
     }

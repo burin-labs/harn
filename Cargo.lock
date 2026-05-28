@@ -2501,6 +2501,7 @@ dependencies = [
  "futures",
  "futures-util",
  "globset",
+ "harn-clock",
  "harn-hostlib",
  "harn-parser",
  "harn-vm",

@@ -98,12 +98,37 @@ pub fn axum_response_from_call(response: CallResponse, request_id: &str) -> Resp
 }
 
 /// Render a `DispatchError` into an `axum::Response` using the
-/// standard error envelope.
+/// standard error envelope. When the error carries a `retry_after_ms`
+/// hint (rate-limit / budget exhaustion), it is surfaced as a
+/// `Retry-After` header alongside the JSON body so HTTP clients that
+/// honour the header transparently can back off without parsing the
+/// body.
 pub fn axum_response_from_dispatch_error(error: DispatchError, request_id: &str) -> Response {
+    let retry_after = retry_after_seconds(&error);
     let (status, payload) = dispatch_error_payload(error, request_id);
     let mut response = (status, Json(payload)).into_response();
     insert_request_id(response.headers_mut(), request_id);
+    if let Some(seconds) = retry_after {
+        if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
+        }
+    }
     response
+}
+
+/// `Retry-After` (in seconds) implied by a dispatch error, when any.
+/// Rate-limit / backpressure rejections carry a ms hint; budget
+/// exhaustion uses 60 s as a safe default since the budget recovers
+/// when the caller starts a new dispatch (a new tenant/route bucket
+/// life). Other errors return `None`.
+fn retry_after_seconds(error: &DispatchError) -> Option<u64> {
+    match error {
+        DispatchError::RateLimited { retry_after_ms, .. } => {
+            Some(retry_after_ms.div_ceil(1_000).max(1))
+        }
+        DispatchError::BudgetExceeded { .. } => Some(60),
+        _ => None,
+    }
 }
 
 /// Decode a `CallResponse` into a [`HttpCodecOutcome`]. Exposed so
@@ -426,6 +451,31 @@ pub fn dispatch_error_payload(error: DispatchError, request_id: &str) -> (Status
             let payload = forbidden_data_payload(&required, &granted);
             let message = crate::error::forbidden_message(&required, &granted);
             (StatusCode::FORBIDDEN, "forbidden", message, payload)
+        }
+        DispatchError::RateLimited {
+            scope,
+            retry_after_ms,
+        } => {
+            let message = format!("rate limit exceeded ({scope}); retry after {retry_after_ms} ms");
+            let details = json!({
+                "scope": scope,
+                "retry_after_ms": retry_after_ms,
+            });
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                message,
+                details,
+            )
+        }
+        DispatchError::BudgetExceeded { category, message } => {
+            let details = json!({ "category": category });
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                "budget_exceeded",
+                message,
+                details,
+            )
         }
         DispatchError::Validation(message) => (
             StatusCode::BAD_REQUEST,

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use harn_parser::{Attribute, Node, TypeExpr};
 
+use crate::limits::{limits_and_budget_from_attributes, BudgetSpec, RouteLimits};
 use crate::DispatchError;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,7 +22,7 @@ pub enum ExportedCallableKind {
     Pipeline,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ExportedFunction {
     pub name: String,
     pub kind: ExportedCallableKind,
@@ -35,9 +36,17 @@ pub struct ExportedFunction {
     /// is unrestricted beyond whatever scopes the auth method enforces
     /// globally.
     pub required_scopes: BTreeSet<String>,
+    /// Rate / backpressure ceilings declared via `@limits(...)`. `None`
+    /// when the route is unbounded — the dispatch path short-circuits
+    /// cheaply when both `limits` and `budget` are absent.
+    pub limits: Option<RouteLimits>,
+    /// Per-dispatch resource budget declared via `@budget(...)` (LLM
+    /// cost / token / pg query / MCP call ceilings). `None` when no
+    /// budget caps were declared.
+    pub budget: Option<BudgetSpec>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ExportCatalog {
     pub script_path: PathBuf,
     pub functions: BTreeMap<String, ExportedFunction>,
@@ -69,6 +78,7 @@ impl ExportCatalog {
                 continue;
             }
 
+            let (limits, budget) = limits_and_budget_from_attributes(attrs);
             functions.insert(
                 name.clone(),
                 ExportedFunction {
@@ -81,6 +91,8 @@ impl ExportCatalog {
                         .as_ref()
                         .and_then(harn_vm::json_schema_for_type_expr),
                     required_scopes: scopes_from_attributes(attrs),
+                    limits,
+                    budget,
                 },
             );
         }
@@ -102,6 +114,7 @@ impl ExportCatalog {
                 continue;
             }
             let required_scopes = scopes_from_attributes(attrs);
+            let (limits, budget) = limits_and_budget_from_attributes(attrs);
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
@@ -114,6 +127,8 @@ impl ExportCatalog {
                         .as_ref()
                         .and_then(harn_vm::json_schema_for_type_expr),
                     required_scopes,
+                    limits,
+                    budget,
                 });
         }
 
@@ -251,6 +266,47 @@ pub fn ping() -> string {
         );
         let ping = catalog.function("ping").expect("ping");
         assert!(ping.required_scopes.is_empty());
+    }
+
+    #[test]
+    fn export_catalog_parses_limits_and_budget_attributes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server.harn");
+        std::fs::write(
+            &path,
+            r#"
+@limits(
+    per_tenant: "100/min",
+    per_route: "5000/min",
+    burst: 50,
+    algorithm: "sliding_window",
+    in_flight_max: 20,
+)
+@budget(llm_cost_usd: 0.50, mcp_calls: 20)
+pub fn create() -> string { return "ok" }
+
+pub fn ping() -> string { return "pong" }
+"#,
+        )
+        .expect("write script");
+
+        let catalog = ExportCatalog::from_path(&path).expect("catalog");
+        let create = catalog.function("create").expect("create export");
+        let limits = create.limits.as_ref().expect("limits parsed");
+        assert_eq!(limits.per_tenant.unwrap().count, 100);
+        assert_eq!(limits.per_route.unwrap().count, 5_000);
+        assert_eq!(limits.burst, Some(50));
+        assert_eq!(limits.algorithm, crate::limits::Algorithm::SlidingWindow);
+        assert_eq!(limits.in_flight_max, Some(20));
+        let budget = create.budget.as_ref().expect("budget parsed");
+        assert_eq!(budget.llm_cost_usd, Some(0.50));
+        assert_eq!(budget.mcp_calls, Some(20));
+
+        // Routes without the attributes get None — the dispatch path
+        // short-circuits without consulting the registry.
+        let ping = catalog.function("ping").expect("ping export");
+        assert!(ping.limits.is_none());
+        assert!(ping.budget.is_none());
     }
 
     #[test]

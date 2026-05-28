@@ -17,8 +17,9 @@ use tokio::task::LocalSet;
 use tracing::Instrument;
 
 use crate::auth::{AuthPolicy, AuthRequest, AuthorizationDecision};
+use crate::limits::{LimitContext, LimitDecision, LimitGuard, LimitRegistry};
 use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
-use crate::{DispatchError, ExportCatalog, ExportedCallableKind};
+use crate::{BudgetSpec, DispatchError, ExportCatalog, ExportedCallableKind};
 
 struct ActiveEventLogGuard {
     previous: Option<Arc<AnyEventLog>>,
@@ -41,6 +42,74 @@ fn install_scoped_event_log(log: Arc<AnyEventLog>) -> ActiveEventLogGuard {
     let previous = active_event_log();
     install_active_event_log(log);
     ActiveEventLogGuard { previous }
+}
+
+/// Translate a VM-level error into the dispatcher's typed error.
+///
+/// Three signals get hoisted out of `Generic` so adapters can render
+/// each correctly:
+///
+/// * `ErrorCategory::Cancelled` — caller-initiated cancel (HTTP 499).
+/// * `ErrorCategory::BudgetExceeded` — a `@budget(...)` ceiling fired
+///   (HTTP 429, `code = "budget_exceeded"`).
+/// * everything else → `Execution` (HTTP 500).
+fn classify_vm_error(error: harn_vm::VmError) -> DispatchError {
+    let category = harn_vm::error_to_category(&error);
+    let message = error.to_string();
+    match category {
+        harn_vm::ErrorCategory::Cancelled => DispatchError::Cancelled(message),
+        harn_vm::ErrorCategory::BudgetExceeded => DispatchError::BudgetExceeded {
+            category: budget_category_from_error(&error)
+                .unwrap_or_else(|| "llm_cost_usd".to_string()),
+            message,
+        },
+        _ => DispatchError::Execution(message),
+    }
+}
+
+/// Best-effort attempt to recover the specific budget dimension that
+/// fired (e.g. `llm_cost_usd`) from a `VmError`. The structured form
+/// (`VmError::Thrown(Dict)`) carries it as the `limit` field; for the
+/// categorised mid-call variant we fall back to inferring from the
+/// error message.
+fn budget_category_from_error(error: &harn_vm::VmError) -> Option<String> {
+    match error {
+        harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(d)) => d
+            .get("limit")
+            .map(|value| value.display())
+            .filter(|s| !s.is_empty()),
+        harn_vm::VmError::CategorizedError { message, .. } if message.contains("LLM") => {
+            Some("llm_cost_usd".to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Install per-dispatch resource ceilings from the route's
+/// `@budget(...)` declaration. The LLM-cost and LLM-token caps route
+/// through `harn-vm`'s pre-existing per-thread counters; `pg_queries`
+/// and `mcp_calls` are parsed and reserved on the [`BudgetSpec`] but
+/// enforcement waits on their respective primitive integrations
+/// (Postgres hostlib A.3, the MCP host call-count meter) — both
+/// tracked as follow-ups so a runaway tool loop can be capped once
+/// the call sites exist.
+fn install_route_budget(spec: &BudgetSpec) -> Option<RouteBudgetGuard> {
+    if spec.is_empty() {
+        return None;
+    }
+    Some(RouteBudgetGuard {
+        _llm_cost: spec.llm_cost_usd.map(harn_vm::install_llm_cost_budget),
+        _llm_tokens: spec.llm_tokens.map(harn_vm::install_llm_token_budget),
+    })
+}
+
+/// Aggregate of per-cap guards held for the lifetime of one dispatch.
+/// Dropping the aggregate restores every cap simultaneously, keeping
+/// nested dispatches safe even when guards land in different
+/// thread-locals.
+pub(crate) struct RouteBudgetGuard {
+    _llm_cost: Option<harn_vm::LlmBudgetGuard>,
+    _llm_tokens: Option<harn_vm::LlmTokenBudgetGuard>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +184,12 @@ pub struct DispatchCoreConfig {
     pub auth_policy: AuthPolicy,
     pub replay_cache: Arc<dyn ReplayCache>,
     pub vm_configurator: Arc<dyn VmConfigurator>,
+    /// Rate-limit + backpressure orchestrator. `None` short-circuits
+    /// the limits check (every dispatch admitted unconditionally),
+    /// matching legacy `harn-serve` behaviour. Production deployments
+    /// install [`LimitRegistry::in_memory`] (single-node default) or a
+    /// cluster-aware impl that wraps a remote counter.
+    pub limit_registry: Option<Arc<LimitRegistry>>,
 }
 
 impl DispatchCoreConfig {
@@ -134,6 +209,7 @@ impl DispatchCoreConfig {
             auth_policy: AuthPolicy::allow_all(),
             replay_cache: Arc::new(InMemoryReplayCache::new()),
             vm_configurator: Arc::new(NoopVmConfigurator),
+            limit_registry: None,
         }
     }
 }
@@ -241,6 +317,13 @@ impl DispatchCore {
             ))
         })?;
 
+        // Rate-limit + backpressure gate. Held across the dispatch so
+        // the in-flight counter decrements on drop (including panics).
+        // Cached replies skip the gate to keep replay-cache hits free
+        // and avoid double-charging buckets the original call already
+        // paid for.
+        let _limit_guard = self.check_limits(&request, function)?;
+
         let replay_key = request
             .replay_key
             .clone()
@@ -258,6 +341,12 @@ impl DispatchCore {
                 });
             }
         }
+
+        // Per-dispatch resource budget caps live on `function.budget`
+        // and are installed inside `invoke_function` / `invoke_pipeline`
+        // — the thread-local backing (`harn_vm::install_llm_cost_budget`)
+        // must be set on the same OS thread the VM runs on, which the
+        // tokio `LocalSet` inside each invoker pins.
 
         // tenant_id is a low-cardinality routing key (one entry per
         // tenant), not PII — safe to record as a span attribute so
@@ -333,6 +422,38 @@ impl DispatchCore {
         }
     }
 
+    /// Consult the rate-limit + backpressure registry for this dispatch.
+    /// Returns a guard that decrements the in-flight counter on drop
+    /// when the registry admits the call; returns
+    /// `DispatchError::RateLimited` otherwise.
+    fn check_limits(
+        &self,
+        request: &CallRequest,
+        function: &crate::ExportedFunction,
+    ) -> Result<LimitGuard, DispatchError> {
+        let Some(registry) = self.config.limit_registry.as_ref() else {
+            return Ok(LimitGuard::unbounded_for_caller());
+        };
+        let Some(limits) = function.limits.as_ref() else {
+            return Ok(LimitGuard::unbounded_for_caller());
+        };
+        let ctx = LimitContext {
+            route: &request.function,
+            tenant_id: request.tenant_id.as_ref(),
+            scopes: &function.required_scopes,
+        };
+        match registry.check(&ctx, limits) {
+            LimitDecision::Allowed(guard) => Ok(guard),
+            LimitDecision::Rejected {
+                scope,
+                retry_after_ms,
+            } => Err(DispatchError::RateLimited {
+                scope: scope.as_str().to_string(),
+                retry_after_ms,
+            }),
+        }
+    }
+
     fn default_replay_key(&self, request: &CallRequest) -> ReplayKey {
         let rendered_args = match &request.arguments {
             CallArguments::Named(values) => {
@@ -379,6 +500,7 @@ impl DispatchCore {
         let progress = request.progress.clone();
 
         let tenant_id = request.tenant_id.clone();
+        let budget = function.budget.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -388,6 +510,7 @@ impl DispatchCore {
                     harn_vm::agent_sessions::enter_current_session(session_id.to_string())
                 });
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
+                let _budget_guard = budget.as_ref().and_then(install_route_budget);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -416,14 +539,7 @@ impl DispatchCore {
 
                 match result {
                     Ok(value) => Ok((vm_value_to_json(&value), vm.output().to_string())),
-                    Err(error) => {
-                        let message = error.to_string();
-                        if message.contains("cancelled") {
-                            Err(DispatchError::Cancelled(message))
-                        } else {
-                            Err(DispatchError::Execution(message))
-                        }
-                    }
+                    Err(error) => Err(classify_vm_error(error)),
                 }
             }))
             .await
@@ -461,6 +577,7 @@ impl DispatchCore {
         let progress = request.progress.clone();
 
         let tenant_id = request.tenant_id.clone();
+        let budget = function.budget.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -470,6 +587,7 @@ impl DispatchCore {
                     harn_vm::agent_sessions::enter_current_session(session_id.to_string())
                 });
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
+                let _budget_guard = budget.as_ref().and_then(install_route_budget);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -492,14 +610,7 @@ impl DispatchCore {
                         let output = vm.output().to_string();
                         Ok((serde_json::Value::String(output.clone()), output))
                     }
-                    Err(error) => {
-                        let message = error.to_string();
-                        if message.contains("cancelled") {
-                            Err(DispatchError::Cancelled(message))
-                        } else {
-                            Err(DispatchError::Execution(message))
-                        }
-                    }
+                    Err(error) => Err(classify_vm_error(error)),
                 }
             }))
             .await

@@ -14,6 +14,23 @@ pub enum DispatchError {
         required: BTreeSet<String>,
         granted: BTreeSet<String>,
     },
+    /// One of the route's declared rate-limit buckets (per-route /
+    /// per-tenant / per-scope) or the backpressure watermark rejected
+    /// this dispatch. Adapters render this as HTTP 429 with a
+    /// `Retry-After` header derived from `retry_after_ms`. `scope`
+    /// identifies which bucket dimension fired so callers can attribute
+    /// the rejection (e.g. "your tenant quota" vs "global route ceiling").
+    RateLimited {
+        scope: String,
+        retry_after_ms: u64,
+    },
+    /// A `@budget(...)` ceiling declared on the route was exhausted
+    /// mid-call (e.g. accumulated LLM cost rose above `llm_cost_usd`).
+    /// Adapters render this as HTTP 429 with `code = "budget_exceeded"`.
+    BudgetExceeded {
+        category: String,
+        message: String,
+    },
     Validation(String),
     MissingExport(String),
     Cancelled(String),
@@ -37,6 +54,13 @@ impl DispatchError {
             | Self::Io(message)
             | Self::Cache(message) => message.clone(),
             Self::Forbidden { required, granted } => forbidden_message(required, granted),
+            Self::RateLimited {
+                scope,
+                retry_after_ms,
+            } => format!("rate limit exceeded ({scope}); retry after {retry_after_ms} ms"),
+            Self::BudgetExceeded { category, message } => {
+                format!("budget exceeded ({category}): {message}")
+            }
         }
     }
 }
