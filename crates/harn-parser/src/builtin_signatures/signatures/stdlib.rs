@@ -6,7 +6,7 @@ use super::shapes::{
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL,
-    TY_DURATION, TY_FLOAT, TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
+    TY_DURATION, TY_FLOAT, TY_INT, TY_LIST, TY_NEVER, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
 // `string | dict` — used by waitpoint and daemon handles which accept either
@@ -757,4 +757,47 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_ANY,
     ),
+    // Parser-only shadows for migrated builtins that harn-parser unit
+    // tests reference by name. The runtime-installed slice from
+    // `#[harn_builtin]` shadows these at driver startup; without these
+    // five entries, pure-parser tests that never call
+    // `install_builtin_signatures` (lookup_hits_and_misses,
+    // return_type_*_variant, test_builtin_arg_type_mismatch,
+    // test_builtin_arity_warning, test_builtin_return_type_inference,
+    // never_tail_expression_satisfies_return_type, …) can't find these
+    // names.
+    BuiltinSignature::variadic("snake_to_camel", &[Param::new("args", TY_ANY)], TY_STRING),
+    BuiltinSignature::simple("env", &[Param::new("name", TY_STRING)], TY_STRING_OR_NIL),
+    BuiltinSignature::simple("json_parse", &[Param::new("text", TY_STRING)], TY_ANY),
+    BuiltinSignature::simple(
+        "len",
+        &[Param::new(
+            "value",
+            Ty::Union(&[
+                TY_STRING,
+                TY_BYTES,
+                TY_LIST,
+                TY_DICT,
+                Ty::Named("set"),
+                Ty::Named("range"),
+                TY_NIL,
+            ]),
+        )],
+        TY_INT,
+    ),
+    BuiltinSignature::variadic("to_int", &[Param::new("args", TY_ANY)], TY_INT),
+    BuiltinSignature::variadic("type_of", &[Param::new("args", TY_ANY)], TY_STRING),
+    BuiltinSignature::variadic("unreachable", &[Param::new("args", TY_ANY)], TY_NEVER),
+    // Harness method targets — typechecker resolves `harness.crypto.sha256`
+    // / `harness.term.width` / `harness.term.height` via
+    // `harness_methods::harness_*_ambient` to these builtin names. Pure-
+    // parser tests need them in the registry to type-check the namespace
+    // call sites.
+    BuiltinSignature::simple(
+        "sha256_hex",
+        &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple("term_width", &[], TY_INT),
+    BuiltinSignature::simple("term_height", &[], TY_INT),
 ];
