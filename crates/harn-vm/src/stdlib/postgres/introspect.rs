@@ -40,8 +40,8 @@ use crate::stdlib::macros::{
 use crate::value::{VmError, VmValue};
 
 use super::{
-    bind_params, ensure_handle_kind, handle_id, pool_by_id, pool_record_by_id, required_arg,
-    runtime_error, HANDLE_POOL,
+    bind_params, ensure_handle_kind, handle_id, pool_arg, pool_record_by_id, required_arg,
+    row_to_value, runtime_error, validate_pg_identifier, HANDLE_POOL,
 };
 
 #[harn_builtin(
@@ -54,20 +54,18 @@ use super::{
     category = "postgres"
 )]
 async fn pg_introspect_tables_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let pool_handle = required_arg(&args, 0, "pg_introspect_tables", "pool handle")?;
-    ensure_handle_kind(pool_handle, HANDLE_POOL, "pg_introspect_tables")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_introspect_tables")?;
+    let pool = pool_arg(&args, "pg_introspect_tables")?;
     let options = args.get(1).and_then(VmValue::as_dict);
     let schema = options
         .and_then(|opts| opts.get("schema"))
         .map(VmValue::display)
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| "public".to_string());
-
-    let pool = pool_by_id(&pool_id)?;
-    let sql = "
-        SELECT n.nspname  AS schema,
-               c.relname  AS table_name,
+    // Aliases use double-quoted `"table"` because `table` is a PG reserved
+    // word — the quoting is purely cosmetic on the output column name.
+    let sql = r#"
+        SELECT n.nspname AS schema,
+               c.relname AS "table",
                CASE c.relkind
                  WHEN 'r' THEN 'table'
                  WHEN 'p' THEN 'partitioned_table'
@@ -81,31 +79,14 @@ async fn pg_introspect_tables_impl(args: Vec<VmValue>) -> Result<VmValue, VmErro
         WHERE n.nspname = $1
           AND c.relkind = ANY('{r,p,v,m,f}')
         ORDER BY c.relname
-    ";
-    let rows = bind_params(query(sql), &[VmValue::String(Rc::from(schema))])
-        .fetch_all(pool.as_ref())
-        .await
-        .map_err(|error| runtime_error(format!("pg_introspect_tables: {error}")))?;
-    Ok(VmValue::List(Rc::new(
-        rows.into_iter()
-            .map(|row| {
-                let mut dict = BTreeMap::new();
-                dict.insert(
-                    "schema".to_string(),
-                    VmValue::String(Rc::from(row.get::<String, _>("schema"))),
-                );
-                dict.insert(
-                    "table".to_string(),
-                    VmValue::String(Rc::from(row.get::<String, _>("table_name"))),
-                );
-                dict.insert(
-                    "kind".to_string(),
-                    VmValue::String(Rc::from(row.get::<String, _>("kind"))),
-                );
-                VmValue::Dict(Rc::new(dict))
-            })
-            .collect(),
-    )))
+    "#;
+    rows_to_list(
+        pool.as_ref(),
+        sql,
+        &[VmValue::String(Rc::from(schema))],
+        "pg_introspect_tables",
+    )
+    .await
 }
 
 #[harn_builtin(
@@ -118,67 +99,31 @@ async fn pg_introspect_tables_impl(args: Vec<VmValue>) -> Result<VmValue, VmErro
     category = "postgres"
 )]
 async fn pg_introspect_columns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let pool_handle = required_arg(&args, 0, "pg_introspect_columns", "pool handle")?;
-    ensure_handle_kind(pool_handle, HANDLE_POOL, "pg_introspect_columns")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_introspect_columns")?;
+    let pool = pool_arg(&args, "pg_introspect_columns")?;
     let (schema, table) = split_qualified(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
         "pg_introspect_columns",
     )?;
-
-    let pool = pool_by_id(&pool_id)?;
-    let sql = "
-        SELECT column_name,
-               udt_name,
-               data_type,
+    let sql = r#"
+        SELECT column_name        AS "column",
+               udt_name            AS "type",
+               data_type           AS data_type,
                is_nullable = 'YES' AS nullable,
-               column_default,
-               ordinal_position
+               column_default      AS "default"
         FROM information_schema.columns
         WHERE table_schema = $1 AND table_name = $2
         ORDER BY ordinal_position
-    ";
-    let rows = bind_params(
-        query(sql),
+    "#;
+    rows_to_list(
+        pool.as_ref(),
+        sql,
         &[
             VmValue::String(Rc::from(schema)),
             VmValue::String(Rc::from(table)),
         ],
+        "pg_introspect_columns",
     )
-    .fetch_all(pool.as_ref())
     .await
-    .map_err(|error| runtime_error(format!("pg_introspect_columns: {error}")))?;
-    Ok(VmValue::List(Rc::new(
-        rows.into_iter()
-            .map(|row| {
-                let mut dict = BTreeMap::new();
-                dict.insert(
-                    "column".to_string(),
-                    VmValue::String(Rc::from(row.get::<String, _>("column_name"))),
-                );
-                dict.insert(
-                    "type".to_string(),
-                    VmValue::String(Rc::from(row.get::<String, _>("udt_name"))),
-                );
-                dict.insert(
-                    "data_type".to_string(),
-                    VmValue::String(Rc::from(row.get::<String, _>("data_type"))),
-                );
-                dict.insert("nullable".to_string(), VmValue::Bool(row.get("nullable")));
-                let default = row
-                    .try_get::<Option<String>, _>("column_default")
-                    .ok()
-                    .flatten();
-                dict.insert(
-                    "default".to_string(),
-                    default
-                        .map(|d| VmValue::String(Rc::from(d)))
-                        .unwrap_or(VmValue::Nil),
-                );
-                VmValue::Dict(Rc::new(dict))
-            })
-            .collect(),
-    )))
 }
 
 #[harn_builtin(
@@ -191,20 +136,16 @@ async fn pg_introspect_columns_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
     category = "postgres"
 )]
 async fn pg_introspect_indexes_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let pool_handle = required_arg(&args, 0, "pg_introspect_indexes", "pool handle")?;
-    ensure_handle_kind(pool_handle, HANDLE_POOL, "pg_introspect_indexes")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_introspect_indexes")?;
+    let pool = pool_arg(&args, "pg_introspect_indexes")?;
     let (schema, table) = split_qualified(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
         "pg_introspect_indexes",
     )?;
-
-    let pool = pool_by_id(&pool_id)?;
-    let sql = "
-        SELECT i.relname AS index_name,
+    let sql = r#"
+        SELECT i.relname AS index,
                array_agg(a.attname ORDER BY x.ord) AS columns,
-               ix.indisunique AS is_unique,
-               ix.indisprimary AS is_primary
+               ix.indisunique AS "unique",
+               ix.indisprimary AS "primary"
         FROM pg_class t
         JOIN pg_namespace n ON t.relnamespace = n.oid
         JOIN pg_index ix ON t.oid = ix.indrelid
@@ -214,41 +155,17 @@ async fn pg_introspect_indexes_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
         WHERE n.nspname = $1 AND t.relname = $2
         GROUP BY i.relname, ix.indisunique, ix.indisprimary
         ORDER BY i.relname
-    ";
-    let rows = bind_params(
-        query(sql),
+    "#;
+    rows_to_list(
+        pool.as_ref(),
+        sql,
         &[
             VmValue::String(Rc::from(schema)),
             VmValue::String(Rc::from(table)),
         ],
+        "pg_introspect_indexes",
     )
-    .fetch_all(pool.as_ref())
     .await
-    .map_err(|error| runtime_error(format!("pg_introspect_indexes: {error}")))?;
-    Ok(VmValue::List(Rc::new(
-        rows.into_iter()
-            .map(|row| {
-                let mut dict = BTreeMap::new();
-                dict.insert(
-                    "index".to_string(),
-                    VmValue::String(Rc::from(row.get::<String, _>("index_name"))),
-                );
-                let columns: Vec<String> = row.try_get("columns").unwrap_or_default();
-                dict.insert(
-                    "columns".to_string(),
-                    VmValue::List(Rc::new(
-                        columns
-                            .into_iter()
-                            .map(|c| VmValue::String(Rc::from(c)))
-                            .collect(),
-                    )),
-                );
-                dict.insert("unique".to_string(), VmValue::Bool(row.get("is_unique")));
-                dict.insert("primary".to_string(), VmValue::Bool(row.get("is_primary")));
-                VmValue::Dict(Rc::new(dict))
-            })
-            .collect(),
-    )))
 }
 
 #[harn_builtin(
@@ -261,7 +178,7 @@ async fn pg_pool_stats_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     ensure_handle_kind(pool_handle, HANDLE_POOL, "pg_pool_stats")?;
     let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_pool_stats")?;
     let record = pool_record_by_id(&pool_id)?;
-    let pool = &record.pool;
+    let pool = record.pool.as_ref();
     let size = pool.size();
     let idle = pool.num_idle();
     let max = record.max_connections;
@@ -325,9 +242,7 @@ async fn pg_pool_stats_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "postgres"
 )]
 async fn pg_partition_attach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let pool_handle = required_arg(&args, 0, "pg_partition_attach", "pool handle")?;
-    ensure_handle_kind(pool_handle, HANDLE_POOL, "pg_partition_attach")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_partition_attach")?;
+    let pool = pool_arg(&args, "pg_partition_attach")?;
     let parent = qualified_identifier(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
         "pg_partition_attach",
@@ -345,7 +260,6 @@ async fn pg_partition_attach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
         })?;
 
     let bounds_clause = render_bounds_clause(&bounds)?;
-    let pool = pool_by_id(&pool_id)?;
     let sql = format!(
         "ALTER TABLE {} ATTACH PARTITION {} {bounds_clause}",
         parent.quoted, partition.quoted
@@ -367,9 +281,7 @@ async fn pg_partition_attach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     category = "postgres"
 )]
 async fn pg_partition_detach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let pool_handle = required_arg(&args, 0, "pg_partition_detach", "pool handle")?;
-    ensure_handle_kind(pool_handle, HANDLE_POOL, "pg_partition_detach")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_partition_detach")?;
+    let pool = pool_arg(&args, "pg_partition_detach")?;
     let parent = qualified_identifier(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
         "pg_partition_detach",
@@ -385,7 +297,6 @@ async fn pg_partition_detach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     )
     .unwrap_or(false);
 
-    let pool = pool_by_id(&pool_id)?;
     let suffix = if concurrently { " CONCURRENTLY" } else { "" };
     let sql = format!(
         "ALTER TABLE {} DETACH PARTITION {}{suffix}",
@@ -408,9 +319,7 @@ async fn pg_partition_detach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     category = "postgres"
 )]
 async fn pg_partition_prune_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let pool_handle = required_arg(&args, 0, "pg_partition_prune", "pool handle")?;
-    ensure_handle_kind(pool_handle, HANDLE_POOL, "pg_partition_prune")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_partition_prune")?;
+    let pool = pool_arg(&args, "pg_partition_prune")?;
     let parent = qualified_identifier(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
         "pg_partition_prune",
@@ -426,7 +335,6 @@ async fn pg_partition_prune_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
     let options = args.get(3).and_then(VmValue::as_dict);
     let dry_run = super::option_bool(options.and_then(|opts| opts.get("dry_run"))).unwrap_or(false);
 
-    let pool = pool_by_id(&pool_id)?;
     let candidates_sql = "
         SELECT n.nspname AS schema,
                c.relname AS partition,
@@ -452,7 +360,14 @@ async fn pg_partition_prune_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
         if !partition_bound_strictly_before(&bound, &before_literal) {
             continue;
         }
-        let quoted = format!("\"{schema}\".\"{part_name}\"");
+        // Defensive: PG identifiers from pg_class can technically contain
+        // any character if they were created with double quotes. Escape
+        // embedded `"` per PG identifier rules before SQL synthesis.
+        let quoted = format!(
+            "\"{}\".\"{}\"",
+            schema.replace('"', "\"\""),
+            part_name.replace('"', "\"\""),
+        );
         if !dry_run {
             let drop_sql = format!("DROP TABLE {quoted}");
             sqlx_core::raw_sql::raw_sql(&drop_sql)
@@ -465,6 +380,27 @@ async fn pg_partition_prune_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
     Ok(VmValue::List(Rc::new(pruned)))
 }
 
+/// Common builtin tail: run a `SELECT` against `pool` with the given
+/// params and decode each row through the standard `row_to_value` mapper.
+/// Used by every introspection builtin so the dict-per-row shape stays
+/// consistent and the SQL column alias *is* the dict key — no per-row
+/// hand-coded re-mapping.
+async fn rows_to_list(
+    pool: &sqlx_postgres::PgPool,
+    sql: &str,
+    params: &[VmValue],
+    builtin: &'static str,
+) -> Result<VmValue, VmError> {
+    let rows = bind_params(query(sql), params)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
+    rows.into_iter()
+        .map(row_to_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map(|values| VmValue::List(Rc::new(values)))
+}
+
 fn split_qualified(input: &str, builtin: &'static str) -> Result<(String, String), VmError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -473,11 +409,11 @@ fn split_qualified(input: &str, builtin: &'static str) -> Result<(String, String
         )));
     }
     if let Some((schema, table)) = trimmed.split_once('.') {
-        validate_identifier(schema, builtin)?;
-        validate_identifier(table, builtin)?;
+        validate_pg_identifier(schema, builtin, "identifier", &[])?;
+        validate_pg_identifier(table, builtin, "identifier", &[])?;
         Ok((schema.to_string(), table.to_string()))
     } else {
-        validate_identifier(trimmed, builtin)?;
+        validate_pg_identifier(trimmed, builtin, "identifier", &[])?;
         Ok(("public".to_string(), trimmed.to_string()))
     }
 }
@@ -493,28 +429,6 @@ fn qualified_identifier(input: &str, builtin: &'static str) -> Result<QualifiedI
         quoted: format!("\"{schema}\".\"{table}\""),
         qualified: format!("{schema}.{table}"),
     })
-}
-
-fn validate_identifier(name: &str, builtin: &'static str) -> Result<(), VmError> {
-    if name.is_empty() || name.len() > 63 {
-        return Err(runtime_error(format!(
-            "{builtin}: identifier `{name}` must be 1..=63 bytes"
-        )));
-    }
-    let first = name.chars().next().unwrap();
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return Err(runtime_error(format!(
-            "{builtin}: identifier `{name}` must start with a letter or underscore"
-        )));
-    }
-    for ch in name.chars() {
-        if !(ch.is_ascii_alphanumeric() || ch == '_') {
-            return Err(runtime_error(format!(
-                "{builtin}: identifier `{name}` contains invalid character `{ch}`"
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn render_bounds_clause(bounds: &BTreeMap<String, VmValue>) -> Result<String, VmError> {

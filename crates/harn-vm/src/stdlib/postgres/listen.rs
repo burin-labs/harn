@@ -284,30 +284,12 @@ fn parse_channel_list(value: &VmValue) -> Result<Vec<String>, VmError> {
 }
 
 fn validate_channel_name(name: &str, builtin: &'static str) -> Result<(), VmError> {
-    if name.trim().is_empty() {
-        return Err(runtime_error(format!(
-            "{builtin}: channel name is required"
-        )));
-    }
-    if name.len() > 63 {
-        return Err(runtime_error(format!(
-            "{builtin}: channel name exceeds Postgres identifier length (63 bytes)"
-        )));
-    }
-    let first = name.chars().next().expect("non-empty checked above");
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return Err(runtime_error(format!(
-            "{builtin}: channel name must start with a letter or underscore"
-        )));
-    }
-    for ch in name.chars() {
-        if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == ':' || ch == '-') {
-            return Err(runtime_error(format!(
-                "{builtin}: channel `{name}` contains disallowed character `{ch}`"
-            )));
-        }
-    }
-    Ok(())
+    // Channel names allow `.`, `:`, `-` so callers can scope per-tenant
+    // (`pg:tenant-a:receipts.updated`) without quoting hassles. Postgres
+    // double-quotes the channel name in the synthesized LISTEN/NOTIFY
+    // anyway, but we keep the validator strict to catch typos and reject
+    // SQL injection vectors at the harness boundary.
+    super::validate_pg_identifier(name, builtin, "channel name", &['.', ':', '-'])
 }
 
 fn listener_by_id(id: &str) -> Result<Arc<ListenerRecord>, VmError> {

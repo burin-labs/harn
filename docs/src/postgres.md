@@ -165,20 +165,20 @@ case (the lock should live exactly as long as the work it guards).
 ```harn
 pg_transaction(db, { tx ->
   pg_advisory_xact_lock(tx, "release-cut", {tenant_namespace: true})
-  # exclusive section — released when this fn returns or throws
+  // exclusive section — released when this fn returns or throws
 })
 
 if (pg_with_advisory_lock(db, 0x4861726E, { tx ->
-  # opens an internal txn, takes the lock, runs the body, commits.
+  // opens an internal txn, takes the lock, runs the body, commits.
   return pg_query_one(tx, "select count(*) as n from receipts", []).n > 0
 })) {
   log("had receipts")
 }
 
-# Non-blocking probe:
+// Non-blocking probe:
 pg_transaction(db, { tx ->
   if (pg_try_advisory_xact_lock(tx, 0x4861726E)) {
-    # …
+    // …
   }
 })
 ```
@@ -218,8 +218,8 @@ received notification onto the in-process channel bus as
 
 ```harn
 let stats = pg_pool_stats(db)
-# {size, idle, in_use, max_connections, statement_cache_capacity,
-#  replicas, circuit_state, circuit_failures, circuit_opened_at_ms}
+// → {size, idle, in_use, max_connections, statement_cache_capacity,
+//    replicas, circuit_state, circuit_failures, circuit_opened_at_ms}
 ```
 
 `circuit_state` is `"disabled"` unless `circuit_breaker` was passed to
@@ -232,14 +232,14 @@ elapses, then a single half-open probe runs.
 
 ```harn
 pg_introspect_tables(db, {schema: "public"})
-  # → [{schema, table, kind}, …] where kind is one of
-  #   table / partitioned_table / view / materialized_view / foreign_table.
+// → [{schema, table, kind}, …] where kind is one of
+//   table / partitioned_table / view / materialized_view / foreign_table.
 
 pg_introspect_columns(db, "billing.invoices")
-  # → [{column, type, data_type, nullable, default}, …]
+// → [{column, type, data_type, nullable, default}, …]
 
 pg_introspect_indexes(db, "billing.invoices")
-  # → [{index, columns, unique, primary}, …]
+// → [{index, columns, unique, primary}, …]
 ```
 
 Identifiers are validated against the standard PG identifier rules
@@ -253,9 +253,9 @@ let db = pg_pool("env:DATABASE_URL", {
   max_connections: 10,
   replicas: ["env:DATABASE_REPLICA_URL", "env:DATABASE_REPLICA2_URL"],
 })
-# Per-query opt-in routes through the round-robin replica cursor.
+// Per-query opt-in routes through the round-robin replica cursor.
 pg_query(db, "select * from receipts where id = $1", [id], {read_only: true})
-# Writes always go to the primary.
+// Writes always go to the primary.
 pg_execute(db, "insert into receipts (id, payload) values ($1, $2)", [id, payload])
 ```
 
@@ -271,8 +271,8 @@ pg_partition_attach(db, "events", "events_2026_05",
                     {from: "2026-05-01", to: "2026-06-01"})
 pg_partition_detach(db, "events", "events_2026_03", {concurrently: true})
 let pruned = pg_partition_prune(db, "events", "2026-01-01")
-# Returns the list of `<schema>.<partition>` names that were dropped.
-# Pass {dry_run: true} to compute the list without dropping.
+// Returns the list of `<schema>.<partition>` names that were dropped.
+// Pass {dry_run: true} to compute the list without dropping.
 ```
 
 Bounds may be `{from, to}` (range), `{in: [...]}` (list), or

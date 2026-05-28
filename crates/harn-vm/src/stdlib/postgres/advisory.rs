@@ -31,8 +31,6 @@
 //! a magic number.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
-use std::time::Instant;
 
 use sqlx_core::query::query;
 
@@ -40,8 +38,7 @@ use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY, TY_BO
 use crate::value::{VmError, VmValue};
 
 use super::{
-    bind_params, handle_id, pool_by_id, required_arg, runtime_error, tx_by_id, HANDLE_POOL,
-    HANDLE_TX,
+    bind_params, handle_id, required_arg, runtime_error, tx_by_id, HANDLE_POOL, HANDLE_TX,
 };
 
 #[harn_builtin(
@@ -94,46 +91,12 @@ async fn pg_with_advisory_lock_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
     let options = args.get(3).and_then(VmValue::as_dict).cloned();
     let key = resolve_key(key_value, options.as_ref(), "pg_with_advisory_lock")?;
 
-    let pool = pool_by_id(&pool_id)?;
-    let tx = pool
-        .begin()
-        .await
-        .map_err(|error| runtime_error(format!("pg_with_advisory_lock: begin failed: {error}")))?;
-    let tx_id = super::next_id("pgtx");
-    let tx_cell = Rc::new(tokio::sync::Mutex::new(Some(tx)));
-    super::register_tx(&tx_id, Rc::clone(&tx_cell));
-    let tx_handle = super::handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
-
-    let acquired = take_xact_lock(&tx_id, &key).await;
-    if let Err(error) = acquired {
-        super::unregister_tx(&tx_id);
-        if let Some(tx) = tx_cell.lock().await.take() {
-            let _ = tx.rollback().await;
-        }
-        return Err(error);
-    }
-
-    let mut child_vm = crate::vm::clone_async_builtin_child_vm()
-        .ok_or_else(|| runtime_error("pg_with_advisory_lock: requires VM execution context"))?;
-    let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
-
-    super::unregister_tx(&tx_id);
-    let tx =
-        tx_cell.lock().await.take().ok_or_else(|| {
-            runtime_error("pg_with_advisory_lock: transaction was already consumed")
-        })?;
-    match result {
-        Ok(value) => {
-            tx.commit().await.map_err(|error| {
-                runtime_error(format!("pg_with_advisory_lock: commit failed: {error}"))
-            })?;
-            Ok(value)
-        }
-        Err(error) => {
-            let _ = tx.rollback().await;
-            Err(error)
-        }
-    }
+    super::run_managed_transaction(&pool_id, "pg_with_advisory_lock", closure, move |tx_id| {
+        let key = key;
+        let tx_id_owned = tx_id.to_string();
+        Box::pin(async move { take_xact_lock(&tx_id_owned, &key).await })
+    })
+    .await
 }
 
 async fn advisory_xact_op(args: &[VmValue], try_only: bool) -> Result<VmValue, VmError> {
@@ -162,7 +125,6 @@ async fn take_xact_lock(tx_id: &str, key: &LockKey) -> Result<(), VmError> {
     let tx = tx
         .as_mut()
         .ok_or_else(|| runtime_error("pg_advisory_xact_lock: transaction is closed"))?;
-    let started = Instant::now();
     let result = match key {
         LockKey::Single(value) => {
             let params = [VmValue::Int(*value)];
@@ -178,10 +140,7 @@ async fn take_xact_lock(tx_id: &str, key: &LockKey) -> Result<(), VmError> {
         }
     };
     result.map_err(|error| {
-        runtime_error(format!(
-            "pg_advisory_xact_lock: acquire failed after {:?}: {error}",
-            started.elapsed()
-        ))
+        runtime_error(format!("pg_advisory_xact_lock: acquire failed: {error}"))
     })?;
     Ok(())
 }
@@ -211,6 +170,7 @@ async fn try_take_xact_lock(tx_id: &str, key: &LockKey) -> Result<VmValue, VmErr
     Ok(VmValue::Bool(row))
 }
 
+#[derive(Clone, Copy)]
 enum LockKey {
     Single(i64),
     Pair(i32, i32),

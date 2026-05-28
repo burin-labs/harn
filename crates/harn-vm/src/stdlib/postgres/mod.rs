@@ -229,38 +229,72 @@ async fn pg_transaction_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         }
     };
     let options = args.get(2).and_then(VmValue::as_dict).cloned();
-    let pool = pool_by_id(&pool_id)?;
+    let settings = options
+        .as_ref()
+        .and_then(|opts| opts.get("settings"))
+        .and_then(VmValue::as_dict)
+        .cloned();
+    run_managed_transaction(&pool_id, "pg_transaction", closure, move |tx_id| {
+        let tx_id = tx_id.to_string();
+        Box::pin(async move {
+            if let Some(settings) = settings {
+                apply_transaction_settings(&tx_id, &settings).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+}
+
+/// Shared txn-with-closure wrapper used by `pg_transaction` and
+/// `pg_with_advisory_lock`. Opens a transaction on the pool, registers
+/// the tx in the local registry under a fresh id, runs `prepare(tx_id)`
+/// so the caller can take an advisory lock / apply settings / etc., then
+/// invokes the closure with the `pg_tx` handle. Commit on `Ok(...)`,
+/// rollback on any error in the closure.
+pub(super) async fn run_managed_transaction(
+    pool_id: &str,
+    builtin: &'static str,
+    closure: Rc<crate::value::VmClosure>,
+    prepare: impl FnOnce(
+        &str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), VmError>> + '_>,
+    >,
+) -> Result<VmValue, VmError> {
+    let pool = pool_by_id(pool_id)?;
     let tx = pool
         .begin()
         .await
-        .map_err(|error| runtime_error(format!("pg_transaction: begin failed: {error}")))?;
+        .map_err(|error| runtime_error(format!("{builtin}: begin failed: {error}")))?;
     let tx_id = next_id("pgtx");
     let tx_cell = Rc::new(Mutex::new(Some(tx)));
     register_tx(&tx_id, Rc::clone(&tx_cell));
     let tx_handle = handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
 
-    if let Some(settings) = options
-        .as_ref()
-        .and_then(|opts| opts.get("settings"))
-        .and_then(VmValue::as_dict)
-    {
-        apply_transaction_settings(&tx_id, settings).await?;
+    if let Err(error) = prepare(&tx_id).await {
+        unregister_tx(&tx_id);
+        if let Some(tx) = tx_cell.lock().await.take() {
+            let _ = tx.rollback().await;
+        }
+        return Err(error);
     }
 
     let mut child_vm = crate::vm::clone_async_builtin_child_vm()
-        .ok_or_else(|| runtime_error("pg_transaction: requires VM execution context"))?;
+        .ok_or_else(|| runtime_error(format!("{builtin}: requires VM execution context")))?;
     let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
 
     unregister_tx(&tx_id);
-    let tx =
-        tx_cell.lock().await.take().ok_or_else(|| {
-            runtime_error("pg_transaction: transaction handle was already consumed")
-        })?;
+    let tx = tx_cell
+        .lock()
+        .await
+        .take()
+        .ok_or_else(|| runtime_error(format!("{builtin}: transaction was already consumed")))?;
     match result {
         Ok(value) => {
-            tx.commit().await.map_err(|error| {
-                runtime_error(format!("pg_transaction: commit failed: {error}"))
-            })?;
+            tx.commit()
+                .await
+                .map_err(|error| runtime_error(format!("{builtin}: commit failed: {error}")))?;
             Ok(value)
         }
         Err(error) => {
@@ -672,29 +706,45 @@ fn render_savepoint_sql(op: SavepointOp, name: &str) -> String {
 }
 
 fn validate_savepoint_name(name: &str, builtin: &'static str) -> Result<(), VmError> {
-    if name.trim().is_empty() {
+    // Savepoints can be scoped with `.` so `migration.0042` is valid.
+    validate_pg_identifier(name, builtin, "savepoint name", &['_', '.'])
+}
+
+/// Shared Postgres-identifier validator. `extras` lists characters that
+/// are accepted in addition to ASCII alphanumerics; `_` is the standard
+/// PG-identifier extra, `.` is accepted by savepoint/channel callers.
+///
+/// Used by savepoints (mod.rs), partition + introspection identifiers
+/// (introspect.rs), and LISTEN/NOTIFY channel names (listen.rs) so they
+/// share one canonical reject set. The 63-byte ceiling matches Postgres'
+/// `NAMEDATALEN - 1` default.
+pub(super) fn validate_pg_identifier(
+    name: &str,
+    builtin: &'static str,
+    label: &'static str,
+    extras: &[char],
+) -> Result<(), VmError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
         return Err(runtime_error(format!(
-            "{builtin}: savepoint name must not be empty"
+            "{builtin}: {label} must not be empty"
         )));
     }
     if name.len() > 63 {
         return Err(runtime_error(format!(
-            "{builtin}: savepoint name exceeds Postgres identifier length (63 bytes)"
+            "{builtin}: {label} exceeds Postgres identifier length (63 bytes)"
         )));
     }
-    // Letters/digits/underscore/dot so callers can name scoped savepoints
-    // like `migration.0042`; reject quotes/semicolons/whitespace even
-    // though identifiers are double-quoted on output.
     let first = name.chars().next().expect("non-empty checked above");
     if !(first.is_ascii_alphabetic() || first == '_') {
         return Err(runtime_error(format!(
-            "{builtin}: savepoint name must start with a letter or underscore"
+            "{builtin}: {label} must start with a letter or underscore"
         )));
     }
     for ch in name.chars() {
-        if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '.') {
+        if !(ch.is_ascii_alphanumeric() || ch == '_' || extras.contains(&ch)) {
             return Err(runtime_error(format!(
-                "{builtin}: savepoint name `{name}` contains disallowed character `{ch}`"
+                "{builtin}: {label} `{name}` contains disallowed character `{ch}`"
             )));
         }
     }
@@ -986,6 +1036,18 @@ pub(super) fn pool_record_from_handle(
 ) -> Result<Arc<PoolRecord>, VmError> {
     let id = handle_id(Some(value), HANDLE_POOL, builtin)?;
     pool_record_by_id(&id)
+}
+
+/// First-arg extractor for builtins that operate on the primary pool:
+/// validates that args\[0\] is a `pg_pool` handle and returns the live
+/// connection pool. Replaces 4-line
+/// `required_arg + ensure_handle_kind + handle_id + pool_by_id` preambles
+/// across the introspect and partition builtins.
+pub(super) fn pool_arg(args: &[VmValue], builtin: &'static str) -> Result<Arc<PgPool>, VmError> {
+    let handle = required_arg(args, 0, builtin, "pool handle")?;
+    ensure_handle_kind(handle, HANDLE_POOL, builtin)?;
+    let id = handle_id(Some(handle), HANDLE_POOL, builtin)?;
+    pool_by_id(&id)
 }
 
 pub(super) fn tx_by_id(id: &str) -> Result<PgTxCell, VmError> {
@@ -1757,13 +1819,13 @@ import "std/postgres"
 
 let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 2}})
 
-# --- Pool observability --------------------------------------------------
+// --- Pool observability --------------------------------------------------
 let stats = pg_pool_stats(db)
 __io_println(stats.circuit_state)
 __io_println(stats.max_connections)
 __io_println(stats.replicas)
 
-# --- Schema setup --------------------------------------------------------
+// --- Schema setup --------------------------------------------------------
 pg_execute(db, "CREATE SCHEMA IF NOT EXISTS \"{schema}\"", [])
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
 pg_execute(db, "CREATE TABLE widgets (id int4 PRIMARY KEY, tags text[] NOT NULL DEFAULT '{{}}')", [])
@@ -1771,14 +1833,14 @@ pg_execute(db, "CREATE UNIQUE INDEX widgets_id_uniq ON widgets (id)", [])
 pg_execute(db, "INSERT INTO widgets (id, tags) VALUES (1, ARRAY['alpha','beta'])", [])
 pg_execute(db, "INSERT INTO widgets (id, tags) VALUES (2, ARRAY[]::text[])", [])
 
-# --- Advisory lock inside a transaction ----------------------------------
+// --- Advisory lock inside a transaction ----------------------------------
 let locked_label = pg_transaction(db, {{ tx ->
   pg_advisory_xact_lock(tx, 0x4861_726E_5632_AABB)
   return pg_query_one(tx, "SELECT 'locked' AS label", []).label
 }})
 __io_println(locked_label)
 
-# --- Schema introspection ------------------------------------------------
+// --- Schema introspection ------------------------------------------------
 let tables = pg_introspect_tables(db, {{schema: "{schema}"}})
 __io_println(len(tables))
 __io_println(tables[0].kind)
@@ -1791,21 +1853,21 @@ __io_println(cols[1].column + ":" + cols[1].type)
 let idx = pg_introspect_indexes(db, "{schema}.widgets")
 __io_println(len(idx))
 
-# --- Array decoding ------------------------------------------------------
+// --- Array decoding ------------------------------------------------------
 let row = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [1])
 __io_println(row.tags[0] + "," + row.tags[1])
 
 let empty = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [2])
 __io_println(len(empty.tags))
 
-# --- LISTEN/NOTIFY round-trip --------------------------------------------
+// --- LISTEN/NOTIFY round-trip --------------------------------------------
 let listener = pg_listen(db, "harn_v2_test")
 pg_notify(db, "harn_v2_test", "hello")
 let notification = pg_listener_recv(listener, 5000)
 __io_println(notification.channel + ":" + notification.payload)
 pg_listener_close(listener)
 
-# --- Teardown ------------------------------------------------------------
+// --- Teardown ------------------------------------------------------------
 pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
 pg_close(db)
 "#,
