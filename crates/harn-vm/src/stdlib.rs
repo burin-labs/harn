@@ -344,6 +344,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(sets::MODULE_BUILTINS);
         out.extend_from_slice(shapes::MODULE_BUILTINS);
         out.extend_from_slice(skills::MODULE_BUILTINS);
+        out.extend_from_slice(crate::step_runtime::MODULE_BUILTINS);
         out.extend_from_slice(strings::MODULE_BUILTINS);
         out.extend_from_slice(supervisor::MODULE_BUILTINS);
         out.extend_from_slice(testbench::MODULE_BUILTINS);
