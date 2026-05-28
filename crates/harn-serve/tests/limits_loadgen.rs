@@ -213,31 +213,41 @@ pub fn slow() -> string {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn backpressure_concurrent_overflow_rejects_above_watermark() {
-    // Drive the registry directly with parallel `check` calls so the
-    // overflow trips deterministically — `core.dispatch` can't hold
-    // its guard open across our async boundary without slow .harn
-    // I/O. The registry's atomic fetch_add / rollback closes the
-    // race; here we verify the math holds under contention.
+    // Drive 32 parallel `check` calls into an in_flight_max=3 registry
+    // and use a `Notify` to hold every admitted task at the same
+    // suspension point — that way the watermark is *known* full when
+    // the remaining tasks make their attempt, regardless of how the
+    // runtime schedules them. Proves the atomic fetch_add + rollback
+    // closes the check-then-act race even under contention.
     use std::collections::BTreeSet;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::Arc as StdArc;
 
     use harn_serve::{LimitContext, LimitDecision, LimitScope, RouteLimits};
+    use tokio::sync::Notify;
+
+    const MAX: u32 = 3;
+    const TOTAL: usize = 32;
 
     let registry = LimitRegistry::in_memory(paused_clock());
     let limits = RouteLimits {
-        in_flight_max: Some(3),
+        in_flight_max: Some(MAX),
         ..RouteLimits::default()
     };
     let admitted = StdArc::new(AtomicUsize::new(0));
     let rejected = StdArc::new(AtomicUsize::new(0));
+    // All admitted tasks suspend on this until the main thread
+    // releases them — guaranteeing the bucket is full when the
+    // remaining (TOTAL - MAX) tasks make their attempt.
+    let release = StdArc::new(Notify::new());
 
     let mut handles = Vec::new();
-    for _ in 0..32 {
+    for _ in 0..TOTAL {
         let registry = registry.clone();
         let limits = limits.clone();
         let admitted = admitted.clone();
         let rejected = rejected.clone();
+        let release = release.clone();
         handles.push(tokio::spawn(async move {
             let scopes = BTreeSet::new();
             let ctx = LimitContext {
@@ -247,17 +257,15 @@ async fn backpressure_concurrent_overflow_rejects_above_watermark() {
             };
             match registry.check(&ctx, &limits) {
                 LimitDecision::Allowed(guard) => {
-                    admitted.fetch_add(1, AtomicOrdering::Relaxed);
-                    // Hold the guard briefly so concurrent attempts
-                    // observe a full bucket.
-                    tokio::task::yield_now().await;
+                    admitted.fetch_add(1, AtomicOrdering::AcqRel);
+                    release.notified().await;
                     drop(guard);
                 }
                 LimitDecision::Rejected {
                     scope: LimitScope::Backpressure,
                     ..
                 } => {
-                    rejected.fetch_add(1, AtomicOrdering::Relaxed);
+                    rejected.fetch_add(1, AtomicOrdering::AcqRel);
                 }
                 LimitDecision::Rejected { scope, .. } => {
                     panic!("expected backpressure rejection, got {scope:?}");
@@ -265,17 +273,35 @@ async fn backpressure_concurrent_overflow_rejects_above_watermark() {
             }
         }));
     }
+
+    // Wait until exactly MAX tasks have admitted (and `TOTAL - MAX`
+    // rejected). Poll on the atomic counters with a short backoff —
+    // capped at 5 s so a hung test fails fast on CI rather than
+    // timing out the whole job.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let a = admitted.load(AtomicOrdering::Acquire);
+        let r = rejected.load(AtomicOrdering::Acquire);
+        if a == MAX as usize && r == TOTAL - MAX as usize {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out: admitted={a}, rejected={r} (want {MAX} and {})",
+            TOTAL - MAX as usize
+        );
+        tokio::task::yield_now().await;
+    }
+
+    // Release the admitted tasks so they drop their guards and join.
+    release.notify_waiters();
     for h in handles {
         h.await.expect("task joined");
     }
-    let admitted = admitted.load(AtomicOrdering::Relaxed);
-    let rejected = rejected.load(AtomicOrdering::Relaxed);
-    assert_eq!(admitted + rejected, 32);
-    // We can't assert exact splits (scheduler-dependent) but the
-    // critical invariant is that the in-flight count never overshot
-    // the cap: any rejection means the race was correctly closed.
-    assert!(rejected > 0, "expected at least one backpressure rejection");
-    assert!(admitted > 0, "expected at least one admission");
+
+    let stats = registry.stats();
+    assert_eq!(stats.admitted as usize, MAX as usize);
+    assert_eq!(stats.rejected_backpressure as usize, TOTAL - MAX as usize);
 }
 
 #[tokio::test]
