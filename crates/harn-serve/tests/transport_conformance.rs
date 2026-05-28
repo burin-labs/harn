@@ -282,10 +282,18 @@ async fn cors_unknown_origin_does_not_expose_allow_headers() {
     .await;
     // tower-http's CorsLayer responds to the preflight unconditionally
     // but only echoes Allow-Origin when the request origin matched the
-    // policy. Verify we did not leak the wildcard.
-    assert!(!response
-        .headers()
-        .get("access-control-allow-origin")
-        .map(|value| value == "*")
-        .unwrap_or(false));
+    // policy. Verify we neither leaked the wildcard nor mirrored the
+    // unknown origin back, both of which would defeat the explicit
+    // allow-list.
+    let allow_origin = response.headers().get("access-control-allow-origin");
+    assert_ne!(
+        allow_origin.and_then(|v| v.to_str().ok()),
+        Some("*"),
+        "unknown origin must not yield wildcard CORS",
+    );
+    assert_ne!(
+        allow_origin.and_then(|v| v.to_str().ok()),
+        Some("https://evil.example.com"),
+        "unknown origin must not be mirrored back",
+    );
 }

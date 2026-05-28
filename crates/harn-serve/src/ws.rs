@@ -26,7 +26,12 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::{any, MethodRouter};
+use futures::stream::{SplitSink, SplitStream, StreamExt};
+use futures::SinkExt;
 use tokio::sync::Mutex;
+
+type WsSink = SplitSink<WebSocket, Message>;
+type WsStream = SplitStream<WebSocket>;
 
 /// Default idle ping cadence — every 30 s.
 pub const DEFAULT_IDLE_PING_MS: u64 = 30_000;
@@ -66,43 +71,44 @@ impl Default for WsConfig {
 /// [`WsSession::send`] / [`WsSession::send_binary`]; closing happens
 /// implicitly when the handler returns, or explicitly via
 /// [`WsSession::close`].
+///
+/// Internally the socket is `split()` into a sink + stream pair so a
+/// long-running `recv` doesn't block outbound traffic (notably the
+/// background ping task driving idle keepalive). The stream lock is
+/// held only while a single message is read; the sink lock is held
+/// only while a single message is written.
 pub struct WsSession {
-    inner: Arc<Mutex<WebSocket>>,
+    sink: Arc<Mutex<WsSink>>,
+    stream: Mutex<WsStream>,
     pub negotiated_subprotocol: Option<String>,
     pub max_message_bytes: usize,
 }
 
 impl WsSession {
-    /// Receive the next message. Returns `Ok(None)` on a clean close
-    /// or `Err(WsError::Closed)` if the peer has already gone away.
+    /// Receive the next text or binary message. Ping / pong frames are
+    /// consumed transparently (axum's stream replies to inbound pings
+    /// automatically). Returns `Ok(None)` on a clean close.
     pub async fn recv(&self) -> Result<Option<WsMessage>, WsError> {
         loop {
-            let next = {
-                let mut guard = self.inner.lock().await;
-                use futures::StreamExt;
-                guard.next().await
-            };
+            let next = self.stream.lock().await.next().await;
             match next {
-                Some(Ok(message)) => match message {
-                    Message::Text(text) => {
-                        if text.len() > self.max_message_bytes {
-                            self.send_close(1009, "message too big").await?;
-                            return Err(WsError::MessageTooBig);
-                        }
-                        return Ok(Some(WsMessage::Text(text.to_string())));
+                Some(Ok(Message::Text(text))) => {
+                    if text.len() > self.max_message_bytes {
+                        self.send_close(1009, "message too big").await?;
+                        return Err(WsError::MessageTooBig);
                     }
-                    Message::Binary(bytes) => {
-                        if bytes.len() > self.max_message_bytes {
-                            self.send_close(1009, "message too big").await?;
-                            return Err(WsError::MessageTooBig);
-                        }
-                        return Ok(Some(WsMessage::Binary(bytes.to_vec())));
+                    return Ok(Some(WsMessage::Text(text.to_string())));
+                }
+                Some(Ok(Message::Binary(bytes))) => {
+                    if bytes.len() > self.max_message_bytes {
+                        self.send_close(1009, "message too big").await?;
+                        return Err(WsError::MessageTooBig);
                     }
-                    Message::Ping(_) | Message::Pong(_) => continue,
-                    Message::Close(_) => return Ok(None),
-                },
+                    return Ok(Some(WsMessage::Binary(bytes.to_vec())));
+                }
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                Some(Ok(Message::Close(_))) | None => return Ok(None),
                 Some(Err(error)) => return Err(WsError::Transport(error.to_string())),
-                None => return Ok(None),
             }
         }
     }
@@ -113,11 +119,7 @@ impl WsSession {
         if text.len() > self.max_message_bytes {
             return Err(WsError::MessageTooBig);
         }
-        let mut guard = self.inner.lock().await;
-        guard
-            .send(Message::Text(text.into()))
-            .await
-            .map_err(|error| WsError::Transport(error.to_string()))
+        send_message(&self.sink, Message::Text(text.into())).await
     }
 
     /// Send a binary message.
@@ -125,21 +127,13 @@ impl WsSession {
         if bytes.len() > self.max_message_bytes {
             return Err(WsError::MessageTooBig);
         }
-        let mut guard = self.inner.lock().await;
-        guard
-            .send(Message::Binary(bytes.into()))
-            .await
-            .map_err(|error| WsError::Transport(error.to_string()))
+        send_message(&self.sink, Message::Binary(bytes.into())).await
     }
 
     /// Send a ping frame. Heartbeats sent during the idle interval
     /// happen automatically; callers usually do not need this.
     pub async fn ping(&self) -> Result<(), WsError> {
-        let mut guard = self.inner.lock().await;
-        guard
-            .send(Message::Ping(Default::default()))
-            .await
-            .map_err(|error| WsError::Transport(error.to_string()))
+        send_message(&self.sink, Message::Ping(Default::default())).await
     }
 
     /// Send a close frame with the given code and reason, then drop
@@ -149,15 +143,23 @@ impl WsSession {
     }
 
     async fn send_close(&self, code: u16, reason: &str) -> Result<(), WsError> {
-        let mut guard = self.inner.lock().await;
-        guard
-            .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+        send_message(
+            &self.sink,
+            Message::Close(Some(axum::extract::ws::CloseFrame {
                 code,
                 reason: reason.to_string().into(),
-            })))
-            .await
-            .map_err(|error| WsError::Transport(error.to_string()))
+            })),
+        )
+        .await
     }
+}
+
+async fn send_message(sink: &Mutex<WsSink>, message: Message) -> Result<(), WsError> {
+    sink.lock()
+        .await
+        .send(message)
+        .await
+        .map_err(|error| WsError::Transport(error.to_string()))
 }
 
 #[derive(Debug, Clone)]
@@ -168,12 +170,13 @@ pub enum WsMessage {
 
 #[derive(Debug)]
 pub enum WsError {
-    /// The peer or transport returned an error mid-stream.
+    /// The peer or transport returned an error mid-stream. Also used
+    /// when a send fails because the socket already closed — axum
+    /// surfaces both as a `tungstenite::Error` rather than a distinct
+    /// kind, so we don't try to disambiguate.
     Transport(String),
     /// A frame exceeded `max_message_bytes`.
     MessageTooBig,
-    /// Connection has already closed.
-    Closed,
 }
 
 impl std::fmt::Display for WsError {
@@ -181,7 +184,6 @@ impl std::fmt::Display for WsError {
         match self {
             Self::Transport(message) => write!(f, "ws transport error: {message}"),
             Self::MessageTooBig => write!(f, "ws message too big"),
-            Self::Closed => write!(f, "ws connection closed"),
         }
     }
 }
@@ -227,31 +229,36 @@ async fn ws_dispatch(
     }
 
     upgrade.on_upgrade(move |socket| async move {
+        let (sink, stream) = socket.split();
+        let sink = Arc::new(Mutex::new(sink));
         let session = WsSession {
-            inner: Arc::new(Mutex::new(socket)),
+            sink: sink.clone(),
+            stream: Mutex::new(stream),
             negotiated_subprotocol: negotiated,
             max_message_bytes: config.max_message_bytes,
         };
 
-        if let Some(interval) = config.idle_ping {
-            let ping_socket = session.inner.clone();
-            let ping_task = tokio::spawn(async move {
+        let ping_task = config.idle_ping.map(|interval| {
+            let ping_sink = sink.clone();
+            tokio::spawn(async move {
                 let mut ticker = tokio::time::interval(interval);
                 ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 ticker.tick().await; // skip the immediate first tick
                 loop {
                     ticker.tick().await;
-                    let mut guard = ping_socket.lock().await;
-                    if guard.send(Message::Ping(Default::default())).await.is_err() {
+                    if send_message(&ping_sink, Message::Ping(Default::default()))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
-            });
+            })
+        });
 
-            handler(session).await;
-            ping_task.abort();
-        } else {
-            handler(session).await;
+        handler(session).await;
+        if let Some(task) = ping_task {
+            task.abort();
         }
     })
 }
@@ -326,6 +333,36 @@ mod tests {
         let echoed = socket.next().await.unwrap().unwrap();
         assert_eq!(echoed, TungMessage::Binary(vec![1, 2, 3, 4].into()));
 
+        socket.send(TungMessage::Close(None)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ws_session_send_does_not_block_on_pending_recv() {
+        // Regression guard for the split sink/stream design: a
+        // long-running `recv` (the client never sends) must not lock
+        // out a parallel `send`. Before the split, recv held the
+        // single socket mutex across `next().await`, so a sibling
+        // send (or the background ping task) would deadlock.
+        async fn push_then_wait(session: WsSession) {
+            // Start a recv that will block waiting for a client
+            // message that never comes.
+            let recv_task = tokio::spawn(async move {
+                tokio::time::timeout(std::time::Duration::from_millis(500), session.recv()).await
+            });
+            let _ = recv_task.await;
+        }
+        let app = Router::new().route("/ws", ws_route(push_then_wait, WsConfig::default()));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let url = format!("ws://{addr}/ws");
+        let (mut socket, _response) = tokio_tungstenite::connect_async(url).await.unwrap();
+        // Wait briefly, then close — the server must be responsive
+        // (not stuck holding a single big lock) during the recv.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         socket.send(TungMessage::Close(None)).await.unwrap();
     }
 

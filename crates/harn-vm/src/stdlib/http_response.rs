@@ -478,57 +478,63 @@ fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     category = "http_response"
 )]
 fn http_choose_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let accept = match args.first() {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::String(text)) => Some(text.to_string()),
-        Some(other) => {
-            return Err(thrown_err(format!(
-                "http_choose: accept must be a string or nil (got {})",
-                other.type_name()
-            )));
-        }
-    };
+    let accept = optional_string_arg(args.first(), "http_choose", "accept")?;
     let offers_value = args
         .get(1)
         .ok_or_else(|| thrown_err("http_choose: offers is required"))?;
-    let offers = match offers_value {
-        VmValue::List(items) => items
-            .iter()
-            .map(|value| match value {
-                VmValue::String(text) => Ok(text.to_string()),
-                other => Err(thrown_err(format!(
-                    "http_choose: offers must contain strings (got {})",
-                    other.type_name()
-                ))),
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        other => {
-            return Err(thrown_err(format!(
-                "http_choose: offers must be a list (got {})",
-                other.type_name()
-            )))
-        }
-    };
+    let offers = expect_string_list(offers_value, "http_choose", "offers")?;
     if offers.is_empty() {
         return Err(thrown_err("http_choose: offers must be non-empty"));
     }
-
-    let default = match args.get(2) {
-        None | Some(VmValue::Nil) => offers[0].clone(),
-        Some(VmValue::String(text)) => text.to_string(),
-        Some(other) => {
-            return Err(thrown_err(format!(
-                "http_choose: default must be a string or nil (got {})",
-                other.type_name()
-            )));
-        }
-    };
+    let default = optional_string_arg(args.get(2), "http_choose", "default")?
+        .unwrap_or_else(|| offers[0].clone());
 
     let chosen = match accept.as_deref() {
         None | Some("") | Some("*/*") => default,
         Some(header) => negotiate_accept(header, &offers).unwrap_or(default),
     };
     Ok(VmValue::String(Rc::from(chosen)))
+}
+
+fn optional_string_arg(
+    value: Option<&VmValue>,
+    builtin: &str,
+    arg_name: &str,
+) -> Result<Option<String>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) => Ok(Some(text.to_string())),
+        Some(other) => Err(thrown_err(format!(
+            "{builtin}: {arg_name} must be a string or nil (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn expect_string_list(
+    value: &VmValue,
+    builtin: &str,
+    arg_name: &str,
+) -> Result<Vec<String>, VmError> {
+    let items = match value {
+        VmValue::List(items) => items,
+        other => {
+            return Err(thrown_err(format!(
+                "{builtin}: {arg_name} must be a list (got {})",
+                other.type_name()
+            )));
+        }
+    };
+    items
+        .iter()
+        .map(|value| match value {
+            VmValue::String(text) => Ok(text.to_string()),
+            other => Err(thrown_err(format!(
+                "{builtin}: {arg_name} must contain strings (got {})",
+                other.type_name()
+            ))),
+        })
+        .collect()
 }
 
 #[harn_builtin(
@@ -658,12 +664,14 @@ fn value_as_bytes(value: &VmValue) -> Vec<u8> {
         VmValue::Bytes(bytes) => bytes.as_ref().clone(),
         VmValue::String(text) => text.as_bytes().to_vec(),
         VmValue::Nil => Vec::new(),
-        other => {
-            // For anything else, fall through to JSON-stringify so the
-            // ETag is stable for the same logical value.
-            let json = crate::llm::helpers::vm_value_to_json(other);
-            serde_json::to_vec(&json).unwrap_or_default()
-        }
+        // For dicts / lists / structs, fall through to the stdlib JSON
+        // encoder so the ETag derives from a stable canonical form
+        // (dict keys sorted, bytes base64-tagged) rather than the
+        // less-stable `display()` representation. We reuse
+        // `stdlib::json` directly instead of reaching for the
+        // llm-helpers encoder so the abstraction boundary stays
+        // sibling-module, not cross-subsystem.
+        other => crate::stdlib::json::vm_value_to_json(other).into_bytes(),
     }
 }
 

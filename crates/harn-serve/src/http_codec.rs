@@ -82,6 +82,16 @@ fn default_json_response(value: Value, request_id: &str) -> HttpCodecOutcome {
 
 /// Render a `CallResponse` into an `axum::Response`. Untagged values
 /// degrade to `200 OK + application/json`.
+///
+/// A `.harn` handler that returns an `http_upgrade_ws(...)` envelope
+/// cannot be rendered as plain HTTP — the upgrade needs a hijacked
+/// connection that the codec does not own. The hosting adapter must
+/// detect [`HttpCodecOutcome::WsUpgradeRejected`] from
+/// [`decode_call_response`] and route the request through
+/// [`crate::ws::ws_route`] instead. To make the failure mode loud
+/// rather than silent, rendering a `ws_upgrade` envelope here yields a
+/// `500 Internal Server Error` with a `ws_upgrade_not_routed` error
+/// code.
 pub fn axum_response_from_call(response: CallResponse, request_id: &str) -> Response {
     let outcome = decode_call_response(response, request_id);
     outcome_to_response(outcome)
@@ -106,7 +116,39 @@ pub fn decode_call_response(response: CallResponse, request_id: &str) -> HttpCod
     envelope_to_outcome(envelope, request_id)
 }
 
+/// Return `Some(spec)` when the decoded envelope is a `ws_upgrade`
+/// directive. Hosting adapters use this to short-circuit out of the
+/// plain-HTTP rendering path and dispatch through
+/// [`crate::ws::ws_route`] instead. Returns `None` for every other
+/// envelope shape (or untagged value).
+pub fn classify_ws_upgrade(response: &CallResponse) -> Option<harn_vm::WsUpgradeSpec> {
+    let envelope = parse_http_envelope(&response.value)?;
+    envelope.ws_upgrade
+}
+
 fn envelope_to_outcome(envelope: HttpEnvelope, request_id: &str) -> HttpCodecOutcome {
+    if envelope.ws_upgrade.is_some() {
+        // The hosting adapter is supposed to detect the upgrade
+        // intent via `classify_ws_upgrade` and route to `ws_route`
+        // before reaching the codec. Falling through here means
+        // somebody asked us to render a 101 over a plain HTTP
+        // response, which the WS protocol does not permit. Emit a
+        // structured 500 so the misuse surfaces in the access log
+        // rather than the client seeing a silent malformed reply.
+        let body = json!({
+            "code": "ws_upgrade_not_routed",
+            "message": "handler returned an http_upgrade_ws envelope but the route is not wired to harn_serve::ws_route",
+            "request_id": request_id,
+        });
+        let mut headers = HeaderMap::new();
+        insert_request_id(&mut headers, request_id);
+        return HttpCodecOutcome::Json {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            headers,
+            body: Some(body),
+        };
+    }
+
     let status = StatusCode::from_u16(envelope.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let mut headers = http_headers(&envelope.headers);
     insert_request_id(&mut headers, request_id);
@@ -797,5 +839,58 @@ pub fn handler() -> dict {
         let response = axum_response_from_call(synth_call(value), "req_e2e");
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         assert_eq!(response.headers().get("x-job-id").unwrap(), "job_42");
+    }
+
+    #[tokio::test]
+    async fn ws_upgrade_envelope_yields_structured_500_when_rendered_as_plain_http() {
+        // A handler that returns http_upgrade_ws but the route was not
+        // wired through `ws_route` would otherwise emit a 101 over a
+        // non-hijacked HTTP connection — silently broken. The codec
+        // must instead surface the misuse with a structured error.
+        let envelope = json!({
+            "__http_response__": "v1",
+            "status": 101,
+            "body_kind": "none",
+            "headers": {"Upgrade": "websocket", "Connection": "Upgrade"},
+            "ws_upgrade": {
+                "subprotocol": "v1.harn",
+                "offered": ["v1.harn"],
+            },
+        });
+        let response = make_response(envelope);
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body: Value = serde_json::from_str(&body_text(response).await).unwrap();
+        assert_eq!(body["code"], "ws_upgrade_not_routed");
+        assert_eq!(body["request_id"], "req_test");
+    }
+
+    #[tokio::test]
+    async fn classify_ws_upgrade_routes_envelopes_through_ws() {
+        let envelope = json!({
+            "__http_response__": "v1",
+            "status": 101,
+            "body_kind": "none",
+            "headers": {},
+            "ws_upgrade": {
+                "subprotocol": "v1.harn",
+                "offered": ["v1.harn", "v2.harn"],
+            },
+        });
+        let spec = classify_ws_upgrade(&synth_call(envelope)).expect("upgrade spec");
+        assert_eq!(spec.subprotocol.as_deref(), Some("v1.harn"));
+        assert_eq!(spec.offered, vec!["v1.harn", "v2.harn"]);
+
+        // Plain envelopes route through the codec as usual.
+        let plain = json!({
+            "__http_response__": "v1",
+            "status": 200,
+            "body_kind": "json",
+            "headers": {},
+            "body": {"ok": true},
+        });
+        assert!(classify_ws_upgrade(&synth_call(plain)).is_none());
+
+        // Untagged values produce None as well.
+        assert!(classify_ws_upgrade(&synth_call(json!({"ok": true}))).is_none());
     }
 }
