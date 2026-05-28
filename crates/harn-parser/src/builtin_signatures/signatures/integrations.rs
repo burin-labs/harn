@@ -78,17 +78,49 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
+    // Supervised MCP host primitive (#2504, A.7). See
+    // `crates/harn-vm/src/mcp_host.rs` for the runtime side.
+    BuiltinSignature::simple(
+        "harn.mcp.call",
+        &[
+            Param::new("server", TY_STRING),
+            Param::new("tool", TY_STRING),
+            Param::optional("args", TY_DICT),
+        ],
+        TY_ANY,
+    ),
     BuiltinSignature::simple(
         "harn.mcp.configure",
         &[Param::optional("config", TY_DICT)],
         TY_DICT,
     ),
+    BuiltinSignature::simple("harn.mcp.discover", &[], TY_LIST),
     BuiltinSignature::simple(
         "harn.mcp.file_input",
         &[Param::optional("options", TY_DICT)],
         TY_DICT,
     ),
+    BuiltinSignature::simple(
+        "harn.mcp.reload",
+        &[Param::new("server", TY_STRING)],
+        TY_NIL,
+    ),
     BuiltinSignature::simple("harn.mcp.roots", &[], TY_LIST),
+    BuiltinSignature::simple(
+        "harn.mcp.spawn",
+        &[
+            Param::new("spec", TY_DICT),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple("harn.mcp.status", &[], TY_LIST),
+    BuiltinSignature::simple("harn.mcp.stop", &[Param::new("server", TY_STRING)], TY_NIL),
+    BuiltinSignature::simple(
+        "harn.mcp.tools",
+        &[Param::new("server", TY_STRING)],
+        TY_LIST,
+    ),
     BuiltinSignature::simple(
         "harn.mcp.upload_file",
         &[

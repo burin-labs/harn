@@ -460,6 +460,12 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/llm/routing.rs"
   "crates/harn-vm/src/llm/stream.rs"
   "crates/harn-vm/src/mcp_card.rs"
+  # mcp_host.rs supervises external MCP servers: cache TTLs and
+  # circuit-breaker reset windows are inherently wall-clock concerns
+  # (the cache hint is server-issued in real time, the breaker decay is
+  # a real-world cool-off period). Mirrors the sibling mcp_registry.rs
+  # exemption and the broader supervision pattern in personas/.
+  "crates/harn-vm/src/mcp_host.rs"
   "crates/harn-vm/src/mcp_registry.rs"
   "crates/harn-vm/src/metadata.rs"
   "crates/harn-vm/src/orchestration/command_policy.rs"
