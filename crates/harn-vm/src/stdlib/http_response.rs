@@ -587,9 +587,14 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         })
         .unwrap_or_default();
 
-    let negotiated = offered_subprotocols
+    // Pick the first *client-preferred* subprotocol the server can
+    // serve. This must match the convention in
+    // `harn_serve::ws::negotiate_subprotocol` — if the two
+    // disagreed, the builtin's envelope would carry one subprotocol
+    // while the actual upgrade handshake echoed back another.
+    let negotiated = request_subprotocols
         .iter()
-        .find(|name| request_subprotocols.iter().any(|client| client == *name))
+        .find(|client| offered_subprotocols.iter().any(|name| name == *client))
         .cloned();
 
     let mut headers = BTreeMap::new();
@@ -1163,6 +1168,41 @@ mod tests {
                 .map(|v| v.display())
                 .as_deref(),
             Some("v1.harn")
+        );
+    }
+
+    #[test]
+    fn http_upgrade_ws_picks_client_preferred_when_both_overlap() {
+        // Regression for the divergence between
+        // `http_upgrade_ws_impl`'s envelope-side negotiation and
+        // `harn_serve::ws::negotiate_subprotocol`'s wire-side
+        // negotiation. With client "v2.harn, v1.harn" and server
+        // ["v1.harn", "v2.harn"] the two implementations used to
+        // disagree (server-order picked v1; client-order picks v2).
+        // The envelope MUST match what the upgrade handshake echoes
+        // back, so we honour client preference everywhere.
+        let req = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "headers".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "Sec-WebSocket-Protocol".to_string(),
+                VmValue::String(Rc::from("v2.harn, v1.harn")),
+            )]))),
+        )])));
+        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "subprotocols".to_string(),
+            VmValue::List(Rc::new(vec![
+                VmValue::String(Rc::from("v1.harn")),
+                VmValue::String(Rc::from("v2.harn")),
+            ])),
+        )])));
+        let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
+        let upgrade = dict(&response)
+            .get("ws_upgrade")
+            .and_then(VmValue::as_dict)
+            .expect("ws_upgrade");
+        assert_eq!(
+            upgrade.get("subprotocol").map(|v| v.display()).as_deref(),
+            Some("v2.harn")
         );
     }
 
