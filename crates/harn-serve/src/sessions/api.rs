@@ -105,6 +105,17 @@ fn map_error(error: StoreError) -> (StatusCode, Json<ErrorBody>) {
     )
 }
 
+// Span names + attribute keys follow the `harn.session.*` schema. The
+// A.10 observability primitive (#2513) will export these spans through
+// its OTLP pipeline without further changes here.
+#[tracing::instrument(
+    name = "harn.session.create",
+    skip_all,
+    fields(
+        harn.session.tenant_id = payload.tenant_id.as_deref().unwrap_or(""),
+        harn.session.persona = payload.persona.as_deref().unwrap_or(""),
+    ),
+)]
 async fn create_session(
     State(state): State<SessionsState>,
     Json(payload): Json<CreateSession>,
@@ -115,6 +126,13 @@ async fn create_session(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.list",
+    skip_all,
+    fields(
+        harn.session.tenant_id = filter.tenant_id.as_deref().unwrap_or(""),
+    ),
+)]
 async fn list_sessions(
     State(state): State<SessionsState>,
     Query(filter): Query<ListFilter>,
@@ -132,6 +150,11 @@ async fn list_sessions(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.describe",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
 async fn describe_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -142,6 +165,11 @@ async fn describe_session(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.soft_delete",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
 async fn soft_delete_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -152,6 +180,11 @@ async fn soft_delete_session(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.hard_delete",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
 async fn hard_delete_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -162,6 +195,14 @@ async fn hard_delete_session(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.append",
+    skip_all,
+    fields(
+        harn.session.id = %id,
+        harn.session.event_kind = body.kind.discriminator(),
+    ),
+)]
 async fn append_event(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -181,6 +222,11 @@ async fn append_event(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.read",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
 async fn read_events(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -200,6 +246,14 @@ async fn read_events(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.fork",
+    skip_all,
+    fields(
+        harn.session.id = %id,
+        harn.session.fork_at_event_id = body.at_event_id,
+    ),
+)]
 async fn fork_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -215,6 +269,14 @@ async fn fork_session(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.truncate",
+    skip_all,
+    fields(
+        harn.session.id = %id,
+        harn.session.truncate_at_event_id = body.at_event_id,
+    ),
+)]
 async fn truncate_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -226,6 +288,11 @@ async fn truncate_session(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.snapshot",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
 async fn snapshot_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -236,6 +303,11 @@ async fn snapshot_session(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.replay",
+    skip_all,
+    fields(harn.session.snapshot_id = %snapshot_id),
+)]
 async fn replay_snapshot(
     State(state): State<SessionsState>,
     Path(snapshot_id): Path<String>,
@@ -246,6 +318,11 @@ async fn replay_snapshot(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.close",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
 async fn close_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
@@ -256,6 +333,11 @@ async fn close_session(
     }
 }
 
+#[tracing::instrument(
+    name = "harn.session.verify",
+    skip_all,
+    fields(harn.session.id = %id),
+)]
 async fn verify_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,

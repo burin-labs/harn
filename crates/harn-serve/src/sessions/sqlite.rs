@@ -16,7 +16,10 @@ use uuid::Uuid;
 use super::event::{
     now_ms_and_rfc3339, AppendEvent, EventId, EventSignature, SessionEventKind, StoredEvent,
 };
-use super::signing::{chain_root_hash, compute_record_hash, verify_event};
+use super::signing::{
+    chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
+    verify_event,
+};
 use super::store::{
     CreateSession, EventPage, ForkResult, ListFilter, ReadRange, SessionId, SessionMeta,
     SessionStatus, SessionStore, Snapshot, SnapshotId, StoreError, StoreHooks, StoreResult,
@@ -112,6 +115,14 @@ impl SqliteSessionStore {
             );
             CREATE INDEX IF NOT EXISTS session_events_ts
                 ON session_events(session_id, ts_ms);
+            CREATE TABLE IF NOT EXISTS session_tags (
+                session_id  TEXT NOT NULL,
+                tag         TEXT NOT NULL,
+                PRIMARY KEY (session_id, tag),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS session_tags_by_tag
+                ON session_tags(tag, session_id);
             CREATE TABLE IF NOT EXISTS session_snapshots (
                 id              TEXT PRIMARY KEY,
                 session_id      TEXT NOT NULL,
@@ -137,10 +148,6 @@ impl SqliteSessionStore {
 
     pub fn path(&self) -> &Path {
         &self.path
-    }
-
-    pub fn hooks(&self) -> &StoreHooks {
-        &self.hooks
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
@@ -207,6 +214,19 @@ fn status_from_sql(value: &str) -> StoreResult<SessionStatus> {
     })
 }
 
+fn insert_session_tags(conn: &Connection, session_id: &str, tags: &[String]) -> StoreResult<()> {
+    if tags.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = conn
+        .prepare("INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?1, ?2)")
+        .map_err(map_sql)?;
+    for tag in tags {
+        stmt.execute(params![session_id, tag]).map_err(map_sql)?;
+    }
+    Ok(())
+}
+
 fn insert_session(
     conn: &Connection,
     meta: &SessionMeta,
@@ -247,6 +267,7 @@ fn insert_session(
         ],
     )
     .map_err(map_sql)?;
+    insert_session_tags(conn, &meta.id, &meta.tags)?;
     Ok(())
 }
 
@@ -446,6 +467,10 @@ fn apply_redaction(hooks: &StoreHooks, event: &mut AppendEvent) {
 
 #[async_trait]
 impl SessionStore for SqliteSessionStore {
+    fn hooks(&self) -> &StoreHooks {
+        &self.hooks
+    }
+
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
         let meta = super::memory_helpers::meta_for_create(request);
         let conn = self.lock();
@@ -474,51 +499,76 @@ impl SessionStore for SqliteSessionStore {
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>> {
         let conn = self.lock();
         let limit = filter.limit.unwrap_or(MAX_READ_BATCH).min(MAX_READ_BATCH) as i64;
-        let mut sql = String::from("SELECT id FROM sessions WHERE 1=1");
-        let mut args: Vec<rusqlite::types::Value> = Vec::new();
-        if let Some(tenant) = filter.tenant_id.as_ref() {
-            sql.push_str(&format!(" AND tenant_id = ?{}", args.len() + 1));
-            args.push(tenant.clone().into());
+        // Pull the cursor's anchor row up front so the SQL can do
+        // keyset pagination on `(created_at_ms, id)` instead of scanning
+        // every prior row into memory.
+        let cursor_anchor: Option<(i64, String)> = filter
+            .cursor
+            .as_ref()
+            .map(|id| {
+                conn.query_row(
+                    "SELECT created_at_ms, id FROM sessions WHERE id = ?1",
+                    params![id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()
+                .map_err(map_sql)
+            })
+            .transpose()?
+            .flatten();
+
+        let mut sql = String::from("SELECT s.id FROM sessions s");
+        if filter.tag.is_some() {
+            sql.push_str(" INNER JOIN session_tags t ON t.session_id = s.id AND t.tag = :tag");
         }
-        if let Some(persona) = filter.persona.as_ref() {
-            sql.push_str(&format!(" AND persona = ?{}", args.len() + 1));
-            args.push(persona.clone().into());
+        sql.push_str(" WHERE 1=1");
+        let mut args: Vec<(&'static str, rusqlite::types::Value)> = Vec::new();
+        if let Some(tag) = filter.tag {
+            args.push((":tag", tag.into()));
+        }
+        if let Some(tenant) = filter.tenant_id {
+            sql.push_str(" AND s.tenant_id = :tenant");
+            args.push((":tenant", tenant.into()));
+        }
+        if let Some(persona) = filter.persona {
+            sql.push_str(" AND s.persona = :persona");
+            args.push((":persona", persona.into()));
         }
         if let Some(status) = filter.status {
-            sql.push_str(&format!(" AND status = ?{}", args.len() + 1));
-            args.push(status_to_sql(status).to_string().into());
+            sql.push_str(" AND s.status = :status");
+            args.push((":status", status_to_sql(status).to_string().into()));
         }
         if let Some(after) = filter.created_after_ms {
-            sql.push_str(&format!(" AND created_at_ms >= ?{}", args.len() + 1));
-            args.push(after.into());
+            sql.push_str(" AND s.created_at_ms >= :after");
+            args.push((":after", after.into()));
         }
         if let Some(before) = filter.created_before_ms {
-            sql.push_str(&format!(" AND created_at_ms <= ?{}", args.len() + 1));
-            args.push(before.into());
+            sql.push_str(" AND s.created_at_ms <= :before");
+            args.push((":before", before.into()));
         }
-        sql.push_str(" ORDER BY created_at_ms ASC, id ASC");
+        if let Some((anchor_ms, anchor_id)) = cursor_anchor {
+            sql.push_str(
+                " AND (s.created_at_ms > :cursor_ms OR (s.created_at_ms = :cursor_ms AND s.id > :cursor_id))",
+            );
+            args.push((":cursor_ms", anchor_ms.into()));
+            args.push((":cursor_id", anchor_id.into()));
+        }
+        sql.push_str(" ORDER BY s.created_at_ms ASC, s.id ASC LIMIT :limit");
+        args.push((":limit", limit.into()));
+
+        let named_args: Vec<(&str, &dyn rusqlite::ToSql)> = args
+            .iter()
+            .map(|(name, value)| (*name, value as &dyn rusqlite::ToSql))
+            .collect();
         let mut stmt = conn.prepare(&sql).map_err(map_sql)?;
-        let mut ids: Vec<String> = stmt
-            .query_map(rusqlite::params_from_iter(args.iter()), |row| row.get(0))
+        let ids: Vec<String> = stmt
+            .query_map(named_args.as_slice(), |row| row.get(0))
             .map_err(map_sql)?
             .collect::<Result<_, _>>()
             .map_err(map_sql)?;
-        if let Some(cursor) = filter.cursor.as_ref() {
-            if let Some(position) = ids.iter().position(|id| id == cursor) {
-                ids = ids.into_iter().skip(position + 1).collect();
-            }
-        }
-        if (ids.len() as i64) > limit {
-            ids.truncate(limit as usize);
-        }
         let mut metas = Vec::with_capacity(ids.len());
         for id in ids {
             let (meta, _) = read_session_meta(&conn, &id)?;
-            if let Some(tag) = filter.tag.as_ref() {
-                if !meta.tags.iter().any(|value| value == tag) {
-                    continue;
-                }
-            }
             metas.push(meta);
         }
         Ok(metas)
@@ -578,24 +628,9 @@ impl SessionStore for SqliteSessionStore {
             stored.signed_by = Some(signer.sign_event(&stored));
         }
         insert_event(&tx, &stored)?;
-        let all_events = {
-            let mut stmt = tx
-                .prepare(
-                    "SELECT record_hash FROM session_events
-                     WHERE session_id = ?1 ORDER BY event_id ASC",
-                )
-                .map_err(map_sql)?;
-            let rows = stmt
-                .query_map(params![session_id], |row| row.get::<_, String>(0))
-                .map_err(map_sql)?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row.map_err(map_sql)?);
-            }
-            out
-        };
-        let chain_root = chain_root_hash_from_hashes(&all_events);
-        meta.event_count = all_events.len();
+        let prev_root = meta.chain_root_hash.clone().unwrap_or_else(chain_root_init);
+        let chain_root = chain_root_fold(&prev_root, &stored.record_hash);
+        meta.event_count = meta.event_count.saturating_add(1);
         meta.last_event_id = Some(next_event_id);
         meta.chain_root_hash = Some(chain_root);
         meta.updated_at_ms = ts_ms;
@@ -706,14 +741,11 @@ impl SessionStore for SqliteSessionStore {
         child_meta.closed_at_ms = None;
         child_meta.closed_at = None;
         child_meta.soft_deleted_at_ms = None;
-        let copied: Vec<StoredEvent> = parent_events
+        let inherited: Vec<StoredEvent> = parent_events
             .into_iter()
             .filter(|event| event.event_id <= at_event_id)
-            .map(|mut event| {
-                event.session_id = new_id.clone();
-                event
-            })
             .collect();
+        let copied = re_anchor_events(&inherited, &new_id);
         child_meta.event_count = copied.len();
         child_meta.last_event_id = copied.last().map(|tail| tail.event_id);
         child_meta.chain_root_hash = Some(chain_root_hash(&copied));
@@ -781,7 +813,9 @@ impl SessionStore for SqliteSessionStore {
             }
             out
         };
-        let new_root = chain_root_hash_from_hashes(&remaining_hashes);
+        let new_root = remaining_hashes
+            .iter()
+            .fold(chain_root_init(), |root, hash| chain_root_fold(&root, hash));
         let (ms, text) = now_ms_and_rfc3339();
         meta.event_count = remaining_hashes.len();
         meta.last_event_id = Some(at_event_id);
@@ -982,16 +1016,4 @@ impl SessionStore for SqliteSessionStore {
             failures,
         })
     }
-}
-
-/// Hash a flat list of record-hash strings; mirrors the chain-root
-/// computation but skips the per-event re-hash.
-fn chain_root_hash_from_hashes(hashes: &[String]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(b"harn.session.chain.v1");
-    for hash in hashes {
-        hasher.update(hash.as_bytes());
-    }
-    format!("sha256:{}", hex::encode(hasher.finalize()))
 }

@@ -85,11 +85,17 @@ pub fn key_id_for(verifying_key: &VerifyingKey) -> String {
 /// Compute the canonical record hash for an event with `prev_hash`
 /// already populated. Result is `"sha256:<hex>"`.
 pub fn compute_record_hash(event: &StoredEvent) -> String {
-    let bytes = canonical_event_bytes(event);
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    let digest = hasher.finalize();
-    format!("sha256:{}", hex::encode(digest))
+    hasher.update(canonical_event_bytes(event));
+    finalize_sha256(hasher)
+}
+
+/// Wrap a finalised SHA-256 in the canonical `"sha256:<hex>"` label
+/// every chain primitive prints. Centralising the format keeps the
+/// algorithm tag in one place so a future cutover to a different hash
+/// doesn't fan out across the module.
+fn finalize_sha256(hasher: Sha256) -> String {
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 /// Verify a per-event signature.
@@ -170,15 +176,59 @@ fn verify_signature(
         .map_err(|_| VerifyError::BadSignature)
 }
 
-/// Build the Merkle-style root hash for a chain of stored events.
-/// Folds each `record_hash` into a running sha256.
-pub fn chain_root_hash(events: &[StoredEvent]) -> String {
+/// Initial chain root before any events have been appended. The prefix
+/// is versioned so a future schema change doesn't silently re-validate
+/// against an old chain.
+pub fn chain_root_init() -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"harn.session.chain.v1");
+    hasher.update(b"harn.session.chain.v2");
+    finalize_sha256(hasher)
+}
+
+/// Fold a single event's `record_hash` into the running chain root.
+/// Composing folds in sequence reproduces [`chain_root_hash`] without
+/// re-hashing the entire history on every append.
+pub fn chain_root_fold(prev_root: &str, record_hash: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(prev_root.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(record_hash.as_bytes());
+    finalize_sha256(hasher)
+}
+
+/// Build the chain root hash for a list of stored events by replaying
+/// the fold from genesis. Used by `verify` and by snapshot/replay; the
+/// hot append path uses [`chain_root_fold`] directly.
+pub fn chain_root_hash(events: &[StoredEvent]) -> String {
+    events.iter().fold(chain_root_init(), |root, event| {
+        chain_root_fold(&root, &event.record_hash)
+    })
+}
+
+/// Re-anchor a chain of events on a new owning session id. The
+/// `session_id` field is rewritten on each event and `prev_hash` +
+/// `record_hash` are recomputed sequentially, so the resulting chain
+/// is bytewise-verifiable as a standalone session. Used by
+/// [`crate::sessions::SessionStore::fork`] to give the child session
+/// a chain that `verify` can attest without the parent.
+pub fn re_anchor_events(events: &[StoredEvent], new_session_id: &str) -> Vec<StoredEvent> {
+    let mut rewritten = Vec::with_capacity(events.len());
+    let mut prev_hash: Option<String> = None;
     for event in events {
-        hasher.update(event.record_hash.as_bytes());
+        let mut copied = event.clone();
+        copied.session_id = new_session_id.to_string();
+        copied.prev_hash = prev_hash.clone();
+        copied.record_hash = compute_record_hash(&copied);
+        // Per-event signatures are detached over the canonical bytes;
+        // since both session_id and prev_hash changed, the parent's
+        // signature no longer attests this event. Drop it — the
+        // session-close path will mint a fresh receipt covering the
+        // re-anchored chain.
+        copied.signed_by = None;
+        prev_hash = Some(copied.record_hash.clone());
+        rewritten.push(copied);
     }
-    format!("sha256:{}", hex::encode(hasher.finalize()))
+    rewritten
 }
 
 /// Helper for receipt payloads built outside the signer.
@@ -199,8 +249,7 @@ pub fn canonical_receipt_payload(
 /// hashing inputs. Public surface kept tight; mostly used by the
 /// integration tests that round-trip events.
 pub fn canonical_value_hash(value: &serde_json::Value) -> String {
-    let bytes = canonical_json_bytes(value);
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    format!("sha256:{}", hex::encode(hasher.finalize()))
+    hasher.update(canonical_json_bytes(value));
+    finalize_sha256(hasher)
 }

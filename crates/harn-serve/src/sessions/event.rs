@@ -229,3 +229,14 @@ pub(crate) fn now_ms_and_rfc3339() -> (i64, String) {
     let text = now.format(&Rfc3339).unwrap_or_else(|_| now.to_string());
     (ms, text)
 }
+
+/// Render a millisecond Unix timestamp as RFC 3339. Used by retention
+/// sweeps that already have a `now_ms` from the caller and need to
+/// stamp tombstone events with the same instant.
+pub(crate) fn ms_to_rfc3339(ms: i64) -> String {
+    let nanos = (ms as i128).saturating_mul(1_000_000);
+    OffsetDateTime::from_unix_timestamp_nanos(nanos)
+        .ok()
+        .and_then(|dt| dt.format(&Rfc3339).ok())
+        .unwrap_or_default()
+}

@@ -60,11 +60,11 @@ pub use permissions::{
 };
 pub use replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 pub use sessions::{
-    sessions_router, AppendEvent, CreateSession, EventId, EventPage, ForkResult, ListFilter,
-    MemorySessionStore, ReadRange, RetentionPolicy, SessionEventKind, SessionId, SessionMeta,
-    SessionSigner, SessionStatus, SessionStore, SharedSessionStore, Snapshot, SnapshotId,
-    SqliteSessionStore, StoreError, StoreHooks, StoreResult, StoredEvent, SweepReport,
-    TruncateResult, VerifyFailure, VerifyReport,
+    sessions_router, AppendEvent, ArchiveSink, CreateSession, EventId, EventPage, ForkResult,
+    ListFilter, MemorySessionStore, ReadRange, RetentionPolicy, SessionEventKind, SessionId,
+    SessionMeta, SessionSigner, SessionStatus, SessionStore, SharedArchiveSink, SharedSessionStore,
+    Snapshot, SnapshotId, SqliteSessionStore, StoreError, StoreHooks, StoreResult, StoredEvent,
+    SweepReport, Tombstone, TruncateResult, VerifyFailure, VerifyReport,
 };
 pub use tls::{bind_listener, HstsConfig, HttpTlsConfig};
 pub use transport::{

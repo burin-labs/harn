@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::event::{AppendEvent, EventId, StoredEvent};
-use super::retention::RetentionPolicy;
+use super::retention::{RetentionPolicy, SharedArchiveSink, Tombstone};
 use super::signing::SessionSigner;
 use harn_vm::redact::RedactionPolicy;
 
@@ -205,10 +205,21 @@ pub struct StoreHooks {
     /// Default retention policy applied to new sessions when their
     /// meta does not override it.
     pub retention: RetentionPolicy,
+    /// Optional durable archive destination. The default
+    /// [`SessionStore::sweep_retention`] writes archived sessions and
+    /// tombstones here before the rows leave primary storage; see
+    /// [`super::retention::ArchiveSink`].
+    pub archive_sink: Option<SharedArchiveSink>,
 }
 
 #[async_trait]
 pub trait SessionStore: Send + Sync {
+    /// Plug-in processors configured for this store. The default
+    /// [`Self::sweep_retention`] reads `hooks.archive_sink` so the
+    /// retention loop can hand archived sessions to durable storage
+    /// without callers wiring the sink explicitly.
+    fn hooks(&self) -> &StoreHooks;
+
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta>;
     async fn describe(&self, session_id: &str) -> StoreResult<SessionMeta>;
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>>;
@@ -231,31 +242,111 @@ pub trait SessionStore: Send + Sync {
 
     /// Sweep retention. Backends with native scheduling can override
     /// to skip the default loop; the default sweeps all sessions
-    /// against the configured [`RetentionPolicy`].
+    /// against the configured [`RetentionPolicy`] and routes archived
+    /// sessions + tombstones through `hooks().archive_sink` when set.
     async fn sweep_retention(
         &self,
         policy: &RetentionPolicy,
         now_ms: i64,
     ) -> StoreResult<SweepReport> {
-        let mut report = SweepReport::default();
-        let sessions = self.list(ListFilter::default()).await?;
-        for session in sessions {
-            if policy.should_hard_delete(&session, now_ms) {
-                self.hard_delete(&session.id).await?;
-                report.hard_deleted += 1;
-            } else if policy.should_soft_delete(&session, now_ms) {
-                self.soft_delete(&session.id).await?;
-                report.soft_deleted += 1;
+        use tracing::Instrument as _;
+        let span = tracing::info_span!(
+            "harn.session.sweep_retention",
+            harn.session.sweep.archive_sink_configured = self.hooks().archive_sink.is_some(),
+            harn.session.sweep.archived = tracing::field::Empty,
+            harn.session.sweep.soft_deleted = tracing::field::Empty,
+            harn.session.sweep.hard_deleted = tracing::field::Empty,
+        );
+        let span_for_record = span.clone();
+        let sink = self.hooks().archive_sink.clone();
+        let result = async move {
+            let mut report = SweepReport::default();
+            let sessions = self.list(ListFilter::default()).await?;
+            for session in sessions {
+                if policy.should_hard_delete(&session, now_ms) {
+                    if let Some(sink) = sink.as_ref() {
+                        let tombstone = Tombstone {
+                            session_id: session.id.clone(),
+                            tenant_id: session.tenant_id.clone(),
+                            deleted_at_ms: now_ms,
+                            deleted_at: super::event::ms_to_rfc3339(now_ms),
+                            final_chain_root_hash: session.chain_root_hash.clone(),
+                            final_event_id: session.last_event_id,
+                        };
+                        sink.tombstone(&tombstone).await?;
+                        report.tombstoned += 1;
+                    }
+                    self.hard_delete(&session.id).await?;
+                    report.hard_deleted += 1;
+                } else if policy.should_soft_delete(&session, now_ms) {
+                    if policy.should_archive(&session, now_ms) {
+                        if let Some(sink) = sink.as_ref() {
+                            let events = read_all_events(self, &session.id).await?;
+                            sink.archive(&session, &events).await?;
+                            report.archived += 1;
+                        }
+                    }
+                    self.soft_delete(&session.id).await?;
+                    report.soft_deleted += 1;
+                }
             }
+            Ok::<_, StoreError>(report)
         }
-        Ok(report)
+        .instrument(span)
+        .await?;
+        span_for_record.record("harn.session.sweep.archived", result.archived as i64);
+        span_for_record.record(
+            "harn.session.sweep.soft_deleted",
+            result.soft_deleted as i64,
+        );
+        span_for_record.record(
+            "harn.session.sweep.hard_deleted",
+            result.hard_deleted as i64,
+        );
+        Ok(result)
     }
+}
+
+/// Drain every event for a session via repeated paginated reads. Used
+/// by [`SessionStore::sweep_retention`] when shipping a session to the
+/// [`super::retention::ArchiveSink`].
+async fn read_all_events<S: SessionStore + ?Sized>(
+    store: &S,
+    session_id: &str,
+) -> StoreResult<Vec<StoredEvent>> {
+    let mut all = Vec::new();
+    let mut cursor: Option<EventId> = None;
+    loop {
+        let page = store
+            .read(
+                session_id,
+                ReadRange {
+                    from_event_id: cursor,
+                    to_event_id: None,
+                    limit: Some(MAX_READ_BATCH),
+                },
+            )
+            .await?;
+        let next = page.next_cursor;
+        all.extend(page.events);
+        match next {
+            Some(next_cursor) => cursor = Some(next_cursor),
+            None => break,
+        }
+    }
+    Ok(all)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SweepReport {
     pub soft_deleted: usize,
     pub hard_deleted: usize,
+    /// Sessions handed to [`super::retention::ArchiveSink::archive`]
+    /// because they crossed `min_age_before_archive_seconds`.
+    pub archived: usize,
+    /// Hard-deleted sessions whose final state was emitted as a
+    /// [`super::retention::Tombstone`] to the archive sink.
+    pub tombstoned: usize,
 }
 
 /// Dyn-dispatch alias so adapters can keep one `Arc<dyn SessionStore>`
