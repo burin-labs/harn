@@ -15,9 +15,6 @@
 //! owns the keyed map of these cells.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
-
-use harn_clock::Clock;
 
 /// One trip through the algorithm — either admitted, or rejected with a
 /// hint at how long the caller should back off before retrying. Callers
@@ -69,16 +66,12 @@ impl Algorithm {
         }
     }
 
-    /// Build a fresh per-key cell of the chosen algorithm. The
-    /// `capacity` argument means different things by algorithm — see the
-    /// individual impls — but always upper-bounds the burst tolerance.
-    pub fn new_cell(
-        self,
-        rate_per_sec: f64,
-        capacity: u32,
-        clock: &Arc<dyn Clock>,
-    ) -> Box<dyn RateAlgorithm> {
-        let now_ms = clock.monotonic_ms();
+    /// Build a fresh per-key cell of the chosen algorithm. `now_ms` is
+    /// the current monotonic millis from the clock the store owns —
+    /// passed in so the algorithm enum stays decoupled from the time
+    /// substrate. `capacity` means different things by algorithm (see
+    /// the individual impls) but always upper-bounds the burst.
+    pub fn new_cell(self, rate_per_sec: f64, capacity: u32, now_ms: i64) -> Box<dyn RateAlgorithm> {
         match self {
             Self::TokenBucket => Box::new(TokenBucket::new(rate_per_sec, capacity, now_ms)),
             Self::SlidingWindow => Box::new(SlidingWindow::new(

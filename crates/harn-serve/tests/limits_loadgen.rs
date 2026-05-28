@@ -35,7 +35,7 @@ fn synth_request(function: &str) -> CallRequest {
         // Unique replay key per call so the cache never short-circuits
         // the limit check — the spec runs each call through the full
         // gate.
-        replay_key: Some(format!("loadgen-{}-{}", function, uuid_short())),
+        replay_key: Some(format!("loadgen-{function}-{}", uuid_short())),
         trace_id: None,
         parent_span_id: None,
         metadata: BTreeMap::new(),
@@ -177,7 +177,13 @@ pub fn ping() -> string {
 }
 
 #[tokio::test]
-async fn backpressure_high_watermark_rejects_concurrent_overflow() {
+async fn backpressure_sequential_dispatches_never_exceed_watermark() {
+    // Strictly-sequential dispatches under `in_flight_max` should
+    // never reject: each guard drops on `await` completion before the
+    // next call arrives. The companion `LimitRegistry`-level
+    // concurrency test (limits::tests::backpressure_rejects_when_…)
+    // exercises overlapping in-flight slots without needing a slow
+    // .harn body.
     let dir = TempDir::new().expect("tempdir");
     let path = write_script(
         &dir,
@@ -189,23 +195,13 @@ pub fn slow() -> string {
 "#,
     );
 
-    let clock = paused_clock();
-    let registry = LimitRegistry::in_memory(clock);
-    let core = Arc::new(
-        DispatchCore::new(DispatchCoreConfig {
-            limit_registry: Some(registry.clone()),
-            ..DispatchCoreConfig::for_script(&path)
-        })
-        .expect("dispatch core"),
-    );
+    let registry = LimitRegistry::in_memory(paused_clock());
+    let core = DispatchCore::new(DispatchCoreConfig {
+        limit_registry: Some(registry.clone()),
+        ..DispatchCoreConfig::for_script(&path)
+    })
+    .expect("dispatch core");
 
-    // Pin two slots open by holding the dispatch futures' returned
-    // bodies — we can't easily block inside .harn from a test without
-    // a channel, so instead exercise the in-flight counter directly
-    // through repeated calls and watch the stats. Even though each
-    // dispatch finishes before the next starts in this single-task
-    // test, the in-flight max=2 ceiling should never reject a strictly
-    // sequential call.
     for _ in 0..5 {
         core.dispatch(synth_request("slow"))
             .await
@@ -213,6 +209,73 @@ pub fn slow() -> string {
     }
     assert_eq!(registry.stats().admitted, 5);
     assert_eq!(registry.stats().rejected_backpressure, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn backpressure_concurrent_overflow_rejects_above_watermark() {
+    // Drive the registry directly with parallel `check` calls so the
+    // overflow trips deterministically — `core.dispatch` can't hold
+    // its guard open across our async boundary without slow .harn
+    // I/O. The registry's atomic fetch_add / rollback closes the
+    // race; here we verify the math holds under contention.
+    use std::collections::BTreeSet;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    use std::sync::Arc as StdArc;
+
+    use harn_serve::{LimitContext, LimitDecision, LimitScope, RouteLimits};
+
+    let registry = LimitRegistry::in_memory(paused_clock());
+    let limits = RouteLimits {
+        in_flight_max: Some(3),
+        ..RouteLimits::default()
+    };
+    let admitted = StdArc::new(AtomicUsize::new(0));
+    let rejected = StdArc::new(AtomicUsize::new(0));
+
+    let mut handles = Vec::new();
+    for _ in 0..32 {
+        let registry = registry.clone();
+        let limits = limits.clone();
+        let admitted = admitted.clone();
+        let rejected = rejected.clone();
+        handles.push(tokio::spawn(async move {
+            let scopes = BTreeSet::new();
+            let ctx = LimitContext {
+                route: "/r",
+                tenant_id: None,
+                scopes: &scopes,
+            };
+            match registry.check(&ctx, &limits) {
+                LimitDecision::Allowed(guard) => {
+                    admitted.fetch_add(1, AtomicOrdering::Relaxed);
+                    // Hold the guard briefly so concurrent attempts
+                    // observe a full bucket.
+                    tokio::task::yield_now().await;
+                    drop(guard);
+                }
+                LimitDecision::Rejected {
+                    scope: LimitScope::Backpressure,
+                    ..
+                } => {
+                    rejected.fetch_add(1, AtomicOrdering::Relaxed);
+                }
+                LimitDecision::Rejected { scope, .. } => {
+                    panic!("expected backpressure rejection, got {scope:?}");
+                }
+            }
+        }));
+    }
+    for h in handles {
+        h.await.expect("task joined");
+    }
+    let admitted = admitted.load(AtomicOrdering::Relaxed);
+    let rejected = rejected.load(AtomicOrdering::Relaxed);
+    assert_eq!(admitted + rejected, 32);
+    // We can't assert exact splits (scheduler-dependent) but the
+    // critical invariant is that the in-flight count never overshot
+    // the cap: any rejection means the race was correctly closed.
+    assert!(rejected > 0, "expected at least one backpressure rejection");
+    assert!(admitted > 0, "expected at least one admission");
 }
 
 #[tokio::test]

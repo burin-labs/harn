@@ -87,24 +87,27 @@ impl InMemoryLimitStore {
         self.cells.lock().expect("limit cells poisoned").len()
     }
 
-    fn cell_handle(&self, key: &str, spec: &BucketSpec) -> SharedCell {
+    fn cell_handle(&self, key: &str, spec: &BucketSpec, now_ms: i64) -> SharedCell {
+        // Fast path: borrowed lookup avoids the `to_string()` alloc on
+        // every dispatch against an already-known key. The slow path
+        // only fires the first time a route/tenant/scope appears.
         let mut cells = self.cells.lock().expect("limit cells poisoned");
-        cells
-            .entry(key.to_string())
-            .or_insert_with(|| {
-                let cell = spec
-                    .algorithm
-                    .new_cell(spec.rate_per_sec, spec.capacity, &self.clock);
-                Arc::new(Mutex::new(cell))
-            })
-            .clone()
+        if let Some(handle) = cells.get(key) {
+            return handle.clone();
+        }
+        let cell = spec
+            .algorithm
+            .new_cell(spec.rate_per_sec, spec.capacity, now_ms);
+        let handle = Arc::new(Mutex::new(cell));
+        cells.insert(key.to_string(), handle.clone());
+        handle
     }
 }
 
 impl LimitStore for InMemoryLimitStore {
     fn try_admit(&self, key: &str, spec: &BucketSpec, _cost: u32) -> CellDecision {
-        let handle = self.cell_handle(key, spec);
         let now_ms = self.clock.monotonic_ms();
+        let handle = self.cell_handle(key, spec, now_ms);
         let mut cell = handle.lock().expect("limit cell poisoned");
         cell.try_admit(now_ms)
     }

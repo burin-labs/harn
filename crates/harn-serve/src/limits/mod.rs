@@ -390,11 +390,54 @@ impl LimitRegistry {
     }
 
     fn route_in_flight_handle(&self, route: &str) -> Arc<AtomicUsize> {
+        // Fast path: lookup with the borrowed `&str` to skip the
+        // allocation when the route is already known. Falls through to
+        // an owned-key insertion when it isn't, which only happens
+        // once per route over the process lifetime.
         let mut in_flight = self.in_flight.lock().expect("in-flight map poisoned");
-        in_flight
-            .entry(route.to_string())
-            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
-            .clone()
+        if let Some(handle) = in_flight.get(route) {
+            return handle.clone();
+        }
+        let counter = Arc::new(AtomicUsize::new(0));
+        in_flight.insert(route.to_string(), counter.clone());
+        counter
+    }
+
+    /// Bump a stats counter by scope, used by both successful-admit
+    /// and rejection paths so the per-scope rejection counters stay
+    /// in lockstep with the [`LimitScope`] enum (adding a new scope
+    /// only requires extending this match + the struct).
+    fn record_rejection(&self, scope: LimitScope) {
+        let counter = match scope {
+            LimitScope::Route => &self.stats.rejected_route,
+            LimitScope::Tenant => &self.stats.rejected_tenant,
+            LimitScope::Scope => &self.stats.rejected_scope,
+            LimitScope::Backpressure => &self.stats.rejected_backpressure,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Try one rate dimension against the underlying store. Returns
+    /// `Some(retry_after_ms)` on rejection (registry has already
+    /// counted the rejection and emitted telemetry); `None` on
+    /// admission. Centralises the "build spec, try_admit, emit
+    /// rejection" plumbing the three rate dimensions all share.
+    fn admit_rate_dimension(
+        &self,
+        ctx: &LimitContext<'_>,
+        scope: LimitScope,
+        quota: Quota,
+        limits: &RouteLimits,
+        multiplier: f64,
+        key: &str,
+    ) -> Option<u64> {
+        let spec = scaled_bucket(limits.bucket_for(quota), multiplier);
+        let CellDecision::Rejected { retry_after_ms } = self.store.try_admit(key, &spec, 1) else {
+            return None;
+        };
+        self.record_rejection(scope);
+        emit_rejection(ctx, scope, retry_after_ms);
+        Some(retry_after_ms)
     }
 
     /// Evaluate every declared bucket and the backpressure watermark
@@ -414,12 +457,10 @@ impl LimitRegistry {
         // rejection to keep noise rejections cheap.
 
         if let Some(quota) = limits.per_route {
-            let spec = scaled_bucket(limits.bucket_for(quota), multiplier);
             let key = format!("route:{}", ctx.route);
-            if let CellDecision::Rejected { retry_after_ms } = self.store.try_admit(&key, &spec, 1)
+            if let Some(retry_after_ms) =
+                self.admit_rate_dimension(ctx, LimitScope::Route, quota, limits, multiplier, &key)
             {
-                self.stats.rejected_route.fetch_add(1, Ordering::Relaxed);
-                emit_rejection(ctx, LimitScope::Route, retry_after_ms);
                 return LimitDecision::Rejected {
                     scope: LimitScope::Route,
                     retry_after_ms,
@@ -428,15 +469,16 @@ impl LimitRegistry {
         }
 
         if let Some(quota) = limits.per_tenant {
-            // Without a bound tenant, `per_tenant` cannot enforce; treat
-            // the dispatch as anonymous and fall back to the route key.
+            // Without a bound tenant the per_tenant bucket is meaningless,
+            // but rejecting "no tenant" outright would surprise dev/test
+            // callers who haven't wired authentication yet — instead fold
+            // anonymous traffic into a shared `__anon__` bucket so the
+            // ceiling still bounds runaway clients.
             let tenant_key = ctx.tenant_id.map(|t| t.0.as_str()).unwrap_or("__anon__");
-            let spec = scaled_bucket(limits.bucket_for(quota), multiplier);
             let key = format!("tenant:{tenant_key}:{}", ctx.route);
-            if let CellDecision::Rejected { retry_after_ms } = self.store.try_admit(&key, &spec, 1)
+            if let Some(retry_after_ms) =
+                self.admit_rate_dimension(ctx, LimitScope::Tenant, quota, limits, multiplier, &key)
             {
-                self.stats.rejected_tenant.fetch_add(1, Ordering::Relaxed);
-                emit_rejection(ctx, LimitScope::Tenant, retry_after_ms);
                 return LimitDecision::Rejected {
                     scope: LimitScope::Tenant,
                     retry_after_ms,
@@ -445,20 +487,12 @@ impl LimitRegistry {
         }
 
         if let Some(quota) = limits.per_scope {
-            // The "scope" bucket is keyed on the joined scope set so a
-            // caller that holds two scopes shares quota across both —
-            // matching how `harn-cloud-gateway` charges scope quotas.
-            let scope_key = if ctx.scopes.is_empty() {
-                "__none__".to_string()
-            } else {
-                ctx.scopes.iter().cloned().collect::<Vec<_>>().join(",")
-            };
-            let spec = scaled_bucket(limits.bucket_for(quota), multiplier);
-            let key = format!("scope:{scope_key}:{}", ctx.route);
-            if let CellDecision::Rejected { retry_after_ms } = self.store.try_admit(&key, &spec, 1)
+            // Joined-scope keying matches `harn-cloud-gateway` semantics:
+            // callers that present the same scope set share quota.
+            let key = format!("scope:{}:{}", scope_key(ctx.scopes), ctx.route);
+            if let Some(retry_after_ms) =
+                self.admit_rate_dimension(ctx, LimitScope::Scope, quota, limits, multiplier, &key)
             {
-                self.stats.rejected_scope.fetch_add(1, Ordering::Relaxed);
-                emit_rejection(ctx, LimitScope::Scope, retry_after_ms);
                 return LimitDecision::Rejected {
                     scope: LimitScope::Scope,
                     retry_after_ms,
@@ -477,10 +511,8 @@ impl LimitRegistry {
             let prev = counter.fetch_add(1, Ordering::AcqRel);
             if prev >= max as usize {
                 counter.fetch_sub(1, Ordering::AcqRel);
-                self.stats
-                    .rejected_backpressure
-                    .fetch_add(1, Ordering::Relaxed);
-                let retry_after_ms = 250; // re-poll quickly; the queue drains by completions, not time
+                let retry_after_ms = BACKPRESSURE_RETRY_AFTER_MS;
+                self.record_rejection(LimitScope::Backpressure);
                 emit_rejection(ctx, LimitScope::Backpressure, retry_after_ms);
                 return LimitDecision::Rejected {
                     scope: LimitScope::Backpressure,
@@ -494,6 +526,24 @@ impl LimitRegistry {
         self.stats.admitted.fetch_add(1, Ordering::Relaxed);
         LimitDecision::Allowed(LimitGuard::unbounded())
     }
+}
+
+/// Backpressure rejections drain by *completions*, not by clock — the
+/// caller's hint is a short poll interval, not a quota window.
+const BACKPRESSURE_RETRY_AFTER_MS: u64 = 250;
+
+fn scope_key(scopes: &std::collections::BTreeSet<String>) -> String {
+    if scopes.is_empty() {
+        return "__none__".to_string();
+    }
+    let mut out = String::new();
+    for scope in scopes {
+        if !out.is_empty() {
+            out.push(',');
+        }
+        out.push_str(scope);
+    }
+    out
 }
 
 fn scaled_bucket(mut spec: BucketSpec, multiplier: f64) -> BucketSpec {
