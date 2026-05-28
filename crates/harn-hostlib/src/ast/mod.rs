@@ -32,9 +32,11 @@ use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, Syn
 
 mod apply_node;
 mod bracket_balance;
+mod edit_common;
 mod function_body;
 mod fuzzy;
 mod imports;
+mod insert_at_anchor;
 mod language;
 mod mutation;
 mod outline;
@@ -206,6 +208,12 @@ impl HostlibCapability for AstCapability {
             "hostlib_ast_apply_node",
             "apply_node",
             apply_node::run,
+        );
+        register(
+            registry,
+            "hostlib_ast_insert_at_anchor",
+            "insert_at_anchor",
+            insert_at_anchor::run,
         );
     }
 }

@@ -296,6 +296,79 @@ PHP, Scala, Bash, Zig, Elixir, Lua, Haskell, R. Languages outside the
 table return `result == "unsupported_language"`; callers can fall back
 to `edit_apply_old_new_patch` (text-mode) in that branch.
 
+### How to add a new test to a Rust mod
+
+`edit_insert_at_anchor` (also from [`std/edit`](./stdlib/edit.md)) is
+the companion primitive for adding a sibling or child node next to an
+AST anchor — perfect for "append a new test case to this `mod tests`"
+or "add a new variant before the trailing `}`". Where `apply_node`
+*replaces* a span, `insert_at_anchor` *adds* one.
+
+```harn,ignore
+import "std/edit"
+
+pipeline default(task) {
+  // src/lib.rs contains:
+  //
+  //   #[cfg(test)]
+  //   mod tests {
+  //       #[test]
+  //       fn one() {}
+  //   }
+  //
+  let result = edit_insert_at_anchor({
+    path: "src/lib.rs",
+    query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
+    position: "last_child",
+    content: "#[test]\nfn two() {}",
+  })
+  log(result.result)        // "applied"
+  log(result.position)      // "last_child"
+}
+```
+
+`position` is one of `"before"`, `"after"`, `"first_child"`, or
+`"last_child"`. The first two place a sibling at the anchor's indent
+depth; the last two place a child at the anchor's body depth (taken
+from existing children if present, else `anchor_indent + indent_unit`).
+
+The anchor query must match exactly one node. Multi-match returns
+`result == "ambiguous"` and lists every competing span. Tighten with
+`(#eq? @name "…")` or an extra structural predicate to pin a single
+target.
+
+### How to add a new import to a TypeScript file
+
+```harn,ignore
+import "std/edit"
+
+pipeline default(task) {
+  // src/index.ts contains:
+  //
+  //   import { a } from "./a";
+  //   import { b } from "./b";
+  //
+  //   const x = 1;
+  //
+  let result = edit_insert_at_anchor({
+    path: "src/index.ts",
+    // Anchor on the last existing import so the new line lands right
+    // below it (and above any code).
+    query: "(import_statement source: (string (string_fragment) @src) (#eq? @src \"./b\")) @anchor",
+    position: "after",
+    content: "import { c } from \"./c\";",
+  })
+  log(result.applied)       // true
+}
+```
+
+Validation is on by default for both primitives: the post-edit source
+is re-parsed and any tree-sitter `ERROR` / `MISSING` node aborts with
+`result == "syntax_error"`, leaving the file on disk untouched. Pair
+either primitive with a `session_id` to route the read + write through
+the staged filesystem (#1722) so the edit is atomic alongside other
+staged writes.
+
 ## MCP servers
 
 ### How to call an MCP server

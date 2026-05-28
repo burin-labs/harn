@@ -348,6 +348,70 @@ return {{
 }
 
 #[test]
+fn end_to_end_insert_at_anchor_via_harn_script() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let source_path = root.join("hello.rs");
+    fs::write(
+        &source_path,
+        "fn alpha() {\n    1\n}\n\nfn gamma() {\n    3\n}\n",
+    )
+    .unwrap();
+    let path_str = source_path.to_string_lossy().replace('\\', "/");
+
+    let path = &path_str;
+    let script = format!(
+        r#"
+let preview = hostlib_ast_insert_at_anchor({{
+    path: "{path}",
+    query: "(function_item name: (identifier) @name (#eq? @name \"alpha\")) @anchor",
+    position: "after",
+    content: "fn beta() {{\n    2\n}}",
+    dry_run: true,
+}})
+let applied = hostlib_ast_insert_at_anchor({{
+    path: "{path}",
+    query: "(function_item name: (identifier) @name (#eq? @name \"alpha\")) @anchor",
+    position: "after",
+    content: "fn beta() {{\n    2\n}}",
+}})
+return {{
+    preview_result: preview.result,
+    preview_dry: preview.dry_run,
+    preview_position: preview.position,
+    preview_contains_beta: contains(preview.preview, "fn beta()"),
+    applied_result: applied.result,
+    applied_position: applied.position,
+}}
+"#,
+    );
+
+    let (result, _) = run_harn(&script);
+    let dict = match &result {
+        VmValue::Dict(d) => d,
+        other => panic!("expected dict, got {other:?}"),
+    };
+    let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
+    assert!(matches!(get("preview_result"), VmValue::String(s) if s.as_ref() == "applied"));
+    assert!(matches!(get("preview_dry"), VmValue::Bool(true)));
+    assert!(matches!(get("preview_position"), VmValue::String(s) if s.as_ref() == "after"));
+    assert!(matches!(get("preview_contains_beta"), VmValue::Bool(true)));
+    assert!(matches!(get("applied_result"), VmValue::String(s) if s.as_ref() == "applied"));
+    assert!(matches!(get("applied_position"), VmValue::String(s) if s.as_ref() == "after"));
+
+    // Disk content should contain all three functions in order, and the
+    // dry-run call should not have touched the file before the live one.
+    let on_disk = std::fs::read_to_string(&source_path).expect("read");
+    let alpha = on_disk.find("fn alpha()").expect("alpha present");
+    let beta = on_disk.find("fn beta()").expect("beta present");
+    let gamma = on_disk.find("fn gamma()").expect("gamma present");
+    assert!(
+        alpha < beta && beta < gamma,
+        "expected alpha < beta < gamma on disk, got:\n{on_disk}"
+    );
+}
+
+#[test]
 fn end_to_end_code_index_via_harn_script() {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
