@@ -17,6 +17,9 @@ use protocol::{DapMessage, DapResponse};
 const MAX_DAP_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
 fn main() {
+    // Defeat rlib dead-code stripping of the linkme distributed slice
+    // (linkme issue #36) before reading `all_builtin_signatures()`.
+    harn_vm::stdlib::force_link();
     // Install the macro-emitted builtin signature slice into the parser
     // registry so source-file typechecking inside DAP launch covers
     // `#[harn_builtin]`-migrated entries.

@@ -303,3 +303,18 @@ fn migrated_stdlib_modules_publish_runtime_metadata() {
         );
     }
 }
+
+#[test]
+fn linkme_distributed_slice_populates_with_all_builtins() {
+    let linkme_count = harn_vm::stdlib::macros::ALL_BUILTIN_DEFS.len();
+    let manual_count = harn_vm::stdlib::all_builtin_defs().len();
+    assert!(
+        linkme_count > 0,
+        "linkme distributed slice ALL_BUILTIN_DEFS is empty — likely rlib dead-code stripping, see linkme issue #36"
+    );
+    assert_eq!(
+        linkme_count, manual_count,
+        "linkme slice and manual aggregator out of sync: linkme={}, manual={}",
+        linkme_count, manual_count
+    );
+}

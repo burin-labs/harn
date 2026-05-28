@@ -409,11 +409,10 @@ const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
     &DICT_FROM_PAIRS_IMPL_DEF,
 ];
 
-/// The macro-emitted builtins from this module that the top-level stdlib
-/// aggregator pushes into `all_builtin_defs()`. Currently covers the
-/// dict_builder family; the rest of `collections.rs` still uses inline
-/// `vm.register_builtin` closures and will migrate in later passes.
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = DICT_BUILDER_BUILTINS;
+// (Per-module MODULE_BUILTINS slice deleted — `#[harn_builtin]` now
+// auto-registers each emitted DEF via the linkme distributed slice
+// `crate::stdlib::macros::ALL_BUILTIN_DEFS`, so no aggregation here is
+// needed.)
 
 /// Returns a shallow copy of `value`. Dicts and lists become fresh
 /// allocations independent of the source; primitives are returned by value.

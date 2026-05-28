@@ -275,6 +275,14 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         }
     };
 
+    // Sibling linkme entry that registers `#def_ident` into the
+    // workspace-global `ALL_BUILTIN_DEFS` distributed slice — eliminates
+    // the need for per-module `MODULE_BUILTINS` arrays + a hand-maintained
+    // aggregator in `stdlib.rs`. The entry name is derived from the def
+    // identifier so two builtins in different modules never collide on
+    // the static name.
+    let link_ident = format_ident!("__{}_LINKME", fn_name.to_string().to_uppercase());
+
     let out = quote! {
         #item_fn
 
@@ -292,6 +300,11 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
             parser_only: #parser_only,
             runtime_only: #runtime_only,
         };
+
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
+        static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
     };
     Ok(out)
 }

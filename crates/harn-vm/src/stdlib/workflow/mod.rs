@@ -16,7 +16,7 @@ mod usage;
 
 pub(in crate::stdlib) use self::artifact::load_run_tree;
 pub(in crate::stdlib) use self::convert::workflow_graph_to_vm;
-pub(crate) use self::register::{register_workflow_builtins, MODULE_BUILTINS};
+pub(crate) use self::register::register_workflow_builtins;
 
 #[cfg(test)]
 mod tests;
