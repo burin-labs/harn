@@ -177,29 +177,11 @@ impl Vm {
         for name in names {
             match def.handler {
                 VmBuiltinHandler::Sync(f) => {
-                    let mut meta = VmBuiltinMetadata::sync_static(name).arity(arity);
-                    if let Some(category) = def.category {
-                        meta = meta.category_static(category);
-                    }
-                    if let Some(doc) = def.doc {
-                        meta = meta.doc_static(doc);
-                    }
-                    if let Some(sig_text) = def.signature_text {
-                        meta = meta.signature_static(sig_text);
-                    }
+                    let meta = builtin_def_metadata(def, name, arity, VmBuiltinKind::Sync);
                     self.register_builtin_with_metadata(meta, f);
                 }
                 VmBuiltinHandler::Async(f) => {
-                    let mut meta = VmBuiltinMetadata::async_static(name).arity(arity);
-                    if let Some(category) = def.category {
-                        meta = meta.category_static(category);
-                    }
-                    if let Some(doc) = def.doc {
-                        meta = meta.doc_static(doc);
-                    }
-                    if let Some(sig_text) = def.signature_text {
-                        meta = meta.signature_static(sig_text);
-                    }
+                    let meta = builtin_def_metadata(def, name, arity, VmBuiltinKind::Async);
                     // Wrap the function pointer that already returns an
                     // AsyncBuiltinFuture so register_async_builtin_with_metadata's
                     // generic bound `F: Fn(Vec<VmValue>) -> Fut + 'static` is met.
@@ -638,6 +620,33 @@ impl Vm {
             }
         }
     }
+}
+
+/// Build the discoverable [`VmBuiltinMetadata`] for one entry of a
+/// `#[harn_builtin]`-emitted `VmBuiltinDef`, threading the optional
+/// category / doc / signature_text fields without duplicating the chain
+/// across the Sync / Async dispatch arms in `register_builtin_def`.
+fn builtin_def_metadata(
+    def: &'static crate::stdlib::macros::VmBuiltinDef,
+    name: &'static str,
+    arity: VmBuiltinArity,
+    kind: VmBuiltinKind,
+) -> VmBuiltinMetadata {
+    let mut meta = match kind {
+        VmBuiltinKind::Sync => VmBuiltinMetadata::sync_static(name),
+        VmBuiltinKind::Async => VmBuiltinMetadata::async_static(name),
+    }
+    .arity(arity);
+    if let Some(category) = def.category {
+        meta = meta.category_static(category);
+    }
+    if let Some(doc) = def.doc {
+        meta = meta.doc_static(doc);
+    }
+    if let Some(sig_text) = def.signature_text {
+        meta = meta.signature_static(sig_text);
+    }
+    meta
 }
 
 /// Derive a [`VmBuiltinArity`] from a parsed [`BuiltinSignature`]. Required
