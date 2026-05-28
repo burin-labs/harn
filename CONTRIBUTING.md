@@ -179,9 +179,7 @@ The detection logic lives in
 flags additions to:
 
 - **Stdlib builtins** — `crates/harn-vm/src/stdlib/**/*.rs`: a new
-  `#[harn_builtin]` annotation, or (in the few remaining unmigrated
-  modules) a new `vm.register_builtin(...)`, `SyncBuiltin::new(...)`,
-  `async_builtin!(...)`, or `register_builtin_group(...)` call. See
+  `#[harn_builtin]` annotation. See
   [Adding a stdlib builtin](#adding-a-stdlib-builtin) for the canonical
   proc-macro pattern.
 - **Host capabilities** — `crates/harn-vm/src/stdlib/host.rs` (a new
@@ -366,25 +364,17 @@ Prefer `#[harn_builtin(parser_only = true)]` in the VM crate for new
 parser-only entries; only touch the parser-side shadow when you're
 adding a name the VM stdlib genuinely doesn't expose.
 
-### Deprecated registration DSL
+### Captured-state pattern (for builtins that need per-VM handles)
 
-`crates/harn-vm/src/stdlib/registration.rs` (`SyncBuiltin`,
-`AsyncBuiltin`, `BuiltinGroup`, `register_builtin_group`,
-`async_builtin!`) is deprecated. It survives only for a small set of
-captured-state files that depend on closure-captured `Rc`/`Arc` handles
-that the proc-macro doesn't yet model. Do not extend it. New builtins
-must use `#[harn_builtin]`; the unmigrated holdouts will move once the
-captured-state shape lands a proc-macro-friendly equivalent.
-
-### Looking ahead
-
-Today every migrated module hand-rolls its `MODULE_BUILTINS` slice and
-`stdlib::all_builtin_defs()` lists each module by name. A planned
-follow-up will collapse those per-module slices into a single
-workspace-global slice via `linkme::distributed_slice`, so the macro
-expansion will register itself automatically and the central
-concatenation in `stdlib.rs` will go away. Until that lands, keep
-appending to `MODULE_BUILTINS` and `all_builtin_defs()` as above.
+A few builtins need access to per-VM state (`MetadataState`,
+`CheckpointState`, `pool` registry, etc.) that closures used to capture
+directly. The proc-macro shape is a free fn, so those modules use a
+`thread_local!` cell installed by the module's `register_<module>_builtins`
+function and read inside the macro-emitted handler via
+`with_state(fn_name, |state| { ... })`. See `crates/harn-vm/src/checkpoint.rs`
+and `crates/harn-vm/src/metadata.rs` for canonical examples. The Harn VM
+runs single-threaded per execution, so this matches the old
+`Rc<RefCell<State>>` semantics 1:1.
 
 ## Adding conformance tests
 

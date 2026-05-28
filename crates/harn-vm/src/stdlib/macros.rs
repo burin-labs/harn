@@ -55,10 +55,9 @@ pub enum VmBuiltinHandler {
 pub type VmBuiltinDef = BuiltinDef<VmBuiltinHandler>;
 
 /// Eager-registration helper: install every entry (name + aliases) on `vm`
-/// using the macro-emitted handler. The replacement for the legacy
-/// `register_builtin_group(vm, BuiltinGroup::new().sync(...))` shape —
-/// post-migration call sites just iterate a `&[&VmBuiltinDef]` slice and
-/// call this once per entry.
+/// using the macro-emitted handler. Each module's `register_*_builtins(vm)`
+/// calls this with its `MODULE_BUILTINS` slice so the call ordering between
+/// modules stays deterministic (e.g. `clock` overrides `process::timestamp`).
 pub fn register_builtin_defs(vm: &mut crate::vm::Vm, defs: &'static [&'static VmBuiltinDef]) {
     for def in defs {
         vm.register_builtin_def(def);
@@ -68,7 +67,7 @@ pub fn register_builtin_defs(vm: &mut crate::vm::Vm, defs: &'static [&'static Vm
 /// Deferred-registration helper: register names + aliases as deferred
 /// builtins on `vm`. The first time any of them dispatches, `registrar`
 /// runs (typically installs the LLM stack), which re-registers the real
-/// impls. Replaces `register_deferred_builtin_group` from the legacy DSL.
+/// impls.
 pub fn register_deferred_builtin_defs(
     vm: &mut crate::vm::Vm,
     defs: &[&'static VmBuiltinDef],
