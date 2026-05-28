@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/safe_text_patch.response.json",
+  "title": "fs.safe_text_patch response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "result": {
+      "type": "string",
+      "enum": ["applied", "stale_base", "no_op"],
+      "description": "`applied` — pre-image hash matched and bytes changed. `stale_base` — `expected_hash` did not match the observed pre-image. `no_op` — pre-image hash matched but the post-image is identical to the pre-image, so the write was skipped."
+    },
+    "applied": { "type": "boolean" },
+    "stale_base": { "type": "boolean" },
+    "current_hash": {
+      "type": "string",
+      "description": "`sha256:HEX` of the observed pre-image. Echoed even on `stale_base` so the caller can re-read and retry without an extra hop."
+    },
+    "before_sha256": { "type": "string" },
+    "after_sha256": { "type": "string" },
+    "expected_hash": { "type": ["string", "null"] },
+    "created": { "type": "boolean" },
+    "bytes_written": { "type": "integer", "minimum": 0 }
+  },
+  "required": [
+    "path",
+    "result",
+    "applied",
+    "stale_base",
+    "current_hash",
+    "before_sha256",
+    "after_sha256",
+    "created",
+    "bytes_written"
+  ],
+  "additionalProperties": false
+}

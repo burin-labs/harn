@@ -1035,3 +1035,243 @@ pub fn edit_insert_at_anchor(params) {
     provenance: provenance,
   }
 }
+
+fn __edit_safe_patch_telemetry(result, hunks_count, failed_hunk_index) {
+  return {
+    result: result,
+    hunks: hunks_count,
+    stale_base: if result == "stale_base" {
+      1
+    } else {
+      0
+    },
+    hunk_conflict: if result == "hunk_conflict" {
+      1
+    } else {
+      0
+    },
+    applied: if result == "applied" {
+      1
+    } else {
+      0
+    },
+    no_op: if result == "no_op" {
+      1
+    } else {
+      0
+    },
+    failed_hunk_index: failed_hunk_index,
+  }
+}
+
+fn __edit_safe_patch_result(ctx, fields = nil) {
+  let extra = fields ?? {}
+  let result = extra?.result ?? ctx.result
+  let failed_idx = extra?.failed_hunk_index
+  let base = {
+    ok: result == "applied" || result == "no_op",
+    result: result,
+    applied: false,
+    changed: false,
+    path: ctx.path,
+    before_sha256: ctx.before_hash,
+    after_sha256: ctx.before_hash,
+    current_hash: ctx.current_hash,
+    expected_hash: ctx.expected_hash,
+    hunks_count: ctx.hunks_count,
+    hunk_results: extra?.hunk_results ?? [],
+    failed_hunk_index: failed_idx,
+    failed_hunk_error_code: extra?.failed_hunk_error_code,
+    failed_hunk_message: extra?.failed_hunk_message,
+    stale_base: result == "stale_base",
+    bytes_written: 0,
+    created: false,
+    preview: nil,
+    errors: [],
+    warnings: [],
+    telemetry: __edit_safe_patch_telemetry(result, ctx.hunks_count, failed_idx),
+    provenance: {
+      module: "std/edit",
+      helper: "edit_safe_text_patch",
+      path: ctx.path,
+      before_sha256: ctx.before_hash,
+      after_sha256: extra?.after_sha256 ?? ctx.before_hash,
+      current_hash: ctx.current_hash,
+      expected_hash: ctx.expected_hash,
+      caller: ctx.options?.provenance,
+    },
+  }
+  return base.merge(extra)
+}
+
+/**
+ * Apply a sequence of old/new hunks to `path` atomically against the
+ * staged-fs overlay (#1722). Snapshots the current bytes at `path`,
+ * checks `expected_hash` (when supplied) for stale-base rejection, runs
+ * each hunk through `edit_apply_old_new_patch` against the running
+ * post-image, and writes the final bytes back through the same overlay.
+ *
+ * All-or-nothing: if any hunk rejects (no match / ambiguous / lazy /
+ * etc.) the call returns `hunk_conflict` and no bytes are written.
+ *
+ * ## Params
+ *
+ * - `path`: file to mutate.
+ * - `hunks`: list of `{old_text, new_text, options?}`. Each hunk's
+ *   `options` override the top-level `match_options` for that hunk.
+ * - `expected_hash`: `sha256:HEX` of the pre-image the caller observed.
+ *   When omitted the stale-base check is skipped (still atomic w.r.t.
+ *   other staged-fs writers in the same process).
+ * - `session_id`: hostlib session whose staged-fs overlay should
+ *   intercept the read and the write.
+ * - `match_options`: default `edit_apply_old_new_patch` options merged
+ *   into every hunk; per-hunk `options` win when keys overlap.
+ * - `dry_run`: when true the post-image is computed and returned in
+ *   `preview` but no bytes are written.
+ *
+ * ## Result
+ *
+ * Returns `{ok, result, applied, changed, path, before_sha256,
+ * after_sha256, current_hash, expected_hash, hunks_count,
+ * hunk_results, failed_hunk_index?, stale_base, bytes_written,
+ * preview?, telemetry, provenance}`. `result` is one of `applied`,
+ * `no_op`, `stale_base`, `hunk_conflict`. `telemetry` carries
+ * per-call counters hosts roll up into stale-base / hunk-conflict
+ * rates and average hunks-per-patch.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_safe_text_patch({path: "src/lib.rs", expected_hash: "sha256:...", hunks: [{old_text: "x = 1", new_text: "x = 2"}]})
+ */
+pub fn edit_safe_text_patch(params) {
+  let opts = params ?? {}
+  let path = opts?.path ?? ""
+  let hunks = opts?.hunks ?? []
+  let session_id = opts?.session_id
+  let match_options = opts?.match_options ?? {}
+  let dry_run = opts?.dry_run ?? false
+  let expected_hash = opts?.expected_hash
+  let read_response = hostlib_fs_read_text({path: path, session_id: session_id})
+  let current_content = read_response?.content ?? ""
+  let current_hash = read_response?.sha256 ?? __edit_sha256(current_content)
+  let ctx = {
+    path: path,
+    before_hash: current_hash,
+    current_hash: current_hash,
+    expected_hash: expected_hash,
+    hunks_count: len(hunks),
+    result: "applied",
+    options: opts,
+  }
+  if expected_hash != nil && expected_hash != current_hash {
+    return __edit_safe_patch_result(
+      ctx,
+      {
+        result: "stale_base",
+        errors: [
+          {
+            code: "stale_base",
+            message: "expected_hash did not match the current pre-image",
+            current_hash: current_hash,
+            expected_hash: expected_hash,
+          },
+        ],
+      },
+    )
+  }
+  var working = current_content
+  var hunk_results = []
+  var idx = 0
+  while idx < len(hunks) {
+    let hunk = hunks[idx]
+    let hunk_opts = match_options.merge(hunk?.options ?? {})
+    let outcome = edit_apply_old_new_patch(working, hunk?.old_text, hunk?.new_text, hunk_opts)
+    hunk_results = hunk_results + [outcome]
+    if !outcome.ok {
+      return __edit_safe_patch_result(
+        ctx,
+        {
+          result: "hunk_conflict",
+          after_sha256: __edit_sha256(working),
+          hunk_results: hunk_results,
+          failed_hunk_index: idx,
+          failed_hunk_error_code: outcome?.error_code,
+          failed_hunk_message: outcome?.message,
+          errors: [
+            {
+              code: "hunk_conflict",
+              message: "hunk " + to_string(idx) + " rejected: " + outcome?.error_code ?? "no_match",
+              hunk_index: idx,
+              hunk_error_code: outcome?.error_code,
+              hunk_message: outcome?.message,
+            },
+          ],
+        },
+      )
+    }
+    working = outcome.patched
+    idx = idx + 1
+  }
+  let after_hash = __edit_sha256(working)
+  if dry_run {
+    let result_kind = if current_content == working {
+      "no_op"
+    } else {
+      "applied"
+    }
+    return __edit_safe_patch_result(
+      ctx,
+      {
+        result: result_kind,
+        after_sha256: after_hash,
+        hunk_results: hunk_results,
+        changed: current_content != working,
+        preview: working,
+      },
+    )
+  }
+  let commit = hostlib_fs_safe_text_patch(
+    {
+      path: path,
+      content: working,
+      expected_hash: current_hash,
+      session_id: session_id,
+      create_parents: opts?.create_parents ?? true,
+      overwrite: opts?.overwrite ?? true,
+    },
+  )
+  let commit_result = commit?.result ?? "applied"
+  let committed_hash = commit?.current_hash ?? current_hash
+  if commit_result == "stale_base" {
+    return __edit_safe_patch_result(
+      ctx.merge({current_hash: committed_hash}),
+      {
+        result: "stale_base",
+        after_sha256: after_hash,
+        hunk_results: hunk_results,
+        errors: [
+          {
+            code: "stale_base",
+            message: "another writer committed between snapshot and write",
+            current_hash: committed_hash,
+            expected_hash: current_hash,
+          },
+        ],
+      },
+    )
+  }
+  return __edit_safe_patch_result(
+    ctx.merge({current_hash: committed_hash}),
+    {
+      result: commit_result,
+      after_sha256: commit?.after_sha256 ?? after_hash,
+      hunk_results: hunk_results,
+      applied: commit?.applied ?? false,
+      changed: commit_result == "applied",
+      bytes_written: commit?.bytes_written ?? 0,
+      created: commit?.created ?? false,
+    },
+  )
+}

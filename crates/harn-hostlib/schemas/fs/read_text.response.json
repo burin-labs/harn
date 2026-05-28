@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/read_text.response.json",
+  "title": "fs.read_text response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "content": {
+      "type": "string",
+      "description": "UTF-8 file body. Empty string when `exists` is false."
+    },
+    "sha256": {
+      "type": "string",
+      "description": "`sha256:HEX` of the bytes read. Pair this with `fs.safe_text_patch` as `expected_hash`."
+    },
+    "size": { "type": "integer", "minimum": 0 },
+    "exists": { "type": "boolean" }
+  },
+  "required": ["path", "content", "sha256", "size", "exists"],
+  "additionalProperties": false
+}

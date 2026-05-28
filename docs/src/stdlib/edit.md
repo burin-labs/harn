@@ -327,6 +327,139 @@ plus the predicate) to pin a single anchor.
   for `first_child` / `last_child`. The call returns
   `result == "invalid_anchor"` with the anchor span attached.
 
+## `edit_safe_text_patch` — multi-hunk text edits with staged-fs collision rejection
+
+`edit_safe_text_patch({path, expected_hash, hunks, ...})` reads the
+file through the staged-fs overlay, runs each `{old_text, new_text}`
+hunk through the same matcher as `edit_apply_old_new_patch`, and
+writes the composed post-image back atomically. When the observed
+pre-image hash diverges from `expected_hash` the call returns
+`result == "stale_base"` without writing — callers should re-read and
+retry, never blindly clobber.
+
+Backed by the `hostlib_fs_safe_text_patch` builtin (issue
+[#2509](https://github.com/burin-labs/harn/issues/2509)).
+
+### Parameters
+
+| Field | Required | Notes |
+|---|---|---|
+| `path` | yes | File to mutate. |
+| `hunks` | yes | List of `{old_text, new_text, options?}`. Each hunk's `options` override `match_options` for that hunk; matcher options accept the same keys as `edit_apply_old_new_patch`. |
+| `expected_hash` | no | `sha256:HEX` of the pre-image the caller observed. When omitted the stale-base check is skipped (still atomic w.r.t. other staged-fs writers in the same process). |
+| `session_id` | no | Hostlib session whose staged-fs overlay should intercept the read and the write. |
+| `match_options` | no | Default `edit_apply_old_new_patch` options merged into every hunk. |
+| `dry_run` | no | When `true` the post-image is rendered into `preview` but no bytes are written. |
+| `create_parents` | no, default `true` | Create missing parent directories on write. |
+| `overwrite` | no, default `true` | Allow replacing existing files. |
+
+### Result
+
+| `result` | When |
+|---|---|
+| `applied` | All hunks matched and the bytes changed. `bytes_written` / `created` describe the write. |
+| `no_op` | All hunks matched but the post-image equals the pre-image (skipped the write). |
+| `stale_base` | `expected_hash` did not match the observed pre-image, or another writer committed between snapshot and write. No bytes were written. |
+| `hunk_conflict` | A hunk's `old_text` failed to match against the running post-image. `failed_hunk_index` and `failed_hunk_error_code` describe which hunk and why. None of the hunks committed. |
+
+Every result carries `before_sha256` / `after_sha256` / `current_hash`,
+the per-hunk `hunk_results`, a `telemetry` envelope (`applied`,
+`stale_base`, `hunk_conflict`, `no_op` counters plus `hunks`), and a
+`provenance` envelope so hosts can roll up stale-base / hunk-conflict
+rates and average hunks-per-patch without re-parsing logs.
+
+### Worked example: two hunks under stale-base guarding
+
+```harn,ignore
+import { edit_safe_text_patch } from "std/edit"
+
+pipeline default() {
+  let path = "src/lib.rs"
+  // 1) Snapshot the pre-image hash through the same overlay.
+  let snapshot = hostlib_fs_read_text({path: path})
+  // 2) Compose a patch off the snapshot.
+  let result = edit_safe_text_patch(
+    {
+      path: path,
+      expected_hash: snapshot.sha256,
+      hunks: [
+        {old_text: "return 1", new_text: "return 11"},
+        {old_text: "return 3", new_text: "return 33"},
+      ],
+    },
+  )
+  __io_println(result.result)                  // "applied"
+  __io_println(result.telemetry.applied)       // 1
+  __io_println(result.hunks_count)             // 2
+  // On a stale_base result, re-read snapshot.sha256 and retry.
+  if result.result == "stale_base" {
+    __io_println(result.current_hash)          // overlay's actual hash
+  }
+}
+```
+
+### Multi-agent collision rejection
+
+When two agents race against the same file, the staged-fs overlay
+turns the race into a deterministic `stale_base` outcome:
+
+```harn,ignore
+import { edit_safe_text_patch } from "std/edit"
+
+pipeline default() {
+  let session = "demo"
+  hostlib_enable("tools:deterministic")
+  hostlib_fs_set_mode({session_id: session, mode: "staged"})
+  let pre = hostlib_fs_read_text({path: "src/main.rs", session_id: session})
+
+  // Sibling agent stages a competing write — overlay diverges.
+  hostlib_tools_write_file(
+    {session_id: session, path: "src/main.rs", content: "// sibling won\n"},
+  )
+
+  let losing = edit_safe_text_patch(
+    {
+      path: "src/main.rs",
+      expected_hash: pre.sha256,
+      hunks: [{old_text: "TODO", new_text: "DONE"}],
+      session_id: session,
+    },
+  )
+  __io_println(losing.result)                 // "stale_base"
+
+  // Retry against the now-current overlay hash.
+  let refreshed = hostlib_fs_read_text({path: "src/main.rs", session_id: session})
+  let winner = edit_safe_text_patch(
+    {
+      path: "src/main.rs",
+      expected_hash: refreshed.sha256,
+      hunks: [{old_text: "sibling won", new_text: "we negotiated"}],
+      session_id: session,
+    },
+  )
+  __io_println(winner.result)                 // "applied"
+}
+```
+
+### Migration from `edit_apply_old_new_patch`
+
+Callers of the pure-text helpers from
+[#1499](https://github.com/burin-labs/harn/issues/1499) can adopt the
+new entry point incrementally:
+
+| Before | After |
+|---|---|
+| Read file, call `edit_apply_old_new_patch(text, old, new)`, write result. | `edit_safe_text_patch({path, hunks: [{old_text: old, new_text: new}]})` — handles the read + write + staged-fs routing for you. |
+| Race-aware bespoke retry loop. | Pass `expected_hash` from a `hostlib_fs_read_text` snapshot; the helper returns `result == "stale_base"` and `current_hash` on collision so the caller can retry. |
+| Apply multiple hunks via N sequential `edit_apply_old_new_patch` calls + N writes. | Pass them as one `hunks: [...]` list — all-or-nothing commit, no half-applied intermediate state. |
+| Manual logging of hunk-conflict / stale-base counters. | `result.telemetry` carries per-call counters so hosts aggregate without log scraping. |
+
+The pure helpers (`edit_apply_old_new_patch`, `edit_splice_lines`,
+`edit_check_lazy_truncation`, …) remain available for callers that
+operate on in-memory strings without a path. `edit_safe_text_patch`
+is the recommended entry point any time the call ends with a write
+back to disk.
+
 ## See also
 
 - [`std/edit` cookbook recipe](../cookbook.md#how-to-rewrite-a-function-body-via-a-tree-sitter-query)

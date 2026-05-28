@@ -21,13 +21,16 @@ use sha2::{Digest, Sha256};
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 use crate::tools::args::{
-    build_dict, dict_arg, optional_string, optional_string_list, require_string, str_value,
+    build_dict, dict_arg, optional_bool, optional_string, optional_string_list, require_string,
+    str_value,
 };
 
 const SET_MODE_BUILTIN: &str = "hostlib_fs_set_mode";
 const STATUS_BUILTIN: &str = "hostlib_fs_staged_status";
 const COMMIT_BUILTIN: &str = "hostlib_fs_commit_staged";
 const DISCARD_BUILTIN: &str = "hostlib_fs_discard_staged";
+const SAFE_TEXT_PATCH_BUILTIN: &str = "hostlib_fs_safe_text_patch";
+const READ_TEXT_BUILTIN: &str = "hostlib_fs_read_text";
 
 const MANIFEST_VERSION: u32 = 1;
 const STATE_REL: &[&str] = &[".harn", "state", "staged"];
@@ -61,6 +64,13 @@ impl HostlibCapability for FsCapability {
             "discard_staged",
             discard_staged_builtin,
         );
+        register(
+            registry,
+            SAFE_TEXT_PATCH_BUILTIN,
+            "safe_text_patch",
+            safe_text_patch_builtin,
+        );
+        register(registry, READ_TEXT_BUILTIN, "read_text", read_text_builtin);
     }
 }
 
@@ -508,6 +518,402 @@ pub(crate) fn stage_delete_or_none(
     emit_staged_update(&state);
     guard.insert(session_id, state);
     Ok(Some(true))
+}
+
+/// Outcome of one [`safe_text_patch`] call. `applied` says whether the
+/// on-disk (or staged-overlay) bytes changed; `result` carries the
+/// structured discriminant used by the wire/JSON shape.
+#[derive(Clone, Debug)]
+pub struct SafeTextPatchOutcome {
+    /// Discriminant: `"applied"`, `"stale_base"`, or `"no_op"`.
+    pub result: SafeTextPatchResult,
+    /// `sha256:HEX` of the pre-image (overlay-aware) the call observed.
+    pub current_hash: String,
+    /// `sha256:HEX` of the requested post-image.
+    pub after_hash: String,
+    /// `true` when the file did not exist before the call.
+    pub created: bool,
+    /// Bytes written; `0` on `stale_base` or `no_op`.
+    pub bytes_written: usize,
+}
+
+/// Discriminant for a [`safe_text_patch`] outcome.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SafeTextPatchResult {
+    /// Pre-image hash matched (or no expected hash supplied) and the
+    /// post-image differs from the pre-image — bytes were written.
+    Applied,
+    /// `expected_hash` did not match the observed pre-image hash; no
+    /// bytes were written. Callers should re-read and retry.
+    StaleBase,
+    /// Pre-image hash matched and the post-image equals the pre-image —
+    /// skipped the write to avoid spurious timestamps and overlay churn.
+    NoOp,
+}
+
+impl SafeTextPatchResult {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::StaleBase => "stale_base",
+            Self::NoOp => "no_op",
+        }
+    }
+}
+
+/// Atomic compare-and-swap-style text write.
+///
+/// Reads the current bytes at `path` through the staged-fs overlay (when a
+/// session is active) so concurrent agent edits see each other's pending
+/// writes. If `expected_hash` is supplied and differs from the observed
+/// `sha256:HEX`, returns `SafeTextPatchResult::StaleBase` without
+/// mutating any state. On a hash match the post-image is written through
+/// the same overlay path, keeping the read and the write atomic with
+/// respect to other staged-fs consumers in the same process.
+///
+/// Atomicity:
+///
+/// - When a session is in staged mode, the read, hash check, and write
+///   all happen under a single acquisition of the sessions mutex, so a
+///   sibling thread cannot stage a write into the window between the
+///   pre-image snapshot and the commit.
+/// - When the call routes through disk (no active session, or session in
+///   immediate mode), the write goes through an atomic rename-into-place
+///   so partial-write tearing is impossible. Cross-process races are
+///   intentionally out of scope — the staged-fs overlay is the
+///   collision-rejection layer.
+pub fn safe_text_patch(
+    path: &Path,
+    content: &str,
+    expected_hash: Option<&str>,
+    session_id: Option<&str>,
+    create_parents: bool,
+    overwrite: bool,
+) -> Result<SafeTextPatchOutcome, HostlibError> {
+    let new_bytes = content.as_bytes();
+    let after_hash = format!("sha256:{}", hex::encode(Sha256::digest(new_bytes)));
+
+    if let Some(outcome) = safe_text_patch_staged(
+        path,
+        new_bytes,
+        expected_hash,
+        session_id,
+        create_parents,
+        overwrite,
+        &after_hash,
+    )? {
+        return Ok(outcome);
+    }
+
+    safe_text_patch_disk(
+        path,
+        new_bytes,
+        expected_hash,
+        create_parents,
+        overwrite,
+        after_hash,
+    )
+}
+
+/// Atomic CAS path for a session in `staged` mode. Holds the sessions
+/// mutex through the entire read → hash → check → write so concurrent
+/// agents in the same process cannot race the snapshot. Returns `None`
+/// when no session is active or the session is in `immediate` mode, so
+/// the caller can fall through to the disk path.
+#[allow(clippy::too_many_arguments)]
+fn safe_text_patch_staged(
+    path: &Path,
+    new_bytes: &[u8],
+    expected_hash: Option<&str>,
+    session_id: Option<&str>,
+    create_parents: bool,
+    overwrite: bool,
+    after_hash: &str,
+) -> Result<Option<SafeTextPatchOutcome>, HostlibError> {
+    let Some(session) = active_session_id(session_id) else {
+        return Ok(None);
+    };
+    let mut guard = sessions()
+        .lock()
+        .expect("hostlib fs session mutex poisoned");
+    let mut state = state_for_locked(&mut guard, &session, None)?;
+    if state.mode != FsMode::Staged {
+        guard.insert(session, state);
+        return Ok(None);
+    }
+
+    let key = normalize_logical(path);
+    let (existing_bytes, existed) = match overlay_read(&state, path) {
+        Some(Ok(bytes)) => (bytes, true),
+        Some(Err(err)) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
+        Some(Err(err)) => {
+            guard.insert(session, state);
+            return Err(HostlibError::Backend {
+                builtin: SAFE_TEXT_PATCH_BUILTIN,
+                message: format!("read `{}`: {err}", path.display()),
+            });
+        }
+        None => match stdfs::read(path) {
+            Ok(bytes) => (bytes, true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
+            Err(err) => {
+                guard.insert(session, state);
+                return Err(HostlibError::Backend {
+                    builtin: SAFE_TEXT_PATCH_BUILTIN,
+                    message: format!("read `{}`: {err}", path.display()),
+                });
+            }
+        },
+    };
+    let current_hash = format!("sha256:{}", hex::encode(Sha256::digest(&existing_bytes)));
+
+    if let Some(expected) = expected_hash {
+        if expected != current_hash {
+            guard.insert(session, state);
+            return Ok(Some(SafeTextPatchOutcome {
+                result: SafeTextPatchResult::StaleBase,
+                current_hash,
+                after_hash: after_hash.to_string(),
+                created: false,
+                bytes_written: 0,
+            }));
+        }
+    }
+
+    if existed && existing_bytes == new_bytes {
+        guard.insert(session, state);
+        return Ok(Some(SafeTextPatchOutcome {
+            result: SafeTextPatchResult::NoOp,
+            current_hash,
+            after_hash: after_hash.to_string(),
+            created: false,
+            bytes_written: 0,
+        }));
+    }
+
+    let overlay_existed = overlay_exists(&state, &key);
+    if overlay_existed && !overwrite {
+        guard.insert(session, state);
+        return Err(HostlibError::Backend {
+            builtin: SAFE_TEXT_PATCH_BUILTIN,
+            message: format!("`{}` exists and overwrite=false", key.display()),
+        });
+    }
+    if !create_parents && !parent_exists(&state, &key) {
+        guard.insert(session, state);
+        return Err(HostlibError::Backend {
+            builtin: SAFE_TEXT_PATCH_BUILTIN,
+            message: format!("parent directory for `{}` does not exist", key.display()),
+        });
+    }
+
+    let body_hash = write_body(&state, new_bytes).map_err(|err| HostlibError::Backend {
+        builtin: SAFE_TEXT_PATCH_BUILTIN,
+        message: err,
+    })?;
+    state.entries.insert(
+        key.clone(),
+        StagedEntry::Write {
+            body_hash,
+            len: new_bytes.len() as u64,
+            created_at_ms: now_ms(),
+        },
+    );
+    persist_state(&state, "safe_text_patch", Some(&key)).map_err(|err| HostlibError::Backend {
+        builtin: SAFE_TEXT_PATCH_BUILTIN,
+        message: err,
+    })?;
+    emit_staged_update(&state);
+    guard.insert(session, state);
+
+    Ok(Some(SafeTextPatchOutcome {
+        result: SafeTextPatchResult::Applied,
+        current_hash,
+        after_hash: after_hash.to_string(),
+        created: !existed,
+        bytes_written: new_bytes.len(),
+    }))
+}
+
+/// Disk path for callers without an active staged session. Uses
+/// `atomic_write` so the post-image lands via rename-into-place rather
+/// than an open/truncate/write/close sequence — readers either see the
+/// pre-image or the post-image, never a torn write.
+fn safe_text_patch_disk(
+    path: &Path,
+    new_bytes: &[u8],
+    expected_hash: Option<&str>,
+    create_parents: bool,
+    overwrite: bool,
+    after_hash: String,
+) -> Result<SafeTextPatchOutcome, HostlibError> {
+    let (existing_bytes, existed) = match stdfs::read(path) {
+        Ok(bytes) => (bytes, true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
+        Err(err) => {
+            return Err(HostlibError::Backend {
+                builtin: SAFE_TEXT_PATCH_BUILTIN,
+                message: format!("read `{}`: {err}", path.display()),
+            });
+        }
+    };
+    let current_hash = format!("sha256:{}", hex::encode(Sha256::digest(&existing_bytes)));
+
+    if let Some(expected) = expected_hash {
+        if expected != current_hash {
+            return Ok(SafeTextPatchOutcome {
+                result: SafeTextPatchResult::StaleBase,
+                current_hash,
+                after_hash,
+                created: false,
+                bytes_written: 0,
+            });
+        }
+    }
+
+    if existed && existing_bytes == new_bytes {
+        return Ok(SafeTextPatchOutcome {
+            result: SafeTextPatchResult::NoOp,
+            current_hash,
+            after_hash,
+            created: false,
+            bytes_written: 0,
+        });
+    }
+    if existed && !overwrite {
+        return Err(HostlibError::Backend {
+            builtin: SAFE_TEXT_PATCH_BUILTIN,
+            message: format!("`{}` exists and overwrite=false", path.display()),
+        });
+    }
+
+    crate::fs_snapshot::auto_capture_for_write(SAFE_TEXT_PATCH_BUILTIN, path);
+    if create_parents {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                stdfs::create_dir_all(parent).map_err(|err| HostlibError::Backend {
+                    builtin: SAFE_TEXT_PATCH_BUILTIN,
+                    message: format!("mkdir `{}`: {err}", parent.display()),
+                })?;
+            }
+        }
+    }
+    atomic_write(path, new_bytes).map_err(|err| HostlibError::Backend {
+        builtin: SAFE_TEXT_PATCH_BUILTIN,
+        message: format!("write `{}`: {err}", path.display()),
+    })?;
+
+    Ok(SafeTextPatchOutcome {
+        result: SafeTextPatchResult::Applied,
+        current_hash,
+        after_hash,
+        created: !existed,
+        bytes_written: new_bytes.len(),
+    })
+}
+
+/// Read the pre-image through the staged-fs overlay (when active),
+/// falling back to disk. Returns `(bytes, existed_on_disk_or_overlay)`.
+/// `builtin` is the caller's tag — used so backend errors point at the
+/// right builtin name in diagnostics.
+fn read_existing(
+    builtin: &'static str,
+    path: &Path,
+    session_id: Option<&str>,
+) -> Result<(Vec<u8>, bool), HostlibError> {
+    if let Some(result) = read(path, session_id) {
+        return match result {
+            Ok(bytes) => Ok((bytes, true)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok((Vec::new(), false)),
+            Err(err) => Err(HostlibError::Backend {
+                builtin,
+                message: format!("read `{}`: {err}", path.display()),
+            }),
+        };
+    }
+    match stdfs::read(path) {
+        Ok(bytes) => Ok((bytes, true)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok((Vec::new(), false)),
+        Err(err) => Err(HostlibError::Backend {
+            builtin,
+            message: format!("read `{}`: {err}", path.display()),
+        }),
+    }
+}
+
+fn read_text_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(READ_TEXT_BUILTIN, args)?;
+    let dict = raw.as_ref();
+    let path_str = require_string(READ_TEXT_BUILTIN, dict, "path")?;
+    let session_id = optional_string(READ_TEXT_BUILTIN, dict, "session_id")?;
+    let path = Path::new(&path_str);
+
+    let (bytes, existed) = read_existing(READ_TEXT_BUILTIN, path, session_id.as_deref())?;
+    let hash = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
+    let content = match std::str::from_utf8(&bytes) {
+        Ok(s) => s.to_string(),
+        Err(err) => {
+            return Err(HostlibError::Backend {
+                builtin: READ_TEXT_BUILTIN,
+                message: format!("`{path_str}` is not valid UTF-8: {err}"),
+            });
+        }
+    };
+    let bytes_len = bytes.len() as i64;
+    Ok(build_dict([
+        ("path", str_value(&path_str)),
+        ("content", str_value(&content)),
+        ("sha256", str_value(&hash)),
+        ("size", VmValue::Int(bytes_len)),
+        ("exists", VmValue::Bool(existed)),
+    ]))
+}
+
+fn safe_text_patch_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(SAFE_TEXT_PATCH_BUILTIN, args)?;
+    let dict = raw.as_ref();
+
+    let path_str = require_string(SAFE_TEXT_PATCH_BUILTIN, dict, "path")?;
+    let content = require_string(SAFE_TEXT_PATCH_BUILTIN, dict, "content")?;
+    let expected_hash = optional_string(SAFE_TEXT_PATCH_BUILTIN, dict, "expected_hash")?;
+    let session_id = optional_string(SAFE_TEXT_PATCH_BUILTIN, dict, "session_id")?;
+    let create_parents = optional_bool(SAFE_TEXT_PATCH_BUILTIN, dict, "create_parents", true)?;
+    let overwrite = optional_bool(SAFE_TEXT_PATCH_BUILTIN, dict, "overwrite", true)?;
+
+    let outcome = safe_text_patch(
+        Path::new(&path_str),
+        &content,
+        expected_hash.as_deref(),
+        session_id.as_deref(),
+        create_parents,
+        overwrite,
+    )?;
+
+    let entries: Vec<(&'static str, VmValue)> = vec![
+        ("path", str_value(&path_str)),
+        ("result", str_value(outcome.result.as_str())),
+        (
+            "applied",
+            VmValue::Bool(outcome.result == SafeTextPatchResult::Applied),
+        ),
+        (
+            "stale_base",
+            VmValue::Bool(outcome.result == SafeTextPatchResult::StaleBase),
+        ),
+        ("current_hash", str_value(&outcome.current_hash)),
+        ("before_sha256", str_value(&outcome.current_hash)),
+        ("after_sha256", str_value(&outcome.after_hash)),
+        ("created", VmValue::Bool(outcome.created)),
+        ("bytes_written", VmValue::Int(outcome.bytes_written as i64)),
+        (
+            "expected_hash",
+            match expected_hash.as_deref() {
+                Some(hash) => str_value(hash),
+                None => VmValue::Nil,
+            },
+        ),
+    ];
+    Ok(build_dict(entries))
 }
 
 fn set_mode_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
