@@ -1,4 +1,18 @@
 //! Standard library builtins for the Harn VM.
+//!
+//! New builtins are declared with the `#[harn_builtin]` proc-macro
+//! (`crate::stdlib::macros::harn_builtin`). Each annotation emits a sibling
+//! `static <FN>_DEF: VmBuiltinDef` carrying the signature, aliases, handler,
+//! and metadata; modules collect those into a `MODULE_BUILTINS: &[&VmBuiltinDef]`
+//! slice and expose a `register_<module>_builtins(vm)` that iterates it.
+//! `all_builtin_defs()` below concatenates every module's slice (alphabetical
+//! by module) and `register_vm_stdlib` installs the resulting signatures into
+//! the parser registry.
+//!
+//! The legacy DSL under [`registration`] (`SyncBuiltin`, `AsyncBuiltin`,
+//! `BuiltinGroup`, `register_builtin_group`) is deprecated and retained only
+//! for a small set of unmigrated callers. New code MUST use `#[harn_builtin]`.
+//! See `CONTRIBUTING.md` ("Adding a stdlib builtin") for the full template.
 
 pub mod macros;
 
@@ -283,6 +297,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(bytes::MODULE_BUILTINS);
         out.extend_from_slice(calendar::MODULE_BUILTINS);
         out.extend_from_slice(channel_guardrails::MODULE_BUILTINS);
+        out.extend_from_slice(crate::checkpoint::MODULE_BUILTINS);
         out.extend_from_slice(clock::MODULE_BUILTINS);
         out.extend_from_slice(collections::MODULE_BUILTINS);
         out.extend_from_slice(command_policy::MODULE_BUILTINS);
