@@ -6,11 +6,17 @@ use std::rc::Rc;
 use crate::orchestration::{
     append_audit_entry, builtin_ceiling, normalize_workflow_value, validate_workflow, WorkflowEdge,
 };
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
 use super::convert::{to_vm, workflow_graph_to_vm};
 use super::policy::{normalize_policy, set_node_policy};
 
+/// Normalize a workflow value and return the canonical workflow graph dict.
+#[harn_builtin(
+    sig = "workflow_graph(input?: dict|nil) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_graph_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -23,6 +29,11 @@ pub(super) fn workflow_graph_builtin(
     workflow_graph_to_vm(&graph)
 }
 
+/// Validate a workflow graph against a capability policy ceiling.
+#[harn_builtin(
+    sig = "workflow_validate(input?: dict|nil, ceiling?: dict|nil) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_validate_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -39,6 +50,11 @@ pub(super) fn workflow_validate_builtin(
     ))
 }
 
+/// Return normalized workflow graph shape and validation details.
+#[harn_builtin(
+    sig = "workflow_inspect(input?: dict|nil, ceiling?: dict|nil) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_inspect_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -59,6 +75,11 @@ pub(super) fn workflow_inspect_builtin(
     }))
 }
 
+/// Report workflow and node policies against an effective ceiling.
+#[harn_builtin(
+    sig = "workflow_policy_report(graph: dict, ceiling?: dict|nil) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_policy_report_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -84,6 +105,11 @@ pub(super) fn workflow_policy_report_builtin(
     }))
 }
 
+/// Clone a workflow graph and append audit metadata.
+#[harn_builtin(
+    sig = "workflow_clone(graph: dict) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_clone_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -99,6 +125,11 @@ pub(super) fn workflow_clone_builtin(
     workflow_graph_to_vm(&graph)
 }
 
+/// Insert a node and optional edge into a workflow graph.
+#[harn_builtin(
+    sig = "workflow_insert_node(graph: dict, node: dict, edge?: dict|nil) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_insert_node_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -140,6 +171,11 @@ pub(super) fn workflow_insert_node_builtin(
     workflow_graph_to_vm(&graph)
 }
 
+/// Replace one node in a workflow graph.
+#[harn_builtin(
+    sig = "workflow_replace_node(graph: dict, node_id: string, node: dict) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_replace_node_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -169,6 +205,11 @@ pub(super) fn workflow_replace_node_builtin(
     workflow_graph_to_vm(&graph)
 }
 
+/// Replace outgoing edge wiring for one workflow graph node.
+#[harn_builtin(
+    sig = "workflow_rewire(graph: dict, from: string, to: string, branch?: string|nil) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_rewire_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -199,6 +240,11 @@ pub(super) fn workflow_rewire_builtin(
     workflow_graph_to_vm(&graph)
 }
 
+/// Set one node's model policy.
+#[harn_builtin(
+    sig = "workflow_set_model_policy(graph: dict, node_id: string, policy: dict) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_set_model_policy_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -210,6 +256,11 @@ pub(super) fn workflow_set_model_policy_builtin(
     })
 }
 
+/// Set one node's context policy.
+#[harn_builtin(
+    sig = "workflow_set_context_policy(graph: dict, node_id: string, policy: dict) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_set_context_policy_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -221,6 +272,11 @@ pub(super) fn workflow_set_context_policy_builtin(
     })
 }
 
+/// Set one node's auto-compaction policy.
+#[harn_builtin(
+    sig = "workflow_set_auto_compact(graph: dict, node_id: string, policy: dict) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_set_auto_compact_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -232,6 +288,11 @@ pub(super) fn workflow_set_auto_compact_builtin(
     })
 }
 
+/// Set one node's output visibility policy.
+#[harn_builtin(
+    sig = "workflow_set_output_visibility(graph: dict, node_id: string, visibility: string|nil) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_set_output_visibility_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -250,6 +311,11 @@ pub(super) fn workflow_set_output_visibility_builtin(
     })
 }
 
+/// Compare two workflow graph values for canonical JSON changes.
+#[harn_builtin(
+    sig = "workflow_diff(left: dict, right: dict) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_diff_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -271,6 +337,11 @@ pub(super) fn workflow_diff_builtin(
     }))
 }
 
+/// Validate and commit workflow graph audit metadata.
+#[harn_builtin(
+    sig = "workflow_commit(graph: dict, reason?: string|nil) -> dict",
+    category = "workflow.host"
+)]
 pub(super) fn workflow_commit_builtin(
     args: &[VmValue],
     _out: &mut String,
