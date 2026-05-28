@@ -1,0 +1,25 @@
+import "std/postgres"
+
+/**
+ * pg_savepoint / pg_release_savepoint / pg_rollback_to_savepoint are
+ * transactional control statements that the mock pool can accept as
+ * no-ops. The test asserts the call surface compiles and routes through
+ * the mock fixture matcher (no real Postgres required).
+ */
+pipeline default() {
+  let db = pg_mock_pool(
+    [
+      {sql: "SAVEPOINT \"step1\"", rows_affected: 0},
+      {sql: "RELEASE SAVEPOINT \"step1\"", rows_affected: 0},
+      {sql: "ROLLBACK TO SAVEPOINT \"step1\"", rows_affected: 0},
+    ],
+  )
+  __io_println(pg_savepoint(db, "step1"))
+  __io_println(pg_release_savepoint(db, "step1"))
+  __io_println(pg_rollback_to_savepoint(db, "step1"))
+  let calls = pg_mock_calls(db)
+  __io_println(len(calls))
+  for call in calls {
+    __io_println(call.sql)
+  }
+}

@@ -2,7 +2,29 @@
  * std/postgres — Postgres persistence helpers.
  *
  * The pg_* functions are VM builtins registered by the Rust stdlib. This
- * module carries the public handle shapes for import-aware tools.
+ * module carries the public handle and result shapes so import-aware
+ * tools and the typechecker know what scripts get back from the runtime.
+ *
+ * Surface (issue #2500):
+ *
+ *   let pool = pg_pool("env:DATABASE_URL", {max_connections: 5})
+ *   pg_execute(pool, "insert into ledger (id, amount) values ($1, $2)", [id, amount])
+ *   let row = pg_query_one(pool, "select balance from ledger where id = $1", [id])
+ *
+ *   pg_transaction(pool, { tx ->
+ *     pg_savepoint(tx, "before_charge")
+ *     pg_execute(tx, "update ledger set balance = balance - $1 where id = $2", [amount, id])
+ *     if (balance_after_too_low()) {
+ *       pg_rollback_to_savepoint(tx, "before_charge")
+ *     } else {
+ *       pg_release_savepoint(tx, "before_charge")
+ *     }
+ *   })
+ *
+ *   pg_migrate(pool, {dir: "./migrations"})  // applies pending .sql files
+ *
+ * `pg_mock_pool(fixtures)` returns a deterministic mock so unit tests do
+ * not need a live database.
  */
 type PgPool = {_type: "pg_pool", id: string}
 
@@ -12,4 +34,13 @@ type PgMockPool = {_type: "pg_mock_pool", id: string}
 
 type PgHandle = PgPool | PgTx | PgMockPool
 
-type PgExecuteResult = {rows_affected: int}
+type PgExecuteResult = {rows_affected: int, duration_ms: int}
+
+type PgMigrateResult = {
+  applied: list<string>,
+  skipped: list<string>,
+  available: list<string>,
+  dry_run: bool,
+  duration_ms: int,
+  table: string,
+}
