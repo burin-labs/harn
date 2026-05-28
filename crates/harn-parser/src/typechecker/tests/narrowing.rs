@@ -649,7 +649,7 @@ fn test_schema_is_shape_narrowing_preserves_current_fields() {
     // truthy branch must still permit `x.a` after narrowing against a
     // schema that only mentions `b`.
     let errs = errors(
-        r#"type Tag = {b: string}
+        r"type Tag = {b: string}
 
 pipeline t(task) {
   fn check(x: {a: int, b: string}) {
@@ -658,7 +658,7 @@ pipeline t(task) {
       let _b: string = x.b
     }
   }
-}"#,
+}",
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
@@ -669,7 +669,7 @@ fn test_schema_is_shape_narrowing_adds_schema_only_required_field() {
     // matched check, so the truthy branch should expose it alongside
     // the existing fields.
     let errs = errors(
-        r#"type WithTag = {kind: string}
+        r"type WithTag = {kind: string}
 
 pipeline t(task) {
   fn check(x: {a: int}) {
@@ -678,7 +678,7 @@ pipeline t(task) {
       let _kind: string = x.kind
     }
   }
-}"#,
+}",
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
