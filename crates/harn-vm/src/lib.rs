@@ -240,6 +240,10 @@ pub use stdlib::hitl::{
     HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
 };
 pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
+pub use stdlib::http_response::{
+    parse_envelope as parse_http_envelope, HttpEnvelope, HttpHeaderValue, HTTP_RESPONSE_TAG_KEY,
+    HTTP_RESPONSE_TAG_VERSION,
+};
 pub use stdlib::io::{set_stdout_passthrough, take_stderr_buffer};
 pub use stdlib::long_running::cancel_handle as cancel_long_running_handle;
 pub use stdlib::secret_scan::{

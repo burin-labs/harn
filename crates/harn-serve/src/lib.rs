@@ -6,6 +6,7 @@ mod auth;
 mod core;
 mod error;
 mod exports;
+pub mod http_codec;
 mod mcp_context;
 pub mod mcp_host_bridge;
 mod mcp_prompts;
@@ -44,6 +45,10 @@ pub use core::{
 };
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
+pub use http_codec::{
+    axum_response_from_call, axum_response_from_dispatch_error, decode_call_response,
+    dispatch_error_payload, fresh_request_id, HttpCodecOutcome, SseEventSpec,
+};
 pub use mcp_host_bridge::install_mcp_host_allowlist;
 pub use mcp_prompts::FilePromptCatalog;
 pub use permissions::{
