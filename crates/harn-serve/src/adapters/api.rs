@@ -24,6 +24,10 @@ use uuid::Uuid;
 
 use crate::adapters::acp::{run_acp_channel_server, AcpServerConfig};
 use crate::auth::{AuthPolicy, AuthRequest, AuthorizationDecision};
+use crate::permissions::{
+    ActionClass, AuditFilter, DecisionScope, InMemoryPermissionStore, PermissionDecision,
+    PermissionPolicy, PermissionRequest, PermissionStore, RememberRule, RememberSpec, RuleId,
+};
 use crate::tls::HttpTlsConfig;
 
 const OPENAPI_YAML: &str = include_str!("../../openapi.yaml");
@@ -84,6 +88,7 @@ impl ApiServer {
             inner: Arc::new(Mutex::new(ApiStateInner::new(config.workspace_root))),
             events_tx,
             auth_policy: config.auth_policy,
+            permissions: Arc::new(InMemoryPermissionStore::default()),
         };
         client.spawn_output_loop(response_rx, state.clone());
         Self { state }
@@ -114,6 +119,11 @@ struct ApiState {
     inner: Arc<Mutex<ApiStateInner>>,
     events_tx: broadcast::Sender<ApiEvent>,
     auth_policy: AuthPolicy,
+    /// The permission primitive every adapter delegates to. Lives at
+    /// the state level so the REST routes, the ACP-suspend-respond
+    /// path, and (eventually) the `harness.permissions.*` host calls
+    /// all read and write the same store.
+    permissions: Arc<InMemoryPermissionStore>,
 }
 
 struct ApiStateInner {
@@ -628,6 +638,20 @@ fn api_router(state: ApiState) -> Router {
             "/v1/permission-requests/{request_id}/respond",
             post(respond_permission_request),
         )
+        .route(
+            "/v1/permissions/policy",
+            get(get_permissions_policy).put(put_permissions_policy),
+        )
+        .route(
+            "/v1/permissions/rules",
+            get(list_permission_rules).post(create_permission_rule),
+        )
+        .route(
+            "/v1/permissions/rules/{rule_id}",
+            axum::routing::delete(revoke_permission_rule),
+        )
+        .route("/v1/permissions/history", get(get_permission_history))
+        .route("/v1/permissions/check", post(check_permission))
         .layer(DefaultBodyLimit::max(crate::DEFAULT_HTTP_BODY_LIMIT_BYTES))
         .with_state(state)
 }
@@ -675,7 +699,11 @@ async fn api_root() -> Response {
             "sessions": "/v1/sessions",
             "tasks": "/v1/tasks",
             "events": "/v1/events/stream",
-            "permission_requests": "/v1/permission-requests"
+            "permission_requests": "/v1/permission-requests",
+            "permission_policy": "/v1/permissions/policy",
+            "permission_rules": "/v1/permissions/rules",
+            "permission_history": "/v1/permissions/history",
+            "permission_check": "/v1/permissions/check"
         }
     }))
     .into_response()
@@ -1918,6 +1946,7 @@ async fn respond_permission_request(
             "result": result
         }));
     }
+    record_permission_response(&state, &permission, &input, approved).await;
     state.append_event(
         permission["session_id"].as_str().map(str::to_string),
         permission["task_id"].as_str().map(str::to_string),
@@ -1925,6 +1954,336 @@ async fn respond_permission_request(
         permission.clone(),
     );
     Json(permission).into_response()
+}
+
+/// Bridge from the ACP-style `respond_permission_request` flow to the
+/// new permissions store. Materializes a [`PermissionRequest`] from the
+/// pending permission payload, records the audit entry, and optionally
+/// installs a remember-rule when the responder asked to "remember"
+/// their answer. The reconstruction is best-effort: ACP today does not
+/// carry the full action/target shape, so missing fields fall back to
+/// the public payload's `action` value or the literal "unknown" string.
+async fn record_permission_response(
+    state: &ApiState,
+    permission: &Value,
+    input: &Value,
+    approved: bool,
+) {
+    let session_id = permission
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let action_value = permission.get("action").cloned().unwrap_or(Value::Null);
+    let action = action_value
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| {
+            action_value
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    let target = action_value
+        .get("target")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| action.clone());
+    let class = input
+        .get("class")
+        .and_then(Value::as_str)
+        .and_then(parse_action_class)
+        .unwrap_or(ActionClass::Custom);
+    let actor = input
+        .get("reviewer")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| "api".to_string());
+    let mut request = PermissionRequest::new(
+        permission
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        session_id,
+        actor.clone(),
+        class,
+        action,
+        target,
+    );
+    if let Some(reason) = input.get("reason").and_then(Value::as_str) {
+        request.reason = Some(reason.to_string());
+    }
+    let policy_version = state.permissions.policy().await.version();
+    let scope = input
+        .get("scope")
+        .and_then(Value::as_str)
+        .and_then(parse_decision_scope)
+        .unwrap_or(DecisionScope::Session);
+    let expires_at = input
+        .get("expires_at")
+        .and_then(Value::as_str)
+        .and_then(|raw| OffsetDateTime::parse(raw, &Rfc3339).ok());
+    let decision = if approved {
+        PermissionDecision::Granted {
+            scope,
+            policy_version,
+            reason: request.reason.clone(),
+            expires_at,
+            rule_id: None,
+        }
+    } else {
+        PermissionDecision::Denied {
+            scope,
+            policy_version,
+            reason: request.reason.clone(),
+            rule_id: None,
+        }
+    };
+    let remember = input
+        .get("remember")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        .then(|| RememberSpec {
+            scope,
+            action_pattern: input
+                .get("action_pattern")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            target_pattern: input
+                .get("target_pattern")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            expires_at,
+        });
+    state
+        .permissions
+        .record_decision(&request, &decision, Some(actor), remember)
+        .await;
+}
+
+fn parse_action_class(raw: &str) -> Option<ActionClass> {
+    match raw {
+        "read" => Some(ActionClass::Read),
+        "write" => Some(ActionClass::Write),
+        "exec" => Some(ActionClass::Exec),
+        "net" => Some(ActionClass::Net),
+        "llm" => Some(ActionClass::Llm),
+        "custom" => Some(ActionClass::Custom),
+        _ => None,
+    }
+}
+
+fn parse_decision_scope(raw: &str) -> Option<DecisionScope> {
+    match raw {
+        "session" => Some(DecisionScope::Session),
+        "workspace" => Some(DecisionScope::Workspace),
+        "user" => Some(DecisionScope::User),
+        "always" => Some(DecisionScope::Always),
+        _ => None,
+    }
+}
+
+async fn get_permissions_policy(
+    State(state): State<ApiState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
+        return response;
+    }
+    let policy = state.permissions.policy().await;
+    let version = policy.version();
+    Json(json!({
+        "object": "permission_policy",
+        "version": version.as_str(),
+        "policy": policy,
+    }))
+    .into_response()
+}
+
+async fn put_permissions_policy(
+    State(state): State<ApiState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::PUT, &uri, &headers, body.clone()).await {
+        return response;
+    }
+    let Ok(input) = parse_json_body(&body) else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_json",
+            "request body must be JSON",
+        );
+    };
+    let policy_value = input.get("policy").cloned().unwrap_or(input.clone());
+    let policy: PermissionPolicy = match serde_json::from_value(policy_value) {
+        Ok(value) => value,
+        Err(error) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_policy",
+                &format!("policy did not deserialize: {error}"),
+            );
+        }
+    };
+    if let Err(errors) = policy.lint() {
+        let messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_policy",
+            &messages.join("; "),
+        );
+    }
+    let version = state.permissions.install_policy(policy.clone()).await;
+    Json(json!({
+        "object": "permission_policy",
+        "version": version.as_str(),
+        "policy": policy,
+    }))
+    .into_response()
+}
+
+async fn list_permission_rules(
+    State(state): State<ApiState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
+        return response;
+    }
+    let rules = state.permissions.rules().await;
+    let data: Vec<Value> = rules
+        .into_iter()
+        .map(|rule| serde_json::to_value(rule).unwrap_or(Value::Null))
+        .collect();
+    Json(list_response(data)).into_response()
+}
+
+async fn create_permission_rule(
+    State(state): State<ApiState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
+        return response;
+    }
+    let Ok(input) = parse_json_body(&body) else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_json",
+            "request body must be JSON",
+        );
+    };
+    let rule: RememberRule = match serde_json::from_value(input) {
+        Ok(rule) => rule,
+        Err(error) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_rule",
+                &format!("rule did not deserialize: {error}"),
+            );
+        }
+    };
+    state.permissions.add_rule(rule.clone()).await;
+    Json(serde_json::to_value(&rule).unwrap_or(Value::Null)).into_response()
+}
+
+async fn revoke_permission_rule(
+    State(state): State<ApiState>,
+    AxumPath(rule_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::DELETE, &uri, &headers, Bytes::new()).await {
+        return response;
+    }
+    let id = RuleId(rule_id);
+    if state.permissions.revoke_rule(&id).await {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        api_error(StatusCode::NOT_FOUND, "not_found", "rule not found")
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct PermissionHistoryQuery {
+    session_id: Option<String>,
+    workspace_id: Option<String>,
+    tenant_id: Option<String>,
+    actor: Option<String>,
+    outcome: Option<crate::permissions::AuditOutcome>,
+    limit: Option<usize>,
+}
+
+async fn get_permission_history(
+    State(state): State<ApiState>,
+    Query(query): Query<PermissionHistoryQuery>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
+        return response;
+    }
+    let filter = AuditFilter {
+        tenant_id: query.tenant_id,
+        session_id: query.session_id,
+        workspace_id: query.workspace_id,
+        actor: query.actor,
+        outcome: query.outcome,
+        since: None,
+        limit: query.limit,
+    };
+    let entries = state.permissions.history(&filter).await;
+    let data: Vec<Value> = entries
+        .into_iter()
+        .map(|entry| serde_json::to_value(entry).unwrap_or(Value::Null))
+        .collect();
+    Json(list_response(data)).into_response()
+}
+
+async fn check_permission(
+    State(state): State<ApiState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
+        return response;
+    }
+    let Ok(input) = parse_json_body(&body) else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_json",
+            "request body must be JSON",
+        );
+    };
+    let mut request: PermissionRequest = match serde_json::from_value(input) {
+        Ok(request) => request,
+        Err(error) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                &format!("permission request did not deserialize: {error}"),
+            );
+        }
+    };
+    if request.id.is_empty() {
+        request.id = format!("permission_{}", Uuid::now_v7());
+    }
+    let decision = state.permissions.evaluate(&request).await;
+    state
+        .permissions
+        .record_decision(&request, &decision, None, None)
+        .await;
+    Json(json!({
+        "object": "permission_decision",
+        "request_id": request.id,
+        "decision": decision,
+    }))
+    .into_response()
 }
 
 async fn authorize(
@@ -2465,6 +2824,191 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    async fn build_test_router() -> axum::Router {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("agent.harn");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
+        let server = ApiServer::new(ApiServerConfig::for_pipeline(
+            script.to_string_lossy().to_string(),
+        ));
+        // Leak the tempdir so the workspace_root stays alive for the
+        // lifetime of the test; the router holds a path-only reference
+        // and we don't need to clean up the on-disk artifact.
+        std::mem::forget(dir);
+        api_router(server.state)
+    }
+
+    async fn read_json(response: Response) -> Value {
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        serde_json::from_slice(&body).expect("json")
+    }
+
+    #[tokio::test]
+    async fn permissions_policy_installs_and_lints() {
+        let app = build_test_router().await;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/v1/permissions/policy")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"read":["src/**"],"escalate_to":["user"]}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = read_json(response).await;
+        assert_eq!(body["object"], "permission_policy");
+        let version = body["version"].as_str().expect("version");
+        assert!(version.starts_with("policy-"));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/permissions/policy")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = read_json(response).await;
+        assert_eq!(body["policy"]["read"][0], "src/**");
+
+        // Linter rejects empty patterns.
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/v1/permissions/policy")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"read":[""]}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn permission_rules_round_trip_and_check_uses_them() {
+        let app = build_test_router().await;
+        let rule = RememberRule::new(
+            DecisionScope::Session,
+            Some("s1".to_string()),
+            ActionClass::Read,
+            "fs.*",
+            "src/**",
+            true,
+            "alice",
+        )
+        .expect("rule compiles");
+        let rule_body = serde_json::to_string(&rule).expect("rule json");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/permissions/rules")
+                    .header("content-type", "application/json")
+                    .body(Body::from(rule_body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let status = response.status();
+        let body = read_json(response).await;
+        assert_eq!(status, StatusCode::OK, "create rule failed: {body}");
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/permissions/rules")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = read_json(response).await;
+        assert_eq!(body["data"].as_array().expect("rules").len(), 1);
+
+        let check_request = PermissionRequest::new(
+            "p1",
+            "s1",
+            "alice",
+            ActionClass::Read,
+            "fs.read",
+            "src/lib.rs",
+        );
+        let check_body = serde_json::to_string(&check_request).expect("request json");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/permissions/check")
+                    .header("content-type", "application/json")
+                    .body(Body::from(check_body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let status = response.status();
+        let body = read_json(response).await;
+        assert_eq!(status, StatusCode::OK, "check failed: {body}");
+        assert_eq!(body["decision"]["outcome"], "granted");
+        assert_eq!(body["decision"]["scope"], "session");
+
+        let history = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/permissions/history?session_id=s1")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let body = read_json(history).await;
+        assert_eq!(body["data"].as_array().expect("history").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn permission_check_returns_suspend_when_no_rule_or_policy() {
+        let app = build_test_router().await;
+        let request = PermissionRequest::new(
+            "p1",
+            "s1",
+            "alice",
+            ActionClass::Exec,
+            "shell.exec",
+            "rm -rf /",
+        );
+        let body = serde_json::to_string(&request).expect("request json");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/permissions/check")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let status = response.status();
+        let body = read_json(response).await;
+        assert_eq!(status, StatusCode::OK, "check failed: {body}");
+        assert_eq!(body["decision"]["outcome"], "suspend");
     }
 
     #[cfg(unix)]

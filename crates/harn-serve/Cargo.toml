@@ -14,6 +14,7 @@ axum-server = { version = "0.8", features = ["tls-rustls"] }
 base64 = "0.22"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 futures = "0.3"
+globset = "0.4"
 harn-parser = { path = "../harn-parser", version = "0.8" }
 harn-vm = { path = "../harn-vm", version = "0.8" }
 harn-hostlib = { path = "../harn-hostlib", version = "0.8", optional = true }

@@ -2497,6 +2497,7 @@ dependencies = [
  "ed25519-dalek",
  "filetime",
  "futures",
+ "globset",
  "harn-hostlib",
  "harn-parser",
  "harn-vm",
