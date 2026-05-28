@@ -5,69 +5,27 @@ use std::time::Duration as StdDuration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::process::runtime_root_base;
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
-};
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 const DEFAULT_UPDATE_TIMEOUT_MS: u64 = 30_000;
 const UPDATE_POLL_INTERVAL_MS: u64 = 25;
 
-const WORKFLOW_MESSAGE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("workflow.signal", workflow_signal_builtin)
-        .signature("workflow.signal(target, name, payload?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Enqueue a workflow signal message."),
-    SyncBuiltin::new("workflow.query", workflow_query_builtin)
-        .signature("workflow.query(target, name)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Read the latest published workflow query value."),
-    SyncBuiltin::new("workflow.publish_query", workflow_publish_query_builtin)
-        .signature("workflow.publish_query(target, name, value?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Publish a workflow query value."),
-    SyncBuiltin::new("workflow.receive", workflow_receive_builtin)
-        .signature("workflow.receive(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Receive the next workflow mailbox message."),
-    SyncBuiltin::new("workflow.respond_update", workflow_respond_update_builtin)
-        .signature("workflow.respond_update(target, request_id, value?, name?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-        .doc("Respond to a pending workflow update request."),
-    SyncBuiltin::new("workflow.pause", workflow_pause_builtin)
-        .signature("workflow.pause(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Pause a workflow mailbox."),
-    SyncBuiltin::new("workflow.resume", workflow_resume_builtin)
-        .signature("workflow.resume(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Resume a workflow mailbox."),
-    SyncBuiltin::new("workflow.status", workflow_status_builtin)
-        .signature("workflow.status(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return workflow mailbox status."),
-    SyncBuiltin::new("workflow.continue_as_new", workflow_continue_as_new_builtin)
-        .signature("workflow.continue_as_new(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Advance a workflow mailbox generation."),
-    SyncBuiltin::new("continue_as_new", continue_as_new_builtin)
-        .signature("continue_as_new(target)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Advance a workflow mailbox generation."),
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &WORKFLOW_SIGNAL_BUILTIN_DEF,
+    &WORKFLOW_QUERY_BUILTIN_DEF,
+    &WORKFLOW_PUBLISH_QUERY_BUILTIN_DEF,
+    &WORKFLOW_RECEIVE_BUILTIN_DEF,
+    &WORKFLOW_RESPOND_UPDATE_BUILTIN_DEF,
+    &WORKFLOW_PAUSE_BUILTIN_DEF,
+    &WORKFLOW_RESUME_BUILTIN_DEF,
+    &WORKFLOW_STATUS_BUILTIN_DEF,
+    &WORKFLOW_CONTINUE_AS_NEW_BUILTIN_DEF,
+    &CONTINUE_AS_NEW_BUILTIN_DEF,
+    &WORKFLOW_UPDATE_BUILTIN_DEF,
 ];
-
-const WORKFLOW_MESSAGE_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
-    &[async_builtin!("workflow.update", workflow_update_builtin)
-        .signature("workflow.update(target, name, payload?, options?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-        .doc("Enqueue a workflow update and wait for a response.")];
-
-const WORKFLOW_MESSAGE_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("workflow.messages")
-    .sync(WORKFLOW_MESSAGE_SYNC_PRIMITIVES)
-    .async_(WORKFLOW_MESSAGE_ASYNC_PRIMITIVES);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkflowMessageRecord {
@@ -575,9 +533,16 @@ pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
         ]))),
     );
 
-    register_builtin_group(vm, WORKFLOW_MESSAGE_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
+/// Enqueue a workflow signal message.
+#[harn_builtin(
+    sig = "workflow.signal(target: string|dict, name: string, payload?: any) -> dict",
+    category = "workflow.messages"
+)]
 fn workflow_signal_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.signal")?;
     let name = args
@@ -594,6 +559,11 @@ fn workflow_signal_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     Ok(crate::stdlib::json_to_vm_value(&result))
 }
 
+/// Read the latest published workflow query value.
+#[harn_builtin(
+    sig = "workflow.query(target: string|dict, name: string) -> any",
+    category = "workflow.messages"
+)]
 fn workflow_query_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.query")?;
     let name = args
@@ -611,6 +581,12 @@ fn workflow_query_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     ))
 }
 
+/// Enqueue a workflow update and wait for a response.
+#[harn_builtin(
+    sig = "workflow.update(target: string|dict, name: string, payload?: any, options?: dict|nil) -> any",
+    kind = "async",
+    category = "workflow.messages"
+)]
 async fn workflow_update_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.update")?;
     let name = args
@@ -641,6 +617,11 @@ async fn workflow_update_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     Ok(crate::stdlib::json_to_vm_value(&result))
 }
 
+/// Publish a workflow query value.
+#[harn_builtin(
+    sig = "workflow.publish_query(target: string|dict, name: string, value?: any) -> dict",
+    category = "workflow.messages"
+)]
 fn workflow_publish_query_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.publish_query")?;
     let name = args
@@ -658,6 +639,11 @@ fn workflow_publish_query_builtin(args: &[VmValue], _out: &mut String) -> Result
     Ok(crate::stdlib::json_to_vm_value(&result))
 }
 
+/// Receive the next workflow mailbox message.
+#[harn_builtin(
+    sig = "workflow.receive(target: string|dict) -> dict|nil",
+    category = "workflow.messages"
+)]
 fn workflow_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.receive")?;
     let Some(message) = receive_message(&target).map_err(VmError::Runtime)? else {
@@ -674,6 +660,11 @@ fn workflow_receive_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
     })))
 }
 
+/// Respond to a pending workflow update request.
+#[harn_builtin(
+    sig = "workflow.respond_update(target: string|dict, request_id: string, value?: any, name?: string|nil) -> dict",
+    category = "workflow.messages"
+)]
 fn workflow_respond_update_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -705,6 +696,11 @@ fn workflow_respond_update_builtin(
     Ok(crate::stdlib::json_to_vm_value(&result))
 }
 
+/// Pause a workflow mailbox.
+#[harn_builtin(
+    sig = "workflow.pause(target: string|dict) -> dict",
+    category = "workflow.messages"
+)]
 fn workflow_pause_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.pause")?;
     let result =
@@ -712,6 +708,11 @@ fn workflow_pause_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(crate::stdlib::json_to_vm_value(&result))
 }
 
+/// Resume a workflow mailbox.
+#[harn_builtin(
+    sig = "workflow.resume(target: string|dict) -> dict",
+    category = "workflow.messages"
+)]
 fn workflow_resume_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.resume")?;
     let result = workflow_resume_for_base(&target.base_dir, &target.workflow_id)
@@ -719,6 +720,11 @@ fn workflow_resume_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     Ok(crate::stdlib::json_to_vm_value(&result))
 }
 
+/// Return workflow mailbox status.
+#[harn_builtin(
+    sig = "workflow.status(target: string|dict) -> dict",
+    category = "workflow.messages"
+)]
 fn workflow_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.status")?;
     let state = load_state(&target).map_err(VmError::Runtime)?;
@@ -727,6 +733,11 @@ fn workflow_status_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     )))
 }
 
+/// Advance a workflow mailbox generation.
+#[harn_builtin(
+    sig = "workflow.continue_as_new(target: string|dict) -> dict",
+    category = "workflow.messages"
+)]
 fn workflow_continue_as_new_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -734,6 +745,11 @@ fn workflow_continue_as_new_builtin(
     continue_as_new_for_label(args, "workflow.continue_as_new")
 }
 
+/// Advance a workflow mailbox generation (top-level alias).
+#[harn_builtin(
+    sig = "continue_as_new(target: string|dict) -> dict",
+    category = "workflow.messages"
+)]
 fn continue_as_new_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     continue_as_new_for_label(args, "continue_as_new")
 }
