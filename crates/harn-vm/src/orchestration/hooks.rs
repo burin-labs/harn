@@ -34,175 +34,194 @@ where
     (output, reports)
 }
 
-/// Manifest / runtime hook event names.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub enum HookEvent {
-    #[serde(rename = "PreToolUse")]
-    PreToolUse,
-    #[serde(rename = "PostToolUse")]
-    PostToolUse,
-    #[serde(rename = "PreAgentTurn")]
-    PreAgentTurn,
-    #[serde(rename = "PostAgentTurn")]
-    PostAgentTurn,
-    #[serde(rename = "WorkerSpawned")]
-    WorkerSpawned,
-    #[serde(rename = "WorkerProgressed")]
-    WorkerProgressed,
-    #[serde(rename = "WorkerWaitingForInput")]
-    WorkerWaitingForInput,
-    #[serde(rename = "WorkerSuspended")]
-    WorkerSuspended,
-    #[serde(rename = "WorkerResumed")]
-    WorkerResumed,
-    #[serde(rename = "WorkerCompleted")]
-    WorkerCompleted,
-    #[serde(rename = "WorkerFailed")]
-    WorkerFailed,
-    #[serde(rename = "WorkerCancelled")]
-    WorkerCancelled,
-    #[serde(rename = "PreStep")]
-    PreStep,
-    #[serde(rename = "PostStep")]
-    PostStep,
-    #[serde(rename = "OnBudgetThreshold")]
-    OnBudgetThreshold,
-    #[serde(rename = "OnApprovalRequested")]
-    OnApprovalRequested,
-    #[serde(rename = "OnHandoffEmitted")]
-    OnHandoffEmitted,
-    #[serde(rename = "OnPersonaPaused")]
-    OnPersonaPaused,
-    #[serde(rename = "OnPersonaResumed")]
-    OnPersonaResumed,
-    #[serde(rename = "SessionStart")]
-    SessionStart,
-    #[serde(rename = "SessionEnd")]
-    SessionEnd,
-    #[serde(rename = "UserPromptSubmit")]
-    UserPromptSubmit,
-    #[serde(rename = "PreCompact")]
-    PreCompact,
-    #[serde(rename = "PostCompact")]
-    PostCompact,
-    #[serde(rename = "PostTurn")]
-    PostTurn,
-    #[serde(rename = "PermissionAsked")]
-    PermissionAsked,
-    #[serde(rename = "PermissionReplied")]
-    PermissionReplied,
-    #[serde(rename = "FileEdited")]
-    FileEdited,
-    #[serde(rename = "SessionError")]
-    SessionError,
-    #[serde(rename = "SessionIdle")]
-    SessionIdle,
-    #[serde(rename = "PreFinish")]
-    PreFinish,
-    #[serde(rename = "PostFinish")]
-    PostFinish,
-    #[serde(rename = "OnUnsettledDetected")]
-    OnUnsettledDetected,
-    #[serde(rename = "PreSuspend")]
-    PreSuspend,
-    #[serde(rename = "PostSuspend")]
-    PostSuspend,
-    #[serde(rename = "PreResume")]
-    PreResume,
-    #[serde(rename = "PostResume")]
-    PostResume,
-    #[serde(rename = "PreDrain")]
-    PreDrain,
-    #[serde(rename = "PostDrain")]
-    PostDrain,
-    #[serde(rename = "OnDrainDecision")]
-    OnDrainDecision,
+/// High-level grouping for a hook event. Drives `parse_session_event` /
+/// `parse_provider_event` routing, reminder support, and the
+/// `clear_session_hooks` filter, so each behavior derives from the
+/// variant's declared kind rather than a hand-maintained match arm.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum HookEventKind {
+    /// Tool-call lifecycle (PreToolUse / PostToolUse).
+    Tool,
+    /// Agent-turn lifecycle (PreAgentTurn / PostAgentTurn).
+    AgentTurn,
+    /// Worker lifecycle — the only kind that rejects reminder effects.
+    Worker,
+    /// Step lifecycle (PreStep / PostStep).
+    Step,
+    /// Notification surfaces (budget / approval / handoff / persona).
+    Notification,
+    /// Session-level lifecycle. Eligible for `parse_session_event` and
+    /// scoped clearing via `clear_session_hooks`.
+    Session,
+}
+
+/// `hook_events!` — single source of truth for `HookEvent`. Emits the
+/// enum, `as_str`, `kind`, `supports_reminder_effects`,
+/// `is_session_lifecycle`, `parse_session_event`, `parse_provider_event`,
+/// `from_worker_event`, and the canonical `ALL` slice. Adding a variant
+/// requires only one new line — every dispatch table is derived.
+///
+/// Each entry has the form
+/// `Variant { kind: Kind [, provider_parse: true] [, aliases: [..]] }`:
+/// `provider_parse` flags variants accepted directly by
+/// `parse_provider_event` (Worker variants are accepted by virtue of
+/// `kind: Worker`); `aliases` lists explicit extra wire names beyond
+/// the auto-derived `snake_case` of the variant identifier.
+macro_rules! hook_events {
+    (
+        $(
+            $(#[$attr:meta])*
+            $variant:ident {
+                kind: $kind:ident
+                $(, provider_parse: $provider_parse:literal)?
+                $(, aliases: [$($alias:literal),* $(,)?])?
+                $(,)?
+            }
+        ),* $(,)?
+    ) => {
+        #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+        pub enum HookEvent {
+            $(
+                $(#[$attr])*
+                $variant,
+            )*
+        }
+
+        impl HookEvent {
+            /// Canonical PascalCase wire name.
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => stringify!($variant),)*
+                }
+            }
+
+            /// High-level grouping — drives every other routing predicate.
+            pub const fn kind(self) -> HookEventKind {
+                match self {
+                    $(Self::$variant => HookEventKind::$kind,)*
+                }
+            }
+
+            /// Reminder effects are rejected by Worker events because
+            /// they fire from contexts without a pending tool-call /
+            /// transcript slot for the reminder to attach to.
+            pub const fn supports_reminder_effects(self) -> bool {
+                !matches!(self.kind(), HookEventKind::Worker)
+            }
+
+            /// Whether `clear_session_hooks` and `parse_session_event`
+            /// own this variant.
+            pub const fn is_session_lifecycle(self) -> bool {
+                matches!(self.kind(), HookEventKind::Session)
+            }
+
+            /// All variants in declaration order. Stable enough that
+            /// `parse_*` functions can iterate it.
+            pub const ALL: &'static [Self] = &[$(Self::$variant,)*];
+
+            /// Whether this variant is accepted directly by
+            /// `parse_provider_event` (independent of the
+            /// session-parser fallback). Worker variants are accepted
+            /// implicitly by their kind.
+            const fn in_provider_parse(self) -> bool {
+                match self {
+                    $(Self::$variant => hook_events!(@or_false $($provider_parse)?),)*
+                }
+            }
+
+            /// Explicit non-snake-case aliases declared on the variant.
+            const fn extra_aliases(self) -> &'static [&'static str] {
+                match self {
+                    $(Self::$variant => &[$($($alias),*)?],)*
+                }
+            }
+
+            /// Parse a session-level hook event name. Returns `Err` for
+            /// unknown or non-session events; persona/tool/worker events
+            /// are intentionally rejected so each registration surface
+            /// owns its own event set. Accepts the canonical PascalCase
+            /// spelling, its auto-derived snake_case, and any explicit
+            /// `aliases: [...]` declared in `hook_events!`.
+            pub fn parse_session_event(name: &str) -> Result<Self, String> {
+                let trimmed = name.trim();
+                for &event in Self::ALL.iter().filter(|e| e.is_session_lifecycle()) {
+                    if event_matches_name(event, trimmed) {
+                        return Ok(event);
+                    }
+                }
+                Err(format!("unknown session hook event `{trimmed}`"))
+            }
+
+            /// Parse a reminder-provider event name. Accepts Worker
+            /// events, any variant flagged `provider_parse: true` in
+            /// `hook_events!`, and (by fallback) every session event.
+            pub fn parse_provider_event(name: &str) -> Result<Self, String> {
+                let trimmed = name.trim();
+                for &event in Self::ALL.iter().filter(|e| {
+                    matches!(e.kind(), HookEventKind::Worker) || e.in_provider_parse()
+                }) {
+                    if event_matches_name(event, trimmed) {
+                        return Ok(event);
+                    }
+                }
+                Self::parse_session_event(trimmed)
+                    .map_err(|_| format!("unknown reminder provider event `{trimmed}`"))
+            }
+        }
+    };
+    (@or_false $val:literal) => { $val };
+    (@or_false) => { false };
+}
+
+hook_events! {
+    PreToolUse              { kind: Tool },
+    PostToolUse             { kind: Tool, provider_parse: true },
+    PreAgentTurn            { kind: AgentTurn },
+    PostAgentTurn           { kind: AgentTurn },
+    WorkerSpawned           { kind: Worker },
+    WorkerProgressed        { kind: Worker },
+    WorkerWaitingForInput   { kind: Worker },
+    WorkerSuspended         { kind: Worker },
+    WorkerResumed           { kind: Worker },
+    WorkerCompleted         { kind: Worker },
+    WorkerFailed            { kind: Worker },
+    WorkerCancelled         { kind: Worker },
+    PreStep                 { kind: Step },
+    PostStep                { kind: Step },
+    OnBudgetThreshold       { kind: Notification, provider_parse: true },
+    OnApprovalRequested     { kind: Notification },
+    OnHandoffEmitted        { kind: Notification },
+    OnPersonaPaused         { kind: Notification },
+    OnPersonaResumed        { kind: Notification },
+    SessionStart            { kind: Session },
+    SessionEnd              { kind: Session },
+    UserPromptSubmit        { kind: Session },
+    PreCompact              { kind: Session },
+    PostCompact             { kind: Session },
+    PostTurn                { kind: Session },
+    PermissionAsked         { kind: Session },
+    PermissionReplied       { kind: Session },
+    FileEdited              { kind: Session },
+    SessionError            { kind: Session, aliases: ["error"] },
+    SessionIdle             { kind: Session },
+    PreFinish               { kind: Session },
+    PostFinish              { kind: Session },
+    OnUnsettledDetected     { kind: Session },
+    PreSuspend              { kind: Session },
+    PostSuspend             { kind: Session },
+    PreResume               { kind: Session },
+    PostResume              { kind: Session },
+    PreDrain                { kind: Session },
+    PostDrain               { kind: Session },
+    OnDrainDecision         { kind: Session },
     /// Fired by `__agent_loop_checkpoint(kind, ...)` at every safe
     /// injection seam in the agent loop. Pattern-match on `payload.kind`
     /// to subscribe to specific seams (e.g. `kind=="pre_tool_dispatch"`)
     /// or use `*` to observe every checkpoint pass.
-    #[serde(rename = "LoopCheckpoint")]
-    LoopCheckpoint,
+    LoopCheckpoint          { kind: Session },
 }
 
 impl HookEvent {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PreToolUse => "PreToolUse",
-            Self::PostToolUse => "PostToolUse",
-            Self::PreAgentTurn => "PreAgentTurn",
-            Self::PostAgentTurn => "PostAgentTurn",
-            Self::WorkerSpawned => "WorkerSpawned",
-            Self::WorkerProgressed => "WorkerProgressed",
-            Self::WorkerWaitingForInput => "WorkerWaitingForInput",
-            Self::WorkerSuspended => "WorkerSuspended",
-            Self::WorkerResumed => "WorkerResumed",
-            Self::WorkerCompleted => "WorkerCompleted",
-            Self::WorkerFailed => "WorkerFailed",
-            Self::WorkerCancelled => "WorkerCancelled",
-            Self::PreStep => "PreStep",
-            Self::PostStep => "PostStep",
-            Self::OnBudgetThreshold => "OnBudgetThreshold",
-            Self::OnApprovalRequested => "OnApprovalRequested",
-            Self::OnHandoffEmitted => "OnHandoffEmitted",
-            Self::OnPersonaPaused => "OnPersonaPaused",
-            Self::OnPersonaResumed => "OnPersonaResumed",
-            Self::SessionStart => "SessionStart",
-            Self::SessionEnd => "SessionEnd",
-            Self::UserPromptSubmit => "UserPromptSubmit",
-            Self::PreCompact => "PreCompact",
-            Self::PostCompact => "PostCompact",
-            Self::PostTurn => "PostTurn",
-            Self::PermissionAsked => "PermissionAsked",
-            Self::PermissionReplied => "PermissionReplied",
-            Self::FileEdited => "FileEdited",
-            Self::SessionError => "SessionError",
-            Self::SessionIdle => "SessionIdle",
-            Self::PreFinish => "PreFinish",
-            Self::PostFinish => "PostFinish",
-            Self::OnUnsettledDetected => "OnUnsettledDetected",
-            Self::PreSuspend => "PreSuspend",
-            Self::PostSuspend => "PostSuspend",
-            Self::PreResume => "PreResume",
-            Self::PostResume => "PostResume",
-            Self::PreDrain => "PreDrain",
-            Self::PostDrain => "PostDrain",
-            Self::OnDrainDecision => "OnDrainDecision",
-            Self::LoopCheckpoint => "LoopCheckpoint",
-        }
-    }
-
-    /// Parse a session-level hook event name. Returns `Err` for unknown
-    /// or non-session events; persona/tool events are intentionally
-    /// rejected so each registration surface owns its own event set.
-    pub fn parse_session_event(name: &str) -> Result<Self, String> {
-        match name.trim() {
-            "SessionStart" | "session_start" => Ok(Self::SessionStart),
-            "SessionEnd" | "session_end" => Ok(Self::SessionEnd),
-            "UserPromptSubmit" | "user_prompt_submit" => Ok(Self::UserPromptSubmit),
-            "PreCompact" | "pre_compact" => Ok(Self::PreCompact),
-            "PostCompact" | "post_compact" => Ok(Self::PostCompact),
-            "PostTurn" | "post_turn" => Ok(Self::PostTurn),
-            "PermissionAsked" | "permission_asked" => Ok(Self::PermissionAsked),
-            "PermissionReplied" | "permission_replied" => Ok(Self::PermissionReplied),
-            "FileEdited" | "file_edited" => Ok(Self::FileEdited),
-            "SessionError" | "session_error" | "error" => Ok(Self::SessionError),
-            "SessionIdle" | "session_idle" => Ok(Self::SessionIdle),
-            "PreFinish" | "pre_finish" => Ok(Self::PreFinish),
-            "PostFinish" | "post_finish" => Ok(Self::PostFinish),
-            "OnUnsettledDetected" | "on_unsettled_detected" => Ok(Self::OnUnsettledDetected),
-            "PreSuspend" | "pre_suspend" => Ok(Self::PreSuspend),
-            "PostSuspend" | "post_suspend" => Ok(Self::PostSuspend),
-            "PreResume" | "pre_resume" => Ok(Self::PreResume),
-            "PostResume" | "post_resume" => Ok(Self::PostResume),
-            "PreDrain" | "pre_drain" => Ok(Self::PreDrain),
-            "PostDrain" | "post_drain" => Ok(Self::PostDrain),
-            "OnDrainDecision" | "on_drain_decision" => Ok(Self::OnDrainDecision),
-            "LoopCheckpoint" | "loop_checkpoint" => Ok(Self::LoopCheckpoint),
-            other => Err(format!("unknown session hook event `{other}`")),
-        }
-    }
-
     pub fn from_worker_event(event: WorkerEvent) -> Self {
         match event {
             WorkerEvent::WorkerSpawned => Self::WorkerSpawned,
@@ -215,20 +234,34 @@ impl HookEvent {
             WorkerEvent::WorkerCancelled => Self::WorkerCancelled,
         }
     }
+}
 
-    pub fn supports_reminder_effects(self) -> bool {
-        !matches!(
-            self,
-            Self::WorkerSpawned
-                | Self::WorkerProgressed
-                | Self::WorkerWaitingForInput
-                | Self::WorkerSuspended
-                | Self::WorkerResumed
-                | Self::WorkerCompleted
-                | Self::WorkerFailed
-                | Self::WorkerCancelled
-        )
+fn pascal_to_snake_buf(pascal: &str, buf: &mut String) {
+    buf.clear();
+    buf.reserve(pascal.len() + 4);
+    for (i, c) in pascal.char_indices() {
+        if c.is_ascii_uppercase() {
+            if i > 0 {
+                buf.push('_');
+            }
+            buf.push(c.to_ascii_lowercase());
+        } else {
+            buf.push(c);
+        }
     }
+}
+
+fn event_matches_name(event: HookEvent, candidate: &str) -> bool {
+    let pascal = event.as_str();
+    if candidate == pascal {
+        return true;
+    }
+    if event.extra_aliases().contains(&candidate) {
+        return true;
+    }
+    let mut snake = String::new();
+    pascal_to_snake_buf(pascal, &mut snake);
+    candidate == snake
 }
 
 /// Control flow returned by a session-level lifecycle hook.
@@ -580,33 +613,9 @@ pub fn clear_runtime_hooks() {
 /// `clear_persona_hooks()` for the new surface.
 pub fn clear_session_hooks() {
     RUNTIME_HOOKS.with(|hooks| {
-        hooks.borrow_mut().retain(|hook| {
-            !matches!(
-                hook.event,
-                HookEvent::SessionStart
-                    | HookEvent::SessionEnd
-                    | HookEvent::UserPromptSubmit
-                    | HookEvent::PreCompact
-                    | HookEvent::PostCompact
-                    | HookEvent::PostTurn
-                    | HookEvent::PermissionAsked
-                    | HookEvent::PermissionReplied
-                    | HookEvent::FileEdited
-                    | HookEvent::SessionError
-                    | HookEvent::SessionIdle
-                    | HookEvent::PreFinish
-                    | HookEvent::PostFinish
-                    | HookEvent::OnUnsettledDetected
-                    | HookEvent::PreSuspend
-                    | HookEvent::PostSuspend
-                    | HookEvent::PreResume
-                    | HookEvent::PostResume
-                    | HookEvent::PreDrain
-                    | HookEvent::PostDrain
-                    | HookEvent::OnDrainDecision
-                    | HookEvent::LoopCheckpoint
-            )
-        });
+        hooks
+            .borrow_mut()
+            .retain(|hook| !hook.event.is_session_lifecycle());
     });
 }
 
@@ -1784,5 +1793,116 @@ mod tests {
         let message = error_message(parse_hook_effects(HookEvent::WorkerSpawned, &value));
         assert!(message.contains(Code::ReminderUnsupportedHookEvent.as_str()));
         assert!(message.contains("WorkerSpawned"), "{message}");
+    }
+
+    #[test]
+    fn as_str_round_trips_through_serde() {
+        // The macro relies on serde's default unit-variant encoding
+        // (identifier = wire name) instead of a per-variant
+        // `#[serde(rename)]`. Lock that contract so a future variant
+        // can't drift by accident.
+        for &event in HookEvent::ALL {
+            let json = serde_json::to_string(&event).unwrap();
+            assert_eq!(json, format!("\"{}\"", event.as_str()));
+            let parsed: HookEvent = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, event);
+        }
+    }
+
+    #[test]
+    fn parse_session_event_accepts_both_spellings_for_every_session_variant() {
+        // The macro auto-derives snake_case from the PascalCase
+        // identifier; this test guards against a future variant whose
+        // name doesn't round-trip cleanly (e.g. unexpected punctuation).
+        for &event in HookEvent::ALL.iter().filter(|e| e.is_session_lifecycle()) {
+            let pascal = event.as_str();
+            let mut snake = String::new();
+            pascal_to_snake_buf(pascal, &mut snake);
+            assert_eq!(
+                HookEvent::parse_session_event(pascal).unwrap(),
+                event,
+                "PascalCase `{pascal}`",
+            );
+            assert_eq!(
+                HookEvent::parse_session_event(&snake).unwrap(),
+                event,
+                "snake_case `{snake}`",
+            );
+        }
+    }
+
+    #[test]
+    fn parse_session_event_rejects_non_session_variants() {
+        // Tool, agent-turn, worker, step, and notification events must
+        // not be accepted by the session parser — each surface owns
+        // its own event set.
+        for &event in HookEvent::ALL.iter().filter(|e| !e.is_session_lifecycle()) {
+            let err = HookEvent::parse_session_event(event.as_str())
+                .expect_err("non-session event slipped through");
+            assert!(err.contains("unknown session hook event"), "{err}");
+        }
+    }
+
+    #[test]
+    fn parse_provider_event_accepts_worker_and_session_and_flagged_variants() {
+        // Worker variants are accepted by kind, session variants by
+        // the fallback, and explicitly-flagged variants
+        // (`provider_parse: true`) by the first-pass loop. The whole
+        // set should round-trip.
+        for &event in HookEvent::ALL.iter().filter(|e| {
+            matches!(e.kind(), HookEventKind::Worker | HookEventKind::Session)
+                || e.in_provider_parse()
+        }) {
+            assert_eq!(
+                HookEvent::parse_provider_event(event.as_str()).unwrap(),
+                event,
+                "{event:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn session_error_accepts_legacy_short_alias() {
+        // `SessionError` carries an explicit `"error"` alias for
+        // backward compat with the original event name.
+        assert_eq!(
+            HookEvent::parse_session_event("error").unwrap(),
+            HookEvent::SessionError,
+        );
+        assert_eq!(
+            HookEvent::parse_session_event("SessionError").unwrap(),
+            HookEvent::SessionError,
+        );
+        assert_eq!(
+            HookEvent::parse_session_event("session_error").unwrap(),
+            HookEvent::SessionError,
+        );
+    }
+
+    #[test]
+    fn supports_reminder_effects_excludes_only_worker_kind() {
+        for &event in HookEvent::ALL {
+            let supports = event.supports_reminder_effects();
+            let expected = !matches!(event.kind(), HookEventKind::Worker);
+            assert_eq!(
+                supports,
+                expected,
+                "{event:?} ({:?}) reminder support disagrees with kind",
+                event.kind(),
+            );
+        }
+    }
+
+    #[test]
+    fn from_worker_event_covers_every_worker_variant() {
+        for worker in WorkerEvent::ALL {
+            let event = HookEvent::from_worker_event(worker);
+            assert!(
+                matches!(event.kind(), HookEventKind::Worker),
+                "WorkerEvent::{worker:?} mapped to non-Worker kind {:?}",
+                event.kind(),
+            );
+            assert_eq!(event.as_str(), worker.as_str());
+        }
     }
 }
