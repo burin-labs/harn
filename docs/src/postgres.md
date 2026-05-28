@@ -154,6 +154,147 @@ or branching — keep using SQLx CLI, Sqitch, or Flyway and call
 `pg_migrate` only when your `.harn` pipeline is the authoritative
 schema owner.
 
+## Advisory locks
+
+Advisory locks coordinate work across processes that share a Postgres
+instance — typically "only one worker may run job X at a time" without
+having to write the lock state to a table. Transaction-scoped locks
+auto-release on commit/rollback, which matches almost every real use
+case (the lock should live exactly as long as the work it guards).
+
+```harn
+pg_transaction(db, { tx ->
+  pg_advisory_xact_lock(tx, "release-cut", {tenant_namespace: true})
+  // exclusive section — released when this fn returns or throws
+})
+
+if (pg_with_advisory_lock(db, 0x4861726E, { tx ->
+  // opens an internal txn, takes the lock, runs the body, commits.
+  return pg_query_one(tx, "select count(*) as n from receipts", []).n > 0
+})) {
+  log("had receipts")
+}
+
+// Non-blocking probe:
+pg_transaction(db, { tx ->
+  if (pg_try_advisory_xact_lock(tx, 0x4861726E)) {
+    // …
+  }
+})
+```
+
+Keys may be an `int`, a `string` (hashed to a `(class, instance)` pair),
+or `{class: int, instance: int}`. Pass `{tenant_namespace: true}` to XOR
+the key with a tenant-id-derived salt so two tenants colliding on the
+same caller-supplied key resolve to *different* server-side keys.
+
+## LISTEN/NOTIFY
+
+`pg_listen` opens a [`PgListener`][sqlx-listener] (sqlx's auto-reconnect
+async subscriber) and returns a handle. `pg_listener_recv(handle, ms?)`
+blocks up to `ms` milliseconds; pass `nil` for non-blocking. `pg_notify`
+serializes its payload as JSON (string payloads pass through unchanged)
+and emits the corresponding `NOTIFY` command.
+
+[sqlx-listener]: https://docs.rs/sqlx/latest/sqlx/postgres/struct.PgListener.html
+
+```harn
+let listener = pg_listen(db, ["receipts.updated", "captain.notice"])
+while (true) {
+  let n = pg_listener_recv(listener, 5000)
+  if (n == nil) { continue }
+  log(n.channel + " -> " + n.payload)
+}
+pg_listener_close(listener)
+
+pg_notify(db, "receipts.updated", {receipt_id: "r1"})
+```
+
+Pass `{bridge_to_channel: true}` to `pg_listen` to republish every
+received notification onto the in-process channel bus as
+`pg:<channel-name>` — useful for composing with the trigger DSL.
+
+## Pool observability
+
+```harn
+let stats = pg_pool_stats(db)
+// → {size, idle, in_use, max_connections, statement_cache_capacity,
+//    replicas, circuit_state, circuit_failures, circuit_opened_at_ms}
+```
+
+`circuit_state` is `"disabled"` unless `circuit_breaker` was passed to
+`pg_pool(...)`. When enabled, consecutive failure budgets are tracked
+per pool; once `failure_threshold` is reached the circuit opens and
+queries fast-fail with `pg: circuit open` until `reset_after_ms`
+elapses, then a single half-open probe runs.
+
+## Schema introspection
+
+```harn
+pg_introspect_tables(db, {schema: "public"})
+// → [{schema, table, kind}, …] where kind is one of
+//   table / partitioned_table / view / materialized_view / foreign_table.
+
+pg_introspect_columns(db, "billing.invoices")
+// → [{column, type, data_type, nullable, default}, …]
+
+pg_introspect_indexes(db, "billing.invoices")
+// → [{index, columns, unique, primary}, …]
+```
+
+Identifiers are validated against the standard PG identifier rules
+(`[A-Za-z_][A-Za-z0-9_]*`, ≤ 63 bytes) and bound as parameters — no
+string concatenation hits the wire.
+
+## Read replicas
+
+```harn
+let db = pg_pool("env:DATABASE_URL", {
+  max_connections: 10,
+  replicas: ["env:DATABASE_REPLICA_URL", "env:DATABASE_REPLICA2_URL"],
+})
+// Per-query opt-in routes through the round-robin replica cursor.
+pg_query(db, "select * from receipts where id = $1", [id], {read_only: true})
+// Writes always go to the primary.
+pg_execute(db, "insert into receipts (id, payload) values ($1, $2)", [id, payload])
+```
+
+`replicas` accepts URL strings, `env:…`/`secret:…` references, or
+`{url|env|secret}` dicts — the same shapes the primary URL accepts. The
+round-robin cursor is shared across the pool; if replicas is empty the
+read-only flag is a no-op.
+
+## Partition helpers
+
+```harn
+pg_partition_attach(db, "events", "events_2026_05",
+                    {from: "2026-05-01", to: "2026-06-01"})
+pg_partition_detach(db, "events", "events_2026_03", {concurrently: true})
+let pruned = pg_partition_prune(db, "events", "2026-01-01")
+// Returns the list of `<schema>.<partition>` names that were dropped.
+// Pass {dry_run: true} to compute the list without dropping.
+```
+
+Bounds may be `{from, to}` (range), `{in: [...]}` (list), or
+`{default: true}` (default partition). Caller-supplied bounds are
+rendered as SQL literals — keep them constant and trusted.
+
+## Extended column decoding
+
+Beyond the v1 primitive types, the row decoder also handles:
+
+- `HSTORE` → `dict<string, string | nil>`
+- `POINT` → `{x: float, y: float}`
+- Other geometric types (`LINE`, `LSEG`, `BOX`, `PATH`, `POLYGON`,
+  `CIRCLE`) fall back to PG's textual representation.
+
+## Array column decoding
+
+The row decoder handles common array types end-to-end: `BOOL[]`,
+`INT2[]`, `INT4[]`, `INT8[]`, `FLOAT4[]`, `FLOAT8[]`, `TEXT[]`,
+`VARCHAR[]`, `UUID[]`, `JSON[]`, `JSONB[]`. Other array element types
+fall back to their textual representation.
+
 ## Mock fixtures
 
 Tests can avoid a live Postgres server with `pg_mock_pool`.

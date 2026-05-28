@@ -1,0 +1,22 @@
+import "std/postgres"
+
+/**
+ * pg_notify routes through execute_stmt, which the mock pool intercepts.
+ * The test asserts pg_notify serializes its payload as JSON and binds
+ * (channel, payload) into the synthesized SQL `SELECT pg_notify($1, $2)`.
+ */
+pipeline default() {
+  let db = pg_mock_pool(
+    [
+      {sql: "SELECT pg_notify($1, $2)", params: ["receipts_updated", "{\"id\":\"r1\"}"], rows_affected: 0},
+      {sql: "SELECT pg_notify($1, $2)", params: ["greetings", "hello"], rows_affected: 0},
+    ],
+  )
+  __io_println(pg_notify(db, "receipts_updated", {id: "r1"}))
+  __io_println(pg_notify(db, "greetings", "hello"))
+  let calls = pg_mock_calls(db)
+  __io_println(len(calls))
+  for call in calls {
+    __io_println(call.params[0])
+  }
+}

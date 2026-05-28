@@ -512,6 +512,11 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   # — same shape as the existing `process.rs` allowlist entry.
   "crates/harn-vm/src/stdlib/postgres/migrate.rs"
   "crates/harn-vm/src/stdlib/postgres/mod.rs"
+  # `pg_pool`'s circuit breaker (#2512) stamps the open-at instant + tests
+  # cooldown elapsed against the host wall clock. The "is the cooldown
+  # over yet" decision IS the observability source of truth — same shape
+  # as supervisor/triggers entries above.
+  "crates/harn-vm/src/stdlib/postgres/circuit.rs"
   "crates/harn-vm/src/stdlib/process.rs"
   "crates/harn-vm/src/stdlib/supervisor.rs"
   "crates/harn-vm/src/stdlib/tracing.rs"

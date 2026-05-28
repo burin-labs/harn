@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,15 +24,23 @@ use crate::stdlib::macros::{
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-const HANDLE_POOL: &str = "pg_pool";
-const HANDLE_TX: &str = "pg_tx";
-const HANDLE_MOCK: &str = "pg_mock_pool";
+use self::circuit::{Allow, CircuitBreakerState};
+
+pub(super) const HANDLE_POOL: &str = "pg_pool";
+pub(super) const HANDLE_TX: &str = "pg_tx";
+pub(super) const HANDLE_MOCK: &str = "pg_mock_pool";
+
+const DEFAULT_STATEMENT_CACHE_CAPACITY: usize = 100;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone)]
-struct PoolRecord {
-    pool: Arc<PgPool>,
+pub(super) struct PoolRecord {
+    pub(super) pool: Arc<PgPool>,
+    pub(super) replicas: Vec<Arc<PgPool>>,
+    pub(super) replica_cursor: AtomicUsize,
+    pub(super) max_connections: u32,
+    pub(super) statement_cache_capacity: usize,
+    pub(super) circuit: Arc<CircuitBreakerState>,
 }
 
 #[derive(Clone)]
@@ -54,7 +62,7 @@ type PgTxCell = Rc<Mutex<Option<Transaction<'static, Postgres>>>>;
 type PgTxRegistry = BTreeMap<String, PgTxCell>;
 
 thread_local! {
-    static POOLS: RefCell<BTreeMap<String, PoolRecord>> = const { RefCell::new(BTreeMap::new()) };
+    static POOLS: RefCell<BTreeMap<String, Arc<PoolRecord>>> = const { RefCell::new(BTreeMap::new()) };
     static TXS: RefCell<PgTxRegistry> =
         const { RefCell::new(BTreeMap::new()) };
     static MOCKS: RefCell<BTreeMap<String, MockPool>> = const { RefCell::new(BTreeMap::new()) };
@@ -64,6 +72,7 @@ pub(crate) fn reset_postgres_state() {
     POOLS.with(|pools| pools.borrow_mut().clear());
     TXS.with(|txs| txs.borrow_mut().clear());
     MOCKS.with(|mocks| mocks.borrow_mut().clear());
+    listen::reset_state();
 }
 
 pub(crate) fn register_postgres_builtins(vm: &mut Vm) {
@@ -73,6 +82,7 @@ pub(crate) fn register_postgres_builtins(vm: &mut Vm) {
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    // Core (v1 — issue #2500)
     &PG_POOL_IMPL_DEF,
     &PG_CONNECT_IMPL_DEF,
     &PG_CLOSE_IMPL_DEF,
@@ -86,8 +96,29 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &PG_MIGRATE_IMPL_DEF,
     &PG_MOCK_POOL_IMPL_DEF,
     &PG_MOCK_CALLS_IMPL_DEF,
+    // Advisory locks (v2 — issue #2512)
+    &advisory::PG_ADVISORY_XACT_LOCK_IMPL_DEF,
+    &advisory::PG_TRY_ADVISORY_XACT_LOCK_IMPL_DEF,
+    &advisory::PG_WITH_ADVISORY_LOCK_IMPL_DEF,
+    // LISTEN/NOTIFY (v2 — issue #2512)
+    &listen::PG_LISTEN_IMPL_DEF,
+    &listen::PG_LISTENER_RECV_IMPL_DEF,
+    &listen::PG_LISTENER_CLOSE_IMPL_DEF,
+    &listen::PG_NOTIFY_IMPL_DEF,
+    // Schema introspection + pool observability + partitions (v2)
+    &introspect::PG_INTROSPECT_TABLES_IMPL_DEF,
+    &introspect::PG_INTROSPECT_COLUMNS_IMPL_DEF,
+    &introspect::PG_INTROSPECT_INDEXES_IMPL_DEF,
+    &introspect::PG_POOL_STATS_IMPL_DEF,
+    &introspect::PG_PARTITION_ATTACH_IMPL_DEF,
+    &introspect::PG_PARTITION_DETACH_IMPL_DEF,
+    &introspect::PG_PARTITION_PRUNE_IMPL_DEF,
 ];
 
+mod advisory;
+mod circuit;
+mod introspect;
+mod listen;
 mod migrate;
 
 #[harn_builtin(
@@ -123,9 +154,12 @@ async fn pg_connect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 )]
 async fn pg_close_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let id = handle_id(args.first(), HANDLE_POOL, "pg_close")?;
-    let pool = POOLS.with(|pools| pools.borrow_mut().remove(&id).map(|record| record.pool));
-    if let Some(pool) = pool {
-        pool.close().await;
+    let removed = POOLS.with(|pools| pools.borrow_mut().remove(&id));
+    if let Some(record) = removed {
+        record.pool.close().await;
+        for replica in &record.replicas {
+            replica.close().await;
+        }
         Ok(VmValue::Bool(true))
     } else {
         Ok(VmValue::Bool(false))
@@ -143,7 +177,9 @@ async fn pg_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .ok_or_else(|| runtime_error("pg_query: pool or transaction handle is required"))?;
     let sql = required_string_arg(&args, 1, "pg_query", "sql")?;
     let params = params_arg(args.get(2), "pg_query")?;
-    query_many(target, &sql, &params).await
+    let options = args.get(3).and_then(VmValue::as_dict);
+    let routing = routing_from_options(options);
+    query_many(target, &sql, &params, routing).await
 }
 
 #[harn_builtin(
@@ -157,7 +193,9 @@ async fn pg_query_one_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .ok_or_else(|| runtime_error("pg_query_one: pool or transaction handle is required"))?;
     let sql = required_string_arg(&args, 1, "pg_query_one", "sql")?;
     let params = params_arg(args.get(2), "pg_query_one")?;
-    let rows = query_rows(target, &sql, &params).await?;
+    let options = args.get(3).and_then(VmValue::as_dict);
+    let routing = routing_from_options(options);
+    let rows = query_rows(target, &sql, &params, routing).await?;
     Ok(rows.into_iter().next().unwrap_or(VmValue::Nil))
 }
 
@@ -191,42 +229,72 @@ async fn pg_transaction_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         }
     };
     let options = args.get(2).and_then(VmValue::as_dict).cloned();
-    let pool = pool_by_id(&pool_id)?;
-    let tx = pool
-        .begin()
-        .await
-        .map_err(|error| runtime_error(format!("pg_transaction: begin failed: {error}")))?;
-    let tx_id = next_id("pgtx");
-    let tx_cell = Rc::new(Mutex::new(Some(tx)));
-    TXS.with(|txs| {
-        txs.borrow_mut().insert(tx_id.clone(), Rc::clone(&tx_cell));
-    });
-    let tx_handle = handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
-
-    if let Some(settings) = options
+    let settings = options
         .as_ref()
         .and_then(|opts| opts.get("settings"))
         .and_then(VmValue::as_dict)
-    {
-        apply_transaction_settings(&tx_id, settings).await?;
+        .cloned();
+    run_managed_transaction(&pool_id, "pg_transaction", closure, move |tx_id| {
+        let tx_id = tx_id.to_string();
+        Box::pin(async move {
+            if let Some(settings) = settings {
+                apply_transaction_settings(&tx_id, &settings).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+}
+
+/// Shared txn-with-closure wrapper used by `pg_transaction` and
+/// `pg_with_advisory_lock`. Opens a transaction on the pool, registers
+/// the tx in the local registry under a fresh id, runs `prepare(tx_id)`
+/// so the caller can take an advisory lock / apply settings / etc., then
+/// invokes the closure with the `pg_tx` handle. Commit on `Ok(...)`,
+/// rollback on any error in the closure.
+pub(super) async fn run_managed_transaction(
+    pool_id: &str,
+    builtin: &'static str,
+    closure: Rc<crate::value::VmClosure>,
+    prepare: impl FnOnce(
+        &str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), VmError>> + '_>,
+    >,
+) -> Result<VmValue, VmError> {
+    let pool = pool_by_id(pool_id)?;
+    let tx = pool
+        .begin()
+        .await
+        .map_err(|error| runtime_error(format!("{builtin}: begin failed: {error}")))?;
+    let tx_id = next_id("pgtx");
+    let tx_cell = Rc::new(Mutex::new(Some(tx)));
+    register_tx(&tx_id, Rc::clone(&tx_cell));
+    let tx_handle = handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
+
+    if let Err(error) = prepare(&tx_id).await {
+        unregister_tx(&tx_id);
+        if let Some(tx) = tx_cell.lock().await.take() {
+            let _ = tx.rollback().await;
+        }
+        return Err(error);
     }
 
     let mut child_vm = crate::vm::clone_async_builtin_child_vm()
-        .ok_or_else(|| runtime_error("pg_transaction: requires VM execution context"))?;
+        .ok_or_else(|| runtime_error(format!("{builtin}: requires VM execution context")))?;
     let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
 
-    TXS.with(|txs| {
-        txs.borrow_mut().remove(&tx_id);
-    });
-    let tx =
-        tx_cell.lock().await.take().ok_or_else(|| {
-            runtime_error("pg_transaction: transaction handle was already consumed")
-        })?;
+    unregister_tx(&tx_id);
+    let tx = tx_cell
+        .lock()
+        .await
+        .take()
+        .ok_or_else(|| runtime_error(format!("{builtin}: transaction was already consumed")))?;
     match result {
         Ok(value) => {
-            tx.commit().await.map_err(|error| {
-                runtime_error(format!("pg_transaction: commit failed: {error}"))
-            })?;
+            tx.commit()
+                .await
+                .map_err(|error| runtime_error(format!("{builtin}: commit failed: {error}")))?;
             Ok(value)
         }
         Err(error) => {
@@ -321,9 +389,92 @@ async fn open_pool(
     options: Option<&BTreeMap<String, VmValue>>,
     single_connection: bool,
 ) -> Result<VmValue, VmError> {
-    let url = resolve_connection_url(source).await?;
-    let mut connect_options = PgConnectOptions::from_str(&url).map_err(|error| {
-        runtime_error(format!("pg_pool: invalid Postgres URL/options: {error}"))
+    let primary_url = resolve_connection_url(source).await?;
+    let stmt_cache_capacity = option_int(options, "statement_cache_capacity")
+        .map(|n| n.max(0) as usize)
+        .unwrap_or(DEFAULT_STATEMENT_CACHE_CAPACITY);
+    let max_connections = if single_connection {
+        1
+    } else {
+        option_int(options, "max_connections")
+            .unwrap_or(5)
+            .clamp(1, i64::from(u32::MAX)) as u32
+    };
+    let primary_pool = build_pool(
+        &primary_url,
+        options,
+        max_connections,
+        stmt_cache_capacity,
+        "pg_pool",
+    )
+    .await?;
+
+    let replica_urls = collect_replica_urls(options).await?;
+    let mut replicas = Vec::with_capacity(replica_urls.len());
+    for url in &replica_urls {
+        let pool = build_pool(
+            url,
+            options,
+            max_connections,
+            stmt_cache_capacity,
+            "pg_pool replica",
+        )
+        .await?;
+        replicas.push(Arc::new(pool));
+    }
+
+    let circuit = Arc::new(build_circuit_breaker(options));
+
+    let id = next_id(if single_connection {
+        "pgconn"
+    } else {
+        "pgpool"
+    });
+    let mut meta = BTreeMap::new();
+    meta.insert(
+        "max_connections".to_string(),
+        VmValue::Int(i64::from(max_connections)),
+    );
+    meta.insert(
+        "single_connection".to_string(),
+        VmValue::Bool(single_connection),
+    );
+    meta.insert("replicas".to_string(), VmValue::Int(replicas.len() as i64));
+    meta.insert(
+        "statement_cache_capacity".to_string(),
+        VmValue::Int(stmt_cache_capacity as i64),
+    );
+    if let Some(application_name) = option_string(options, "application_name") {
+        meta.insert(
+            "application_name".to_string(),
+            VmValue::String(Rc::from(application_name)),
+        );
+    }
+    POOLS.with(|pools| {
+        pools.borrow_mut().insert(
+            id.clone(),
+            Arc::new(PoolRecord {
+                pool: Arc::new(primary_pool),
+                replicas,
+                replica_cursor: AtomicUsize::new(0),
+                max_connections,
+                statement_cache_capacity: stmt_cache_capacity,
+                circuit,
+            }),
+        );
+    });
+    Ok(handle_value(HANDLE_POOL, &id, meta))
+}
+
+async fn build_pool(
+    url: &str,
+    options: Option<&BTreeMap<String, VmValue>>,
+    max_connections: u32,
+    stmt_cache_capacity: usize,
+    label: &'static str,
+) -> Result<PgPool, VmError> {
+    let mut connect_options = PgConnectOptions::from_str(url).map_err(|error| {
+        runtime_error(format!("{label}: invalid Postgres URL/options: {error}"))
     })?;
     if let Some(application_name) = option_string(options, "application_name") {
         connect_options = connect_options.application_name(&application_name);
@@ -333,17 +484,8 @@ async fn open_pool(
     {
         connect_options = connect_options.ssl_mode(parse_ssl_mode(&ssl_mode)?);
     }
-    if let Some(capacity) = option_int(options, "statement_cache_capacity") {
-        connect_options = connect_options.statement_cache_capacity(capacity.max(0) as usize);
-    }
+    connect_options = connect_options.statement_cache_capacity(stmt_cache_capacity);
 
-    let max_connections = if single_connection {
-        1
-    } else {
-        option_int(options, "max_connections")
-            .unwrap_or(5)
-            .clamp(1, i64::from(u32::MAX)) as u32
-    };
     let mut pool_options = PgPoolOptions::new().max_connections(max_connections);
     if let Some(min_connections) = option_int(options, "min_connections") {
         pool_options = pool_options
@@ -361,50 +503,76 @@ async fn open_pool(
         pool_options = pool_options.max_lifetime(Duration::from_millis(ms));
     }
 
-    let pool = pool_options
+    pool_options
         .connect_with(connect_options)
         .await
-        .map_err(|error| runtime_error(format!("pg_pool: connect failed: {error}")))?;
-    let id = next_id(if single_connection {
-        "pgconn"
-    } else {
-        "pgpool"
-    });
-    let mut meta = BTreeMap::new();
-    meta.insert(
-        "max_connections".to_string(),
-        VmValue::Int(i64::from(max_connections)),
-    );
-    meta.insert(
-        "single_connection".to_string(),
-        VmValue::Bool(single_connection),
-    );
-    if let Some(application_name) = option_string(options, "application_name") {
-        meta.insert(
-            "application_name".to_string(),
-            VmValue::String(Rc::from(application_name)),
-        );
+        .map_err(|error| runtime_error(format!("{label}: connect failed: {error}")))
+}
+
+async fn collect_replica_urls(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Vec<String>, VmError> {
+    let Some(replicas_value) = options.and_then(|opts| opts.get("replicas")) else {
+        return Ok(Vec::new());
+    };
+    let items = match replicas_value {
+        VmValue::List(items) => items.as_ref(),
+        VmValue::Nil => return Ok(Vec::new()),
+        _ => {
+            return Err(runtime_error(
+                "pg_pool: replicas must be a list of url strings or {url|env|secret} dicts",
+            ))
+        }
+    };
+    let mut urls = Vec::with_capacity(items.len());
+    for entry in items {
+        urls.push(resolve_connection_url(entry).await?);
     }
-    POOLS.with(|pools| {
-        pools.borrow_mut().insert(
-            id.clone(),
-            PoolRecord {
-                pool: Arc::new(pool),
-            },
-        );
-    });
-    Ok(handle_value(HANDLE_POOL, &id, meta))
+    Ok(urls)
 }
 
-async fn query_many(target: &VmValue, sql: &str, params: &[VmValue]) -> Result<VmValue, VmError> {
-    let rows = query_rows(target, sql, params).await?;
-    Ok(VmValue::List(Rc::new(rows)))
+fn build_circuit_breaker(options: Option<&BTreeMap<String, VmValue>>) -> CircuitBreakerState {
+    let Some(cb) = options
+        .and_then(|opts| opts.get("circuit_breaker"))
+        .and_then(VmValue::as_dict)
+    else {
+        return CircuitBreakerState::disabled();
+    };
+    let threshold = cb
+        .get("failure_threshold")
+        .and_then(VmValue::as_int)
+        .filter(|n| *n > 0)
+        .map(|n| n.clamp(1, i64::from(u32::MAX)) as u32);
+    let Some(threshold) = threshold else {
+        return CircuitBreakerState::disabled();
+    };
+    let reset_after_ms = cb
+        .get("reset_after_ms")
+        .and_then(|v| match v {
+            VmValue::Int(n) => Some(*n),
+            VmValue::Duration(n) => Some(*n),
+            _ => None,
+        })
+        .filter(|n| *n >= 0)
+        .unwrap_or(30_000);
+    CircuitBreakerState::new(threshold, reset_after_ms)
 }
 
-async fn query_rows(
+async fn query_many(
     target: &VmValue,
     sql: &str,
     params: &[VmValue],
+    routing: QueryRouting,
+) -> Result<VmValue, VmError> {
+    let rows = query_rows(target, sql, params, routing).await?;
+    Ok(VmValue::List(Rc::new(rows)))
+}
+
+pub(super) async fn query_rows(
+    target: &VmValue,
+    sql: &str,
+    params: &[VmValue],
+    routing: QueryRouting,
 ) -> Result<Vec<VmValue>, VmError> {
     match handle_kind(target).as_deref() {
         Some(HANDLE_MOCK) => return mock_query(target, sql, params, false),
@@ -425,16 +593,28 @@ async fn query_rows(
         _ => {}
     }
 
-    let pool = pool_from_handle(target, "pg_query")?;
+    let record = pool_record_from_handle(target, "pg_query")?;
+    let pool = pool_for_routing(&record, routing);
+    let (probe, _) = enter_circuit(&record.circuit, "pg_query")?;
     let query = bind_params(query(sql), params);
-    let rows = query
-        .fetch_all(pool.as_ref())
-        .await
-        .map_err(|error| runtime_error(format!("pg_query: {error}")))?;
-    rows.into_iter().map(row_to_value).collect()
+    let result = query.fetch_all(pool.as_ref()).await;
+    match result {
+        Ok(rows) => {
+            record.circuit.record_success(probe);
+            rows.into_iter().map(row_to_value).collect()
+        }
+        Err(error) => {
+            record.circuit.record_failure(probe);
+            Err(runtime_error(format!("pg_query: {error}")))
+        }
+    }
 }
 
-async fn execute_stmt(target: &VmValue, sql: &str, params: &[VmValue]) -> Result<VmValue, VmError> {
+pub(super) async fn execute_stmt(
+    target: &VmValue,
+    sql: &str,
+    params: &[VmValue],
+) -> Result<VmValue, VmError> {
     let started = std::time::Instant::now();
     if handle_kind(target).as_deref() == Some(HANDLE_MOCK) {
         let rows = mock_query(target, sql, params, true)?;
@@ -447,25 +627,34 @@ async fn execute_stmt(target: &VmValue, sql: &str, params: &[VmValue]) -> Result
             .max(0) as u64;
         return Ok(execute_result_value(rows_affected, started.elapsed()));
     }
-    let result = if handle_kind(target).as_deref() == Some(HANDLE_TX) {
+    if handle_kind(target).as_deref() == Some(HANDLE_TX) {
         let id = handle_id(Some(target), HANDLE_TX, "pg_execute")?;
         let tx = tx_by_id(&id)?;
         let mut tx = tx.lock().await;
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
-        bind_params(query(sql), params)
+        let result = bind_params(query(sql), params)
             .execute(&mut **tx)
             .await
-            .map_err(|error| runtime_error(format!("pg_execute: {error}")))?
-    } else {
-        let pool = pool_from_handle(target, "pg_execute")?;
-        bind_params(query(sql), params)
-            .execute(pool.as_ref())
-            .await
-            .map_err(|error| runtime_error(format!("pg_execute: {error}")))?
-    };
-    Ok(query_result_value(result, started.elapsed()))
+            .map_err(|error| runtime_error(format!("pg_execute: {error}")))?;
+        return Ok(query_result_value(result, started.elapsed()));
+    }
+    let record = pool_record_from_handle(target, "pg_execute")?;
+    let (probe, _) = enter_circuit(&record.circuit, "pg_execute")?;
+    let result = bind_params(query(sql), params)
+        .execute(record.pool.as_ref())
+        .await;
+    match result {
+        Ok(query_result) => {
+            record.circuit.record_success(probe);
+            Ok(query_result_value(query_result, started.elapsed()))
+        }
+        Err(error) => {
+            record.circuit.record_failure(probe);
+            Err(runtime_error(format!("pg_execute: {error}")))
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -517,29 +706,45 @@ fn render_savepoint_sql(op: SavepointOp, name: &str) -> String {
 }
 
 fn validate_savepoint_name(name: &str, builtin: &'static str) -> Result<(), VmError> {
-    if name.trim().is_empty() {
+    // Savepoints can be scoped with `.` so `migration.0042` is valid.
+    validate_pg_identifier(name, builtin, "savepoint name", &['_', '.'])
+}
+
+/// Shared Postgres-identifier validator. `extras` lists characters that
+/// are accepted in addition to ASCII alphanumerics; `_` is the standard
+/// PG-identifier extra, `.` is accepted by savepoint/channel callers.
+///
+/// Used by savepoints (mod.rs), partition + introspection identifiers
+/// (introspect.rs), and LISTEN/NOTIFY channel names (listen.rs) so they
+/// share one canonical reject set. The 63-byte ceiling matches Postgres'
+/// `NAMEDATALEN - 1` default.
+pub(super) fn validate_pg_identifier(
+    name: &str,
+    builtin: &'static str,
+    label: &'static str,
+    extras: &[char],
+) -> Result<(), VmError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
         return Err(runtime_error(format!(
-            "{builtin}: savepoint name must not be empty"
+            "{builtin}: {label} must not be empty"
         )));
     }
     if name.len() > 63 {
         return Err(runtime_error(format!(
-            "{builtin}: savepoint name exceeds Postgres identifier length (63 bytes)"
+            "{builtin}: {label} exceeds Postgres identifier length (63 bytes)"
         )));
     }
-    // Letters/digits/underscore/dot so callers can name scoped savepoints
-    // like `migration.0042`; reject quotes/semicolons/whitespace even
-    // though identifiers are double-quoted on output.
     let first = name.chars().next().expect("non-empty checked above");
     if !(first.is_ascii_alphabetic() || first == '_') {
         return Err(runtime_error(format!(
-            "{builtin}: savepoint name must start with a letter or underscore"
+            "{builtin}: {label} must start with a letter or underscore"
         )));
     }
     for ch in name.chars() {
-        if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '.') {
+        if !(ch.is_ascii_alphanumeric() || ch == '_' || extras.contains(&ch)) {
             return Err(runtime_error(format!(
-                "{builtin}: savepoint name `{name}` contains disallowed character `{ch}`"
+                "{builtin}: {label} `{name}` contains disallowed character `{ch}`"
             )));
         }
     }
@@ -571,7 +776,7 @@ async fn apply_transaction_settings(
     Ok(())
 }
 
-fn bind_params<'q>(
+pub(super) fn bind_params<'q>(
     mut query: Query<'q, Postgres, PgArguments>,
     params: &'q [VmValue],
 ) -> Query<'q, Postgres, PgArguments> {
@@ -590,7 +795,7 @@ fn bind_params<'q>(
     query
 }
 
-fn row_to_value(row: PgRow) -> Result<VmValue, VmError> {
+pub(super) fn row_to_value(row: PgRow) -> Result<VmValue, VmError> {
     let mut map = BTreeMap::new();
     for (index, column) in row.columns().iter().enumerate() {
         let name = column.name().to_string();
@@ -665,6 +870,54 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 .map_err(decode_error)?
                 .to_string(),
         )),
+        // Postgres array types. sqlx exposes these as `<ELEMENT>[]`. Common
+        // element types map directly; anything else (e.g. user-defined
+        // enum arrays) falls back to text below.
+        "BOOL[]" => decode_array::<bool>(row, index, VmValue::Bool)?,
+        "INT2[]" => decode_array::<i16>(row, index, |v| VmValue::Int(i64::from(v)))?,
+        "INT4[]" => decode_array::<i32>(row, index, |v| VmValue::Int(i64::from(v)))?,
+        "INT8[]" => decode_array::<i64>(row, index, VmValue::Int)?,
+        "FLOAT4[]" => decode_array::<f32>(row, index, |v| VmValue::Float(f64::from(v)))?,
+        "FLOAT8[]" => decode_array::<f64>(row, index, VmValue::Float)?,
+        "TEXT[]" | "VARCHAR[]" => {
+            decode_array::<String>(row, index, |v| VmValue::String(Rc::from(v)))?
+        }
+        "UUID[]" => {
+            decode_array::<uuid::Uuid>(row, index, |v| VmValue::String(Rc::from(v.to_string())))?
+        }
+        "JSON[]" | "JSONB[]" => {
+            let values: Vec<serde_json::Value> = row.try_get(index).map_err(decode_error)?;
+            VmValue::List(Rc::new(
+                values.iter().map(crate::stdlib::json_to_vm_value).collect(),
+            ))
+        }
+        // HSTORE decodes as a Harn dict<string, string|nil>. sqlx surfaces
+        // it as `BTreeMap<String, Option<String>>` already.
+        "HSTORE" => {
+            let map: sqlx_postgres::types::PgHstore = row.try_get(index).map_err(decode_error)?;
+            let mut dict = BTreeMap::new();
+            for (key, value) in map.0 {
+                dict.insert(
+                    key,
+                    value
+                        .map(|v| VmValue::String(Rc::from(v)))
+                        .unwrap_or(VmValue::Nil),
+                );
+            }
+            VmValue::Dict(Rc::new(dict))
+        }
+        // PG geometric POINT decodes as `{x, y}`. Other geometric types
+        // (LINE, LSEG, BOX, PATH, POLYGON, CIRCLE) fall back to their
+        // textual representation below — Harn callers can parse if
+        // needed, but a structured decode for every geometric type is
+        // niche enough to defer.
+        "POINT" => {
+            let point: sqlx_postgres::types::PgPoint = row.try_get(index).map_err(decode_error)?;
+            let mut dict = BTreeMap::new();
+            dict.insert("x".to_string(), VmValue::Float(point.x));
+            dict.insert("y".to_string(), VmValue::Float(point.y));
+            VmValue::Dict(Rc::new(dict))
+        }
         _ => VmValue::String(Rc::from(row.try_get::<String, _>(index).map_err(
             |error| {
                 runtime_error(format!(
@@ -674,6 +927,25 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         )?)),
     };
     Ok(value)
+}
+
+fn decode_array<T>(
+    row: &PgRow,
+    index: usize,
+    map: impl Fn(T) -> VmValue,
+) -> Result<VmValue, VmError>
+where
+    T: for<'r> sqlx_core::decode::Decode<'r, Postgres>
+        + sqlx_core::types::Type<Postgres>
+        + sqlx_postgres::PgHasArrayType
+        + Send
+        + Unpin
+        + 'static,
+{
+    let values: Vec<T> = row.try_get(index).map_err(decode_error)?;
+    Ok(VmValue::List(Rc::new(
+        values.into_iter().map(map).collect(),
+    )))
 }
 
 fn decode_error(error: sqlx_core::error::Error) -> VmError {
@@ -771,22 +1043,44 @@ fn parse_ssl_mode(mode: &str) -> Result<PgSslMode, VmError> {
     }
 }
 
-fn pool_from_handle(value: &VmValue, builtin: &str) -> Result<Arc<PgPool>, VmError> {
-    let id = handle_id(Some(value), HANDLE_POOL, builtin)?;
-    pool_by_id(&id)
+pub(super) fn pool_by_id(id: &str) -> Result<Arc<PgPool>, VmError> {
+    pool_record_by_id(id).map(|record| Arc::clone(&record.pool))
 }
 
-fn pool_by_id(id: &str) -> Result<Arc<PgPool>, VmError> {
+pub(super) fn pool_record_by_id(id: &str) -> Result<Arc<PoolRecord>, VmError> {
     POOLS.with(|pools| {
         pools
             .borrow()
             .get(id)
-            .map(|record| Arc::clone(&record.pool))
+            .cloned()
             .ok_or_else(|| runtime_error(format!("pg_pool: unknown or closed pool `{id}`")))
     })
 }
 
-fn tx_by_id(id: &str) -> Result<PgTxCell, VmError> {
+pub(super) fn pool_record_from_handle(
+    value: &VmValue,
+    builtin: &str,
+) -> Result<Arc<PoolRecord>, VmError> {
+    let id = handle_id(Some(value), HANDLE_POOL, builtin)?;
+    pool_record_by_id(&id)
+}
+
+/// First-arg extractor for builtins that operate on the primary pool:
+/// validates that args\[0\] is a `pg_pool` handle and returns the live
+/// connection pool. Replaces the
+/// `required_arg + handle_id + pool_by_id` preamble across every
+/// introspection / partition / lock builtin.
+///
+/// `handle_id` already validates the handle kind, so we don't need
+/// `ensure_handle_kind` ahead of it — that helper exists for callers
+/// that want a kind check without also reading the id.
+pub(super) fn pool_arg(args: &[VmValue], builtin: &'static str) -> Result<Arc<PgPool>, VmError> {
+    let handle = required_arg(args, 0, builtin, "pool handle")?;
+    let id = handle_id(Some(handle), HANDLE_POOL, builtin)?;
+    pool_by_id(&id)
+}
+
+pub(super) fn tx_by_id(id: &str) -> Result<PgTxCell, VmError> {
     TXS.with(|txs| {
         txs.borrow()
             .get(id)
@@ -795,20 +1089,36 @@ fn tx_by_id(id: &str) -> Result<PgTxCell, VmError> {
     })
 }
 
-fn handle_value(kind: &str, id: &str, mut extra: BTreeMap<String, VmValue>) -> VmValue {
+pub(super) fn register_tx(id: &str, cell: PgTxCell) {
+    TXS.with(|txs| {
+        txs.borrow_mut().insert(id.to_string(), cell);
+    });
+}
+
+pub(super) fn unregister_tx(id: &str) {
+    TXS.with(|txs| {
+        txs.borrow_mut().remove(id);
+    });
+}
+
+pub(super) fn handle_value(kind: &str, id: &str, mut extra: BTreeMap<String, VmValue>) -> VmValue {
     extra.insert("_type".to_string(), VmValue::String(Rc::from(kind)));
     extra.insert("id".to_string(), VmValue::String(Rc::from(id.to_string())));
     VmValue::Dict(Rc::new(extra))
 }
 
-fn handle_kind(value: &VmValue) -> Option<String> {
+pub(super) fn handle_kind(value: &VmValue) -> Option<String> {
     value
         .as_dict()
         .and_then(|dict| dict.get("_type"))
         .map(VmValue::display)
 }
 
-fn handle_id(value: Option<&VmValue>, expected: &str, builtin: &str) -> Result<String, VmError> {
+pub(super) fn handle_id(
+    value: Option<&VmValue>,
+    expected: &str,
+    builtin: &str,
+) -> Result<String, VmError> {
     let dict = value
         .and_then(VmValue::as_dict)
         .ok_or_else(|| runtime_error(format!("{builtin}: expected {expected} handle")))?;
@@ -825,6 +1135,16 @@ fn handle_id(value: Option<&VmValue>, expected: &str, builtin: &str) -> Result<S
     Ok(id)
 }
 
+pub(super) fn required_arg<'a>(
+    args: &'a [VmValue],
+    index: usize,
+    builtin: &str,
+    label: &str,
+) -> Result<&'a VmValue, VmError> {
+    args.get(index)
+        .ok_or_else(|| runtime_error(format!("{builtin}: {label} is required")))
+}
+
 fn required_string_arg(
     args: &[VmValue],
     index: usize,
@@ -838,7 +1158,64 @@ fn required_string_arg(
     Ok(value)
 }
 
-fn params_arg(value: Option<&VmValue>, builtin: &str) -> Result<Vec<VmValue>, VmError> {
+/// Tenant namespace used by `pg_advisory_*lock(... {tenant_namespace: true})`
+/// to XOR salt into lock keys. Reads the harness-tenant scope (same
+/// source `emit_channel` consults) so two tenants colliding on the same
+/// numeric key see distinct lock-key pairs server-side.
+pub(super) fn current_tenant_namespace() -> String {
+    crate::harness_tenant::current_tenant_id()
+        .map(|t| t.0)
+        .unwrap_or_default()
+}
+
+/// Round-robin replica picker. Returns the primary pool when no replicas
+/// are configured or routing is `Primary`.
+pub(super) fn pool_for_routing(record: &Arc<PoolRecord>, routing: QueryRouting) -> Arc<PgPool> {
+    match routing {
+        QueryRouting::Primary => Arc::clone(&record.pool),
+        QueryRouting::ReadOnly => {
+            if record.replicas.is_empty() {
+                Arc::clone(&record.pool)
+            } else {
+                let idx =
+                    record.replica_cursor.fetch_add(1, Ordering::Relaxed) % record.replicas.len();
+                Arc::clone(&record.replicas[idx])
+            }
+        }
+    }
+}
+
+/// Per-query routing policy.
+#[derive(Clone, Copy)]
+pub(super) enum QueryRouting {
+    Primary,
+    ReadOnly,
+}
+
+pub(super) fn routing_from_options(options: Option<&BTreeMap<String, VmValue>>) -> QueryRouting {
+    if option_bool(options.and_then(|opts| opts.get("read_only"))) == Some(true) {
+        QueryRouting::ReadOnly
+    } else {
+        QueryRouting::Primary
+    }
+}
+
+/// Returns `(probe, ())` where `probe` is true if the call is a half-open
+/// probe. Errors fast when the circuit is open.
+pub(super) fn enter_circuit(
+    circuit: &CircuitBreakerState,
+    builtin: &str,
+) -> Result<(bool, ()), VmError> {
+    match circuit.admit() {
+        Allow::Closed => Ok((false, ())),
+        Allow::Probe => Ok((true, ())),
+        Allow::Open => Err(runtime_error(format!(
+            "{builtin}: circuit open — pool is throttling after repeated failures"
+        ))),
+    }
+}
+
+pub(super) fn params_arg(value: Option<&VmValue>, builtin: &str) -> Result<Vec<VmValue>, VmError> {
     match value {
         None | Some(VmValue::Nil) => Ok(Vec::new()),
         Some(VmValue::List(items)) => Ok((**items).clone()),
@@ -853,6 +1230,13 @@ fn option_string(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Opti
         .and_then(|opts| opts.get(key))
         .map(VmValue::display)
         .filter(|value| !value.trim().is_empty())
+}
+
+pub(super) fn option_bool(value: Option<&VmValue>) -> Option<bool> {
+    match value? {
+        VmValue::Bool(b) => Some(*b),
+        _ => None,
+    }
 }
 
 fn option_int(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<i64> {
@@ -876,11 +1260,11 @@ fn option_duration_ms(options: Option<&BTreeMap<String, VmValue>>, key: &str) ->
         })
 }
 
-fn next_id(prefix: &str) -> String {
+pub(super) fn next_id(prefix: &str) -> String {
     format!("{prefix}-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
 }
 
-fn runtime_error(message: impl Into<String>) -> VmError {
+pub(super) fn runtime_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(message.into())
 }
 
@@ -1117,6 +1501,7 @@ mod tests {
                 s("2024-01-02T03:04:05Z"),
                 s("12345.6789"),
             ],
+            QueryRouting::Primary,
         )
         .await
         .unwrap()
@@ -1431,5 +1816,159 @@ pg_close(db)
                 })
                 .await;
         });
+    }
+
+    /// End-to-end smoke for the v2 surface against a real Postgres:
+    /// pool stats reflect live connections, advisory locks succeed inside
+    /// a transaction, schema introspection finds the test table, an
+    /// `int[]` column round-trips through the array decoder, and
+    /// LISTEN/NOTIFY delivers the payload back through pg_listener_recv.
+    #[test]
+    fn v2_surface_smoke_when_env_url_is_set() {
+        if std::env::var("HARN_TEST_POSTGRES_URL").is_err() {
+            return;
+        }
+        reset_postgres_state();
+        let schema = format!("harn_pg_v2_{}", uuid::Uuid::new_v4().simple());
+        let source = format!(
+            r#"
+import "std/postgres"
+
+let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 2}})
+
+// --- Pool observability --------------------------------------------------
+let stats = pg_pool_stats(db)
+__io_println(stats.circuit_state)
+__io_println(stats.max_connections)
+__io_println(stats.replicas)
+
+// --- Schema setup --------------------------------------------------------
+pg_execute(db, "CREATE SCHEMA IF NOT EXISTS \"{schema}\"", [])
+pg_execute(db, "SET search_path TO \"{schema}\"", [])
+pg_execute(db, "CREATE TABLE widgets (id int4 PRIMARY KEY, tags text[] NOT NULL DEFAULT '{{}}')", [])
+pg_execute(db, "CREATE UNIQUE INDEX widgets_id_uniq ON widgets (id)", [])
+pg_execute(db, "INSERT INTO widgets (id, tags) VALUES (1, ARRAY['alpha','beta'])", [])
+pg_execute(db, "INSERT INTO widgets (id, tags) VALUES (2, ARRAY[]::text[])", [])
+
+// --- Advisory lock inside a transaction ----------------------------------
+let locked_label = pg_transaction(db, {{ tx ->
+  pg_advisory_xact_lock(tx, 0x4861_726E_5632_AABB)
+  return pg_query_one(tx, "SELECT 'locked' AS label", []).label
+}})
+__io_println(locked_label)
+
+// --- pg_with_advisory_lock (RAII helper, exercises run_managed_transaction) ----
+let with_label = pg_with_advisory_lock(db, "release-cut", {{ tx ->
+  return pg_query_one(tx, "SELECT 'raii' AS label", []).label
+}})
+__io_println(with_label)
+
+// --- Schema introspection ------------------------------------------------
+let tables = pg_introspect_tables(db, {{schema: "{schema}"}})
+__io_println(len(tables))
+__io_println(tables[0].kind)
+
+let cols = pg_introspect_columns(db, "{schema}.widgets")
+__io_println(len(cols))
+__io_println(cols[0].column + ":" + cols[0].type)
+__io_println(cols[1].column + ":" + cols[1].type)
+
+let idx = pg_introspect_indexes(db, "{schema}.widgets")
+__io_println(len(idx))
+
+// --- Array decoding ------------------------------------------------------
+let row = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [1])
+__io_println(row.tags[0] + "," + row.tags[1])
+
+let empty = pg_query_one(db, "SELECT tags FROM widgets WHERE id = $1", [2])
+__io_println(len(empty.tags))
+
+// --- LISTEN/NOTIFY round-trip --------------------------------------------
+let listener = pg_listen(db, "harn_v2_test")
+pg_notify(db, "harn_v2_test", "hello")
+let notification = pg_listener_recv(listener, 5000)
+__io_println(notification.channel + ":" + notification.payload)
+pg_listener_close(listener)
+
+// --- Teardown ------------------------------------------------------------
+pg_execute(db, "DROP SCHEMA \"{schema}\" CASCADE", [])
+pg_close(db)
+"#,
+        );
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let chunk = compile_source(&source).expect("compile v2 smoke source");
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    vm.execute(&chunk).await.expect("execute v2 smoke source");
+                    let lines: Vec<&str> = vm.output().lines().collect();
+                    // Expected (in order):
+                    //   disabled            // circuit_state
+                    //   2                   // max_connections
+                    //   0                   // replicas
+                    //   locked              // pg_advisory_xact_lock path label
+                    //   raii                // pg_with_advisory_lock path label
+                    //   1                   // tables in schema
+                    //   table               // kind
+                    //   2                   // columns count
+                    //   id:int4             // column 0 type
+                    //   tags:_text          // column 1 type (PG type is _text)
+                    //   2                   // PK + explicit UNIQUE indexes
+                    //   alpha,beta          // array decoding
+                    //   0                   // empty array length
+                    //   harn_v2_test:hello  // notification
+                    assert_eq!(lines[0], "disabled");
+                    assert_eq!(lines[1], "2");
+                    assert_eq!(lines[2], "0");
+                    assert_eq!(lines[3], "locked");
+                    assert_eq!(lines[4], "raii");
+                    assert_eq!(lines[5], "1");
+                    assert_eq!(lines[6], "table");
+                    assert_eq!(lines[7], "2");
+                    assert_eq!(lines[8], "id:int4");
+                    assert!(
+                        lines[9] == "tags:_text" || lines[9] == "tags:text[]",
+                        "tags column type unexpected: {}",
+                        lines[9]
+                    );
+                    // PK index + the explicit UNIQUE = 2 indexes
+                    assert_eq!(lines[10], "2");
+                    assert_eq!(lines[11], "alpha,beta");
+                    assert_eq!(lines[12], "0");
+                    assert_eq!(lines[13], "harn_v2_test:hello");
+                })
+                .await;
+        });
+    }
+
+    /// Advisory locks must isolate distinct tenants when
+    /// `tenant_namespace: true` is set: the same caller-supplied key
+    /// resolves to *different* server-side lock keys per tenant. Without
+    /// that, two tenants would deadlock each other for routine
+    /// per-resource locks.
+    #[test]
+    fn advisory_lock_tenant_namespacing_keys_differ_per_tenant() {
+        use crate::harness_tenant::enter_tenant;
+        use crate::TenantId;
+
+        reset_postgres_state();
+        let key_a = {
+            let _g = enter_tenant(TenantId::new("tenant-a"));
+            super::advisory::tenant_salt_for_test()
+        };
+        let key_b = {
+            let _g = enter_tenant(TenantId::new("tenant-b"));
+            super::advisory::tenant_salt_for_test()
+        };
+        let key_none = super::advisory::tenant_salt_for_test();
+        assert_ne!(key_a, key_b, "same salt for distinct tenants");
+        assert_eq!(key_none, 0, "no-tenant scope should produce zero salt");
+        assert_ne!(key_a, 0);
     }
 }
