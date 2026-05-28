@@ -2490,10 +2490,12 @@ dependencies = [
 name = "harn-serve"
 version = "0.8.47"
 dependencies = [
+ "async-compression",
  "async-trait",
  "axum",
  "axum-server",
  "base64",
+ "bytes",
  "ed25519-dalek",
  "filetime",
  "futures",
@@ -2518,6 +2520,7 @@ dependencies = [
  "tokio",
  "toml",
  "tower 0.5.3",
+ "tower-http",
  "tracing",
  "url",
  "uuid",

@@ -32,6 +32,7 @@ subtle = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 time = { version = "0.3", features = ["formatting"] }
 toml = "1.1"
+tower-http = { version = "0.6", features = ["compression-br", "compression-gzip", "compression-zstd", "cors"] }
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4", "v7"] }
@@ -50,6 +51,8 @@ default-features = false
 features = ["use_pem", "aws_lc_rs"]
 
 [dev-dependencies]
+async-compression = { version = "0.4", features = ["tokio", "gzip", "brotli", "zstd"] }
+bytes = "1"
 filetime = "0.2"
 hex = "0.4"
 tempfile = "3"

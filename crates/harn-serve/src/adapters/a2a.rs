@@ -100,6 +100,9 @@ pub struct A2aServerConfig {
     pub core: DispatchCore,
     pub agent_name: Option<String>,
     pub card_signing_secret: Option<String>,
+    /// Response compression + ETag + (optional) CORS. Defaults to the
+    /// standard enabled stack.
+    pub transport: crate::transport::TransportConfig,
 }
 
 impl A2aServerConfig {
@@ -108,7 +111,13 @@ impl A2aServerConfig {
             agent_name: Some(derived_agent_name(core.catalog())),
             core,
             card_signing_secret: None,
+            transport: crate::transport::TransportConfig::default_enabled(),
         }
+    }
+
+    pub fn with_transport(mut self, transport: crate::transport::TransportConfig) -> Self {
+        self.transport = transport;
+        self
     }
 }
 
@@ -121,6 +130,7 @@ pub struct A2aServer {
     executor: ExecutionRuntime,
     tasks: TaskStore,
     push_configs: PushConfigStore,
+    transport: crate::transport::TransportConfig,
 }
 
 #[derive(Clone)]
@@ -258,6 +268,7 @@ impl A2aServer {
             core,
             tasks: Arc::new(Mutex::new(HashMap::new())),
             push_configs,
+            transport: config.transport,
         }
     }
 }

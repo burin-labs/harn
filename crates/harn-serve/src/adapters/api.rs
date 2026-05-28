@@ -29,6 +29,7 @@ use crate::permissions::{
     PermissionPolicy, PermissionRequest, PermissionStore, RememberRule, RememberSpec, RuleId,
 };
 use crate::tls::HttpTlsConfig;
+use crate::transport::{apply_transport_layers, TransportConfig};
 
 const OPENAPI_YAML: &str = include_str!("../../openapi.yaml");
 const API_PROTOCOL_VERSION: &str = "agents-protocol-2026-04-25";
@@ -45,6 +46,10 @@ pub struct ApiServerConfig {
     pub acp: AcpServerConfig,
     pub auth_policy: AuthPolicy,
     pub workspace_root: PathBuf,
+    /// Response compression + ETag + (optional) CORS. Defaults to the
+    /// standard stack (gzip/brotli/zstd negotiation + strong-ETag
+    /// conditional GETs; CORS disabled).
+    pub transport: TransportConfig,
 }
 
 impl ApiServerConfig {
@@ -59,6 +64,7 @@ impl ApiServerConfig {
             acp: AcpServerConfig::for_pipeline(path),
             auth_policy: AuthPolicy::allow_all(),
             workspace_root: root,
+            transport: TransportConfig::default_enabled(),
         }
     }
 
@@ -71,11 +77,19 @@ impl ApiServerConfig {
         self.acp.profile = profile;
         self
     }
+
+    /// Replace the transport config wholesale. Use this to attach a
+    /// CORS policy or to disable compression/ETag selectively.
+    pub fn with_transport(mut self, transport: TransportConfig) -> Self {
+        self.transport = transport;
+        self
+    }
 }
 
 #[derive(Clone)]
 pub struct ApiServer {
     state: ApiState,
+    transport: TransportConfig,
 }
 
 impl ApiServer {
@@ -91,11 +105,15 @@ impl ApiServer {
             permissions: Arc::new(InMemoryPermissionStore::default()),
         };
         client.spawn_output_loop(response_rx, state.clone());
-        Self { state }
+        Self {
+            state,
+            transport: config.transport,
+        }
     }
 
     pub async fn run_http(self: Arc<Self>, options: ApiHttpServeOptions) -> Result<(), String> {
         let router = api_router(self.state.clone());
+        let router = apply_transport_layers(router, &self.transport);
         let router = crate::tls::apply_security_headers(router, &options.tls);
         let listener = crate::tls::bind_listener(options.bind)?;
         let local_addr = listener

@@ -783,6 +783,84 @@ pub fn handler() -> dict {
     }
 
     #[tokio::test]
+    async fn end_to_end_http_etag_round_trip() {
+        // A `.harn` handler can call `http_etag` on a body, attach it as
+        // a header, and the transport ETag middleware will short-circuit
+        // a subsequent matching request to 304. This test drives the
+        // builtin end-to-end; the middleware itself is covered in
+        // `transport::etag::tests`.
+        let value = dispatch_value(
+            r#"
+pub fn handler() -> dict {
+  let body = {greeting: "hello"}
+  let tag = http_etag(body)
+  return http_reply(200, body, {"ETag": tag})
+}
+"#,
+            "handler",
+        )
+        .await
+        .expect("dispatch");
+        let response = axum_response_from_call(synth_call(value), "req_e2e");
+        assert_eq!(response.status(), StatusCode::OK);
+        let tag = response
+            .headers()
+            .get(header::ETAG)
+            .expect("etag attached")
+            .to_str()
+            .unwrap()
+            .to_string();
+        // Re-invoking with the same body must yield the same tag —
+        // determinism is the contract the conditional-GET middleware
+        // relies on.
+        let again = dispatch_value(
+            r#"
+pub fn handler() -> dict {
+  let body = {greeting: "hello"}
+  return http_reply(200, body, {"ETag": http_etag(body)})
+}
+"#,
+            "handler",
+        )
+        .await
+        .expect("dispatch");
+        let again_response = axum_response_from_call(synth_call(again), "req_e2e_2");
+        let again_tag = again_response
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(again_tag, tag);
+    }
+
+    #[tokio::test]
+    async fn end_to_end_http_choose_negotiates_media_type() {
+        let value = dispatch_value(
+            r#"
+pub fn handler() -> dict {
+  let chosen = http_choose("application/json;q=0.4, text/html", ["application/json", "text/html"])
+  if chosen == nil {
+    return http_error(406, "not_acceptable", "no offered type was acceptable")
+  }
+  return http_reply(200, {chosen: chosen}, {"Content-Type": chosen})
+}
+"#,
+            "handler",
+        )
+        .await
+        .expect("dispatch");
+        let response = axum_response_from_call(synth_call(value), "req_e2e");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html"
+        );
+        let body = body_text(response).await;
+        assert!(body.contains("text/html"), "got: {body}");
+    }
+
+    #[tokio::test]
     async fn end_to_end_low_level_http_reply_with_headers() {
         let value = dispatch_value(
             r#"

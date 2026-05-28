@@ -15,11 +15,13 @@ impl A2aServer {
                 local_addr.port()
             )
         });
+        let transport = self.transport.clone();
         let state = HttpState {
             server: self,
             public_url: public_url.clone(),
         };
         let router = Self::http_router(state);
+        let router = crate::transport::apply_transport_layers(router, &transport);
         let router = crate::tls::apply_security_headers(router, &options.tls);
 
         eprintln!("Harn A2A server listening on {public_url}");

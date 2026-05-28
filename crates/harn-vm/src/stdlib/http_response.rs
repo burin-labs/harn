@@ -22,6 +22,8 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use sha2::{Digest, Sha256};
+
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -144,6 +146,83 @@ async fn http_stream_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         BODY_KIND_STREAM,
         headers,
     ))
+}
+
+/// Compute a strong ETag (RFC 9110 §8.8.3) over a value's canonical
+/// JSON encoding. Handlers can pair this with `http_reply`/`http_ok`
+/// to advertise a stable cache key: the transport ETag middleware
+/// will short-circuit to 304 when the client returns the same tag in
+/// `If-None-Match`, but handlers that pre-compute the digest can skip
+/// expensive body assembly entirely (the caller already has it).
+#[harn_builtin(sig = "http_etag(body: any) -> string", category = "http_response")]
+fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let value = args
+        .first()
+        .ok_or_else(|| thrown_err("http_etag: body is required"))?;
+    let json = crate::llm::helpers::vm_value_to_json(value);
+    let bytes = serde_json::to_vec(&json).map_err(|error| {
+        thrown_err(format!(
+            "http_etag: failed to encode body as JSON ({error})"
+        ))
+    })?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let digest = hex::encode(hasher.finalize());
+    Ok(VmValue::String(Rc::from(format!("\"{digest}\""))))
+}
+
+/// Pick the best media type the caller will accept from a candidate
+/// list. Implements RFC 9110 §12.5.1: split on commas, parse `q=`
+/// preferences, drop entries with `q=0`, and pick the candidate with
+/// the highest server-side index that the client allows (server
+/// preference breaks client ties — that's how `http.choose(req,
+/// ["application/json", "text/html"])` ends up favouring JSON when
+/// the client says `*/*`).
+///
+/// Returns `nil` when none of the candidates is acceptable.
+#[harn_builtin(
+    sig = "http_choose(accept: string?, candidates: list) -> string?",
+    category = "http_response"
+)]
+fn http_choose_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let accept = match args.first() {
+        Some(VmValue::String(value)) => value.to_string(),
+        Some(VmValue::Nil) | None => String::new(),
+        Some(other) => {
+            return Err(thrown_err(format!(
+                "http_choose: accept must be a string (got {})",
+                other.type_name()
+            )));
+        }
+    };
+    let candidates_value = args
+        .get(1)
+        .ok_or_else(|| thrown_err("http_choose: candidates is required"))?;
+    let candidates = match candidates_value {
+        VmValue::List(items) => items
+            .iter()
+            .map(|value| match value {
+                VmValue::String(text) => Ok(text.to_string()),
+                other => Err(thrown_err(format!(
+                    "http_choose: candidates must be a list of strings (got {})",
+                    other.type_name()
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        other => {
+            return Err(thrown_err(format!(
+                "http_choose: candidates must be a list (got {})",
+                other.type_name()
+            )));
+        }
+    };
+    if candidates.is_empty() {
+        return Ok(VmValue::Nil);
+    }
+    match choose_media_type(&accept, &candidates) {
+        Some(value) => Ok(VmValue::String(Rc::from(value))),
+        None => Ok(VmValue::Nil),
+    }
 }
 
 #[harn_builtin(
@@ -332,6 +411,118 @@ async fn drain_to_list(value: VmValue, fn_name: &str) -> Result<Vec<VmValue>, Vm
     }
 }
 
+/// Parse an `Accept` header value and return the candidate whose media
+/// type best matches one of the offered ranges, or `None` when no
+/// candidate is acceptable.
+///
+/// Tie-breaking, per RFC 9110 §12.5.1 and §12.5.3:
+/// 1. **Specificity** — an exact `type/subtype` match beats `type/*`
+///    which beats `*/*`, regardless of q-values.
+/// 2. **Quality** — among equally specific matches, higher q wins.
+/// 3. **Server preference** — among matches that tie on both, the
+///    candidate that appears earlier in the offered list wins.
+///
+/// Ranges with `q=0` are excluded entirely (an explicit "do not send
+/// me this"). When the header is empty or only contains `*/*`, the
+/// first offered candidate wins by server preference.
+fn choose_media_type(accept: &str, candidates: &[String]) -> Option<String> {
+    let trimmed = accept.trim();
+    if trimmed.is_empty() {
+        return candidates.first().cloned();
+    }
+
+    let ranges: Vec<AcceptRange> = trimmed.split(',').filter_map(parse_accept_range).collect();
+    if ranges.is_empty() {
+        return None;
+    }
+
+    // The score is the lexicographic max of (specificity, q-scaled);
+    // server preference is enforced separately by keeping the first
+    // server index that ties on score.
+    let mut best: Option<(usize, (usize, u32))> = None;
+    for (server_idx, candidate) in candidates.iter().enumerate() {
+        let Some((cand_type, cand_subtype)) = split_media_type(candidate) else {
+            continue;
+        };
+        let candidate_score = ranges
+            .iter()
+            .filter(|range| range.matches(cand_type, cand_subtype) && range.q > 0.0)
+            .map(|range| (range.specificity(), q_scaled(range.q)))
+            .max();
+        let Some(score) = candidate_score else {
+            continue;
+        };
+        match best {
+            None => best = Some((server_idx, score)),
+            Some((_, prev_score)) if score > prev_score => {
+                best = Some((server_idx, score));
+            }
+            _ => {}
+        }
+    }
+
+    best.map(|(idx, _)| candidates[idx].clone())
+}
+
+/// Scale a `q` value to an integer for ordering. The HTTP grammar
+/// caps q at three decimal places, so 1000× is a lossless conversion.
+fn q_scaled(q: f64) -> u32 {
+    (q * 1000.0).round() as u32
+}
+
+struct AcceptRange<'a> {
+    main: &'a str,
+    sub: &'a str,
+    q: f64,
+}
+
+impl AcceptRange<'_> {
+    fn matches(&self, main: &str, sub: &str) -> bool {
+        let main_match = self.main == "*" || self.main.eq_ignore_ascii_case(main);
+        let sub_match = self.sub == "*" || self.sub.eq_ignore_ascii_case(sub);
+        main_match && sub_match
+    }
+
+    /// Higher = more specific. 2 = exact, 1 = subtype star
+    /// (`type/*`), 0 = `*/*`.
+    fn specificity(&self) -> usize {
+        match (self.main, self.sub) {
+            ("*", "*") => 0,
+            (_, "*") => 1,
+            _ => 2,
+        }
+    }
+}
+
+fn parse_accept_range(raw: &str) -> Option<AcceptRange<'_>> {
+    let mut parts = raw.split(';');
+    let media = parts.next()?.trim();
+    let (main, sub) = split_media_type(media)?;
+
+    let mut q = 1.0f64;
+    for param in parts {
+        let trimmed = param.trim();
+        if let Some(value) = trimmed
+            .strip_prefix("q=")
+            .or_else(|| trimmed.strip_prefix("Q="))
+        {
+            if let Ok(parsed) = value.trim().parse::<f64>() {
+                q = parsed.clamp(0.0, 1.0);
+            }
+        }
+    }
+    Some(AcceptRange { main, sub, q })
+}
+
+fn split_media_type(media: &str) -> Option<(&str, &str)> {
+    let media = media.trim();
+    let (main, sub) = media.split_once('/')?;
+    if main.is_empty() || sub.is_empty() {
+        return None;
+    }
+    Some((main, sub))
+}
+
 fn thrown_err(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(Rc::from(message.into())))
 }
@@ -423,6 +614,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &HTTP_REPLY_IMPL_DEF,
     &HTTP_STREAM_IMPL_DEF,
     &HTTP_SSE_IMPL_DEF,
+    &HTTP_ETAG_IMPL_DEF,
+    &HTTP_CHOOSE_IMPL_DEF,
 ];
 
 #[cfg(test)]
@@ -655,5 +848,172 @@ mod tests {
     fn parse_envelope_ignores_untagged_dicts() {
         let plain = serde_json::json!({"status": 200, "body": {}});
         assert!(parse_envelope(&plain).is_none());
+    }
+
+    #[test]
+    fn http_etag_returns_strong_quoted_sha256() {
+        let body = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("id".to_string(), VmValue::String(Rc::from("sess_1"))),
+            ("count".to_string(), VmValue::Int(2)),
+        ])));
+        let result = http_etag_impl(&[body.clone()], &mut String::new()).expect("etag");
+        let tag = match result {
+            VmValue::String(s) => s.to_string(),
+            other => panic!("expected string, got {other:?}"),
+        };
+        assert!(tag.starts_with('"') && tag.ends_with('"'));
+        // Same input -> same tag.
+        let again = http_etag_impl(&[body], &mut String::new()).expect("etag");
+        assert_eq!(
+            match again {
+                VmValue::String(s) => s.to_string(),
+                _ => unreachable!(),
+            },
+            tag
+        );
+    }
+
+    #[test]
+    fn http_etag_changes_when_body_changes() {
+        let one = http_etag_impl(
+            &[VmValue::Dict(Rc::new(BTreeMap::from([(
+                "n".to_string(),
+                VmValue::Int(1),
+            )])))],
+            &mut String::new(),
+        )
+        .expect("etag");
+        let two = http_etag_impl(
+            &[VmValue::Dict(Rc::new(BTreeMap::from([(
+                "n".to_string(),
+                VmValue::Int(2),
+            )])))],
+            &mut String::new(),
+        )
+        .expect("etag");
+        assert_ne!(one.display(), two.display());
+    }
+
+    fn list_of_strs(values: &[&str]) -> VmValue {
+        VmValue::List(Rc::new(
+            values
+                .iter()
+                .map(|s| VmValue::String(Rc::from(*s)))
+                .collect(),
+        ))
+    }
+
+    #[test]
+    fn http_choose_picks_specific_over_star() {
+        let result = http_choose_impl(
+            &[
+                VmValue::String(Rc::from("application/json;q=0.5, text/html, */*;q=0.1")),
+                list_of_strs(&["application/json", "text/html"]),
+            ],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert_eq!(result.display(), "text/html");
+    }
+
+    #[test]
+    fn http_choose_returns_first_candidate_for_star_star() {
+        let result = http_choose_impl(
+            &[
+                VmValue::String(Rc::from("*/*")),
+                list_of_strs(&["application/json", "text/html"]),
+            ],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert_eq!(result.display(), "application/json");
+    }
+
+    #[test]
+    fn http_choose_empty_accept_falls_back_to_first_candidate() {
+        let result = http_choose_impl(
+            &[
+                VmValue::String(Rc::from("")),
+                list_of_strs(&["application/json", "text/html"]),
+            ],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert_eq!(result.display(), "application/json");
+    }
+
+    #[test]
+    fn http_choose_returns_nil_when_no_match() {
+        let result = http_choose_impl(
+            &[
+                VmValue::String(Rc::from("application/xml")),
+                list_of_strs(&["application/json", "text/html"]),
+            ],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert!(matches!(result, VmValue::Nil));
+    }
+
+    #[test]
+    fn http_choose_respects_q_zero() {
+        let result = http_choose_impl(
+            &[
+                VmValue::String(Rc::from("application/json;q=0, text/html")),
+                list_of_strs(&["application/json", "text/html"]),
+            ],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert_eq!(result.display(), "text/html");
+    }
+
+    #[test]
+    fn http_choose_subtype_star_matches() {
+        let result = http_choose_impl(
+            &[
+                VmValue::String(Rc::from("text/*")),
+                list_of_strs(&["application/json", "text/plain"]),
+            ],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert_eq!(result.display(), "text/plain");
+    }
+
+    #[test]
+    fn http_choose_nil_accept_falls_back_to_first_candidate() {
+        let result = http_choose_impl(
+            &[VmValue::Nil, list_of_strs(&["text/plain"])],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert_eq!(result.display(), "text/plain");
+    }
+
+    #[test]
+    fn http_choose_server_preference_breaks_ties_when_scores_equal() {
+        let result = http_choose_impl(
+            &[
+                VmValue::String(Rc::from("application/json, text/html")),
+                list_of_strs(&["text/html", "application/json"]),
+            ],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert_eq!(result.display(), "text/html");
+    }
+
+    #[test]
+    fn http_choose_q_value_outranks_server_order() {
+        let result = http_choose_impl(
+            &[
+                VmValue::String(Rc::from("text/html;q=0.5, application/json;q=0.9")),
+                list_of_strs(&["text/html", "application/json"]),
+            ],
+            &mut String::new(),
+        )
+        .expect("choose");
+        assert_eq!(result.display(), "application/json");
     }
 }

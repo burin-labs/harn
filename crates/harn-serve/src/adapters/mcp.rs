@@ -87,6 +87,10 @@ pub struct McpServerConfig {
     pub core: DispatchCore,
     pub server_name: Option<String>,
     pub server_card: Option<JsonValue>,
+    /// Response compression + ETag + (optional) CORS applied to the
+    /// HTTP transport. Stdio transport ignores this. Defaults to the
+    /// standard enabled stack.
+    pub transport: crate::transport::TransportConfig,
 }
 
 impl McpServerConfig {
@@ -95,11 +99,17 @@ impl McpServerConfig {
             server_name: Some(derived_server_name(core.catalog())),
             server_card: None,
             core,
+            transport: crate::transport::TransportConfig::default_enabled(),
         }
     }
 
     pub fn with_server_card(mut self, card: JsonValue) -> Self {
         self.server_card = Some(card);
+        self
+    }
+
+    pub fn with_transport(mut self, transport: crate::transport::TransportConfig) -> Self {
+        self.transport = transport;
         self
     }
 }
@@ -114,6 +124,7 @@ pub struct McpServer {
     context: McpContextCatalog,
     auth_policy: AuthPolicy,
     executor: ExecutionRuntime,
+    transport: crate::transport::TransportConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -282,6 +293,7 @@ impl McpServer {
             context,
             auth_policy,
             executor: ExecutionRuntime::start(core),
+            transport: config.transport,
         }
     }
 
@@ -352,6 +364,7 @@ impl McpServer {
         listener: std::net::TcpListener,
         options: McpHttpServeOptions,
     ) -> Result<(), String> {
+        let transport = self.transport.clone();
         let state = HttpState {
             server: self,
             options: options.clone(),
@@ -371,6 +384,7 @@ impl McpServer {
             .route(&options.messages_path, post(legacy_sse_message))
             .layer(DefaultBodyLimit::max(crate::DEFAULT_HTTP_BODY_LIMIT_BYTES))
             .with_state(state.clone());
+        let router = crate::transport::apply_transport_layers(router, &transport);
         let router = crate::tls::apply_security_headers(router, &options.tls);
         let local_addr = listener
             .local_addr()

@@ -16,6 +16,7 @@ mod protocol_fixture_tests;
 mod replay;
 pub mod sessions;
 pub mod tls;
+pub mod transport;
 
 /// Default 10 MiB body size cap applied to every HTTP router exposed by
 /// the `harn-serve` adapters (MCP, A2A, API). Matches the orchestrator
@@ -65,3 +66,4 @@ pub use sessions::{
     TruncateResult, VerifyFailure, VerifyReport,
 };
 pub use tls::{bind_listener, HstsConfig, HttpTlsConfig};
+pub use transport::{apply_transport_layers, compute_strong_etag, CorsConfig, TransportConfig};

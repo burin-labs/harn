@@ -54,6 +54,8 @@ adapter renders it into a real `axum::Response`:
 | `http_stream(source, content_type?)`             | streamed body, `source` is a list or channel of chunks  |
 | `http_sse(source, retry_ms?)`                    | Server-Sent Events, `source` is a list or channel       |
 | `http_reply(status, body?, headers?)`            | low-level escape hatch for arbitrary 1xx-5xx codes      |
+| `http_etag(body)`                                | strong ETag (`"<sha256-hex>"`) for the JSON-encoded body |
+| `http_choose(accept, candidates)`                | best media-type match per RFC 9110 `Accept` semantics    |
 
 Plain values returned from a handler still work — they degrade to
 `200 OK` with `Content-Type: application/json`. Untagged dicts that
@@ -65,6 +67,33 @@ render through the same envelope, so callers see one consistent
 error shape regardless of who raised the error. The `request_id`
 field is filled in by the codec from the inbound request and is
 always present.
+
+## Transport middleware
+
+Every adapter router (API, A2A, MCP) is wrapped by a shared transport
+stack configurable through `TransportConfig`:
+
+- **Response compression** — gzip, brotli, and zstd negotiated through
+  the request's `Accept-Encoding`. Small or already-compressed bodies
+  pass through untouched.
+- **Conditional GET / strong ETag** — JSON responses to `GET`/`HEAD`
+  pick up an `ETag: "<sha256-hex>"` header. A matching
+  `If-None-Match` short-circuits to `304 Not Modified`. The digest is
+  stable across `Accept-Encoding` negotiation, so a client can cache
+  a gzipped representation and revalidate over zstd without losing
+  the cache hit. Handlers that pre-compute their tag via `http_etag`
+  produce the same value as the middleware would, so the two are
+  always consistent.
+- **CORS preflight** — declarative `CorsConfig` (origins, methods,
+  headers, credentials, exposed headers, max-age) attached to
+  `TransportConfig::cors`. Off by default; turn it on at server-config
+  time when a browser surface needs to talk to the adapter.
+
+The defaults (`TransportConfig::default_enabled`) enable compression
+and ETag but leave CORS off. Adapters that already manage their own
+transport semantics (for example, an external load balancer that
+terminates TLS and handles compression) can opt out per-feature
+without rewiring routes.
 
 ## Picking an adapter
 
