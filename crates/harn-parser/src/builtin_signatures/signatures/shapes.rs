@@ -578,16 +578,6 @@ pub(crate) const READ_LINE_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("raw", TY_BOOL),
 ]);
 
-/// Options dict for `__tui_page` (the runtime backing `std/tui::page`).
-/// Mirrors `parse_page_options` in `crates/harn-vm/src/stdlib/tui.rs`.
-pub(crate) const PAGER_OPTIONS: Ty = Ty::Shape(&[
-    ShapeFieldDescriptor::new("body", TY_STRING),
-    ShapeFieldDescriptor::optional("title", TY_STRING),
-    ShapeFieldDescriptor::optional("footer", TY_STRING),
-    ShapeFieldDescriptor::optional("format", TY_STRING),
-    ShapeFieldDescriptor::optional("no_pager", TY_BOOL),
-]);
-
 /// Options dict for `signal_install` / cooperative signal handler primitives.
 pub(crate) const SIGNAL_HANDLER_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("once", TY_BOOL),

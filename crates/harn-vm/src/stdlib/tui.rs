@@ -5,32 +5,16 @@ use std::io::{ErrorKind, Write};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
 
-use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 const CLEAR_SEQUENCE: &str = "\x1b[2J\x1b[H";
 const DEFAULT_TERMINAL_WIDTH: usize = 80;
 const DEFAULT_RULE_CHAR: &str = "─";
 
-const TUI_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("__tui_page", tui_page_builtin)
-        .signature("__tui_page(options)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Render a text or markdown page through a pager when appropriate."),
-    SyncBuiltin::new("__tui_clear", tui_clear_builtin)
-        .signature("__tui_clear()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Write the ANSI clear-screen sequence to stdout."),
-    SyncBuiltin::new("__tui_terminal_width", tui_terminal_width_builtin)
-        .signature("__tui_terminal_width(default_width?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Return the current terminal width or the supplied default."),
-];
-
-const TUI_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("tui")
-    .sync(TUI_SYNC_PRIMITIVES);
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
+    &[&__TUI_PAGE_DEF, &__TUI_CLEAR_DEF, &__TUI_TERMINAL_WIDTH_DEF];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PageOptions {
@@ -48,10 +32,14 @@ enum PageFormat {
 }
 
 pub(crate) fn register_tui_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, TUI_PRIMITIVES);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
-fn tui_page_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+/// Render a text or markdown page through a pager when appropriate.
+#[harn_builtin(sig = "__tui_page(options: dict) -> dict", category = "tui")]
+fn __tui_page(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_page_options(args)?;
     let content = render_page_content(&options);
 
@@ -70,12 +58,19 @@ fn tui_page_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
     }
 }
 
-fn tui_clear_builtin(_args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+/// Write the ANSI clear-screen sequence to stdout.
+#[harn_builtin(sig = "__tui_clear() -> nil", category = "tui")]
+fn __tui_clear(_args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     super::io::write_stdout(out, CLEAR_SEQUENCE);
     Ok(VmValue::Nil)
 }
 
-fn tui_terminal_width_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+/// Return the current terminal width or the supplied default.
+#[harn_builtin(
+    sig = "__tui_terminal_width(default_width?: int) -> int",
+    category = "tui"
+)]
+fn __tui_terminal_width(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let default = args
         .first()
         .and_then(VmValue::as_int)

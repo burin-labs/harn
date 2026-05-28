@@ -334,6 +334,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(tools::MODULE_BUILTINS);
         out.extend_from_slice(tracing::MODULE_BUILTINS);
         out.extend_from_slice(triggers_stdlib::MODULE_BUILTINS);
+        out.extend_from_slice(tui::MODULE_BUILTINS);
         out.extend_from_slice(types::MODULE_BUILTINS);
         out.extend_from_slice(url_parse::MODULE_BUILTINS);
         out.extend_from_slice(waitpoint::MODULE_BUILTINS);

@@ -1,8 +1,7 @@
 //! Core stdlib builtin signatures that are not in the higher-level namespaces.
 
 use super::shapes::{
-    DAEMON_CONFIG, DAEMON_SUMMARY, IO_RESULT_ENVELOPE, PAGER_OPTIONS, READ_LINE_OPTIONS,
-    SIGNAL_HANDLER_OPTIONS,
+    DAEMON_CONFIG, DAEMON_SUMMARY, IO_RESULT_ENVELOPE, READ_LINE_OPTIONS, SIGNAL_HANDLER_OPTIONS,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL,
@@ -163,17 +162,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "__signal_raise",
         &[Param::optional("signal", TY_STRING)],
         TY_NIL,
-    ),
-    BuiltinSignature::simple("__tui_clear", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "__tui_page",
-        &[Param::new("options", PAGER_OPTIONS)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__tui_terminal_width",
-        &[Param::optional("default_width", TY_INT)],
-        TY_INT,
     ),
     BuiltinSignature::simple(
         "append_file",
