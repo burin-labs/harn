@@ -1198,7 +1198,7 @@ fn pool_get_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 }
 
 /// List every pool registered in the local pool registry.
-#[harn_builtin(sig = "__pool_list() -> list", category = "pool")]
+#[harn_builtin(sig = "__pool_list() -> list", category = "pool", runtime_only = true)]
 fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut entries: Vec<Rc<RefCell<PoolEntry>>> =
         POOLS.with(|pools| pools.borrow().values().cloned().collect());
@@ -1212,7 +1212,11 @@ fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 /// Return active + queued task count for a pool.
-#[harn_builtin(sig = "__pool_size(pool: dict) -> int", category = "pool")]
+#[harn_builtin(
+    sig = "__pool_size(pool: string|dict) -> int",
+    category = "pool",
+    runtime_only = true
+)]
 fn pool_size_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pool_id = pool_id_from_value(
         args.first()
@@ -1232,14 +1236,22 @@ fn pool_size_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 /// simulate "kill process → restart" without actually forking a new
 /// process. Returns `nil`.
 /// Drop the in-process pool registry; pipeline-scope pools reload from disk on next pool_create.
-#[harn_builtin(sig = "__pool_simulate_restart() -> nil", category = "pool")]
+#[harn_builtin(
+    sig = "__pool_simulate_restart() -> nil",
+    category = "pool",
+    runtime_only = true
+)]
 fn pool_reload_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     reset_pool_state();
     Ok(VmValue::Nil)
 }
 
 /// Return the full pool snapshot for inspection.
-#[harn_builtin(sig = "__pool_snapshot(pool: dict) -> dict", category = "pool")]
+#[harn_builtin(
+    sig = "__pool_snapshot(pool: string|dict) -> dict",
+    category = "pool",
+    runtime_only = true
+)]
 fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pool_id = pool_id_from_value(
         args.first().ok_or_else(|| {
@@ -1254,7 +1266,7 @@ fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 /// Submit a closure to a pool; spawns when a slot is free, otherwise queues.
 #[harn_builtin(
-    sig = "__pool_submit(pool: dict, closure: closure, options?: dict|nil) -> dict",
+    sig = "__pool_submit(pool: string|dict, closure: closure, options?: dict|nil) -> dict",
     kind = "async",
     category = "pool",
     runtime_only = true
@@ -2335,7 +2347,7 @@ fn finalize_task(
 
 /// Block until one or more pool task handles reach a terminal state.
 #[harn_builtin(
-    sig = "__pool_wait(handle_or_handles: dict|list) -> dict",
+    sig = "__pool_wait(handle_or_handles: string|dict|list) -> dict",
     kind = "async",
     category = "pool",
     runtime_only = true
