@@ -301,6 +301,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(monitors::MODULE_BUILTINS);
         out.extend_from_slice(multipart::MODULE_BUILTINS);
         out.extend_from_slice(net_policy::MODULE_BUILTINS);
+        out.extend_from_slice(oauth_dynreg::MODULE_BUILTINS);
         out.extend_from_slice(oauth_storage::MODULE_BUILTINS);
         out.extend_from_slice(observability::MODULE_BUILTINS);
         out.extend_from_slice(path::MODULE_BUILTINS);
@@ -317,6 +318,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(strings::MODULE_BUILTINS);
         out.extend_from_slice(supervisor::MODULE_BUILTINS);
         out.extend_from_slice(testbench::MODULE_BUILTINS);
+        out.extend_from_slice(testing::MODULE_BUILTINS);
         out.extend_from_slice(timing::MODULE_BUILTINS);
         out.extend_from_slice(tool_hooks::MODULE_BUILTINS);
         out.extend_from_slice(token_redaction::MODULE_BUILTINS);

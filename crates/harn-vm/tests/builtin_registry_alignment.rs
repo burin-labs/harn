@@ -167,7 +167,6 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__range__",
     "__register_persona",
     "__register_step",
-    "__testing_call_body",
 ];
 
 #[test]
