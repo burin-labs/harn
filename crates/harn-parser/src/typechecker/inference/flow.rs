@@ -110,6 +110,24 @@ fn format_discriminant(v: &DiscriminantValue) -> String {
     }
 }
 
+/// Whether a condition is a bare scalar literal (no operator wrapping).
+/// Used by the vacuous-condition lint to skip the `if true { … }` /
+/// `if false { … }` block-scope idiom while still flagging compound
+/// expressions that fold to the same constant (`if !true`, `if (a || true)`,
+/// `if (false && cond)`, …) — the latter almost always signal a partial
+/// refactor that left dead code behind, the former is intentional.
+fn is_bare_literal(node: &SNode) -> bool {
+    matches!(
+        &node.node,
+        Node::BoolLiteral(_)
+            | Node::NilLiteral
+            | Node::IntLiteral(_)
+            | Node::FloatLiteral(_)
+            | Node::StringLiteral(_)
+            | Node::RawStringLiteral(_)
+    )
+}
+
 /// Compile-time evaluation of a boolean condition over literal operands and
 /// the short-circuit / negation rules. Returns `Some(value)` only when the
 /// truthiness is determinable from the AST alone — leaves are limited to
@@ -167,26 +185,34 @@ impl TypeChecker {
     /// Walk a boolean condition reporting `HARN-LNT-058`. Two patterns fire:
     ///
     /// 1. The whole subexpression reduces to a constant via
-    ///    [`evaluate_constant_bool`]. One warning at the subexpression's
-    ///    span; no descent (children are dead).
+    ///    [`evaluate_constant_bool`] — but only when there's compound
+    ///    folding involved (an operator). A bare `if true { … }` or
+    ///    `if false { … }` is left alone: in Harn it's the canonical
+    ///    block-scope / disable-block idiom, the conformance suite uses
+    ///    it intentionally, and the unreachable-code analysis already
+    ///    handles "this branch never runs" diagnostics for those bare
+    ///    cases. One warning at the subexpression's span; no descent
+    ///    (children are dead either way).
     /// 2. The subexpression is `schema_is(x, S)` / `is_type(x, S)` and
     ///    `x`'s static type makes the predicate's answer known.
     ///
     /// `&&` and `||` re-enter with the refined scope so a nested predicate
     /// sees the narrowings the left-hand operand established.
     fn lint_vacuous_condition(&mut self, condition: &SNode, scope: &TypeScope) {
-        if let Some(value) = evaluate_constant_bool(condition) {
-            let (state, dead_branch) = if value {
-                ("truthy", "falsy")
-            } else {
-                ("falsy", "truthy")
-            };
-            self.warning_at(
-                Code::LintVacuousCondition,
-                format!("condition is statically always {state}; the {dead_branch} branch is unreachable"),
-                condition.span,
-            );
-            return;
+        if !is_bare_literal(condition) {
+            if let Some(value) = evaluate_constant_bool(condition) {
+                let (state, dead_branch) = if value {
+                    ("truthy", "falsy")
+                } else {
+                    ("falsy", "truthy")
+                };
+                self.warning_at(
+                    Code::LintVacuousCondition,
+                    format!("condition is statically always {state}; the {dead_branch} branch is unreachable"),
+                    condition.span,
+                );
+                return;
+            }
         }
         match &condition.node {
             Node::BinaryOp { op, left, right } if op == "&&" || op == "||" => {

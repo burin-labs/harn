@@ -814,7 +814,11 @@ pipeline t(task) {
 }
 
 #[test]
-fn test_vacuous_condition_lint_constant_true_literal() {
+fn test_vacuous_condition_lint_skips_bare_true_literal() {
+    // `if true { … }` is the canonical Harn block-scope idiom — the
+    // conformance suite uses it intentionally. Skip the lint on bare
+    // literals so we don't spam every block-scope use; the compound-
+    // folding tests below still catch the cases that *are* mistakes.
     let warns = warnings(
         r#"pipeline t(task) {
   if true {
@@ -823,13 +827,16 @@ fn test_vacuous_condition_lint_constant_true_literal() {
 }"#,
     );
     assert!(
-        warns.iter().any(|w| w.contains("always truthy")),
-        "expected constant-truthy warning, got: {warns:?}"
+        !warns.iter().any(|w| w.contains("always truthy")),
+        "bare `if true` is a block-scope idiom and must not fire, got: {warns:?}"
     );
 }
 
 #[test]
-fn test_vacuous_condition_lint_constant_false_literal() {
+fn test_vacuous_condition_lint_skips_bare_false_literal() {
+    // `if false { … }` is the canonical disable-block idiom (used when
+    // temporarily turning a branch off during refactor) — skip it for
+    // the same reason as `if true`.
     let warns = warnings(
         r#"pipeline t(task) {
   if false {
@@ -838,8 +845,8 @@ fn test_vacuous_condition_lint_constant_false_literal() {
 }"#,
     );
     assert!(
-        warns.iter().any(|w| w.contains("always falsy")),
-        "expected constant-falsy warning, got: {warns:?}"
+        !warns.iter().any(|w| w.contains("always falsy")),
+        "bare `if false` is a disable-block idiom and must not fire, got: {warns:?}"
     );
 }
 
@@ -964,39 +971,44 @@ pipeline t(task) {
 
 #[test]
 fn test_vacuous_condition_lint_fires_in_while_condition() {
-    // `while` runs the same condition-extraction pipeline as `if`, so the
-    // lint must apply there too. A `while true` body never exits the
-    // condition naturally — exactly the kind of accidental constant we
-    // want to flag.
+    // `while` runs the same condition-extraction pipeline as `if`. Bare
+    // `while true { … }` is the idiomatic infinite-loop spelling, so the
+    // lint skips it; a compound condition that folds to the same answer
+    // is what we want to catch — `while (cond || true)` is almost always
+    // a refactor leftover.
     let warns = warnings(
         r#"pipeline t(task) {
-  while true {
-    log("forever")
-    break
+  fn check(cond: bool) {
+    while cond || true {
+      log("forever")
+      break
+    }
   }
 }"#,
     );
     assert!(
         warns.iter().any(|w| w.contains("always truthy")),
-        "expected `while true` warning, got: {warns:?}"
+        "expected compound-folded `while` warning, got: {warns:?}"
     );
 }
 
 #[test]
 fn test_vacuous_condition_lint_fires_in_guard_condition() {
-    // `guard <cond> else { ... }`: a vacuous condition makes either the
-    // guard's pass-through or its else-block dead.
+    // `guard <cond> else { ... }`: a vacuous compound condition makes
+    // either the guard's pass-through or its else-block dead. Use a
+    // compound folder (not a bare literal) so the idiomatic-bare carve-
+    // out doesn't apply.
     let warns = warnings(
         r"pipeline t(task) {
-  fn check() -> int {
-    guard false else { return 0 }
+  fn check(cond: bool) -> int {
+    guard cond && false else { return 0 }
     return 1
   }
 }",
     );
     assert!(
         warns.iter().any(|w| w.contains("always falsy")),
-        "expected `guard false` warning, got: {warns:?}"
+        "expected compound-folded `guard` warning, got: {warns:?}"
     );
 }
 
