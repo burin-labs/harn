@@ -1210,7 +1210,7 @@ async fn host_agent_reminder_providers_fire_impl(args: Vec<VmValue>) -> Result<V
         }
     };
     let event =
-        super::reminder_providers::parse_provider_event(&event_name).map_err(|message| {
+        crate::orchestration::HookEvent::parse_provider_event(&event_name).map_err(|message| {
             VmError::Runtime(format!("__host_agent_reminder_providers_fire: {message}"))
         })?;
     let payload = args

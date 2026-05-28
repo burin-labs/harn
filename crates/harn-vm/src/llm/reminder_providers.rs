@@ -401,27 +401,6 @@ fn format_workspace_anchor_body(anchor: &crate::workspace_anchor::WorkspaceAncho
     body
 }
 
-pub fn parse_provider_event(name: &str) -> Result<HookEvent, String> {
-    match name.trim() {
-        "PostToolUse" | "post_tool_use" => Ok(HookEvent::PostToolUse),
-        "OnBudgetThreshold" | "on_budget_threshold" => Ok(HookEvent::OnBudgetThreshold),
-        "SessionIdle" | "session_idle" => Ok(HookEvent::SessionIdle),
-        "PostCompact" | "post_compact" => Ok(HookEvent::PostCompact),
-        "WorkerSpawned" | "worker_spawned" => Ok(HookEvent::WorkerSpawned),
-        "WorkerProgressed" | "worker_progressed" => Ok(HookEvent::WorkerProgressed),
-        "WorkerWaitingForInput" | "worker_waiting_for_input" => {
-            Ok(HookEvent::WorkerWaitingForInput)
-        }
-        "WorkerSuspended" | "worker_suspended" => Ok(HookEvent::WorkerSuspended),
-        "WorkerResumed" | "worker_resumed" => Ok(HookEvent::WorkerResumed),
-        "WorkerCompleted" | "worker_completed" => Ok(HookEvent::WorkerCompleted),
-        "WorkerFailed" | "worker_failed" => Ok(HookEvent::WorkerFailed),
-        "WorkerCancelled" | "worker_cancelled" => Ok(HookEvent::WorkerCancelled),
-        other => HookEvent::parse_session_event(other)
-            .map_err(|_| format!("unknown reminder provider event `{other}`")),
-    }
-}
-
 pub fn register_vm_provider(
     id: impl Into<String>,
     subscribes_to: Vec<HookEvent>,

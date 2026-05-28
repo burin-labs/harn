@@ -392,7 +392,7 @@ fn reminder_provider_event_list(
         )));
     };
     match value {
-        VmValue::String(event) => crate::llm::reminder_providers::parse_provider_event(event)
+        VmValue::String(event) => crate::orchestration::HookEvent::parse_provider_event(event)
             .map(|event| vec![event])
             .map_err(|message| VmError::Runtime(format!("{builtin}: {message}"))),
         VmValue::List(events) => {
@@ -408,7 +408,7 @@ fn reminder_provider_event_list(
                     }
                 };
                 out.push(
-                    crate::llm::reminder_providers::parse_provider_event(&name)
+                    crate::orchestration::HookEvent::parse_provider_event(&name)
                         .map_err(|message| VmError::Runtime(format!("{builtin}: {message}")))?,
                 );
             }
