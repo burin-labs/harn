@@ -1,17 +1,17 @@
 //! Standard library builtins for the Harn VM.
 //!
-//! New builtins are declared with the `#[harn_builtin]` proc-macro
+//! Every builtin is declared with the `#[harn_builtin]` proc-macro
 //! (`crate::stdlib::macros::harn_builtin`). Each annotation emits a sibling
 //! `static <FN>_DEF: VmBuiltinDef` carrying the signature, aliases, handler,
-//! and metadata; modules collect those into a `MODULE_BUILTINS: &[&VmBuiltinDef]`
-//! slice and expose a `register_<module>_builtins(vm)` that iterates it.
-//! `all_builtin_defs()` below concatenates every module's slice (alphabetical
-//! by module) and `register_vm_stdlib` installs the resulting signatures into
-//! the parser registry.
+//! and metadata, and registers it into the workspace-global
+//! [`macros::ALL_BUILTIN_DEFS`] distributed slice at link time. The CLI / LSP /
+//! lint / serve / dap binaries call [`force_link`] to defeat rlib dead-code
+//! stripping (linkme issue #36) so every static lands in the slice. Modules
+//! still expose a `register_<module>_builtins(vm)` helper for ordered eager
+//! registration (e.g. so `clock::timestamp` can override `process::timestamp`).
+//! `register_vm_stdlib` calls those helpers in order and then installs the
+//! aggregated signatures into the parser registry.
 //!
-//! The legacy DSL under [`registration`] (`SyncBuiltin`, `AsyncBuiltin`,
-//! `BuiltinGroup`, `register_builtin_group`) is deprecated and retained only
-//! for a small set of unmigrated callers. New code MUST use `#[harn_builtin]`.
 //! See `CONTRIBUTING.md` ("Adding a stdlib builtin") for the full template.
 
 pub mod macros;

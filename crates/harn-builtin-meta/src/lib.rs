@@ -136,6 +136,81 @@ impl Ty {
     }
 }
 
+impl core::fmt::Display for Ty {
+    /// Render a parsed [`Ty`] back into the `#[harn_builtin]` sig grammar.
+    /// Round-trip target: parsing the output through the proc-macro's
+    /// sig parser yields a structurally-equal [`Ty`] (modulo whitespace and
+    /// canonical operator spacing). See the drift test in
+    /// `crates/harn-vm/tests/builtin_signature_text_drift.rs`.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Ty::Named(s) | Ty::Generic(s) => f.write_str(s),
+            Ty::Any => f.write_str("any"),
+            Ty::Never => f.write_str("never"),
+            Ty::Optional(inner) => write!(f, "{inner}?"),
+            Ty::Apply(name, args) => {
+                f.write_str(name)?;
+                f.write_str("<")?;
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{a}")?;
+                }
+                f.write_str(">")
+            }
+            Ty::Union(parts) => {
+                // Recover sig-grammar sugar so output round-trips through
+                // the proc-macro sig parser (which desugars `T?` and
+                // `number` into unions).
+                if let [inner, Ty::Named("nil")] = parts {
+                    if !matches!(inner, Ty::Named("nil")) {
+                        return write!(f, "{inner}?");
+                    }
+                }
+                if let [Ty::Named("int"), Ty::Named("float")] = parts {
+                    return f.write_str("number");
+                }
+                for (i, p) in parts.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" | ")?;
+                    }
+                    write!(f, "{p}")?;
+                }
+                Ok(())
+            }
+            Ty::Fn(params, ret) => {
+                f.write_str("(")?;
+                for (i, p) in params.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{p}")?;
+                }
+                write!(f, ") -> {ret}")
+            }
+            Ty::Shape(fields) => {
+                f.write_str("{")?;
+                for (i, fld) in fields.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    let name = fld.name;
+                    let ty = &fld.ty;
+                    write!(f, "{name}: {ty}")?;
+                    if fld.optional {
+                        f.write_str("?")?;
+                    }
+                }
+                f.write_str("}")
+            }
+            Ty::SchemaOf(t) => write!(f, "Schema<{t}>"),
+            Ty::LitInt(n) => write!(f, "{n}"),
+            Ty::LitString(s) => write!(f, "\"{s}\""),
+        }
+    }
+}
+
 impl BuiltinSignature {
     /// Non-generic, fixed-arity builtin: no type parameters, no rest, no
     /// where-clause bounds. Covers ~70% of the registry; lets each call
@@ -215,6 +290,53 @@ impl BuiltinSignature {
     }
 }
 
+impl core::fmt::Display for BuiltinSignature {
+    /// Render a parsed [`BuiltinSignature`] back into the `#[harn_builtin]`
+    /// `sig = "..."` grammar. Used by the drift test and by tooling that
+    /// wants a canonical string form of the signature regardless of how it
+    /// was originally typed.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if !self.type_params.is_empty() {
+            f.write_str("<")?;
+            for (i, tp) in self.type_params.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                f.write_str(tp)?;
+            }
+            if !self.where_clauses.is_empty() {
+                f.write_str(" where ")?;
+                for (i, (tp, iface)) in self.where_clauses.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{tp}: {iface}")?;
+                }
+            }
+            f.write_str("> ")?;
+        }
+        f.write_str(self.name)?;
+        f.write_str("(")?;
+        let last_idx = self.params.len().saturating_sub(1);
+        for (i, p) in self.params.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            if self.has_rest && i == last_idx {
+                f.write_str("...")?;
+            }
+            f.write_str(p.name)?;
+            if p.optional {
+                f.write_str("?")?;
+            }
+            let ty = &p.ty;
+            write!(f, ": {ty}")?;
+        }
+        let ret = &self.returns;
+        write!(f, ") -> {ret}")
+    }
+}
+
 /// Public view of one builtin used by `harn-lint` and other crates that need
 /// just identifier + return-type hints (no parameter types).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,3 +374,94 @@ pub const TY_DICT_OR_NIL: Ty = Ty::Union(&[TY_DICT, TY_NIL]);
 pub const TY_BYTES_OR_NIL: Ty = Ty::Union(&[TY_BYTES, TY_NIL]);
 /// `int | float`.
 pub const TY_NUMBER: Ty = Ty::Union(&[TY_INT, TY_FLOAT]);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const APPLY_ARGS: &[Ty] = &[TY_DICT];
+    const FN_PARAMS: &[Ty] = &[TY_INT, TY_STRING];
+    const SHAPE_FIELDS: &[ShapeFieldDescriptor] = &[
+        ShapeFieldDescriptor::new("name", TY_STRING),
+        ShapeFieldDescriptor::optional("age", TY_INT),
+    ];
+
+    #[test]
+    fn ty_display_atomic_and_compound() {
+        assert_eq!(format!("{TY_INT}"), "int");
+        assert_eq!(format!("{TY_ANY}"), "any");
+        assert_eq!(format!("{TY_NEVER}"), "never");
+        // `T | nil` round-trips as `T?` (the sig grammar's optional sugar
+        // is desugared into a 2-element union, not `Ty::Optional`).
+        assert_eq!(format!("{TY_STRING_OR_NIL}"), "string?");
+        let opt_int = Ty::Optional(&TY_INT);
+        assert_eq!(format!("{opt_int}"), "int?");
+        // `int | float` round-trips as `number` (the predeclared shorthand).
+        assert_eq!(format!("{TY_NUMBER}"), "number");
+        let list_dict = Ty::Apply("list", APPLY_ARGS);
+        assert_eq!(format!("{list_dict}"), "list<dict>");
+        let lit_int = Ty::LitInt(42);
+        assert_eq!(format!("{lit_int}"), "42");
+        let lit_str = Ty::LitString("pass");
+        assert_eq!(format!("{lit_str}"), "\"pass\"");
+        let schema_t = Ty::SchemaOf("T");
+        assert_eq!(format!("{schema_t}"), "Schema<T>");
+        let fn_ty = Ty::Fn(FN_PARAMS, &TY_BOOL);
+        assert_eq!(format!("{fn_ty}"), "(int, string) -> bool");
+        let shape = Ty::Shape(SHAPE_FIELDS);
+        assert_eq!(format!("{shape}"), "{name: string, age: int?}");
+    }
+
+    const BASIC_PARAMS: &[Param] = &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)];
+    const REST_PARAMS: &[Param] = &[Param::new("prefix", TY_STRING), Param::new("args", TY_ANY)];
+    const OPT_PARAMS: &[Param] = &[
+        Param::new("receipt", TY_DICT),
+        Param::optional("candidate", TY_ANY),
+    ];
+    const GENERIC_PARAMS: &[Param] = &[Param::new("schema", Ty::SchemaOf("T"))];
+
+    #[test]
+    fn signature_display_basic() {
+        let sig = BuiltinSignature::simple("deep_merge", BASIC_PARAMS, TY_DICT);
+        assert_eq!(format!("{sig}"), "deep_merge(a: dict, b: dict) -> dict");
+    }
+
+    #[test]
+    fn signature_display_with_optional_and_rest() {
+        let sig = BuiltinSignature {
+            name: "io_println",
+            params: REST_PARAMS,
+            returns: TY_NIL,
+            type_params: &[],
+            has_rest: true,
+            where_clauses: &[],
+        };
+        assert_eq!(
+            format!("{sig}"),
+            "io_println(prefix: string, ...args: any) -> nil"
+        );
+
+        let opt_sig =
+            BuiltinSignature::simple("lifecycle_replay_resume_input", OPT_PARAMS, TY_DICT);
+        assert_eq!(
+            format!("{opt_sig}"),
+            "lifecycle_replay_resume_input(receipt: dict, candidate?: any) -> dict"
+        );
+    }
+
+    #[test]
+    fn signature_display_with_generics_and_where() {
+        let sig = BuiltinSignature {
+            name: "schema_parse",
+            params: GENERIC_PARAMS,
+            returns: Ty::Generic("T"),
+            type_params: &["T"],
+            has_rest: false,
+            where_clauses: &[("T", "Decode")],
+        };
+        assert_eq!(
+            format!("{sig}"),
+            "<T where T: Decode> schema_parse(schema: Schema<T>) -> T"
+        );
+    }
+}

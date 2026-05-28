@@ -130,8 +130,8 @@ polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
 - Register new stdlib builtins with `#[harn_builtin]` (see
   [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-stdlib-builtin)). The legacy
   `SyncBuiltin` / `AsyncBuiltin` / `BuiltinGroup` / `register_builtin_group`
-  DSL in `crates/harn-vm/src/stdlib/registration.rs` is deprecated and only
-  survives for a handful of captured-state files; do not extend it.
+  DSL was removed in PR #2575; every builtin now flows through
+  `#[harn_builtin]` + the workspace-global `ALL_BUILTIN_DEFS` linkme slice.
 - Public CLI, builtin, or host-capability changes need user-facing docs and
   help text.
 - Prompt-template syntax changes also require

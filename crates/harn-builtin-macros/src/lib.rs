@@ -2,13 +2,14 @@
 //!
 //! Annotates a Rust function that implements one builtin and emits both a
 //! runtime registration entry and a parser `BuiltinSignature` from a single
-//! declaration. This is the canonical way to register stdlib builtins — see
-//! `CONTRIBUTING.md` ("Adding a stdlib builtin") for the wire-up checklist
-//! and `crates/harn-vm/src/stdlib/bytes.rs`, `runtime_scope.rs`, and
-//! `strings.rs` for sync, async, and `aliases = [...]` examples respectively.
-//! The legacy `SyncBuiltin` / `AsyncBuiltin` / `register_builtin_group` DSL
-//! in `harn-vm/src/stdlib/registration.rs` is deprecated and must not be
-//! extended.
+//! declaration. This is the only supported way to register stdlib builtins —
+//! see `CONTRIBUTING.md` ("Adding a stdlib builtin") for the wire-up
+//! checklist and `crates/harn-vm/src/stdlib/bytes.rs`, `runtime_scope.rs`,
+//! and `strings.rs` for sync, async, and `aliases = [...]` examples
+//! respectively. The macro contributes each emitted `VmBuiltinDef` to the
+//! workspace-global `ALL_BUILTIN_DEFS` linkme distributed slice, so simply
+//! annotating a fn (in a module already pulled into `harn-vm`) is enough to
+//! make it land in the registry — no per-module aggregation edits required.
 
 extern crate proc_macro;
 
