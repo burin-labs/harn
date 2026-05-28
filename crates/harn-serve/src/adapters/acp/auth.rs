@@ -64,6 +64,7 @@ pub(super) fn acp_auth_request_for_method(
             .unwrap_or_default(),
         headers: harn_auth_headers(meta),
         validated_oauth: None,
+        tenant_id: None,
     };
 
     match method {

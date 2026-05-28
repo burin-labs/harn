@@ -326,6 +326,7 @@ impl McpServer {
                 body: line.into_bytes(),
                 headers: BTreeMap::new(),
                 validated_oauth: None,
+                tenant_id: None,
             };
             self.clone()
                 .handle_stdio_message(request, session.clone(), auth, tx.clone())

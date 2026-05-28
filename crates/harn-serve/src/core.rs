@@ -12,7 +12,7 @@ use harn_vm::event_log::{
 use harn_vm::llm::vm_value_to_json;
 use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
-use harn_vm::{TraceId, Vm, VmValue};
+use harn_vm::{TenantId, TraceId, Vm, VmValue};
 use tokio::task::LocalSet;
 use tracing::Instrument;
 
@@ -75,6 +75,13 @@ pub struct CallRequest {
     /// the MCP transport adapter populates this today; other adapters
     /// leave it `None` and the builtin is a no-op.
     pub progress: Option<ProgressContext>,
+    /// Tenant the adapter wants this dispatch to run under, overriding
+    /// whatever `AuthPolicy` resolves from the credential. Set this
+    /// when the transport already owns tenant resolution (e.g. an
+    /// upstream cloud gateway that mapped the API key to a tenant in
+    /// its own store before forwarding the call). When `None`, the
+    /// tenant is sourced from the authenticated principal.
+    pub tenant_id: Option<TenantId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -165,7 +172,7 @@ impl DispatchCore {
         self.event_log.clone()
     }
 
-    pub async fn dispatch(&self, request: CallRequest) -> Result<CallResponse, DispatchError> {
+    pub async fn dispatch(&self, mut request: CallRequest) -> Result<CallResponse, DispatchError> {
         let trace_id = request.trace_id.clone().unwrap_or_default();
         let function_scopes = self
             .catalog
@@ -178,7 +185,16 @@ impl DispatchCore {
             .authorize_with_scopes(&request.auth, &function_scopes)
             .await;
         match authorization {
-            AuthorizationDecision::Authorized(_) => {}
+            AuthorizationDecision::Authorized(principal) => {
+                // Adapter-supplied tenants override; otherwise the
+                // authenticated principal's tenant wins. Resolving here
+                // (not later inside `invoke_*`) keeps trust records and
+                // span attributes consistent with the value the .harn
+                // callee actually sees.
+                if request.tenant_id.is_none() {
+                    request.tenant_id = principal.tenant_id;
+                }
+            }
             AuthorizationDecision::Rejected(message) => {
                 self.record_trust(
                     &request,
@@ -228,6 +244,12 @@ impl DispatchCore {
             }
         }
 
+        // tenant_id is a low-cardinality routing key (one entry per
+        // tenant), not PII — safe to record as a span attribute so
+        // exporters can filter traces by tenant. `Empty` until populated
+        // so the absent case isn't recorded as the literal string
+        // `"None"`. Recorded once after the span opens, mirroring how
+        // OTEL bindings expect span attributes to be set.
         let span = tracing::info_span!(
             target: "harn.serve",
             "harn_serve.dispatch",
@@ -235,7 +257,11 @@ impl DispatchCore {
             function = %request.function,
             caller = %request.caller,
             trace_id = %trace_id.0,
+            tenant_id = tracing::field::Empty,
         );
+        if let Some(tenant) = request.tenant_id.as_ref() {
+            span.record("tenant_id", tenant.0.as_str());
+        }
         let _ = harn_vm::observability::otel::set_span_parent(
             &span,
             &trace_id,
@@ -337,6 +363,7 @@ impl DispatchCore {
         let agent_session_id = request.agent_session_id.clone();
         let progress = request.progress.clone();
 
+        let tenant_id = request.tenant_id.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -345,6 +372,7 @@ impl DispatchCore {
                     harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
                     harn_vm::agent_sessions::enter_current_session(session_id.to_string())
                 });
+                let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -354,6 +382,7 @@ impl DispatchCore {
                 vm.set_source_info(&script_path.display().to_string(), &source);
                 vm.set_source_dir(store_base);
                 vm.install_cancel_token(cancel_token);
+                vm.set_harness(harn_vm::Harness::real());
                 self.config.vm_configurator.configure(&mut vm)?;
 
                 let exports = vm
@@ -367,7 +396,7 @@ impl DispatchCore {
                         script_path.display()
                     )));
                 };
-                let args = build_vm_args(&request.arguments, function)?;
+                let args = build_vm_args(&request.arguments, function, &vm)?;
                 let result = vm.call_closure_pub(closure, &args).await;
 
                 match result {
@@ -416,6 +445,7 @@ impl DispatchCore {
         let agent_session_id = request.agent_session_id.clone();
         let progress = request.progress.clone();
 
+        let tenant_id = request.tenant_id.clone();
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
@@ -424,6 +454,7 @@ impl DispatchCore {
                     harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
                     harn_vm::agent_sessions::enter_current_session(session_id.to_string())
                 });
+                let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
 
                 let mut vm = Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -433,6 +464,7 @@ impl DispatchCore {
                 vm.set_source_info(&script_path.display().to_string(), &source);
                 vm.set_source_dir(store_base);
                 vm.install_cancel_token(cancel_token);
+                vm.set_harness(harn_vm::Harness::real());
                 self.config.vm_configurator.configure(&mut vm)?;
                 for (name, value) in globals {
                     vm.set_global(&name, value);
@@ -482,6 +514,11 @@ impl DispatchCore {
         record
             .metadata
             .insert("function".to_string(), serde_json::json!(request.function));
+        if let Some(tenant) = request.tenant_id.as_ref() {
+            record
+                .metadata
+                .insert("tenant_id".to_string(), serde_json::json!(tenant.0));
+        }
         if let Some(error) = error {
             record
                 .metadata
@@ -499,13 +536,39 @@ impl DispatchCore {
 fn build_vm_args(
     arguments: &CallArguments,
     function: &crate::ExportedFunction,
+    vm: &Vm,
 ) -> Result<Vec<VmValue>, DispatchError> {
-    match arguments {
-        CallArguments::Positional(values) => Ok(values.iter().map(json_to_vm_value).collect()),
+    let mut params = function.params.as_slice();
+    let mut prefix = Vec::new();
+    // Exported `pub fn foo(harness: Harness, ...)` opts the function
+    // into the runtime-supplied capability handle the same way
+    // top-level `fn main(harness: Harness)` does. The dispatch surface
+    // hands JSON in, so the host fills the slot from
+    // `vm.set_harness(...)` instead of asking the caller to encode a
+    // Harness through CallArguments. Only the first positional slot
+    // qualifies (matches the language convention).
+    if first_param_is_harness(function) {
+        let harness = vm
+            .global("harness")
+            .ok_or_else(|| {
+                DispatchError::Execution(
+                    "Harness handle not installed; DispatchCore must call vm.set_harness() before invoking exported functions that take a harness param"
+                        .to_string(),
+                )
+            })?
+            .clone();
+        prefix.push(harness);
+        params = &params[1..];
+    }
+
+    let rest = match arguments {
+        CallArguments::Positional(values) => {
+            values.iter().map(json_to_vm_value).collect::<Vec<_>>()
+        }
         CallArguments::Named(values) => {
             let mut args = Vec::new();
             let mut saw_gap = false;
-            for param in &function.params {
+            for param in params {
                 let value = values.get(&param.name);
                 match value {
                     Some(value) => {
@@ -528,9 +591,24 @@ fn build_vm_args(
                     }
                 }
             }
-            Ok(trim_trailing_defaults(args))
+            trim_trailing_defaults(args)
         }
-    }
+    };
+
+    prefix.extend(rest);
+    Ok(prefix)
+}
+
+/// `true` when the first exported param is the canonical `harness`
+/// capability handle slot. Type annotation is optional (most pubs use
+/// untyped `harness` in stdlib) so we only check the name; the
+/// typechecker still enforces the `Harness` type in declared signatures.
+fn first_param_is_harness(function: &crate::ExportedFunction) -> bool {
+    function
+        .params
+        .first()
+        .map(|param| param.name == "harness")
+        .unwrap_or(false)
 }
 
 fn build_pipeline_globals(
@@ -641,6 +719,7 @@ pub fn greet(name: string) -> string {
                 cancel_token: None,
                 agent_session_id: None,
                 progress: None,
+                tenant_id: None,
             })
             .await
             .expect("dispatch");
@@ -681,6 +760,7 @@ pipeline default(task) {
                 cancel_token: None,
                 agent_session_id: None,
                 progress: None,
+                tenant_id: None,
             })
             .await
             .expect("dispatch");
@@ -738,6 +818,7 @@ pub fn greet(name: string) -> string {
                 cancel_token: None,
                 agent_session_id: None,
                 progress: None,
+                tenant_id: None,
             })
             .await
             .expect("dispatch");
@@ -774,6 +855,7 @@ pub fn inspect(upload: string) -> string {
             cancel_token: None,
             agent_session_id: None,
             progress: None,
+            tenant_id: None,
         };
 
         let first = core
@@ -825,6 +907,7 @@ pub fn greet(name: string) -> string {
                 cancel_token: None,
                 agent_session_id: None,
                 progress: None,
+                tenant_id: None,
             })
             .await
             .expect("dispatch");
@@ -873,10 +956,179 @@ pub fn spin() -> string {
                 cancel_token: Some(cancel_token),
                 agent_session_id: None,
                 progress: None,
+                tenant_id: None,
             })
             .await
             .expect("dispatch");
 
         assert_eq!(response.value, serde_json::json!("stopped"));
+    }
+
+    /// `.harn` callees see the tenant the host bound via
+    /// `AuthPolicy` — the `ApiKeyEntry` was configured with a tenant,
+    /// the principal carries it forward, and `DispatchCore::dispatch`
+    /// installs the [`harn_vm::enter_tenant`] guard so the script's
+    /// `harness.tenant.id()` returns the same id end-to-end.
+    #[tokio::test]
+    async fn dispatch_threads_api_key_tenant_into_harness_and_trust_record() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn whoami(harness: Harness) -> string {
+  return harness.tenant.id()
+}
+",
+        )
+        .expect("write script");
+
+        let mut config = DispatchCoreConfig::for_script(&script);
+        config.auth_policy = crate::auth::AuthPolicy {
+            methods: vec![crate::auth::AuthMethodConfig::ApiKey(
+                crate::auth::ApiKeyAuthConfig {
+                    keys: vec![
+                        crate::auth::ApiKeyEntry::new("alice-key", []).with_tenant("acme-corp")
+                    ],
+                },
+            )],
+        };
+        let core = DispatchCore::new(config).expect("core");
+
+        let response = core
+            .dispatch(CallRequest {
+                adapter: "mcp".to_string(),
+                function: "whoami".to_string(),
+                arguments: CallArguments::Positional(Vec::new()),
+                auth: AuthRequest {
+                    headers: BTreeMap::from([(
+                        "authorization".to_string(),
+                        "Bearer alice-key".to_string(),
+                    )]),
+                    ..AuthRequest::default()
+                },
+                caller: "tester".to_string(),
+                replay_key: Some("tenant-whoami".to_string()),
+                trace_id: None,
+                parent_span_id: None,
+                metadata: BTreeMap::new(),
+                cancel_token: None,
+                agent_session_id: None,
+                progress: None,
+                tenant_id: None,
+            })
+            .await
+            .expect("dispatch");
+
+        assert_eq!(response.value, serde_json::json!("acme-corp"));
+
+        let records =
+            harn_vm::query_trust_records(&core.event_log, &harn_vm::TrustQueryFilters::default())
+                .await
+                .expect("records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].metadata["tenant_id"], "acme-corp");
+    }
+
+    /// `harness.tenant.id()` raises a typed runtime error (categorized
+    /// as `auth`) when the dispatch was not bound to a tenant. The
+    /// dispatch surface then maps it through the standard `Execution`
+    /// error envelope so callers see the canonical message.
+    #[tokio::test]
+    async fn dispatch_missing_tenant_raises_typed_runtime_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn whoami(harness: Harness) -> string {
+  return harness.tenant.id()
+}
+",
+        )
+        .expect("write script");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let error = core
+            .dispatch(CallRequest {
+                adapter: "mcp".to_string(),
+                function: "whoami".to_string(),
+                arguments: CallArguments::Positional(Vec::new()),
+                auth: AuthRequest::default(),
+                caller: "tester".to_string(),
+                replay_key: Some("missing-tenant".to_string()),
+                trace_id: None,
+                parent_span_id: None,
+                metadata: BTreeMap::new(),
+                cancel_token: None,
+                agent_session_id: None,
+                progress: None,
+                tenant_id: None,
+            })
+            .await
+            .expect_err("missing tenant should error");
+
+        let message = error.message();
+        assert!(
+            message.contains("harness.tenant.id()"),
+            "expected typed tenant error, got: {message}"
+        );
+    }
+
+    /// `CallRequest.tenant_id` overrides the principal-supplied tenant
+    /// — covers the case where an upstream gateway already resolved
+    /// tenancy out-of-band and hands the answer to harn-serve.
+    #[tokio::test]
+    async fn dispatch_request_tenant_overrides_principal_tenant() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn whoami(harness: Harness) -> string {
+  return harness.tenant.id()
+}
+",
+        )
+        .expect("write script");
+
+        let mut config = DispatchCoreConfig::for_script(&script);
+        config.auth_policy = crate::auth::AuthPolicy {
+            methods: vec![crate::auth::AuthMethodConfig::ApiKey(
+                crate::auth::ApiKeyAuthConfig {
+                    keys: vec![
+                        crate::auth::ApiKeyEntry::new("key", []).with_tenant("principal-tenant")
+                    ],
+                },
+            )],
+        };
+        let core = DispatchCore::new(config).expect("core");
+
+        let response = core
+            .dispatch(CallRequest {
+                adapter: "mcp".to_string(),
+                function: "whoami".to_string(),
+                arguments: CallArguments::Positional(Vec::new()),
+                auth: AuthRequest {
+                    headers: BTreeMap::from([(
+                        "authorization".to_string(),
+                        "Bearer key".to_string(),
+                    )]),
+                    ..AuthRequest::default()
+                },
+                caller: "tester".to_string(),
+                replay_key: Some("override-tenant".to_string()),
+                trace_id: None,
+                parent_span_id: None,
+                metadata: BTreeMap::new(),
+                cancel_token: None,
+                agent_session_id: None,
+                progress: None,
+                tenant_id: Some(harn_vm::TenantId::new("override-tenant")),
+            })
+            .await
+            .expect("dispatch");
+
+        assert_eq!(response.value, serde_json::json!("override-tenant"));
     }
 }

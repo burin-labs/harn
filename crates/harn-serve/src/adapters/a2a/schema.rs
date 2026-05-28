@@ -1088,6 +1088,7 @@ pub(super) fn http_auth_request(
         body,
         headers: normalized_headers(headers),
         validated_oauth: None,
+        tenant_id: None,
     }
 }
 

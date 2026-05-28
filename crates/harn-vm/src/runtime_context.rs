@@ -283,7 +283,16 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
         insert_string(&mut values, "trigger_id", None);
         insert_string(&mut values, "trigger_event_id", None);
         insert_string(&mut values, "binding_key", None);
-        insert_string(&mut values, "tenant_id", None);
+        // Outside a trigger dispatch, fall back to the ambient
+        // `enter_tenant` scope hosts install (today: harn-serve binds
+        // it from the authenticated principal). Keeps
+        // `runtime_context.tenant_id` consistent across trigger and
+        // non-trigger code paths.
+        insert_string(
+            &mut values,
+            "tenant_id",
+            crate::harness_tenant::current_tenant_id().map(|tenant| tenant.0),
+        );
         insert_string(&mut values, "provider", None);
         insert_string(
             &mut values,

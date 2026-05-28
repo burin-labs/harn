@@ -948,6 +948,7 @@ impl TypeChecker {
                 "crypto" => Some(TypeExpr::Named("HarnessCrypto".into())),
                 "system" => Some(TypeExpr::Named("HarnessSystem".into())),
                 "llm" => Some(TypeExpr::Named("HarnessLlm".into())),
+                "tenant" => Some(TypeExpr::Named("HarnessTenant".into())),
                 _ if optional => Some(TypeExpr::Named("nil".into())),
                 _ => None,
             },

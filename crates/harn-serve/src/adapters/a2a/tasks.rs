@@ -118,6 +118,7 @@ impl A2aServer {
                 cancel_token: Some(task.cancel_token.clone()),
                 agent_session_id: Some(session_id.clone()),
                 progress: None,
+                tenant_id: None,
             })
             .await;
 

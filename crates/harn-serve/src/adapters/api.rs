@@ -1940,6 +1940,7 @@ async fn authorize(
         body: body.to_vec(),
         headers: headers_to_map(headers),
         validated_oauth: None,
+        tenant_id: None,
     };
     match state.auth_policy.authorize(&request).await {
         AuthorizationDecision::Authorized(_) => Ok(()),

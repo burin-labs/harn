@@ -87,6 +87,7 @@ impl crate::vm::Vm {
             HarnessKind::Process => self.call_harness_process_method(handle, method, args),
             HarnessKind::Crypto => self.call_harness_crypto_method(handle, method, args),
             HarnessKind::Llm => self.call_harness_llm_method(handle, method),
+            HarnessKind::Tenant => self.call_harness_tenant_method(handle, method, args),
         }
     }
 
@@ -263,6 +264,32 @@ impl crate::vm::Vm {
         match method {
             "catalog" => Ok(crate::llm::config_builtins::llm_catalog_value()),
             "providers" => Ok(crate::llm::config_builtins::llm_provider_status_value()),
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
+    fn call_harness_tenant_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        if !args.is_empty() {
+            return Err(VmError::TypeError(format!(
+                "HarnessTenant.{method} takes no arguments"
+            )));
+        }
+        match method {
+            "id" => match crate::harness_tenant::current_tenant_id() {
+                Some(tenant) => Ok(vm_string(tenant.0)),
+                None => Err(VmError::CategorizedError {
+                    message: crate::harness_tenant::MISSING_TENANT_MESSAGE.to_string(),
+                    category: ErrorCategory::Auth,
+                }),
+            },
+            "try_id" => Ok(crate::harness_tenant::current_tenant_id()
+                .map(|tenant| vm_string(tenant.0))
+                .unwrap_or(VmValue::Nil)),
             _ => Err(method_unsupported(handle, method)),
         }
     }
@@ -857,6 +884,13 @@ impl crate::vm::Vm {
                 Ok(crate::stdlib::json_to_vm_value(&json))
             }
             HarnessKind::Llm => self.call_harness_llm_method(handle, method),
+            HarnessKind::Tenant => {
+                // Mock mode shares the same ambient stack as real mode
+                // so conformance fixtures can drive `enter_tenant(...)`
+                // and assert `harness.tenant.id()` returns the pushed
+                // id. No mock-only state is needed.
+                self.call_harness_tenant_method(handle, method, args)
+            }
         }
     }
 }

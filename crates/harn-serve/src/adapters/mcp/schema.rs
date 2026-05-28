@@ -35,6 +35,7 @@ pub(super) fn build_call_request(
         cancel_token: Some(cancel_token),
         agent_session_id: None,
         progress,
+        tenant_id: None,
     })
 }
 

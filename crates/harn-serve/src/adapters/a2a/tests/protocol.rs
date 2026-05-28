@@ -767,6 +767,7 @@ fn auth_request_with_bearer(token: &str) -> AuthRequest {
             format!("Bearer {token}"),
         )]),
         validated_oauth: None,
+        tenant_id: None,
     }
 }
 

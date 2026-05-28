@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use harn_vm::connectors::ConnectorError;
 use harn_vm::event_log::MemoryEventLog;
-use harn_vm::ProviderId;
+use harn_vm::{ProviderId, TenantId};
 use subtle::ConstantTimeEq;
 use time::{Duration, OffsetDateTime};
 
@@ -13,6 +13,13 @@ pub struct AuthenticatedPrincipal {
     /// Scopes the credential carries. Compared against the per-route
     /// `required_scopes` passed to `AuthPolicy::authorize_with_scopes`.
     pub granted_scopes: BTreeSet<String>,
+    /// Tenant the credential is bound to. Populated by API-key /
+    /// HMAC / OAuth verification when the configured method ties the
+    /// credential to a specific `TenantId`; `None` means the
+    /// credential is tenant-agnostic (e.g. an open-permissions key, or
+    /// an admin/system bearer). Threaded through `DispatchCtx` into
+    /// the `.harn` callee as `harness.tenant.id()`.
+    pub tenant_id: Option<TenantId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +28,12 @@ pub struct OAuthClaims {
     pub issuer: String,
     pub audience: Option<String>,
     pub scopes: BTreeSet<String>,
+    /// Tenant claim the transport extracted from the verified JWT
+    /// (typically `tenant_id`, `tid`, or a custom claim configured per
+    /// deployment). When the auth policy's `OAuth21AuthConfig` does not
+    /// pick a specific claim name, this is the trusted fallback the
+    /// transport itself believes refers to the tenant.
+    pub tenant_id: Option<TenantId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -30,6 +43,14 @@ pub struct AuthRequest {
     pub body: Vec<u8>,
     pub headers: BTreeMap<String, String>,
     pub validated_oauth: Option<OAuthClaims>,
+    /// Tenant the transport resolved ahead of authentication (e.g. a
+    /// cloud gateway that looks up the API key in its own store and
+    /// hands `harn-serve` the result). When set, it wins over whatever
+    /// the configured auth method would resolve, so the same
+    /// `AuthPolicy` works for both first-party API key configs and
+    /// transports that own tenant resolution. `None` means defer to
+    /// the auth method.
+    pub tenant_id: Option<TenantId>,
 }
 
 impl AuthRequest {
@@ -68,6 +89,11 @@ fn header_value<'a>(headers: &'a BTreeMap<String, String>, name: &str) -> Option
 pub struct ApiKeyEntry {
     pub key: String,
     pub scopes: BTreeSet<String>,
+    /// Tenant the key is bound to. When set, every authenticated
+    /// dispatch under this key carries the tenant into `DispatchCtx`
+    /// and the `harness.tenant` ambient. `None` means a tenant-agnostic
+    /// key — useful for single-tenant deployments and integration tests.
+    pub tenant_id: Option<TenantId>,
 }
 
 impl ApiKeyEntry {
@@ -75,7 +101,15 @@ impl ApiKeyEntry {
         Self {
             key: key.into(),
             scopes: scopes.into_iter().collect(),
+            tenant_id: None,
         }
+    }
+
+    /// Bind this key to a tenant. Chainable so callers can construct
+    /// the entry in one expression: `ApiKeyEntry::new("k", scopes).with_tenant("acme")`.
+    pub fn with_tenant(mut self, tenant: impl Into<String>) -> Self {
+        self.tenant_id = Some(TenantId::new(tenant));
+        self
     }
 }
 
@@ -102,6 +136,11 @@ pub struct HmacAuthConfig {
     pub timestamp_window: Duration,
     /// Scopes any caller authenticated via this shared secret carries.
     pub granted_scopes: BTreeSet<String>,
+    /// Tenant any caller authenticated via this shared secret is bound
+    /// to. `None` leaves the dispatch tenant-agnostic — appropriate for
+    /// single-tenant deployments or callers that resolve tenancy out of
+    /// band (e.g. from the canonical request body).
+    pub tenant_id: Option<TenantId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -113,6 +152,12 @@ pub struct OAuth21AuthConfig {
     /// can pin a baseline (e.g. `harn:invoke`) without repeating it on every
     /// route mount.
     pub required_scopes: BTreeSet<String>,
+    /// Tenant fallback when the verified JWT did not carry a
+    /// `tenant_id` claim (or the transport did not extract one).
+    /// Useful for single-tenant OAuth deployments where every token is
+    /// implicitly bound to the same tenant. The transport-supplied
+    /// `OAuthClaims.tenant_id` still wins when present.
+    pub tenant_id: Option<TenantId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -183,11 +228,12 @@ impl AuthPolicy {
         request: &AuthRequest,
         required: &BTreeSet<String>,
     ) -> AuthorizationDecision {
-        let principal = if self.methods.is_empty() {
+        let mut principal = if self.methods.is_empty() {
             AuthenticatedPrincipal {
                 subject: "anonymous".to_string(),
                 scheme: "none".to_string(),
                 granted_scopes: BTreeSet::new(),
+                tenant_id: None,
             }
         } else {
             let mut failures = Vec::new();
@@ -206,6 +252,15 @@ impl AuthPolicy {
                 None => return AuthorizationDecision::Rejected(failures.join("; ")),
             }
         };
+
+        // Transports that resolve tenancy themselves (e.g. an upstream
+        // cloud gateway that owns the API-key → tenant lookup) hand the
+        // result in via `AuthRequest.tenant_id`. That override wins so
+        // operators can swap auth methods without rewiring how the
+        // tenant is sourced.
+        if let Some(override_tenant) = request.tenant_id.clone() {
+            principal.tenant_id = Some(override_tenant);
+        }
 
         if !required.is_subset(&principal.granted_scopes) {
             return AuthorizationDecision::MissingScope {
@@ -313,6 +368,7 @@ async fn authorize_method(
                     subject: "api-key".to_string(),
                     scheme: "api_key".to_string(),
                     granted_scopes: entry.scopes.clone(),
+                    tenant_id: entry.tenant_id.clone(),
                 }),
                 None => Err("invalid API key".to_string()),
             }
@@ -336,6 +392,7 @@ async fn authorize_method(
                 subject: "hmac".to_string(),
                 scheme: "hmac".to_string(),
                 granted_scopes: config.granted_scopes.clone(),
+                tenant_id: config.tenant_id.clone(),
             })
         }
         AuthMethodConfig::OAuth21(config) => {
@@ -361,6 +418,14 @@ async fn authorize_method(
                 subject: claims.subject.clone(),
                 scheme: "oauth21".to_string(),
                 granted_scopes: claims.scopes.clone(),
+                // Token-borne claim wins, with the policy-level
+                // fallback (`OAuth21AuthConfig.tenant_id`) covering
+                // single-tenant deployments where every token implicitly
+                // belongs to the same tenant.
+                tenant_id: claims
+                    .tenant_id
+                    .clone()
+                    .or_else(|| config.tenant_id.clone()),
             })
         }
     }
@@ -424,6 +489,7 @@ mod tests {
                     provider: "harn-serve".to_string(),
                     timestamp_window: Duration::seconds(60),
                     granted_scopes: BTreeSet::new(),
+                    tenant_id: None,
                 }),
                 AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("second")),
             ],
@@ -458,6 +524,7 @@ mod tests {
                 provider: "harn-serve".to_string(),
                 timestamp_window: Duration::seconds(60),
                 granted_scopes: BTreeSet::new(),
+                tenant_id: None,
             })],
         };
         let request = AuthRequest {
@@ -466,6 +533,7 @@ mod tests {
             body: body.to_vec(),
             headers: BTreeMap::from([("authorization".to_string(), authorization)]),
             validated_oauth: None,
+            tenant_id: None,
         };
 
         let decision = policy.authorize(&request).await;
@@ -479,6 +547,7 @@ mod tests {
                 issuer: "https://issuer.example".to_string(),
                 audience: Some("harn-serve".to_string()),
                 required_scopes: scopes(&["invoke"]),
+                tenant_id: None,
             })],
         };
         let request = AuthRequest {
@@ -487,6 +556,7 @@ mod tests {
                 issuer: "https://issuer.example".to_string(),
                 audience: Some("harn-serve".to_string()),
                 scopes: scopes(&["invoke", "read"]),
+                tenant_id: None,
             }),
             ..AuthRequest::default()
         };
@@ -498,6 +568,7 @@ mod tests {
                 subject: "alice".to_string(),
                 scheme: "oauth21".to_string(),
                 granted_scopes: scopes(&["invoke", "read"]),
+                tenant_id: None,
             })
         );
     }
@@ -509,6 +580,7 @@ mod tests {
                 issuer: "https://issuer.example".to_string(),
                 audience: Some("harn-serve".to_string()),
                 required_scopes: BTreeSet::new(),
+                tenant_id: None,
             })],
         };
         let request = AuthRequest {
@@ -517,6 +589,7 @@ mod tests {
                 issuer: "https://issuer.example".to_string(),
                 audience: None,
                 scopes: BTreeSet::new(),
+                tenant_id: None,
             }),
             ..AuthRequest::default()
         };
@@ -644,6 +717,7 @@ mod tests {
                 provider: "harn-serve".to_string(),
                 timestamp_window: Duration::seconds(60),
                 granted_scopes: scopes(&["personas:read"]),
+                tenant_id: None,
             })],
         };
         let request = AuthRequest {
@@ -652,6 +726,7 @@ mod tests {
             body: body.to_vec(),
             headers: BTreeMap::from([("authorization".to_string(), authorization)]),
             validated_oauth: None,
+            tenant_id: None,
         };
 
         let decision = policy
@@ -661,6 +736,100 @@ mod tests {
             panic!("expected Authorized");
         };
         assert_eq!(principal.granted_scopes, scopes(&["personas:read"]));
+    }
+
+    #[tokio::test]
+    async fn api_key_with_tenant_carries_tenant_into_principal() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                keys: vec![ApiKeyEntry::new("tenant-key", []).with_tenant("acme")],
+            })],
+        };
+        let request = AuthRequest {
+            headers: BTreeMap::from([(
+                "authorization".to_string(),
+                "Bearer tenant-key".to_string(),
+            )]),
+            ..AuthRequest::default()
+        };
+
+        let AuthorizationDecision::Authorized(principal) = policy.authorize(&request).await else {
+            panic!("expected Authorized");
+        };
+        assert_eq!(principal.tenant_id, Some(TenantId::new("acme")));
+    }
+
+    #[tokio::test]
+    async fn request_tenant_override_wins_over_method_tenant() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                keys: vec![ApiKeyEntry::new("key", []).with_tenant("baseline")],
+            })],
+        };
+        let request = AuthRequest {
+            headers: BTreeMap::from([("authorization".to_string(), "Bearer key".to_string())]),
+            tenant_id: Some(TenantId::new("override")),
+            ..AuthRequest::default()
+        };
+
+        let AuthorizationDecision::Authorized(principal) = policy.authorize(&request).await else {
+            panic!("expected Authorized");
+        };
+        assert_eq!(principal.tenant_id, Some(TenantId::new("override")));
+    }
+
+    #[tokio::test]
+    async fn oauth_claims_tenant_wins_over_policy_fallback() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::OAuth21(OAuth21AuthConfig {
+                issuer: "https://issuer.example".to_string(),
+                audience: None,
+                required_scopes: BTreeSet::new(),
+                tenant_id: Some(TenantId::new("policy-default")),
+            })],
+        };
+        let request = AuthRequest {
+            validated_oauth: Some(OAuthClaims {
+                subject: "alice".to_string(),
+                issuer: "https://issuer.example".to_string(),
+                audience: None,
+                scopes: BTreeSet::new(),
+                tenant_id: Some(TenantId::new("token-bound")),
+            }),
+            ..AuthRequest::default()
+        };
+
+        let AuthorizationDecision::Authorized(principal) = policy.authorize(&request).await else {
+            panic!("expected Authorized");
+        };
+        assert_eq!(principal.tenant_id, Some(TenantId::new("token-bound")));
+    }
+
+    #[tokio::test]
+    async fn oauth_policy_fallback_tenant_used_when_claims_have_none() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::OAuth21(OAuth21AuthConfig {
+                issuer: "https://issuer.example".to_string(),
+                audience: None,
+                required_scopes: BTreeSet::new(),
+                tenant_id: Some(TenantId::new("policy-default")),
+            })],
+        };
+        let request = AuthRequest {
+            validated_oauth: Some(OAuthClaims {
+                subject: "alice".to_string(),
+                issuer: "https://issuer.example".to_string(),
+                audience: None,
+                scopes: BTreeSet::new(),
+                tenant_id: None,
+            }),
+            ..AuthRequest::default()
+        };
+
+        let AuthorizationDecision::Authorized(principal) = policy.authorize(&request).await else {
+            panic!("expected Authorized");
+        };
+        assert_eq!(principal.tenant_id, Some(TenantId::new("policy-default")));
     }
 
     #[tokio::test]
