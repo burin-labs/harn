@@ -279,6 +279,15 @@ Bounds may be `{from, to}` (range), `{in: [...]}` (list), or
 `{default: true}` (default partition). Caller-supplied bounds are
 rendered as SQL literals — keep them constant and trusted.
 
+## Extended column decoding
+
+Beyond the v1 primitive types, the row decoder also handles:
+
+- `HSTORE` → `dict<string, string | nil>`
+- `POINT` → `{x: float, y: float}`
+- Other geometric types (`LINE`, `LSEG`, `BOX`, `PATH`, `POLYGON`,
+  `CIRCLE`) fall back to PG's textual representation.
+
 ## Array column decoding
 
 The row decoder handles common array types end-to-end: `BOOL[]`,

@@ -891,6 +891,33 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 values.iter().map(crate::stdlib::json_to_vm_value).collect(),
             ))
         }
+        // HSTORE decodes as a Harn dict<string, string|nil>. sqlx surfaces
+        // it as `BTreeMap<String, Option<String>>` already.
+        "HSTORE" => {
+            let map: sqlx_postgres::types::PgHstore = row.try_get(index).map_err(decode_error)?;
+            let mut dict = BTreeMap::new();
+            for (key, value) in map.0 {
+                dict.insert(
+                    key,
+                    value
+                        .map(|v| VmValue::String(Rc::from(v)))
+                        .unwrap_or(VmValue::Nil),
+                );
+            }
+            VmValue::Dict(Rc::new(dict))
+        }
+        // PG geometric POINT decodes as `{x, y}`. Other geometric types
+        // (LINE, LSEG, BOX, PATH, POLYGON, CIRCLE) fall back to their
+        // textual representation below — Harn callers can parse if
+        // needed, but a structured decode for every geometric type is
+        // niche enough to defer.
+        "POINT" => {
+            let point: sqlx_postgres::types::PgPoint = row.try_get(index).map_err(decode_error)?;
+            let mut dict = BTreeMap::new();
+            dict.insert("x".to_string(), VmValue::Float(point.x));
+            dict.insert("y".to_string(), VmValue::Float(point.y));
+            VmValue::Dict(Rc::new(dict))
+        }
         _ => VmValue::String(Rc::from(row.try_get::<String, _>(index).map_err(
             |error| {
                 runtime_error(format!(
