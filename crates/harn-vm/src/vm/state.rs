@@ -795,6 +795,15 @@ impl Vm {
         Rc::make_mut(&mut self.globals).insert(name.to_string(), value);
     }
 
+    /// Read a previously-installed global (the value `set_global` /
+    /// `set_harness` recorded). Returns `None` for unknown names.
+    /// Hosts use this to look up runtime-installed capability handles
+    /// (e.g. the `harness` slot) without having to track them
+    /// separately.
+    pub fn global(&self, name: &str) -> Option<&VmValue> {
+        self.globals.get(name)
+    }
+
     /// Install the script's `Harness` capability handle as the `harness`
     /// global so the auto-call emitted by `Compiler::compile()` (for
     /// `fn main(harness: Harness)` entrypoints) can read it. Hosts that

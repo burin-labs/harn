@@ -32,6 +32,7 @@ pub mod harness;
 pub(crate) mod harness_crypto;
 pub mod harness_net;
 pub mod harness_system;
+pub mod harness_tenant;
 mod http;
 pub mod jsonrpc;
 pub mod llm;
@@ -148,12 +149,15 @@ pub use corrections::{
 pub use harness::{
     DenyEvent, Harness, HarnessCall, HarnessClock, HarnessCrypto, HarnessEnv, HarnessFs,
     HarnessKind, HarnessLlm, HarnessNet, HarnessProcess, HarnessRandom, HarnessStdio,
-    HarnessSystem, HarnessTerm, MockAwareClock, MockHarnessBuilder, VmHarness,
+    HarnessSystem, HarnessTenant, HarnessTerm, MockAwareClock, MockHarnessBuilder, VmHarness,
 };
 pub use harness_net::{
     bypass_enabled as net_policy_bypass_enabled, NetMatcher, NetPolicy, NetPolicyAudit,
     NetPolicyDecision, NetPolicyDefault, NetPolicyRule, OnViolation, HARN_NET_POLICY_BYPASS_ENV,
     NET_POLICY_AUDIT_TOPIC,
+};
+pub use harness_tenant::{
+    current_tenant_id, enter_tenant, TenantScopeGuard, MISSING_TENANT_MESSAGE,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

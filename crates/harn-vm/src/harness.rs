@@ -45,6 +45,10 @@ pub enum HarnessKind {
     Crypto,
     System,
     Llm,
+    /// Tenant sub-handle exposing the ambient `TenantId` (if any) that
+    /// the dispatching host bound to this call. See
+    /// [`crate::harness_tenant`].
+    Tenant,
 }
 
 impl HarnessKind {
@@ -65,6 +69,7 @@ impl HarnessKind {
             HarnessKind::Crypto => "HarnessCrypto",
             HarnessKind::System => "HarnessSystem",
             HarnessKind::Llm => "HarnessLlm",
+            HarnessKind::Tenant => "HarnessTenant",
         }
     }
 
@@ -84,6 +89,7 @@ impl HarnessKind {
             HarnessKind::Crypto => Some("crypto"),
             HarnessKind::System => Some("system"),
             HarnessKind::Llm => Some("llm"),
+            HarnessKind::Tenant => Some("tenant"),
         }
     }
 
@@ -101,6 +107,7 @@ impl HarnessKind {
             "crypto" => Some(HarnessKind::Crypto),
             "system" => Some(HarnessKind::System),
             "llm" => Some(HarnessKind::Llm),
+            "tenant" => Some(HarnessKind::Tenant),
             _ => None,
         }
     }
@@ -118,6 +125,7 @@ impl HarnessKind {
         HarnessKind::Crypto,
         HarnessKind::System,
         HarnessKind::Llm,
+        HarnessKind::Tenant,
     ];
 
     /// Every kind a Harn-script type annotation may reference.
@@ -134,6 +142,7 @@ impl HarnessKind {
         HarnessKind::Crypto,
         HarnessKind::System,
         HarnessKind::Llm,
+        HarnessKind::Tenant,
     ];
 }
 
@@ -661,6 +670,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.tenant`.
+    pub fn tenant(&self) -> HarnessTenant {
+        HarnessTenant {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Lower this handle into the `VmValue::Harness` payload.
     pub fn into_vm_value(self) -> crate::value::VmValue {
         crate::value::VmValue::harness(VmHarness {
@@ -765,6 +781,16 @@ pub struct HarnessLlm {
     inner: Arc<HarnessInner>,
 }
 
+/// tenant sub-handle: `id`, `try_id`. Surfaces the ambient `TenantId`
+/// bound by the dispatching host (see [`crate::harness_tenant`]). No
+/// host state — the methods consult a thread-local stack — but the
+/// handle still rides the shared `Arc<HarnessInner>` so null/mock-mode
+/// gating in [`crate::vm::methods::harness`] applies uniformly.
+#[derive(Debug, Clone)]
+pub struct HarnessTenant {
+    inner: Arc<HarnessInner>,
+}
+
 macro_rules! sub_handle_inner {
     ($($ty:ty),* $(,)?) => {
         $(
@@ -788,6 +814,7 @@ sub_handle_inner!(
     HarnessCrypto,
     HarnessSystem,
     HarnessLlm,
+    HarnessTenant,
 );
 
 impl HarnessClock {
@@ -985,6 +1012,7 @@ mod tests {
             r#"fn main(harness: Harness) { harness.crypto.sha256("") }"#,
             r"fn main(harness: Harness) { harness.system.cpu() }",
             r"fn main(harness: Harness) { harness.llm.catalog() }",
+            r"fn main(harness: Harness) { harness.tenant.id() }",
         ] {
             let error = run_harness_source(source, harness.clone()).expect_err("call denied");
             assert!(
@@ -1012,6 +1040,7 @@ mod tests {
                 (HarnessKind::Crypto, "sha256"),
                 (HarnessKind::System, "cpu"),
                 (HarnessKind::Llm, "catalog"),
+                (HarnessKind::Tenant, "id"),
             ]
         );
         assert_eq!(events[0].args, vec!["blocked"]);

@@ -709,6 +709,7 @@ fn script_http_auth_request(
         body,
         headers: script_normalized_headers(headers),
         validated_oauth: None,
+        tenant_id: None,
     }
 }
 
@@ -834,6 +835,7 @@ fn build_auth_policy(api_keys: &[String], hmac_secret: Option<&String>) -> AuthP
             provider: "harn-serve".to_string(),
             timestamp_window: Duration::seconds(300),
             granted_scopes: BTreeSet::new(),
+            tenant_id: None,
         }));
     }
     AuthPolicy { methods }
