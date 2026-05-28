@@ -958,3 +958,80 @@ pub fn edit_apply_node(params) {
     provenance: provenance,
   }
 }
+
+/**
+ * Splice `content` into `path` relative to a unique AST anchor located
+ * by a Tree-Sitter query.
+ *
+ * Companion to `edit_apply_node`: where `apply_node` *replaces* a span,
+ * this primitive *adds* a sibling or child node. `position` picks the
+ * slot:
+ *
+ * - `"before"` / `"after"` — insert a sibling at the anchor's indent
+ *   depth (e.g. "add a new function after this one").
+ * - `"first_child"` / `"last_child"` — insert inside the anchor at the
+ *   inferred child depth (e.g. "append a new test to this mod").
+ *
+ * The query MUST match exactly one node — multi-match returns
+ * `result == "ambiguous"`. Tighten queries with `(#eq? @name "…")`
+ * predicates to disambiguate.
+ *
+ * Each line of `content` is re-indented to the target depth unless
+ * `reindent: false` is supplied. The indent unit is detected from the
+ * file's existing indentation (tabs win when any line starts with one,
+ * else the smallest non-zero leading-space run), falling back to a
+ * language default. Override explicitly via `indent: "  "`.
+ *
+ * When `validate` is true (default) the rewritten source is re-parsed
+ * and any tree-sitter ERROR/MISSING node aborts the edit with
+ * `result == "syntax_error"`. When `dry_run` is true the file is left
+ * untouched but the response still carries the `preview` text the
+ * splice would produce. Reads and writes route through staged-fs
+ * (#1722) when a `session_id` is supplied so the insert is atomic
+ * alongside siblings.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_insert_at_anchor({path: "src/lib.rs", query: q, position: "after", content: "fn beta() {}"})
+ */
+pub fn edit_insert_at_anchor(params) {
+  let raw = hostlib_ast_insert_at_anchor(params ?? {})
+  let payload = raw ?? {}
+  let provenance = {
+    module: "std/edit",
+    helper: "edit_insert_at_anchor",
+    path: payload?.path,
+    position: payload?.position,
+    dry_run: payload?.dry_run ?? false,
+    before_sha256: payload?.before_sha256,
+    after_sha256: payload?.after_sha256,
+    caller: params?.provenance,
+  }
+  return {
+    ok: payload?.result ?? "" == "applied",
+    applied: payload?.applied ?? false,
+    result: payload?.result ?? "no_match",
+    path: payload?.path,
+    dry_run: payload?.dry_run ?? false,
+    position: payload?.position,
+    insertion_byte: payload?.insertion_byte,
+    indent: payload?.indent,
+    inserted_text: payload?.inserted_text,
+    anchor: payload?.anchor,
+    anchors: payload?.anchors ?? [],
+    match_count: payload?.match_count ?? 0,
+    preview: payload?.preview,
+    before_sha256: payload?.before_sha256,
+    after_sha256: payload?.after_sha256,
+    query: payload?.query,
+    target_capture: payload?.target_capture,
+    details: payload?.details,
+    error_row: payload?.error_row,
+    error_column: payload?.error_column,
+    errors: [],
+    warnings: [],
+    provenance: provenance,
+  }
+}

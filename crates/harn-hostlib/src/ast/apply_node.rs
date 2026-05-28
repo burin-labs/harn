@@ -36,18 +36,22 @@
 //! union since they are caller bugs, not edit outcomes.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use harn_vm::VmValue;
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Node, Query, QueryCursor, QueryError, QueryErrorKind};
+use tree_sitter::{Node, Query, QueryCursor, QueryError};
 
 use crate::error::HostlibError;
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, require_string, str_value,
 };
 
+use super::edit_common::{
+    first_syntax_error, format_query_error, read_source, resolve_target_capture, sha256_hex,
+    write_source,
+};
 use super::language::Language;
 use super::parse::parse_source;
 
@@ -145,7 +149,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
 
-    let source = read_source(&path, session_id.as_deref(), max_bytes as usize)?;
+    let source = read_source(BUILTIN, &path, session_id.as_deref(), max_bytes as usize)?;
 
     let query = match Query::new(&language.ts_language(), &query_text) {
         Ok(q) => q,
@@ -193,7 +197,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
 
     if !dry_run {
-        write_source(&path, &patched, session_id.as_deref())?;
+        write_source(BUILTIN, &path, &patched, session_id.as_deref())?;
     }
 
     Ok(applied_response(
@@ -203,32 +207,6 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         &chosen,
         &replacement,
         dry_run,
-    ))
-}
-
-/// Resolve which capture index drives replacement.
-///
-/// - If `requested` matches a capture name in the query, return that
-///   index.
-/// - Otherwise, if the query has exactly one capture, fall back to it
-///   so single-capture queries do not need a `@target` rename.
-/// - Otherwise, return a diagnostic listing the available captures so
-///   the caller can fix the query.
-fn resolve_target_capture(query: &Query, requested: &str) -> Result<u32, String> {
-    let names = query.capture_names();
-    if let Some(idx) = names.iter().position(|n| *n == requested) {
-        return Ok(idx as u32);
-    }
-    if names.len() == 1 {
-        return Ok(0);
-    }
-    Err(format!(
-        "query has no capture named `{requested}`; available captures: [{}]",
-        names
-            .iter()
-            .map(|n| format!("@{n}"))
-            .collect::<Vec<_>>()
-            .join(", ")
     ))
 }
 
@@ -320,105 +298,6 @@ fn splice(source: &str, chosen: &[Span], replacement: &str) -> String {
         out.replace_range(span.start_byte..span.end_byte, replacement);
     }
     out
-}
-
-fn first_syntax_error(source: &str, language: Language) -> Option<String> {
-    let tree = parse_source(source, language).ok()?;
-    let root = tree.root_node();
-    if !root.has_error() {
-        return None;
-    }
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if node.is_missing() {
-            let pos = node.start_position();
-            return Some(format!(
-                "missing `{}` at line {}, column {}",
-                node.kind(),
-                pos.row + 1,
-                pos.column + 1
-            ));
-        }
-        if node.is_error() {
-            let pos = node.start_position();
-            let snippet = node_text(node, source);
-            let trimmed: String = snippet.chars().take(40).collect();
-            return Some(format!(
-                "unexpected `{trimmed}` at line {}, column {}",
-                pos.row + 1,
-                pos.column + 1
-            ));
-        }
-        for i in (0..node.child_count()).rev() {
-            if let Some(child) = node.child(i as u32) {
-                if child.has_error() || child.is_missing() {
-                    stack.push(child);
-                }
-            }
-        }
-    }
-    Some("post-edit source has parse errors".into())
-}
-
-fn node_text(node: Node<'_>, source: &str) -> String {
-    let bytes = source.as_bytes();
-    let start = node.start_byte().min(bytes.len());
-    let end = node.end_byte().min(bytes.len());
-    if start >= end {
-        return String::new();
-    }
-    std::str::from_utf8(&bytes[start..end])
-        .map(|s| s.to_string())
-        .unwrap_or_default()
-}
-
-// ---------------------------------------------------------------------------
-// I/O — routed through staged-fs (#1722) when a session id is supplied.
-// ---------------------------------------------------------------------------
-
-fn read_source(
-    path: &Path,
-    session_id: Option<&str>,
-    max_bytes: usize,
-) -> Result<String, HostlibError> {
-    let bytes = if let Some(result) = crate::fs::read(path, session_id) {
-        result.map_err(|err| HostlibError::Backend {
-            builtin: BUILTIN,
-            message: format!("read `{}`: {err}", path.display()),
-        })?
-    } else {
-        std::fs::read(path).map_err(|err| HostlibError::Backend {
-            builtin: BUILTIN,
-            message: format!("read `{}`: {err}", path.display()),
-        })?
-    };
-    let slice = if max_bytes == 0 || bytes.len() <= max_bytes {
-        &bytes[..]
-    } else {
-        &bytes[..max_bytes]
-    };
-    Ok(String::from_utf8_lossy(slice).into_owned())
-}
-
-fn write_source(path: &Path, contents: &str, session_id: Option<&str>) -> Result<(), HostlibError> {
-    if crate::fs::stage_write_or_none(BUILTIN, path, contents.as_bytes(), true, true, session_id)?
-        .is_some()
-    {
-        return Ok(());
-    }
-    crate::fs_snapshot::auto_capture_for_write(BUILTIN, path);
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|err| HostlibError::Backend {
-                builtin: BUILTIN,
-                message: format!("mkdir `{}`: {err}", parent.display()),
-            })?;
-        }
-    }
-    std::fs::write(path, contents).map_err(|err| HostlibError::Backend {
-        builtin: BUILTIN,
-        message: format!("write `{}`: {err}", path.display()),
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -519,31 +398,10 @@ fn invalid_query_response(query: &str, err: &QueryError) -> VmValue {
         ("result", str_value("invalid_query")),
         ("applied", VmValue::Bool(false)),
         ("query", str_value(query)),
-        (
-            "details",
-            str_value(format!(
-                "tree-sitter rejected query at row {} col {}: {} ({})",
-                err.row,
-                err.column,
-                err.message,
-                query_error_kind_str(&err.kind),
-            )),
-        ),
+        ("details", str_value(format_query_error(err))),
         ("error_row", VmValue::Int(err.row as i64)),
         ("error_column", VmValue::Int(err.column as i64)),
     ])
-}
-
-fn query_error_kind_str(kind: &QueryErrorKind) -> &'static str {
-    match kind {
-        QueryErrorKind::Syntax => "syntax",
-        QueryErrorKind::NodeType => "node_type",
-        QueryErrorKind::Field => "field",
-        QueryErrorKind::Capture => "capture",
-        QueryErrorKind::Predicate => "predicate",
-        QueryErrorKind::Structure => "structure",
-        QueryErrorKind::Language => "language",
-    }
 }
 
 fn unsupported_language_response(path: &str, hint: Option<&str>) -> VmValue {
@@ -595,13 +453,6 @@ fn span_to_value(span: &Span) -> VmValue {
         ("end_col", VmValue::Int(span.end_col as i64)),
         ("text", str_value(&span.original)),
     ])
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]

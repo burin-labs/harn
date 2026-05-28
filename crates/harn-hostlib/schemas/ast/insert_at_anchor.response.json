@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/insert_at_anchor.response.json",
+  "title": "ast.insert_at_anchor response",
+  "description": "Tagged-union response for ast.insert_at_anchor. `result` discriminates success (`applied`) from the failure modes; `applied` mirrors `result == \"applied\"` for ergonomic callers.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "no_match",
+        "ambiguous",
+        "invalid_query",
+        "invalid_anchor",
+        "unsupported_language",
+        "syntax_error"
+      ]
+    },
+    "applied": {
+      "type": "boolean",
+      "description": "True iff `result == \"applied\"`."
+    },
+    "path": {
+      "type": "string"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "Echoes the `dry_run` request flag (set only when `result == \"applied\"`)."
+    },
+    "position": {
+      "type": "string",
+      "enum": ["before", "after", "first_child", "last_child"],
+      "description": "Echoes the requested position. Set when `result == \"applied\"` or `result == \"invalid_anchor\"`."
+    },
+    "insertion_byte": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Byte offset at which the splice landed in the original source. Set only when `result == \"applied\"`."
+    },
+    "indent": {
+      "type": "string",
+      "description": "The leading-whitespace string applied to each line of the inserted content. Set only when `result == \"applied\"`."
+    },
+    "inserted_text": {
+      "type": "string",
+      "description": "The exact text spliced into the file (re-indented and wrapped with newlines). Set only when `result == \"applied\"`."
+    },
+    "anchor": {
+      "type": "object",
+      "description": "Anchor span metadata. Set when `result == \"applied\"` or `result == \"invalid_anchor\"`.",
+      "properties": {
+        "start_byte": { "type": "integer", "minimum": 0 },
+        "end_byte": { "type": "integer", "minimum": 0 },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" }
+      },
+      "required": ["start_byte", "end_byte", "text"],
+      "additionalProperties": false
+    },
+    "anchors": {
+      "type": "array",
+      "description": "Per-match anchor metadata when `result == \"ambiguous\"`.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "start_byte": { "type": "integer", "minimum": 0 },
+          "end_byte": { "type": "integer", "minimum": 0 },
+          "start_row": { "type": "integer", "minimum": 0 },
+          "start_col": { "type": "integer", "minimum": 0 },
+          "end_row": { "type": "integer", "minimum": 0 },
+          "end_col": { "type": "integer", "minimum": 0 },
+          "text": { "type": "string" }
+        },
+        "required": ["start_byte", "end_byte", "text"],
+        "additionalProperties": false
+      }
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of anchor matches; set when `result == \"ambiguous\"`."
+    },
+    "before_sha256": {
+      "type": "string",
+      "description": "Hex sha256 of the original source. Set only when `result == \"applied\"`."
+    },
+    "after_sha256": {
+      "type": "string",
+      "description": "Hex sha256 of the post-splice source. Set only when `result == \"applied\"`."
+    },
+    "preview": {
+      "type": "string",
+      "description": "Post-splice source text. Always set when `result == \"applied\"`; also surfaced on `syntax_error` so callers can inspect the rejected output."
+    },
+    "query": {
+      "type": "string",
+      "description": "Echoes the original query; set on `no_match` and `invalid_query` for ergonomic diagnostics."
+    },
+    "target_capture": {
+      "type": "string",
+      "description": "Capture name used as the anchor; set on `no_match`."
+    },
+    "details": {
+      "type": "string",
+      "description": "Short human-readable diagnostic; set on every non-`applied` result."
+    },
+    "error_row": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Tree-sitter query error row when `result == \"invalid_query\"`."
+    },
+    "error_column": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Tree-sitter query error column when `result == \"invalid_query\"`."
+    }
+  },
+  "required": ["result", "applied"],
+  "additionalProperties": false
+}
