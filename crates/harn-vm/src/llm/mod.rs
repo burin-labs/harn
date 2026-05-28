@@ -172,12 +172,11 @@ pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value
     )))
 }
 
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_groups, register_deferred_builtin_groups, AsyncBuiltin,
-    BuiltinGroup, SyncBuiltin,
+use crate::stdlib::macros::{
+    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
 };
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 use std::rc::Rc;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
@@ -287,68 +286,45 @@ pub fn reset_llm_state() {
     crate::step_runtime::reset_thread_local_state();
 }
 
-const LLM_HOST_CORE_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("__cost_route", cost_route::cost_route_impl)
-        .signature("__cost_route(options)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Route an LLM request by cost and capability metadata."),
-    async_builtin!("llm_call", llm_call_impl)
-        .signature("llm_call(prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Execute one LLM call and return the normalized Harn result dict."),
-    async_builtin!("llm_stream_call", llm_stream_call_impl)
-        .signature("llm_stream_call(prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Execute one streaming LLM call and return the normalized Harn result dict."),
-    async_builtin!("llm_call_safe", llm_call_safe_builtin)
-        .signature("llm_call_safe(prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Execute one LLM call and return a non-throwing safe envelope."),
-];
+/// Route an LLM request by cost and capability metadata.
+#[harn_builtin(
+    sig = "__cost_route(options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
+async fn cost_route_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    cost_route::cost_route_impl(args).await
+}
 
-const LLM_STRUCTURED_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("llm_call_structured", llm_call_structured_builtin)
-        .signature("llm_call_structured(prompt, schema, options?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Call an LLM for JSON data and return parsed schema-valid data."),
-    async_builtin!("llm_call_structured_safe", llm_call_structured_safe_builtin)
-        .signature("llm_call_structured_safe(prompt, schema, options?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Call an LLM for JSON data and return a non-throwing schema envelope."),
-    async_builtin!(
-        "llm_call_structured_result",
-        llm_call_structured_result_builtin
-    )
-    .signature("llm_call_structured_result(prompt, schema, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-    .doc("Call an LLM for JSON data and return a diagnostic structured-output envelope."),
-];
+/// Execute one LLM call and return the normalized Harn result dict.
+#[harn_builtin(
+    sig = "llm_call(prompt: any, system?: any, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
+async fn llm_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    llm_call_impl(args).await
+}
 
-const SCHEMA_RECOVERY_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[async_builtin!(
-    "schema_recover",
-    schema_recover_builtin
-)
-.signature("schema_recover(text, schema, options?)")
-.arity(VmBuiltinArity::Range { min: 2, max: 3 })
-.doc("Recover malformed JSON text against a schema using deterministic and optional LLM repair.")];
+/// Execute one streaming LLM call and return the normalized Harn result dict.
+#[harn_builtin(
+    sig = "llm_stream_call(prompt: any, system?: any, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
+async fn llm_stream_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    llm_stream_call_impl(args).await
+}
 
-const LLM_RATE_LIMIT_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
-    &[async_builtin!("with_rate_limit", with_rate_limit_builtin)
-        .signature("with_rate_limit(provider, callback, options?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Run a closure behind the provider rate limiter with retryable-error backoff.")];
-
-const LLM_HOST_COMPLETION_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!("llm_completion", llm_completion_builtin)
-        .signature("llm_completion(prefix, suffix?, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 4 })
-        .doc("Execute a fill-in-the-middle LLM completion request."),
-    async_builtin!("llm_stream", llm_stream_builtin)
-        .signature("llm_stream(prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Execute a channel-based streaming LLM request."),
-];
-
+/// Rank a tool registry for Harn-managed client-mode tool search.
+#[harn_builtin(
+    sig = "__host_tool_search_score(query: string, registry: dict, opts?: dict|nil) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let query = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),
@@ -383,14 +359,17 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
     )))
 }
 
-const LLM_TOOL_SEARCH_SYNC_PRIMITIVES: &[SyncBuiltin] =
-    &[
-        SyncBuiltin::new("__host_tool_search_score", host_tool_search_score_builtin)
-            .signature("__host_tool_search_score(query, registry, opts)")
-            .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-            .doc("Rank a tool registry for Harn-managed client-mode tool search."),
-    ];
-
+/// Build a first-class routing policy handle. Pass {chain: [{provider, model}, ...],
+/// failover: {on_status?, on_timeout_ms?, on_error_kinds?, max_attempts?},
+/// latency: {race_after_ms?, target_p95_ms?}, budget: {per_call_usd?, session_usd?, on_exceed?},
+/// observe: {emit_event?}} and pipe the result through `llm_call(... routing: policy ...)`
+/// to drive the chain with failover, latency-aware racing, and budget caps. Tape events:
+/// <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.
+#[harn_builtin(
+    sig = "routing_policy(config: dict) -> dict",
+    category = "llm.host",
+    runtime_only = true
+)]
 fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = match args.first() {
         Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
@@ -409,66 +388,67 @@ fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     routing::build_routing_policy(&config)
 }
 
-const LLM_ROUTING_SYNC_PRIMITIVES: &[SyncBuiltin] =
-    &[SyncBuiltin::new("routing_policy", routing_policy_builtin)
-        .signature("routing_policy(config)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc(
-            "Build a first-class routing policy handle. Pass {chain: [{provider, model}, ...], \
-     failover: {on_status?, on_timeout_ms?, on_error_kinds?, max_attempts?}, \
-     latency: {race_after_ms?, target_p95_ms?}, budget: {per_call_usd?, session_usd?, on_exceed?}, \
-     observe: {emit_event?}} and pipe the result through `llm_call(... routing: policy ...)` \
-     to drive the chain with failover, latency-aware racing, and budget caps. Tape events: \
-     <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.",
-        )];
+/// Return resolved runtime facts {provider, model, model_alias, family, tool_format, tier,
+/// context_window, runtime_context_window, capabilities, harn_version, harness} for the
+/// most recent llm_call on this thread. Fields are nil before any llm_call has run. The
+/// model-callable surface (current_model() / current_provider() / ...) is opt-in via
+/// `runtime_introspection_tools(registry)`; this builtin is the underlying read.
+#[harn_builtin(
+    sig = "runtime_introspection() -> dict",
+    category = "llm.introspection",
+    runtime_only = true
+)]
+fn runtime_introspection_builtin_wrap(
+    args: &[VmValue],
+    out: &mut String,
+) -> Result<VmValue, VmError> {
+    introspection::runtime_introspection_builtin(args, out)
+}
 
-const LLM_INTROSPECTION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[SyncBuiltin::new(
-    "runtime_introspection",
-    introspection::runtime_introspection_builtin,
-)
-.signature("runtime_introspection()")
-.arity(VmBuiltinArity::Exact(0))
-.doc(
-    "Return resolved runtime facts {provider, model, model_alias, family, tool_format, tier, \
-     context_window, runtime_context_window, capabilities, harn_version, harness} for the \
-     most recent llm_call on this thread. Fields are nil before any llm_call has run. The \
-     model-callable surface (current_model() / current_provider() / ...) is opt-in via \
-     `runtime_introspection_tools(registry)`; this builtin is the underlying read.",
-)];
-
-const LLM_RUNTIME_PRIMITIVE_GROUPS: &[BuiltinGroup<'static>] = &[
-    BuiltinGroup::new()
-        .category("agent.trace")
-        .sync(trace_builtins::LLM_TRACE_SYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("agent.host")
-        .async_(agent_host_primitives::AGENT_HOST_ASYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("llm.host")
-        .async_(LLM_HOST_CORE_ASYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("llm.structured")
-        .async_(LLM_STRUCTURED_ASYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("schema.recovery")
-        .async_(SCHEMA_RECOVERY_ASYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("llm.rate_limit")
-        .async_(LLM_RATE_LIMIT_ASYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("llm.host")
-        .async_(LLM_HOST_COMPLETION_ASYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("agent.host")
-        .sync(LLM_TOOL_SEARCH_SYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("llm.host")
-        .sync(LLM_ROUTING_SYNC_PRIMITIVES),
-    BuiltinGroup::new()
-        .category("llm.introspection")
-        .sync(LLM_INTROSPECTION_SYNC_PRIMITIVES),
+const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
+    // trace
+    &trace_builtins::AGENT_TRACE_BUILTIN_DEF,
+    &trace_builtins::AGENT_TRACE_SUMMARY_BUILTIN_DEF,
+    &trace_builtins::HOST_TYPED_CHECKPOINT_TRACE_BUILTIN_DEF,
+    // agent.host
+    &agent_host_primitives::HOST_AGENT_CAPTURE_EVENTS_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
+    &agent_host_primitives::HOST_MCP_BOOTSTRAP_IMPL_DEF,
+    &agent_host_primitives::HOST_MCP_DISCONNECT_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_REMINDER_PROVIDERS_FIRE_IMPL_DEF,
+    // llm.host core
+    &COST_ROUTE_BUILTIN_DEF,
+    &LLM_CALL_BUILTIN_DEF,
+    &LLM_STREAM_CALL_BUILTIN_DEF,
+    &LLM_CALL_SAFE_BUILTIN_DEF,
+    // llm.structured
+    &LLM_CALL_STRUCTURED_BUILTIN_DEF,
+    &LLM_CALL_STRUCTURED_SAFE_BUILTIN_DEF,
+    &LLM_CALL_STRUCTURED_RESULT_BUILTIN_DEF,
+    // schema.recovery
+    &SCHEMA_RECOVER_BUILTIN_DEF,
+    // llm.rate_limit
+    &WITH_RATE_LIMIT_BUILTIN_DEF,
+    // llm.host completion + stream
+    &LLM_COMPLETION_BUILTIN_DEF,
+    &LLM_STREAM_BUILTIN_WRAP_DEF,
+    // agent.host tool search
+    &HOST_TOOL_SEARCH_SCORE_BUILTIN_DEF,
+    // llm.host routing
+    &ROUTING_POLICY_BUILTIN_DEF,
+    // llm.introspection
+    &RUNTIME_INTROSPECTION_BUILTIN_WRAP_DEF,
 ];
 
+/// Execute one LLM call and return a non-throwing safe envelope.
+#[harn_builtin(
+    sig = "llm_call_safe(prompt: any, system?: any, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
 async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     match llm_call_impl(args).await {
         Ok(response) => Ok(llm_safe_envelope_ok(response)),
@@ -476,12 +456,26 @@ async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 }
 
+/// Call an LLM for JSON data and return parsed schema-valid data.
+#[harn_builtin(
+    sig = "llm_call_structured(prompt: any, schema: dict, options?: dict|nil) -> any",
+    kind = "async",
+    category = "llm.structured",
+    runtime_only = true
+)]
 async fn llm_call_structured_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let rewritten = rewrite_structured_args(args)?;
     let response = llm_call_impl(rewritten).await?;
     Ok(extract_structured_data(response))
 }
 
+/// Call an LLM for JSON data and return a non-throwing schema envelope.
+#[harn_builtin(
+    sig = "llm_call_structured_safe(prompt: any, schema: dict, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.structured",
+    runtime_only = true
+)]
 async fn llm_call_structured_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let rewritten = match rewrite_structured_args(args) {
         Ok(v) => v,
@@ -495,14 +489,35 @@ async fn llm_call_structured_safe_builtin(args: Vec<VmValue>) -> Result<VmValue,
     }
 }
 
+/// Call an LLM for JSON data and return a diagnostic structured-output envelope.
+#[harn_builtin(
+    sig = "llm_call_structured_result(prompt: any, schema: dict, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.structured",
+    runtime_only = true
+)]
 async fn llm_call_structured_result_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     structured_envelope::llm_call_structured_result_impl(args, None).await
 }
 
+/// Recover malformed JSON text against a schema using deterministic and optional LLM repair.
+#[harn_builtin(
+    sig = "schema_recover(text: string, schema: dict, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "schema.recovery",
+    runtime_only = true
+)]
 async fn schema_recover_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     schema_recover::schema_recover_impl(args, None).await
 }
 
+/// Run a closure behind the provider rate limiter with retryable-error backoff.
+#[harn_builtin(
+    sig = "with_rate_limit(provider: string, callback: closure, options?: dict|nil) -> any",
+    kind = "async",
+    category = "llm.rate_limit",
+    runtime_only = true
+)]
 async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
     if provider.is_empty() {
@@ -557,6 +572,13 @@ async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     }
 }
 
+/// Execute a fill-in-the-middle LLM completion request.
+#[harn_builtin(
+    sig = "llm_completion(prefix: string, suffix?: string|nil, system?: any, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
 async fn llm_completion_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let prefix = args.first().map(|a| a.display()).unwrap_or_default();
     let suffix = args.get(1).and_then(|a| {
@@ -604,10 +626,21 @@ async fn llm_completion_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     Ok(vm_build_llm_result(&result, None, None, None))
 }
 
+/// Execute a channel-based streaming LLM request.
+#[harn_builtin(
+    sig = "llm_stream(prompt: any, system?: any, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
+async fn llm_stream_builtin_wrap(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    llm_stream_builtin(args).await
+}
+
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
     agent_config::register_agent_control_primitives(vm);
-    register_builtin_groups(vm, LLM_RUNTIME_PRIMITIVE_GROUPS);
+    register_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS);
     agent_config::register_agent_loop(vm);
     agent_session_host::register_agent_session_host_primitives(vm);
 
@@ -624,7 +657,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 /// resolution of any deferred name installs the complete LLM surface.
 pub(crate) fn register_deferred_llm_builtins(vm: &mut Vm) {
     agent_config::register_deferred_agent_control_primitives(vm, register_llm_builtins);
-    register_deferred_builtin_groups(vm, LLM_RUNTIME_PRIMITIVE_GROUPS, register_llm_builtins);
+    register_deferred_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS, register_llm_builtins);
     agent_config::register_deferred_agent_loop(vm, register_llm_builtins);
     agent_session_host::register_deferred_agent_session_host_primitives(vm, register_llm_builtins);
 

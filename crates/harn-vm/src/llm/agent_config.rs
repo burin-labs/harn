@@ -6,8 +6,8 @@ use std::rc::Rc;
 use crate::stdlib::harn_entry::{
     register_deferred_harn_entrypoint_category, register_harn_entrypoint_category,
 };
-use crate::stdlib::registration::{
-    register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
+use crate::stdlib::macros::{
+    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
@@ -24,20 +24,10 @@ use super::tools::build_assistant_response_message;
 const AGENT_STDLIB_ENTRYPOINT_CATEGORY: &str = "agent.stdlib";
 const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
 
-const AGENT_CONTROL_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("agent_subscribe", agent_subscribe_builtin)
-        .signature("agent_subscribe(session_id, callback)")
-        .arity(VmBuiltinArity::Exact(2))
-        .doc("Subscribe a Harn callback to events for an agent session."),
-    SyncBuiltin::new("agent_inject_feedback", agent_inject_feedback_builtin)
-        .signature("agent_inject_feedback(session_id, kind, content)")
-        .arity(VmBuiltinArity::Exact(3))
-        .doc("Inject pending feedback into an agent session."),
+const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
+    &AGENT_SUBSCRIBE_BUILTIN_DEF,
+    &AGENT_INJECT_FEEDBACK_BUILTIN_DEF,
 ];
-
-const AGENT_CONTROL_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("agent.host")
-    .sync(AGENT_CONTROL_PRIMITIVES);
 
 pub(crate) fn agent_feedback_message(kind: &str, content: &str) -> VmValue {
     let mut msg = std::collections::BTreeMap::new();
@@ -312,13 +302,19 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 }
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
-    register_builtin_group(vm, AGENT_CONTROL_GROUP);
+    register_builtin_defs(vm, AGENT_CONTROL_BUILTINS);
 }
 
 pub(crate) fn register_deferred_agent_control_primitives(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_group(vm, AGENT_CONTROL_GROUP, registrar);
+    register_deferred_builtin_defs(vm, AGENT_CONTROL_BUILTINS, registrar);
 }
 
+/// Subscribe a Harn callback to events for an agent session.
+#[harn_builtin(
+    sig = "agent_subscribe(session_id: string, callback: closure) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),
@@ -340,6 +336,12 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     Ok(VmValue::Nil)
 }
 
+/// Inject pending feedback into an agent session.
+#[harn_builtin(
+    sig = "agent_inject_feedback(session_id: string, kind: string, content: string) -> nil",
+    category = "agent.host",
+    runtime_only = true
+)]
 fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),

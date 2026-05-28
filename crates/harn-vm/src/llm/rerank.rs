@@ -1,35 +1,31 @@
 use std::rc::Rc;
 
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, register_deferred_builtin_group, AsyncBuiltin,
-    BuiltinGroup,
+use crate::stdlib::macros::{
+    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
 };
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 const SELF_CERTAINTY_PROMPT_PREFIX: &str = "Repeat exactly the text between <text> tags. Do not add, omit, or alter any characters.\n<text>\n";
 const SELF_CERTAINTY_PROMPT_SUFFIX: &str = "\n</text>";
 
 pub(crate) fn register_rerank_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, RERANK_PRIMITIVES);
+    register_builtin_defs(vm, RERANK_BUILTINS);
 }
 
 pub(crate) fn register_deferred_rerank_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_group(vm, RERANK_PRIMITIVES, registrar);
+    register_deferred_builtin_defs(vm, RERANK_BUILTINS, registrar);
 }
 
-const RERANK_ASYNC_PRIMITIVES: &[AsyncBuiltin] =
-    &[
-        async_builtin!("__llm_self_certainty", self_certainty_builtin)
-            .signature("__llm_self_certainty(text, options?)")
-            .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-            .doc("Return length-normalized confidence from token log probabilities."),
-    ];
+const RERANK_BUILTINS: &[&VmBuiltinDef] = &[&SELF_CERTAINTY_BUILTIN_DEF];
 
-const RERANK_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("llm.rerank")
-    .async_(RERANK_ASYNC_PRIMITIVES);
-
+/// Return length-normalized confidence from token log probabilities.
+#[harn_builtin(
+    sig = "__llm_self_certainty(text: string|dict, options?: dict|nil) -> float",
+    kind = "async",
+    category = "llm.rerank",
+    runtime_only = true
+)]
 async fn self_certainty_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let text = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),

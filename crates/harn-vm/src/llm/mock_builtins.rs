@@ -1,50 +1,37 @@
 use std::rc::Rc;
 
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::registration::{
-    register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
+use crate::stdlib::macros::{
+    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
 };
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 use super::{helpers, mock};
 
-const LLM_MOCK_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("llm_mock", llm_mock_builtin)
-        .signature("llm_mock(config)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Register a deterministic LLM mock response for tests."),
-    SyncBuiltin::new("llm_mock_calls", llm_mock_calls_builtin)
-        .signature("llm_mock_calls()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return recorded LLM mock calls."),
-    SyncBuiltin::new("llm_mock_clear", llm_mock_clear_builtin)
-        .signature("llm_mock_clear()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Clear deterministic LLM mocks and recorded calls."),
-    SyncBuiltin::new("llm_mock_push_scope", llm_mock_push_scope_builtin)
-        .signature("llm_mock_push_scope()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Push an isolated LLM mock scope."),
-    SyncBuiltin::new("llm_mock_pop_scope", llm_mock_pop_scope_builtin)
-        .signature("llm_mock_pop_scope()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Pop the current isolated LLM mock scope."),
+const LLM_MOCK_BUILTINS: &[&VmBuiltinDef] = &[
+    &LLM_MOCK_BUILTIN_DEF,
+    &LLM_MOCK_CALLS_BUILTIN_DEF,
+    &LLM_MOCK_CLEAR_BUILTIN_DEF,
+    &LLM_MOCK_PUSH_SCOPE_BUILTIN_DEF,
+    &LLM_MOCK_POP_SCOPE_BUILTIN_DEF,
 ];
-
-const LLM_MOCK_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("llm.mock")
-    .sync(LLM_MOCK_SYNC_PRIMITIVES);
 
 /// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
 pub(super) fn register_llm_mock_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, LLM_MOCK_PRIMITIVES);
+    register_builtin_defs(vm, LLM_MOCK_BUILTINS);
 }
 
 pub(super) fn register_deferred_llm_mock_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_group(vm, LLM_MOCK_PRIMITIVES, registrar);
+    register_deferred_builtin_defs(vm, LLM_MOCK_BUILTINS, registrar);
 }
 
+/// Register a deterministic LLM mock response for tests.
+#[harn_builtin(
+    sig = "llm_mock(config: dict) -> nil",
+    category = "llm.mock",
+    runtime_only = true
+)]
 fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = match args.first() {
         Some(VmValue::Dict(d)) => d,
@@ -221,6 +208,12 @@ fn optional_display_field(
     }
 }
 
+/// Return recorded LLM mock calls.
+#[harn_builtin(
+    sig = "llm_mock_calls() -> list",
+    category = "llm.mock",
+    runtime_only = true
+)]
 fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let calls = mock::get_llm_mock_calls();
     let result: Vec<VmValue> = calls
@@ -322,16 +315,34 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
     Ok(VmValue::List(Rc::new(result)))
 }
 
+/// Clear deterministic LLM mocks and recorded calls.
+#[harn_builtin(
+    sig = "llm_mock_clear() -> nil",
+    category = "llm.mock",
+    runtime_only = true
+)]
 fn llm_mock_clear_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     mock::reset_llm_mock_state();
     Ok(VmValue::Nil)
 }
 
+/// Push an isolated LLM mock scope.
+#[harn_builtin(
+    sig = "llm_mock_push_scope() -> nil",
+    category = "llm.mock",
+    runtime_only = true
+)]
 fn llm_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     mock::push_llm_mock_scope();
     Ok(VmValue::Nil)
 }
 
+/// Pop the current isolated LLM mock scope.
+#[harn_builtin(
+    sig = "llm_mock_pop_scope() -> nil",
+    category = "llm.mock",
+    runtime_only = true
+)]
 fn llm_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !mock::pop_llm_mock_scope() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(

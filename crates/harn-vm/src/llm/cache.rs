@@ -12,11 +12,11 @@ use sha2::{Digest, Sha256};
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::clock::now_wall_ms;
-use crate::stdlib::registration::{
-    register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
+use crate::stdlib::macros::{
+    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
 };
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 const DEFAULT_NAMESPACE: &str = "default";
 const DEFAULT_TTL_SECONDS: u64 = 600;
@@ -90,49 +90,20 @@ impl CacheRecord {
 }
 
 pub(crate) fn register_cache_builtins(vm: &mut Vm) {
-    register_builtin_group(
-        vm,
-        BuiltinGroup::new()
-            .category("cache")
-            .sync(CACHE_SYNC_PRIMITIVES),
-    );
+    register_builtin_defs(vm, CACHE_BUILTINS);
 }
 
 pub(crate) fn register_deferred_cache_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_group(
-        vm,
-        BuiltinGroup::new()
-            .category("cache")
-            .sync(CACHE_SYNC_PRIMITIVES),
-        registrar,
-    );
+    register_deferred_builtin_defs(vm, CACHE_BUILTINS, registrar);
 }
 
-const CACHE_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("__cache_get", cache_get_builtin)
-        .signature("__cache_get(key, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Return a persistent cache hit envelope for key."),
-    SyncBuiltin::new("__cache_put", cache_put_builtin)
-        .signature("__cache_put(key, value, options?)")
-        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Persist a cache value with TTL and LRU eviction."),
-    SyncBuiltin::new("__cache_clear", cache_clear_builtin)
-        .signature("__cache_clear(options?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Clear one persistent cache namespace."),
-    SyncBuiltin::new("__cache_stats", cache_stats_builtin)
-        .signature("__cache_stats(options?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Return {hits, misses, lookups, hit_rate} for a cache namespace."),
-    SyncBuiltin::new("__cache_stats_reset", cache_stats_reset_builtin)
-        .signature("__cache_stats_reset(options?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Reset the in-process hit/miss counters for a cache namespace."),
-    SyncBuiltin::new("__llm_cache_key", llm_cache_key_builtin)
-        .signature("__llm_cache_key(prompt, system?, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-        .doc("Derive the canonical LLM with_cache key."),
+const CACHE_BUILTINS: &[&VmBuiltinDef] = &[
+    &CACHE_GET_BUILTIN_DEF,
+    &CACHE_PUT_BUILTIN_DEF,
+    &CACHE_CLEAR_BUILTIN_DEF,
+    &CACHE_STATS_BUILTIN_DEF,
+    &CACHE_STATS_RESET_BUILTIN_DEF,
+    &LLM_CACHE_KEY_BUILTIN_DEF,
 ];
 
 fn cache_envelope_base(options: &CacheOptions) -> BTreeMap<String, VmValue> {
@@ -148,6 +119,12 @@ fn cache_envelope_base(options: &CacheOptions) -> BTreeMap<String, VmValue> {
     envelope
 }
 
+/// Return a persistent cache hit envelope for key.
+#[harn_builtin(
+    sig = "__cache_get(key: string, options?: dict|nil) -> dict",
+    category = "cache",
+    runtime_only = true
+)]
 fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = required_string_arg(args, 0, "__cache_get(key, options?)")?;
     let options = parse_cache_options(args.get(1))?;
@@ -162,6 +139,12 @@ fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::Dict(Rc::new(envelope)))
 }
 
+/// Persist a cache value with TTL and LRU eviction.
+#[harn_builtin(
+    sig = "__cache_put(key: string, value: any, options?: dict|nil) -> dict",
+    category = "cache",
+    runtime_only = true
+)]
 fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = required_string_arg(args, 0, "__cache_put(key, value, options?)")?;
     let value = args.get(1).ok_or_else(|| {
@@ -181,6 +164,12 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::Dict(Rc::new(envelope)))
 }
 
+/// Clear one persistent cache namespace.
+#[harn_builtin(
+    sig = "__cache_clear(options?: dict|nil) -> nil",
+    category = "cache",
+    runtime_only = true
+)]
 fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
     match options.backend {
@@ -192,6 +181,12 @@ fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     Ok(VmValue::Nil)
 }
 
+/// Return {hits, misses, lookups, hit_rate} for a cache namespace.
+#[harn_builtin(
+    sig = "__cache_stats(options?: dict|nil) -> dict",
+    category = "cache",
+    runtime_only = true
+)]
 fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
     let snapshot = metrics_snapshot(&options);
@@ -222,12 +217,24 @@ fn saturating_u64_to_i64(value: u64) -> i64 {
     value.min(i64::MAX as u64) as i64
 }
 
+/// Reset the in-process hit/miss counters for a cache namespace.
+#[harn_builtin(
+    sig = "__cache_stats_reset(options?: dict|nil) -> nil",
+    category = "cache",
+    runtime_only = true
+)]
 fn cache_stats_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
     reset_metrics_for(&options);
     Ok(VmValue::Nil)
 }
 
+/// Derive the canonical LLM with_cache key.
+#[harn_builtin(
+    sig = "__llm_cache_key(prompt: any, system?: any, options?: dict|nil) -> string",
+    category = "cache",
+    runtime_only = true
+)]
 fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let explicit_options = match args.get(2) {
         Some(VmValue::Dict(dict)) => Some((**dict).clone()),

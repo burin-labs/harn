@@ -3,153 +3,54 @@ use std::rc::Rc;
 
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::registration::{
-    async_builtin, register_builtin_groups, register_deferred_builtin_groups, AsyncBuiltin,
-    BuiltinGroup, SyncBuiltin,
+use crate::stdlib::macros::{
+    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
 };
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 
 use super::helpers::vm_value_to_json;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
-    register_builtin_groups(vm, LLM_CONFIG_GROUPS);
+    register_builtin_defs(vm, LLM_CONFIG_DEFS);
 }
 
 pub(crate) fn register_deferred_config_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_groups(vm, LLM_CONFIG_GROUPS, registrar);
+    register_deferred_builtin_defs(vm, LLM_CONFIG_DEFS, registrar);
 }
 
-const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
-    SyncBuiltin::new("provider_capabilities", provider_capabilities_builtin)
-        .signature("provider_capabilities(provider, model?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Return provider/model capability metadata from the loaded capability matrix."),
-    SyncBuiltin::new(
-        "provider_capabilities_install",
-        provider_capabilities_install_builtin,
-    )
-    .signature("provider_capabilities_install(toml_src)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Install raw TOML capability overrides for provider/model capability lookup."),
-    SyncBuiltin::new(
-        "provider_capabilities_clear",
-        provider_capabilities_clear_builtin,
-    )
-    .signature("provider_capabilities_clear()")
-    .arity(VmBuiltinArity::Exact(0))
-    .doc("Clear installed provider/model capability overrides."),
-    SyncBuiltin::new("llm_infer_provider", llm_infer_provider_builtin)
-        .signature("llm_infer_provider(model_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Infer the configured provider name for a model identifier."),
-    SyncBuiltin::new("llm_model_tier", llm_model_tier_builtin)
-        .signature("llm_model_tier(model_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return the configured capability tier for a model identifier."),
-    SyncBuiltin::new("llm_resolve_model", llm_resolve_model_builtin)
-        .signature("llm_resolve_model(alias)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Resolve a model alias or selector to full model metadata."),
-    SyncBuiltin::new("llm_model_info", llm_model_info_builtin)
-        .signature("llm_model_info(selector)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return catalog metadata for a resolved model selector."),
-    SyncBuiltin::new("llm_known_models", llm_known_models_builtin)
-        .signature("llm_known_models()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("List configured model alias names."),
-    SyncBuiltin::new("llm_available_providers", llm_available_providers_builtin)
-        .signature("llm_available_providers()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("List providers usable in the current environment."),
-    SyncBuiltin::new("llm_qc_default_model", llm_qc_default_model_builtin)
-        .signature("llm_qc_default_model(provider)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return the configured cheap QC/repair model for a provider."),
-    SyncBuiltin::new("llm_resolved_options", llm_resolved_options_builtin)
-        .signature("llm_resolved_options(opts)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return the fully-merged llm_call options for `opts`. Requires opts.model."),
-    SyncBuiltin::new(
-        "llm_apply_reasoning_policy",
-        llm_apply_reasoning_policy_builtin,
-    )
-    .signature("llm_apply_reasoning_policy(opts)")
-    .arity(VmBuiltinArity::Exact(1))
-    .doc("Apply Harn's provider-aware reasoning_policy/thinking_policy defaults to an llm_call option dict."),
-    SyncBuiltin::new("llm_model_defaults", llm_model_defaults_builtin)
-        .signature("llm_model_defaults(model_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Return glob-merged model_defaults for `model_id`."),
-    SyncBuiltin::new("llm_provider_catalog", llm_provider_catalog_builtin)
-        .signature("llm_provider_catalog()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Return the loaded provider, alias, model, pricing, and availability catalog."),
-    SyncBuiltin::new("llm_pick_model", llm_pick_model_builtin)
-        .signature("llm_pick_model(target, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Resolve a model alias or tier to an `{id, provider, tier}` dict."),
-    SyncBuiltin::new("llm_providers", llm_providers_builtin)
-        .signature("llm_providers()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("List all configured and runtime-registered LLM provider names."),
-    SyncBuiltin::new("provider_register", provider_register_builtin)
-        .signature("provider_register(name)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Register a custom OpenAI-compatible provider name for runtime dispatch."),
-    SyncBuiltin::new("llm_config", llm_config_builtin)
-        .signature("llm_config(provider?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Return configured provider settings, or all provider settings when no provider is passed."),
-    SyncBuiltin::new("llm_catalog", llm_catalog_builtin)
-        .signature("llm_catalog()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc(
-            "Return the full configured model catalog as a list of dicts: \
-             `[{id, name, provider, context_window, runtime_context_window, capabilities, \
-             quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`. \
-             Alias for the read-only `harness.llm.catalog()` handle method, available for \
-             scripts that do not receive a `Harness` parameter.",
-        ),
-    SyncBuiltin::new("llm_provider_status", llm_provider_status_builtin)
-        .signature("llm_provider_status()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc(
-            "Return a list of `{name, available, credential_status}` dicts describing every \
-             configured provider plus runtime-registered names. `available` is true when \
-             credentials resolve via the configured env vars (or when the provider uses \
-             multi-step auth like Bedrock/Vertex). `credential_status` is one of \
-             `\"ok\"`, `\"missing\"`, `\"not_required\"`, `\"deferred\"`. Alias for the \
-             read-only `harness.llm.providers()` handle method, available for scripts that \
-             do not receive a `Harness` parameter.",
-        ),
+const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
+    &PROVIDER_CAPABILITIES_BUILTIN_DEF,
+    &PROVIDER_CAPABILITIES_INSTALL_BUILTIN_DEF,
+    &PROVIDER_CAPABILITIES_CLEAR_BUILTIN_DEF,
+    &LLM_INFER_PROVIDER_BUILTIN_DEF,
+    &LLM_MODEL_TIER_BUILTIN_DEF,
+    &LLM_RESOLVE_MODEL_BUILTIN_DEF,
+    &LLM_MODEL_INFO_BUILTIN_DEF,
+    &LLM_KNOWN_MODELS_BUILTIN_DEF,
+    &LLM_AVAILABLE_PROVIDERS_BUILTIN_DEF,
+    &LLM_QC_DEFAULT_MODEL_BUILTIN_DEF,
+    &LLM_RESOLVED_OPTIONS_BUILTIN_DEF,
+    &LLM_APPLY_REASONING_POLICY_BUILTIN_DEF,
+    &LLM_MODEL_DEFAULTS_BUILTIN_DEF,
+    &LLM_PROVIDER_CATALOG_BUILTIN_DEF,
+    &LLM_PICK_MODEL_BUILTIN_DEF,
+    &LLM_PROVIDERS_BUILTIN_DEF,
+    &PROVIDER_REGISTER_BUILTIN_DEF,
+    &LLM_CONFIG_BUILTIN_DEF,
+    &LLM_CATALOG_BUILTIN_DEF,
+    &LLM_PROVIDER_STATUS_BUILTIN_DEF,
+    &LLM_RATE_LIMIT_BUILTIN_DEF,
+    &LLM_HEALTHCHECK_BUILTIN_DEF,
 ];
 
-const LLM_RATE_LIMIT_SYNC_BUILTINS: &[SyncBuiltin] =
-    &[SyncBuiltin::new("llm_rate_limit", llm_rate_limit_builtin)
-        .signature("llm_rate_limit(provider, options?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc("Set, query, or clear per-provider requests-per-minute rate limits.")];
-
-const LLM_CONFIG_ASYNC_BUILTINS: &[AsyncBuiltin] =
-    &[async_builtin!("llm_healthcheck", llm_healthcheck_builtin)
-        .signature("llm_healthcheck(provider_or_options?, options?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 2 })
-        .doc("Validate provider health, API key reachability, and optional model readiness.")];
-
-const LLM_CONFIG_BUILTINS: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("llm.config")
-    .sync(LLM_CONFIG_SYNC_BUILTINS)
-    .async_(LLM_CONFIG_ASYNC_BUILTINS);
-
-const LLM_RATE_LIMIT_BUILTINS: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("llm.rate_limit")
-    .sync(LLM_RATE_LIMIT_SYNC_BUILTINS);
-
-const LLM_CONFIG_GROUPS: &[BuiltinGroup<'static>] = &[LLM_CONFIG_BUILTINS, LLM_RATE_LIMIT_BUILTINS];
-
+/// Return provider/model capability metadata from the loaded capability matrix.
+#[harn_builtin(
+    sig = "provider_capabilities(provider: string, model?: string|nil) -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn provider_capabilities_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
     let model = args.get(1).map(|a| a.display()).unwrap_or_default();
@@ -162,6 +63,12 @@ fn provider_capabilities_builtin(args: &[VmValue], _out: &mut String) -> Result<
     Ok(capabilities_to_vm_value(&provider, &model, &caps))
 }
 
+/// Install raw TOML capability overrides for provider/model capability lookup.
+#[harn_builtin(
+    sig = "provider_capabilities_install(toml_src: string) -> nil",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn provider_capabilities_install_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -178,6 +85,12 @@ fn provider_capabilities_install_builtin(
     Ok(VmValue::Bool(true))
 }
 
+/// Clear installed provider/model capability overrides.
+#[harn_builtin(
+    sig = "provider_capabilities_clear() -> nil",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn provider_capabilities_clear_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -186,6 +99,12 @@ fn provider_capabilities_clear_builtin(
     Ok(VmValue::Bool(true))
 }
 
+/// Infer the configured provider name for a model identifier.
+#[harn_builtin(
+    sig = "llm_infer_provider(model_id: string) -> string",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(llm_config::infer_provider(
@@ -193,11 +112,23 @@ fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     ))))
 }
 
+/// Return the configured capability tier for a model identifier.
+#[harn_builtin(
+    sig = "llm_model_tier(model_id: string) -> string",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_model_tier_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(VmValue::String(Rc::from(llm_config::model_tier(&model_id))))
 }
 
+/// Resolve a model alias or selector to full model metadata.
+#[harn_builtin(
+    sig = "llm_resolve_model(alias: string) -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_resolve_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let alias = args.first().map(|a| a.display()).unwrap_or_default();
     Ok(resolved_model_to_vm_value(&llm_config::resolve_model_info(
@@ -205,16 +136,34 @@ fn llm_resolve_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
     )))
 }
 
+/// Return catalog metadata for a resolved model selector.
+#[harn_builtin(
+    sig = "llm_model_info(selector: string) -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_model_info_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let selector = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = llm_config::resolve_model_info(&selector);
     Ok(model_info_to_vm_value(&resolved))
 }
 
+/// List configured model alias names.
+#[harn_builtin(
+    sig = "llm_known_models() -> list",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_known_models_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(string_list_to_vm_value(llm_config::known_model_names()))
 }
 
+/// List providers usable in the current environment.
+#[harn_builtin(
+    sig = "llm_available_providers() -> list",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_available_providers_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -224,6 +173,12 @@ fn llm_available_providers_builtin(
     ))
 }
 
+/// Return the configured cheap QC/repair model for a provider.
+#[harn_builtin(
+    sig = "llm_qc_default_model(provider: string) -> string|nil",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
     if provider.is_empty() {
@@ -236,6 +191,12 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         .unwrap_or(VmValue::Nil))
 }
 
+/// Return glob-merged model_defaults for `model_id`.
+#[harn_builtin(
+    sig = "llm_model_defaults(model_id: string) -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
     if model_id.is_empty() {
@@ -251,6 +212,12 @@ fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     Ok(VmValue::Dict(Rc::new(dict)))
 }
 
+/// Return the fully-merged llm_call options for `opts`. Requires opts.model.
+#[harn_builtin(
+    sig = "llm_resolved_options(opts: dict) -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let opts = args
         .first()
@@ -291,6 +258,12 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
     Ok(VmValue::Dict(Rc::new(out)))
 }
 
+/// Apply Harn's provider-aware reasoning_policy/thinking_policy defaults to an llm_call option dict.
+#[harn_builtin(
+    sig = "llm_apply_reasoning_policy(opts: dict) -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_apply_reasoning_policy_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -323,10 +296,22 @@ fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
     }
 }
 
+/// Return the loaded provider, alias, model, pricing, and availability catalog.
+#[harn_builtin(
+    sig = "llm_provider_catalog() -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_provider_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(provider_catalog_to_vm_value())
 }
 
+/// Resolve a model alias or tier to an `{id, provider, tier}` dict.
+#[harn_builtin(
+    sig = "llm_pick_model(target: string, options?: dict|nil) -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = args.first().map(|a| a.display()).unwrap_or_default();
     let options = args.get(1).and_then(|v| v.as_dict());
@@ -354,6 +339,12 @@ fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::Dict(Rc::new(dict)))
 }
 
+/// List all configured and runtime-registered LLM provider names.
+#[harn_builtin(
+    sig = "llm_providers() -> list",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config_names = llm_config::provider_names();
     let registry_names = super::provider::registered_provider_names();
@@ -366,6 +357,12 @@ fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::List(Rc::new(list)))
 }
 
+/// Register a custom OpenAI-compatible provider name for runtime dispatch.
+#[harn_builtin(
+    sig = "provider_register(name: string) -> nil",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn provider_register_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if name.is_empty() {
@@ -385,6 +382,16 @@ pub(crate) fn llm_catalog_value() -> VmValue {
     VmValue::List(Rc::new(entries))
 }
 
+/// Return the full configured model catalog as a list of dicts:
+/// `[{id, name, provider, context_window, runtime_context_window, capabilities,
+/// quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`.
+/// Alias for the read-only `harness.llm.catalog()` handle method, available for
+/// scripts that do not receive a `Harness` parameter.
+#[harn_builtin(
+    sig = "llm_catalog() -> list",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(llm_catalog_value())
 }
@@ -447,10 +454,28 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
     VmValue::List(Rc::new(entries))
 }
 
+/// Return a list of `{name, available, credential_status}` dicts describing every
+/// configured provider plus runtime-registered names. `available` is true when
+/// credentials resolve via the configured env vars (or when the provider uses
+/// multi-step auth like Bedrock/Vertex). `credential_status` is one of
+/// `"ok"`, `"missing"`, `"not_required"`, `"deferred"`. Alias for the
+/// read-only `harness.llm.providers()` handle method, available for scripts that
+/// do not receive a `Harness` parameter.
+#[harn_builtin(
+    sig = "llm_provider_status() -> list",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(llm_provider_status_value())
 }
 
+/// Return configured provider settings, or all provider settings when no provider is passed.
+#[harn_builtin(
+    sig = "llm_config(provider?: string|nil) -> dict",
+    category = "llm.config",
+    runtime_only = true
+)]
 fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider_name = args.first().map(|a| a.display());
     match provider_name {
@@ -473,6 +498,12 @@ fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     }
 }
 
+/// Set, query, or clear per-provider requests-per-minute rate limits.
+#[harn_builtin(
+    sig = "llm_rate_limit(provider: string, options?: dict|nil) -> dict",
+    category = "llm.rate_limit",
+    runtime_only = true
+)]
 fn llm_rate_limit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
     if provider.is_empty() {
@@ -503,6 +534,13 @@ fn llm_rate_limit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     }
 }
 
+/// Validate provider health, API key reachability, and optional model readiness.
+#[harn_builtin(
+    sig = "llm_healthcheck(provider_or_options?: any, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.config",
+    runtime_only = true
+)]
 async fn llm_healthcheck_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let (provider_name, api_key) = parse_healthcheck_args(&args);
 

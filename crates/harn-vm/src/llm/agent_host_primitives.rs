@@ -5,9 +5,8 @@ use std::sync::Arc;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::registration::{async_builtin, AsyncBuiltin};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::VmBuiltinArity;
 
 use super::agent_runtime::{current_agent_session_id, current_host_bridge};
 use super::{agent_runtime, agent_session_host, agent_tools, helpers, permissions, tools};
@@ -29,6 +28,13 @@ impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
     }
 }
 
+/// Capture agent events emitted while executing a Harn closure.
+#[harn_builtin(
+    sig = "__host_agent_capture_events(session_id: string, body: closure) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_capture_events_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(text)) if !text.is_empty() => text.to_string(),
@@ -299,6 +305,13 @@ fn attach_hook_reminder_audit(
     result
 }
 
+/// Parse model text into normalized agent tool-call records.
+#[harn_builtin(
+    sig = "__host_agent_parse_tool_calls(text: string, tools?: dict|nil) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let text = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),
@@ -387,6 +400,13 @@ async fn host_agent_dispatch_tool_batch_capped(
         .collect())
 }
 
+/// Dispatch a batch of normalized agent tool calls through the host tool runtime.
+#[harn_builtin(
+    sig = "__host_agent_dispatch_tool_batch(calls: list, tools?: dict|nil, options?: dict|nil) -> list",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let mut args = args.into_iter();
     let calls = match args.next() {
@@ -423,6 +443,13 @@ async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmVal
     Ok(VmValue::List(Rc::new(results)))
 }
 
+/// Dispatch one normalized agent tool call through the host tool runtime.
+#[harn_builtin(
+    sig = "__host_agent_dispatch_tool_call(call: dict, tools?: dict|nil, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let mut args = args.into_iter();
     let call = args.next().ok_or_else(|| {
@@ -971,6 +998,15 @@ async fn host_agent_dispatch_tool_call(
     }
 }
 
+/// Connect to each MCP server in specs, list their tools (prefixed with
+/// server_name__), store handles keyed by session_id, and return
+/// {tools_added, errors}.
+#[harn_builtin(
+    sig = "__host_mcp_bootstrap(session_id: string, specs?: list|nil) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     use std::collections::BTreeMap;
 
@@ -1105,6 +1141,14 @@ async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
     })))
 }
 
+/// Disconnect all MCP clients installed for session_id and remove them
+/// from the session registry.
+#[harn_builtin(
+    sig = "__host_mcp_disconnect(session_id: string) -> bool",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_mcp_disconnect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),
@@ -1128,6 +1172,13 @@ async fn host_mcp_disconnect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     Ok(VmValue::Bool(true))
 }
 
+/// Evaluate registered reminder providers for an agent lifecycle event.
+#[harn_builtin(
+    sig = "__host_agent_reminder_providers_fire(session_id: string, event: string, payload?: dict|nil, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
 async fn host_agent_reminder_providers_fire_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) if !s.trim().is_empty() => s.to_string(),
@@ -1180,56 +1231,3 @@ async fn host_agent_reminder_providers_fire_impl(args: Vec<VmValue>) -> Result<V
     .await?;
     Ok(json_to_vm_value(&report))
 }
-
-pub(super) const AGENT_HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
-    async_builtin!(
-        "__host_agent_capture_events",
-        host_agent_capture_events_impl
-    )
-    .signature("__host_agent_capture_events(session_id, body)")
-    .arity(VmBuiltinArity::Exact(2))
-    .doc("Capture agent events emitted while executing a Harn closure."),
-    async_builtin!(
-        "__host_agent_parse_tool_calls",
-        host_agent_parse_tool_calls_impl
-    )
-    .signature("__host_agent_parse_tool_calls(text, tools?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-    .doc("Parse model text into normalized agent tool-call records."),
-    async_builtin!(
-        "__host_agent_dispatch_tool_call",
-        host_agent_dispatch_tool_call_impl
-    )
-    .signature("__host_agent_dispatch_tool_call(call, tools?, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .doc("Dispatch one normalized agent tool call through the host tool runtime."),
-    async_builtin!(
-        "__host_agent_dispatch_tool_batch",
-        host_agent_dispatch_tool_batch_impl
-    )
-    .signature("__host_agent_dispatch_tool_batch(calls, tools?, options?)")
-    .arity(VmBuiltinArity::Range { min: 1, max: 3 })
-    .doc("Dispatch a batch of normalized agent tool calls through the host tool runtime."),
-    async_builtin!("__host_mcp_bootstrap", host_mcp_bootstrap_impl)
-        .signature("__host_mcp_bootstrap(session_id, specs)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
-        .doc(
-            "Connect to each MCP server in specs, list their tools (prefixed with \
-             server_name__), store handles keyed by session_id, and return \
-             {tools_added, errors}.",
-        ),
-    async_builtin!("__host_mcp_disconnect", host_mcp_disconnect_impl)
-        .signature("__host_mcp_disconnect(session_id)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc(
-            "Disconnect all MCP clients installed for session_id and remove them \
-             from the session registry.",
-        ),
-    async_builtin!(
-        "__host_agent_reminder_providers_fire",
-        host_agent_reminder_providers_fire_impl
-    )
-    .signature("__host_agent_reminder_providers_fire(session_id, event, payload?, options?)")
-    .arity(VmBuiltinArity::Range { min: 2, max: 4 })
-    .doc("Evaluate registered reminder providers for an agent lifecycle event."),
-];

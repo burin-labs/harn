@@ -76,7 +76,6 @@ mod project;
 mod project_catalog;
 mod project_enrich;
 mod regex;
-pub(crate) mod registration;
 mod review;
 mod runtime_scope;
 pub(crate) mod sandbox;
