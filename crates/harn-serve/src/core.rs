@@ -1007,6 +1007,7 @@ pub fn whoami(harness: Harness) -> string {
                     ],
                 },
             )],
+            mcp_allowlist: None,
         };
         let core = DispatchCore::new(config).expect("core");
 
@@ -1116,6 +1117,7 @@ pub fn whoami(harness: Harness) -> string {
                     ],
                 },
             )],
+            mcp_allowlist: None,
         };
         let core = DispatchCore::new(config).expect("core");
 

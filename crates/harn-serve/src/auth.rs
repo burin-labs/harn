@@ -384,6 +384,7 @@ impl AuthPolicy {
                 subject: "anonymous".to_string(),
                 scheme: "none".to_string(),
                 granted_scopes: BTreeSet::new(),
+                tenant_id: None,
             });
         };
         match allowlist.check(server, tool) {
@@ -391,6 +392,7 @@ impl AuthPolicy {
                 subject: "anonymous".to_string(),
                 scheme: "none".to_string(),
                 granted_scopes: BTreeSet::new(),
+                tenant_id: None,
             }),
             AllowlistOutcome::ServerDenied => AuthorizationDecision::McpNotAllowlisted {
                 server: server.to_string(),
@@ -892,6 +894,7 @@ mod tests {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
                 keys: vec![ApiKeyEntry::new("tenant-key", []).with_tenant("acme")],
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([(
@@ -913,6 +916,7 @@ mod tests {
             methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
                 keys: vec![ApiKeyEntry::new("key", []).with_tenant("baseline")],
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             headers: BTreeMap::from([("authorization".to_string(), "Bearer key".to_string())]),
@@ -935,6 +939,7 @@ mod tests {
                 required_scopes: BTreeSet::new(),
                 tenant_id: Some(TenantId::new("policy-default")),
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             validated_oauth: Some(OAuthClaims {
@@ -962,6 +967,7 @@ mod tests {
                 required_scopes: BTreeSet::new(),
                 tenant_id: Some(TenantId::new("policy-default")),
             })],
+            mcp_allowlist: None,
         };
         let request = AuthRequest {
             validated_oauth: Some(OAuthClaims {
