@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/dry_run.response.json",
+  "title": "ast.dry_run response",
+  "description": "Per-file unified diff bundle plus an op-level outcome list and a roll-up summary. The diff format is standard unified diff (compatible with `git apply --check`). The transient staged-fs session is discarded before this response is returned, so no on-disk state is touched.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": ["ok", "partial", "no_ops_applied"],
+      "description": "`ok` when every op applied; `partial` when at least one applied and at least one was rejected; `no_ops_applied` when zero ops applied (empty plan or all rejected)."
+    },
+    "per_file_unified_diff": {
+      "type": "array",
+      "description": "One entry per file touched by the plan, in path-sorted order.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "diff": {
+            "type": "string",
+            "description": "Unified-diff body including `---`/`+++` headers, hunk markers, and `\\ No newline at end of file` annotations where applicable. Empty when before == after for this file."
+          },
+          "lines_added": { "type": "integer", "minimum": 0 },
+          "lines_removed": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["path", "diff", "lines_added", "lines_removed"]
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "files_touched": { "type": "integer", "minimum": 0 },
+        "lines_added": { "type": "integer", "minimum": 0 },
+        "lines_removed": { "type": "integer", "minimum": 0 },
+        "ops_applied": { "type": "integer", "minimum": 0 },
+        "ops_rejected": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "files_touched",
+        "lines_added",
+        "lines_removed",
+        "ops_applied",
+        "ops_rejected"
+      ]
+    },
+    "ops": {
+      "type": "array",
+      "description": "Per-op outcomes in input order. Inspect `applied` / `result` / `reason` / `details` to surface rejections to the user.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "op": { "type": "string" },
+          "applied": { "type": "boolean" },
+          "result": {
+            "type": "string",
+            "enum": ["applied", "rejected", "error"]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Stable failure tag for rejected ops (e.g. `no_match`, `ambiguous`, `invalid_query`, `syntax_error`, `unsupported_language`, `unknown_op`, `use_standalone`)."
+          },
+          "details": { "type": "string" },
+          "path": { "type": "string" },
+          "match_count": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["op", "applied", "result"]
+      }
+    }
+  },
+  "required": ["result", "per_file_unified_diff", "summary", "ops"]
+}

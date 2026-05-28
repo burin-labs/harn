@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/dry_run.request.json",
+  "title": "ast.dry_run request",
+  "description": "Render a multi-op edit plan as a per-file unified diff bundle without committing anything to disk. The runner opens a transient staged-fs (#1722) session, dispatches each op through its op-specific handler with that session id wired in, then walks the resulting overlay to produce the diff. The transient session is discarded before returning, so the on-disk tree is byte-identical before and after the call.",
+  "type": "object",
+  "properties": {
+    "plan": {
+      "type": "array",
+      "description": "Ordered list of edit operations to preview. Each op carries an `op` tag that determines its shape.",
+      "items": {
+        "type": "object",
+        "discriminator": { "propertyName": "op" },
+        "oneOf": [
+          {
+            "title": "apply_node",
+            "type": "object",
+            "properties": {
+              "op": { "type": "string", "const": "apply_node" },
+              "path": { "type": "string" },
+              "query": { "type": "string" },
+              "replacement": { "type": "string" },
+              "language": { "type": "string" },
+              "target_capture": { "type": "string", "default": "target" },
+              "select": {
+                "type": "string",
+                "enum": ["unique", "first", "all", "nth"],
+                "default": "unique"
+              },
+              "nth": { "type": "integer", "minimum": 1 },
+              "validate": { "type": "boolean", "default": true }
+            },
+            "required": ["op", "path", "query", "replacement"]
+          },
+          {
+            "title": "insert_at_anchor",
+            "type": "object",
+            "properties": {
+              "op": { "type": "string", "const": "insert_at_anchor" },
+              "path": { "type": "string" },
+              "query": {
+                "type": "string",
+                "description": "Tree-Sitter query selecting the anchor span. Must match exactly one node; multi-match queries return `ambiguous`."
+              },
+              "position": {
+                "type": "string",
+                "enum": ["before", "after", "first_child", "last_child"]
+              },
+              "content": { "type": "string" },
+              "language": { "type": "string" },
+              "target_capture": {
+                "type": "string",
+                "default": "anchor",
+                "description": "Capture name for the anchor span. Defaults to `anchor`; single-capture queries accept any name."
+              },
+              "validate": { "type": "boolean", "default": true }
+            },
+            "required": ["op", "path", "query", "position", "content"]
+          },
+          {
+            "title": "safe_text_patch",
+            "type": "object",
+            "properties": {
+              "op": { "type": "string", "const": "safe_text_patch" },
+              "path": { "type": "string" },
+              "old_text": {
+                "type": "string",
+                "description": "Exact substring to replace. Must appear in the source exactly once."
+              },
+              "new_text": { "type": "string" }
+            },
+            "required": ["op", "path", "old_text", "new_text"]
+          },
+          {
+            "title": "rename_symbol",
+            "type": "object",
+            "properties": {
+              "op": { "type": "string", "const": "rename_symbol" },
+              "symbol_ref": { "type": "string" },
+              "new_name": { "type": "string" },
+              "scope": { "type": "string" }
+            },
+            "required": ["op", "symbol_ref", "new_name"]
+          }
+        ]
+      }
+    }
+  },
+  "required": ["plan"],
+  "additionalProperties": false
+}

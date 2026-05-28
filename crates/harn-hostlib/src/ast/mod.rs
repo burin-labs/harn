@@ -32,6 +32,7 @@ use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, Syn
 
 mod apply_node;
 mod bracket_balance;
+mod dry_run;
 mod edit_common;
 mod function_body;
 mod fuzzy;
@@ -46,6 +47,7 @@ mod symbols;
 mod symbols_call;
 mod types;
 mod undefined_names;
+mod unified_diff;
 
 pub use language::Language;
 pub use types::{OutlineItem, ParseError, ParsedNode, Symbol, SymbolKind, UndefinedName};
@@ -215,6 +217,7 @@ impl HostlibCapability for AstCapability {
             "insert_at_anchor",
             insert_at_anchor::run,
         );
+        register(registry, "hostlib_ast_dry_run", "dry_run", dry_run::run);
     }
 }
 
