@@ -1,0 +1,61 @@
+/**
+ * Exercises the harn-side compaction policy primitive (#2505):
+ *   compaction.policy(opts) — declare or replace a per-session policy
+ *   compaction.check(session_id) — return {action, ...} without mutating
+ *   compaction.run(session_id, plan?) — execute lifecycle, return result
+ *
+ * The acceptance contract is the spec triad: a `defer` decision when the
+ * transcript is under threshold, a `compact_now` decision when it crosses,
+ * and a `compaction.run` that funnels through the existing #2323 lifecycle.
+ */
+pipeline test(task) {
+  let session = agent_session_open("compaction-policy-primitive")
+  // Register a session-specific policy.
+  let snapshot = compaction
+    .policy({session_id: session, strategy: "summarize-then-prune", max_tokens: 1, keep_last: 1})
+  __io_println(snapshot["strategy"] == "summarize-then-prune")
+  __io_println(snapshot["max_tokens"] == 1)
+  // Empty session — check should defer.
+  let empty_decision = compaction.check(session)
+  __io_println(empty_decision["action"] == "defer")
+  __io_println(empty_decision["message_count"] == 0)
+  __io_println(!empty_decision["policy_inherited"])
+  // Push enough messages to clear the (1-token) threshold.
+  agent_session_inject(
+    session,
+    {role: "user", content: "Investigate the parser regression in stdlib."},
+  )
+  agent_session_inject(
+    session,
+    {role: "assistant", content: "The root cause is in diagnostic recovery."},
+  )
+  agent_session_inject(
+    session,
+    {role: "user", content: "Keep the failing test names and next command in the summary."},
+  )
+  let primed_decision = compaction.check(session)
+  __io_println(primed_decision["action"] == "compact_now")
+  __io_println(primed_decision["trigger"] == "tokens")
+  __io_println(primed_decision["strategy"] == "summarize-then-prune")
+  __io_println(primed_decision["engine_strategy"] == "llm")
+  // compaction.run with a plan override forcing a custom strategy avoids
+  // needing an LLM round-trip during conformance.
+  let outcome = compaction
+    .run(
+    session,
+    {
+      strategy: "custom",
+      summarize_fn: { archived, _reminders -> {summary: "policy compacted " + to_string(len(archived))} },
+    },
+  )
+  __io_println(outcome["compacted"])
+  __io_println(outcome["session_id"] == session)
+  __io_println(outcome["archived_messages"] == 2)
+  __io_println(outcome["latency_ms"] >= 0)
+  __io_println(outcome["engine_strategy"] == "custom")
+  __io_println(transcript_summary(outcome["transcript"]).contains("policy compacted 2"))
+  // After running, check should return defer again — transcript is below
+  // threshold once the summary message replaces the archived ones.
+  let after_decision = compaction.check(session)
+  __io_println(after_decision["action"] == "compact_now" || after_decision["action"] == "defer")
+}

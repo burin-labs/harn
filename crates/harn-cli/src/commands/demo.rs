@@ -74,6 +74,17 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/stdlib-toolkit/scenario.harn"),
         tape: include_str!("../../assets/demo/stdlib-toolkit/tape.jsonl"),
     },
+    Scenario {
+        id: "compaction-policy",
+        title: "compaction.{policy,check,run} drives a session through the lifecycle",
+        description: "Declare a per-session compaction policy with thresholds, call \
+                      `compaction.check` to get a `compact_now` / `defer` decision, then drive \
+                      the canonical #2323 lifecycle via `compaction.run`. Demonstrates the \
+                      lifted-from-TUI policy primitive (#2505) entirely offline using a custom \
+                      summarize closure.",
+        script: include_str!("../../assets/demo/compaction-policy/scenario.harn"),
+        tape: include_str!("../../assets/demo/compaction-policy/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]

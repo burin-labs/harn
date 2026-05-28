@@ -187,6 +187,40 @@ fn stdlib_toolkit_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn compaction_policy_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("compaction-policy");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "compaction-policy demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("compaction_policy_demo"),
+        "compaction-policy demo should emit the receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"pre_decision_action\":\"compact_now\""),
+        "compaction.check should flag the seeded session for compaction:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"post_decision_action\":\"defer\""),
+        "compaction.check should defer once the transcript is compacted:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"engine_strategy\":\"custom\""),
+        "compaction.run should record the engine strategy in the receipt:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all
@@ -197,6 +231,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "provider-race",
         "routing-policy",
         "stdlib-toolkit",
+        "compaction-policy",
     ]
     .into_iter()
     .collect();
