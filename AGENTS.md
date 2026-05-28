@@ -145,6 +145,17 @@ lineage, and mutation session audit metadata. Hosts own approval UX, concrete
 file mutations, and undo/redo semantics. For autonomous or background edits,
 prefer worktree-backed execution over ambient cwd state.
 
+## Editing source
+
+Mutate source files through `std/edit` rather than freeform text patches:
+`edit_apply_node` to replace a node, `edit_insert_at_anchor` to add a
+sibling/child, `edit_rename_symbol` for cross-file renames, `edit_dry_run`
+to preview a multi-op plan, and `edit_safe_text_patch` only when the
+language has no tree-sitter grammar or the change is purely textual. The
+decision tree (and a `system_reminder` snippet that nudges agent loops the
+same way) lives in
+[Precise edits with AST tools](docs/src/cookbook.md#precise-edits-with-ast-tools).
+
 ## Changelog fragments
 
 - Non-trivial PRs drop a single fragment file: `changelog.d/<id>.<category>.md`.
