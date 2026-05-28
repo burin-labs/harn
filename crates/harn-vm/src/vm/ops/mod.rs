@@ -1,3 +1,23 @@
+//! VM opcode dispatch.
+//!
+//! The `Op` enum, the byte-to-variant mapping, the sync and async
+//! dispatch tables, the disassembly renderer, and the per-opcode
+//! classification helpers (`op_reads_outer_name`, `is_adaptive_binary_op`)
+//! are all emitted by `harn_opcode_macros::define_opcodes!` from the
+//! single declarative table below. Adding or renaming an opcode is now a
+//! one-line edit instead of paired edits to four hand-maintained match
+//! tables — see issue #2584 for the migration that collapsed them.
+//!
+//! Each entry follows the shape
+//!
+//! ```ignore
+//! VariantName { <kind>(<expr>...), disasm: <helper>("<LABEL>") [, flags: [...]] };
+//! ```
+//!
+//! where `<kind>` selects the dispatch shape (`sync`, `sync_void`,
+//! `sync_return`, `split`, `async_op`) and the `<helper>` resolves to a
+//! `disasm_<helper>` free fn in `crate::chunk`.
+
 mod arithmetic;
 mod call;
 mod collections;
@@ -11,245 +31,169 @@ mod misc;
 mod parallel;
 mod stack;
 
-use crate::chunk::Op;
 use crate::value::{VmError, VmValue};
 
+harn_opcode_macros::define_opcodes! {
+    // === Constants & nil ===
+    Constant { sync(self.execute_constant()), disasm: const_pool_u16("CONSTANT") };
+    Nil { sync_void(self.execute_nil()), disasm: bare("NIL") };
+    True { sync_void(self.execute_true()), disasm: bare("TRUE") };
+    False { sync_void(self.execute_false()), disasm: bare("FALSE") };
+
+    // === Variables ===
+    GetVar { sync(self.execute_get_var()), disasm: const_pool_u16("GET_VAR"), flags: [reads_outer_name] };
+    DefLet { sync(self.execute_def_let()), disasm: const_pool_u16("DEF_LET") };
+    DefVar { sync(self.execute_def_var()), disasm: const_pool_u16("DEF_VAR") };
+    SetVar { sync(self.execute_set_var()), disasm: const_pool_u16("SET_VAR"), flags: [reads_outer_name] };
+    PushScope { sync_void(self.execute_push_scope()), disasm: bare("PUSH_SCOPE") };
+    PopScope { sync_void(self.execute_pop_scope()), disasm: bare("POP_SCOPE") };
+
+    // === Generic arithmetic (adaptive binary IC) ===
+    Add { sync(self.execute_add()), disasm: bare("ADD"), flags: [adaptive_binary] };
+    Sub { sync(self.execute_sub()), disasm: bare("SUB"), flags: [adaptive_binary] };
+    Mul { sync(self.execute_mul()), disasm: bare("MUL"), flags: [adaptive_binary] };
+    Div { sync(self.execute_div()), disasm: bare("DIV"), flags: [adaptive_binary] };
+    Mod { sync(self.execute_mod()), disasm: bare("MOD"), flags: [adaptive_binary] };
+    Pow { sync(self.execute_pow()), disasm: bare("POW") };
+    Negate { sync(self.execute_negate()), disasm: bare("NEGATE") };
+
+    // === Generic comparison (adaptive binary IC) ===
+    Equal { sync(self.execute_equal()), disasm: bare("EQUAL"), flags: [adaptive_binary] };
+    NotEqual { sync(self.execute_not_equal()), disasm: bare("NOT_EQUAL"), flags: [adaptive_binary] };
+    Less { sync(self.execute_less()), disasm: bare("LESS"), flags: [adaptive_binary] };
+    Greater { sync(self.execute_greater()), disasm: bare("GREATER"), flags: [adaptive_binary] };
+    LessEqual { sync(self.execute_less_equal()), disasm: bare("LESS_EQUAL"), flags: [adaptive_binary] };
+    GreaterEqual { sync(self.execute_greater_equal()), disasm: bare("GREATER_EQUAL"), flags: [adaptive_binary] };
+
+    // === Logical ===
+    Not { sync(self.execute_not()), disasm: bare("NOT") };
+
+    // === Control flow ===
+    Jump { sync_void(self.execute_jump()), disasm: u16("JUMP") };
+    JumpIfFalse { sync(self.execute_jump_if_false()), disasm: u16("JUMP_IF_FALSE") };
+    JumpIfTrue { sync(self.execute_jump_if_true()), disasm: u16("JUMP_IF_TRUE") };
+    Pop { sync(self.execute_pop()), disasm: bare("POP") };
+
+    // === Functions ===
+    Call { split(self.execute_call_sync(), self.execute_call_async().await), disasm: u8("CALL"), flags: [reads_outer_name] };
+    TailCall { split(self.execute_tail_call_sync(), self.execute_tail_call_async().await), disasm: u8("TAIL_CALL"), flags: [reads_outer_name] };
+    Return { sync_return(self.execute_return()), disasm: bare("RETURN") };
+    Closure { sync_void(self.execute_closure()), disasm: u16("CLOSURE") };
+
+    // === Collections ===
+    BuildList { sync_void(self.execute_build_list()), disasm: u16("BUILD_LIST") };
+    BuildDict { sync_void(self.execute_build_dict()), disasm: u16("BUILD_DICT") };
+    Subscript { sync(self.execute_subscript(false)), disasm: bare("SUBSCRIPT") };
+    SubscriptOpt { sync(self.execute_subscript(true)), disasm: bare("SUBSCRIPT_OPT") };
+    Slice { sync(self.execute_slice()), disasm: bare("SLICE") };
+
+    // === Object operations ===
+    GetProperty { sync(self.execute_get_property(false)), disasm: const_pool_u16("GET_PROPERTY") };
+    GetPropertyOpt { sync(self.execute_get_property(true)), disasm: const_pool_u16("GET_PROPERTY_OPT") };
+    SetProperty { sync(self.execute_set_property()), disasm: const_pool_u16("SET_PROPERTY") };
+    SetSubscript { sync(self.execute_set_subscript()), disasm: const_pool_u16("SET_SUBSCRIPT") };
+    MethodCall { split(self.execute_method_call_sync(false), self.execute_method_call(false).await), disasm: method_call("METHOD_CALL") };
+    MethodCallOpt { split(self.execute_method_call_sync(true), self.execute_method_call(true).await), disasm: method_call("METHOD_CALL_OPT") };
+
+    // === Strings ===
+    Concat { sync_void(self.execute_concat()), disasm: u16("CONCAT") };
+
+    // === Iteration ===
+    IterInit { sync(self.execute_iter_init()), disasm: bare("ITER_INIT") };
+    IterNext { split(self.execute_iter_next_sync(), self.execute_iter_next_async().await), disasm: u16("ITER_NEXT") };
+
+    // === Pipe (async) ===
+    Pipe { async_op(self.execute_pipe().await), disasm: bare("PIPE"), flags: [reads_outer_name] };
+
+    // === Error handling ===
+    Throw { sync(self.execute_throw()), disasm: bare("THROW") };
+    TryCatchSetup { sync_void(self.execute_try_catch_setup()), disasm: u16("TRY_CATCH_SETUP") };
+    PopHandler { sync_void(self.execute_pop_handler()), disasm: bare("POP_HANDLER") };
+
+    // === Concurrency ===
+    Parallel { async_op(self.execute_parallel().await), disasm: bare("PARALLEL") };
+    ParallelMap { async_op(self.execute_parallel_map().await), disasm: bare("PARALLEL_MAP") };
+    ParallelMapStream { async_op(self.execute_parallel_map_stream().await), disasm: bare("PARALLEL_MAP_STREAM") };
+    ParallelSettle { async_op(self.execute_parallel_settle().await), disasm: bare("PARALLEL_SETTLE") };
+    Spawn { sync(self.execute_spawn()), disasm: bare("SPAWN") };
+    SyncMutexEnter { async_op(self.execute_sync_mutex_enter().await), disasm: const_pool_u16("SYNC_MUTEX_ENTER") };
+
+    // === Imports (async) ===
+    Import { async_op(self.execute_import_op().await), disasm: const_pool_u16("IMPORT") };
+    SelectiveImport { async_op(self.execute_selective_import().await), disasm: selective_import("SELECTIVE_IMPORT") };
+
+    // === Deadline ===
+    DeadlineSetup { sync(self.execute_deadline_setup()), disasm: bare("DEADLINE_SETUP") };
+    DeadlineEnd { sync_void(self.execute_deadline_end()), disasm: bare("DEADLINE_END") };
+
+    // === Enum ===
+    BuildEnum { sync(self.execute_build_enum()), disasm: build_enum("BUILD_ENUM") };
+    MatchEnum { sync(self.execute_match_enum()), disasm: match_enum("MATCH_ENUM") };
+
+    // === Loop control ===
+    PopIterator { sync_void(self.execute_pop_iterator()), disasm: bare("POP_ITERATOR") };
+
+    // === Defaults ===
+    GetArgc { sync_void(self.execute_get_argc()), disasm: bare("GET_ARGC") };
+
+    // === Type checking ===
+    CheckType { sync(self.execute_check_type()), disasm: check_type("CHECK_TYPE"), flags: [reads_outer_name] };
+
+    // === Result try operator ===
+    TryUnwrap { sync(self.execute_try_unwrap()), disasm: bare("TRY_UNWRAP") };
+    TryWrapOk { sync(self.execute_try_wrap_ok()), disasm: bare("TRY_WRAP_OK") };
+
+    // === Spread calls ===
+    CallSpread { async_op(self.execute_call_spread().await), disasm: bare("CALL_SPREAD"), flags: [reads_outer_name] };
+    CallBuiltin { split(self.execute_call_builtin_sync(), self.execute_call_builtin_async().await), disasm: call_builtin("CALL_BUILTIN"), flags: [reads_outer_name] };
+    CallBuiltinSpread { async_op(self.execute_call_builtin_spread().await), disasm: call_builtin_spread("CALL_BUILTIN_SPREAD"), flags: [reads_outer_name] };
+    MethodCallSpread { async_op(self.execute_method_call_spread().await), disasm: method_call_spread("METHOD_CALL_SPREAD") };
+
+    // === Misc ===
+    Dup { sync(self.execute_dup()), disasm: bare("DUP") };
+    Swap { sync_void(self.execute_swap()), disasm: bare("SWAP") };
+    Contains { sync(self.execute_contains()), disasm: bare("CONTAINS") };
+
+    // === Typed arithmetic fast paths ===
+    AddInt { sync(self.execute_add_int()), disasm: bare("ADD_INT") };
+    SubInt { sync(self.execute_sub_int()), disasm: bare("SUB_INT") };
+    MulInt { sync(self.execute_mul_int()), disasm: bare("MUL_INT") };
+    DivInt { sync(self.execute_div_int()), disasm: bare("DIV_INT") };
+    ModInt { sync(self.execute_mod_int()), disasm: bare("MOD_INT") };
+    AddFloat { sync(self.execute_add_float()), disasm: bare("ADD_FLOAT") };
+    SubFloat { sync(self.execute_sub_float()), disasm: bare("SUB_FLOAT") };
+    MulFloat { sync(self.execute_mul_float()), disasm: bare("MUL_FLOAT") };
+    DivFloat { sync(self.execute_div_float()), disasm: bare("DIV_FLOAT") };
+    ModFloat { sync(self.execute_mod_float()), disasm: bare("MOD_FLOAT") };
+
+    // === Typed comparison fast paths ===
+    EqualInt { sync(self.execute_equal_int()), disasm: bare("EQUAL_INT") };
+    NotEqualInt { sync(self.execute_not_equal_int()), disasm: bare("NOT_EQUAL_INT") };
+    LessInt { sync(self.execute_less_int()), disasm: bare("LESS_INT") };
+    GreaterInt { sync(self.execute_greater_int()), disasm: bare("GREATER_INT") };
+    LessEqualInt { sync(self.execute_less_equal_int()), disasm: bare("LESS_EQUAL_INT") };
+    GreaterEqualInt { sync(self.execute_greater_equal_int()), disasm: bare("GREATER_EQUAL_INT") };
+    EqualFloat { sync(self.execute_equal_float()), disasm: bare("EQUAL_FLOAT") };
+    NotEqualFloat { sync(self.execute_not_equal_float()), disasm: bare("NOT_EQUAL_FLOAT") };
+    LessFloat { sync(self.execute_less_float()), disasm: bare("LESS_FLOAT") };
+    GreaterFloat { sync(self.execute_greater_float()), disasm: bare("GREATER_FLOAT") };
+    LessEqualFloat { sync(self.execute_less_equal_float()), disasm: bare("LESS_EQUAL_FLOAT") };
+    GreaterEqualFloat { sync(self.execute_greater_equal_float()), disasm: bare("GREATER_EQUAL_FLOAT") };
+    EqualBool { sync(self.execute_equal_bool()), disasm: bare("EQUAL_BOOL") };
+    NotEqualBool { sync(self.execute_not_equal_bool()), disasm: bare("NOT_EQUAL_BOOL") };
+    EqualString { sync(self.execute_equal_string()), disasm: bare("EQUAL_STRING") };
+    NotEqualString { sync(self.execute_not_equal_string()), disasm: bare("NOT_EQUAL_STRING") };
+
+    // === Generators (async) ===
+    Yield { async_op(self.execute_yield().await), disasm: bare("YIELD") };
+
+    // === Slot-indexed locals ===
+    GetLocalSlot { sync(self.execute_get_local_slot()), disasm: local_slot_u16("GET_LOCAL_SLOT") };
+    DefLocalSlot { sync(self.execute_def_local_slot()), disasm: local_slot_u16("DEF_LOCAL_SLOT") };
+    SetLocalSlot { sync(self.execute_set_local_slot()), disasm: local_slot_u16("SET_LOCAL_SLOT") };
+}
+
 impl super::Vm {
-    /// Execute a single opcode in a non-`async` context.
-    ///
-    /// Returns `Some(result)` for sync opcodes (the vast majority — arithmetic,
-    /// comparison, jumps, slot ops, etc.) and `None` for opcodes that must
-    /// `.await` (calls, method dispatch, iter-next, pipe, parallel families,
-    /// imports, yield). The interpreter's hot loop tries this first to skip
-    /// the per-iteration future-state-machine overhead that the unified async
-    /// dispatcher used to pay on every opcode.
-    ///
-    /// Coverage parity with [`execute_op_async`] is enforced by the
-    /// exhaustive match: a newly added opcode forces a `match` update and the
-    /// fall-through arm classifies it as sync-vs-async explicitly.
-    pub(super) fn execute_op_sync(&mut self, op: Op) -> Option<Result<(), VmError>> {
-        let result: Result<(), VmError> = match op {
-            Op::Constant => self.execute_constant(),
-            Op::Nil => {
-                self.execute_nil();
-                Ok(())
-            }
-            Op::True => {
-                self.execute_true();
-                Ok(())
-            }
-            Op::False => {
-                self.execute_false();
-                Ok(())
-            }
-            Op::GetVar => self.execute_get_var(),
-            Op::DefLet => self.execute_def_let(),
-            Op::DefVar => self.execute_def_var(),
-            Op::SetVar => self.execute_set_var(),
-            Op::GetLocalSlot => self.execute_get_local_slot(),
-            Op::DefLocalSlot => self.execute_def_local_slot(),
-            Op::SetLocalSlot => self.execute_set_local_slot(),
-            Op::PushScope => {
-                self.execute_push_scope();
-                Ok(())
-            }
-            Op::PopScope => {
-                self.execute_pop_scope();
-                Ok(())
-            }
-            Op::Add => self.execute_add(),
-            Op::Sub => self.execute_sub(),
-            Op::Mul => self.execute_mul(),
-            Op::Div => self.execute_div(),
-            Op::Mod => self.execute_mod(),
-            Op::Pow => self.execute_pow(),
-            Op::Negate => self.execute_negate(),
-            Op::Equal => self.execute_equal(),
-            Op::NotEqual => self.execute_not_equal(),
-            Op::Less => self.execute_less(),
-            Op::Greater => self.execute_greater(),
-            Op::LessEqual => self.execute_less_equal(),
-            Op::GreaterEqual => self.execute_greater_equal(),
-            Op::Not => self.execute_not(),
-            Op::Jump => {
-                self.execute_jump();
-                Ok(())
-            }
-            Op::JumpIfFalse => self.execute_jump_if_false(),
-            Op::JumpIfTrue => self.execute_jump_if_true(),
-            Op::Pop => self.execute_pop(),
-            Op::Return => return Some(Err(self.execute_return())),
-            Op::Closure => {
-                self.execute_closure();
-                Ok(())
-            }
-            Op::BuildList => {
-                self.execute_build_list();
-                Ok(())
-            }
-            Op::BuildDict => {
-                self.execute_build_dict();
-                Ok(())
-            }
-            Op::Subscript => self.execute_subscript(false),
-            Op::SubscriptOpt => self.execute_subscript(true),
-            Op::Slice => self.execute_slice(),
-            Op::GetProperty => self.execute_get_property(false),
-            Op::GetPropertyOpt => self.execute_get_property(true),
-            Op::SetProperty => self.execute_set_property(),
-            Op::SetSubscript => self.execute_set_subscript(),
-            Op::Concat => {
-                self.execute_concat();
-                Ok(())
-            }
-            Op::IterInit => self.execute_iter_init(),
-            // IterNext is a split opcode: the sync fast path handles
-            // Vec/Dict/Range/empty iterators inline; if it returns `None`
-            // we hand off to `execute_op_async` for Channel/Generator/
-            // Stream/VmIter without having touched `ip`.
-            Op::IterNext => return self.execute_iter_next_sync(),
-            // Call is split: the sync fast path handles non-generator
-            // user closures with no `@step` definition attached. Other
-            // callee variants (string, builtin ref, etc.) return `None`
-            // and fall through to `execute_call_async` without touching
-            // `ip`.
-            Op::Call => return self.execute_call_sync(),
-            // CallBuiltin is the opcode `f(x)` compiles to and the
-            // actual hot dispatch for user closures. The sync fast path
-            // peeks the name from the inline operand, skips
-            // runtime-construct names (`await`/`cancel`/...), generators,
-            // and `@step`-decorated functions, then pushes the closure
-            // frame inline. Builtins and the listed escape hatches fall
-            // through to `execute_call_builtin_async` with `ip` untouched.
-            Op::CallBuiltin => return self.execute_call_builtin_sync(),
-            // TailCall is split: the sync fast path handles the
-            // steady-state user-closure tail call inline (TCO frame
-            // reuse). Tracked-function frames/callees, generators, and
-            // string/builtin-ref callees return `None` and fall through
-            // to `execute_tail_call_async`.
-            Op::TailCall => return self.execute_tail_call_sync(),
-            // MethodCall is split: optional-nil receivers, inline-cache
-            // hits, and receiver methods that are known to be synchronous
-            // complete here. Callback-taking collection methods and host
-            // capability methods fall through with `ip` untouched.
-            Op::MethodCall => return self.execute_method_call_sync(false),
-            Op::MethodCallOpt => return self.execute_method_call_sync(true),
-            Op::Throw => self.execute_throw(),
-            Op::TryCatchSetup => {
-                self.execute_try_catch_setup();
-                Ok(())
-            }
-            Op::PopHandler => {
-                self.execute_pop_handler();
-                Ok(())
-            }
-            Op::Spawn => self.execute_spawn(),
-            Op::DeadlineSetup => self.execute_deadline_setup(),
-            Op::DeadlineEnd => {
-                self.execute_deadline_end();
-                Ok(())
-            }
-            Op::BuildEnum => self.execute_build_enum(),
-            Op::MatchEnum => self.execute_match_enum(),
-            Op::PopIterator => {
-                self.execute_pop_iterator();
-                Ok(())
-            }
-            Op::GetArgc => {
-                self.execute_get_argc();
-                Ok(())
-            }
-            Op::CheckType => self.execute_check_type(),
-            Op::TryUnwrap => self.execute_try_unwrap(),
-            Op::TryWrapOk => self.execute_try_wrap_ok(),
-            Op::Dup => self.execute_dup(),
-            Op::Swap => {
-                self.execute_swap();
-                Ok(())
-            }
-            Op::Contains => self.execute_contains(),
-            Op::AddInt => self.execute_add_int(),
-            Op::SubInt => self.execute_sub_int(),
-            Op::MulInt => self.execute_mul_int(),
-            Op::DivInt => self.execute_div_int(),
-            Op::ModInt => self.execute_mod_int(),
-            Op::AddFloat => self.execute_add_float(),
-            Op::SubFloat => self.execute_sub_float(),
-            Op::MulFloat => self.execute_mul_float(),
-            Op::DivFloat => self.execute_div_float(),
-            Op::ModFloat => self.execute_mod_float(),
-            Op::EqualInt => self.execute_equal_int(),
-            Op::NotEqualInt => self.execute_not_equal_int(),
-            Op::LessInt => self.execute_less_int(),
-            Op::GreaterInt => self.execute_greater_int(),
-            Op::LessEqualInt => self.execute_less_equal_int(),
-            Op::GreaterEqualInt => self.execute_greater_equal_int(),
-            Op::EqualFloat => self.execute_equal_float(),
-            Op::NotEqualFloat => self.execute_not_equal_float(),
-            Op::LessFloat => self.execute_less_float(),
-            Op::GreaterFloat => self.execute_greater_float(),
-            Op::LessEqualFloat => self.execute_less_equal_float(),
-            Op::GreaterEqualFloat => self.execute_greater_equal_float(),
-            Op::EqualBool => self.execute_equal_bool(),
-            Op::NotEqualBool => self.execute_not_equal_bool(),
-            Op::EqualString => self.execute_equal_string(),
-            Op::NotEqualString => self.execute_not_equal_string(),
-            // Async-dispatched opcodes: caller must fall through to
-            // `execute_op_async`. Keeping these in a single explicit arm
-            // keeps the sync/async classification visible alongside the
-            // sync dispatch table.
-            Op::CallBuiltinSpread
-            | Op::Pipe
-            | Op::Parallel
-            | Op::ParallelMap
-            | Op::ParallelMapStream
-            | Op::ParallelSettle
-            | Op::SyncMutexEnter
-            | Op::Import
-            | Op::SelectiveImport
-            | Op::CallSpread
-            | Op::MethodCallSpread
-            | Op::Yield => return None,
-        };
-        Some(result)
-    }
-
-    /// Execute a single async opcode. The caller must have already verified
-    /// that [`execute_op_sync`] returned `None` for this opcode; reaching the
-    /// catch-all is a coverage bug between the two dispatch tables.
-    pub(super) async fn execute_op_async(&mut self, op: Op) -> Result<(), VmError> {
-        match op {
-            Op::Call => self.execute_call_async().await,
-            Op::CallBuiltin => self.execute_call_builtin_async().await,
-            Op::CallBuiltinSpread => self.execute_call_builtin_spread().await,
-            Op::TailCall => self.execute_tail_call_async().await,
-            Op::MethodCall => self.execute_method_call(false).await,
-            Op::MethodCallOpt => self.execute_method_call(true).await,
-            Op::IterNext => self.execute_iter_next_async().await,
-            Op::Pipe => self.execute_pipe().await,
-            Op::Parallel => self.execute_parallel().await,
-            Op::ParallelMap => self.execute_parallel_map().await,
-            Op::ParallelMapStream => self.execute_parallel_map_stream().await,
-            Op::ParallelSettle => self.execute_parallel_settle().await,
-            Op::SyncMutexEnter => self.execute_sync_mutex_enter().await,
-            Op::Import => self.execute_import_op().await,
-            Op::SelectiveImport => self.execute_selective_import().await,
-            Op::CallSpread => self.execute_call_spread().await,
-            Op::MethodCallSpread => self.execute_method_call_spread().await,
-            Op::Yield => self.execute_yield().await,
-            sync_op => {
-                debug_assert!(
-                    false,
-                    "execute_op_async called with sync opcode {sync_op:?} — \
-                     dispatch tables in execute_op_sync / execute_op_async are out of sync"
-                );
-                Err(VmError::Runtime(format!(
-                    "internal VM dispatch error: {sync_op:?} is not an async opcode"
-                )))
-            }
-        }
-    }
-
     /// Execute a single opcode. Used by the scope-interrupt wrapper that
     /// drives cancellable / deadlined execution; the hot interpreter loop
     /// in `run_chunk_ref` bypasses this and calls `execute_op_sync` /

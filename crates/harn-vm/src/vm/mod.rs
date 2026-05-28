@@ -9,7 +9,7 @@ mod interrupts;
 pub mod iter;
 mod methods;
 mod modules;
-mod ops;
+pub(crate) mod ops;
 mod scope;
 mod state;
 

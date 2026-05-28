@@ -17,368 +17,14 @@ use crate::runtime_guards::RuntimeParamGuard;
 /// out of the addressable slot range.
 pub(crate) const NO_INLINE_CACHE_SLOT: u32 = u32::MAX;
 
-/// Bytecode opcodes for the Harn VM.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Op {
-    /// Push a constant from the constant pool onto the stack.
-    Constant, // arg: u16 constant index
-    /// Push nil onto the stack.
-    Nil,
-    /// Push true onto the stack.
-    True,
-    /// Push false onto the stack.
-    False,
-
-    // --- Variable operations ---
-    /// Get a variable by name (from constant pool).
-    GetVar, // arg: u16 constant index (name)
-    /// Define a new immutable variable. Pops value from stack.
-    DefLet, // arg: u16 constant index (name)
-    /// Define a new mutable variable. Pops value from stack.
-    DefVar, // arg: u16 constant index (name)
-    /// Assign to an existing mutable variable. Pops value from stack.
-    SetVar, // arg: u16 constant index (name)
-    /// Push a new lexical scope onto the environment stack.
-    PushScope,
-    /// Pop the current lexical scope from the environment stack.
-    PopScope,
-
-    // --- Arithmetic ---
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    Pow,
-    Negate,
-
-    // --- Comparison ---
-    Equal,
-    NotEqual,
-    Less,
-    Greater,
-    LessEqual,
-    GreaterEqual,
-
-    // --- Logical ---
-    Not,
-
-    // --- Control flow ---
-    /// Jump unconditionally. arg: u16 offset.
-    Jump,
-    /// Jump if top of stack is falsy. Does not pop. arg: u16 offset.
-    JumpIfFalse,
-    /// Jump if top of stack is truthy. Does not pop. arg: u16 offset.
-    JumpIfTrue,
-    /// Pop top of stack (discard).
-    Pop,
-
-    // --- Functions ---
-    /// Call a function/builtin. arg: u8 = arg count. Name is on stack below args.
-    Call,
-    /// Tail call: like Call, but replaces the current frame instead of pushing
-    /// a new one. Used for `return f(x)` to enable tail call optimization.
-    /// For builtins, behaves like a regular Call (no frame to replace).
-    TailCall,
-    /// Return from current function. Pops return value.
-    Return,
-    /// Create a closure. arg: u16 = chunk index in function table.
-    Closure,
-
-    // --- Collections ---
-    /// Build a list. arg: u16 = element count. Elements are on stack.
-    BuildList,
-    /// Build a dict. arg: u16 = entry count. Key-value pairs on stack.
-    BuildDict,
-    /// Subscript access: stack has [object, index]. Pushes result.
-    Subscript,
-    /// Optional subscript (`obj?[index]`). Like `Subscript` but pushes nil
-    /// instead of indexing when the object is nil.
-    SubscriptOpt,
-    /// Slice access: stack has [object, start_or_nil, end_or_nil]. Pushes sublist/substring.
-    Slice,
-
-    // --- Object operations ---
-    /// Property access. arg: u16 = constant index (property name).
-    GetProperty,
-    /// Optional property access (?.). Like GetProperty but returns nil
-    /// instead of erroring when the object is nil. arg: u16 = constant index.
-    GetPropertyOpt,
-    /// Property assignment. arg: u16 = constant index (property name).
-    /// Stack: [value] → assigns to the named variable's property.
-    SetProperty,
-    /// Subscript assignment. arg: u16 = constant index (variable name).
-    /// Stack: [index, value] → assigns to variable[index] = value.
-    SetSubscript,
-    /// Method call. arg1: u16 = constant index (method name), arg2: u8 = arg count.
-    MethodCall,
-    /// Optional method call (?.). Like MethodCall but returns nil if the
-    /// receiver is nil instead of dispatching. arg1: u16, arg2: u8.
-    MethodCallOpt,
-
-    // --- String ---
-    /// String concatenation of N parts. arg: u16 = part count.
-    Concat,
-
-    // --- Iteration ---
-    /// Set up a for-in loop. Expects iterable on stack. Pushes iterator state.
-    IterInit,
-    /// Advance iterator. If exhausted, jumps. arg: u16 = jump offset.
-    /// Pushes next value and the variable name is set via DefVar before the loop.
-    IterNext,
-
-    // --- Pipe ---
-    /// Pipe: pops [value, callable], invokes callable(value).
-    Pipe,
-
-    // --- Error handling ---
-    /// Pop value, raise as error.
-    Throw,
-    /// Push exception handler. arg: u16 = offset to catch handler.
-    TryCatchSetup,
-    /// Remove top exception handler (end of try body).
-    PopHandler,
-
-    // --- Concurrency ---
-    /// Execute closure N times sequentially, push results as list.
-    /// Stack: count, closure → result_list
-    Parallel,
-    /// Execute closure for each item in list, push results as list.
-    /// Stack: list, closure → result_list
-    ParallelMap,
-    /// Execute closure for each item in list, push a stream that emits in completion order.
-    /// Stack: list, closure → stream
-    ParallelMapStream,
-    /// Like ParallelMap but wraps each result in Result.Ok/Err, never fails.
-    /// Stack: list, closure → {results: [Result], succeeded: int, failed: int}
-    ParallelSettle,
-    /// Store closure for deferred execution, push TaskHandle.
-    /// Stack: closure → TaskHandle
-    Spawn,
-    /// Acquire a process-local mutex for the current lexical scope.
-    /// arg: u16 constant index (key string).
-    SyncMutexEnter,
-
-    // --- Imports ---
-    /// Import a file. arg: u16 = constant index (path string).
-    Import,
-    /// Selective import. arg1: u16 = path string, arg2: u16 = names list constant.
-    SelectiveImport,
-
-    // --- Deadline ---
-    /// Pop duration value, push deadline onto internal deadline stack.
-    DeadlineSetup,
-    /// Pop deadline from internal deadline stack.
-    DeadlineEnd,
-
-    // --- Enum ---
-    /// Build an enum variant value.
-    /// arg1: u16 = constant index (enum name), arg2: u16 = constant index (variant name),
-    /// arg3: u16 = field count. Fields are on stack.
-    BuildEnum,
-
-    // --- Match ---
-    /// Match an enum pattern. Checks enum_name + variant on the top of stack (dup'd match value).
-    /// arg1: u16 = constant index (enum name), arg2: u16 = constant index (variant name).
-    /// If match succeeds, pushes true; else pushes false.
-    MatchEnum,
-
-    // --- Loop control ---
-    /// Pop the top iterator from the iterator stack (cleanup on break from for-in).
-    PopIterator,
-
-    // --- Defaults ---
-    /// Push the number of arguments passed to the current function call.
-    GetArgc,
-
-    // --- Type checking ---
-    /// Runtime type check on a variable.
-    /// arg1: u16 = constant index (variable name),
-    /// arg2: u16 = constant index (expected type name).
-    /// Throws a TypeError if the variable's type doesn't match.
-    CheckType,
-
-    // --- Result try operator ---
-    /// Try-unwrap: if top is Result.Ok(v), replace with v. If Result.Err(e), return it.
-    TryUnwrap,
-    /// Wrap top of stack in Result.Ok unless it is already a Result.
-    TryWrapOk,
-
-    // --- Spread call ---
-    /// Call with spread arguments. Stack: [callee, args_list] -> result.
-    CallSpread,
-    /// Direct builtin call. Followed by u64 builtin ID, u16 name constant, u8 arg count.
-    /// Runtime still checks closure shadowing before using the ID.
-    CallBuiltin,
-    /// Direct builtin spread call. Followed by u64 builtin ID and u16 name constant.
-    /// Stack: [args_list] -> result.
-    CallBuiltinSpread,
-    /// Method call with spread arguments. Stack: [object, args_list] -> result.
-    /// Followed by 2 bytes for method name constant index.
-    MethodCallSpread,
-
-    // --- Misc ---
-    /// Duplicate top of stack.
-    Dup,
-    /// Swap top two stack values.
-    Swap,
-    /// Membership test: stack has [item, collection]. Pushes bool.
-    /// Works for lists (item in list), dicts (key in dict), strings (substr in string), and sets.
-    Contains,
-
-    // --- Typed arithmetic/comparison fast paths ---
-    AddInt,
-    SubInt,
-    MulInt,
-    DivInt,
-    ModInt,
-    AddFloat,
-    SubFloat,
-    MulFloat,
-    DivFloat,
-    ModFloat,
-    EqualInt,
-    NotEqualInt,
-    LessInt,
-    GreaterInt,
-    LessEqualInt,
-    GreaterEqualInt,
-    EqualFloat,
-    NotEqualFloat,
-    LessFloat,
-    GreaterFloat,
-    LessEqualFloat,
-    GreaterEqualFloat,
-    EqualBool,
-    NotEqualBool,
-    EqualString,
-    NotEqualString,
-
-    /// Yield a value from a generator. Pops value, sends through channel, suspends.
-    Yield,
-
-    // --- Slot-indexed locals ---
-    /// Get a frame-local slot. arg: u16 slot index.
-    GetLocalSlot,
-    /// Define or initialize a frame-local slot. Pops value from stack.
-    DefLocalSlot,
-    /// Assign an existing frame-local slot. Pops value from stack.
-    SetLocalSlot,
-}
-
-impl Op {
-    pub(crate) const ALL: &'static [Self] = &[
-        Op::Constant,
-        Op::Nil,
-        Op::True,
-        Op::False,
-        Op::GetVar,
-        Op::DefLet,
-        Op::DefVar,
-        Op::SetVar,
-        Op::PushScope,
-        Op::PopScope,
-        Op::Add,
-        Op::Sub,
-        Op::Mul,
-        Op::Div,
-        Op::Mod,
-        Op::Pow,
-        Op::Negate,
-        Op::Equal,
-        Op::NotEqual,
-        Op::Less,
-        Op::Greater,
-        Op::LessEqual,
-        Op::GreaterEqual,
-        Op::Not,
-        Op::Jump,
-        Op::JumpIfFalse,
-        Op::JumpIfTrue,
-        Op::Pop,
-        Op::Call,
-        Op::TailCall,
-        Op::Return,
-        Op::Closure,
-        Op::BuildList,
-        Op::BuildDict,
-        Op::Subscript,
-        Op::SubscriptOpt,
-        Op::Slice,
-        Op::GetProperty,
-        Op::GetPropertyOpt,
-        Op::SetProperty,
-        Op::SetSubscript,
-        Op::MethodCall,
-        Op::MethodCallOpt,
-        Op::Concat,
-        Op::IterInit,
-        Op::IterNext,
-        Op::Pipe,
-        Op::Throw,
-        Op::TryCatchSetup,
-        Op::PopHandler,
-        Op::Parallel,
-        Op::ParallelMap,
-        Op::ParallelMapStream,
-        Op::ParallelSettle,
-        Op::Spawn,
-        Op::SyncMutexEnter,
-        Op::Import,
-        Op::SelectiveImport,
-        Op::DeadlineSetup,
-        Op::DeadlineEnd,
-        Op::BuildEnum,
-        Op::MatchEnum,
-        Op::PopIterator,
-        Op::GetArgc,
-        Op::CheckType,
-        Op::TryUnwrap,
-        Op::TryWrapOk,
-        Op::CallSpread,
-        Op::CallBuiltin,
-        Op::CallBuiltinSpread,
-        Op::MethodCallSpread,
-        Op::Dup,
-        Op::Swap,
-        Op::Contains,
-        Op::AddInt,
-        Op::SubInt,
-        Op::MulInt,
-        Op::DivInt,
-        Op::ModInt,
-        Op::AddFloat,
-        Op::SubFloat,
-        Op::MulFloat,
-        Op::DivFloat,
-        Op::ModFloat,
-        Op::EqualInt,
-        Op::NotEqualInt,
-        Op::LessInt,
-        Op::GreaterInt,
-        Op::LessEqualInt,
-        Op::GreaterEqualInt,
-        Op::EqualFloat,
-        Op::NotEqualFloat,
-        Op::LessFloat,
-        Op::GreaterFloat,
-        Op::LessEqualFloat,
-        Op::GreaterEqualFloat,
-        Op::EqualBool,
-        Op::NotEqualBool,
-        Op::EqualString,
-        Op::NotEqualString,
-        Op::Yield,
-        Op::GetLocalSlot,
-        Op::DefLocalSlot,
-        Op::SetLocalSlot,
-    ];
-
-    pub(crate) fn from_byte(byte: u8) -> Option<Self> {
-        Self::ALL.get(byte as usize).copied()
-    }
-}
+/// Bytecode opcodes for the Harn VM. The enum, the byte-to-variant
+/// mapping, the sync and async dispatch tables, the disassembly
+/// renderer, and the per-opcode classification helpers are all emitted
+/// by `harn_opcode_macros::define_opcodes!` in [`crate::vm::ops`].
+/// Re-exported here so callers that import `crate::chunk::Op` need no
+/// awareness of the macro layout.
+pub use crate::vm::ops::Op;
+pub(crate) use crate::vm::ops::{is_adaptive_binary_op, op_reads_outer_name};
 
 /// A constant value in the constant pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -877,34 +523,6 @@ impl Chunk {
         }
     }
 
-    /// Opcodes that perform a runtime env-based name lookup or
-    /// assignment. Emitting any of these marks the chunk as needing the
-    /// caller-scope late-bind walk in [`Vm::closure_call_env`].
-    ///
-    /// `Op::Call` / `Op::TailCall` / `Op::Pipe` make the list because
-    /// the compiler emits `Op::Constant("name") + Op::TailCall` for
-    /// `return fn_name(...)` (see `compile_return` in
-    /// `compiler/statements.rs`) — the callee is materialized on the
-    /// stack as a String and resolved through
-    /// [`Vm::resolve_named_closure`] at dispatch time, which is exactly
-    /// the path the walk feeds. Excluding them would silently break
-    /// mutual recursion across a tail-call boundary.
-    #[inline]
-    pub(crate) fn op_reads_outer_name(op: Op) -> bool {
-        matches!(
-            op,
-            Op::GetVar
-                | Op::SetVar
-                | Op::CallBuiltin
-                | Op::CallBuiltinSpread
-                | Op::CallSpread
-                | Op::Call
-                | Op::TailCall
-                | Op::Pipe
-                | Op::CheckType
-        )
-    }
-
     /// Set the current column for subsequent emit calls.
     pub fn set_column(&mut self, col: u32) {
         self.current_col = col;
@@ -932,7 +550,7 @@ impl Chunk {
         if is_adaptive_binary_op(op) {
             self.register_inline_cache(op_offset);
         }
-        if Self::op_reads_outer_name(op) {
+        if op_reads_outer_name(op) {
             self.references_outer_names = true;
         }
     }
@@ -956,7 +574,7 @@ impl Chunk {
         ) {
             self.register_inline_cache(op_offset);
         }
-        if Self::op_reads_outer_name(op) {
+        if op_reads_outer_name(op) {
             self.references_outer_names = true;
         }
     }
@@ -974,7 +592,7 @@ impl Chunk {
         if matches!(op, Op::Call) {
             self.register_inline_cache(op_offset);
         }
-        if Self::op_reads_outer_name(op) {
+        if op_reads_outer_name(op) {
             self.references_outer_names = true;
         }
     }
@@ -1344,367 +962,160 @@ impl Chunk {
         ])
     }
 
-    /// Disassemble for debugging.
+    /// Disassemble the chunk for debugging. The per-opcode rendering is
+    /// macro-generated alongside the dispatch tables in
+    /// `crate::vm::ops` — see [`Self::disassemble_op`].
     pub fn disassemble(&self, name: &str) -> String {
         let mut out = format!("== {name} ==\n");
         let mut ip = 0;
         while ip < self.code.len() {
-            let op = self.code[ip];
+            let op_byte = self.code[ip];
             let line = self.lines.get(ip).copied().unwrap_or(0);
             out.push_str(&format!("{ip:04} [{line:>4}] "));
             ip += 1;
 
-            match op {
-                x if x == Op::Constant as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    let val = &self.constants[idx as usize];
-                    out.push_str(&format!("CONSTANT {idx:>4} ({val})\n"));
-                }
-                x if x == Op::Nil as u8 => out.push_str("NIL\n"),
-                x if x == Op::True as u8 => out.push_str("TRUE\n"),
-                x if x == Op::False as u8 => out.push_str("FALSE\n"),
-                x if x == Op::GetVar as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "GET_VAR {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::DefLet as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "DEF_LET {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::DefVar as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "DEF_VAR {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::SetVar as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "SET_VAR {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::GetLocalSlot as u8 => {
-                    let slot = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("GET_LOCAL_SLOT {slot:>4}"));
-                    if let Some(info) = self.local_slots.get(slot as usize) {
-                        out.push_str(&format!(" ({})", info.name));
-                    }
-                    out.push('\n');
-                }
-                x if x == Op::DefLocalSlot as u8 => {
-                    let slot = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("DEF_LOCAL_SLOT {slot:>4}"));
-                    if let Some(info) = self.local_slots.get(slot as usize) {
-                        out.push_str(&format!(" ({})", info.name));
-                    }
-                    out.push('\n');
-                }
-                x if x == Op::SetLocalSlot as u8 => {
-                    let slot = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("SET_LOCAL_SLOT {slot:>4}"));
-                    if let Some(info) = self.local_slots.get(slot as usize) {
-                        out.push_str(&format!(" ({})", info.name));
-                    }
-                    out.push('\n');
-                }
-                x if x == Op::PushScope as u8 => out.push_str("PUSH_SCOPE\n"),
-                x if x == Op::PopScope as u8 => out.push_str("POP_SCOPE\n"),
-                x if x == Op::Add as u8 => out.push_str("ADD\n"),
-                x if x == Op::Sub as u8 => out.push_str("SUB\n"),
-                x if x == Op::Mul as u8 => out.push_str("MUL\n"),
-                x if x == Op::Div as u8 => out.push_str("DIV\n"),
-                x if x == Op::Mod as u8 => out.push_str("MOD\n"),
-                x if x == Op::Pow as u8 => out.push_str("POW\n"),
-                x if x == Op::Negate as u8 => out.push_str("NEGATE\n"),
-                x if x == Op::Equal as u8 => out.push_str("EQUAL\n"),
-                x if x == Op::NotEqual as u8 => out.push_str("NOT_EQUAL\n"),
-                x if x == Op::Less as u8 => out.push_str("LESS\n"),
-                x if x == Op::Greater as u8 => out.push_str("GREATER\n"),
-                x if x == Op::LessEqual as u8 => out.push_str("LESS_EQUAL\n"),
-                x if x == Op::GreaterEqual as u8 => out.push_str("GREATER_EQUAL\n"),
-                x if x == Op::Contains as u8 => out.push_str("CONTAINS\n"),
-                x if x == Op::Not as u8 => out.push_str("NOT\n"),
-                x if x == Op::Jump as u8 => {
-                    let target = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("JUMP {target:>4}\n"));
-                }
-                x if x == Op::JumpIfFalse as u8 => {
-                    let target = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("JUMP_IF_FALSE {target:>4}\n"));
-                }
-                x if x == Op::JumpIfTrue as u8 => {
-                    let target = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("JUMP_IF_TRUE {target:>4}\n"));
-                }
-                x if x == Op::Pop as u8 => out.push_str("POP\n"),
-                x if x == Op::Call as u8 => {
-                    let argc = self.code[ip];
-                    ip += 1;
-                    out.push_str(&format!("CALL {argc:>4}\n"));
-                }
-                x if x == Op::TailCall as u8 => {
-                    let argc = self.code[ip];
-                    ip += 1;
-                    out.push_str(&format!("TAIL_CALL {argc:>4}\n"));
-                }
-                x if x == Op::Return as u8 => out.push_str("RETURN\n"),
-                x if x == Op::Closure as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("CLOSURE {idx:>4}\n"));
-                }
-                x if x == Op::BuildList as u8 => {
-                    let count = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("BUILD_LIST {count:>4}\n"));
-                }
-                x if x == Op::BuildDict as u8 => {
-                    let count = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("BUILD_DICT {count:>4}\n"));
-                }
-                x if x == Op::Subscript as u8 => out.push_str("SUBSCRIPT\n"),
-                x if x == Op::SubscriptOpt as u8 => out.push_str("SUBSCRIPT_OPT\n"),
-                x if x == Op::Slice as u8 => out.push_str("SLICE\n"),
-                x if x == Op::GetProperty as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "GET_PROPERTY {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::GetPropertyOpt as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "GET_PROPERTY_OPT {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::SetProperty as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "SET_PROPERTY {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::SetSubscript as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "SET_SUBSCRIPT {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::MethodCall as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    let argc = self.code[ip];
-                    ip += 1;
-                    out.push_str(&format!(
-                        "METHOD_CALL {:>4} ({}) argc={}\n",
-                        idx, self.constants[idx as usize], argc
-                    ));
-                }
-                x if x == Op::MethodCallOpt as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    let argc = self.code[ip];
-                    ip += 1;
-                    out.push_str(&format!(
-                        "METHOD_CALL_OPT {:>4} ({}) argc={}\n",
-                        idx, self.constants[idx as usize], argc
-                    ));
-                }
-                x if x == Op::Concat as u8 => {
-                    let count = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("CONCAT {count:>4}\n"));
-                }
-                x if x == Op::IterInit as u8 => out.push_str("ITER_INIT\n"),
-                x if x == Op::IterNext as u8 => {
-                    let target = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("ITER_NEXT {target:>4}\n"));
-                }
-                x if x == Op::Throw as u8 => out.push_str("THROW\n"),
-                x if x == Op::TryCatchSetup as u8 => {
-                    let target = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!("TRY_CATCH_SETUP {target:>4}\n"));
-                }
-                x if x == Op::PopHandler as u8 => out.push_str("POP_HANDLER\n"),
-                x if x == Op::Pipe as u8 => out.push_str("PIPE\n"),
-                x if x == Op::Parallel as u8 => out.push_str("PARALLEL\n"),
-                x if x == Op::ParallelMap as u8 => out.push_str("PARALLEL_MAP\n"),
-                x if x == Op::ParallelMapStream as u8 => out.push_str("PARALLEL_MAP_STREAM\n"),
-                x if x == Op::ParallelSettle as u8 => out.push_str("PARALLEL_SETTLE\n"),
-                x if x == Op::Spawn as u8 => out.push_str("SPAWN\n"),
-                x if x == Op::Import as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "IMPORT {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::SelectiveImport as u8 => {
-                    let path_idx = self.read_u16(ip);
-                    ip += 2;
-                    let names_idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "SELECTIVE_IMPORT {:>4} ({}) names: {:>4} ({})\n",
-                        path_idx,
-                        self.constants[path_idx as usize],
-                        names_idx,
-                        self.constants[names_idx as usize]
-                    ));
-                }
-                x if x == Op::SyncMutexEnter as u8 => {
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "SYNC_MUTEX_ENTER {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::DeadlineSetup as u8 => out.push_str("DEADLINE_SETUP\n"),
-                x if x == Op::DeadlineEnd as u8 => out.push_str("DEADLINE_END\n"),
-                x if x == Op::BuildEnum as u8 => {
-                    let enum_idx = self.read_u16(ip);
-                    ip += 2;
-                    let variant_idx = self.read_u16(ip);
-                    ip += 2;
-                    let field_count = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "BUILD_ENUM {:>4} ({}) {:>4} ({}) fields={}\n",
-                        enum_idx,
-                        self.constants[enum_idx as usize],
-                        variant_idx,
-                        self.constants[variant_idx as usize],
-                        field_count
-                    ));
-                }
-                x if x == Op::MatchEnum as u8 => {
-                    let enum_idx = self.read_u16(ip);
-                    ip += 2;
-                    let variant_idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "MATCH_ENUM {:>4} ({}) {:>4} ({})\n",
-                        enum_idx,
-                        self.constants[enum_idx as usize],
-                        variant_idx,
-                        self.constants[variant_idx as usize]
-                    ));
-                }
-                x if x == Op::PopIterator as u8 => out.push_str("POP_ITERATOR\n"),
-                x if x == Op::TryUnwrap as u8 => out.push_str("TRY_UNWRAP\n"),
-                x if x == Op::TryWrapOk as u8 => out.push_str("TRY_WRAP_OK\n"),
-                x if x == Op::CallSpread as u8 => out.push_str("CALL_SPREAD\n"),
-                x if x == Op::CallBuiltin as u8 => {
-                    let id = self.read_u64(ip);
-                    ip += 8;
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    let argc = self.code[ip];
-                    ip += 1;
-                    out.push_str(&format!(
-                        "CALL_BUILTIN {id:#018x} {:>4} ({}) argc={}\n",
-                        idx, self.constants[idx as usize], argc
-                    ));
-                }
-                x if x == Op::CallBuiltinSpread as u8 => {
-                    let id = self.read_u64(ip);
-                    ip += 8;
-                    let idx = self.read_u16(ip);
-                    ip += 2;
-                    out.push_str(&format!(
-                        "CALL_BUILTIN_SPREAD {id:#018x} {:>4} ({})\n",
-                        idx, self.constants[idx as usize]
-                    ));
-                }
-                x if x == Op::MethodCallSpread as u8 => {
-                    let idx = self.read_u16(ip + 1);
-                    ip += 2;
-                    out.push_str(&format!("METHOD_CALL_SPREAD {idx}\n"));
-                }
-                x if x == Op::Dup as u8 => out.push_str("DUP\n"),
-                x if x == Op::Swap as u8 => out.push_str("SWAP\n"),
-                x if x == Op::AddInt as u8 => out.push_str("ADD_INT\n"),
-                x if x == Op::SubInt as u8 => out.push_str("SUB_INT\n"),
-                x if x == Op::MulInt as u8 => out.push_str("MUL_INT\n"),
-                x if x == Op::DivInt as u8 => out.push_str("DIV_INT\n"),
-                x if x == Op::ModInt as u8 => out.push_str("MOD_INT\n"),
-                x if x == Op::AddFloat as u8 => out.push_str("ADD_FLOAT\n"),
-                x if x == Op::SubFloat as u8 => out.push_str("SUB_FLOAT\n"),
-                x if x == Op::MulFloat as u8 => out.push_str("MUL_FLOAT\n"),
-                x if x == Op::DivFloat as u8 => out.push_str("DIV_FLOAT\n"),
-                x if x == Op::ModFloat as u8 => out.push_str("MOD_FLOAT\n"),
-                x if x == Op::EqualInt as u8 => out.push_str("EQUAL_INT\n"),
-                x if x == Op::NotEqualInt as u8 => out.push_str("NOT_EQUAL_INT\n"),
-                x if x == Op::LessInt as u8 => out.push_str("LESS_INT\n"),
-                x if x == Op::GreaterInt as u8 => out.push_str("GREATER_INT\n"),
-                x if x == Op::LessEqualInt as u8 => out.push_str("LESS_EQUAL_INT\n"),
-                x if x == Op::GreaterEqualInt as u8 => out.push_str("GREATER_EQUAL_INT\n"),
-                x if x == Op::EqualFloat as u8 => out.push_str("EQUAL_FLOAT\n"),
-                x if x == Op::NotEqualFloat as u8 => out.push_str("NOT_EQUAL_FLOAT\n"),
-                x if x == Op::LessFloat as u8 => out.push_str("LESS_FLOAT\n"),
-                x if x == Op::GreaterFloat as u8 => out.push_str("GREATER_FLOAT\n"),
-                x if x == Op::LessEqualFloat as u8 => out.push_str("LESS_EQUAL_FLOAT\n"),
-                x if x == Op::GreaterEqualFloat as u8 => out.push_str("GREATER_EQUAL_FLOAT\n"),
-                x if x == Op::EqualBool as u8 => out.push_str("EQUAL_BOOL\n"),
-                x if x == Op::NotEqualBool as u8 => out.push_str("NOT_EQUAL_BOOL\n"),
-                x if x == Op::EqualString as u8 => out.push_str("EQUAL_STRING\n"),
-                x if x == Op::NotEqualString as u8 => out.push_str("NOT_EQUAL_STRING\n"),
-                x if x == Op::Yield as u8 => out.push_str("YIELD\n"),
-                _ => {
-                    out.push_str(&format!("UNKNOWN(0x{op:02x})\n"));
-                }
+            if let Some(op) = Op::from_byte(op_byte) {
+                self.disassemble_op(op, &mut ip, &mut out);
+            } else {
+                out.push_str(&format!("UNKNOWN(0x{op_byte:02x})\n"));
             }
         }
         out
     }
 }
 
-fn is_adaptive_binary_op(op: Op) -> bool {
-    matches!(
-        op,
-        Op::Add
-            | Op::Sub
-            | Op::Mul
-            | Op::Div
-            | Op::Mod
-            | Op::Equal
-            | Op::NotEqual
-            | Op::Less
-            | Op::Greater
-            | Op::LessEqual
-            | Op::GreaterEqual
+/// Disassembly helpers consumed by the macro-generated
+/// [`Chunk::disassemble_op`]. Each helper takes the current code position
+/// (already advanced past the opcode byte), advances it over the operand
+/// bytes the opcode carries, and renders one human-readable line without
+/// a trailing newline (the dispatcher appends it).
+///
+/// Defining one helper per operand layout — and not one per opcode —
+/// keeps adding an opcode a one-line edit in the `define_opcodes!` table
+/// rather than a paired edit here. New layouts live with the helpers;
+/// new opcodes live with the dispatch.
+pub(crate) fn disasm_bare(_chunk: &Chunk, _ip: &mut usize, label: &str) -> String {
+    label.to_string()
+}
+
+pub(crate) fn disasm_u8(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let arg = chunk.code[*ip];
+    *ip += 1;
+    format!("{label} {arg:>4}")
+}
+
+pub(crate) fn disasm_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let arg = chunk.read_u16(*ip);
+    *ip += 2;
+    format!("{label} {arg:>4}")
+}
+
+pub(crate) fn disasm_const_pool_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let idx = chunk.read_u16(*ip);
+    *ip += 2;
+    format!("{label} {idx:>4} ({})", chunk.constants[idx as usize])
+}
+
+pub(crate) fn disasm_local_slot_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let slot = chunk.read_u16(*ip);
+    *ip += 2;
+    let mut out = format!("{label} {slot:>4}");
+    if let Some(info) = chunk.local_slots.get(slot as usize) {
+        out.push_str(&format!(" ({})", info.name));
+    }
+    out
+}
+
+pub(crate) fn disasm_method_call(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let argc = chunk.code[*ip];
+    *ip += 1;
+    format!(
+        "{label} {idx:>4} ({}) argc={argc}",
+        chunk.constants[idx as usize]
     )
+}
+
+pub(crate) fn disasm_match_enum(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let enum_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let var_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    format!(
+        "{label} {enum_idx:>4} ({}) {var_idx:>4} ({})",
+        chunk.constants[enum_idx as usize], chunk.constants[var_idx as usize],
+    )
+}
+
+pub(crate) fn disasm_build_enum(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let enum_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let var_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let field_count = chunk.read_u16(*ip);
+    *ip += 2;
+    format!(
+        "{label} {enum_idx:>4} ({}) {var_idx:>4} ({}) fields={field_count}",
+        chunk.constants[enum_idx as usize], chunk.constants[var_idx as usize],
+    )
+}
+
+pub(crate) fn disasm_selective_import(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let path_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let names_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    format!(
+        "{label} {path_idx:>4} ({}) names: {names_idx:>4} ({})",
+        chunk.constants[path_idx as usize], chunk.constants[names_idx as usize],
+    )
+}
+
+pub(crate) fn disasm_check_type(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let var_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let type_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    format!(
+        "{label} {var_idx:>4} ({}) -> {type_idx:>4} ({})",
+        chunk.constants[var_idx as usize], chunk.constants[type_idx as usize],
+    )
+}
+
+pub(crate) fn disasm_call_builtin(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let id = chunk.read_u64(*ip);
+    *ip += 8;
+    let idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let argc = chunk.code[*ip];
+    *ip += 1;
+    format!(
+        "{label} {id:#018x} {idx:>4} ({}) argc={argc}",
+        chunk.constants[idx as usize],
+    )
+}
+
+pub(crate) fn disasm_call_builtin_spread(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let id = chunk.read_u64(*ip);
+    *ip += 8;
+    let idx = chunk.read_u16(*ip);
+    *ip += 2;
+    format!(
+        "{label} {id:#018x} {idx:>4} ({})",
+        chunk.constants[idx as usize],
+    )
+}
+
+pub(crate) fn disasm_method_call_spread(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    // emit_u16(Op::MethodCallSpread, name_idx, ...) writes opcode + 2
+    // bytes of u16 name_idx, so the operand is read at *ip with the
+    // usual `read_u16`. The previous hand-written disasm read at
+    // `ip + 1`, which displayed the wrong constant index — silently
+    // corrupting any disassembly that hit a `MethodCallSpread` opcode.
+    let idx = chunk.read_u16(*ip);
+    *ip += 2;
+    format!("{label} {idx:>4} ({})", chunk.constants[idx as usize])
 }
 
 impl Default for Chunk {
@@ -1730,6 +1141,38 @@ mod tests {
             assert_eq!(Op::from_byte(byte as u8), Some(op));
         }
         assert_eq!(Op::from_byte(Op::ALL.len() as u8), None);
+        assert_eq!(Op::COUNT, Op::ALL.len());
+    }
+
+    #[test]
+    fn disassemble_covers_every_opcode_variant() {
+        // The macro-generated `disassemble_op` match is exhaustive on
+        // `Op`, so this is a compile-time guarantee. The runtime check
+        // pins that no helper falls through to `UNKNOWN(...)` for a
+        // valid opcode byte — catching any future macro refactor that
+        // silently drops a helper arm. Each opcode is exercised in
+        // isolation against a hand-built chunk so the test logic does
+        // not depend on operand sizes (and so a single short opcode
+        // does not bleed into reading trailing padding as a follow-on
+        // opcode in the chunk-level loop).
+        for op in Op::ALL.iter().copied() {
+            let mut chunk = Chunk::new();
+            chunk.add_constant(super::Constant::String("__probe__".to_string()));
+            // Pad to the worst-case operand width (CallBuiltin: u64 +
+            // u16 + u8 = 11 bytes) so any helper has well-formed bytes
+            // to consume regardless of its layout.
+            for _ in 0..16 {
+                chunk.code.push(0);
+            }
+            let mut ip: usize = 0;
+            let mut out = String::new();
+            chunk.disassemble_op(op, &mut ip, &mut out);
+            assert!(
+                !out.contains("UNKNOWN"),
+                "disasm emitted UNKNOWN for {op:?}: {out}",
+            );
+            assert!(!out.is_empty(), "disasm produced no output for {op:?}");
+        }
     }
 
     // --- references_outer_names tracking ---

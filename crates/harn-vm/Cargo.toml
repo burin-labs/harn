@@ -31,6 +31,7 @@ testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "0.8" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "0.8" }
 harn-builtin-macros = { path = "../harn-builtin-macros", version = "0.8" }
+harn-opcode-macros = { path = "../harn-opcode-macros", version = "0.8" }
 linkme = "0.3"
 harn-clock = { path = "../harn-clock", version = "0.8" }
 harn-ir = { path = "../harn-ir", version = "0.8" }
