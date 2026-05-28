@@ -12,6 +12,7 @@ async-trait = "0.1"
 axum = { version = "0.8", features = ["multipart", "ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 base64 = "0.22"
+bytes = "1"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 futures = "0.3"
 globset = "0.4"
