@@ -125,7 +125,7 @@ async fn http_request(request: Request<Body>) -> Response {
 }
 
 #[tokio::test]
-async fn ws_echo_roundtrip_with_subprotocol_negotiation() {
+async fn ws_echo_roundtrip() {
     let addr = spawn_server().await;
     let url = format!("ws://{addr}/v1/ws");
     let (mut socket, _response) = tokio_tungstenite::connect_async(url).await.unwrap();
