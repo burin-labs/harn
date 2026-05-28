@@ -15,9 +15,9 @@ use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, S
 use crate::orchestration::{
     set_singleton_pre_tool_hook, PreToolAction, PreToolHookFn, ReminderSpec,
 };
-use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity};
+use crate::vm::Vm;
 use crate::workspace_anchor::MountMode;
 
 const DEFAULT_ARG_KEYS: &[&str] = &[
@@ -36,39 +36,28 @@ const DEFAULT_ARG_KEYS: &[&str] = &[
 pub const PATH_SCOPE_VIOLATION_PREFIX: &str = "[path_scope_violation] ";
 
 pub fn register_path_scope_guard_builtins(vm: &mut Vm) {
-    register_builtin_group(vm, BUILTINS);
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
-const BUILTINS: BuiltinGroup<'static> = BuiltinGroup::new()
-    .category("agent.path_scope_guard")
-    .sync(&[
-        SyncBuiltin::new(
-            "register_path_scope_guard",
-            register_path_scope_guard_builtin,
-        )
-        .signature("register_path_scope_guard(opts?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc(
-            "Install a PreToolUse hook that denies (or emits a `<scope-alert>` \
-             reminder for) tool calls whose path-shaped args point outside the \
-             session's workspace anchor (#2221). `opts` may set `arg_keys` \
-             (default: path/destination/source/file/filepath/file_path/target), \
-             `on_violation` (\"deny\" or \"reminder\"; default \"deny\"), and \
-             `mount_modes` (which mounted-root modes count as in-scope; default \
-             the session's writable mounts: extend + sandboxed). Returns nil. \
-             Pairs with the `<scope-alert>` reminder body for the model-facing \
-             handoff hint (#2222).",
-        ),
-        SyncBuiltin::new("clear_path_scope_guard", clear_path_scope_guard_builtin)
-            .signature("clear_path_scope_guard()")
-            .arity(VmBuiltinArity::Exact(0))
-            .doc("Remove the active path_scope_guard registration."),
-    ]);
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
+    &[&REGISTER_PATH_SCOPE_GUARD_DEF, &CLEAR_PATH_SCOPE_GUARD_DEF];
 
-fn register_path_scope_guard_builtin(
-    args: &[VmValue],
-    _out: &mut String,
-) -> Result<VmValue, VmError> {
+/// Install a PreToolUse hook that denies (or emits a `<scope-alert>`
+/// reminder for) tool calls whose path-shaped args point outside the
+/// session's workspace anchor (#2221). `opts` may set `arg_keys`
+/// (default: path/destination/source/file/filepath/file_path/target),
+/// `on_violation` ("deny" or "reminder"; default "deny"), and
+/// `mount_modes` (which mounted-root modes count as in-scope; default
+/// the session's writable mounts: extend + sandboxed). Returns nil.
+/// Pairs with the `<scope-alert>` reminder body for the model-facing
+/// handoff hint (#2222).
+#[harn_builtin(
+    sig = "register_path_scope_guard(opts?: dict|nil) -> nil",
+    category = "agent.path_scope_guard"
+)]
+fn register_path_scope_guard(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let opts = match args.first() {
         None | Some(VmValue::Nil) => BTreeMap::new(),
         Some(VmValue::Dict(map)) => map.as_ref().clone(),
@@ -129,10 +118,12 @@ fn register_path_scope_guard_builtin(
     Ok(VmValue::Nil)
 }
 
-fn clear_path_scope_guard_builtin(
-    _args: &[VmValue],
-    _out: &mut String,
-) -> Result<VmValue, VmError> {
+/// Remove the active path_scope_guard registration.
+#[harn_builtin(
+    sig = "clear_path_scope_guard() -> nil",
+    category = "agent.path_scope_guard"
+)]
+fn clear_path_scope_guard(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     set_singleton_pre_tool_hook(None);
     Ok(VmValue::Nil)
 }

@@ -313,6 +313,7 @@ pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
         out.extend_from_slice(oauth_storage::MODULE_BUILTINS);
         out.extend_from_slice(observability::MODULE_BUILTINS);
         out.extend_from_slice(path::MODULE_BUILTINS);
+        out.extend_from_slice(path_scope_guard::MODULE_BUILTINS);
         out.extend_from_slice(postgres::MODULE_BUILTINS);
         out.extend_from_slice(process::MODULE_BUILTINS);
         out.extend_from_slice(project::MODULE_BUILTINS);
