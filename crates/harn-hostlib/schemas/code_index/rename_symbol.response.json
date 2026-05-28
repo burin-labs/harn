@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/rename_symbol.response.json",
+  "title": "code_index.rename_symbol response",
+  "description": "Tagged result of a cross-file rename. `applied` carries the per-file edit list; `conflict` carries shadow sites the rename would have created; the other tags surface caller-visible failure modes without ever touching disk.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "conflict",
+        "no_match",
+        "ambiguous_symbol",
+        "invalid_identifier",
+        "unsupported_language",
+        "syntax_error"
+      ]
+    },
+    "applied": { "type": "boolean" },
+    "dry_run": { "type": "boolean" },
+    "scope": { "type": "string", "enum": ["file", "module", "workspace"] },
+    "symbol": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "new_name": { "type": "string" },
+        "path": { "type": "string" },
+        "line": { "type": ["integer", "null"] },
+        "kind": { "type": ["string", "null"] }
+      },
+      "required": ["name", "new_name"],
+      "additionalProperties": false
+    },
+    "touched_files": {
+      "type": "array",
+      "description": "One entry per rewritten file. Empty on non-`applied` results.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "language": { "type": "string" },
+          "before_sha256": { "type": "string" },
+          "after_sha256": { "type": "string" },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_byte": { "type": "integer", "minimum": 0 },
+                "end_byte": { "type": "integer", "minimum": 0 },
+                "start_row": { "type": "integer", "minimum": 0 },
+                "start_col": { "type": "integer", "minimum": 0 },
+                "end_row": { "type": "integer", "minimum": 0 },
+                "end_col": { "type": "integer", "minimum": 0 },
+                "before": { "type": "string" },
+                "after": { "type": "string" }
+              },
+              "required": ["start_byte", "end_byte", "before", "after"]
+            }
+          }
+        },
+        "required": ["path", "edits"]
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "description": "Populated when `result == \"conflict\"`. Each entry names a file + position where `new_name` is already in scope.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "row": { "type": "integer", "minimum": 0 },
+          "col": { "type": "integer", "minimum": 0 },
+          "shadow": { "type": "string" }
+        },
+        "required": ["path", "shadow"]
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Best-effort flags (e.g. languages outside the first batch falling back to scope=file).",
+      "items": { "type": "string" }
+    },
+    "failed_paths_with_reasons": {
+      "type": "array",
+      "description": "Paths the host buffered an edit for but failed to persist (only meaningful when no `session_id` was supplied — staged-fs sessions defer this to commit time).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["path", "reason"]
+      }
+    },
+    "match_count": { "type": "integer", "minimum": 0 },
+    "details": { "type": "string" }
+  },
+  "required": ["result", "applied", "symbol", "scope"],
+  "additionalProperties": false
+}

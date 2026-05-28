@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/rename_symbol.request.json",
+  "title": "code_index.rename_symbol request",
+  "description": "Safe cross-file rename driven by the typed symbol graph (#2434). The host resolves `symbol_ref` against the workspace graph, walks every file in scope, replaces identifier-context occurrences of `symbol_ref.name` with `new_name`, and rejects the edit if `new_name` already exists as an identifier in any rewritten file (shadow check). Writes route through staged-fs (#1722) when `session_id` is supplied so all touched files succeed or none do; without a session id the host still buffers every edit in memory and only writes after pre-flight validation passes.",
+  "type": "object",
+  "properties": {
+    "symbol_ref": {
+      "type": "object",
+      "description": "Pointer at the symbol to rename. `name` and `path` are required; `line` (1-based) disambiguates when several symbols in the file share a name; `kind` (Function|Type|Module) narrows by node kind.",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "kind": {
+          "type": "string",
+          "enum": ["Function", "Type", "Module"]
+        }
+      },
+      "required": ["name", "path"],
+      "additionalProperties": false
+    },
+    "new_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Replacement identifier. Must match the per-language identifier syntax and must not equal `symbol_ref.name`."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["file", "module", "workspace"],
+      "description": "How widely to rewrite. `file` and `module` are aliases in the current graph (one Module node per file); `workspace` follows REFS edges across files."
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional staged-fs session id. When supplied and the session is in `staged` mode, writes land in the overlay until commit."
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "When true, validate end-to-end (parse, conflict, syntax) and return the planned edits without writing. Defaults to false."
+    },
+    "validate": {
+      "type": "boolean",
+      "description": "When true (default) every rewritten file is re-parsed; any tree-sitter ERROR/MISSING node aborts the edit with `result: \"syntax_error\"`."
+    }
+  },
+  "required": ["symbol_ref", "new_name", "scope"],
+  "additionalProperties": false
+}

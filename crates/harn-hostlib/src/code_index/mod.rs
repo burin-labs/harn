@@ -43,6 +43,15 @@
 //!   indexed snapshot; consumers detect staleness without forcing a
 //!   rebuild.
 //!
+//! ### Cross-file safe rename (added in #2508)
+//!
+//! - **`rename_symbol`**: rewrite a symbol across `file | module |
+//!   workspace` using the typed graph for symbol resolution and
+//!   tree-sitter identifier kinds for safe text spans. Detects
+//!   `new_name` shadowing in any rewritten file and aborts before any
+//!   write. Routes through staged-fs (#1722) when a `session_id` is
+//!   supplied so all touched files succeed or none do.
+//!
 //! ## Concurrency model
 //!
 //! All ops serialise through a single `Arc<Mutex<Option<IndexState>>>` so
@@ -57,6 +66,7 @@ mod file_table;
 mod graph;
 mod imports;
 mod overlay;
+mod rename;
 mod snapshot;
 mod state;
 mod symbol_graph;
@@ -404,6 +414,17 @@ impl HostlibCapability for CodeIndexCapability {
             builtins::BUILTIN_FRESHNESS,
             "freshness",
             builtins::run_freshness,
+        );
+
+        // Cross-file safe rename (issue #2508). Builds on the typed
+        // symbol graph (#2434) and routes writes through staged-fs
+        // (#1722) so all touched files succeed or none do.
+        register(
+            registry,
+            self.index.clone(),
+            rename::BUILTIN,
+            "rename_symbol",
+            rename::run,
         );
     }
 }

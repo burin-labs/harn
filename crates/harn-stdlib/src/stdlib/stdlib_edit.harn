@@ -1275,3 +1275,62 @@ pub fn edit_safe_text_patch(params) {
     },
   )
 }
+
+/**
+ * Rename a symbol across the workspace using the typed symbol graph
+ * (#2434). Pass `symbol_ref` (`{name, path, line?, kind?}`), the
+ * `new_name`, and a `scope` (`"file"` | `"module"` | `"workspace"`).
+ *
+ * The helper resolves the seed against the indexed graph, walks every
+ * file in scope, replaces identifier-context occurrences of the symbol
+ * name (skipping comments and string literals), and rejects the edit
+ * with `result: "conflict"` if `new_name` already exists as an
+ * identifier in any rewritten file. Languages: Rust, TypeScript/TSX,
+ * JavaScript/JSX, Python, Swift, Go.
+ *
+ * Pass `session_id` to route writes through staged-fs (#1722) so all
+ * touched files succeed or none do — the host still buffers every plan
+ * in memory and only persists after pre-flight validation passes, so
+ * the same all-or-nothing guarantee applies even without a session.
+ *
+ * `dry_run` returns the planned per-file edits without writing.
+ * `validate` (default true) re-parses every rewritten file and aborts
+ * with `result: "syntax_error"` on any ERROR/MISSING node.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_rename_symbol({symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"}, new_name: "Gadget", scope: "workspace"})
+ */
+pub fn edit_rename_symbol(params) {
+  let req = params ?? {}
+  let raw = hostlib_code_index_rename_symbol(req)
+  let payload = raw ?? {}
+  let result_tag = payload?.result ?? "no_match"
+  let provenance = {
+    module: "std/edit",
+    helper: "edit_rename_symbol",
+    symbol: payload?.symbol,
+    scope: payload?.scope ?? req?.scope,
+    dry_run: payload?.dry_run ?? false,
+    touched_count: len(payload?.touched_files ?? []),
+    caller: req?.provenance,
+  }
+  return {
+    ok: result_tag == "applied",
+    applied: payload?.applied ?? false,
+    result: result_tag,
+    dry_run: payload?.dry_run ?? false,
+    scope: payload?.scope ?? req?.scope,
+    symbol: payload?.symbol,
+    touched_files: payload?.touched_files ?? [],
+    conflicts: payload?.conflicts ?? [],
+    match_count: payload?.match_count ?? 0,
+    failed_paths_with_reasons: payload?.failed_paths_with_reasons ?? [],
+    details: payload?.details,
+    errors: [],
+    warnings: payload?.warnings ?? [],
+    provenance: provenance,
+  }
+}

@@ -221,6 +221,45 @@ fn compaction_policy_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn edit_rename_symbol_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("edit-rename-symbol");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "edit-rename-symbol demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("edit_rename_symbol_receipt"),
+        "edit-rename-symbol demo should emit the rename receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"planned_result\":\"applied\""),
+        "dry_run planning phase must succeed against the seed workspace:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"planned_touched_files\":[\"src/lib.rs\",\"src/main.rs\"]"),
+        "dry_run plan must enumerate both seed files:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"conflict_result\":\"conflict\""),
+        "the shadow-site rename must short-circuit with `conflict`:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"conflict_first_shadow\":\"Gadget\""),
+        "the conflict response must name `Gadget` as the shadow identifier:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all
@@ -232,6 +271,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "routing-policy",
         "stdlib-toolkit",
         "compaction-policy",
+        "edit-rename-symbol",
     ]
     .into_iter()
     .collect();

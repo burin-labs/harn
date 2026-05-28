@@ -1166,6 +1166,15 @@ fn optional_positive_usize(
     }
 }
 
+/// Re-export of [`normalize_relative_path`] for sibling modules
+/// (e.g. [`super::rename`]). Inputs may be a workspace-relative path,
+/// an absolute path inside the workspace, or an unknown path; the
+/// returned string is always workspace-relative when resolvable and
+/// falls back to the raw input otherwise.
+pub(super) fn normalize_relative_path_for(state: &IndexState, path: &str) -> String {
+    normalize_relative_path(state, path)
+}
+
 fn normalize_relative_path(state: &IndexState, path: &str) -> String {
     if let Some(rel) = state
         .lookup_path(path)

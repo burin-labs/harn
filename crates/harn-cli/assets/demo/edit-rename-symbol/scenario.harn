@@ -1,0 +1,91 @@
+/**
+ * edit-rename-symbol demo: drive the new `edit_rename_symbol`
+ * primitive end-to-end against a freshly-built code-index workspace.
+ *
+ * The scenario points the symbol-graph rebuilder at the bundled
+ * `seed/` (a Rust mini-workspace with `Widget` defined in `src/lib.rs`
+ * and used from `src/main.rs`), then exercises the rename primitive
+ * (#2508) in two modes that do NOT touch disk (so the demo stays
+ * sandbox-clean):
+ *
+ *   1. `dry_run` — workspace-scoped plan against the typed graph; no
+ *      writes hit disk, but the response shape carries every touched
+ *      file plus per-edit byte/(row, col) spans.
+ *   2. `conflict` — re-point the rebuilder at `seed-conflict/`, where
+ *      both `Widget` and `Gadget` already coexist. Asking for a
+ *      Widget -> Gadget rename short-circuits with
+ *      `result: "conflict"` and reports the shadow site without
+ *      writing anything.
+ *
+ * The receipt at the end captures match counts and the planned file
+ * list so the demo-gate smoke test can assert end-to-end behaviour.
+ *
+ * Fully offline: no LLM calls, no network. Uses `hostlib_code_index_*`
+ * and `hostlib_code_index_rename_symbol` directly — the runtime wires
+ * them in via `harn-hostlib`.
+ */
+import { edit_rename_symbol } from "std/edit"
+
+pipeline default(_task) {
+  // `asset_root()` resolves to the directory holding this script,
+  // which is also where the seed workspaces ship. That gives us a
+  // sandbox-safe absolute path for the code-index rebuild without
+  // depending on the caller's cwd.
+  let assets = asset_root()
+  let seed_root = assets + "/seed"
+  let conflict_root = assets + "/seed-conflict"
+  // The symbol graph is per-workspace; rebuild seeds the index before
+  // any rename runs.
+  let _rebuild = hostlib_code_index_rebuild({root: seed_root})
+  // 1. Dry-run rename: planning only, no disk writes. The plan walks
+  //    the typed symbol graph (#2434) from the `Widget` Type node and
+  //    re-parses every in-scope file with tree-sitter to collect the
+  //    identifier-context byte spans that would be rewritten.
+  let planned = edit_rename_symbol(
+    {
+      symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
+      new_name: "Gadget",
+      scope: "workspace",
+      dry_run: true,
+    },
+  )
+  // 2. Conflict path: re-target the rebuilder at the conflict seed,
+  //    where Widget and Gadget already share the same file. The host
+  //    detects the shadow site and refuses to touch disk.
+  let _rebuild_conflict = hostlib_code_index_rebuild({root: conflict_root})
+  let conflict = edit_rename_symbol(
+    {
+      symbol_ref: {name: "Widget", path: "src/main.rs", kind: "Type"},
+      new_name: "Gadget",
+      scope: "workspace",
+    },
+  )
+  __io_println("=== edit-rename-symbol demo ===")
+  __io_println("seed_root: " + seed_root)
+  __io_println(
+    "dry_run result: " + planned.result + " — " + to_string(planned.match_count)
+      + " edits planned across "
+      + to_string(len(planned.touched_files))
+      + " file(s)",
+  )
+  __io_println(
+    "conflict result: " + conflict.result + " — " + to_string(len(conflict.conflicts))
+      + " shadow site(s) reported",
+  )
+  __io_println("")
+  let receipt = {
+    receipt_kind: "edit_rename_symbol_receipt",
+    planned_result: planned.result,
+    planned_match_count: planned.match_count,
+    planned_touched_files: planned.touched_files.map({ entry -> entry.path }),
+    conflict_result: conflict.result,
+    conflict_sites: len(conflict.conflicts),
+    conflict_first_shadow: if len(conflict.conflicts) > 0 {
+      conflict.conflicts[0].shadow
+    } else {
+      nil
+    },
+  }
+  __io_println(json_stringify(receipt))
+  return receipt
+}
