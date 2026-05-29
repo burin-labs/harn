@@ -1,6 +1,6 @@
 //! HTTP and SSE transport routing for MCP.
 use super::auth::{
-    accepts_media, attach_http_headers, attach_legacy_deprecation_headers, http_auth_request,
+    accepts_media, attach_http_headers, attach_legacy_deprecation_headers,
     lookup_or_create_session, should_stream_post_response, validate_origin,
     validate_protocol_header, validate_rc_routing_headers,
 };
@@ -48,7 +48,7 @@ pub(super) async fn http_post_request(
             Ok(value) => value,
             Err(response) => return *response,
         };
-    let auth = http_auth_request(method, &state.options.path, body.to_vec(), &headers);
+    let auth = AuthRequest::from_http(&method, &state.options.path, body.to_vec(), &headers);
     let response_protocol = response_protocol_version(&headers, &request);
 
     match state.server.process_message(request, session, auth).await {
@@ -237,8 +237,8 @@ pub(super) async fn legacy_sse_message(
             return response;
         }
     };
-    let auth = http_auth_request(
-        Method::POST,
+    let auth = AuthRequest::from_http(
+        &Method::POST,
         &state.options.messages_path,
         body.to_vec(),
         &headers,

@@ -2295,14 +2295,7 @@ async fn authorize(
     headers: &HeaderMap,
     body: Bytes,
 ) -> Result<(), Response> {
-    let request = AuthRequest {
-        method: method.as_str().to_string(),
-        path: uri.path().to_string(),
-        body: body.to_vec(),
-        headers: headers_to_map(headers),
-        validated_oauth: None,
-        tenant_id: None,
-    };
+    let request = AuthRequest::from_http(&method, uri.path(), body.to_vec(), headers);
     match state.auth_policy.authorize(&request).await {
         AuthorizationDecision::Authorized(_) => Ok(()),
         AuthorizationDecision::Rejected(message) => Err(api_error(
@@ -2345,18 +2338,6 @@ fn forbidden_api_error(required: &BTreeSet<String>, granted: &BTreeSet<String>) 
         );
     }
     (StatusCode::FORBIDDEN, Json(json!({ "error": body }))).into_response()
-}
-
-fn headers_to_map(headers: &HeaderMap) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
-        })
-        .collect()
 }
 
 fn parse_json_body(body: &Bytes) -> Result<Value, serde_json::Error> {

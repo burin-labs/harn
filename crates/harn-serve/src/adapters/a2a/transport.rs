@@ -409,7 +409,7 @@ pub(super) async fn jsonrpc_request(
                 .into_response()
         }
     };
-    let auth = http_auth_request(method, "/", body.to_vec(), &headers);
+    let auth = AuthRequest::from_http(&method, "/", body.to_vec(), &headers);
     let processed = state
         .server
         .process_rpc_with_public_url(request, auth, &state.public_url)
@@ -722,7 +722,7 @@ pub(super) async fn rest_dispatch_no_body(
     params: JsonValue,
 ) -> Response {
     log_legacy_version_header(&headers);
-    let auth = http_auth_request(method, auth_path, Vec::new(), &headers);
+    let auth = AuthRequest::from_http(&method, auth_path, Vec::new(), &headers);
     let request = harn_vm::jsonrpc::request(Uuid::now_v7().to_string(), rpc_method, params);
     let processed = state
         .server
@@ -741,7 +741,7 @@ pub(super) async fn rest_dispatch_with_body(
     params: JsonValue,
 ) -> Response {
     log_legacy_version_header(&headers);
-    let auth = http_auth_request(method, auth_path, body.to_vec(), &headers);
+    let auth = AuthRequest::from_http(&method, auth_path, body.to_vec(), &headers);
     let request = harn_vm::jsonrpc::request(Uuid::now_v7().to_string(), rpc_method, params);
     let processed = state
         .server
@@ -792,7 +792,7 @@ pub(super) async fn rest_task_request(
         }
     };
     let auth_path = format!("/{rpc_method}");
-    let auth = http_auth_request(method, &auth_path, body.to_vec(), &headers);
+    let auth = AuthRequest::from_http(&method, &auth_path, body.to_vec(), &headers);
     let request = harn_vm::jsonrpc::request(Uuid::now_v7().to_string(), rpc_method, params);
     let mut processed = state
         .server

@@ -1076,34 +1076,6 @@ pub(super) fn www_authenticate_header(policy: &AuthPolicy) -> HeaderValue {
         .unwrap_or_else(|_| HeaderValue::from_static("Bearer realm=\"harn-a2a\""))
 }
 
-pub(super) fn http_auth_request(
-    method: Method,
-    path: &str,
-    body: Vec<u8>,
-    headers: &HeaderMap,
-) -> AuthRequest {
-    AuthRequest {
-        method: method.as_str().to_string(),
-        path: path.to_string(),
-        body,
-        headers: normalized_headers(headers),
-        validated_oauth: None,
-        tenant_id: None,
-    }
-}
-
-pub(super) fn normalized_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
-        })
-        .collect()
-}
-
 pub(super) fn sign_card(card: &mut JsonValue, secret: &str) {
     let Ok(bytes) = serde_json::to_vec(card) else {
         return;

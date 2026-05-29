@@ -1,34 +1,6 @@
 //! Transport auth metadata and request validation helpers.
 use super::*;
 
-pub(super) fn http_auth_request(
-    method: Method,
-    path: &str,
-    body: Vec<u8>,
-    headers: &HeaderMap,
-) -> AuthRequest {
-    AuthRequest {
-        method: method.as_str().to_string(),
-        path: path.to_string(),
-        body,
-        headers: normalized_headers(headers),
-        validated_oauth: None,
-        tenant_id: None,
-    }
-}
-
-pub(super) fn normalized_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
-        })
-        .collect()
-}
-
 pub(super) fn lookup_or_create_session(
     state: &HttpState,
     request: &JsonValue,

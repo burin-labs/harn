@@ -33,14 +33,12 @@ use serde_json::{json, Value as JsonValue};
 use sha2::Sha256;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::LocalSet;
 use uuid::Uuid;
 
 use crate::{
     AdapterDescriptor, AuthMethodConfig, AuthPolicy, AuthRequest, AuthorizationDecision,
-    CallArguments, CallRequest, CallResponse, DispatchCore, DispatchError, ExportCatalog,
-    HttpTlsConfig, TransportAdapter,
+    CallArguments, CallRequest, CallResponse, DispatchCore, DispatchError, DispatchRuntime,
+    ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
 mod auth;
@@ -118,7 +116,7 @@ pub struct A2aServer {
     card_signing_secret: Option<String>,
     catalog: ExportCatalog,
     core: Arc<DispatchCore>,
-    executor: ExecutionRuntime,
+    executor: DispatchRuntime,
     tasks: TaskStore,
     push_configs: PushConfigStore,
 }
@@ -199,15 +197,6 @@ struct TaskState {
 type TaskStore = Arc<Mutex<HashMap<String, TaskState>>>;
 type PushConfigStore = Arc<Mutex<HashMap<String, BTreeMap<String, JsonValue>>>>;
 
-struct ExecutionRuntime {
-    tx: mpsc::UnboundedSender<ExecutionJob>,
-}
-
-struct ExecutionJob {
-    request: CallRequest,
-    response_tx: oneshot::Sender<Result<CallResponse, DispatchError>>,
-}
-
 struct PreparedTask {
     id: String,
     function: String,
@@ -254,7 +243,7 @@ impl A2aServer {
             agent_name,
             card_signing_secret: config.card_signing_secret,
             catalog,
-            executor: ExecutionRuntime::start(core.clone()),
+            executor: DispatchRuntime::start("A2A", core.clone()),
             core,
             tasks: Arc::new(Mutex::new(HashMap::new())),
             push_configs,

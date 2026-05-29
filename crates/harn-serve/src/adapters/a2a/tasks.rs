@@ -533,39 +533,3 @@ impl A2aServer {
         });
     }
 }
-
-impl ExecutionRuntime {
-    pub(super) fn start(core: Arc<DispatchCore>) -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel::<ExecutionJob>();
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build A2A runtime");
-            let local = LocalSet::new();
-            local.block_on(&runtime, async move {
-                while let Some(job) = rx.recv().await {
-                    let core = core.clone();
-                    tokio::task::spawn_local(async move {
-                        let result = core.dispatch(job.request).await;
-                        let _ = job.response_tx.send(result);
-                    });
-                }
-            });
-        });
-        Self { tx }
-    }
-
-    pub(super) async fn call(&self, request: CallRequest) -> Result<CallResponse, DispatchError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.tx
-            .send(ExecutionJob {
-                request,
-                response_tx,
-            })
-            .map_err(|_| DispatchError::Execution("A2A executor is not running".to_string()))?;
-        response_rx
-            .await
-            .map_err(|_| DispatchError::Execution("A2A executor dropped response".to_string()))?
-    }
-}

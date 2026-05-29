@@ -18,10 +18,11 @@
 //! request id. It can therefore back any axum-based HTTP surface
 //! built on `harn-serve` without coupling to a particular adapter.
 
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 
 use axum::body::{Body, Bytes};
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -32,7 +33,46 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::error::forbidden_data_payload;
-use crate::{CallResponse, DispatchError};
+use crate::{AuthRequest, CallResponse, DispatchError};
+
+impl AuthRequest {
+    /// Build an [`AuthRequest`] from an inbound HTTP request. Every
+    /// axum-based transport (`api`, `a2a`, `mcp`) decodes ingress the
+    /// same way, so the construction lives here — beside the HTTP codec
+    /// — rather than being copied per adapter.
+    ///
+    /// Header names are lower-cased so downstream lookups are
+    /// case-insensitive regardless of how the client cased them on the
+    /// wire; values that aren't valid UTF-8 are dropped. `validated_oauth`
+    /// and `tenant_id` start `None` — the configured [`crate::AuthPolicy`]
+    /// fills `validated_oauth`, and a tenant-resolving transport fills
+    /// `tenant_id` before authorization.
+    pub fn from_http(method: &Method, path: &str, body: Vec<u8>, headers: &HeaderMap) -> Self {
+        Self {
+            method: method.as_str().to_string(),
+            path: path.to_string(),
+            body,
+            headers: normalize_headers(headers),
+            validated_oauth: None,
+            tenant_id: None,
+        }
+    }
+}
+
+/// Lower-case header names into a `BTreeMap`, dropping any value that
+/// isn't valid UTF-8. Shared by [`AuthRequest::from_http`] and any
+/// adapter that needs the normalized header view.
+pub(crate) fn normalize_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
+        })
+        .collect()
+}
 
 /// Return value class produced by the codec — what the caller renders
 /// to axum varies by body kind, so the codec exposes the discrete
@@ -563,6 +603,40 @@ mod tests {
     async fn body_text(response: Response) -> String {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn auth_request_from_http_lowercases_headers_and_drops_invalid_utf8() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", HeaderValue::from_static("Bearer tok"));
+        headers.insert("X-Request-Id", HeaderValue::from_static("req_42"));
+        headers.insert("X-Binary", HeaderValue::from_bytes(&[0xff, 0xfe]).unwrap());
+
+        let auth = AuthRequest::from_http(&Method::POST, "/v1/tasks", b"body".to_vec(), &headers);
+
+        assert_eq!(auth.method, "POST");
+        assert_eq!(auth.path, "/v1/tasks");
+        assert_eq!(auth.body, b"body");
+        assert_eq!(
+            auth.headers.get("authorization").map(String::as_str),
+            Some("Bearer tok")
+        );
+        assert_eq!(
+            auth.headers.get("x-request-id").map(String::as_str),
+            Some("req_42")
+        );
+        assert!(
+            !auth.headers.contains_key("x-binary"),
+            "non-UTF-8 header dropped"
+        );
+        assert!(auth
+            .headers
+            .keys()
+            .all(|key| key == &key.to_ascii_lowercase()));
+        assert!(auth.validated_oauth.is_none());
+        assert!(auth.tenant_id.is_none());
+        // The case-insensitive accessors resolve against the normalized map.
+        assert_eq!(auth.bearer_token(), Some("tok"));
     }
 
     #[tokio::test]
