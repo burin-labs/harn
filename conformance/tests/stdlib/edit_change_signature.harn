@@ -1,0 +1,79 @@
+import {
+  edit_add_parameter,
+  edit_change_return_type,
+  edit_change_signature,
+  edit_reorder_parameters,
+} from "std/edit"
+
+/**
+ * End-to-end exercise of the signature-family + return-type structured
+ * refactorings (issue #2520): definition rewrite plus atomic call-site
+ * updates across multiple callers, the callsite_strategy matrix, and
+ * argument reordering.
+ */
+fn write_fixture(dir: string, name: string, body: string) -> string {
+  let path = path_join(dir, name)
+  harness.fs.write_text(path, body)
+  return path
+}
+
+pipeline default() {
+  hostlib_enable("tools:deterministic")
+  let root = path_join(
+    harness.fs.temp_dir(),
+    "harn_edit_change_signature_" + to_string(harness.random.gen_range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
+  // 1) Rust add_parameter with default_fill across THREE call sites.
+  let rs_body = "fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\nfn main() {\n    let x = add(1, 2);\n    let y = add(3, 4);\n    let z = add(5, 6);\n}\n"
+  let rs_path = write_fixture(root, "add.rs", rs_body)
+  let rs_ap = edit_add_parameter({path: rs_path, symbol: {name: "add"}, param: "c: i64", default: "0"})
+  __io_println(rs_ap.result)
+  let rs_after = harness.fs.read_text(rs_path)
+  __io_println(contains(rs_after, "fn add(a: i64, b: i64, c: i64) -> i64"))
+  __io_println(contains(rs_after, "add(1, 2, 0)"))
+  __io_println(contains(rs_after, "add(3, 4, 0)"))
+  __io_println(contains(rs_after, "add(5, 6, 0)"))
+  __io_println(rs_ap.summary.files_touched == 1)
+  // 2) Python reorder_parameters — definition + call args permuted.
+  let py_body = "def sub(a, b):\n    return a - b\n\np = sub(10, 3)\nq = sub(20, 5)\n"
+  let py_path = write_fixture(root, "sub.py", py_body)
+  let py_ro = edit_reorder_parameters({path: py_path, symbol: {name: "sub"}, order: [1, 0]})
+  __io_println(py_ro.result)
+  let py_after = harness.fs.read_text(py_path)
+  __io_println(contains(py_after, "def sub(b, a):"))
+  __io_println(contains(py_after, "sub(3, 10)"))
+  __io_println(contains(py_after, "sub(5, 20)"))
+  // 3) TypeScript change_return_type — definition rewrite + caller warning.
+  let ts_body = "function add(a: number, b: number): number {\n  return a + b\n}\nconst x = add(1, 2)\n"
+  let ts_path = write_fixture(root, "add.ts", ts_body)
+  let ts_rt = edit_change_return_type({path: ts_path, symbol: {name: "add"}, new_type: "string"})
+  __io_println(ts_rt.result)
+  __io_println(
+    contains(harness.fs.read_text(ts_path), "function add(a: number, b: number): string {"),
+  )
+  __io_println(len(ts_rt.warnings) == 1)
+  // 4) change_signature(strict) refuses when call sites exist; no write.
+  let cs_body = "function mul(a: number, b: number): number {\n  return a * b\n}\nconst r = mul(2, 3)\n"
+  let cs_path = write_fixture(root, "mul.ts", cs_body)
+  let strict = edit_change_signature(
+    {path: cs_path, symbol: {name: "mul"}, new_params: "a: number, b: number, c: number"},
+  )
+  __io_println(strict.result)
+  __io_println(strict.conflicts[0].code)
+  __io_println(harness.fs.read_text(cs_path) == cs_body)
+  // 5) change_signature(default_fill) rewrites def + appends to each call.
+  let df = edit_change_signature(
+    {
+      path: cs_path,
+      symbol: {name: "mul"},
+      new_params: "a: number, b: number, c: number",
+      callsite_strategy: "default_fill",
+      fill: "1",
+    },
+  )
+  __io_println(df.result)
+  let df_after = harness.fs.read_text(cs_path)
+  __io_println(contains(df_after, "function mul(a: number, b: number, c: number)"))
+  __io_println(contains(df_after, "mul(2, 3, 1)"))
+}

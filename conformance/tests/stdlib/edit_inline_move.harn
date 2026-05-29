@@ -1,0 +1,64 @@
+import { edit_inline, edit_move_decl } from "std/edit"
+
+/**
+ * End-to-end exercise of `edit_inline` and `edit_move_decl` (issue #2520).
+ * Inline covers the zero-parameter / single-return safe subset plus its
+ * unsupported gates; move_decl exercises a two-file atomic transaction.
+ */
+fn write_fixture(dir: string, name: string, body: string) -> string {
+  let path = path_join(dir, name)
+  harness.fs.write_text(path, body)
+  return path
+}
+
+pipeline default() {
+  hostlib_enable("tools:deterministic")
+  let root = path_join(
+    harness.fs.temp_dir(),
+    "harn_edit_inline_move_" + to_string(harness.random.gen_range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
+  // 1) Rust inline: replace both calls with the body expr, delete the def.
+  let rs_path = write_fixture(
+    root,
+    "answer.rs",
+    "fn answer() -> i64 {\n    return 42\n}\nfn user() {\n    let a = answer();\n    let b = answer();\n}\n",
+  )
+  let rs_inline = edit_inline({path: rs_path, symbol: {name: "answer"}})
+  __io_println(rs_inline.result)
+  let rs_after = harness.fs.read_text(rs_path)
+  __io_println(contains(rs_after, "let a = (42);"))
+  __io_println(contains(rs_after, "let b = (42);"))
+  __io_println(!contains(rs_after, "fn answer"))
+  // 2) Python inline.
+  let py_path = write_fixture(root, "answer.py", "def answer():\n    return 42\n\nx = answer()\n")
+  let py_inline = edit_inline({path: py_path, symbol: {name: "answer"}})
+  __io_println(py_inline.result)
+  __io_println(contains(harness.fs.read_text(py_path), "x = (42)"))
+  __io_println(!contains(harness.fs.read_text(py_path), "def answer"))
+  // 3) Unsupported: parameterized function.
+  let inc_path = write_fixture(root, "inc.py", "def inc(n):\n    return n + 1\n\ny = inc(1)\n")
+  __io_println(edit_inline({path: inc_path, symbol: {name: "inc"}}).result)
+  // 4) Unsupported: multi-statement body.
+  let two_path = write_fixture(root, "two.py", "def two():\n    a = 1\n    return a\n")
+  __io_println(edit_inline({path: two_path, symbol: {name: "two"}}).result)
+  // 5) move_decl: lift `helper` from a.py into b.py atomically (two files).
+  let a_path = write_fixture(
+    root,
+    "a.py",
+    "import os\n\ndef helper(x):\n    return x + 1\n\ndef main():\n    return helper(2)\n",
+  )
+  let b_path = write_fixture(root, "b.py", "# target\n")
+  let mv = edit_move_decl({path: a_path, symbol: {name: "helper"}, target_file: b_path})
+  __io_println(mv.result)
+  __io_println(mv.summary.files_touched == 2)
+  let a_after = harness.fs.read_text(a_path)
+  let b_after = harness.fs.read_text(b_path)
+  __io_println(!contains(a_after, "def helper"))
+  __io_println(contains(a_after, "def main"))
+  __io_println(contains(b_after, "def helper(x):"))
+  __io_println(contains(b_after, "    return x + 1"))
+  __io_println(len(mv.warnings) >= 1)
+  // 6) move_decl conflict: symbol not present.
+  __io_println(edit_move_decl({path: a_path, symbol: {name: "nope"}, target_file: b_path}).result)
+}

@@ -19,5 +19,9 @@ pipeline test(task) {
   log(d.get("a"))
   log(d.get("z", "default_value"))
   log(d.get("z"))
+  let dynamic_key = "b"
+  let computed = {a: 1, [dynamic_key]: 2}
+  log(computed.get("a"))
+  log(computed.get("b"))
 }
 // Should be nil
