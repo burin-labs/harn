@@ -17,6 +17,7 @@ const IDLE_NUDGE_ID: &str = "idle_nudge";
 const TOOL_OUTPUT_TRUNCATED_ID: &str = "tool_output_truncated";
 const POST_COMPACT_RECAP_ID: &str = "post_compact_recap";
 const RESUME_CONTINUITY_ID: &str = "resume_continuity";
+const COMPASS_AST_EDITS_ID: &str = "compass_ast_edits";
 const PROJECT_FACTS_ID: &str = "project_facts";
 const WORKSPACE_ANCHOR_ID: &str = "workspace_anchor";
 
@@ -28,6 +29,7 @@ const RESUME_CONTINUITY_EVENTS: &[HookEvent] = &[HookEvent::WorkerResumed];
 const PROJECT_FACTS_EVENTS: &[HookEvent] = &[HookEvent::SessionStart, HookEvent::OnBudgetThreshold];
 const WORKSPACE_ANCHOR_EVENTS: &[HookEvent] =
     &[HookEvent::SessionStart, HookEvent::OnBudgetThreshold];
+const COMPASS_AST_EDITS_EVENTS: &[HookEvent] = &[HookEvent::SessionStart, HookEvent::WorkerResumed];
 
 const PROJECT_FACTS_DEFAULT_NAMESPACE: &str = "project/facts";
 const PROJECT_FACTS_DEFAULT_MAX: i64 = 5;
@@ -481,7 +483,68 @@ pub async fn evaluate_and_inject(
     }))
 }
 
-fn canonical_providers() -> [&'static dyn ReminderProvider; 7] {
+/// Burin compass (B.9, #2521): steer the agent loop toward the
+/// AST-precise edit primitives over freeform text edits.
+///
+/// The `edit_*` stdlib surface (`edit_apply_node`, `edit_rename_symbol`,
+/// the structured refactors, `edit_dry_run`) is the moat tool for the
+/// "measure twice, cut once" burin metaphor — but it only pays off when
+/// agents reach for it first. Left to defaults, the path of least
+/// resistance is a freeform `str_replace`/text patch, the brittle
+/// string-collision failure mode the AST tools exist to kill. This
+/// provider injects a standing reminder at session start (and on resume)
+/// that inverts the default: structural is the expected tool, freeform is
+/// the conscious fallback. When enabled it always fires (the steer is
+/// relevant to any code-editing session) and preserves across compaction
+/// so the guidance persists through a long session.
+///
+/// It is registered in `canonical_providers` but ships **opt-in**: it is
+/// deliberately absent from the default-enabled set
+/// (`canonical_provider_ids`), so a session activates it explicitly with
+/// `reminders: {providers: ["compass_ast_edits"]}`. The other canonical
+/// providers are conditional (they stay silent without relevant data); an
+/// unconditional default-on steer would instead fire on every agent loop,
+/// including sub-agent and one-shot loops that never edit code. Flipping
+/// it on by default, alongside the tool-rewrite router, is tracked as
+/// follow-up #2612.
+struct CompassAstEditsProvider;
+
+const COMPASS_AST_EDITS_BODY: &str = "When editing source files, prefer the AST-precise edit \
+tools over freeform text edits: `edit_apply_node` / `edit_insert_at_anchor` for node-level \
+changes, `edit_rename_symbol` for safe cross-file renames, and the structured refactors \
+(`edit_extract_function`, `edit_change_signature`, `edit_inline`, `edit_move_decl`, …) for \
+compound changes. Preview any plan with `edit_dry_run` before committing. Reach for \
+`edit_safe_text_patch` only when the language has no grammar support — the structural tools \
+update semantic neighbours (callers, imports) that a string replace would silently miss.";
+
+impl ReminderProvider for CompassAstEditsProvider {
+    fn id(&self) -> &'static str {
+        COMPASS_AST_EDITS_ID
+    }
+
+    fn subscribes_to(&self) -> &'static [HookEvent] {
+        COMPASS_AST_EDITS_EVENTS
+    }
+
+    fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
+        let mut reminder = provider_reminder(
+            COMPASS_AST_EDITS_BODY.to_string(),
+            COMPASS_AST_EDITS_ID,
+            ctx,
+        );
+        reminder.tags = vec![COMPASS_AST_EDITS_ID.to_string()];
+        // One steer per session; the dedupe key suppresses a second
+        // emission if both SessionStart and a later resume fire.
+        reminder.dedupe_key = Some(COMPASS_AST_EDITS_ID.to_string());
+        reminder.ttl_turns = None;
+        reminder.preserve_on_compact = true;
+        reminder.propagate = ReminderPropagate::Session;
+        reminder.role_hint = ReminderRoleHint::System;
+        Some(reminder)
+    }
+}
+
+fn canonical_providers() -> [&'static dyn ReminderProvider; 8] {
     [
         &TokenPressureProvider,
         &IdleNudgeProvider,
@@ -490,6 +553,7 @@ fn canonical_providers() -> [&'static dyn ReminderProvider; 7] {
         &ResumeContinuityProvider,
         &ProjectFactsProvider,
         &WorkspaceAnchorProvider,
+        &CompassAstEditsProvider,
     ]
 }
 
@@ -530,6 +594,9 @@ fn enabled_provider_ids(
         return BTreeSet::new();
     }
 
+    // Default-enabled canonical providers. Opt-in-only providers (e.g. the
+    // burin compass) are intentionally excluded here and activate through an
+    // explicit `reminders.providers: ["<id>"]` entry handled below.
     let mut enabled: BTreeSet<String> = canonical_provider_ids()
         .into_iter()
         .map(str::to_string)
@@ -556,6 +623,10 @@ fn enabled_provider_ids(
     enabled
 }
 
+/// Ids of the canonical providers that are enabled by default. The burin
+/// compass (`COMPASS_AST_EDITS_ID`) is intentionally NOT listed: it is a
+/// registered canonical provider (see `canonical_providers`) but ships
+/// opt-in, activated per session via `reminders: {providers: [...]}`.
 fn canonical_provider_ids() -> [&'static str; 7] {
     [
         TOKEN_PRESSURE_ID,
@@ -969,6 +1040,33 @@ mod tests {
             payload,
             options,
         }
+    }
+
+    #[test]
+    fn compass_steers_to_ast_edits_and_survives_compaction() {
+        let spec = CompassAstEditsProvider
+            .evaluate(&ctx(HookEvent::SessionStart, json!({}), JsonValue::Null))
+            .expect("compass fires on session start");
+        // The reminder's `id` is an auto-generated per-instance UUID; the
+        // provider identity is carried by `dedupe_key` / `tags` (matching
+        // the other canonical providers, e.g. the workspace anchor test).
+        assert_eq!(spec.dedupe_key.as_deref(), Some(COMPASS_AST_EDITS_ID));
+        assert_eq!(spec.tags, vec![COMPASS_AST_EDITS_ID.to_string()]);
+        assert!(spec.body.contains("edit_apply_node"));
+        assert!(spec.body.contains("edit_rename_symbol"));
+        assert!(spec.body.contains("edit_dry_run"));
+        // The steer must outlive a context compaction, otherwise a long
+        // session silently reverts to freeform edits after the first squash.
+        assert!(spec.preserve_on_compact);
+    }
+
+    #[test]
+    fn compass_subscribes_to_session_lifecycle_only() {
+        let events = CompassAstEditsProvider.subscribes_to();
+        assert!(events.contains(&HookEvent::SessionStart));
+        assert!(events.contains(&HookEvent::WorkerResumed));
+        // Not per-tool-call — that would spam the transcript on every edit.
+        assert!(!events.contains(&HookEvent::PostToolUse));
     }
 
     #[test]
