@@ -52,6 +52,12 @@ pub(crate) enum ServeCommand {
     /// tools/resources/prompts via `mcp_tools(...)` / `mcp_resource(...)`
     /// / `mcp_prompt(...)`, that script-driven surface.
     Mcp(ServeMcpArgs),
+    /// Host a `.harn` file's HTTP handlers on a live web server. Every
+    /// exported `pub fn` with a `@route("METHOD", "/path")` attribute — or
+    /// matching the `handler_*` naming convention — answers that path; the
+    /// handler receives a `req` dict and returns a value or an `http_*`
+    /// response envelope.
+    Site(SiteServeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -158,6 +164,43 @@ pub(crate) struct ApiServeArgs {
     #[command(flatten)]
     pub profile: ProfileArgs,
     /// Path to the `.harn` agent file to serve.
+    pub file: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SiteServeArgs {
+    /// Socket address to bind the site server to. Defaults to loopback;
+    /// use `--bind 0.0.0.0:PORT` only behind explicit auth/TLS or a
+    /// trusted edge.
+    #[arg(
+        long,
+        env = "HARN_SERVE_SITE_BIND",
+        default_value = "127.0.0.1:8788",
+        value_name = "ADDR"
+    )]
+    pub bind: SocketAddr,
+    /// Public URL printed in the startup banner.
+    #[arg(long = "public-url", env = "HARN_SERVE_SITE_PUBLIC_URL")]
+    pub public_url: Option<String>,
+    /// Static API keys accepted via `Authorization: Bearer` or `X-API-Key`.
+    #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
+    pub api_key: Vec<String>,
+    /// Shared secret for HMAC request signing.
+    #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
+    pub hmac_secret: Option<String>,
+    /// TLS listener mode. Supplying both `--cert` and `--key` implies `pem`.
+    #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
+    pub tls: ServeTlsMode,
+    /// PEM-encoded certificate chain for in-process HTTPS termination.
+    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    pub cert: Option<PathBuf>,
+    /// PEM-encoded private key for in-process HTTPS termination.
+    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    pub key: Option<PathBuf>,
+    /// Where to route `harness.obs.*` spans/metrics/logs.
+    #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
+    pub obs: ServeObsMode,
+    /// Path to the `.harn` file whose routed `pub fn` handlers are served.
     pub file: String,
 }
 

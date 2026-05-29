@@ -39,6 +39,7 @@ pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{
     McpHttpServeOptions, McpServer, McpServerConfig, McpStdioServer, MCP_PROTOCOL_VERSION,
 };
+pub use adapters::site::{SiteHttpServeOptions, SiteServer, SiteServerConfig};
 pub use auth::{
     AllowlistOutcome, ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,
     AuthenticatedPrincipal, AuthorizationDecision, HmacAuthConfig, McpAllowlist, McpAllowlistTools,
@@ -49,7 +50,9 @@ pub use core::{
     VmConfigurator,
 };
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
-pub use exports::{ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam};
+pub use exports::{
+    ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam, RouteSpec,
+};
 pub use http_codec::{
     axum_response_from_call, axum_response_from_dispatch_error, classify_ws_upgrade,
     decode_call_response, dispatch_error_payload, fresh_request_id, HttpCodecOutcome, SseEventSpec,
@@ -66,7 +69,7 @@ pub use permissions::{
     InMemoryPermissionStore, LlmPolicy, PermissionDecision, PermissionPolicy, PermissionRequest,
     PermissionStore, PolicyVersion, RedactionPolicy, RememberRule, RememberSpec, Risk, RuleId,
 };
-pub use replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
+pub use replay::{InMemoryReplayCache, NoReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 pub use sessions::{
     sessions_router, AppendEvent, ArchiveSink, CreateSession, EventId, EventPage, ForkResult,
     ListFilter, MemorySessionStore, ReadRange, RetentionPolicy, SessionEventKind, SessionId,

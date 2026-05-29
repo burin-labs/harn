@@ -13,6 +13,7 @@ use std::thread;
 
 use harn_cli::commands::demo::scenario_ids;
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
+use harn_cli::env_guard::ScopedEnvVar;
 use harn_cli::tests::common::{cwd_lock, env_lock};
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
@@ -46,6 +47,19 @@ fn run_demo_scenario(id: &str) -> RunOutcome {
     run_in_harn_runtime(move || async move {
         let _env_guard = env_lock::lock_env().lock().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        // Hermetic bytecode cache: point `harn run` at a fresh per-test
+        // directory so the demo always compiles the scenario from source
+        // instead of replaying whatever the ambient `$HOME/.cache/harn`
+        // happens to hold. Without this, a stale artifact written by an
+        // earlier (or buggy) compiler masks both regressions and fixes —
+        // and on a persistent runner the result is order-dependent and
+        // flaky. The guards are held across `execute_run` and restore the
+        // previous env / delete the temp dir on drop.
+        let cache_dir = tempfile::TempDir::new().expect("create temp bytecode cache dir");
+        let _cache_guard = ScopedEnvVar::set(
+            harn_vm::bytecode_cache::CACHE_DIR_ENV,
+            cache_dir.path().to_str().expect("temp cache path is utf-8"),
+        );
         harn_vm::reset_thread_local_state();
         execute_run(
             script.to_string_lossy().as_ref(),
@@ -333,6 +347,37 @@ fn http_transport_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn harn_site_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("harn-site");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "harn-site demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("harn_site_receipt"),
+        "harn-site stdout missing receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"conditional_fresh_status\":200")
+            && outcome.stdout.contains("\"conditional_cached_status\":304"),
+        "conditional handler must return 200 fresh then 304 via http_not_modified:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"echo_name\":\"ada\""),
+        "the echo handler must round-trip the posted JSON body:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"ws_reply\":\"echo:hi\""),
+        "the on_message WebSocket callback must echo the inbound frame:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn obs_primitive_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("obs-primitive");
     assert_eq!(
@@ -423,6 +468,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "edit-language-coverage",
         "edit-refactor",
         "http-transport",
+        "harn-site",
         "obs-primitive",
     ]
     .into_iter()

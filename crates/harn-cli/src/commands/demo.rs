@@ -113,6 +113,20 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/http-transport/tape.jsonl"),
     },
     Scenario {
+        id: "harn-site",
+        title: "harn serve site — a .harn file answers its own HTTP routes",
+        description: "Drive the `harn serve site` handler contract (#2574) offline: a routed \
+                      `pub fn` receives a request dict and returns an `http_*` envelope. The \
+                      scenario calls a GET handler, a POST handler that echoes its body, and a \
+                      conditional GET that returns 200 then 304 via `http_not_modified`, plus the \
+                      `on_message` WebSocket frame callback — capturing each status in a receipt. \
+                      The live socket path (routing, multipart, WS upgrade) is covered by \
+                      `crates/harn-serve/tests/site_hosting.rs`; the demo keeps the offline \
+                      handler-contract smoke covered.",
+        script: include_str!("../../assets/demo/harn-site/scenario.harn"),
+        tape: include_str!("../../assets/demo/harn-site/tape.jsonl"),
+    },
+    Scenario {
         id: "obs-primitive",
         title: "harness.obs.* spans + counter/histogram/gauge + audit roundtrip",
         description: "Drive the standardized observability primitive (#2513): open a span over a \

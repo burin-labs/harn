@@ -1243,6 +1243,13 @@ impl Compiler {
     /// Check if a node produces a value on the stack that needs to be popped.
     pub(super) fn produces_value(node: &Node) -> bool {
         match node {
+            // An attribute decorates a declaration (fn/struct/enum/…), never
+            // an expression — so an attributed top-level item is a statement
+            // that leaves nothing on the operand stack, exactly like its bare
+            // inner declaration. Classifying by the inner node prevents the
+            // script-mode top-level loop from emitting a spurious `Pop` (which
+            // underflows the stack) after compiling, e.g., a `@route pub fn`.
+            Node::AttributedDecl { inner, .. } => Self::produces_value(&inner.node),
             Node::LetBinding { .. }
             | Node::VarBinding { .. }
             | Node::ConstBinding { .. }
