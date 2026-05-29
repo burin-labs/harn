@@ -118,6 +118,7 @@
 - [Agent lifecycle: suspend, resume, self-park](./agent-lifecycle.md)
 - [Memory](./memory.md)
 - [Transcript architecture](./transcript-architecture.md)
+- [Prompt assembly](./prompt-assembly.md)
 - [System reminders](./system-reminders.md)
 - [Workflow runtime](./workflow-runtime.md)
 - [Portable workflow bundles](./workflow-bundles.md)

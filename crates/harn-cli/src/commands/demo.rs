@@ -192,6 +192,21 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/edit-refactor/scenario.harn"),
         tape: include_str!("../../assets/demo/edit-refactor/tape.jsonl"),
     },
+    Scenario {
+        id: "prompt-guidance",
+        title: "tool guidance rides with the tool, and the prompt is auditable",
+        description: "Drive the unified prompt-fragment assembler: a tool carries a `guidance` \
+                      string that the runtime injects as a capability-gated system-prompt fragment \
+                      (`requires_tools: [<that tool>]`), so a 'always update the TODO tracker' \
+                      instruction appears only when the todo tool is present and never otherwise — \
+                      instruction and tool share one source of truth and cannot drift. Calls \
+                      `prompt_explain(options)` with and without the tool, prints the assembled \
+                      system string plus the per-fragment provenance (included/excluded + reason + \
+                      bytes) an operator inspects, and proves the only difference between the two \
+                      prompts is exactly the gated fragment. Fully offline — no LLM, no network.",
+        script: include_str!("../../assets/demo/prompt-guidance/scenario.harn"),
+        tape: include_str!("../../assets/demo/prompt-guidance/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]

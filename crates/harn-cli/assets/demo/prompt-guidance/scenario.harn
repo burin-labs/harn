@@ -1,0 +1,90 @@
+/**
+ * prompt-guidance demo: an instruction rides with the tool that justifies it,
+ * and the assembled prompt is fully auditable.
+ *
+ * A harness author wants the agent told "always update the TODO tracker when
+ * working from a plan" — but ONLY when a todo-tracking tool is actually
+ * available, and never otherwise. The old way is a hand-written `if` that
+ * lists tool names in prose and silently drifts from the real tool set. The
+ * fragment assembler removes the seam: a tool carries a `guidance` string, and
+ * the runtime injects it as a capability-gated system-prompt fragment
+ * (`requires_tools: [<that tool>]`). Instruction and tool share one source of
+ * truth, so they cannot drift — delete the tool and the instruction vanishes.
+ *
+ * `prompt_explain(options)` assembles the system prompt from the same options
+ * you would hand `agent_loop` and returns the final string plus a provenance
+ * record for every fragment (included or excluded, with the reason and byte
+ * count). This scenario assembles the prompt WITH and WITHOUT the todo tool,
+ * proves the guidance appears only when the tool does, and dumps the
+ * provenance an operator would inspect. Fully offline — no LLM, no network.
+ */
+fn mk_tool(name, description, guidance) {
+  if guidance == nil {
+    return {name: name, description: description}
+  }
+  return {name: name, description: description, guidance: guidance}
+}
+
+fn included_ids(explained) {
+  var ids = []
+  for frag in explained.fragments {
+    if frag.included {
+      ids = ids.push(frag.id)
+    }
+  }
+  return ids
+}
+
+pipeline default(_task) {
+  __io_println("=== prompt-guidance demo ===")
+  __io_println("")
+  let base_system = "You are Ness, a pragmatic engineering partner."
+  let todo_guidance = "Always update the TODO tracker after completing each item when working from a plan."
+  // 1. WITH the todo tracker present: its guidance is injected, gated on the
+  //    tool's own presence. The `read` tool carries no guidance, so it adds
+  //    nothing — only tools with something to say speak.
+  let with_todo = prompt_explain(
+    {
+      system: base_system,
+      tools: [
+        mk_tool("todo", "Add/update/complete plan items", todo_guidance),
+        mk_tool("read", "Read a file", nil),
+      ],
+    },
+  )
+  __io_println("WITH todo tool — assembled system prompt:")
+  __io_println(with_todo.system)
+  __io_println("")
+  __io_println("  fragments included: " + json_stringify(included_ids(with_todo)))
+  for frag in with_todo.fragments {
+    __io_println(
+      "    - " + frag.id + " [" + frag.bucket + "] included=" + to_string(frag.included) + " — "
+        + frag.reason,
+    )
+  }
+  __io_println("")
+  // 2. WITHOUT the todo tracker: the SAME options minus the tool. The guidance
+  //    fragment is never even constructed — there is no orphaned instruction
+  //    telling the model to use a tool it does not have.
+  let without_todo = prompt_explain({system: base_system, tools: [mk_tool("read", "Read a file", nil)]})
+  __io_println("WITHOUT todo tool — assembled system prompt:")
+  __io_println(without_todo.system)
+  __io_println("")
+  // 3. The audit: the only difference between the two prompts is exactly the
+  //    one capability-gated fragment, and the provenance names why.
+  let guidance_present_with = with_todo.system.contains(todo_guidance)
+  let guidance_present_without = without_todo.system.contains(todo_guidance)
+  let receipt = {
+    receipt_kind: "prompt_guidance_receipt",
+    guidance_with_tool: guidance_present_with,
+    guidance_without_tool: guidance_present_without,
+    drift_proof: guidance_present_with && !guidance_present_without,
+    included_with: included_ids(with_todo),
+    included_without: included_ids(without_todo),
+    fragment_count_with: len(with_todo.fragments),
+    fragment_count_without: len(without_todo.fragments),
+  }
+  __io_println("receipt:")
+  __io_println(json_stringify(receipt))
+  return receipt
+}

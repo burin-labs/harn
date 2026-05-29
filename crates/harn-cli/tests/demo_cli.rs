@@ -453,6 +453,39 @@ fn edit_language_coverage_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn prompt_guidance_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("prompt-guidance");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "prompt-guidance demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("prompt_guidance_receipt"),
+        "prompt-guidance stdout missing receipt envelope:\n{}",
+        outcome.stdout
+    );
+    // The whole point: the tool's guidance is present iff the tool is, so the
+    // assembled prompt differs by exactly the one capability-gated fragment.
+    assert!(
+        outcome.stdout.contains("\"drift_proof\":true"),
+        "guidance must appear with the tool and vanish without it:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"guidance_with_tool\":true")
+            && outcome.stdout.contains("\"guidance_without_tool\":false"),
+        "guidance presence must track tool presence exactly:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("tool:todo.guidance"),
+        "provenance must name the capability-gated fragment:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all
@@ -470,6 +503,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "http-transport",
         "harn-site",
         "obs-primitive",
+        "prompt-guidance",
     ]
     .into_iter()
     .collect();

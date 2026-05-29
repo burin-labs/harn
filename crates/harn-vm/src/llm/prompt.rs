@@ -112,9 +112,8 @@ pub(crate) struct AssembledPrompt {
 }
 
 impl AssembledPrompt {
-    /// Provenance serialized for transcript metadata / events / the
-    /// `harn agent prompt explain` CLI.
-    #[allow(dead_code)] // wired by the prompt-provenance event + CLI (Wave 2)
+    /// Provenance serialized for the `prompt_explain` builtin / CLI and for
+    /// transcript audit metadata.
     pub(crate) fn provenance_json(&self) -> serde_json::Value {
         serde_json::json!({
             "fragments": self.provenance,
