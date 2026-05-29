@@ -483,7 +483,7 @@ id = "claude-sonnet-4-6"
 provider = "anthropic"
 
 [aliases.opus]
-id = "claude-opus-4-7"
+id = "claude-opus-4-8"
 provider = "anthropic"
 
 [aliases.haiku]
@@ -864,7 +864,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-7."
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-8."
+superseded_by = "claude-opus-4-8"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -876,7 +877,8 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
 deprecated = true
-deprecation_note = "Superseded by claude-opus-4-7. No formal sunset yet; switch when convenient."
+deprecation_note = "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient."
+superseded_by = "claude-opus-4-8"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -886,25 +888,78 @@ name = "Claude Opus 4.6"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+deprecated = true
+deprecation_note = "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient."
+superseded_by = "claude-opus-4-8"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 80.8, swe_bench_pro = 53.4 }
+# Fast mode DEPRECATED at the Opus 4.8 launch; removed ~30 days later.
+fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "deprecated", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50 }, note = "Deprecated at the Opus 4.8 launch; removed ~30 days later, after which speed=fast silently falls back to standard speed/pricing. Migrate to Opus 4.8 or 4.7 fast mode." }
 [models."claude-opus-4-7"]
 name = "Claude Opus 4.7"
 provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
-
-# OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
-# GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
-# from API 2026-02-17 (Enterprise/Edu grace until 2026-04-03).
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+deprecated = true
+deprecation_note = "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient."
+superseded_by = "claude-opus-4-8"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 87.6, swe_bench_pro = 64.3 }
+# Fast mode (research preview): 6x standard pricing, ~2.5x output tok/s.
+fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "research_preview", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50 }, note = "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate." }
+
+# Claude Opus 4.8 (released 2026-05-28) — Anthropic's most capable model
+# for complex reasoning, long-horizon agentic coding, and high-autonomy
+# work; the current `opus` alias target. Adaptive thinking only (extended
+# thinking budgets return 400); the `effort` parameter controls reasoning
+# depth and defaults to `high` on every surface. Sampling params
+# (temperature/top_p/top_k) are rejected — steer via prompting instead.
+# Natively a 1M-token context window (via the long-context beta); the
+# catalog keeps the standard-tier 200k convention shared by every other
+# Claude row. Pricing per the Anthropic models overview: $5 / $25 per
+# MTok in/out (cache read 0.1x, 5-min cache write 1.25x).
+[models."claude-opus-4-8"]
+name = "Claude Opus 4.8"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 88.6, swe_bench_pro = 69.2 }
+# Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
+fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." }
+
+# OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
+
+# GPT-5.5 — current OpenAI frontier (Responses + Chat Completions).
+# Reasoning model driven by `reasoning_effort`. Standard $5 / $30 per MTok
+# (cached input $0.50); short-context rates shown — long-context (>200k)
+# bills higher per OpenAI's pricing page. Accelerated serving rides the
+# `service_tier` knob: Codex exposes it as "Fast mode"
+# (service_tier = "fast", ~1.5x faster output) and the API as priority
+# processing (service_tier = "priority"); both bill at 2.5x standard.
+# Off by default.
+[models."gpt-5.5"]
+name = "GPT-5.5"
+provider = "openai"
+context_window = 400000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
+fast_mode = { param = "service_tier", value = "fast", otps_speedup = 1.5, status = "ga", pricing = { input_per_mtok = 12.50, output_per_mtok = 75.00, cache_read_per_mtok = 1.25 }, note = "Codex \"Fast mode\" (service_tier=\"fast\", ~1.5x faster output) and API priority processing (service_tier=\"priority\") both bill at 2.5x standard. Not offered for long-context, fine-tuned models, or embeddings." }
+
+# GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
+# from API 2026-02-17 (Enterprise/Edu grace until 2026-04-03).
 [models."gpt-4o"]
 name = "GPT-4o"
 provider = "openai"

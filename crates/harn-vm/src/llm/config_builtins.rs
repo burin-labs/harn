@@ -1061,6 +1061,14 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
+        "superseded_by".to_string(),
+        model
+            .superseded_by
+            .as_deref()
+            .map(|target| VmValue::String(Rc::from(target)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
         "quality_tags".to_string(),
         string_list_to_vm_value(model.quality_tags.clone()),
     );
@@ -1086,6 +1094,14 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         .map(|(key, value)| (key.clone(), VmValue::Float(*value)))
         .collect();
     dict.insert("benchmarks".to_string(), VmValue::Dict(Rc::new(benchmarks)));
+    dict.insert(
+        "fast_mode".to_string(),
+        model
+            .fast_mode
+            .as_ref()
+            .map(fast_mode_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
     VmValue::Dict(Rc::new(dict))
 }
 
@@ -1111,6 +1127,53 @@ fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
         pricing
             .cache_write_per_mtok
             .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil),
+    );
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "param".to_string(),
+        VmValue::String(Rc::from(fast.param.as_str())),
+    );
+    dict.insert(
+        "value".to_string(),
+        VmValue::String(Rc::from(fast.value.as_str())),
+    );
+    dict.insert(
+        "beta_header".to_string(),
+        fast.beta_header
+            .as_deref()
+            .map(|header| VmValue::String(Rc::from(header)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "otps_speedup".to_string(),
+        fast.otps_speedup
+            .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "status".to_string(),
+        fast.status
+            .as_deref()
+            .map(|status| VmValue::String(Rc::from(status)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "pricing".to_string(),
+        fast.pricing
+            .as_ref()
+            .map(pricing_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "note".to_string(),
+        fast.note
+            .as_deref()
+            .map(|note| VmValue::String(Rc::from(note)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::Dict(Rc::new(dict))

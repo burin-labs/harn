@@ -87,6 +87,9 @@
             "active",
             "deprecated"
           ]
+        },
+        "superseded_by": {
+          "type": "string"
         }
       },
       "required": [
@@ -114,6 +117,40 @@
       "required": [
         "base_url",
         "chat_endpoint"
+      ],
+      "type": "object"
+    },
+    "fast_mode": {
+      "additionalProperties": false,
+      "properties": {
+        "beta_header": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "otps_speedup": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "param": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "pricing": {
+          "$ref": "#/$defs/pricing"
+        },
+        "status": {
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "param",
+        "value"
       ],
       "type": "object"
     },
@@ -221,6 +258,9 @@
         },
         "deprecation": {
           "$ref": "#/$defs/deprecation"
+        },
+        "fast_mode": {
+          "$ref": "#/$defs/fast_mode"
         },
         "format_preferences": {
           "$ref": "#/$defs/format_preferences"

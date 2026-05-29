@@ -233,6 +233,43 @@ pub struct ModelPricing {
     pub cache_write_per_mtok: Option<f64>,
 }
 
+/// Optional accelerated-serving ("fast mode") tier for a model. Off by
+/// default: its presence only *describes* that the provider offers a
+/// faster, premium-priced serving path running the same weights — callers
+/// must explicitly opt in via the provider's request knob, so nothing here
+/// changes default behavior. Deliberately provider-agnostic: Anthropic
+/// exposes the tier as `speed = "fast"` (beta-gated), while OpenAI uses
+/// `service_tier = "fast"` / `"priority"`. Premium pricing is stored as
+/// absolute per-MTok rates rather than a single multiplier because
+/// providers price the tier asymmetrically (Anthropic Opus 4.8 is 2x
+/// standard; Opus 4.6/4.7 fast mode is 6x).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct FastModeDef {
+    /// Request field that opts into the fast tier (e.g. "speed" for
+    /// Anthropic, "service_tier" for OpenAI).
+    pub param: String,
+    /// Value to send on `param` (e.g. "fast", "priority").
+    pub value: String,
+    /// Provider beta/feature header required to use the tier, if any
+    /// (e.g. Anthropic "fast-mode-2026-02-01").
+    #[serde(default)]
+    pub beta_header: Option<String>,
+    /// Output-tokens-per-second speedup vs standard serving (e.g. 2.5).
+    #[serde(default)]
+    pub otps_speedup: Option<f64>,
+    /// Lifecycle of the fast tier: "ga" | "research_preview" |
+    /// "deprecated". None when unspecified.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Premium pricing charged while the fast tier is active (absolute
+    /// per-MTok rates, not a multiplier on standard pricing).
+    #[serde(default)]
+    pub pricing: Option<ModelPricing>,
+    /// Free-text note: constraints, deprecation timeline, etc.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelDef {
     pub name: String,
@@ -250,6 +287,20 @@ pub struct ModelDef {
     pub deprecated: bool,
     #[serde(default)]
     pub deprecation_note: Option<String>,
+    /// Structured replacement pointer: the catalog id of the model that
+    /// supersedes this one (e.g. an older Opus row points at the newest
+    /// Opus). Lets release tooling express "migrate to X" in a
+    /// machine-readable way instead of burying it in `deprecation_note`
+    /// free text. A model may be superseded without being `deprecated`
+    /// (a newer option exists but this one is still fully supported);
+    /// pair it with `deprecated = true` once a sunset is announced.
+    #[serde(default)]
+    pub superseded_by: Option<String>,
+    /// Accelerated-serving ("fast mode") tier metadata, when the model's
+    /// provider offers one. Off by default — see [`FastModeDef`]. None for
+    /// models with no faster serving path.
+    #[serde(default)]
+    pub fast_mode: Option<FastModeDef>,
     #[serde(default)]
     pub quality_tags: Vec<String>,
     /// Whether the model can be reached over a normal API-key serverless call,
@@ -1213,6 +1264,8 @@ mod tests {
                 pricing: None,
                 deprecated: false,
                 deprecation_note: None,
+                superseded_by: None,
+                fast_mode: None,
                 quality_tags: Vec::new(),
                 availability: ModelAvailability::default(),
                 tier: None,
@@ -1581,6 +1634,8 @@ mod tests {
                 }),
                 deprecated: false,
                 deprecation_note: None,
+                superseded_by: None,
+                fast_mode: None,
                 quality_tags: Vec::new(),
                 availability: ModelAvailability::default(),
                 tier: None,
@@ -1841,5 +1896,53 @@ mod tests {
                 entry.deprecation_note
             );
         }
+    }
+
+    #[test]
+    fn opus_alias_tracks_claude_opus_4_8_with_fast_mode() {
+        // The `opus` alias must follow the newest Opus release, and that
+        // release advertises its (off-by-default) fast-mode tier.
+        let (model, provider) = resolve_model("opus");
+        assert_eq!(model, "claude-opus-4-8");
+        assert_eq!(provider.as_deref(), Some("anthropic"));
+
+        let opus48 = model_catalog_entry("claude-opus-4-8").expect("opus 4.8 catalog entry");
+        assert!(!opus48.deprecated, "newest Opus must not be deprecated");
+        let fast = opus48.fast_mode.expect("opus 4.8 advertises fast mode");
+        assert_eq!(fast.param, "speed");
+        assert_eq!(fast.value, "fast");
+        assert_eq!(fast.status.as_deref(), Some("research_preview"));
+        let fast_pricing = fast.pricing.expect("fast mode carries premium pricing");
+        let standard = opus48.pricing.expect("opus 4.8 standard pricing");
+        assert!(
+            fast_pricing.input_per_mtok > standard.input_per_mtok,
+            "fast mode must be premium-priced relative to standard"
+        );
+    }
+
+    #[test]
+    fn superseded_opus_models_point_at_claude_opus_4_8() {
+        // Earlier Opus rows are deprecated and carry a structured
+        // `superseded_by` pointer to the current flagship.
+        for model in ["claude-opus-4-7", "claude-opus-4-6"] {
+            let entry =
+                model_catalog_entry(model).unwrap_or_else(|| panic!("{model} catalog entry"));
+            assert!(entry.deprecated, "{model} should be deprecated");
+            assert_eq!(
+                entry.superseded_by.as_deref(),
+                Some("claude-opus-4-8"),
+                "{model} should be superseded by claude-opus-4-8"
+            );
+        }
+    }
+
+    #[test]
+    fn gpt_5_5_fast_mode_rides_service_tier() {
+        // Fast mode is provider-agnostic: OpenAI exposes it through the
+        // `service_tier` knob rather than Anthropic's `speed`.
+        let entry = model_catalog_entry("gpt-5.5").expect("gpt-5.5 catalog entry");
+        let fast = entry.fast_mode.expect("gpt-5.5 advertises a fast tier");
+        assert_eq!(fast.param, "service_tier");
+        assert_eq!(fast.status.as_deref(), Some("ga"));
     }
 }

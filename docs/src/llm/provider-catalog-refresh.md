@@ -43,7 +43,10 @@ checks in generated artifacts under `spec/provider-catalog/` so
 downstream hosts do not need to parse Harn internals:
 
 - `provider-catalog.json` — normalized providers, models, aliases,
-  variants, QC defaults, capabilities, pricing, deprecation metadata,
+  variants, QC defaults, capabilities, pricing, deprecation metadata
+  (including the structured `superseded_by` migration pointer),
+  fast-mode tier metadata (the accelerated-serving opt-in knob, its
+  premium pricing, and lifecycle — described but off by default),
   serverless-vs-dedicated availability, endpoint/auth metadata, and
   provider caveats;
 - `provider-catalog.schema.json` — JSON Schema for the catalog
