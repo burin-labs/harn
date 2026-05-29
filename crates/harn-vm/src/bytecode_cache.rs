@@ -57,6 +57,15 @@ pub const SCHEMA_VERSION: u32 = 4;
 /// are rejected on load.
 pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Build-time fingerprint of the compiler front-end — the lexer, parser, IR,
+/// and code generator — computed in `build.rs` from those crates' source and
+/// baked in via `cargo:rustc-env`. Folded into the cache key so a compiler
+/// change that alters emitted bytecode for unchanged source invalidates stale
+/// entries automatically, within a single version, with no manual cache wipe.
+/// `HARN_VERSION` only busts the cache across release bumps; this closes the
+/// same gap for the within-version compiler edits that masked #2610. See #2621.
+pub const CODEGEN_FINGERPRINT: &str = env!("HARN_CODEGEN_FINGERPRINT");
+
 /// Conventional extension for entry-chunk cache files.
 pub const CACHE_EXTENSION: &str = "harnbc";
 
@@ -708,6 +717,17 @@ fn embedded_stdlib_digest() -> &'static [u8; 32] {
 /// disk files), so without this fold a stdlib edit between development
 /// builds would leave user-file caches pinned to a stale stdlib snapshot.
 fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
+    hash_transitive_user_imports_fingerprinted(source_path, source, CODEGEN_FINGERPRINT)
+}
+
+/// Inner form of [`hash_transitive_user_imports`] parameterized on the compiler
+/// fingerprint so tests can vary it; production always passes
+/// [`CODEGEN_FINGERPRINT`].
+fn hash_transitive_user_imports_fingerprinted(
+    source_path: &Path,
+    source: &str,
+    codegen_fingerprint: &str,
+) -> [u8; 32] {
     let mut visited: std::collections::BTreeMap<PathBuf, ImportNode> =
         std::collections::BTreeMap::new();
     let mut frontier: Vec<(PathBuf, String)> = collect_user_imports(source)
@@ -757,6 +777,13 @@ fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(b"stdlib-digest\0");
     hasher.update(embedded_stdlib_digest());
+    hasher.update(b"\0");
+    // Fold in the compiler's code-generation fingerprint so a compiler change
+    // that alters emitted bytecode for unchanged source busts stale cache
+    // entries within a single version — the gap that masked the #2610 fix until
+    // the cache was cleared by hand. See `build.rs` and `CODEGEN_FINGERPRINT`.
+    hasher.update(b"codegen-fingerprint\0");
+    hasher.update(codegen_fingerprint.as_bytes());
     hasher.update(b"\0");
     for (path, node) in &visited {
         hasher.update(path.to_string_lossy().as_bytes());
@@ -850,6 +877,38 @@ mod tests {
             read_chunk_if_matches(&path, &other).unwrap().is_none(),
             "flipped HARN_DISABLE_OPTIMIZATIONS must not reuse a chunk \
              compiled under the opposite setting"
+        );
+    }
+
+    #[test]
+    fn codegen_fingerprint_is_populated() {
+        // In-workspace builds always hash real compiler sources, so the
+        // fingerprint must be a non-empty digest; an empty value would silently
+        // disable the within-version compiler-staleness guard.
+        assert!(!CODEGEN_FINGERPRINT.is_empty());
+    }
+
+    #[test]
+    fn codegen_fingerprint_changes_cache_key() {
+        // A compiler whose code-generation source differs must produce a
+        // different cache key for the *same* user source, so a stale artifact
+        // compiled by a prior compiler at the same version misses on load
+        // rather than being replayed (#2621). The fingerprint is a compile-time
+        // constant, so exercise the parameterized inner hash directly.
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = tmp.path().join("entry.harn");
+        std::fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
+        let source = std::fs::read_to_string(&entry).unwrap();
+        let a = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-A");
+        let b = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-B");
+        let a_again = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-A");
+        assert_ne!(
+            a, b,
+            "differing compiler fingerprints must change the cache key"
+        );
+        assert_eq!(
+            a, a_again,
+            "an unchanged compiler fingerprint must be stable"
         );
     }
 
