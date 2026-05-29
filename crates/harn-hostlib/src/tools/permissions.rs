@@ -1,4 +1,13 @@
-//! Per-thread "enabled features" registry for the deterministic tools.
+//! Permission enforcement shared by the path-touching hostlib builtins.
+//!
+//! Two complementary layers live here:
+//!
+//! * The per-thread "enabled features" registry plus [`gated_handler`] —
+//!   the coarse "is this session allowed to touch the filesystem at all?"
+//!   gate (see the module body below).
+//! * [`enforce_path_scope`] — the granular "is this *specific path* inside
+//!   the session's workspace roots?" check, delegating to the VM-native
+//!   sandbox so the hostlib surface and `harness.fs.*` agree.
 //!
 //! `harn-hostlib` exposes the deterministic tool builtins on every VM that
 //! `install_default` runs against, but pipelines must explicitly opt in to
@@ -20,8 +29,10 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::sync::Arc;
 
+use harn_vm::process_sandbox::{check_fs_path_scope, FsAccess};
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
@@ -92,5 +103,29 @@ pub fn gated_handler(
             });
         }
         runner(args)
+    })
+}
+
+/// Reject `path` when it resolves outside the active execution policy's
+/// workspace roots, under a restricted sandbox profile.
+///
+/// This is the single path-scope policy shared by every hostlib builtin
+/// that resolves a host filesystem path — the `tools::*`, `fs::*`, and
+/// `ast::*` surfaces — so the granular workspace-root check stays
+/// consistent across all of them (the path-level complement to the coarse
+/// [`gated_handler`] feature gate). It delegates to
+/// [`harn_vm::process_sandbox::check_fs_path_scope`] so a path the
+/// `harness.fs.*` VM-native builtins would refuse is refused here too, with
+/// the same message. A no-op when no policy is active or the profile is
+/// unrestricted.
+pub fn enforce_path_scope(
+    builtin: &'static str,
+    path: &Path,
+    access: FsAccess,
+) -> Result<(), HostlibError> {
+    check_fs_path_scope(path, access).map_err(|violation| HostlibError::SandboxViolation {
+        builtin,
+        path: violation.attempted.display().to_string(),
+        message: violation.message(builtin),
     })
 }

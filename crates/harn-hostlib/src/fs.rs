@@ -14,6 +14,7 @@ use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 
 use harn_vm::agent_events::AgentEvent;
+use harn_vm::process_sandbox::{check_fs_path_scope, FsAccess};
 use harn_vm::VmValue;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -24,6 +25,7 @@ use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
     require_string, str_value,
 };
+use crate::tools::permissions::enforce_path_scope;
 
 const SET_MODE_BUILTIN: &str = "hostlib_fs_set_mode";
 const STATUS_BUILTIN: &str = "hostlib_fs_staged_status";
@@ -337,6 +339,19 @@ pub fn commit_staged(session_id: &str, paths: &[String]) -> Result<CommitResult,
             continue;
         };
         let path_label = path.to_string_lossy().into_owned();
+        // The overlay always lives inside the workspace, but commit flushes
+        // to the *target* working-tree path. Enforce workspace-root scope
+        // against that target so a staged entry — possibly persisted under
+        // a looser policy in an earlier session — can never write outside
+        // the roots active at commit time.
+        let access = match entry {
+            StagedEntry::Write { .. } => FsAccess::Write,
+            StagedEntry::Delete { .. } => FsAccess::Delete,
+        };
+        if let Err(violation) = check_fs_path_scope(&path, access) {
+            failed_paths_with_reasons.push((path_label, violation.message(COMMIT_BUILTIN)));
+            continue;
+        }
         match commit_entry(&state, &path, &entry) {
             Ok(()) => {
                 state.entries.remove(&path);
@@ -880,6 +895,7 @@ fn read_text_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let path_str = require_string(READ_TEXT_BUILTIN, dict, "path")?;
     let session_id = optional_string(READ_TEXT_BUILTIN, dict, "session_id")?;
     let path = Path::new(&path_str);
+    enforce_path_scope(READ_TEXT_BUILTIN, path, FsAccess::Read)?;
 
     let (bytes, existed) = read_existing(READ_TEXT_BUILTIN, path, session_id.as_deref())?;
     let hash = hash_label(&bytes);
@@ -913,6 +929,11 @@ fn safe_text_patch_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let create_parents = optional_bool(SAFE_TEXT_PATCH_BUILTIN, dict, "create_parents", true)?;
     let overwrite = optional_bool(SAFE_TEXT_PATCH_BUILTIN, dict, "overwrite", true)?;
 
+    enforce_path_scope(
+        SAFE_TEXT_PATCH_BUILTIN,
+        Path::new(&path_str),
+        FsAccess::Write,
+    )?;
     let outcome = safe_text_patch(
         Path::new(&path_str),
         &content,

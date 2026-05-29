@@ -40,6 +40,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor, QueryError};
@@ -48,6 +49,7 @@ use crate::error::HostlibError;
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, require_string, str_value,
 };
+use crate::tools::permissions::enforce_path_scope;
 
 use super::edit_common::{
     first_syntax_error, format_query_error, read_source, resolve_target_capture, sha256_hex,
@@ -129,6 +131,9 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
 
     let path = PathBuf::from(&path_str);
+    // Guards both the read below and the write-back; one scope check at the
+    // strongest access the builtin can perform.
+    enforce_path_scope(BUILTIN, &path, FsAccess::Write)?;
     let language = match Language::detect(&path, language_hint.as_deref()) {
         Some(l) => l,
         None => {
