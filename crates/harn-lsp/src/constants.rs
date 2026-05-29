@@ -574,22 +574,74 @@ pub(crate) struct BuiltinDetail {
     doc: Option<String>,
 }
 
+/// Authored `(signature_text, doc)` for one builtin, both optional because a
+/// `#[harn_builtin]` descriptor may omit either (e.g. `sig_expr`-defined or
+/// undocumented builtins).
+type DescriptorEntry = (Option<&'static str>, Option<&'static str>);
+
+/// Canonical signature + doc for one builtin, keyed by name.
+///
+/// Built once from the `#[harn_builtin]` descriptor slice
+/// ([`harn_vm::stdlib::all_builtin_defs`]) so it is immune to the
+/// registration-order race that motivated harn#2588: every `#[harn_builtin]`
+/// fn — including `runtime_only` ones — contributes its authored
+/// `signature_text` and doc regardless of how the VM happened to wire it up.
+fn canonical_builtin_descriptors() -> &'static BTreeMap<&'static str, DescriptorEntry> {
+    static CANONICAL: OnceLock<BTreeMap<&'static str, DescriptorEntry>> = OnceLock::new();
+    CANONICAL.get_or_init(|| {
+        let mut map = BTreeMap::new();
+        for def in harn_vm::stdlib::all_builtin_defs() {
+            for name in std::iter::once(def.sig.name).chain(def.aliases.iter().copied()) {
+                map.entry(name).or_insert((def.signature_text, def.doc));
+            }
+        }
+        map
+    })
+}
+
 pub(crate) fn builtin_details() -> &'static [BuiltinDetail] {
     static DETAILS: OnceLock<Vec<BuiltinDetail>> = OnceLock::new();
     DETAILS.get_or_init(|| {
+        // Signature precedence, highest to lowest:
+        //
+        //   1. The curated `BUILTINS` overrides below — hand-tuned strings
+        //      the maintainers want to win (e.g. simplified `llm_healthcheck`).
+        //   2. The `#[harn_builtin]` descriptor's authored `signature_text` —
+        //      the single source the macro emits for both the runtime handler
+        //      and the parser signature, so the LSP, typechecker, and
+        //      `harn explain` all agree.
+        //   3. The VM runtime metadata signature — fallback for builtins with
+        //      no `#[harn_builtin]` descriptor (legacy DSL-only registrations).
+        //
+        // Earlier this read the signature straight from VM runtime metadata,
+        // whose per-name entry is whatever code path registered last. A builtin
+        // carrying both a DSL registration and a typed descriptor could then
+        // surface either spelling depending on registration order, which
+        // differed between local `cargo test` and CI nextest runs. Anchoring
+        // on the descriptor slice removes that race (harn#2588).
+        let canonical = canonical_builtin_descriptors();
         let mut details = BTreeMap::new();
         for metadata in harn_vm::stdlib::stdlib_builtin_metadata() {
             let name = metadata.name();
             if name.starts_with("__") {
                 continue;
             }
-            let signature = metadata.signature().unwrap_or(name);
+            let descriptor = canonical.get(name);
+            let signature = descriptor
+                .and_then(|(sig, _)| *sig)
+                .or_else(|| metadata.signature())
+                .unwrap_or(name)
+                .to_string();
+            let doc = descriptor
+                .and_then(|(_, doc)| *doc)
+                .or_else(|| metadata.doc())
+                .map(str::to_string);
             details.insert(
                 name.to_string(),
                 BuiltinDetail {
                     name: name.to_string(),
-                    signature: signature.to_string(),
-                    doc: metadata.doc().map(str::to_string),
+                    signature,
+                    doc,
                 },
             );
         }
@@ -1049,10 +1101,11 @@ mod tests {
     #[test]
     fn lsp_registry_includes_runtime_metadata_only_llm_config_builtins() {
         assert!(is_builtin("provider_capabilities"));
-        // After #2575 migrated the LLM config builtins to
-        // `#[harn_builtin]`, the recorded signature includes parameter
-        // and return types — match the new shape directly rather than
-        // the legacy untyped string.
+        // `provider_capabilities` is `runtime_only`, so the LSP surfaces the
+        // signature the `#[harn_builtin]` descriptor authored — including the
+        // explicit `string|nil` on the optional `model` param — rather than a
+        // registration-order-dependent runtime-metadata spelling. See
+        // harn#2588.
         assert_eq!(
             builtin_signature("provider_capabilities"),
             Some("provider_capabilities(provider: string, model?: string|nil) -> dict")
@@ -1080,5 +1133,29 @@ mod tests {
         assert!(builtin_doc("llm_healthcheck")
             .expect("llm_healthcheck doc")
             .contains("Ollama accepts"),);
+    }
+
+    /// Every LSP-exposed builtin backed by a `#[harn_builtin]` descriptor must
+    /// surface that descriptor's authored `signature_text` verbatim — unless a
+    /// curated `BUILTINS` override deliberately replaces it. This pins the "one
+    /// canonical source" invariant from harn#2588 so the LSP can never drift
+    /// back to a registration-order-dependent runtime-metadata spelling.
+    #[test]
+    fn lsp_signature_matches_descriptor_text_except_curated_overrides() {
+        let curated: std::collections::HashSet<&str> =
+            super::BUILTINS.iter().map(|&(name, _)| name).collect();
+        let descriptors = super::canonical_builtin_descriptors();
+        for detail in super::builtin_details() {
+            if curated.contains(detail.name.as_str()) {
+                continue;
+            }
+            if let Some((Some(text), _)) = descriptors.get(detail.name.as_str()) {
+                assert_eq!(
+                    detail.signature, *text,
+                    "LSP signature for `{}` drifted from its #[harn_builtin] descriptor",
+                    detail.name
+                );
+            }
+        }
     }
 }
