@@ -1,0 +1,37 @@
+/**
+ * The burin compass (`compass_ast_edits`) is a canonical reminder
+ * provider that ships opt-in: it stays silent unless a session enables it
+ * via `reminders: {providers: ["compass_ast_edits"]}`, at which point it
+ * injects its AST-edit steer at session start.
+ */
+pipeline main() {
+  llm_mock_clear()
+  llm_mock({text: "done"})
+  let opted_in = agent_loop(
+    "compass opt-in",
+    nil,
+    {
+      provider: "mock",
+      model: "mock",
+      session_id: "reminder-compass-opt-in",
+      reminders: {providers: ["compass_ast_edits"]},
+    },
+  )
+  let on = transcript_events_by_kind(opted_in.transcript, "system_reminder")
+    .filter({ e -> e.reminder.tags[0] == "compass_ast_edits" })
+  llm_mock_clear()
+  llm_mock({text: "done"})
+  let default_off = agent_loop(
+    "compass default off",
+    nil,
+    {provider: "mock", model: "mock", session_id: "reminder-compass-default-off"},
+  )
+  let off = transcript_events_by_kind(default_off.transcript, "system_reminder")
+    .filter({ e -> e.reminder.tags[0] == "compass_ast_edits" })
+  __io_println(len(on))
+  __io_println(on[0].reminder.tags[0])
+  __io_println(on[0].reminder.source)
+  __io_println(on[0].reminder.body.contains("edit_apply_node"))
+  __io_println(on[0].reminder.preserve_on_compact)
+  __io_println(len(off))
+}
