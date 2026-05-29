@@ -506,6 +506,13 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/stdlib/long_running.rs"
   "crates/harn-vm/src/stdlib/memory.rs"
   "crates/harn-vm/src/stdlib/monitors.rs"
+  # `pg_partition_retain` / `pg_partition_create_for_window` (#2580) read the
+  # host wall clock to anchor a retention cutoff ("now − keep_days") and the
+  # default maintenance window start. Real current time IS the source of
+  # truth here — the same shape as the `date_now` builtin. The cutoff/window
+  # math lives in pure helpers that take an injected `now` and are unit-tested
+  # deterministically; only the thin builtin boundary reads the real clock.
+  "crates/harn-vm/src/stdlib/postgres/introspect.rs"
   # `pg_execute` and `pg_migrate` time the host wall-clock duration of the
   # Postgres round-trip and surface it as `duration_ms` in the result dict
   # (issue #2500). The measurement IS the observability source of truth
