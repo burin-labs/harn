@@ -1585,17 +1585,39 @@ fn print_completions(shell: CompletionShell) {
     clap_complete::generate(shell, &mut command, "harn", &mut std::io::stdout());
 }
 
+/// Back-compat shim for the legacy `harn serve [flags] agent.harn` shape,
+/// which predates the explicit transport subcommands and defaulted to
+/// A2A. When the token after `serve` is not a known transport subcommand
+/// (nor a help flag), assume the legacy shape and inject `a2a`.
+///
+/// The set of transports is read from the clap command tree rather than
+/// hard-coded, so a newly added transport (e.g. `site`) is recognized
+/// automatically instead of being silently rewritten to `a2a`.
 fn normalize_serve_args(mut raw_args: Vec<String>) -> Vec<String> {
-    if raw_args.len() > 2
-        && raw_args.get(1).is_some_and(|arg| arg == "serve")
-        && !matches!(
-            raw_args.get(2).map(String::as_str),
-            Some("acp" | "a2a" | "api" | "mcp" | "-h" | "--help")
-        )
-    {
-        raw_args.insert(2, "a2a".to_string());
+    if raw_args.len() > 2 && raw_args.get(1).is_some_and(|arg| arg == "serve") {
+        let token = raw_args.get(2).map(String::as_str).unwrap_or_default();
+        let is_explicit = token == "-h"
+            || token == "--help"
+            || serve_subcommand_names().iter().any(|name| name == token);
+        if !is_explicit {
+            raw_args.insert(2, "a2a".to_string());
+        }
     }
     raw_args
+}
+
+/// Names of the transport subcommands clap knows under `harn serve`.
+fn serve_subcommand_names() -> Vec<String> {
+    use clap::CommandFactory;
+    Cli::command()
+        .find_subcommand("serve")
+        .map(|serve| {
+            serve
+                .get_subcommands()
+                .map(|sub| sub.get_name().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn print_version() {
@@ -3092,7 +3114,7 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
 #[cfg(test)]
 mod main_tests {
     use super::{
-        is_broken_pipe_panic_payload, normalize_serve_args,
+        is_broken_pipe_panic_payload, normalize_serve_args, serve_subcommand_names,
         should_install_default_connector_clients,
     };
     use std::path::Path;
@@ -3121,21 +3143,39 @@ mod main_tests {
 
     #[test]
     fn normalize_serve_args_preserves_explicit_subcommands() {
+        // Every transport clap knows must pass through untouched — a new
+        // transport that the shim failed to recognize would be rewritten
+        // to `a2a` and mis-parsed (the `site` regression that motivated
+        // deriving the list from clap rather than hard-coding it).
+        for transport in serve_subcommand_names() {
+            let args = normalize_serve_args(vec![
+                "harn".to_string(),
+                "serve".to_string(),
+                transport.clone(),
+                "server.harn".to_string(),
+            ]);
+            assert_eq!(
+                args,
+                vec![
+                    "harn".to_string(),
+                    "serve".to_string(),
+                    transport.clone(),
+                    "server.harn".to_string(),
+                ],
+                "transport `{transport}` should not be rewritten",
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_serve_args_recognizes_site_subcommand() {
         let args = normalize_serve_args(vec![
             "harn".to_string(),
             "serve".to_string(),
-            "acp".to_string(),
+            "site".to_string(),
             "server.harn".to_string(),
         ]);
-        assert_eq!(
-            args,
-            vec![
-                "harn".to_string(),
-                "serve".to_string(),
-                "acp".to_string(),
-                "server.harn".to_string(),
-            ]
-        );
+        assert_eq!(args.get(2).map(String::as_str), Some("site"));
     }
 
     #[test]

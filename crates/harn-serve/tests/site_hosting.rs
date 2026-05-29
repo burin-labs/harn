@@ -160,6 +160,59 @@ async fn handler_naming_convention_mounts_route() {
 }
 
 #[tokio::test]
+async fn malformed_route_is_diagnosed_and_unmounted_without_breaking_siblings() {
+    // A script where one handler's `@route` is malformed (a non-string
+    // method position) and a sibling is well-formed. The startup catalog
+    // must carry a `HARN-SRV-*` diagnostic and leave the bad handler
+    // unmounted (404), while the good handler still serves (200).
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("site.harn");
+    std::fs::write(
+        &path,
+        r#"
+pub fn bad_method(req: dict) -> string { return "GET" }
+
+@route(bad_method, "/broken")
+pub fn handler_broken(req: dict) -> dict { return http_ok({}) }
+
+@route("GET", "/fine")
+pub fn handler_fine(req: dict) -> dict { return http_ok({ "ok": true }) }
+"#,
+    )
+    .expect("write script");
+
+    let core = build_core(&path);
+    let diagnostics = core.catalog().diagnostics();
+    assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "HARN-SRV-001");
+    assert!(diagnostics[0].message.contains("handler_broken"));
+
+    let router = SiteServer::new(SiteServerConfig::new(core))
+        .router()
+        .expect("site router");
+
+    let broken = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/broken")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(broken.status(), StatusCode::NOT_FOUND);
+
+    let fine = router
+        .oneshot(Request::builder().uri("/fine").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let (status, body) = read_json(fine).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
 async fn unknown_method_on_known_path_yields_405() {
     let (_dir, router) = site_router();
     // /hello is GET-only; DELETE has no handler.

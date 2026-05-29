@@ -113,6 +113,7 @@ pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
     let mut config = DispatchCoreConfig::for_script(&args.file);
     config.auth_policy = auth_policy;
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
+    harn_serve::emit_export_diagnostics(core.catalog().diagnostics());
     let mut server_config = A2aServerConfig::new(core);
     server_config.card_signing_secret = args.card_signing_secret.clone();
     let server = Arc::new(A2aServer::new(server_config));
@@ -160,6 +161,7 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
     // effects — so swap the default replay cache for the no-op one.
     config.replay_cache = Arc::new(harn_serve::NoReplayCache);
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
+    harn_serve::emit_export_diagnostics(core.catalog().diagnostics());
     SiteServer::new(SiteServerConfig::new(core))
         .run_http(SiteHttpServeOptions {
             bind: args.bind,
@@ -186,6 +188,7 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
     // route incoming MCP calls to `pub fn` exports.
     let catalog = ExportCatalog::from_path(Path::new(&args.file))
         .map_err(|error| format!("failed to load script: {error}"))?;
+    harn_serve::emit_export_diagnostics(catalog.diagnostics());
     let has_pub_fn_exports = catalog
         .functions
         .values()
