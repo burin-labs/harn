@@ -13,7 +13,7 @@ use std::thread;
 
 use harn_cli::commands::demo::scenario_ids;
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
-use harn_cli::tests::common::scoped_env::ScopedEnvVar;
+use harn_cli::env_guard::ScopedEnvVar;
 use harn_cli::tests::common::{cwd_lock, env_lock};
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
