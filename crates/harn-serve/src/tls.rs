@@ -139,15 +139,19 @@ pub async fn serve_router_from_tcp(
     router: Router,
     tls: &HttpTlsConfig,
 ) -> Result<(), String> {
+    // `with_connect_info` stashes the peer `SocketAddr` in each request's
+    // extensions so handlers can recover the real transport peer (e.g. the
+    // site adapter's `req.remote_addr` and trusted-proxy `client_ip`
+    // resolution). Adapters that don't read it pay nothing.
     match tls.rustls_config().await? {
         Some(config) => axum_server::from_tcp_rustls(listener, config)
             .map_err(|error| format!("HTTPS listener setup failed: {error}"))?
-            .serve(router.into_make_service())
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .map_err(|error| format!("HTTPS listener failed: {error}")),
         None => axum_server::from_tcp(listener)
             .map_err(|error| format!("HTTP listener setup failed: {error}"))?
-            .serve(router.into_make_service())
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .map_err(|error| format!("HTTP listener failed: {error}")),
     }

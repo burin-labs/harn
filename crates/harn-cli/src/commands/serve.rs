@@ -162,7 +162,7 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
     config.replay_cache = Arc::new(harn_serve::NoReplayCache);
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
     harn_serve::emit_export_diagnostics(core.catalog().diagnostics());
-    SiteServer::new(SiteServerConfig::new(core))
+    SiteServer::new(SiteServerConfig::new(core).with_trusted_proxies(args.trusted_proxies.clone()))
         .run_http(SiteHttpServeOptions {
             bind: args.bind,
             public_url: args.public_url.clone(),

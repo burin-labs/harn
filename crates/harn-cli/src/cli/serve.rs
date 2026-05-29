@@ -1,9 +1,22 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand, ValueEnum};
+use ipnet::IpNet;
 
 use super::ProfileArgs;
+
+/// Parse a `--trusted-proxy` value: either a CIDR range (`10.0.0.0/8`) or
+/// a bare address, which is treated as a single host (`/32` or `/128`).
+pub(crate) fn parse_trusted_proxy(value: &str) -> Result<IpNet, String> {
+    if let Ok(net) = value.parse::<IpNet>() {
+        return Ok(net);
+    }
+    value
+        .parse::<IpAddr>()
+        .map(IpNet::from)
+        .map_err(|_| format!("`{value}` is not a valid IP address or CIDR range"))
+}
 
 /// Observability dev-routing chosen at server startup. Maps to a single
 /// concrete backend installed via
@@ -200,6 +213,18 @@ pub(crate) struct SiteServeArgs {
     /// Where to route `harness.obs.*` spans/metrics/logs.
     #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
     pub obs: ServeObsMode,
+    /// CIDR range (or bare IP) of a reverse proxy whose `X-Forwarded-For`
+    /// / `X-Real-IP` headers may set `req.client_ip`. Repeatable. When
+    /// unset, those headers are ignored and `client_ip` is the direct
+    /// peer — spoof-proof for servers not behind a trusted proxy.
+    #[arg(
+        long = "trusted-proxy",
+        env = "HARN_SERVE_SITE_TRUSTED_PROXIES",
+        value_name = "CIDR",
+        value_delimiter = ',',
+        value_parser = parse_trusted_proxy
+    )]
+    pub trusted_proxies: Vec<IpNet>,
     /// Path to the `.harn` file whose routed `pub fn` handlers are served.
     pub file: String,
 }

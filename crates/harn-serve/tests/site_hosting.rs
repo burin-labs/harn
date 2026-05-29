@@ -11,6 +11,7 @@
 //! so responses are observable byte-for-byte without a socket. The
 //! WebSocket case needs a live upgrade, so it binds a loopback listener.
 
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -64,6 +65,12 @@ pub fn handler_ping(req: dict) -> dict {
   return http_ok({ "pong": true })
 }
 
+// Echo the adapter-resolved peer/client identity back to the test.
+@route("GET", "/whoami")
+pub fn whoami(req: dict) -> dict {
+  return http_ok({ "client_ip": req.client_ip, "remote_addr": req.remote_addr })
+}
+
 @route("GET", "/ws")
 pub fn ws(req: dict) -> dict {
   return http_upgrade_ws(req, { "subprotocols": ["chat.harn"], "on_message": "ws_echo" })
@@ -97,6 +104,30 @@ fn build_router(path: &Path) -> Router {
     SiteServer::new(SiteServerConfig::new(build_core(path)))
         .router()
         .expect("site router")
+}
+
+/// Build a router whose adapter trusts the given proxy CIDRs for
+/// forwarded-header parsing.
+fn router_trusting(path: &Path, proxies: &[&str]) -> Router {
+    let proxies = proxies.iter().map(|cidr| cidr.parse().unwrap()).collect();
+    SiteServer::new(SiteServerConfig::new(build_core(path)).with_trusted_proxies(proxies))
+        .router()
+        .expect("site router")
+}
+
+/// A `GET /whoami` request carrying the given transport peer (mirroring
+/// the `ConnectInfo` extension the connect-info make service inserts in
+/// production) and an optional spoofable `X-Forwarded-For` header.
+fn whoami_request(peer: SocketAddr, forwarded_for: Option<&str>) -> Request<Body> {
+    let mut builder = Request::builder().uri("/whoami");
+    if let Some(xff) = forwarded_for {
+        builder = builder.header("x-forwarded-for", xff);
+    }
+    let mut request = builder.body(Body::empty()).unwrap();
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(peer));
+    request
 }
 
 async fn read_json(response: Response) -> (StatusCode, Value) {
@@ -324,6 +355,123 @@ async fn websocket_upgrade_echoes_through_on_message_handler() {
     assert_eq!(echoed, TungMessage::Text("echo:ping".into()));
     socket.send(TungMessage::Close(None)).await.unwrap();
     // Keep the temp dir alive until the socket round-trip is done.
+    drop(dir);
+}
+
+#[tokio::test]
+async fn remote_addr_reports_the_transport_peer() {
+    let (_dir, router) = site_router();
+    let peer: SocketAddr = "203.0.113.7:54321".parse().unwrap();
+    let response = router.oneshot(whoami_request(peer, None)).await.unwrap();
+    let (status, body) = read_json(response).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["remote_addr"], "203.0.113.7:54321");
+    // With no trusted proxies, client_ip is the peer's IP, not its port.
+    assert_eq!(body["client_ip"], "203.0.113.7");
+}
+
+#[tokio::test]
+async fn forged_forwarded_header_is_ignored_without_trusted_proxies() {
+    let (_dir, router) = site_router();
+    let peer: SocketAddr = "203.0.113.7:54321".parse().unwrap();
+    // A direct client sets X-Forwarded-For hoping to be seen as 1.2.3.4.
+    let response = router
+        .oneshot(whoami_request(peer, Some("1.2.3.4")))
+        .await
+        .unwrap();
+    let (status, body) = read_json(response).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["client_ip"], "203.0.113.7",
+        "forged XFF must be ignored"
+    );
+}
+
+#[tokio::test]
+async fn forwarded_header_is_honored_from_a_trusted_proxy() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("site.harn");
+    std::fs::write(&path, SITE_SCRIPT).expect("write script");
+    // The request arrives from a proxy in the trusted range; its XFF is
+    // believed.
+    let router = router_trusting(&path, &["10.0.0.0/8"]);
+    let peer: SocketAddr = "10.0.0.5:443".parse().unwrap();
+    let response = router
+        .oneshot(whoami_request(peer, Some("1.2.3.4")))
+        .await
+        .unwrap();
+    let (status, body) = read_json(response).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["client_ip"], "1.2.3.4");
+    assert_eq!(body["remote_addr"], "10.0.0.5:443");
+}
+
+#[tokio::test]
+async fn forwarded_chain_peels_off_trusted_hops() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("site.harn");
+    std::fs::write(&path, SITE_SCRIPT).expect("write script");
+    let router = router_trusting(&path, &["10.0.0.0/8"]);
+    let peer: SocketAddr = "10.0.0.5:443".parse().unwrap();
+    // client → edge(10.0.0.9) → us(10.0.0.5): the rightmost untrusted hop
+    // is the real client, even though an internal proxy follows it.
+    let response = router
+        .oneshot(whoami_request(peer, Some("1.2.3.4, 10.0.0.9")))
+        .await
+        .unwrap();
+    let (_status, body) = read_json(response).await;
+    assert_eq!(body["client_ip"], "1.2.3.4");
+}
+
+#[tokio::test]
+async fn untrusted_peer_ignores_forwarded_header_even_with_config() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("site.harn");
+    std::fs::write(&path, SITE_SCRIPT).expect("write script");
+    // Trusted set is configured, but this peer is NOT in it, so its XFF
+    // is untrusted and the peer IP wins.
+    let router = router_trusting(&path, &["10.0.0.0/8"]);
+    let peer: SocketAddr = "203.0.113.7:9000".parse().unwrap();
+    let response = router
+        .oneshot(whoami_request(peer, Some("1.2.3.4")))
+        .await
+        .unwrap();
+    let (_status, body) = read_json(response).await;
+    assert_eq!(body["client_ip"], "203.0.113.7");
+}
+
+#[tokio::test]
+async fn remote_addr_is_populated_over_a_live_socket() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("site.harn");
+    std::fs::write(&path, SITE_SCRIPT).expect("write script");
+    let router = build_router(&path);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        // The connect-info make service is what `serve_router_from_tcp`
+        // installs; serving it here proves the peer address reaches the
+        // handler over a real socket.
+        let _ = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+
+    let body: Value = reqwest::get(format!("http://{addr}/whoami"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let remote_addr = body["remote_addr"].as_str().expect("remote_addr present");
+    assert!(
+        remote_addr.starts_with("127.0.0.1:"),
+        "expected loopback peer, got {remote_addr}"
+    );
+    assert_eq!(body["client_ip"], "127.0.0.1");
     drop(dir);
 }
 
