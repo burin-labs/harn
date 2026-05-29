@@ -496,7 +496,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "provider_capabilities",
         &[
             Param::new("provider", TY_STRING),
-            Param::optional("model", TY_STRING),
+            Param::optional("model", TY_STRING_OR_NIL),
         ],
         TY_DICT,
     ),
