@@ -123,6 +123,9 @@ pub struct CatalogModel {
     /// Public benchmark numbers, snake_case identifier -> score.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub benchmarks: BTreeMap<String, f64>,
+    /// Accelerated-serving ("fast mode") tier metadata, when offered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<ModelFastMode>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -203,6 +206,11 @@ pub struct ModelDeprecation {
     pub status: DeprecationStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Catalog id of the model that supersedes this one, when declared.
+    /// Surfaces `ModelDef::superseded_by` as a machine-readable migration
+    /// target so downstream consumers don't have to parse `note` prose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -210,6 +218,26 @@ pub struct ModelDeprecation {
 pub enum DeprecationStatus {
     Active,
     Deprecated,
+}
+
+/// Catalog projection of an accelerated-serving ("fast mode") tier.
+/// Surfaces `ModelDef::fast_mode` so downstream consumers can show the
+/// opt-in knob, premium pricing, and lifecycle without re-parsing the
+/// source TOML. Absent on models with no faster serving path.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelFastMode {
+    pub param: String,
+    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub beta_header: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otps_speedup: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<ModelPricing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -407,6 +435,34 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 model.id
             ));
         }
+        if let Some(fast) = &model.fast_mode {
+            if let Some(pricing) = &fast.pricing {
+                validate_pricing(model, pricing, &mut result);
+            }
+            if let Some(status) = fast.status.as_deref() {
+                if !matches!(status, "ga" | "research_preview" | "deprecated") {
+                    result.warnings.push(format!(
+                        "model {} fast_mode.status {:?} is not one of ga|research_preview|deprecated",
+                        model.id, status
+                    ));
+                }
+            }
+        }
+    }
+
+    // Structured supersession pointers must reference a real catalog row so
+    // `superseded_by` can be trusted as a migration target by downstream
+    // tooling. A dangling pointer is a soft warning (the row is still
+    // usable) rather than a hard error, mirroring how `note` is advisory.
+    for model in &artifact.models {
+        if let Some(target) = model.deprecation.superseded_by.as_deref() {
+            if !model_ids.contains(target) {
+                result.warnings.push(format!(
+                    "model {} declares superseded_by {} with no matching catalog row",
+                    model.id, target
+                ));
+            }
+        }
     }
 
     let dedicated_pairs: BTreeSet<(&str, &str)> = artifact
@@ -581,7 +637,8 @@ pub fn schema_value() -> Value {
                     "tier": {"enum": ["small", "mid", "frontier", "reasoning"]},
                     "open_weight": {"type": "boolean"},
                     "strengths": {"type": "array", "items": {"type": "string"}},
-                    "benchmarks": {"type": "object", "additionalProperties": {"type": "number"}}
+                    "benchmarks": {"type": "object", "additionalProperties": {"type": "number"}},
+                    "fast_mode": {"$ref": "#/$defs/fast_mode"}
                 },
                 "additionalProperties": false
             },
@@ -678,12 +735,27 @@ pub fn schema_value() -> Value {
                 },
                 "additionalProperties": false
             },
+            "fast_mode": {
+                "type": "object",
+                "required": ["param", "value"],
+                "properties": {
+                    "param": {"type": "string", "minLength": 1},
+                    "value": {"type": "string", "minLength": 1},
+                    "beta_header": {"type": "string"},
+                    "otps_speedup": {"type": "number", "exclusiveMinimum": 0},
+                    "status": {"type": "string"},
+                    "pricing": {"$ref": "#/$defs/pricing"},
+                    "note": {"type": "string"}
+                },
+                "additionalProperties": false
+            },
             "deprecation": {
                 "type": "object",
                 "required": ["status"],
                 "properties": {
                     "status": {"enum": ["active", "deprecated"]},
-                    "note": {"type": "string"}
+                    "note": {"type": "string"},
+                    "superseded_by": {"type": "string"}
                 },
                 "additionalProperties": false
             },
@@ -798,6 +870,7 @@ fn catalog_model(
                 DeprecationStatus::Active
             },
             note: model.deprecation_note.clone(),
+            superseded_by: model.superseded_by.clone(),
         },
         availability: ModelAvailabilityStatus::from(model.availability),
         quality_tags,
@@ -806,6 +879,15 @@ fn catalog_model(
         open_weight: model.open_weight,
         strengths: model.strengths.clone(),
         benchmarks: model.benchmarks.clone(),
+        fast_mode: model.fast_mode.as_ref().map(|fm| ModelFastMode {
+            param: fm.param.clone(),
+            value: fm.value.clone(),
+            beta_header: fm.beta_header.clone(),
+            otps_speedup: fm.otps_speedup,
+            status: fm.status.clone(),
+            pricing: fm.pricing.clone(),
+            note: fm.note.clone(),
+        }),
         id,
         name: model.name,
         provider: model.provider,
@@ -1168,7 +1250,7 @@ export interface HarnCatalogModel {
   }
   prompt_cache: boolean
   pricing?: HarnModelPricing
-  deprecation: { status: "active" | "deprecated"; note?: string }
+  deprecation: { status: "active" | "deprecated"; note?: string; superseded_by?: string }
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
@@ -1176,6 +1258,7 @@ export interface HarnCatalogModel {
   open_weight?: boolean
   strengths?: string[]
   benchmarks?: Record<string, number>
+  fast_mode?: HarnModelFastMode
 }
 
 export interface HarnToolEmpiricalParity {
@@ -1194,6 +1277,16 @@ export interface HarnModelPricing {
   output_per_mtok: number
   cache_read_per_mtok?: number | null
   cache_write_per_mtok?: number | null
+}
+
+export interface HarnModelFastMode {
+  param: string
+  value: string
+  beta_header?: string
+  otps_speedup?: number
+  status?: string
+  pricing?: HarnModelPricing
+  note?: string
 }
 
 export interface HarnCatalogVariant {
@@ -1410,6 +1503,8 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let strengths: [String]
     /// Public benchmark numbers keyed by `snake_case` identifier.
     public let benchmarks: [String: Double]
+    /// Accelerated-serving ("fast mode") tier metadata, when offered.
+    public let fastMode: HarnModelFastMode?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1434,6 +1529,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case openWeight = "open_weight"
         case strengths
         case benchmarks
+        case fastMode = "fast_mode"
     }
 
     public init(from decoder: Decoder) throws {
@@ -1460,6 +1556,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
         benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
+        fastMode = try container.decodeIfPresent(HarnModelFastMode.self, forKey: .fastMode)
     }
 }
 
@@ -1565,6 +1662,33 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
 public struct HarnModelDeprecation: Codable, Sendable, Equatable {
     public let status: String
     public let note: String?
+    public let supersededBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case note
+        case supersededBy = "superseded_by"
+    }
+}
+
+public struct HarnModelFastMode: Codable, Sendable, Equatable {
+    public let param: String
+    public let value: String
+    public let betaHeader: String?
+    public let otpsSpeedup: Double?
+    public let status: String?
+    public let pricing: HarnModelPricing?
+    public let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case param
+        case value
+        case betaHeader = "beta_header"
+        case otpsSpeedup = "otps_speedup"
+        case status
+        case pricing
+        case note
+    }
 }
 
 public struct HarnCatalogVariant: Codable, Sendable, Equatable {
@@ -1842,5 +1966,69 @@ deprecated = true
         let swift = swift_binding().expect("swift binding renders");
         assert!(swift.contains("public let empiricalParity: HarnToolEmpiricalParity?"));
         assert!(swift.contains("public struct HarnToolEmpiricalParity"));
+    }
+
+    #[test]
+    fn fast_mode_and_supersession_surface_in_contract() {
+        let schema = schema_value();
+        assert_eq!(
+            schema["$defs"]["model"]["properties"]["fast_mode"]["$ref"],
+            "#/$defs/fast_mode"
+        );
+        assert_eq!(
+            schema["$defs"]["fast_mode"]["properties"]["pricing"]["$ref"],
+            "#/$defs/pricing"
+        );
+        assert!(schema["$defs"]["deprecation"]["properties"]["superseded_by"].is_object());
+
+        let typescript = typescript_binding().expect("typescript binding renders");
+        assert!(typescript.contains("export interface HarnModelFastMode"));
+        assert!(typescript.contains("fast_mode?: HarnModelFastMode"));
+        assert!(typescript.contains("superseded_by?: string"));
+
+        let swift = swift_binding().expect("swift binding renders");
+        assert!(swift.contains("public struct HarnModelFastMode"));
+        assert!(swift.contains("public let fastMode: HarnModelFastMode?"));
+        assert!(swift.contains("case supersededBy = \"superseded_by\""));
+    }
+
+    #[test]
+    fn dangling_superseded_by_and_unknown_fast_status_warn() {
+        let _guard = install_overlay(
+            r#"
+[providers.warn_co]
+display_name = "Warn Co"
+base_url = "https://example.test/v1"
+auth_style = "bearer"
+auth_env = "WARN_API_KEY"
+chat_endpoint = "/chat/completions"
+
+[models."warn/old"]
+name = "Warn Old"
+provider = "warn_co"
+context_window = 4096
+deprecated = true
+deprecation_note = "Retiring soon."
+superseded_by = "warn/does-not-exist"
+fast_mode = { param = "speed", value = "fast", status = "turbo", pricing = { input_per_mtok = 1.0, output_per_mtok = 2.0 } }
+"#,
+        );
+        let report = validate_current();
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|message| message.contains("superseded_by warn/does-not-exist")),
+            "expected dangling superseded_by warning, got {:?}",
+            report.warnings
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|message| message.contains("fast_mode.status") && message.contains("turbo")),
+            "expected fast_mode.status warning, got {:?}",
+            report.warnings
+        );
     }
 }

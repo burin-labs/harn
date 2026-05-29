@@ -1351,6 +1351,8 @@ preferred_tool_format = "native"
                     }),
                     deprecated: false,
                     deprecation_note: None,
+                    superseded_by: None,
+                    fast_mode: None,
                     quality_tags: Vec::new(),
                     availability: crate::llm_config::ModelAvailability::Serverless,
                     tier: None,

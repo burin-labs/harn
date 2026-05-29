@@ -135,6 +135,8 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let strengths: [String]
     /// Public benchmark numbers keyed by `snake_case` identifier.
     public let benchmarks: [String: Double]
+    /// Accelerated-serving ("fast mode") tier metadata, when offered.
+    public let fastMode: HarnModelFastMode?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -159,6 +161,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case openWeight = "open_weight"
         case strengths
         case benchmarks
+        case fastMode = "fast_mode"
     }
 
     public init(from decoder: Decoder) throws {
@@ -185,6 +188,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
         benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
+        fastMode = try container.decodeIfPresent(HarnModelFastMode.self, forKey: .fastMode)
     }
 }
 
@@ -290,6 +294,33 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
 public struct HarnModelDeprecation: Codable, Sendable, Equatable {
     public let status: String
     public let note: String?
+    public let supersededBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case note
+        case supersededBy = "superseded_by"
+    }
+}
+
+public struct HarnModelFastMode: Codable, Sendable, Equatable {
+    public let param: String
+    public let value: String
+    public let betaHeader: String?
+    public let otpsSpeedup: Double?
+    public let status: String?
+    public let pricing: HarnModelPricing?
+    public let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case param
+        case value
+        case betaHeader = "beta_header"
+        case otpsSpeedup = "otps_speedup"
+        case status
+        case pricing
+        case note
+    }
 }
 
 public struct HarnCatalogVariant: Codable, Sendable, Equatable {
@@ -1286,7 +1317,8 @@ public let harnProviderCatalogJSON = #"""
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Superseded by claude-opus-4-7. No formal sunset yet; switch when convenient."
+        "note": "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient.",
+        "superseded_by": "claude-opus-4-8"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -1370,7 +1402,8 @@ public let harnProviderCatalogJSON = #"""
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-7."
+        "note": "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-8.",
+        "superseded_by": "claude-opus-4-8"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -1447,13 +1480,15 @@ public let harnProviderCatalogJSON = #"""
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 15.0,
-        "output_per_mtok": 75.0,
-        "cache_read_per_mtok": 1.5,
-        "cache_write_per_mtok": 18.75
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 25.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient.",
+        "superseded_by": "claude-opus-4-8"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -1481,11 +1516,126 @@ public let harnProviderCatalogJSON = #"""
       "benchmarks": {
         "swe_bench_pro": 53.4,
         "swe_bench_verified": 80.8
+      },
+      "fast_mode": {
+        "param": "speed",
+        "value": "fast",
+        "beta_header": "fast-mode-2026-02-01",
+        "otps_speedup": 2.5,
+        "status": "deprecated",
+        "pricing": {
+          "input_per_mtok": 30.0,
+          "output_per_mtok": 150.0,
+          "cache_read_per_mtok": 3.0,
+          "cache_write_per_mtok": 37.5
+        },
+        "note": "Deprecated at the Opus 4.8 launch; removed ~30 days later, after which speed=fast silently falls back to standard speed/pricing. Migrate to Opus 4.8 or 4.7 fast mode."
       }
     },
     {
       "id": "claude-opus-4-7",
       "name": "Claude Opus 4.7",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 25.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
+      },
+      "deprecation": {
+        "status": "deprecated",
+        "note": "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient.",
+        "superseded_by": "claude-opus-4-8"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 64.3,
+        "swe_bench_verified": 87.6
+      },
+      "fast_mode": {
+        "param": "speed",
+        "value": "fast",
+        "beta_header": "fast-mode-2026-02-01",
+        "otps_speedup": 2.5,
+        "status": "research_preview",
+        "pricing": {
+          "input_per_mtok": 30.0,
+          "output_per_mtok": 150.0,
+          "cache_read_per_mtok": 3.0,
+          "cache_write_per_mtok": 37.5
+        },
+        "note": "Claude API + Managed Agents only. Migrate to Opus 4.8 fast mode for the cheaper 2x rate."
+      }
+    },
+    {
+      "id": "claude-opus-4-8",
+      "name": "Claude Opus 4.8",
       "provider": "anthropic",
       "aliases": [
         "opus"
@@ -1534,10 +1684,10 @@ public let harnProviderCatalogJSON = #"""
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 15.0,
-        "output_per_mtok": 75.0,
-        "cache_read_per_mtok": 1.5,
-        "cache_write_per_mtok": 18.75
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 25.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
       },
       "deprecation": {
         "status": "active"
@@ -1566,8 +1716,22 @@ public let harnProviderCatalogJSON = #"""
         "agentic"
       ],
       "benchmarks": {
-        "swe_bench_pro": 64.3,
-        "swe_bench_verified": 87.6
+        "swe_bench_pro": 69.2,
+        "swe_bench_verified": 88.6
+      },
+      "fast_mode": {
+        "param": "speed",
+        "value": "fast",
+        "beta_header": "fast-mode-2026-02-01",
+        "otps_speedup": 2.5,
+        "status": "research_preview",
+        "pricing": {
+          "input_per_mtok": 10.0,
+          "output_per_mtok": 50.0,
+          "cache_read_per_mtok": 1.0,
+          "cache_write_per_mtok": 12.5
+        },
+        "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated."
       }
     },
     {
@@ -3862,6 +4026,94 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "gpt-5.5",
+      "name": "GPT-5.5",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 400000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 30.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ],
+      "fast_mode": {
+        "param": "service_tier",
+        "value": "fast",
+        "otps_speedup": 1.5,
+        "status": "ga",
+        "pricing": {
+          "input_per_mtok": 12.5,
+          "output_per_mtok": 75.0,
+          "cache_read_per_mtok": 1.25,
+          "cache_write_per_mtok": null
+        },
+        "note": "Codex \"Fast mode\" (service_tier=\"fast\", ~1.5x faster output) and API priority processing (service_tier=\"priority\") both bill at 2.5x standard. Not offered for long-context, fine-tuned models, or embeddings."
+      }
+    },
+    {
       "id": "o1",
       "name": "OpenAI o1",
       "provider": "openai",
@@ -5675,7 +5927,7 @@ public let harnProviderCatalogJSON = #"""
     },
     {
       "name": "opus",
-      "model_id": "claude-opus-4-7",
+      "model_id": "claude-opus-4-8",
       "provider": "anthropic"
     },
     {
