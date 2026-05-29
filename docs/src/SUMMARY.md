@@ -34,6 +34,7 @@
 - [Channel cookbook](./cookbooks/channels.md)
 - [Pool cookbook](./cookbooks/pools.md)
 - [Rename a symbol cookbook](./cookbooks/rename-symbol.md)
+- [Structured refactorings cookbook](./cookbooks/structured-refactorings.md)
 - [OAuth client + provider cookbook](./oauth.md)
 - [Debugging agent runs](./debugging.md)
 

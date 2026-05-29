@@ -1,0 +1,53 @@
+/**
+ * edit-refactor demo: drive the B.8 structured-refactoring primitives
+ * (issue #2520) end-to-end against a bundled seed workspace.
+ *
+ * All three calls run in `dry_run` mode, so the demo previews each
+ * refactoring as a unified diff against a throw-away staged-fs overlay
+ * and touches no bytes on disk — fully offline, no LLM calls, no network.
+ *
+ *   1. `extract_function` — lift two statements out of a Python function;
+ *      the block's free variables (`base`, `qty`) become parameters while
+ *      the module-level callee `audit` correctly does NOT.
+ *   2. `add_parameter` — append a trailing parameter to a Rust function
+ *      and fill the new argument at all three call sites (default_fill).
+ *   3. `change_return_type` — rewrite the same Rust function's return type.
+ *
+ * The receipt captures each result tag plus a spot-check that the
+ * synthesized signature / filled call sites show up in the preview diff,
+ * so the demo-gate smoke test can assert end-to-end behaviour.
+ */
+import { edit_add_parameter, edit_change_return_type, edit_extract_function } from "std/edit"
+
+pipeline default(_task) {
+  // The AST edit primitives read and (would) write host files, so they
+  // share the deterministic-tools gate.
+  hostlib_enable("tools:deterministic")
+  let assets = asset_root()
+  let rs = assets + "/seed/lib.rs"
+  let py = assets + "/seed/calc.py"
+  let extract = edit_extract_function(
+    {path: py, range: {start_line: 1, end_line: 2}, new_name: "compute_subtotal", dry_run: true},
+  )
+  let add_param = edit_add_parameter(
+    {path: rs, symbol: {name: "scale"}, param: "offset: i64", default: "0", dry_run: true},
+  )
+  let ret = edit_change_return_type({path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true})
+  __io_println("=== edit-refactor demo ===")
+  __io_println("extract_function   -> " + extract.result)
+  __io_println("add_parameter      -> " + add_param.result)
+  __io_println("change_return_type -> " + ret.result)
+  __io_println("")
+  let receipt = {
+    receipt_kind: "edit_refactor_receipt",
+    extract_result: extract.result,
+    extract_signature: contains(extract.unified_diff[0].diff, "def compute_subtotal(base, qty):"),
+    add_param_result: add_param.result,
+    add_param_def: contains(add_param.unified_diff[0].diff, "fn scale(value: i64, factor: i64, offset: i64)"),
+    add_param_calls_filled: contains(add_param.unified_diff[0].diff, "scale(2, 3, 0)")
+      && contains(add_param.unified_diff[0].diff, "scale(6, 7, 0)"),
+    return_type_result: ret.result,
+  }
+  __io_println(json_stringify(receipt))
+  return receipt
+}

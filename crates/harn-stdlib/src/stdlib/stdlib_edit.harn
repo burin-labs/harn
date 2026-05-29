@@ -1,6 +1,8 @@
 /*
  * std/edit - pure helpers for applying and validating agent-authored text patches.
  */
+import { diff_summary, unified_diff } from "std/diff"
+
 fn __edit_sha256(text) {
   return "sha256:" + sha256(text ?? "")
 }
@@ -1433,4 +1435,1508 @@ pub fn edit_capabilities(params = nil) {
     warnings: [],
     provenance: {module: "std/edit", helper: "edit_capabilities", caller: params?.provenance},
   }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Structured refactorings (B.8, issue #2520)
+//
+// Higher-level, compound, language-aware edits composed on top of the
+// B.1–B.5 primitives above (`edit_apply_node`, `edit_insert_at_anchor`,
+// `edit_rename_symbol`, `edit_safe_text_patch`, `edit_dry_run`) plus the
+// host AST analyzers (`hostlib_ast_symbols`, `hostlib_ast_function_body`,
+// `hostlib_ast_undefined_names`).
+//
+// Every refactoring shares one driver, `__refactor_run`, which lowers a
+// list of typed ops into staged-fs writes (#1722): a `dry_run` previews
+// the change as a per-file unified diff against a throw-away overlay and
+// touches no bytes, while an apply stages all ops into one session and
+// commits them atomically (or discards on the first conflict). Callers
+// that already own a staged session pass `session_id`; the driver then
+// stages into it and leaves the commit to the caller.
+//
+// Each public entry point first consults a per-(operation, language)
+// capability matrix and returns `result: "unsupported"` rather than
+// guessing when a language lacks the structure a refactoring needs.
+//
+// All of these route through gated host builtins (`apply_node`,
+// `insert_at_anchor`, `read_text`, `safe_text_patch`), so callers must
+// hold the `tools:deterministic` capability.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __refactor_normalize_lang(name) {
+  let n = lowercase(trim(name ?? ""))
+  let alias = {golang: "go", js: "javascript", py: "python", rb: "ruby", rs: "rust", ts: "typescript"}
+  return alias.get(n, n)
+}
+
+fn __refactor_detect_language(params) {
+  let hint = params?.language
+  if hint != nil && hint != "" {
+    return __refactor_normalize_lang(hint)
+  }
+  let path = params?.path ?? ""
+  let segments = split(path, "/")
+  let filename = if len(segments) > 0 {
+    segments[-1]
+  } else {
+    path
+  }
+  let dotted = split(filename, ".")
+  if len(dotted) < 2 {
+    return ""
+  }
+  return __refactor_normalize_lang(dotted[-1])
+}
+
+fn __refactor_member(list, item) {
+  for x in list ?? [] {
+    if x == item {
+      return true
+    }
+  }
+  return false
+}
+
+fn __refactor_touched_paths(ops) {
+  var seen = []
+  for op in ops ?? [] {
+    let path = op?.path
+    if path != nil && !__refactor_member(seen, path) {
+      seen = seen + [path]
+    }
+  }
+  return seen
+}
+
+fn __refactor_common_root(paths) {
+  if len(paths) == 0 {
+    return "."
+  }
+  let first = split(paths[0], "/")
+  var common = if len(first) > 0 {
+    first[:len(first) - 1]
+  } else {
+    first
+  }
+  for p in paths {
+    let segs = split(p, "/")
+    let dir = if len(segs) > 0 {
+      segs[:len(segs) - 1]
+    } else {
+      segs
+    }
+    var prefix = []
+    var idx = 0
+    while idx < len(common) && idx < len(dir) && common[idx] == dir[idx] {
+      prefix = prefix + [common[idx]]
+      idx = idx + 1
+    }
+    common = prefix
+  }
+  let root = join(common, "/")
+  if root == "" {
+    return "."
+  }
+  return root
+}
+
+fn __refactor_new_session(operation) {
+  return "harn-refactor-" + operation + "-" + uuid_v7()
+}
+
+fn __refactor_leading_ws(line) {
+  let raw = line ?? ""
+  let body = regex_replace("^[ \\t]+", "", raw)
+  return raw.substring(0, len(raw) - len(body))
+}
+
+fn __refactor_result(operation, language, fields) {
+  let base = {
+    ok: false,
+    applied: false,
+    result: "unsupported",
+    operation: operation,
+    language: language,
+    dry_run: false,
+    touched_files: [],
+    unified_diff: [],
+    summary: {files_touched: 0, lines_added: 0, lines_removed: 0},
+    conflicts: [],
+    details: nil,
+    errors: [],
+    warnings: [],
+    provenance: {module: "std/edit", helper: "edit_" + operation, operation: operation, language: language},
+  }
+  return base.merge(fields ?? {})
+}
+
+fn __refactor_unsupported(operation, language, reason) {
+  return __refactor_result(
+    operation,
+    language,
+    {result: "unsupported", details: reason, errors: [{code: "unsupported", message: reason}]},
+  )
+}
+
+fn __refactor_invalid(operation, language, reason) {
+  return __refactor_result(
+    operation,
+    language,
+    {result: "invalid_params", details: reason, errors: [{code: "invalid_params", message: reason}]},
+  )
+}
+
+fn __refactor_conflict(operation, language, conflicts) {
+  return __refactor_result(
+    operation,
+    language,
+    {
+      result: "conflict",
+      conflicts: conflicts,
+      details: if len(conflicts) > 0 {
+        conflicts[0].message
+      } else {
+        nil
+      },
+      errors: conflicts.map({ c -> {code: c.code, message: c.message} }),
+    },
+  )
+}
+
+fn __refactor_exec_op(op, session_id, before_map) {
+  let kind = op?.kind
+  if kind == "content" {
+    let before = before_map.get(op.path, "")
+    let res = hostlib_fs_safe_text_patch(
+      {
+        path: op.path,
+        content: op.after,
+        expected_hash: __edit_sha256(before),
+        session_id: session_id,
+        create_parents: true,
+        overwrite: true,
+      },
+    )
+    let tag = res?.result ?? "applied"
+    return {
+      ok: tag == "applied",
+      result: tag,
+      conflict: {code: tag, message: "content write `" + tag + "` at " + op.path, path: op.path},
+    }
+  }
+  if kind == "node_apply" {
+    let res = edit_apply_node((op?.params ?? {}).merge({session_id: session_id}))
+    return {
+      ok: res.result == "applied",
+      result: res.result,
+      conflict: {code: res.result, message: res.details ?? ("apply_node " + res.result), path: op?.path},
+    }
+  }
+  if kind == "node_insert" {
+    let res = edit_insert_at_anchor((op?.params ?? {}).merge({session_id: session_id}))
+    return {
+      ok: res.result == "applied",
+      result: res.result,
+      conflict: {code: res.result, message: res.details ?? ("insert_at_anchor " + res.result), path: op?.path},
+    }
+  }
+  return {
+    ok: false,
+    result: "invalid_op",
+    conflict: {code: "invalid_op", message: "unknown refactor op kind"},
+  }
+}
+
+/**
+ * Shared driver for the structured refactorings. Lowers `ops` (typed
+ * `content` / `node_apply` / `node_insert` records) into staged-fs
+ * writes, previewing or committing atomically per the contract above.
+ * Not part of the public API surface.
+ */
+fn __refactor_run(operation, language, ops, params, warnings) {
+  let p = params ?? {}
+  let dry_run = p?.dry_run ?? false
+  let warns = warnings ?? []
+  if len(ops) == 0 {
+    return __refactor_result(
+      operation,
+      language,
+      {ok: true, applied: true, result: "no_op", dry_run: dry_run, warnings: warns},
+    )
+  }
+  let touched = __refactor_touched_paths(ops)
+  let caller_session = p?.session_id
+  let manage_session = dry_run || caller_session == nil
+  let session_id = if manage_session {
+    __refactor_new_session(operation)
+  } else {
+    caller_session
+  }
+  if manage_session {
+    if dry_run {
+      // A preview never commits, so leave the overlay state at the host
+      // default (cwd-relative) rather than scattering `.harn/state` next
+      // to the target files — same as `edit_dry_run`.
+      hostlib_fs_set_mode({session_id: session_id, mode: "staged"})
+    } else {
+      // An apply must commit to disk, so root the overlay at the tightest
+      // directory enclosing every touched path.
+      hostlib_fs_set_mode(
+        {session_id: session_id, mode: "staged", root: p?.root ?? __refactor_common_root(touched)},
+      )
+    }
+  }
+  var before_map = {}
+  for path in touched {
+    let r = hostlib_fs_read_text({path: path, session_id: session_id})
+    before_map = before_map.merge({[path]: r?.content ?? ""})
+  }
+  var conflicts = []
+  var ok_all = true
+  for op in ops {
+    let outcome = __refactor_exec_op(op, session_id, before_map)
+    if !outcome.ok {
+      conflicts = conflicts + [outcome.conflict]
+      ok_all = false
+      break
+    }
+  }
+  var diffs = []
+  var changed = []
+  var added = 0
+  var removed = 0
+  if ok_all {
+    for path in touched {
+      let before = before_map.get(path, "")
+      let after_read = hostlib_fs_read_text({path: path, session_id: session_id})
+      let after = after_read?.content ?? before
+      if after != before {
+        let stat = diff_summary(before, after)
+        changed = changed + [path]
+        added = added + stat.insertions
+        removed = removed + stat.deletions
+        diffs = diffs
+          + [
+          {
+            path: path,
+            diff: unified_diff(before, after, {path: path}),
+            lines_added: stat.insertions,
+            lines_removed: stat.deletions,
+          },
+        ]
+      }
+    }
+  }
+  if manage_session {
+    if dry_run || !ok_all {
+      hostlib_fs_discard_staged({session_id: session_id})
+    } else {
+      hostlib_fs_commit_staged({session_id: session_id})
+    }
+  }
+  let result_tag = if !ok_all {
+    "conflict"
+  } else if len(changed) == 0 {
+    "no_op"
+  } else {
+    "applied"
+  }
+  return __refactor_result(
+    operation,
+    language,
+    {
+      ok: result_tag == "applied",
+      applied: result_tag == "applied" || result_tag == "no_op",
+      result: result_tag,
+      dry_run: dry_run,
+      touched_files: changed,
+      unified_diff: diffs,
+      summary: {files_touched: len(changed), lines_added: added, lines_removed: removed},
+      conflicts: conflicts,
+      details: if !ok_all {
+        conflicts[0].message
+      } else {
+        nil
+      },
+      errors: conflicts,
+      warnings: warns,
+    },
+  )
+}
+
+fn __refactor_var_decl_syntax(language) {
+  let table = {
+    go: {kw: "", assign: " := ", term: ""},
+    javascript: {kw: "const ", assign: " = ", term: ";"},
+    jsx: {kw: "const ", assign: " = ", term: ";"},
+    python: {kw: "", assign: " = ", term: ""},
+    ruby: {kw: "", assign: " = ", term: ""},
+    rust: {kw: "let ", assign: " = ", term: ";"},
+    swift: {kw: "let ", assign: " = ", term: ""},
+    tsx: {kw: "const ", assign: " = ", term: ";"},
+    typescript: {kw: "const ", assign: " = ", term: ";"},
+  }
+  return table.get(language, nil)
+}
+
+/**
+ * Extract a single-line expression range into a freshly-declared local
+ * binding, replacing the original span with `new_name` and inserting the
+ * declaration on its own line directly above, at the same indentation.
+ *
+ * `range` is `{start_line, start_col, end_line, end_col}` in 0-based
+ * tree-sitter coordinates (columns are byte offsets within the line).
+ * Multi-line ranges return `result: "unsupported"` — select an
+ * expression that lives on one line.
+ *
+ * The declaration form is chosen from a per-language table (`let`/`const`/
+ * `:=`/bare), so languages that need an explicit type to declare a local
+ * (Java, C, C++) return `result: "unsupported"`.
+ *
+ * Shares the staged-fs preview/atomic-apply contract of the other
+ * structured refactorings: pass `dry_run: true` for a unified-diff
+ * preview, `session_id` to stage into a caller-owned session.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_extract_variable({path: "src/lib.rs", range: {start_line: 4, start_col: 13, end_line: 4, end_col: 24}, new_name: "total"})
+ */
+pub fn edit_extract_variable(params) {
+  let p = params ?? {}
+  let language = __refactor_detect_language(p)
+  let syntax = __refactor_var_decl_syntax(language)
+  if syntax == nil {
+    return __refactor_unsupported(
+      "extract_variable",
+      language,
+      "extract_variable has no local-declaration form for language `" + language + "`",
+    )
+  }
+  let path = p?.path ?? ""
+  let new_name = p?.new_name ?? ""
+  let range = p?.range ?? {}
+  if path == "" || new_name == "" {
+    return __refactor_invalid("extract_variable", language, "`path` and `new_name` are required")
+  }
+  let start_line = range?.start_line
+  let end_line = range?.end_line ?? start_line
+  let start_col = range?.start_col ?? 0
+  let end_col = range?.end_col
+  if start_line == nil || end_col == nil {
+    return __refactor_invalid(
+      "extract_variable",
+      language,
+      "`range` must carry start_line, start_col, end_line, end_col",
+    )
+  }
+  if end_line != start_line {
+    return __refactor_unsupported(
+      "extract_variable",
+      language,
+      "multi-line ranges are not supported; select an expression on one line",
+    )
+  }
+  let read = hostlib_fs_read_text({path: path, session_id: p?.session_id})
+  let content = read?.content ?? ""
+  let lines = split(content, "\n")
+  if start_line < 0 || start_line >= len(lines) {
+    return __refactor_invalid("extract_variable", language, "start_line is outside the file")
+  }
+  let line = lines[start_line]
+  let expr = line.substring(start_col, end_col)
+  if trim(expr) == "" {
+    return __refactor_invalid("extract_variable", language, "selected range is empty or whitespace")
+  }
+  let indent = __refactor_leading_ws(line)
+  let decl = indent + syntax.kw + new_name + syntax.assign + trim(expr) + syntax.term
+  let replaced_line = line.substring(0, start_col) + new_name + line.substring(end_col)
+  var new_lines = if start_line > 0 {
+    lines[:start_line]
+  } else {
+    []
+  }
+  new_lines = new_lines + [decl, replaced_line]
+  if start_line + 1 < len(lines) {
+    new_lines = new_lines + lines[start_line + 1:]
+  }
+  let after = join(new_lines, "\n")
+  return __refactor_run("extract_variable", language, [{kind: "content", path: path, after: after}], p, [])
+}
+
+/**
+ * --- Signature-family + return-type refactorings ----------------------------
+ *
+ * Tree-sitter node/field names per language were verified empirically: the
+ * `parameters` field holds the param-list node (whose node type varies:
+ * `parameters` / `formal_parameters` / `parameter_list`); the return-type
+ * field is `return_type` (Rust/Python/TS) or `result` (Go); call argument
+ * lists are the `arguments` / `argument_list` node under a call node's
+ * `function` field. Replacing a params or args node replaces the enclosing
+ * parens too, so replacements re-add them. TS return-type nodes include the
+ * leading `: `, so `ret_prefix` re-adds it.
+ */
+fn __refactor_lang_spec(language) {
+  let table = {
+    go: {
+      fn_node: "function_declaration",
+      params_node: "parameter_list",
+      ret_field: "result",
+      ret_node: "(_)",
+      ret_prefix: "",
+      call_node: "call_expression",
+      args_node: "argument_list",
+    },
+    javascript: {
+      fn_node: "function_declaration",
+      params_node: "formal_parameters",
+      ret_field: nil,
+      ret_node: nil,
+      ret_prefix: "",
+      call_node: "call_expression",
+      args_node: "arguments",
+    },
+    jsx: {
+      fn_node: "function_declaration",
+      params_node: "formal_parameters",
+      ret_field: nil,
+      ret_node: nil,
+      ret_prefix: "",
+      call_node: "call_expression",
+      args_node: "arguments",
+    },
+    python: {
+      fn_node: "function_definition",
+      params_node: "parameters",
+      ret_field: "return_type",
+      ret_node: "(type)",
+      ret_prefix: "",
+      call_node: "call",
+      args_node: "argument_list",
+    },
+    rust: {
+      fn_node: "function_item",
+      params_node: "parameters",
+      ret_field: "return_type",
+      ret_node: "(_)",
+      ret_prefix: "",
+      call_node: "call_expression",
+      args_node: "arguments",
+    },
+    tsx: {
+      fn_node: "function_declaration",
+      params_node: "formal_parameters",
+      ret_field: "return_type",
+      ret_node: "(type_annotation)",
+      ret_prefix: ": ",
+      call_node: "call_expression",
+      args_node: "arguments",
+    },
+    typescript: {
+      fn_node: "function_declaration",
+      params_node: "formal_parameters",
+      ret_field: "return_type",
+      ret_node: "(type_annotation)",
+      ret_prefix: ": ",
+      call_node: "call_expression",
+      args_node: "arguments",
+    },
+  }
+  return table.get(language, nil)
+}
+
+fn __refactor_symbol_name(p) {
+  let s = p?.symbol
+  if type_of(s) == "dict" {
+    return s?.name ?? ""
+  }
+  if type_of(s) == "string" {
+    return s
+  }
+  return p?.name ?? ""
+}
+
+fn __refactor_paren_inner(s) {
+  let raw = s ?? ""
+  if len(raw) < 2 {
+    return ""
+  }
+  return raw.substring(1, len(raw) - 1)
+}
+
+fn __refactor_split_top_level(text) {
+  var segs = []
+  var depth = 0
+  var quote = ""
+  var cur = ""
+  for c in (text ?? "").chars() {
+    if quote != "" {
+      cur = cur + c
+      if c == quote {
+        quote = ""
+      }
+    } else if c == "\"" || c == "'" {
+      quote = c
+      cur = cur + c
+    } else if c == "(" || c == "[" || c == "{" {
+      depth = depth + 1
+      cur = cur + c
+    } else if c == ")" || c == "]" || c == "}" {
+      depth = depth - 1
+      cur = cur + c
+    } else if c == "," && depth == 0 {
+      if trim(cur) != "" {
+        segs = segs + [trim(cur)]
+      }
+      cur = ""
+    } else {
+      cur = cur + c
+    }
+  }
+  if trim(cur) != "" {
+    segs = segs + [trim(cur)]
+  }
+  return segs
+}
+
+fn __refactor_insert_at(list, index, item) {
+  let n = len(list)
+  let idx = max(0, min(index, n))
+  let head = if idx > 0 {
+    list[:idx]
+  } else {
+    []
+  }
+  let tail = if idx < n {
+    list[idx:]
+  } else {
+    []
+  }
+  return head + [item] + tail
+}
+
+fn __refactor_def_query(spec, fn_name) {
+  return "(" + spec.fn_node + " name: (identifier) @__n parameters: (" + spec.params_node
+    + ") @target (#eq? @__n \""
+    + fn_name
+    + "\"))"
+}
+
+fn __refactor_call_query(spec, fn_name) {
+  return "(" + spec.call_node + " function: (identifier) @__f arguments: (" + spec.args_node
+    + ") @target (#eq? @__f \""
+    + fn_name
+    + "\"))"
+}
+
+fn __refactor_probe(query, path, session_id) {
+  return edit_apply_node(
+    {
+      path: path,
+      query: query,
+      replacement: "",
+      select: "all",
+      dry_run: true,
+      validate: false,
+      session_id: session_id,
+    },
+  )
+}
+
+fn __refactor_read_def_params(spec, path, fn_name, session_id) {
+  let r = edit_apply_node(
+    {
+      path: path,
+      query: __refactor_def_query(spec, fn_name),
+      replacement: "",
+      select: "unique",
+      dry_run: true,
+      validate: false,
+      session_id: session_id,
+    },
+  )
+  if r.result != "applied" {
+    return {ok: false, result: r.result, inner: "", params: []}
+  }
+  let original = if len(r.edits) > 0 {
+    r.edits[0].original
+  } else {
+    "()"
+  }
+  let inner = __refactor_paren_inner(original)
+  return {ok: true, result: "applied", inner: inner, params: __refactor_split_top_level(inner)}
+}
+
+fn __refactor_call_sites(spec, path, fn_name, session_id) {
+  let r = __refactor_probe(__refactor_call_query(spec, fn_name), path, session_id)
+  if r.result == "applied" {
+    return {count: r.match_count, originals: r.edits.map({ e -> e.original })}
+  }
+  return {count: 0, originals: []}
+}
+
+fn __refactor_call_op(spec, path, fn_name, nth, new_args) {
+  return {
+    kind: "node_apply",
+    path: path,
+    params: {
+      path: path,
+      query: __refactor_call_query(spec, fn_name),
+      replacement: "(" + new_args + ")",
+      select: "nth",
+      nth: nth,
+    },
+  }
+}
+
+fn __refactor_def_op(spec, path, fn_name, new_inner) {
+  return {
+    kind: "node_apply",
+    path: path,
+    params: {
+      path: path,
+      query: __refactor_def_query(spec, fn_name),
+      replacement: "(" + new_inner + ")",
+      select: "unique",
+    },
+  }
+}
+
+/**
+ * Replace a function's entire parameter list with `new_params` (the inner
+ * text, without the enclosing parens), updating call sites per
+ * `callsite_strategy`:
+ *
+ * - `"strict"` (default) — refuse with `result: "conflict"` if any call
+ *   site exists, since an arbitrary signature change cannot be reconciled
+ *   automatically.
+ * - `"default_fill"` — append `fill` (required) to every call site's
+ *   argument list, for the common "added a trailing parameter" case.
+ * - `"manual"` — rewrite the definition only and report the untouched call
+ *   sites in `warnings` for the agent to fix.
+ *
+ * `adapter_shim` from the epic is not yet supported (it needs the old
+ * signature + a delegating body); use `add_parameter` / `reorder_parameters`
+ * for the structured cases instead. Languages: rust, python, typescript,
+ * tsx, javascript, jsx, go.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_change_signature({path: "src/lib.rs", symbol: {name: "add"}, new_params: "a: i64, b: i64, c: i64", callsite_strategy: "strict"})
+ */
+pub fn edit_change_signature(params) {
+  let p = params ?? {}
+  let language = __refactor_detect_language(p)
+  let spec = __refactor_lang_spec(language)
+  if spec == nil {
+    return __refactor_unsupported(
+      "change_signature",
+      language,
+      "no signature grammar for language `" + language + "`",
+    )
+  }
+  let path = p?.path ?? ""
+  let fn_name = __refactor_symbol_name(p)
+  let new_params = p?.new_params
+  if path == "" || fn_name == "" || new_params == nil {
+    return __refactor_invalid(
+      "change_signature",
+      language,
+      "`path`, `symbol`/`name`, and `new_params` are required",
+    )
+  }
+  let strategy = p?.callsite_strategy ?? "strict"
+  let probe_session = if p?.dry_run ?? false {
+    nil
+  } else {
+    p?.session_id
+  }
+  let def_op = __refactor_def_op(spec, path, fn_name, new_params)
+  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  if strategy == "strict" {
+    if calls.count > 0 {
+      return __refactor_conflict(
+        "change_signature",
+        language,
+        [
+          {
+            code: "has_call_sites",
+            message: "change_signature(strict) refuses: " + to_string(calls.count)
+              + " call site(s) would be left inconsistent; use callsite_strategy `default_fill`/`manual`, or reorder_parameters/add_parameter",
+            path: path,
+            call_count: calls.count,
+          },
+        ],
+      )
+    }
+    return __refactor_run("change_signature", language, [def_op], p, [])
+  }
+  if strategy == "manual" {
+    let warns = if calls.count > 0 {
+      [
+        {
+          code: "call_sites_unchanged",
+          message: to_string(calls.count) + " call site(s) left for manual update",
+        },
+      ]
+    } else {
+      []
+    }
+    return __refactor_run("change_signature", language, [def_op], p, warns)
+  }
+  if strategy == "default_fill" {
+    let fill = p?.fill
+    if fill == nil {
+      return __refactor_invalid(
+        "change_signature",
+        language,
+        "callsite_strategy `default_fill` requires `fill` (text appended to each call's arguments)",
+      )
+    }
+    var ops = [def_op]
+    var i = 0
+    while i < calls.count {
+      let inner = __refactor_paren_inner(calls.originals[i])
+      let new_args = if trim(inner) == "" {
+        fill
+      } else {
+        inner + ", " + fill
+      }
+      ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
+      i = i + 1
+    }
+    return __refactor_run("change_signature", language, ops, p, [])
+  }
+  return __refactor_unsupported(
+    "change_signature",
+    language,
+    "callsite_strategy `" + strategy + "` is not supported (use strict | default_fill | manual)",
+  )
+}
+
+/**
+ * Insert one `param` into a function's parameter list at `index` (0-based;
+ * default appends), then reconcile call sites per `callsite_strategy`:
+ *
+ * - `"default_fill"` (default) — insert `default` (required) at the same
+ *   index in every call's argument list.
+ * - `"strict"` — refuse with `result: "conflict"` when call sites exist.
+ * - `"adapter_shim"` — not yet supported.
+ *
+ * `param` is the full declaration text (e.g. `"c: i64"`, `"c"`, `"c int"`).
+ * Languages: rust, python, typescript, tsx, javascript, jsx, go.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_add_parameter({path: "src/lib.rs", symbol: {name: "add"}, param: "c: i64", default: "0"})
+ */
+pub fn edit_add_parameter(params) {
+  let p = params ?? {}
+  let language = __refactor_detect_language(p)
+  let spec = __refactor_lang_spec(language)
+  if spec == nil {
+    return __refactor_unsupported(
+      "add_parameter",
+      language,
+      "no signature grammar for language `" + language + "`",
+    )
+  }
+  let path = p?.path ?? ""
+  let fn_name = __refactor_symbol_name(p)
+  let param = p?.param
+  if path == "" || fn_name == "" || param == nil || param == "" {
+    return __refactor_invalid("add_parameter", language, "`path`, `symbol`/`name`, and `param` are required")
+  }
+  let probe_session = if p?.dry_run ?? false {
+    nil
+  } else {
+    p?.session_id
+  }
+  let def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  if !def.ok {
+    return __refactor_conflict(
+      "add_parameter",
+      language,
+      [{code: def.result, message: "could not locate definition of `" + fn_name + "`", path: path}],
+    )
+  }
+  let index = p?.index ?? len(def.params)
+  let new_inner = join(__refactor_insert_at(def.params, index, param), ", ")
+  let def_op = __refactor_def_op(spec, path, fn_name, new_inner)
+  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  if calls.count == 0 {
+    return __refactor_run("add_parameter", language, [def_op], p, [])
+  }
+  let strategy = p?.callsite_strategy ?? "default_fill"
+  if strategy == "strict" {
+    return __refactor_conflict(
+      "add_parameter",
+      language,
+      [
+        {
+          code: "has_call_sites",
+          message: to_string(calls.count)
+            + " call site(s); pass callsite_strategy `default_fill` with a `default` value",
+          path: path,
+          call_count: calls.count,
+        },
+      ],
+    )
+  }
+  if strategy == "adapter_shim" {
+    return __refactor_unsupported(
+      "add_parameter",
+      language,
+      "adapter_shim is not yet supported; use default_fill (with `default`) or strict",
+    )
+  }
+  let default_val = p?.default
+  if default_val == nil {
+    return __refactor_invalid(
+      "add_parameter",
+      language,
+      "callsite_strategy `default_fill` requires `default` (value inserted at each call site)",
+    )
+  }
+  var ops = [def_op]
+  var i = 0
+  while i < calls.count {
+    let arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
+    let new_args = join(__refactor_insert_at(arg_list, index, default_val), ", ")
+    ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
+    i = i + 1
+  }
+  return __refactor_run("add_parameter", language, ops, p, [])
+}
+
+/**
+ * Permute a function's parameters by `order` (a list of 0-based source
+ * indices that is a permutation of the current parameters) and apply the
+ * same permutation to every call site's arguments. A call whose argument
+ * count differs from the parameter count (variadics, omitted defaults)
+ * is reported as `result: "conflict"` rather than reordered blindly.
+ *
+ * Languages: rust, python, typescript, tsx, javascript, jsx, go.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_reorder_parameters({path: "src/lib.rs", symbol: {name: "add"}, order: [1, 0]})
+ */
+pub fn edit_reorder_parameters(params) {
+  let p = params ?? {}
+  let language = __refactor_detect_language(p)
+  let spec = __refactor_lang_spec(language)
+  if spec == nil {
+    return __refactor_unsupported(
+      "reorder_parameters",
+      language,
+      "no signature grammar for language `" + language + "`",
+    )
+  }
+  let path = p?.path ?? ""
+  let fn_name = __refactor_symbol_name(p)
+  let order = p?.order
+  if path == "" || fn_name == "" || order == nil {
+    return __refactor_invalid(
+      "reorder_parameters",
+      language,
+      "`path`, `symbol`/`name`, and `order` are required",
+    )
+  }
+  let probe_session = if p?.dry_run ?? false {
+    nil
+  } else {
+    p?.session_id
+  }
+  let def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  if !def.ok {
+    return __refactor_conflict(
+      "reorder_parameters",
+      language,
+      [{code: def.result, message: "could not locate definition of `" + fn_name + "`", path: path}],
+    )
+  }
+  let arity = len(def.params)
+  if len(order) != arity {
+    return __refactor_invalid(
+      "reorder_parameters",
+      language,
+      "`order` must be a permutation of the " + to_string(arity) + " current parameter(s)",
+    )
+  }
+  for oi in order {
+    if oi < 0 || oi >= arity {
+      return __refactor_invalid(
+        "reorder_parameters",
+        language,
+        "`order` index " + to_string(oi) + " is out of range",
+      )
+    }
+  }
+  let new_inner = join(order.map({ oi -> def.params[oi] }), ", ")
+  var ops = [__refactor_def_op(spec, path, fn_name, new_inner)]
+  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  var i = 0
+  while i < calls.count {
+    let arg_list = __refactor_split_top_level(__refactor_paren_inner(calls.originals[i]))
+    if len(arg_list) != arity {
+      return __refactor_conflict(
+        "reorder_parameters",
+        language,
+        [
+          {
+            code: "arity_mismatch",
+            message: "call site #" + to_string(i + 1) + " has " + to_string(len(arg_list))
+              + " argument(s) but the signature has "
+              + to_string(arity)
+              + "; cannot reorder safely",
+            path: path,
+          },
+        ],
+      )
+    }
+    let new_args = join(order.map({ oi -> arg_list[oi] }), ", ")
+    ops = ops + [__refactor_call_op(spec, path, fn_name, i + 1, new_args)]
+    i = i + 1
+  }
+  return __refactor_run("reorder_parameters", language, ops, p, [])
+}
+
+/**
+ * Replace a function's declared return type with `new_type`. Languages
+ * that carry a return-type slot are supported (rust, python, typescript,
+ * tsx, go); JavaScript/JSX have no annotation and return
+ * `result: "unsupported"`. A function with no existing return-type
+ * annotation surfaces as `result: "conflict"` (nothing to replace).
+ *
+ * Caller verification is currently syntactic only: the rewritten file is
+ * re-parsed (tree-sitter) but callers are not type-checked. The count of
+ * call sites is surfaced in `warnings` so the agent knows what to review.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_change_return_type({path: "src/lib.rs", symbol: {name: "add"}, new_type: "i32"})
+ */
+pub fn edit_change_return_type(params) {
+  let p = params ?? {}
+  let language = __refactor_detect_language(p)
+  let spec = __refactor_lang_spec(language)
+  if spec == nil || spec.ret_field == nil {
+    return __refactor_unsupported(
+      "change_return_type",
+      language,
+      "language `" + language + "` has no return-type annotation to rewrite",
+    )
+  }
+  let path = p?.path ?? ""
+  let fn_name = __refactor_symbol_name(p)
+  let new_type = p?.new_type
+  if path == "" || fn_name == "" || new_type == nil || new_type == "" {
+    return __refactor_invalid(
+      "change_return_type",
+      language,
+      "`path`, `symbol`/`name`, and `new_type` are required",
+    )
+  }
+  let probe_session = if p?.dry_run ?? false {
+    nil
+  } else {
+    p?.session_id
+  }
+  let query = "(" + spec.fn_node + " name: (identifier) @__n " + spec.ret_field + ": " + spec.ret_node
+    + " @target (#eq? @__n \""
+    + fn_name
+    + "\"))"
+  let op = {
+    kind: "node_apply",
+    path: path,
+    params: {path: path, query: query, replacement: spec.ret_prefix + new_type, select: "unique"},
+  }
+  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  let warns = if calls.count > 0 {
+    [
+      {
+        code: "callers_not_type_checked",
+        message: to_string(calls.count)
+          + " call site(s) were re-parsed but not type-checked against the new return type",
+      },
+    ]
+  } else {
+    []
+  }
+  return __refactor_run("change_return_type", language, [op], p, warns)
+}
+
+/** --- extract_function ------------------------------------------------------- */
+fn __refactor_fn_synth_kind(language) {
+  let table = {
+    javascript: "brace",
+    jsx: "brace",
+    python: "python",
+    ruby: "ruby",
+    tsx: "brace",
+    typescript: "brace",
+  }
+  return table.get(language, nil)
+}
+
+fn __refactor_min_indent(lines) {
+  var smallest = -1
+  for line in lines {
+    if trim(line ?? "") == "" {
+      continue
+    }
+    let body = regex_replace("^[ \\t]+", "", line)
+    let n = len(line) - len(body)
+    if smallest == -1 || n < smallest {
+      smallest = n
+    }
+  }
+  if smallest == -1 {
+    return 0
+  }
+  return smallest
+}
+
+fn __refactor_strip_n(line, n) {
+  let raw = line ?? ""
+  if len(raw) >= n {
+    return raw.substring(n)
+  }
+  return ""
+}
+
+fn __refactor_indent_lines(lines, prefix) {
+  return lines
+    .map(
+    { l ->
+      if trim(l) == "" {
+        ""
+      } else {
+        prefix + l
+      }
+    },
+  )
+}
+
+fn __refactor_undef_names(src, language) {
+  let r = hostlib_ast_undefined_names({content: src, language: language})
+  if !(r?.supported ?? false) {
+    return []
+  }
+  var names = []
+  for d in r?.diagnostics ?? [] {
+    if d?.kind ?? "identifier" == "identifier" && !__refactor_member(names, d.name) {
+      names = names + [d.name]
+    }
+  }
+  return names
+}
+
+fn __refactor_enclosing_fn(symbols, start_line, end_line) {
+  var best = nil
+  for sym in symbols ?? [] {
+    if sym.kind != "function" || sym.container != nil {
+      continue
+    }
+    if sym.start_row <= start_line && sym.end_row >= end_line {
+      if best == nil || sym.end_row - sym.start_row < best.end_row - best.start_row {
+        best = sym
+      }
+    }
+  }
+  return best
+}
+
+fn __refactor_synth_fn(kind, name, params, body_lines) {
+  let signature = name + "(" + join(params, ", ") + ")"
+  if kind == "python" {
+    return ["def " + signature + ":"] + __refactor_indent_lines(body_lines, "    ")
+  }
+  if kind == "ruby" {
+    return ["def " + signature] + __refactor_indent_lines(body_lines, "  ") + ["end"]
+  }
+  return ["function " + signature + " {"] + __refactor_indent_lines(body_lines, "  ") + ["}"]
+}
+
+fn __refactor_wrap_probe(kind, body_lines) {
+  if kind == "python" {
+    return join(["def __harn_probe__():"] + __refactor_indent_lines(body_lines, "    "), "\n")
+  }
+  if kind == "ruby" {
+    return join(["def __harn_probe__"] + __refactor_indent_lines(body_lines, "  ") + ["end"], "\n")
+  }
+  return join(["function __harn_probe__() {"] + __refactor_indent_lines(body_lines, "  ") + ["}"], "\n")
+}
+
+/**
+ * Extract a contiguous range of statements (`range`{start_line, end_line},
+ * 0-based inclusive) out of an enclosing top-level function into a new
+ * function `new_name`, replacing the range with a call to it.
+ *
+ * Captured free variables become parameters: the selection's free names
+ * (computed via `hostlib_ast_undefined_names` over the block) minus the
+ * enclosing function's free names (so module-level / imported names stay
+ * referenced, not parameterized). Pass `params_order` to fix the order.
+ *
+ * The new definition is placed at module scope after the enclosing
+ * function (`target_scope: "after"`, default) or before it
+ * (`target_scope: "before"`). Only top-level functions are supported as
+ * the enclosing scope (methods/nested return `result: "unsupported"`),
+ * which keeps the placement and indentation correct.
+ *
+ * v1 produces a `void` function: if the block computes values used after
+ * the selection, the generated call will not thread them back — adjust the
+ * call by hand or select a self-contained block. Languages: python,
+ * javascript, jsx, typescript, tsx, ruby (the set with both capture
+ * analysis and a parameter form that needs no inferred types).
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_extract_function({path: "app.py", range: {start_line: 3, end_line: 5}, new_name: "summarize"})
+ */
+pub fn edit_extract_function(params) {
+  let p = params ?? {}
+  let language = __refactor_detect_language(p)
+  let kind = __refactor_fn_synth_kind(language)
+  if kind == nil {
+    return __refactor_unsupported(
+      "extract_function",
+      language,
+      "extract_function supports python/javascript/jsx/typescript/tsx/ruby",
+    )
+  }
+  let path = p?.path ?? ""
+  let new_name = p?.new_name ?? ""
+  let range = p?.range ?? {}
+  let start_line = range?.start_line
+  let end_line = range?.end_line ?? start_line
+  if path == "" || new_name == "" || start_line == nil || end_line == nil {
+    return __refactor_invalid(
+      "extract_function",
+      language,
+      "`path`, `new_name`, and `range`{start_line, end_line} are required",
+    )
+  }
+  let probe_session = if p?.dry_run ?? false {
+    nil
+  } else {
+    p?.session_id
+  }
+  let read = hostlib_fs_read_text({path: path, session_id: probe_session})
+  let content = read?.content ?? ""
+  let lines = split(content, "\n")
+  if start_line < 0 || end_line >= len(lines) || end_line < start_line {
+    return __refactor_invalid("extract_function", language, "`range` is outside the file")
+  }
+  let block_lines = lines[start_line:end_line + 1]
+  let dedent = __refactor_min_indent(block_lines)
+  let dedented = block_lines.map({ l -> __refactor_strip_n(l, dedent) })
+  let symbols = hostlib_ast_symbols({path: path, language: language})?.symbols ?? []
+  let enclosing = __refactor_enclosing_fn(symbols, start_line, end_line)
+  if enclosing == nil {
+    return __refactor_result(
+      "extract_function",
+      language,
+      {
+        result: "unsupported",
+        details: "selected range is not inside a top-level function",
+        errors: [{code: "no_enclosing_function", message: "range is not inside a top-level function"}],
+      },
+    )
+  }
+  let block_undef = __refactor_undef_names(__refactor_wrap_probe(kind, dedented), language)
+  let enclosing_lines = lines[enclosing.start_row:enclosing.end_row + 1]
+  let enclosing_dedent = __refactor_min_indent(enclosing_lines)
+  let enclosing_src = join(enclosing_lines.map({ l -> __refactor_strip_n(l, enclosing_dedent) }), "\n")
+  let enclosing_undef = __refactor_undef_names(enclosing_src, language)
+  var captures = []
+  for nm in block_undef {
+    if !__refactor_member(enclosing_undef, nm) && nm != new_name && !__refactor_member(captures, nm) {
+      captures = captures + [nm]
+    }
+  }
+  let final_params = p?.params_order ?? captures
+  let def_lines = __refactor_synth_fn(kind, new_name, final_params, dedented)
+  let orig_indent = __refactor_leading_ws(lines[start_line])
+  let term = if kind == "brace" {
+    ";"
+  } else {
+    ""
+  }
+  let call_line = orig_indent + new_name + "(" + join(final_params, ", ") + ")" + term
+  let head = if start_line > 0 {
+    lines[:start_line]
+  } else {
+    []
+  }
+  let tail = if end_line + 1 < len(lines) {
+    lines[end_line + 1:]
+  } else {
+    []
+  }
+  let replaced = head + [call_line] + tail
+  let target_scope = p?.target_scope ?? "after"
+  let new_lines = if target_scope == "before" {
+    let pre = if enclosing.start_row > 0 {
+      replaced[:enclosing.start_row]
+    } else {
+      []
+    }
+    pre + def_lines + [""] + replaced[enclosing.start_row:]
+  } else {
+    let insert_idx = enclosing.end_row + (1 - (end_line - start_line + 1)) + 1
+    let suffix = if insert_idx < len(replaced) {
+      replaced[insert_idx:]
+    } else {
+      []
+    }
+    replaced[:insert_idx] + [""] + def_lines + suffix
+  }
+  let after = join(new_lines, "\n")
+  return __refactor_run("extract_function", language, [{kind: "content", path: path, after: after}], p, [])
+}
+
+/** --- inline + move_decl ----------------------------------------------------- */
+fn __refactor_inline_kind(language) {
+  if language == "python" {
+    return "python"
+  }
+  return "brace"
+}
+
+fn __refactor_inline_expr(body_text, kind) {
+  let lines = split(body_text ?? "", "\n")
+  // `hostlib_ast_function_body` returns the indented body only for Python,
+  // but the whole `fn …{ … }` text for brace languages — so brace bodies
+  // drop the signature/opening-brace line and the closing-brace line.
+  let inner = if kind == "python" {
+    lines
+  } else if len(lines) >= 3 {
+    lines[1:len(lines) - 1]
+  } else {
+    []
+  }
+  var body = []
+  for l in inner {
+    if trim(l) != "" {
+      body = body + [trim(l)]
+    }
+  }
+  if len(body) != 1 {
+    return nil
+  }
+  let stmt = body[0]
+  if !stmt.starts_with("return ") {
+    return nil
+  }
+  var expr = trim(stmt.substring(7))
+  if expr.ends_with(";") {
+    expr = trim(expr.substring(0, len(expr) - 1))
+  }
+  if expr == "" {
+    return nil
+  }
+  return expr
+}
+
+/**
+ * Inline a zero-parameter function whose body is a single
+ * `return <expr>` statement: replace every `name()` call with
+ * `(<expr>)` and delete the definition. Functions with parameters, or
+ * with anything other than one return statement, return
+ * `result: "unsupported"` (the safe, precedence-correct subset — inlining
+ * parameterized bodies needs argument substitution that is left to a
+ * future iteration).
+ *
+ * Languages: rust, python, typescript, tsx, javascript, jsx, go.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_inline({path: "src/lib.rs", symbol: {name: "answer"}})
+ */
+pub fn edit_inline(params) {
+  let p = params ?? {}
+  let language = __refactor_detect_language(p)
+  let spec = __refactor_lang_spec(language)
+  if spec == nil {
+    return __refactor_unsupported("inline", language, "no signature grammar for language `" + language + "`")
+  }
+  let path = p?.path ?? ""
+  let fn_name = __refactor_symbol_name(p)
+  if path == "" || fn_name == "" {
+    return __refactor_invalid("inline", language, "`path` and `symbol`/`name` are required")
+  }
+  let probe_session = if p?.dry_run ?? false {
+    nil
+  } else {
+    p?.session_id
+  }
+  let content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
+  let fb = hostlib_ast_function_body({source: content, language: language, function_name: fn_name})
+  if !(fb?.found ?? false) {
+    return __refactor_conflict(
+      "inline",
+      language,
+      [{code: "symbol_not_found", message: "no function `" + fn_name + "` found", path: path}],
+    )
+  }
+  let def = __refactor_read_def_params(spec, path, fn_name, probe_session)
+  if def.ok && len(def.params) != 0 {
+    return __refactor_unsupported(
+      "inline",
+      language,
+      "inline supports zero-parameter functions only (argument substitution is not yet implemented)",
+    )
+  }
+  let expr = __refactor_inline_expr(fb.body_text, __refactor_inline_kind(language))
+  if expr == nil {
+    return __refactor_unsupported(
+      "inline",
+      language,
+      "inline requires a body of exactly one `return <expr>` statement",
+    )
+  }
+  let calls = __refactor_call_sites(spec, path, fn_name, probe_session)
+  var i = 0
+  while i < calls.count {
+    if trim(__refactor_paren_inner(calls.originals[i])) != "" {
+      return __refactor_conflict(
+        "inline",
+        language,
+        [
+          {
+            code: "call_has_arguments",
+            message: "call site #" + to_string(i + 1) + " passes arguments to a zero-parameter function",
+            path: path,
+          },
+        ],
+      )
+    }
+    i = i + 1
+  }
+  let call_target = "((" + spec.call_node + " function: (identifier) @__f (#eq? @__f \"" + fn_name + "\")) @target)"
+  let def_target = "((" + spec.fn_node + " name: (identifier) @__n (#eq? @__n \"" + fn_name + "\")) @target)"
+  var ops = []
+  if calls.count > 0 {
+    ops = ops
+      + [
+      {
+        kind: "node_apply",
+        path: path,
+        params: {path: path, query: call_target, replacement: "(" + expr + ")", select: "all"},
+      },
+    ]
+  }
+  ops = ops
+    + [
+    {
+      kind: "node_apply",
+      path: path,
+      params: {path: path, query: def_target, replacement: "", select: "unique"},
+    },
+  ]
+  return __refactor_run("inline", language, ops, p, [])
+}
+
+/**
+ * Move a top-level declaration `symbol` out of its source `path` and into
+ * `target_file`, deleting it from the source. `target_position` is `"end"`
+ * (default, appended) or `"start"` (prepended). Both files are written in
+ * one atomic staged-fs transaction.
+ *
+ * The declaration text is lifted with `hostlib_ast_symbol_extract` and
+ * removed with `hostlib_ast_symbol_delete`, so language support follows
+ * those builtins (`result: "unsupported"` otherwise). Cross-file import /
+ * export references are NOT rewritten yet — that is reported in
+ * `warnings`; combine with `edit_rename_symbol` for re-export safety.
+ *
+ * @effects: [host, fs]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_move_decl({path: "src/a.rs", symbol: {name: "helper"}, target_file: "src/b.rs"})
+ */
+pub fn edit_move_decl(params) {
+  let p = params ?? {}
+  let language = __refactor_detect_language(p)
+  let path = p?.path ?? ""
+  let target_path = p?.target_file
+  let fn_name = __refactor_symbol_name(p)
+  if path == "" || target_path == nil || target_path == "" || fn_name == "" {
+    return __refactor_invalid("move_decl", language, "`path`, `symbol`/`name`, and `target_file` are required")
+  }
+  let probe_session = if p?.dry_run ?? false {
+    nil
+  } else {
+    p?.session_id
+  }
+  let src_content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
+  let extracted = hostlib_ast_symbol_extract({symbol_name: fn_name, source: src_content, language: language})
+  if extracted.result == "unsupported_language" {
+    return __refactor_unsupported(
+      "move_decl",
+      language,
+      "symbol extraction is unsupported for language `" + language + "`",
+    )
+  }
+  if extracted.result != "extracted" {
+    return __refactor_conflict(
+      "move_decl",
+      language,
+      [{code: extracted.result, message: "cannot extract `" + fn_name + "` from " + path, path: path}],
+    )
+  }
+  let deleted = hostlib_ast_symbol_delete({symbol_name: fn_name, source: src_content, language: language})
+  if deleted.result != "removed" {
+    return __refactor_conflict(
+      "move_decl",
+      language,
+      [{code: deleted.result, message: "cannot remove `" + fn_name + "` from " + path, path: path}],
+    )
+  }
+  let moved = extracted.text
+  let target_content = hostlib_fs_read_text({path: target_path, session_id: probe_session})?.content ?? ""
+  let position = p?.target_position ?? "end"
+  let new_target = if position == "start" {
+    moved + "\n\n" + target_content
+  } else if trim(target_content) == "" {
+    moved + "\n"
+  } else if target_content.ends_with("\n") {
+    target_content + "\n" + moved + "\n"
+  } else {
+    target_content + "\n\n" + moved + "\n"
+  }
+  let warns = [
+    {
+      code: "imports_not_rewritten",
+      message: "moved `" + fn_name
+        + "`; cross-file import/export references may need manual adjustment (pair with edit_rename_symbol)",
+    },
+  ]
+  return __refactor_run(
+    "move_decl",
+    language,
+    [
+      {kind: "content", path: path, after: deleted.source},
+      {kind: "content", path: target_path, after: new_target},
+    ],
+    p,
+    warns,
+  )
 }

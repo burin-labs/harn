@@ -260,6 +260,40 @@ fn edit_rename_symbol_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn edit_refactor_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("edit-refactor");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "edit-refactor demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("edit_refactor_receipt"),
+        "edit-refactor demo should emit the refactor receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"extract_result\":\"applied\"")
+            && outcome.stdout.contains("\"extract_signature\":true"),
+        "extract_function dry-run must synthesize a captured-parameter signature:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"add_param_result\":\"applied\"")
+            && outcome.stdout.contains("\"add_param_calls_filled\":true"),
+        "add_parameter dry-run must fill the new argument at every call site:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"return_type_result\":\"applied\""),
+        "change_return_type dry-run must rewrite the return type:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn http_transport_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("http-transport");
     assert_eq!(
@@ -387,6 +421,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "compaction-policy",
         "edit-rename-symbol",
         "edit-language-coverage",
+        "edit-refactor",
         "http-transport",
         "obs-primitive",
     ]
