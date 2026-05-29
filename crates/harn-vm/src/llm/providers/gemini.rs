@@ -452,6 +452,7 @@ fn parse_response(
         .filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_gemini_usage(&json["usageMetadata"], request_id);
     Ok(LlmResult {
+        served_fast: false,
         text,
         tool_calls,
         input_tokens,
@@ -502,6 +503,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,
@@ -557,6 +559,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,
@@ -617,6 +620,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,
@@ -683,6 +687,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,

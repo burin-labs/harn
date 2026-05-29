@@ -320,6 +320,7 @@ impl AnthropicProvider {
                 });
             }
         }
+        crate::llm::fast_mode::apply_request_knob(&mut body, &opts.model, opts.fast);
         body
     }
 
@@ -397,6 +398,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,
@@ -487,6 +489,40 @@ mod tests {
         let provider = AnthropicProvider;
         assert!(provider.supports_defer_loading("claude-opus-4-7"));
         assert!(!provider.supports_defer_loading("claude-opus-3-5"));
+    }
+
+    #[test]
+    fn fast_mode_injects_speed_knob_and_beta_header() {
+        // `fast: true` on a model whose catalog tier rides `speed` sets the
+        // top-level request knob and the beta header flows through the
+        // payload's resolved Anthropic beta features.
+        let mut payload = base_payload();
+        payload.model = "claude-opus-4-8".to_string();
+        payload.fast = true;
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(body["speed"], serde_json::json!("fast"));
+
+        let opts = {
+            let mut o = crate::llm::api::options::base_opts("anthropic");
+            o.model = "claude-opus-4-8".to_string();
+            o.fast = true;
+            o
+        };
+        assert!(
+            opts.anthropic_beta_features_for_request()
+                .iter()
+                .any(|f| f == "fast-mode-2026-02-01"),
+            "fast mode must request the fast-mode beta header"
+        );
+    }
+
+    #[test]
+    fn fast_mode_knob_absent_when_off() {
+        let mut payload = base_payload();
+        payload.model = "claude-opus-4-8".to_string();
+        payload.fast = false;
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert!(body.get("speed").is_none());
     }
 
     #[test]

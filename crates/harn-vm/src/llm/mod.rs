@@ -27,6 +27,7 @@ pub(crate) mod cost_route;
 pub(crate) mod daemon;
 pub mod eval;
 pub(crate) mod fake;
+pub(crate) mod fast_mode;
 pub(crate) mod helpers;
 pub mod introspection;
 pub mod jsonl;
@@ -675,6 +676,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: super::api::OutputFormat::JsonObject,
             response_format: Some("json".to_string()),
             json_schema: None,

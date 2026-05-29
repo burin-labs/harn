@@ -38,6 +38,7 @@ pub(super) fn request_text_content(message: &serde_json::Value) -> String {
 
 pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
     LlmResult {
+        served_fast: false,
         text: String::new(),
         tool_calls: Vec::new(),
         input_tokens: 0,

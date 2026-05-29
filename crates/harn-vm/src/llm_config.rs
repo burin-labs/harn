@@ -804,6 +804,18 @@ pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
         .and_then(|model| model.pricing.clone())
 }
 
+/// Premium per-MTok pricing for a model's accelerated-serving ("fast mode")
+/// tier, when the catalog declares one. Returns `None` for models with no
+/// fast tier or a tier that omits explicit pricing — callers fall back to
+/// standard pricing in that case.
+pub fn model_fast_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
+    effective_config()
+        .models
+        .get(model_id)
+        .and_then(|model| model.fast_mode.as_ref())
+        .and_then(|fast_mode| fast_mode.pricing.clone())
+}
+
 pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> {
     model_pricing_per_mtok(model_id)
         .map(|pricing| {

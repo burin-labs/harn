@@ -247,6 +247,7 @@ impl OpenAiCompatibleProvider {
             }
             body["chat_template_kwargs"] = chat_template_kwargs;
         }
+        crate::llm::fast_mode::apply_request_knob(&mut body, &opts.model, opts.fast);
         body
     }
 
@@ -401,6 +402,22 @@ mod tests {
         assert!(gpt_model_supports_tool_search("gpt-5-4"));
         assert!(gpt_model_supports_tool_search("gpt-5.5"));
         assert!(gpt_model_supports_tool_search("gpt-6.0"));
+    }
+
+    #[test]
+    fn fast_mode_injects_service_tier_for_openai() {
+        // `fast: true` on GPT-5.5 rides the catalog's `service_tier` knob;
+        // OpenAI needs no beta header so none is added.
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-5.5".to_string();
+        payload.fast = true;
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(body["service_tier"], json!("fast"));
+
+        payload.fast = false;
+        let body_off = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert!(body_off.get("service_tier").is_none());
     }
 
     #[test]
@@ -934,6 +951,7 @@ thinking_modes = ["enabled"]
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,

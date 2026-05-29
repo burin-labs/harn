@@ -540,6 +540,7 @@ aws_secret_access_key = dev-secret
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,

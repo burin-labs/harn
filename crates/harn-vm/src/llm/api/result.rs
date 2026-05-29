@@ -28,6 +28,13 @@ pub(crate) struct LlmResult {
     pub thinking: Option<String>,
     pub thinking_summary: Option<String>,
     pub stop_reason: Option<String>,
+    /// True when the provider confirmed it served this request at the
+    /// accelerated ("fast mode") tier — it echoes the knob (`speed` /
+    /// `service_tier`) in the response. Drives premium-tier billing. A
+    /// `fast: true` request that the provider downgraded under capacity
+    /// pressure echoes a different value and bills at standard rates.
+    #[serde(default)]
+    pub served_fast: bool,
     pub blocks: Vec<serde_json::Value>,
     pub logprobs: Vec<serde_json::Value>,
     /// Server-side timings and runtime accounting captured from this
@@ -78,6 +85,7 @@ fn build_usage_dict(result: &LlmResult) -> BTreeMap<String, VmValue> {
         "cache_savings_usd".to_string(),
         VmValue::Float(cache_savings_usd),
     );
+    usage.insert("served_fast".to_string(), VmValue::Bool(result.served_fast));
     usage
 }
 
@@ -123,6 +131,7 @@ pub(crate) fn vm_build_llm_result(
         "cache_creation_input_tokens".to_string(),
         VmValue::Int(result.cache_write_tokens),
     );
+    dict.insert("served_fast".to_string(), VmValue::Bool(result.served_fast));
     let usage = build_usage_dict(result);
     if let Some(value) = usage.get("cache_hit_ratio") {
         dict.insert("cache_hit_ratio".to_string(), value.clone());
@@ -324,6 +333,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         }
     );
     LlmResult {
+        served_fast: false,
         text: text.clone(),
         tool_calls: Vec::new(),
         input_tokens: (prefix.len() + suffix.len()) as i64,

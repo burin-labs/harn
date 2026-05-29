@@ -397,6 +397,7 @@ async fn parse_raw_generate_response(
     }
     let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
     Ok(LlmResult {
+        served_fast: false,
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,
         tool_calls: Vec::new(),
@@ -499,6 +500,7 @@ async fn parse_raw_generate_stream(
         )))));
     }
     Ok(LlmResult {
+        served_fast: false,
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,
         tool_calls: Vec::new(),
@@ -585,6 +587,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: crate::llm::api::OutputFormat::JsonSchema {
                 schema: serde_json::json!({"type": "object"}),
                 strict: true,

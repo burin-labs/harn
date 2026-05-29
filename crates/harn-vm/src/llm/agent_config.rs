@@ -484,6 +484,7 @@ mod tests {
     #[test]
     fn structured_output_candidates_include_tool_call_arguments() {
         let result = crate::llm::api::LlmResult {
+            served_fast: false,
             text: String::new(),
             tool_calls: vec![serde_json::json!({
                 "id": "call_1",
