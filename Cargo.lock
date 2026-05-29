@@ -2505,6 +2505,7 @@ dependencies = [
  "axum",
  "axum-server",
  "base64",
+ "bytes",
  "ed25519-dalek",
  "filetime",
  "futures",

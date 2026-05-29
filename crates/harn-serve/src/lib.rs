@@ -16,6 +16,7 @@ pub mod permissions;
 mod protocol_fixture_tests;
 mod replay;
 pub mod sessions;
+pub mod streaming;
 pub mod tls;
 pub mod transport;
 pub mod ws;
@@ -71,6 +72,11 @@ pub use sessions::{
     SessionMeta, SessionSigner, SessionStatus, SessionStore, SharedArchiveSink, SharedSessionStore,
     Snapshot, SnapshotId, SqliteSessionStore, StoreError, StoreHooks, StoreResult, StoredEvent,
     SweepReport, Tombstone, TruncateResult, VerifyFailure, VerifyReport,
+};
+pub use streaming::{
+    BodyChannelConfig, MultipartField, MultipartStream, MultipartStreamConfig, RequestBodyChannel,
+    StreamError, DEFAULT_BODY_CHANNEL_CAPACITY, DEFAULT_FIELD_BYTES_CAPACITY,
+    DEFAULT_MAX_FIELD_BYTES, DEFAULT_MULTIPART_OUTER_CAPACITY,
 };
 pub use tls::{bind_listener, HstsConfig, HttpTlsConfig};
 pub use transport::{
