@@ -64,10 +64,62 @@ pub struct RouteSpec {
     pub path: String,
 }
 
+/// A `HARN-SRV-*` diagnostic raised while building the export catalog.
+///
+/// These flag the malformed `@route(...)` / `@scopes(...)` attribute
+/// forms that the collector would otherwise drop silently — leaving a
+/// handler mis-routed, unmounted, or less scope-restricted than the
+/// author intended. They are surfaced by the serve adapters at startup
+/// (see [`emit_export_diagnostics`]) rather than aborting catalog
+/// construction, so one bad attribute doesn't take down a script whose
+/// other handlers are fine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportDiagnostic {
+    /// Stable code so log scanners and editors can key on the condition.
+    pub code: &'static str,
+    /// 1-based source line of the offending attribute (0 when unknown).
+    pub line: usize,
+    pub message: String,
+}
+
+/// `@route` carries an argument that is not a string literal, so the
+/// method/path positions are ambiguous and the handler is not mounted.
+pub const ROUTE_ARG_NOT_STRING: &str = "HARN-SRV-001";
+/// `@route` has the wrong number of arguments — it takes a path, or a
+/// method and a path. The handler is not mounted.
+pub const ROUTE_BAD_ARITY: &str = "HARN-SRV-002";
+/// `@scopes` carries an argument that is not a string literal; that
+/// scope requirement is dropped, leaving the route less restricted.
+pub const SCOPES_ARG_NOT_STRING: &str = "HARN-SRV-003";
+
+impl std::fmt::Display for ExportDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.line > 0 {
+            write!(f, "{}: {} (line {})", self.code, self.message, self.line)
+        } else {
+            write!(f, "{}: {}", self.code, self.message)
+        }
+    }
+}
+
+/// Print catalog diagnostics to stderr at server startup, matching the
+/// `[harn] …` banner the adapters already emit. Standalone serve
+/// commands call this so authors see malformed attributes immediately;
+/// embedders that build a router directly can read
+/// [`ExportCatalog::diagnostics`] and render them in their own UI.
+pub fn emit_export_diagnostics(diagnostics: &[ExportDiagnostic]) {
+    for diagnostic in diagnostics {
+        eprintln!("[harn] warning: {diagnostic}");
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ExportCatalog {
     pub script_path: PathBuf,
     pub functions: BTreeMap<String, ExportedFunction>,
+    /// Non-fatal `HARN-SRV-*` diagnostics gathered while collecting the
+    /// route/scope attributes. Empty for a well-formed script.
+    pub diagnostics: Vec<ExportDiagnostic>,
 }
 
 impl ExportCatalog {
@@ -80,6 +132,7 @@ impl ExportCatalog {
         })?;
 
         let mut functions = BTreeMap::new();
+        let mut diagnostics = Vec::new();
         for node in &program {
             let (attrs, inner) = harn_parser::peel_attributes(node);
             let Node::FnDecl {
@@ -108,10 +161,10 @@ impl ExportCatalog {
                     output_schema: return_type
                         .as_ref()
                         .and_then(harn_vm::json_schema_for_type_expr),
-                    required_scopes: scopes_from_attributes(attrs),
+                    required_scopes: scopes_from_attributes(attrs, name, &mut diagnostics),
                     limits,
                     budget,
-                    route: route_from_attributes(attrs, name),
+                    route: route_from_attributes(attrs, name, &mut diagnostics),
                 },
             );
         }
@@ -132,7 +185,7 @@ impl ExportCatalog {
             if has_public_exports && !*is_pub {
                 continue;
             }
-            let required_scopes = scopes_from_attributes(attrs);
+            let required_scopes = scopes_from_attributes(attrs, name, &mut diagnostics);
             let (limits, budget) = limits_and_budget_from_attributes(attrs);
             functions
                 .entry(name.clone())
@@ -158,11 +211,18 @@ impl ExportCatalog {
         Ok(Self {
             script_path: path.to_path_buf(),
             functions,
+            diagnostics,
         })
     }
 
     pub fn function(&self, name: &str) -> Option<&ExportedFunction> {
         self.functions.get(name)
+    }
+
+    /// Non-fatal `HARN-SRV-*` diagnostics gathered while collecting the
+    /// route/scope attributes. Empty for a well-formed script.
+    pub fn diagnostics(&self) -> &[ExportDiagnostic] {
+        &self.diagnostics
     }
 }
 
@@ -202,7 +262,11 @@ fn pipeline_exported_params(params: &[String]) -> Vec<ExportedParam> {
 /// in callers that prefer key-value form); only string literals
 /// contribute. Multiple `@scopes` attributes on the same declaration
 /// union into one set.
-fn scopes_from_attributes(attrs: &[Attribute]) -> BTreeSet<String> {
+fn scopes_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> BTreeSet<String> {
     let mut set = BTreeSet::new();
     for attr in attrs {
         if attr.name != "scopes" {
@@ -213,7 +277,17 @@ fn scopes_from_attributes(attrs: &[Attribute]) -> BTreeSet<String> {
                 Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
                     set.insert(value.clone());
                 }
-                _ => {}
+                // A non-string scope is silently dropped by the
+                // collector, which would leave the route *less*
+                // restricted than the author wrote — worth a loud warning.
+                _ => diagnostics.push(ExportDiagnostic {
+                    code: SCOPES_ARG_NOT_STRING,
+                    line: arg.span.line,
+                    message: format!(
+                        "`@scopes` on `{fn_name}` requires string-literal arguments; \
+                         dropping a non-string scope leaves the route less restricted"
+                    ),
+                }),
             }
         }
     }
@@ -235,26 +309,58 @@ fn scopes_from_attributes(attrs: &[Attribute]) -> BTreeSet<String> {
 ///    calls for ("mounts every exported `pub fn handler_*` at `/<name>`")
 ///    while letting authors opt into precise routing with the attribute.
 ///
+/// A present-but-malformed `@route` does not fall back to the naming
+/// convention: it records a `HARN-SRV-*` diagnostic and returns `None`,
+/// so the author sees the mistake instead of a silently different route.
+///
 /// Returns `None` for any other `pub fn`, so a script can export helper
 /// functions (reachable via the API/A2A/MCP dispatch adapters) without
 /// every one of them grabbing an HTTP path.
-fn route_from_attributes(attrs: &[Attribute], fn_name: &str) -> Option<RouteSpec> {
-    if let Some(route) = explicit_route_attribute(attrs) {
-        return Some(route);
+fn route_from_attributes(
+    attrs: &[Attribute],
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<RouteSpec> {
+    // An explicit (even if malformed) `@route` overrides the naming
+    // convention: an author who wrote one expects that path, not a
+    // surprise fallback to `/<name>`. A malformed one yields `None` plus
+    // a diagnostic, leaving the handler unmounted until they fix it.
+    if attrs.iter().any(|attr| attr.name == "route") {
+        return explicit_route_attribute(attrs, fn_name, diagnostics);
     }
     handler_convention_route(fn_name)
 }
 
-fn explicit_route_attribute(attrs: &[Attribute]) -> Option<RouteSpec> {
+fn explicit_route_attribute(
+    attrs: &[Attribute],
+    fn_name: &str,
+    diagnostics: &mut Vec<ExportDiagnostic>,
+) -> Option<RouteSpec> {
     let attr = attrs.iter().find(|attr| attr.name == "route")?;
-    let literals: Vec<String> = attr
+    let literals: Vec<&str> = attr
         .args
         .iter()
         .filter_map(|arg| match &arg.value.node {
-            Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value.clone()),
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value.as_str()),
             _ => None,
         })
         .collect();
+
+    // Any non-string argument makes the method/path positions ambiguous
+    // (e.g. `@route("GET", some_var)` would otherwise collapse to the
+    // single-arg form and mis-mount at `/GET`), so refuse to guess.
+    if literals.len() != attr.args.len() {
+        diagnostics.push(ExportDiagnostic {
+            code: ROUTE_ARG_NOT_STRING,
+            line: attr.span.line,
+            message: format!(
+                "`@route` on `{fn_name}` requires string-literal arguments \
+                 (`@route(\"/path\")` or `@route(\"METHOD\", \"/path\")`); handler not mounted"
+            ),
+        });
+        return None;
+    }
+
     match literals.as_slice() {
         // `@route("/path")` — method defaults to GET.
         [path] => Some(RouteSpec {
@@ -262,11 +368,25 @@ fn explicit_route_attribute(attrs: &[Attribute]) -> Option<RouteSpec> {
             path: normalize_route_path(path),
         }),
         // `@route("METHOD", "/path")` — explicit method.
-        [method, path, ..] => Some(RouteSpec {
+        [method, path] => Some(RouteSpec {
             method: normalize_route_method(method),
             path: normalize_route_path(path),
         }),
-        [] => None,
+        // Zero args (`@route()`) or three-plus: the method/path pair is
+        // under- or over-specified, so the route is undefined.
+        _ => {
+            diagnostics.push(ExportDiagnostic {
+                code: ROUTE_BAD_ARITY,
+                line: attr.span.line,
+                message: format!(
+                    "`@route` on `{fn_name}` takes a path or a method and a path \
+                     (`@route(\"/path\")` or `@route(\"METHOD\", \"/path\")`), \
+                     found {} arguments; handler not mounted",
+                    literals.len()
+                ),
+            });
+            None
+        }
     }
 }
 
@@ -528,5 +648,108 @@ pipeline default(task) {
         let default = catalog.function("default").expect("default pipeline");
         assert_eq!(default.kind, ExportedCallableKind::Pipeline);
         assert_eq!(default.params[0].name, "task");
+    }
+
+    /// Build a catalog from inline source, asserting it parses cleanly.
+    fn catalog_from_source(source: &str) -> ExportCatalog {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server.harn");
+        std::fs::write(&path, source).expect("write script");
+        ExportCatalog::from_path(&path).expect("catalog")
+    }
+
+    #[test]
+    fn well_formed_attributes_emit_no_diagnostics() {
+        let catalog = catalog_from_source(
+            r#"
+@scopes("personas:read")
+@route("POST", "/users/{id}")
+pub fn update_user(req: dict) -> dict { return req }
+
+@route("/health")
+pub fn liveness(req: dict) -> dict { return req }
+"#,
+        );
+        assert!(
+            catalog.diagnostics().is_empty(),
+            "unexpected diagnostics: {:?}",
+            catalog.diagnostics()
+        );
+    }
+
+    #[test]
+    fn route_with_non_string_arg_is_diagnosed_and_unmounted() {
+        // The second arg is an identifier, not a string literal. Left
+        // unchecked the collector would treat this as `@route("GET")` and
+        // mis-mount the handler at `/GET`.
+        let catalog = catalog_from_source(
+            r#"
+pub fn make_path(req: dict) -> string { return "/x" }
+
+@route("GET", make_path)
+pub fn handler_users(req: dict) -> dict { return req }
+"#,
+        );
+        let handler = catalog.function("handler_users").expect("handler_users");
+        assert_eq!(
+            handler.route, None,
+            "a malformed @route must not fall back to the handler_ convention route"
+        );
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![ROUTE_ARG_NOT_STRING]);
+    }
+
+    #[test]
+    fn route_with_zero_args_is_diagnosed_and_unmounted() {
+        let catalog = catalog_from_source(
+            r"
+@route()
+pub fn handler_status(req: dict) -> dict { return req }
+",
+        );
+        let handler = catalog.function("handler_status").expect("handler_status");
+        assert_eq!(handler.route, None);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![ROUTE_BAD_ARITY]);
+    }
+
+    #[test]
+    fn route_with_too_many_args_is_diagnosed_and_unmounted() {
+        let catalog = catalog_from_source(
+            r#"
+@route("GET", "/x", "/y")
+pub fn handler_overspecified(req: dict) -> dict { return req }
+"#,
+        );
+        let handler = catalog
+            .function("handler_overspecified")
+            .expect("handler_overspecified");
+        assert_eq!(handler.route, None);
+        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![ROUTE_BAD_ARITY]);
+    }
+
+    #[test]
+    fn scopes_with_non_string_arg_is_diagnosed_but_keeps_valid_scopes() {
+        let catalog = catalog_from_source(
+            r#"
+pub fn make_scope(req: dict) -> string { return "sessions:write" }
+
+@scopes("personas:read", make_scope)
+pub fn list_sessions() -> string { return "ok" }
+"#,
+        );
+        let list = catalog.function("list_sessions").expect("list_sessions");
+        // The valid literal is still enforced; only the bad arg is dropped.
+        assert_eq!(
+            list.required_scopes,
+            BTreeSet::from(["personas:read".to_string()])
+        );
+        let diagnostic = catalog
+            .diagnostics()
+            .iter()
+            .find(|d| d.code == SCOPES_ARG_NOT_STRING)
+            .expect("scopes diagnostic");
+        assert!(diagnostic.message.contains("list_sessions"));
     }
 }

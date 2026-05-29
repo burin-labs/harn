@@ -51,7 +51,8 @@ pub use core::{
 };
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{
-    ExportCatalog, ExportedCallableKind, ExportedFunction, ExportedParam, RouteSpec,
+    emit_export_diagnostics, ExportCatalog, ExportDiagnostic, ExportedCallableKind,
+    ExportedFunction, ExportedParam, RouteSpec,
 };
 pub use http_codec::{
     axum_response_from_call, axum_response_from_dispatch_error, classify_ws_upgrade,
