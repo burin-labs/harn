@@ -8,6 +8,840 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.48
+
+### Added
+
+- **Standardized HTTP response codec for `.harn` handlers (#2501).**
+  New builtins — `http_ok`, `http_created`, `http_no_content`,
+  `http_error`, `http_reply`, `http_stream`, `http_sse` — produce a
+  tagged `HttpResponse` envelope (`__http_response__: "v1"`) that
+  `harn-serve`'s new `http_codec` module renders into a full
+  `axum::Response`: status code (1xx-5xx), single- and multi-value
+  headers, JSON or buffered-stream or SSE body, and a standard error
+  envelope `{ code, message, request_id, details? }`. Untagged handler
+  returns degrade to `200 OK + application/json` so existing scripts
+  keep working. `DispatchError`s render through the same envelope so
+  auth/validation failures look identical to handler-declared errors.
+- **Supervised MCP host primitive (`harn.mcp.*`).** Adds a single
+  authoritative external-tool host that owns MCP server lifecycle
+  (`spawn`/`tools`/`call`/`stop`/`discover`/`reload`/`status`) on top of
+  the existing lazy registry. Layers automatic restart with exponential
+  backoff (capped restart budget per window), per-server circuit-breaker
+  state, a (server, tool, args-hash) response cache that honors MCP
+  cache hints, cross-server tool discovery, and pluggable per-tenant
+  allowlists via a new `AuthPolicy.mcp_allowlist` field and
+  `AuthPolicy::authorize_mcp` decision path. Tracing spans (`harn.mcp.*`)
+  emitted at the dispatch boundary so observability backends can
+  attribute supervision events. Closes #2504 (epic #2496, A.7).
+- **`edit.rename_symbol` stdlib primitive (#2508).** Safe cross-file rename
+  driven by the typed symbol graph (#2434). Resolves a seed symbol, walks
+  every file in scope (`"file" | "module" | "workspace"`) with tree-sitter
+  to collect identifier-context spans (skipping comments and string
+  literals), and refuses to write if `new_name` already exists as an
+  identifier in any rewritten file. Languages: Rust, TypeScript/TSX,
+  JavaScript/JSX, Python, Swift, Go. Writes route through staged-fs
+  (#1722) when a `session_id` is supplied so all touched files succeed
+  or none do; without a session the host still buffers every plan in
+  memory and only writes after pre-flight passes. Exposed as
+  `hostlib_code_index_rename_symbol` plus the Harn-side
+  `edit_rename_symbol(params)` shim. Cookbook: "Rename a symbol across
+  the workspace". Demo: `harn demo edit-rename-symbol`.
+- **`edit_dry_run` — preview a multi-op edit plan without touching disk.**
+  New `hostlib_ast_dry_run` builtin + `std/edit` wrapper that accepts a
+  list of edit ops (`apply_node`, `insert_at_anchor`, `safe_text_patch`,
+  `rename_symbol`), runs them through a transient staged-fs (#1722)
+  overlay, and returns one unified diff per touched file plus a
+  per-op outcome list. The diff format is `git apply --check`
+  compatible (`---`/`+++` headers, `@@ -a,b +c,d @@` hunks, three lines
+  of context, `\ No newline at end of file` markers). Plan ops share
+  the transient session, so cumulative edits to the same file collapse
+  to one diff. The overlay is discarded before returning — the working
+  tree is byte-identical before and after the call. Lands the
+  preview-only renderer child of the AST-precise edit primitive epic
+  (#2497).
+- **Cookbook chapter "Precise edits with AST tools" + agent-loop pattern recipe.**
+  Wraps the five `std/edit` primitives (`edit_apply_node`,
+  `edit_insert_at_anchor`, `edit_rename_symbol`, `edit_dry_run`,
+  `edit_safe_text_patch`) into a Diataxis "How to X" chapter under
+  [`docs/src/cookbook.md`](docs/src/cookbook.md). Adds the
+  shape → primitive decision table, a "How to rename a symbol
+  cross-file" recipe, a "When AST tools won't work" fallback section,
+  and a "How to nudge an agent toward AST tools" recipe that lifts the
+  canonical edit-strategy `system_reminder` body and `inject_reminder`
+  wiring so other agent loops can adopt the same default. Cross-linked
+  from [`docs/src/llm/agent_loop.md`](docs/src/llm/agent_loop.md) and
+  the repo [`AGENTS.md`](AGENTS.md). Demonstrated end-to-end in the
+  [fixer persona](personas/fixer/lib/remediation_plan.harn): a pure
+  `plan_for_atoms` mapper that turns remediation atom shapes into
+  `edit_dry_run`-shaped plan ops, with 7 deterministic tests under
+  [`personas/fixer/tests/`](personas/fixer/tests/). Lands the docs
+  child of the AST-precise edit primitive epic (#2497).
+- **Postgres hostlib v2: advisory locks + LISTEN/NOTIFY + pool/circuit
+  observability + read replicas + introspection + partitions + array
+  decoding (#2512).** Production-readiness sweep building on the v1 MVP
+  (#2500). Adds:
+  - `pg_advisory_xact_lock` / `pg_try_advisory_xact_lock` /
+    `pg_with_advisory_lock` — transaction-scoped locks with optional
+    cross-tenant key namespacing.
+  - `pg_listen` / `pg_listener_recv` / `pg_listener_close` /
+    `pg_notify` — sqlx-backed PgListener bridge with auto-reconnect and
+    opt-in republish onto the in-process channel bus.
+  - `pg_pool_stats` — size/idle/in_use/max + statement-cache capacity +
+    replica count + circuit-breaker state.
+  - `circuit_breaker` option on `pg_pool` — per-pool failure budget +
+    cooldown + single half-open probe.
+  - `replicas` option + `{read_only: true}` per-query routing —
+    round-robin against the configured read replicas, writes always go
+    to the primary.
+  - `pg_introspect_tables` / `pg_introspect_columns` /
+    `pg_introspect_indexes` — read-only schema discovery.
+  - `pg_partition_attach` / `pg_partition_detach` /
+    `pg_partition_prune` — declarative range/list/default partition
+    management with dry-run support.
+  - Row decoder now handles `BOOL[]`, `INT2[]`, `INT4[]`, `INT8[]`,
+    `FLOAT4[]`, `FLOAT8[]`, `TEXT[]`, `VARCHAR[]`, `UUID[]`, `JSON[]`,
+    and `JSONB[]` natively.
+- **Standardised observability primitive (`harness.obs.*`).** Adds the
+  cross-cutting observability surface every harn-serve primitive
+  (sessions, permissions, MCP host, compaction, pg, http codec) routes
+  through. The typed sub-handle exposes `span` / `start_span` / `end_span`,
+  `counter` / `histogram` / `gauge` instruments, `log`, and the ambient
+  `request_id()` pushed by the dispatching host. A published vocabulary
+  (`harn.session.*`, `harn.permission.*`, `harn.mcp.*`, `harn.compaction.*`,
+  `harn.pg.*`, `harn.http.*`) is validated at emit time — typos fail with
+  `HARN-OBS-002` instead of drifting silently into dashboards. The new
+  `harn-obs-audit` conformance gate replays captured events back through
+  the same schema (every metric tagged with an instrument, every span_end
+  carrying a trace_id) so cloud endpoint ports in epic E can fail CI on
+  schema regressions. `harn serve --obs <auto|stdout|stderr|otel|off>`
+  pins the routing for local dev without touching env vars. `CallRequest`
+  gains a `request_id: Option<String>` field that the A2A and MCP
+  adapters mint per ingress, and the existing A.4 error envelope already
+  round-trips it through `request_id`. Closes #2513 (epic #2496, A.10).
+- **Rate-limiting + backpressure + per-call budget primitive on `harn-serve` (#2514).**
+  Declarative `@limits(per_tenant: "100/min", per_scope: "1000/min",
+  per_route: "5000/min", burst: 50, algorithm: "token_bucket",
+  in_flight_max: 20)` and `@budget(llm_cost_usd: 0.50, llm_tokens:
+  10000)` attributes on exported `.harn` handlers feed a new
+  `LimitRegistry` that owns three pluggable algorithms (token bucket,
+  sliding window, leaky bucket), an in-flight watermark for
+  backpressure, per-tenant multipliers, and a rejection stats surface
+  for the observability primitive (A.10). Mid-dispatch exhaustion of
+  the declared LLM cost or token ceilings reuses harn-vm's per-thread
+  counters via new `install_llm_cost_budget` /
+  `install_llm_token_budget` RAII guards, raised as
+  `BudgetExceeded`-categorised runtime errors. Both rate-limit
+  rejections and budget exhaustion render through `http_codec` as HTTP
+  429 with a `Retry-After` header and structured `{ code, message,
+  details, request_id }` body that every adapter (mcp, a2a, api)
+  shares. Subsumes the per-tenant / per-IP / queue-depth enforcement
+  that `harn-cloud-gateway::http_utils::check_rate_limits` encoded as
+  bespoke middleware. `@budget(mcp_calls, pg_queries)` enforcement
+  lands in the follow-up #2576. Closes #2514 (epic #2496, A.11).
+- **A.12 transport completeness for `harn-serve` (#2515).** Adapters
+  now compose `harn_serve::apply_transport_layers(router, &config)` to
+  enable gzip/brotli/zstd response compression, conditional GET via
+  strong ETag + `If-None-Match` → `304 Not Modified`, and declarative
+  CORS — all driven by the request's `Accept-Encoding`, `If-None-Match`,
+  and `Origin` headers without each handler having to wire them
+  manually. A new `harn_serve::ws_route(handler, WsConfig)` mounts a
+  WebSocket route on the same axum router with subprotocol
+  negotiation, automatic ping-based heartbeat, and a per-frame size
+  cap. `.harn` handlers reach the same surface through four new
+  builtins: `http_etag(body)` (strong hex-sha256 ETag),
+  `http_choose(accept, offers, default?)` (q-value-aware content
+  negotiation), `http_not_modified(etag?, headers?)` (the 304
+  envelope), and `http_upgrade_ws(req, options)` (101 envelope with
+  subprotocol negotiation already applied). A new
+  `crates/harn-serve/tests/transport_conformance.rs` exercises the
+  full WS-echo + multipart-upload + gzip + 304 + CORS-preflight cycle
+  end-to-end through axum.
+- **Sandbox runtime arm for the permission primitive (#2516).** A
+  sandbox is now the runtime answer to a declared permission policy.
+  `harn-hostlib` gains a `sandbox` module — the pluggable
+  `SandboxBackend` contract (`SandboxSpec`, `ExecRequest`/`ExecResult`,
+  `NetworkPolicy`, mounts, limits) plus a `LocalSandbox` backend that
+  confines every command through `harn-vm`'s process sandbox
+  (Landlock/seccomp, `sandbox-exec`, Job Objects, `pledge`/`unveil`)
+  rather than reimplementing OS confinement. `harn-serve`'s
+  `permissions::enforcement` lowers a `PermissionPolicy` into the
+  enforcement vocabularies it already uses: `to_capability_policy`
+  derives the in-VM `CapabilityPolicy` ceiling (read/write/exec →
+  capabilities + `side_effect_level`), and `to_sandbox_spec` /
+  `to_network_policy` (with the `hostlib` feature) turn the `net`
+  allowlist into an egress policy. This is the canonical home for the
+  enforcement contract that `harn-cloud-sandbox` previously duplicated,
+  and the abstraction the planned Modal/E2B/Daytona/Fly backends build
+  on.
+- **AST-precise edit language coverage: data/markup grammars + capability matrix (#2519).**
+  The `ast`/`std/edit` edit primitives now cover seven data, markup, and
+  config grammars — **JSON, YAML, TOML, CSS, HTML, SQL, and Markdown** —
+  on top of the existing general-purpose set. The query-driven
+  `edit_apply_node` and `edit_insert_at_anchor` work against every
+  registered grammar with no per-language code. A new `ast.capabilities`
+  builtin (`edit_capabilities` in `std/edit`) reports the per-language
+  matrix — `{apply_node, insert_at_anchor, rename_symbol, symbols}` —
+  so the agent loop can pick an AST primitive or fall back to text
+  without a hard-coded language list. Every `unsupported_language`
+  response now carries a `fallback_suggestion`. The per-language
+  onboarding contract is consolidated onto the `Language` enum
+  (`rename_identifier_kinds`, `edit_capabilities`, `primary_extension`),
+  documented in the [Edit stdlib](stdlib/edit.md) capability matrix, and
+  locked in by a cross-language edit-correctness conformance suite plus
+  the `edit-language-coverage` demo.
+- **Structured refactorings in `std/edit` (#2520).** Eight compound,
+  language-aware refactorings composed on top of the B.1–B.5 AST-precise
+  edit primitives: `edit_extract_variable`, `edit_extract_function`,
+  `edit_change_signature`, `edit_add_parameter`, `edit_reorder_parameters`,
+  `edit_change_return_type`, `edit_inline`, and `edit_move_decl`. Each
+  resolves structure with tree-sitter, captures free variables for
+  extract-function via `hostlib_ast_undefined_names`, and updates call
+  sites across every caller (e.g. `add_parameter` fills the new argument
+  at all sites under `callsite_strategy: "default_fill"`). All share one
+  result shape and one driver: pass `dry_run: true` for a per-file unified
+  diff preview that touches no bytes, or apply atomically through a
+  staged-fs (#1722) transaction — every file flips together, or none do on
+  the first conflict. A per-(operation, language) capability matrix returns
+  `result: "unsupported"` with a reason rather than producing an unsafe
+  edit. Ships the `edit-refactor` demo scenario and a "Structured
+  refactorings" cookbook chapter.
+Burin compass: a built-in, opt-in `compass_ast_edits` system-reminder
+provider that steers the agent loop toward the AST-precise edit
+primitives (`edit_apply_node`, `edit_rename_symbol`, the structured
+refactors, `edit_dry_run`) over freeform text edits at session start.
+Enable it with `reminders.providers.compass_ast_edits = true`. (#2521)
+`harn replay --session-id <id> --events-db <path> --at <event-id>`
+time-travels a recorded agent session, rehydrating and replaying it as
+it stood at a past event. (#2522)
+- **`@budget(mcp_calls, pg_queries)` enforcement on `harn-serve` (#2576).**
+  Completes the A.11 budget surface scaffolded in #2570: declaring
+  `@budget(mcp_calls: 20, pg_queries: 50)` on an exported `.harn`
+  handler now installs per-dispatch ceilings backed by new harn-vm
+  `install_mcp_call_budget` / `install_pg_query_budget` RAII guards.
+  Each `mcp.call` charges one slot at the MCP host's call entry point
+  (ahead of the response cache, so a runaway tool loop is capped even
+  when it keeps hitting cached results), and each `pg_query` /
+  `pg_query_one` / `pg_execute` charges one slot at the Postgres
+  hostlib's query/execute entry points (mock pools included).
+  Crossing a ceiling raises a structured `BudgetExceeded` error whose
+  `limit` field names the dimension, which `http_codec` renders as
+  HTTP 429 with `code = "budget_exceeded"` and
+  `details.category = "mcp_calls"` / `"pg_queries"`. The dispatcher's
+  per-class rejection telemetry now also distinguishes `llm_tokens`
+  from `llm_cost_usd` exhaustion instead of collapsing both to the
+  latter. Closes #2576 and the last open acceptance items of #2514
+  (epic #2496, A.11).
+- **Typed Postgres rows: `harn pg codegen` (#2577).** Generate one Harn
+  record type per table from a directory of `.sql` migrations so query
+  results can be type-checked without a live database. Replays every
+  forward migration (`.sql`, excluding `.down.sql`) in lexicographic
+  order — the same discovery rule `pg_migrate` uses — applying
+  `CREATE TABLE`, `ALTER TABLE … ADD/DROP/ALTER/RENAME COLUMN`,
+  `RENAME TO`, and `DROP TABLE` so the emitted `type <Table>Row = {…}`
+  always mirrors the live schema. SQL types map to the same Harn types
+  the runtime row decoder produces (`int`/`float`/`string`/`any`/`bytes`,
+  `T[]` → `list<T>`); nullable columns become optional (`field: T?`).
+  Annotate a result (`let r: ReceiptsRow = pg_query_one(...)`) and the
+  type-checker proves every field access against the schema on disk.
+  `--check` verifies the generated `--out` file is current for CI.
+  Completes the typed-row-mapping bullet deferred from the A.9 hostlib
+  v2 sweep (#2512).
+- **Postgres hostlib loadgen harness (#2578).** New `perf/postgres/`
+  crate and `make loadgen-postgres` target that drive the hostlib's
+  primary-key-read path under sustained concurrency and assert
+  p99 ≤ 5 ms at ≥10k req/s. Gated on `HARN_TEST_POSTGRES_URL`; self-skips
+  when unset, so the wired nightly E2E step is a no-op until a Postgres
+  instance is provisioned. Optionally composes with the real
+  `harn-cloud-store` migrations via `HARN_TEST_CLOUD_MIGRATIONS_DIR`.
+- **Postgres partition helpers grow hash + sub-partition + retention
+  support (#2580).** `pg_partition_attach` now accepts a
+  `{modulus, remainder}` bound shape for HASH partitions alongside the
+  existing RANGE / LIST / DEFAULT forms. `pg_partition_prune` walks the
+  partition tree recursively, so two-level layouts (range-by-day →
+  hash-by-tenant, or the inverse) prune correctly regardless of which
+  level carries the time column. Two new builtins round out the
+  pg_partman-style surface: `pg_partition_retain(pool, parent,
+  {keep_days: 90})` drops everything older than the retention window in
+  one call, and `pg_partition_create_for_window(pool, parent,
+  {interval: "day", ahead: 7})` pre-creates the next N day/hour
+  partitions (the `run_maintenance` equivalent). Both accept
+  `{dry_run: true}`.
+- **A.12 follow-on: per-route compression opt-out + push-hint builder
+  (#2515).** Two more knobs land on top of the transport stack from
+  #2571. Handlers can now mark an individual response as
+  uncompressible by setting `x-compress: never` — useful for SSE
+  routes where chunked compression breaks flushing semantics, or for
+  already-compressed binary downloads where re-encoding wastes CPU.
+  A new outer middleware strips the marker before the response leaves
+  the server so clients never see the implementation detail. The
+  default `tower-http::DefaultPredicate` is still consulted, so SSE /
+  gRPC / image filtering continues to work for routes that don't
+  opt out. The corresponding constants (`COMPRESSION_OPT_OUT_HEADER`,
+  `COMPRESSION_OPT_OUT_VALUE`, `HeaderOptOutPredicate`) are re-exported
+  from `harn-serve` for adapters that build their own predicate
+  pipelines. `.harn` handlers gain `http_push_hints(envelope, paths)`
+  for emitting HTTP/2 server-push hints via `Link: <path>; rel=preload;
+  as=...` headers, with `as=` inferred from the asset extension
+  (`.css` → `style`, `.js`/`.mjs` → `script`, image/font/json
+  extensions handled, unknown extensions emit a bare `rel=preload`).
+  As a drive-by, `http_codec::merge_headers` now correctly preserves
+  every value of a multi-valued envelope header (Link, Set-Cookie)
+  instead of silently dropping continuation values.
+- **A.12 streaming uploads for `harn-serve` (#2515).** Two new
+  Rust-level primitives let adapter handlers process large inbound
+  bodies without buffering the whole payload, closing the streaming
+  gap the buffered `harn_vm::stdlib::multipart::multipart_parse` left
+  open. `harn_serve::MultipartStream::start(multipart, config)` walks
+  `axum::extract::Multipart` field-by-field and yields each
+  `MultipartField { name, filename, content_type, bytes }` with a
+  bounded inner bytes channel — fields stream straight into hashers,
+  disk, or forwarded requests with a per-field byte cap. Companion
+  `harn_serve::RequestBodyChannel::start(body, config)` exposes
+  `Body::into_data_stream()` as a `mpsc` receiver for
+  `Transfer-Encoding: chunked` consumers. A new
+  `crates/harn-serve/tests/streaming_conformance.rs` proves both
+  primitives walk a 50 MiB payload while the peak in-flight chunk
+  stays bounded to the wire-shaped size (≤4× the source chunk for
+  multipart, ≤2× for raw body), so the 50 MiB allocation cliff that
+  `multipart_parse` would hit on the same upload is avoided. The
+  `.harn` channel bridge for `http.multipart(req)` and
+  `req.body_channel()` builtins lands together with the future `.harn`
+  HTTP handler host (the same hosting pivot blocking the `WsSession`
+  bridge per `#1870`).
+- **New lint `HARN-LNT-058` (vacuous condition).** The typechecker now flags
+  `if` / `while` / `guard` conditions whose result is statically determined,
+  covering two patterns: (1) compound expressions that fold to a constant
+  via short-circuit / negation rules — `if (false && cond)`,
+  `if (true || cond)`, `if !!true`, etc. — using nil / bool / numeric /
+  string literal leaves; and (2) `schema_is(x, S)` / `is_type(x, S)` whose
+  answer is fixed by `x`'s static type. Bare `if true { … }` / `if false
+  { … }` / `while true { … }` are intentionally skipped — they're the
+  canonical Harn block-scope / disable-block / infinite-loop idioms, and
+  the conformance suite (plus typical user code) relies on them. The
+  schema case uses the same `intersect_types` / `types_compatible`
+  machinery the narrower already uses, with a strict optional-vs-required
+  check on shapes (a `{b: string?}` value can lack `b` at runtime, so it
+  is *not* a guaranteed subtype of `{b: string}`). `unknown` and `any` are
+  excluded — `schema_is` is genuinely informative on open-world top types.
+  Modelled after Flow's `unnecessary-invariant` and typescript-eslint's
+  `no-unnecessary-condition` (with `checkTypePredicates`).
+
+### Changed
+
+- `harn-serve`: collapsed the transport adapters' edge glue onto shared
+  primitives. HTTP ingress now builds its `AuthRequest` through one
+  `AuthRequest::from_http` constructor (was copied across the `api`, `a2a`,
+  and `mcp` adapters), and the `a2a`/`mcp` adapters share a single
+  `DispatchRuntime` for off-thread `.harn` execution (was two byte-identical
+  `ExecutionRuntime` impls). Adapter wire behavior is unchanged.
+- **CI lint unblocker (#2573).** Inlined the `linkme_distributed_slice_populates_with_all_builtins`
+  test's `format!` arguments so it satisfies Rust 1.95's `clippy::uninlined_format_args`
+  under `-Dwarnings`. The previous positional form (`"...={}, ...={}", a, b`) was the only
+  diff between local and CI lint outcomes, so every open PR was red on Rust lint until this
+  fix landed.
+**vm:** collapsed the VM's three hand-maintained opcode dispatch tables
+(`execute_op_sync`, `execute_op_async`, `Chunk::disassemble`) and the
+classification helpers (`op_reads_outer_name`, `is_adaptive_binary_op`)
+into a single declarative table driven by a new `define_opcodes!`
+proc-macro. Adding or renaming an opcode is now a one-line edit; coverage
+drift across the previously hand-maintained matches is gone. Surfaced two
+pre-existing disasm bugs as part of the migration — `Op::CheckType` and
+`Op::GetArgc` now render properly instead of `UNKNOWN(0x..)`, and
+`Op::MethodCallSpread` reads its name-index operand at the correct
+offset.
+- **`HookEvent`: single-source-of-truth via `hook_events!` macro.**
+  Collapses the four-place drift surface — enum definition,
+  `as_str`, `parse_session_event`, `parse_provider_event` — behind
+  one declarative macro entry per variant. Adding a hook event now
+  takes one line; every routing table is derived. `HookEventKind`
+  becomes a public primitive (`Tool` / `AgentTurn` / `Worker` /
+  `Step` / `Notification` / `Session`) that drives reminder support,
+  session-scope filtering, and the parser routes from a single
+  declared category. As polish, redundant `#[serde(rename = "...")]`
+  attributes were dropped (serde's default unit-variant encoding
+  already matches each PascalCase identifier), the giant
+  `clear_session_hooks` match collapsed to
+  `is_session_lifecycle()`, and the duplicate
+  `reminder_providers::parse_provider_event` shim was deleted in
+  favor of the `HookEvent::parse_provider_event` method. Seven new
+  lockdown tests enforce that future variants compile only if
+  every routing table is consistent. No behavior change.
+- **`harn-serve` session-store: polish + acceptance gap-fill on issue
+  #2502.** Follow-up to the #2535 landing closes four acceptance items
+  that were left as TODOs in the initial primitive:
+  - **`ArchiveSink` wired into the retention sweep.** `StoreHooks` now
+    carries an optional `archive_sink`, and the default
+    `SessionStore::sweep_retention` ships archived sessions and
+    tombstone records through it before the rows leave primary
+    storage. Closed sessions that cross `min_age_before_archive_seconds`
+    are emitted via `ArchiveSink::archive(session, events)` before
+    soft-delete; hard-deletes fire `ArchiveSink::tombstone(...)` with
+    the final chain root hash so the audit pipeline keeps a permanent
+    record of the deletion. `SweepReport` gained `archived` +
+    `tombstoned` counters; a new `RetentionPolicy::should_archive`
+    predicate keeps the archive-trigger condition out of the
+    soft-delete decision.
+  - **SQL-level tag index + filter** (acceptance: "Per-event tag index
+    for filtered list queries"). New `session_tags(session_id, tag)`
+    table with a `(tag, session_id)` index. SQLite `list` now JOINs
+    the tag table when `filter.tag` is set instead of post-filtering
+    in Rust, and applies the cursor as keyset pagination on
+    `(created_at_ms, id)` so paging through 10⁸ sessions doesn't load
+    every prior row into memory.
+  - **Incremental chain root hash on append.** The append hot path
+    previously re-folded every event's record_hash on each commit
+    (O(N) on every write). The chain root is now a versioned Merkle
+    chain (`v2`) built by `chain_root_init` + `chain_root_fold`, so
+    append only folds the new event's hash into the stored running
+    root. `chain_root_hash(events)` still replays from genesis for
+    verification; the equivalence is exercised by a new test that
+    cross-checks `describe.chain_root_hash` against
+    `verify.chain_root_hash`.
+  - **Tracing instrumentation on every API call** (acceptance: "Every
+    API call emits A.10 spans + metrics with `harn.session.*`
+    attributes"). Every axum handler in `sessions::api` is now wrapped
+    with `#[tracing::instrument]` emitting `harn.session.<verb>` spans
+    carrying `harn.session.id`, `harn.session.tenant_id`,
+    `harn.session.event_kind`, etc. The default `sweep_retention` adds
+    its own span recording `harn.session.sweep.archived` /
+    `soft_deleted` / `hard_deleted` counts; A.10 (#2513) will export
+    them through its OTLP pipeline without further changes here.
+  - **Fork chain bug fix.** Adversarial review found `fork` produced
+    a broken chain on the SQLite backend (session_id rewritten on
+    copied events but `record_hash` not recomputed → `verify` failed
+    with HashMismatch) and a divergent shape on the memory backend
+    (events kept parent's session_id, so reads on the child returned
+    rows that looked like they belonged to the parent). Both backends
+    now route copied events through a shared `re_anchor_events`
+    helper that rewrites `session_id`, recomputes `prev_hash` +
+    `record_hash` sequentially, and drops the parent's per-event
+    signatures (which no longer attest the re-anchored canonical
+    bytes). The child's chain stands alone as a verifiable session;
+    lineage is preserved via `parent_session_id` on the meta.
+  - **DRY**: removed the duplicate `chain_root_hash_from_hashes`
+    helper in the SQLite backend (folded into the public
+    `chain_root_fold` so memory + sqlite share one
+    chain-construction primitive); collapsed `hooks()` from an
+    inherent method into the new `SessionStore::hooks` trait method
+    so the default sweep impl can read the archive sink without
+    backend-specific plumbing; collapsed the four
+    `format!("sha256:{}", hex::encode(...))` call sites in `signing`
+    onto one `finalize_sha256` helper; switched the SQLite list
+    `args` vec to `&'static str` parameter names so per-request
+    String allocation drops to zero.
+
+  New tests: tag-filter roundtrip, keyset cursor pagination, sweep
+  archive + tombstone flow against a recording sink, chain-root
+  incremental equivalence, and fork chain verifiability regression.
+  Existing 34 tests still pass.
+- **`edit_safe_text_patch`: polish + correctness pass.** Follow-up to
+  the #2509 / #2542 landing fixes several issues caught in adversarial
+  review:
+  - **H2**: `create_parents: false` is now honored on the direct-disk
+    path — previously `atomic_write`'s unconditional `create_dir_all`
+    silently created the parent. The disk path now pre-checks the
+    parent and returns a structured error with the right remediation
+    hint when the directory is missing.
+  - **H3**: latent precedence bug in the `hunk_conflict` error message
+    fixed — `+ outcome?.error_code ?? "no_match"` parses as
+    `(... + outcome?.error_code) ?? "no_match"` so the fallback never
+    fires. Parenthesized + hoisted to a `let hunk_error_code` so the
+    same value flows into both the top-level `failed_hunk_error_code`
+    and the per-error `hunk_error_code`.
+  - **M1**: new `AgentEvent::SafeTextPatchResult` carrying
+    `{session_id, path, result, hunks_count, bytes_written,
+    failed_hunk_index?}` fires from every terminal return path
+    (applied / no_op / stale_base / hunk_conflict). Hosts subscribe to
+    stream-aggregate stale-base / hunk-conflict rates and average
+    hunks-per-patch without polling. The ACP adapter translates the
+    event into a `progress` extension with
+    `_meta.harn.kind = "safe_text_patch_result"`. New
+    `hostlib_fs_emit_safe_text_patch_result` builtin routes the event
+    from the Harn wrapper; silently no-ops outside a session.
+  - **M3**: dropped a redundant SHA-256 pass on the commit path —
+    `__edit_sha256(working)` was computed even though the hostlib
+    commit echoes the same digest. Now only computed on the dry-run
+    and hunk-conflict paths where the commit isn't called.
+  - **M5/M6**: dropped redundant `result.changed` (it always equalled
+    `result == "applied"`). Aligned `dry_run` semantics with
+    `edit_apply_node` — `applied: true` now means "matcher succeeded"
+    regardless of whether bytes were written, and a new top-level
+    `result.dry_run` boolean disambiguates.
+  - **L1/L2**: small DRY win — new `hash_label(&[u8]) -> String`
+    helper collapses 4 copies of the `format!("sha256:{}", hex::...)`
+    pattern.
+  - **L3**: schemas tightened — `expected_hash` / `current_hash` /
+    `before_sha256` / `after_sha256` now carry the
+    `^sha256:[0-9a-f]{64}$` regex pattern via a shared `$defs/sha256Label`
+    schema reference. `expected_hash` is now required in the response
+    (was nullable but always emitted).
+  - **L5**: dropped dead `failed_hunk_message` field — the error list
+    already carries the same string under `errors[0].hunk_message`.
+  - **L6/L7**: docs gain a bounded `stale_base` retry loop example
+    and a dry-run → apply workflow example mirroring how
+    `edit_apply_node` documents the same flag.
+  - **Tests**: added integration coverage for non-UTF8 read
+    rejection, ~1.5 MB content roundtrip, `create_parents: false`
+    rejection, and the new agent-event wiring.
+
+  H1 (sandbox-gating of the un-gated `fs/*` and `ast/*` edit
+  primitives) is filed as #2548 — cross-cutting concern with sibling
+  primitives out of scope here.
+- **LLM builtin signatures now have a single source of truth in
+  `harn-builtin-meta`, eliminating the parser/runtime drift behind #2588.** The
+  rich `Ty::Shape` contracts (`LLM_CALL_OPTIONS`, `LLM_CALL_RESULT`,
+  `TRANSCRIPT`, `SESSION_SNAPSHOT`, `SUB_AGENT_RESULT`, …) moved from
+  `harn-parser` into the dep-free `harn_builtin_meta::shapes`, and the
+  `#[harn_builtin]` sig grammar gained an `@NAME` shape-injection form. With
+  shapes expressible from a single annotation, the LLM/agent builtins dropped
+  `runtime_only = true` and now publish their full signatures through the macro
+  — the macro is the authoritative, sole definition. Roughly thirty redundant
+  hand-written static parser entries (the `provider_*`/`llm_*` config family,
+  `llm_mock*`, `agent_trace*`, `__cache_*`, `with_rate_limit`, …) were deleted
+  outright.
+
+  The handful of LLM builtins the typechecker treats as first-class
+  (`llm_call`, `llm_call_safe`, `llm_completion`, `llm_call_structured{,_safe,_result}`,
+  `schema_recover`, plus `llm_catalog`/`llm_provider_status` reachable via
+  `harness.llm.*`) are referenced by `harn-parser`'s own unit tests, which run
+  without a driver-installed registry and cannot depend on `harn-vm` (it
+  compiles later). Their `BuiltinSignature`s are now defined **once** as
+  `pub const`s in `harn_builtin_meta::signatures` and referenced by *both* the
+  parser's static table and the macro (via `sig_expr`) — a single definition
+  shared across the layer boundary, with no dependency cycle and no second
+  place to drift. A `runtime_only`-shadow guard test prevents the original
+  drift class from returning, and `sig_expr` builtins still surface a signature
+  to `harn explain`/LSP by rendering the parsed `BuiltinSignature` via `Display`.
+- **VM and typechecker polish pass: DRY out the 0/1/many type-collapse
+  fan-out and remove a per-call hot-path allocation.** The typechecker
+  gains `collapse_members` / `collapse_members_opt` helpers that
+  centralise the recurring empty→sentinel / single→member / multi→wrap
+  pattern; `simplify_union`, `remove_from_union`, `narrow_to_single`,
+  `intersect_union_with`, and three inference helpers now share one
+  implementation. `json_schema_to_type_expr` gets the same treatment via
+  a sibling helper in `type_expr.rs`. `TriggerEvent` exposes
+  `qualified_kind()` so the five `format!("{}.{}", provider, kind)`
+  open-codes in the dispatcher/audit/predicate paths converge on one
+  source. `default_sensitive_path_patterns` becomes a `&'static
+  [&'static str]` instead of a `Vec<String>` allocated on every approval
+  check, and `is_sensitive_path_candidate` takes a borrowed iterator so
+  custom and default patterns avoid cloning. The empty-fence stripper in
+  `llm/tools/parse/syntax.rs` caches its `Regex` in a `OnceLock` instead
+  of recompiling on every model turn.
+- **Docs + Display + drift test follow-ups to the `#[harn_builtin]`
+  cutover.** Three small polish wins on the registry shipped in PR #2575:
+  - **Doc sweep.** AGENTS.md, CONTRIBUTING.md, and module-level docstrings
+    in `crates/harn-vm/src/stdlib.rs`, `crates/harn-vm/src/stdlib/macros.rs`,
+    and `crates/harn-builtin-macros/src/lib.rs` no longer claim the legacy
+    `SyncBuiltin` / `BuiltinGroup` / `register_builtin_group` DSL still
+    survives — it was deleted, and the docs now reflect that. The
+    "Looking ahead" linkme section in CONTRIBUTING.md is replaced with
+    a "Captured-state pattern" note that points readers at the
+    `thread_local!`-backed examples in `crates/harn-vm/src/checkpoint.rs`
+    and `crates/harn-vm/src/metadata.rs`.
+  - **`Display` for `BuiltinSignature` and `Ty`.** Renders a parsed
+    sig back into the `#[harn_builtin]` `sig = "..."` grammar — recovers
+    the `T?` and `number` sugars (the sig parser desugars both into
+    unions). Lets downstream tools (LSP hover, `harn explain`, error
+    formatting) emit a canonical form regardless of how the macro author
+    typed the original sig string.
+  - **Round-trip drift test.** New
+    `crates/harn-vm/tests/builtin_signature_text_drift.rs` walks
+    `ALL_BUILTIN_DEFS`, renders each parsed `BuiltinSignature` through
+    `Display`, canonicalizes both sides (whitespace squash + sugar
+    normalization), and asserts no drift. Catches future parser tweaks
+    that would silently change how `a | b | c` associates or how
+    `...rest` is parsed.
+
+  Larger follow-ups filed as separate issues for later evaluation:
+  #2584 (collapse VM opcode dispatch tables via `#[harn_opcode]`),
+  #2585 (collapse `HookEvent` enum/parse/render), #2586 (measure +
+  decide whether the `deferred_builtin` registration path is dead
+  weight post-linkme).
+
+### Removed
+
+- **Non-stdlib `register_builtin` callsites cut over to `#[harn_builtin]`.**
+  Migrated `crates/harn-vm/src/metadata.rs` (14 builtins:
+  `metadata_get` / `metadata_resolve` / `metadata_entries` / `metadata_set`
+  / `metadata_save` / `metadata_stale` / `metadata_refresh_hashes` /
+  `metadata_status` / `compute_content_hash` / `invalidate_facts` /
+  `path_metadata_get` / `path_metadata_set` / `path_metadata_entries` /
+  `scan_directory`) and `crates/harn-vm/src/step_runtime.rs`
+  (`__register_step` / `__register_persona`). Per-VM captured state
+  (`MetadataState`) now flows through a thread-local cell using the same
+  pattern as `checkpoint.rs`, so the macro-emitted free fns stay
+  signature-aligned by construction. Deleted the matching hand-maintained
+  `BuiltinSignature` literals from
+  `crates/harn-parser/src/builtin_signatures/signatures/project.rs`
+  (metadata sigs + the 6 stale `checkpoint_*` entries left behind by
+  the prior checkpoint migration).
+- **DSL holdouts migrated to `#[harn_builtin]`** (phase 5).
+  `crates/harn-vm/src/stdlib/path_scope_guard.rs` (2 builtins:
+  `register_path_scope_guard` / `clear_path_scope_guard`) and
+  `crates/harn-vm/src/stdlib/tui.rs` (3 builtins: `__tui_page` /
+  `__tui_clear` / `__tui_terminal_width`) cut over to annotated free
+  fns. Removes the matching `BuiltinSignature` literals from
+  `crates/harn-parser/src/builtin_signatures/signatures/stdlib.rs`
+  plus the now-unused `PAGER_OPTIONS` shape from `shapes.rs`.
+
+  Three legacy-DSL modules remain (`workflow_messages` / `pool/mod.rs` /
+  `workflow/register.rs`) before `stdlib::registration` can be deleted
+  outright.
+- **`workflow_messages.rs` migrated to `#[harn_builtin]`** (phase 6).
+  11 mailbox primitives — `workflow.signal` / `workflow.query` /
+  `workflow.update` (async) / `workflow.publish_query` /
+  `workflow.receive` / `workflow.respond_update` / `workflow.pause` /
+  `workflow.resume` / `workflow.status` / `workflow.continue_as_new`
+  plus the top-level `continue_as_new` alias — cut over from the
+  legacy `BuiltinGroup`/`SyncBuiltin`/`async_builtin!` DSL onto
+  annotated free fns. The macro sig parser handles dotted builtin
+  names (`workflow.signal`), so no `BuiltinRef` shim changes were
+  needed. Deletes the corresponding `BuiltinSignature` literals from
+  `workflow.rs` plus the now-unused `TY_WORKFLOW_TARGET` helper.
+
+  Remaining DSL holdouts: `crates/harn-vm/src/stdlib/workflow/register.rs`
+  (workflow executor primitives across 4 sibling modules) and
+  `crates/harn-vm/src/stdlib/pool/mod.rs`. Both block deletion of the
+  `stdlib::registration` module.
+- **Pool + workflow/compact migrated to `#[harn_builtin]`** (phase 7).
+  `crates/harn-vm/src/stdlib/pool/mod.rs` (8 builtins: `__pool_create` /
+  `__pool_get` / `__pool_list` / `__pool_size` / `__pool_snapshot` /
+  `__pool_simulate_restart` / `__pool_submit` (async) / `__pool_wait`
+  (async)) cut over off the legacy `BuiltinGroup` DSL onto annotated
+  free fns; all marked `runtime_only = true` to match the pre-migration
+  intent (host helpers exposed via `RUNTIME_ONLY_EXCEPTIONS` rather than
+  user-facing parser sigs).
+
+  `crates/harn-vm/src/stdlib/workflow/compact.rs` (4 builtins:
+  `select_artifacts_adaptive` / `estimate_tokens` / `microcompact` /
+  `transcript_auto_compact` (async)) migrated. The remaining ~30
+  workflow primitives (hooks / host / inspect) keep the DSL for now —
+  follow-up will land them as the cutover continues.
+
+  Net effect: `stdlib::registration` retains 3 callers (workflow/register.rs
+  for the hooks/host/inspect primitives; everything else is `#[harn_builtin]`).
+- **Workflow inspect + host + compact migrated to `#[harn_builtin]`** (phase 8).
+  27 builtins move off the legacy `BuiltinGroup`/`SyncBuiltin`/`async_builtin!`
+  DSL onto annotated free fns colocated with their implementations:
+
+  - `crates/harn-vm/src/stdlib/workflow/inspect.rs` (14 builtins:
+    `workflow_graph` / `workflow_validate` / `workflow_inspect` /
+    `workflow_policy_report` / `workflow_clone` / `workflow_insert_node` /
+    `workflow_replace_node` / `workflow_rewire` /
+    `workflow_set_{model,context,auto_compact,output_visibility}_policy` /
+    `workflow_diff` / `workflow_commit`).
+  - `crates/harn-vm/src/stdlib/workflow/host.rs` (9 builtins: all
+    `__host_workflow_*` primitives, `runtime_only = true`).
+  - `crates/harn-vm/src/stdlib/workflow/compact.rs` (4 builtins:
+    `select_artifacts_adaptive` / `estimate_tokens` / `microcompact` /
+    `transcript_auto_compact` async).
+
+  `register_workflow_builtins` keeps the `BuiltinGroup` shim for
+  `hooks.rs` (~15 builtins) while iterating a new `MODULE_BUILTINS`
+  slice for the migrated set. Once `hooks.rs` finishes,
+  `crate::stdlib::registration` can be deleted outright.
+
+  Deletes the matching `BuiltinSignature` literals from
+  `workflow.rs`, `stdlib.rs`, `agents.rs` plus the dead-code
+  `HOST_WORKFLOW_*_BUILTIN` constants that only powered the DSL
+  signature strings.
+- **`workflow/hooks.rs` migrated to `#[harn_builtin]`** (phase 9, the last
+  `register_builtin_group` DSL holdout in stdlib). 15 builtins move off
+  the legacy DSL onto annotated free fns colocated with their
+  implementations:
+
+  - `register_tool_hook` / `clear_tool_hooks`
+  - `register_persona_hook` / `register_step_hook` / `clear_persona_hooks`
+  - `register_session_hook` / `clear_session_hooks`
+  - `register_checkpoint_hook`
+  - `register_reminder_provider` / `clear_reminder_providers`
+  - `pipeline_on_finish` / `pipeline_lifecycle_audit_log_take` /
+    `pipeline_lifecycle_audit_log_snapshot`
+  - `__host_settlement_agent_active` / `notify_file_edited`
+  - `__host_fire_session_hook` (async) / `__host_drain_file_edits` (async)
+
+  `workflow/register.rs` is now a thin slice + dispatcher: no more
+  `SyncBuiltin` / `AsyncBuiltin` / `register_builtin_group` calls — just
+  a `MODULE_BUILTINS: &[&VmBuiltinDef]` slice referencing the DEFs
+  emitted by `#[harn_builtin]` annotations across `compact.rs` /
+  `hooks.rs` / `host.rs` / `inspect.rs`. Deletes the matching
+  `BuiltinSignature` literals from `stdlib.rs`.
+
+  After this lands, the only remaining `stdlib::registration` consumers
+  are the `crates/harn-vm/src/llm/*.rs` modules (~37 kLOC, host-side
+  LLM internals — outside the user-facing stdlib surface). Migrating
+  those + deleting the registration module + the `linkme` capstone are
+  tracked as the remaining follow-ups.
+- **linkme distributed-slice capstone for `#[harn_builtin]` registry.**
+  Every `#[harn_builtin]`-annotated fn now auto-registers into a
+  workspace-global `linkme::distributed_slice` (`ALL_BUILTIN_DEFS` in
+  `crates/harn-vm/src/stdlib/macros.rs`). Replaces the hand-maintained
+  ~80-line `out.extend_from_slice(foo::MODULE_BUILTINS)` aggregator in
+  `crates/harn-vm/src/stdlib.rs` with a one-liner that returns
+  `&ALL_BUILTIN_DEFS`. Adding a new builtin module no longer requires
+  editing `stdlib.rs` — the macro plus linkme handle aggregation
+  automatically at link time.
+
+  Per-module `MODULE_BUILTINS` slices still exist where ordered
+  registration matters (e.g. `clock::register_clock_builtins` must
+  override `process::timestamp`/`elapsed` registered earlier — see
+  `register_io_stdlib` for the precise sequence). Only the truly-unused
+  slices (`collections::MODULE_BUILTINS`, `process::MODULE_BUILTINS`)
+  were deleted.
+
+  **rlib dead-code stripping guard** (linkme issue #36): every binary
+  that exercises builtins (`harn-cli`, `harn-lsp`, `harn-dap`) now
+  calls `harn_vm::stdlib::force_link()` at startup. The fn touches
+  `ALL_BUILTIN_DEFS.len()` with `std::hint::black_box` (preventing LLVM
+  constant-folding) and asserts the slice is non-empty — surfacing a
+  silent stripping regression as a panic at first builtin call instead
+  of confusing `HARN-NAM-002` errors deep in user code. A new alignment
+  test, `linkme_distributed_slice_populates_with_all_builtins`,
+  catches the same regression in CI.
+- **`stdlib::registration` module deleted.** Final follow-up of the
+  `#[harn_builtin]` cutover. The remaining 8 LLM-internal files
+  (`crates/harn-vm/src/llm/*.rs` — cache, rerank, trace_builtins,
+  mock_builtins, agent_host_primitives, agent_config, mod, agent_session_host,
+  config_builtins) migrated off the legacy `register_builtin_group` DSL
+  onto annotated free fns. With no remaining consumers, `SyncBuiltin` /
+  `AsyncBuiltin` / `BuiltinGroup` / `register_builtin_group` /
+  `async_builtin!` are deleted outright. Every builtin in the workspace
+  now flows through `#[harn_builtin]`.
+- **Deferred-builtin registration path collapsed to eager-only.** The
+  lazy `register_deferred_*` machinery — added pre-linkme so the LLM stack
+  stayed out of cold-start — only delayed ~74 `HashMap` inserts once per VM.
+  Measured delta was 0.15 ms per VM construction (1369 µs eager vs. 1217 µs
+  deferred), negligible against process spawn, while the path imposed a
+  `deferred_builtin_registrars` `BTreeMap` lookup on *every* builtin
+  dispatch plus a hand-maintained name list per LLM module that had to be
+  kept in sync with eager registration. Deleted
+  `register_vm_stdlib_with_deferred_llm`, `register_deferred_builtin_defs`,
+  `Vm::register_deferred_builtin` / `ensure_deferred_builtin`, the
+  `deferred_builtin_registrars` VM field, every `register_deferred_*`
+  module helper, and the duplicate `CONVERSATION_BUILTIN_NAMES` /
+  `COST_BUILTIN_NAMES` lists they fed. All call sites
+  (`harn run`, `harn bench`, the MCP test harness) now use the eager
+  `register_vm_stdlib`.
+
+### Fixed
+
+- **LSP signature expectations updated after #2575.** The LSP unit test
+  for runtime-only `provider_capabilities` / `llm_available_providers`
+  builtins was still pinned to the old untyped form. Updated to match
+  the typed sigs published by the `#[harn_builtin]` migration. No
+  user-visible runtime behavior change.
+- **LSP builtin signatures sourced from one canonical place.** The language
+  server's `builtin_details()` previously read each builtin's signature and
+  doc straight from VM runtime metadata, whose per-name entry is whatever code
+  path registered last. A builtin carrying both a DSL registration and a typed
+  `#[harn_builtin]` descriptor could surface either spelling depending on
+  registration order, which differed between local `cargo test` and CI nextest
+  runs (the `provider_capabilities` flake on #2568). The LSP now anchors on the
+  link-time `#[harn_builtin]` descriptor slice (`all_builtin_defs()`) — which
+  includes `runtime_only` builtins with their authored `signature_text` — and
+  falls back to runtime metadata only for legacy DSL-only registrations.
+  Curated `BUILTINS` overrides still win. A new
+  `lsp_signature_matches_descriptor_text_except_curated_overrides` test pins the
+  invariant so the surface can never drift back to a registration-order-
+  dependent spelling.
+- **LLM config builtin signatures now agree between the runtime descriptor
+  and the parser registry (found while fixing #2588).** The `#[harn_builtin]`
+  cutover (#2575) left several `runtime_only = true` LLM builtins with a
+  hand-written static parser signature that had drifted from the authored
+  `sig`. `provider_capabilities`' `model` parameter is now `string|nil`
+  (matching the runtime, which accepts a nil model) instead of the narrower
+  `string`, and the coarse runtime `sig` strings that `harn explain` / LSP
+  surface are corrected to match actual return values:
+  `provider_capabilities_clear`, `provider_capabilities_install`, and
+  `provider_register` return `bool`, `llm_config` returns `dict|nil`, and
+  `llm_rate_limit` returns `bool|int|nil`. No runtime behavior changes — only
+  the advertised types. `runtime_only` is retained because the parser entries
+  for the richer LLM builtins (`llm_call`, transcript helpers, …)
+  intentionally carry typed shapes the `sig` grammar cannot express.
+- **Typechecker: `intersect_types` now handles `iter<T>` and `owned<T>`.**
+  Both kinds had no entry in the intersection table, so any `schema_is(x,
+  S)` whose static `x` happened to be an `iter` or `owned` value silently
+  dropped the relevant union member and left `x` un-narrowed in the
+  truthy branch. `iter<T>` now intersects with `Named("iter")` and with
+  another `iter<T>` the same way `list<T>` does. `owned<T>` is
+  transparent at the equality boundary but the annotation survives the
+  intersection — `owned<channel> ∩ channel = owned<channel>` — so the
+  HARN-OWN-005 leak lint keeps tracking the narrowed binding.
+
+- **Typechecker cleanup: collapse `Named ↔ parameterised` arms in
+  `intersect_types`.** Each `(Named, T) / (T, Named)` pair produces the
+  same intersection regardless of operand order, so the 12 individual
+  arms (`Shape`, `DictType`, `List`, `Iter`, `Generator`, `Stream`, plus
+  `unknown`/`any`) now share a single OR-pattern per kind. The width-
+  subtyping merge for `Shape ∩ Shape` and the Union-distributes-over-
+  intersection logic both move into named helpers (`intersect_shapes`,
+  `intersect_union_with`) so the top-level match reads as a kind table
+  without lossy duplication.
+- **`orchestrator_worker_claim_expiry_requeue` conformance test
+  de-flaked under load.** The original `sleep(120ms)` after the failing
+  drain assumed the first subprocess's 25ms heartbeat (TTL/2 with
+  TTL=50ms) would have stopped by the time the second drain spawned.
+  Under heavy parallel cargo load on the same host the second `harn`
+  process could cold-start and call `claim_next` while the last
+  heartbeat was still alive, see zero ready jobs, and trip the
+  reclaim assertion. Replaced with a poll-with-budget loop that
+  re-runs `drain` (idempotent — a no-op drain returns
+  `drained:0` without consuming state) at 50ms intervals up to 5s
+  until `drained == 1 && acked == 1 && deferred == 0`. Same code
+  shape as `wait_for_readyz` in
+  `orchestrator_recover_stranded_envelopes.harn`.
+- **`publish-release.yml` self-heals when tag-push run misses publish.**
+  Two failures observed during the v0.8.47 cut: the tag-push run of
+  `publish-release.yml` was cancelled by the shared `publish-release`
+  concurrency group (the simultaneous main-push run for the same SHA
+  was still queued), and the subsequent main-push runs all no-op'd
+  because `Cargo.toml` already matched the latest tag. Two fixes:
+  - Concurrency group now scopes by `github.ref_name` so tag-push
+    and main-push runs of the same release commit can run in
+    parallel without contending. Different versions (the only case
+    where main-push would actually publish) are already in different
+    groups; same-version contention is the only thing the old
+    unscoped group prevented, which is exactly the case crates.io
+    publish-skip already makes idempotent.
+  - Drift detection now treats "tag exists but GitHub release has
+    fewer than 5 assets" as drift, forcing the publish job to re-fire
+    from the existing tag (`PUBLISH_REF` pinned to `$LATEST_TAG`).
+    `release_ship.sh --finalize` skips already-published crates, so
+    the recovery is a no-op for crates that landed and a real
+    recovery for any that didn't.
+
+### Security
+
+- **Gate the `std/edit` file-mutation builtins behind `tools:deterministic` (#2548).**
+  `hostlib_fs_safe_text_patch`, `hostlib_fs_read_text`,
+  `hostlib_ast_apply_node`, and `hostlib_ast_insert_at_anchor` now require
+  `hostlib_enable("tools:deterministic")` before they run, matching the
+  existing gate on the `hostlib_tools_*` file I/O builtins. Previously a
+  sandboxed script denied `tools:deterministic` could still read and mutate
+  arbitrary host paths through the `edit_*` helpers. The gating policy is
+  now a single shared `permissions::gated_handler` used by the `tools`,
+  `fs`, and `ast` capabilities. Pure telemetry routing
+  (`hostlib_fs_emit_safe_text_patch_result`) stays un-gated.
+- **Workspace-root path-scope enforcement for the hostlib filesystem
+  builtins (#2600).** Follow-up to the coarse `tools:deterministic` gate
+  (#2548). `harn-vm` now exposes a public, `VmError`-free
+  `process_sandbox::check_fs_path_scope(path, FsAccess)` entrypoint, and
+  every path-accepting hostlib builtin — `tools` `read_file` /
+  `write_file` / `delete_file` / `list_directory` / `search` /
+  `get_file_outline`, `fs` `safe_text_patch` / `read_text`, and `ast`
+  `apply_node` / `insert_at_anchor` — now refuses paths that resolve
+  outside the active policy's `workspace_roots` under a restricted
+  `SandboxProfile`, via one shared `enforce_path_scope` helper. The
+  staged-fs commit flush validates each entry's working-tree *target*
+  path (not the in-workspace overlay path), so a write staged under a
+  looser policy can never escape the roots active at commit time.
+  Rejections surface as a new `HostlibError::SandboxViolation`
+  (`tool_rejected`) carrying the offending path, matching the message the
+  VM-native `harness.fs.*` surface already produces for the same
+  out-of-root path.
+
 ## v0.8.47
 
 ### Added
