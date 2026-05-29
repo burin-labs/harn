@@ -535,6 +535,9 @@ fn dict_int(map: &BTreeMap<String, VmValue>, key: &str) -> SandboxResult<i32> {
 mod tests {
     use super::*;
 
+    // Exercises a real `sh -c` invocation with POSIX env expansion and
+    // `printf`, so it only runs where a POSIX shell exists.
+    #[cfg(unix)]
     #[tokio::test]
     async fn local_backend_execs_inside_session_outputs() {
         let backend = LocalSandbox::default();
