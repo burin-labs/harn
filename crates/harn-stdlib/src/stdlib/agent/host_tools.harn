@@ -1,3 +1,5 @@
+import { command_capture_annotate, command_capture_plan_request } from "std/agent/command_capture"
+
 fn __agent_host_options(options) {
   return options ?? {}
 }
@@ -741,7 +743,19 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             if req?.blocked ?? false {
               return __agent_host_render(req, opts, key)
             }
-            return __agent_host_render(hostlib_tools_run_command(req), opts, key)
+            let planned = if opts?.preserve_filtered_output ?? true {
+              command_capture_plan_request(req)
+            } else {
+              nil
+            }
+            let run_req = planned?.run_request ?? req
+            let result = hostlib_tools_run_command(run_req)
+            let final_result = if planned != nil {
+              command_capture_annotate(result, planned.plan)
+            } else {
+              result
+            }
+            return __agent_host_render(final_result, opts, key)
           },
         },
       ),

@@ -1,0 +1,19 @@
+seq 100 | tee '/tmp/cap.out' 2>/dev/null | tail -3
+cd foo && make 2>&1 | tee '/tmp/cap.out' 2>/dev/null | tail -50
+find . -name '*.rs' | xargs wc -l | sort -n | tee '/tmp/cap.out' 2>/dev/null | tail -1
+grep 'a|b' file | tee '/tmp/cap.out' 2>/dev/null | wc -l
+echo start; seq 10 | tee '/tmp/cap.out' 2>/dev/null | wc -l
+true
+true
+true
+true
+true
+true
+true
+true
+true
+seq 100
+tail -n 3
+100
+3
+true

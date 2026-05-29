@@ -75,6 +75,20 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/stdlib-toolkit/tape.jsonl"),
     },
     Scenario {
+        id: "command-capture",
+        title: "run_command preserves a slow command's full output past a `| tail` filter",
+        description: "Walk the std/agent/command_capture recognizer: rewrite `producer | tail/wc/grep` \
+                      pipelines to `producer | tee '<capture>' 2>/dev/null | filter` so the agent \
+                      still sees the filtered output while the producer's COMPLETE output is \
+                      preserved on disk, show the cases it deliberately leaves untouched (head, \
+                      grep -q, command substitution, subshell grouping), then materialize a capture \
+                      and demonstrate the post-run `output_capture` hint that lets an agent read the \
+                      full output instead of re-running a slow command. Fully offline — no LLM, no \
+                      subprocess.",
+        script: include_str!("../../assets/demo/command-capture/scenario.harn"),
+        tape: include_str!("../../assets/demo/command-capture/tape.jsonl"),
+    },
+    Scenario {
         id: "compaction-policy",
         title: "compaction.{policy,check,run} drives a session through the lifecycle",
         description: "Declare a per-session compaction policy with thresholds, call \
