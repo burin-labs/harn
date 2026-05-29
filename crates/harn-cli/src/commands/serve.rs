@@ -18,7 +18,7 @@ use harn_serve::{
     ApiKeyAuthConfig, ApiKeyEntry, ApiServer, ApiServerConfig, AuthMethodConfig, AuthPolicy,
     AuthRequest, AuthorizationDecision, DispatchCore, DispatchCoreConfig, ExportCatalog,
     ExportedCallableKind, HmacAuthConfig, HttpTlsConfig, McpHttpServeOptions, McpServer,
-    McpServerConfig, MCP_PROTOCOL_VERSION,
+    McpServerConfig, SiteHttpServeOptions, SiteServer, SiteServerConfig, MCP_PROTOCOL_VERSION,
 };
 use serde_json::Value as JsonValue;
 use time::Duration;
@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 use crate::cli::{
     A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeObsMode,
-    ServeTlsMode,
+    ServeTlsMode, SiteServeArgs,
 };
 
 /// Default 10 MiB request-body cap applied to every `harn serve` HTTP
@@ -140,6 +140,28 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
     let server = Arc::new(ApiServer::new(config));
     server
         .run_http(ApiHttpServeOptions {
+            bind: args.bind,
+            public_url: args.public_url.clone(),
+            tls,
+        })
+        .await
+}
+
+pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> {
+    apply_obs_mode(args.obs)?;
+    let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
+    let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
+    guard_serve_bind_auth("site", args.bind, &auth_policy, &tls)?;
+
+    let mut config = DispatchCoreConfig::for_script(&args.file);
+    config.auth_policy = auth_policy;
+    // An HTTP host must run its handler on every request — caching the
+    // reply to an identical second POST would skip the handler's side
+    // effects — so swap the default replay cache for the no-op one.
+    config.replay_cache = Arc::new(harn_serve::NoReplayCache);
+    let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
+    SiteServer::new(SiteServerConfig::new(core))
+        .run_http(SiteHttpServeOptions {
             bind: args.bind,
             public_url: args.public_url.clone(),
             tls,

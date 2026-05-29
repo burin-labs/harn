@@ -1035,6 +1035,12 @@ async fn async_main() {
                     command_error(&error);
                 }
             }
+            ServeCommand::Site(args) => {
+                if let Err(error) = commands::serve::run_site_server(&args).await {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
         },
         Command::Connector(args) => {
             if let Err(error) = commands::connector::handle_connector_command(args).await {

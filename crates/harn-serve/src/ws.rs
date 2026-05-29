@@ -214,6 +214,32 @@ where
     })
 }
 
+/// Complete a WebSocket upgrade whose [`WebSocketUpgrade`] was already
+/// extracted by the caller, running `handler` for the accepted session.
+///
+/// [`ws_route`] mounts a whole route at build time, which fits adapters
+/// that know a path is WebSocket-only. The `.harn` site host
+/// ([`crate::adapters::site`]) instead discovers the upgrade *per request*
+/// — a handler returns an `http_upgrade_ws(...)` envelope at runtime — so
+/// it owns the extracted `upgrade` and needs to drive the same subprotocol
+/// negotiation, idle-ping keepalive, and size-cap machinery without going
+/// back through a `MethodRouter`. This entry point shares that machinery
+/// so the two paths cannot drift.
+pub(crate) async fn ws_accept<F, Fut>(
+    config: WsConfig,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+    handler: F,
+) -> Response
+where
+    F: Fn(WsSession) -> Fut + Clone + Send + Sync + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let handler: Arc<dyn Fn(WsSession) -> WsHandlerFuture + Send + Sync + 'static> =
+        Arc::new(move |session| Box::pin(handler(session)) as _);
+    ws_dispatch(Arc::new(config), handler, headers, upgrade).await
+}
+
 type WsHandlerFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
 async fn ws_dispatch(

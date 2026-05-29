@@ -44,6 +44,24 @@ pub struct ExportedFunction {
     /// cost / token / pg query / MCP call ceilings). `None` when no
     /// budget caps were declared.
     pub budget: Option<BudgetSpec>,
+    /// HTTP route this function answers when hosted by `harn serve site`.
+    /// Populated from a `@route("METHOD", "/path")` attribute, or
+    /// inferred from a `handler_*` naming convention when the attribute is
+    /// absent. `None` for functions that are dispatch-only (API/A2A/MCP)
+    /// and not meant to be reached over a bare HTTP path.
+    pub route: Option<RouteSpec>,
+}
+
+/// An HTTP method + path a `.harn` handler answers under `harn serve
+/// site`. Declared with `@route("GET", "/users/{id}")` or inferred from
+/// the `handler_*` naming convention.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RouteSpec {
+    /// Uppercased HTTP method (`GET`, `POST`, …), or `*` to answer every
+    /// method on the path — the handler inspects `req.method` itself.
+    pub method: String,
+    /// axum-style path with `{param}` captures, always rooted at `/`.
+    pub path: String,
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +111,7 @@ impl ExportCatalog {
                     required_scopes: scopes_from_attributes(attrs),
                     limits,
                     budget,
+                    route: route_from_attributes(attrs, name),
                 },
             );
         }
@@ -129,6 +148,10 @@ impl ExportCatalog {
                     required_scopes,
                     limits,
                     budget,
+                    // Pipelines are dispatch-only; they never carry an
+                    // HTTP route. Only `pub fn` handlers participate in
+                    // `harn serve site`.
+                    route: None,
                 });
         }
 
@@ -195,6 +218,94 @@ fn scopes_from_attributes(attrs: &[Attribute]) -> BTreeSet<String> {
         }
     }
     set
+}
+
+/// Resolve the HTTP route a `pub fn` answers under `harn serve site`.
+///
+/// Two ways to declare one, in priority order:
+///
+/// 1. An explicit `@route("METHOD", "/path")` attribute. The first
+///    positional string is the method (case-insensitive; `"*"` or
+///    `"ANY"` matches every method), the second is the path. A
+///    single-argument form `@route("/path")` defaults the method to
+///    `GET`. Paths are normalized to start with `/`.
+/// 2. The `handler_<name>` naming convention. `pub fn handler_health()`
+///    is mounted at `GET|POST /health`; a bare `pub fn handler()` mounts
+///    at the site root `/`. This keeps the zero-config path the issue
+///    calls for ("mounts every exported `pub fn handler_*` at `/<name>`")
+///    while letting authors opt into precise routing with the attribute.
+///
+/// Returns `None` for any other `pub fn`, so a script can export helper
+/// functions (reachable via the API/A2A/MCP dispatch adapters) without
+/// every one of them grabbing an HTTP path.
+fn route_from_attributes(attrs: &[Attribute], fn_name: &str) -> Option<RouteSpec> {
+    if let Some(route) = explicit_route_attribute(attrs) {
+        return Some(route);
+    }
+    handler_convention_route(fn_name)
+}
+
+fn explicit_route_attribute(attrs: &[Attribute]) -> Option<RouteSpec> {
+    let attr = attrs.iter().find(|attr| attr.name == "route")?;
+    let literals: Vec<String> = attr
+        .args
+        .iter()
+        .filter_map(|arg| match &arg.value.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value.clone()),
+            _ => None,
+        })
+        .collect();
+    match literals.as_slice() {
+        // `@route("/path")` — method defaults to GET.
+        [path] => Some(RouteSpec {
+            method: "GET".to_string(),
+            path: normalize_route_path(path),
+        }),
+        // `@route("METHOD", "/path")` — explicit method.
+        [method, path, ..] => Some(RouteSpec {
+            method: normalize_route_method(method),
+            path: normalize_route_path(path),
+        }),
+        [] => None,
+    }
+}
+
+fn handler_convention_route(fn_name: &str) -> Option<RouteSpec> {
+    let path = match fn_name {
+        "handler" => "/".to_string(),
+        other => {
+            let suffix = other.strip_prefix("handler_")?;
+            if suffix.is_empty() {
+                return None;
+            }
+            format!("/{suffix}")
+        }
+    };
+    // Convention handlers answer both GET and POST so a script can serve
+    // a read and a form-style write from one function without an explicit
+    // attribute; the handler discriminates on `req.method`.
+    Some(RouteSpec {
+        method: "*".to_string(),
+        path,
+    })
+}
+
+fn normalize_route_method(method: &str) -> String {
+    let upper = method.trim().to_ascii_uppercase();
+    if upper == "ANY" || upper.is_empty() {
+        "*".to_string()
+    } else {
+        upper
+    }
+}
+
+fn normalize_route_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    }
 }
 
 fn pipeline_input_schema(params: &[String]) -> serde_json::Value {
@@ -307,6 +418,96 @@ pub fn ping() -> string { return "pong" }
         let ping = catalog.function("ping").expect("ping export");
         assert!(ping.limits.is_none());
         assert!(ping.budget.is_none());
+    }
+
+    #[test]
+    fn route_attribute_parses_method_and_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server.harn");
+        std::fs::write(
+            &path,
+            r#"
+@route("POST", "/users/{id}")
+pub fn update_user(req: dict) -> dict { return req }
+
+@route("/health")
+pub fn liveness(req: dict) -> dict { return req }
+
+@route("any", "metrics")
+pub fn metrics(req: dict) -> dict { return req }
+
+pub fn helper(req: dict) -> dict { return req }
+"#,
+        )
+        .expect("write script");
+
+        let catalog = ExportCatalog::from_path(&path).expect("catalog");
+        let update = catalog.function("update_user").expect("update_user");
+        assert_eq!(
+            update.route,
+            Some(RouteSpec {
+                method: "POST".to_string(),
+                path: "/users/{id}".to_string()
+            })
+        );
+        // Single-arg form defaults to GET.
+        let liveness = catalog.function("liveness").expect("liveness");
+        assert_eq!(
+            liveness.route,
+            Some(RouteSpec {
+                method: "GET".to_string(),
+                path: "/health".to_string()
+            })
+        );
+        // `any` lowercases to the `*` wildcard; a path missing its leading
+        // slash is normalized.
+        let metrics = catalog.function("metrics").expect("metrics");
+        assert_eq!(
+            metrics.route,
+            Some(RouteSpec {
+                method: "*".to_string(),
+                path: "/metrics".to_string()
+            })
+        );
+        // A plain `pub fn` with no attribute and no `handler_` prefix is
+        // dispatch-only — it gets no HTTP route.
+        let helper = catalog.function("helper").expect("helper");
+        assert_eq!(helper.route, None);
+    }
+
+    #[test]
+    fn handler_naming_convention_infers_route() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("server.harn");
+        std::fs::write(
+            &path,
+            r"
+pub fn handler(req: dict) -> dict { return req }
+pub fn handler_echo(req: dict) -> dict { return req }
+",
+        )
+        .expect("write script");
+
+        let catalog = ExportCatalog::from_path(&path).expect("catalog");
+        // Bare `handler` mounts at the site root.
+        assert_eq!(
+            catalog.function("handler").expect("handler").route,
+            Some(RouteSpec {
+                method: "*".to_string(),
+                path: "/".to_string()
+            })
+        );
+        // `handler_echo` mounts at `/echo`, answering every method.
+        assert_eq!(
+            catalog
+                .function("handler_echo")
+                .expect("handler_echo")
+                .route,
+            Some(RouteSpec {
+                method: "*".to_string(),
+                path: "/echo".to_string()
+            })
+        );
     }
 
     #[test]

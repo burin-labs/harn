@@ -145,6 +145,67 @@ Behavior today:
   HMAC canonical-request signatures
   OAuth 2.1 claims injected by a hosting transport
 
+### Site
+
+Choose `harn serve site` when the caller is a plain HTTP client — a
+browser, a webhook sender, a REST consumer — and you want the script to
+answer its **own routes** rather than a fixed protocol surface.
+
+Each routed `pub fn` receives a request dict and returns a value or an
+`http_*` response envelope:
+
+```harn
+@route("POST", "/users/{id}")
+pub fn update_user(req: dict) -> dict {
+  return http_ok({ "id": req.path_params.id, "body": json_parse(req.body) })
+}
+
+// The `handler_*` convention needs no attribute: `handler_health` mounts
+// at GET|POST /health; a bare `handler` mounts at the site root `/`.
+pub fn handler_health(req: dict) -> dict {
+  return http_ok({ "ok": true })
+}
+```
+
+`@route("/path")` (one argument) defaults the method to `GET`;
+`@route("ANY", "/path")` (or `"*"`) answers every method. A `pub fn` with
+neither a `@route` attribute nor a `handler_` name stays dispatch-only —
+still callable by name from the other adapters, but no bare path reaches
+it.
+
+Run it with:
+
+```bash
+harn serve site server.harn
+harn serve site --bind 127.0.0.1:8788 server.harn
+harn serve site --api-key "$HARN_SERVE_API_KEY" --bind 0.0.0.0:8788 server.harn
+harn serve site --tls self-signed-dev server.harn
+```
+
+Mapping:
+
+- the request dict mirrors the in-process `http_server` shape:
+  `{ method, path, route, path_params, params, query, headers, body,
+  body_base64, content_length, client_ip, remote_addr }`
+- `body` is the UTF-8-lossy view; `body_base64` is the standard-base64
+  encoding of the raw bytes, so binary payloads (e.g. a multipart upload)
+  round-trip losslessly — recover them with
+  `bytes_from_base64(req.body_base64)` and hand the result to
+  `multipart_parse`
+- header keys are lower-cased; `client_ip` is read from
+  `X-Forwarded-For` / `X-Real-IP` when present
+- responses go through the same codec as every other surface, so
+  `http_ok` / `http_created` / `http_not_modified` / `http_error` /
+  `http_stream` / `http_sse` plus content negotiation, ETag, and
+  compression all behave identically
+- WebSocket handlers return
+  `http_upgrade_ws(req, { on_message: "fn_name" })`; the named function
+  runs per inbound frame with a `{type, data}` / `{type, data_base64}`
+  message dict, and its return value is sent back (a string verbatim, any
+  other value as JSON, `nil` sends nothing)
+- unlike the dispatch adapters, the site host **never replay-caches** — an
+  HTTP server must re-run its handler on every request
+
 ### A2A
 
 Choose A2A when the caller wants a peer agent rather than a bag of tools.

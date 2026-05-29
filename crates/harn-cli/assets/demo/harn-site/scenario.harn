@@ -1,0 +1,73 @@
+/**
+ * harn-site demo: the `harn serve site` handler contract (#2574).
+ *
+ * `harn serve site server.harn` mounts every routed `pub fn` on a live
+ * HTTP server. Each handler receives a `req` dict
+ * ({method, path, headers, query, path_params, body, body_base64, ...})
+ * and returns either a plain value or an `http_*` response envelope. The
+ * codec (`harn_serve::http_codec`) turns the envelope into a real HTTP
+ * response — status, headers, JSON/SSE/304 — identically to every other
+ * harn-serve surface.
+ *
+ * Scope (offline): this scenario defines the same routed handlers and
+ * drives them with synthetic request dicts, so the handler contract runs
+ * deterministically under `harn run` without binding a socket. The live
+ * socket path (routing, multipart, WebSocket upgrade) is covered by the
+ * `site_hosting` integration test in
+ * `crates/harn-serve/tests/site_hosting.rs`.
+ */
+// GET /hello — a JSON handler echoing request metadata.
+@route("GET", "/hello")
+pub fn hello(req: dict) -> dict {
+  return http_ok({msg: "hi", method: req.method})
+}
+
+// POST /echo — reads and echoes the request body.
+@route("POST", "/echo")
+pub fn echo(req: dict) -> dict {
+  return http_ok({you_sent: json_parse(req.body)})
+}
+
+// GET /conditional — strong-ETag conditional GET; 304 when the client's
+// If-None-Match validator matches, 200 with the ETag otherwise.
+@route("GET", "/conditional")
+pub fn conditional(req: dict) -> dict {
+  let body = "{\"id\":\"r1\"}"
+  let etag = http_etag(body)
+  if req.headers["if-none-match"] == etag {
+    return http_not_modified(etag, {})
+  }
+  return http_response(200, json_parse(body), {ETag: etag})
+}
+
+/**
+ * The WebSocket frame callback named by `http_upgrade_ws(..., on_message)`.
+ * Reached per inbound frame; its return value is sent back to the client.
+ */
+pub fn ws_echo(msg: dict) -> string {
+  return "echo:" + msg.data
+}
+
+fn main(harness: Harness) {
+  // Drive the handlers the way the site host would, then capture every
+  // observable result in a receipt so the tape stays deterministic. Each
+  // http_* envelope carries its HTTP status under the `status` key.
+  let hello_reply = hello({method: "GET", path: "/hello", headers: {}})
+  let echo_reply = echo({method: "POST", body: "{\"name\":\"ada\"}", headers: {}})
+  // First GET has no validator -> 200; a matching validator -> 304.
+  let etag = http_etag("{\"id\":\"r1\"}")
+  let fresh = conditional({method: "GET", headers: {}})
+  let cached = conditional({method: "GET", headers: {"if-none-match": etag}})
+  let receipt = {
+    receipt_kind: "harn_site_receipt",
+    hello_status: hello_reply.status,
+    hello_method: hello_reply.body.method,
+    echo_name: echo_reply.body.you_sent.name,
+    conditional_fresh_status: fresh.status,
+    conditional_cached_status: cached.status,
+    ws_reply: ws_echo({type: "text", data: "hi"}),
+  }
+  __io_println("=== harn-site receipt ===")
+  __io_println(json_stringify(receipt))
+  return receipt
+}

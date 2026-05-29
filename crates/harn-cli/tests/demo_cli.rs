@@ -333,6 +333,37 @@ fn http_transport_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn harn_site_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("harn-site");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "harn-site demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("harn_site_receipt"),
+        "harn-site stdout missing receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"conditional_fresh_status\":200")
+            && outcome.stdout.contains("\"conditional_cached_status\":304"),
+        "conditional handler must return 200 fresh then 304 via http_not_modified:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"echo_name\":\"ada\""),
+        "the echo handler must round-trip the posted JSON body:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"ws_reply\":\"echo:hi\""),
+        "the on_message WebSocket callback must echo the inbound frame:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn obs_primitive_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("obs-primitive");
     assert_eq!(
@@ -423,6 +454,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "edit-language-coverage",
         "edit-refactor",
         "http-transport",
+        "harn-site",
         "obs-primitive",
     ]
     .into_iter()

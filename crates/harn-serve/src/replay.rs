@@ -43,3 +43,27 @@ impl ReplayCache for InMemoryReplayCache {
         Ok(())
     }
 }
+
+/// A replay cache that never caches — every `get` misses and every `put`
+/// is dropped.
+///
+/// The dispatch core memoizes by `(adapter, function, arguments)` so that
+/// retrying an idempotent agent task is free. That is exactly the wrong
+/// default for an HTTP host: two `POST`s with identical bodies are two
+/// distinct requests, and a cached reply to the second would silently
+/// skip the handler's side effects. `harn serve site` installs this so a
+/// live route runs its handler on every request, the way an HTTP server
+/// must.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoReplayCache;
+
+#[async_trait]
+impl ReplayCache for NoReplayCache {
+    async fn get(&self, _key: &ReplayKey) -> Result<Option<ReplayCacheEntry>, DispatchError> {
+        Ok(None)
+    }
+
+    async fn put(&self, _key: ReplayKey, _value: ReplayCacheEntry) -> Result<(), DispatchError> {
+        Ok(())
+    }
+}

@@ -402,11 +402,16 @@ pub fn parse_envelope(value: &serde_json::Value) -> Option<HttpEnvelope> {
                 .unwrap_or_default();
             let idle_ping_ms = map.get("idle_ping_ms").and_then(|v| v.as_u64());
             let max_message_bytes = map.get("max_message_bytes").and_then(|v| v.as_u64());
+            let on_message = map
+                .get("on_message")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             WsUpgradeSpec {
                 subprotocol,
                 offered,
                 idle_ping_ms,
                 max_message_bytes,
+                on_message,
             }
         });
     Some(HttpEnvelope {
@@ -441,6 +446,14 @@ pub struct WsUpgradeSpec {
     pub offered: Vec<String>,
     pub idle_ping_ms: Option<u64>,
     pub max_message_bytes: Option<u64>,
+    /// Exported `.harn` function the hosting adapter dispatches once per
+    /// inbound WebSocket frame. The function receives a `{type, data}`
+    /// message dict and its return value is rendered back to the client
+    /// (a string is sent verbatim; any other value is JSON-encoded; `nil`
+    /// sends nothing). `None` leaves the socket inbound-only — the adapter
+    /// drains and discards frames, which suits server-push handlers that
+    /// never read from the client.
+    pub on_message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -737,6 +750,12 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let max_message_bytes = options
         .and_then(|opts| opts.get("max_message_bytes"))
         .and_then(|v| v.as_int());
+    let on_message = options
+        .and_then(|opts| opts.get("on_message"))
+        .and_then(|v| match v {
+            VmValue::String(name) => Some(name.to_string()),
+            _ => None,
+        });
 
     let mut env_map = envelope_map(101, VmValue::Nil, BODY_KIND_NONE, headers);
     env_map.insert(
@@ -764,6 +783,12 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             }
             if let Some(bytes) = max_message_bytes {
                 map.insert("max_message_bytes".to_string(), VmValue::Int(bytes));
+            }
+            if let Some(handler) = &on_message {
+                map.insert(
+                    "on_message".to_string(),
+                    VmValue::String(Rc::from(handler.clone())),
+                );
             }
             map
         })),
