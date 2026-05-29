@@ -48,11 +48,16 @@
  *   pg_introspect_columns(pool, "receipts")
  *   pg_introspect_indexes(pool, "receipts")
  *
- *   // Declarative partition helpers.
+ *   // Declarative partition helpers (pg_partman-style, no extension).
  *   pg_partition_attach(pool, "events", "events_2026_05",
- *                       {from: "2026-05-01", to: "2026-06-01"})
+ *                       {from: "2026-05-01", to: "2026-06-01"})  // RANGE
+ *   pg_partition_attach(pool, "events", "events_h0",
+ *                       {modulus: 4, remainder: 0})              // HASH
  *   pg_partition_detach(pool, "events", "events_2026_03")
- *   pg_partition_prune(pool, "events", "2026-01-01")
+ *   pg_partition_prune(pool, "events", "2026-01-01")   // recurses sub-partition trees
+ *   pg_partition_retain(pool, "events", {keep_days: 90})         // retention policy
+ *   pg_partition_create_for_window(pool, "events",
+ *                       {interval: "day", ahead: 7})  // pre-create next 7 days
  *
  *   // Read-replica routing (per-query opt-in).
  *   let pool = pg_pool("env:DATABASE_URL", {

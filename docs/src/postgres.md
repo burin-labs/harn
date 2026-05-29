@@ -312,16 +312,42 @@ read-only flag is a no-op.
 
 ```harn
 pg_partition_attach(db, "events", "events_2026_05",
-                    {from: "2026-05-01", to: "2026-06-01"})
+                    {from: "2026-05-01", to: "2026-06-01"})       // range
+pg_partition_attach(db, "events", "events_h0", {modulus: 4, remainder: 0})  // hash
 pg_partition_detach(db, "events", "events_2026_03", {concurrently: true})
 let pruned = pg_partition_prune(db, "events", "2026-01-01")
 // Returns the list of `<schema>.<partition>` names that were dropped.
 // Pass {dry_run: true} to compute the list without dropping.
 ```
 
-Bounds may be `{from, to}` (range), `{in: [...]}` (list), or
-`{default: true}` (default partition). Caller-supplied bounds are
-rendered as SQL literals — keep them constant and trusted.
+Bounds may be `{from, to}` (range), `{in: [...]}` (list),
+`{modulus, remainder}` (hash), or `{default: true}` (default
+partition). Caller-supplied bounds are rendered as SQL literals — keep
+them constant and trusted.
+
+### Retention and maintenance
+
+```harn
+// Drop every partition whose data is entirely older than 90 days. This
+// is the one-call form of `pg_partition_prune(db, parent, now - 90d)`.
+let dropped = pg_partition_retain(db, "events", {keep_days: 90})
+// `{keep_hours: N}` retains an hour-granular window instead.
+
+// Pre-create the next 7 daily partitions (pg_partman's run_maintenance
+// equivalent) so inserts never fall through to the DEFAULT partition.
+let created = pg_partition_create_for_window(db, "events",
+                {interval: "day", ahead: 7})
+// `interval` is "day" or "hour"; `start` (an ISO date/timestamp)
+// defaults to now. Child partitions are named `<table>_<YYYY_MM_DD[_HH]>`
+// and only the missing ones are created. Returns the created names.
+```
+
+Both `pg_partition_retain` and `pg_partition_create_for_window` accept
+`{dry_run: true}` to compute the result list without touching the
+database. `pg_partition_prune` and `pg_partition_retain` descend
+sub-partition trees recursively, so two-level layouts (range-by-day →
+hash-by-tenant, or the inverse) prune correctly regardless of which
+level carries the time column.
 
 ## Extended column decoding
 

@@ -113,6 +113,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &introspect::PG_PARTITION_ATTACH_IMPL_DEF,
     &introspect::PG_PARTITION_DETACH_IMPL_DEF,
     &introspect::PG_PARTITION_PRUNE_IMPL_DEF,
+    &introspect::PG_PARTITION_RETAIN_IMPL_DEF,
+    &introspect::PG_PARTITION_CREATE_FOR_WINDOW_IMPL_DEF,
 ];
 
 mod advisory;
