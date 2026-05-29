@@ -8,6 +8,38 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.49
+
+### Added
+
+- **Claude Opus 4.8 and GPT-5.5 in the provider catalog (#2616).** Adds
+  `claude-opus-4-8` (Anthropic's flagship — adaptive thinking, `effort`
+  defaulting to `high`, $5/$25 per MTok) as the new `opus` alias target, plus
+  a `gpt-5.5` row (OpenAI Responses / Chat Completions).
+- **Structured `superseded_by` model metadata (#2616).** Deprecated catalog
+  rows can now point at their replacement in a machine-readable field instead
+  of only in free-text `deprecation_note`; surfaced through the catalog
+  artifact (JSON / Schema / TypeScript / Swift) and `llm_provider_catalog()`.
+- **Provider-agnostic `fast_mode` catalog metadata (#2616).** Describes a
+  model's accelerated, premium-priced serving tier (Anthropic `speed="fast"`,
+  OpenAI `service_tier`) — its opt-in knob, premium pricing, and lifecycle.
+  Off by default (metadata only); populated for Claude Opus 4.6/4.7/4.8 and
+  GPT-5.5.
+
+### Changed
+
+- **The `opus` alias now resolves to `claude-opus-4-8` (#2616).** Earlier Opus
+  rows (4 / 4.1 / 4.6 / 4.7) declare `superseded_by = "claude-opus-4-8"`.
+- **Corrected Claude Opus 4.6 / 4.7 catalog pricing to $5/$25 per MTok
+  (#2616)** to match Anthropic's published rates (the rows were carrying the
+  older $15/$75 Opus figures).
+
+### Deprecated
+
+- **Claude Opus 4.6 and 4.7 are marked deprecated (#2616),** superseded by
+  Claude Opus 4.8. Soft deprecation with no announced sunset — both remain
+  fully usable, so switch when convenient.
+
 ## v0.8.48
 
 ### Added
