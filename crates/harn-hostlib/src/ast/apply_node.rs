@@ -54,7 +54,7 @@ use super::edit_common::{
     first_syntax_error, format_query_error, read_source, resolve_target_capture, sha256_hex,
     write_source,
 };
-use super::language::Language;
+use super::language::{Language, TEXT_PATCH_FALLBACK};
 use super::parse::parse_source;
 
 const BUILTIN: &str = "hostlib_ast_apply_node";
@@ -421,6 +421,7 @@ fn unsupported_language_response(path: &str, hint: Option<&str>) -> VmValue {
                 hint.unwrap_or("none")
             )),
         ),
+        ("fallback_suggestion", str_value(TEXT_PATCH_FALLBACK)),
     ])
 }
 

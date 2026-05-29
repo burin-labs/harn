@@ -52,7 +52,7 @@ use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
 use tree_sitter::Node;
 
-use crate::ast::{api as ast_api, Language};
+use crate::ast::{api as ast_api, Language, TEXT_PATCH_FALLBACK};
 use crate::error::HostlibError;
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_string, require_string, str_value,
@@ -263,7 +263,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             }
         };
 
-        let Some(identifier_kinds) = identifier_kinds_for(language) else {
+        let Some(identifier_kinds) = language.rename_identifier_kinds() else {
             return Ok(unsupported_language_response(
                 &env,
                 path,
@@ -483,45 +483,6 @@ fn is_identifier_token(text: &str) -> bool {
     chars.all(|c| c.is_alphanumeric() || c == '_')
 }
 
-/// Per-language allow-list of tree-sitter node kinds that represent an
-/// identifier token bound to a name (variables, functions, types,
-/// fields). Anything not in this table is treated as a literal or
-/// punctuation node and left alone, which keeps the rename out of
-/// comments and string bodies even though those *contain* identifier
-/// substrings.
-fn identifier_kinds_for(language: Language) -> Option<&'static [&'static str]> {
-    Some(match language {
-        Language::Rust => &[
-            "identifier",
-            "type_identifier",
-            "field_identifier",
-            "shorthand_field_identifier",
-        ],
-        Language::TypeScript | Language::Tsx => &[
-            "identifier",
-            "type_identifier",
-            "property_identifier",
-            "shorthand_property_identifier",
-            "shorthand_property_identifier_pattern",
-        ],
-        Language::JavaScript | Language::Jsx => &[
-            "identifier",
-            "property_identifier",
-            "shorthand_property_identifier",
-            "shorthand_property_identifier_pattern",
-        ],
-        Language::Python => &["identifier"],
-        Language::Go => &[
-            "identifier",
-            "type_identifier",
-            "field_identifier",
-            "package_identifier",
-        ],
-        Language::Swift => &["simple_identifier", "type_identifier"],
-        _ => return None,
-    })
-}
-
 /// Node kinds that must terminate identifier descent — strings, comments,
 /// and anything else where a matching textual substring is *not* an
 /// identifier reference.
@@ -708,10 +669,13 @@ struct ResponseExtras {
     failed_paths: Vec<VmValue>,
     match_count: usize,
     details: String,
+    /// Text-edit degradation path, emitted only on `unsupported_language`
+    /// so the agent loop can fall back without a hard-coded language list.
+    fallback_suggestion: Option<String>,
 }
 
 fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtras) -> VmValue {
-    build_dict([
+    let mut entries: Vec<(&'static str, VmValue)> = vec![
         ("result", str_value(tag)),
         ("applied", VmValue::Bool(extras.applied)),
         ("dry_run", VmValue::Bool(extras.dry_run)),
@@ -729,7 +693,11 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
         ),
         ("match_count", VmValue::Int(extras.match_count as i64)),
         ("details", str_value(&extras.details)),
-    ])
+    ];
+    if let Some(fallback) = extras.fallback_suggestion {
+        entries.push(("fallback_suggestion", str_value(fallback)));
+    }
+    build_dict(entries)
 }
 
 fn applied_response(
@@ -838,15 +806,22 @@ fn unsupported_language_response(
     file_path: &str,
     language: Option<&str>,
 ) -> VmValue {
+    let supported = Language::all()
+        .iter()
+        .filter(|l| l.supports_rename())
+        .map(|l| l.name())
+        .collect::<Vec<_>>()
+        .join(", ");
     emit_response(
         env,
         "unsupported_language",
         ResponseExtras {
             details: format!(
-                "no identifier-kind table for `{}` in `{file_path}`; rename only \
-                 supports rust, typescript/tsx, javascript/jsx, python, swift, go (first batch)",
+                "no identifier-kind table for `{}` in `{file_path}`; \
+                 rename supports {supported}",
                 language.unwrap_or("?")
             ),
+            fallback_suggestion: Some(TEXT_PATCH_FALLBACK.to_string()),
             ..Default::default()
         },
     )

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/capabilities.response.json",
+  "title": "ast.capabilities response",
+  "description": "The per-language AST-precise edit capability matrix. `ok` carries the `languages` rows; `unsupported_language` is returned when a `language` filter resolves to no registered grammar. Both carry `fallback_suggestion`.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": ["ok", "unsupported_language"]
+    },
+    "fallback_suggestion": {
+      "type": "string",
+      "description": "Text-edit degradation path the agent loop should use when no AST primitive applies."
+    },
+    "details": {
+      "type": "string",
+      "description": "Short human-readable diagnostic; set when `result == \"unsupported_language\"`."
+    },
+    "languages": {
+      "type": "array",
+      "description": "Capability rows, one per language. Set when `result == \"ok\"`.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "language": { "type": "string" },
+          "extension": { "type": "string" },
+          "apply_node": { "type": "boolean" },
+          "insert_at_anchor": { "type": "boolean" },
+          "rename_symbol": { "type": "boolean" },
+          "symbols": { "type": "boolean" }
+        },
+        "required": [
+          "language",
+          "extension",
+          "apply_node",
+          "insert_at_anchor",
+          "rename_symbol",
+          "symbols"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["result", "fallback_suggestion"],
+  "additionalProperties": false
+}

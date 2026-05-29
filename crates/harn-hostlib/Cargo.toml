@@ -77,6 +77,17 @@ tree-sitter-elixir = "0.3"
 tree-sitter-lua = "0.5"
 tree-sitter-haskell = "0.23"
 tree-sitter-r = "1.2"
+# Data / markup / config grammars (B.7). These have no symbol-graph
+# projection (no rename, empty symbol/outline extraction), but the
+# query-driven edit primitives (`apply_node`, `insert_at_anchor`) work
+# against them like any other grammar.
+tree-sitter-json = "0.24"
+tree-sitter-yaml = "0.7"
+tree-sitter-toml-ng = "0.7"
+tree-sitter-css = "0.25"
+tree-sitter-html = "0.23"
+tree-sitter-sequel = "0.3"
+tree-sitter-md = "0.5"
 
 # Per-OS secret-store backends. The file backend is always compiled in
 # (and is the universal fallback when `HARN_SECRET_STORE_BACKEND=file` is

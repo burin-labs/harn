@@ -1,0 +1,9 @@
+{
+  "name": "harn-fixture",
+  "version": "0.1.0",
+  "keywords": ["ast", "edit", "tree-sitter"],
+  "engines": {
+    "harn": ">=0.5"
+  },
+  "private": true
+}

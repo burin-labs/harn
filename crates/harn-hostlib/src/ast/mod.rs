@@ -17,10 +17,15 @@
 //!
 //! ## Languages
 //!
-//! [`language::Language`] covers TypeScript/TSX, JavaScript/JSX, Python,
-//! Go, Rust, Java, C, C++, C#, Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig,
-//! Elixir, Lua, Haskell, and R. Adding/dropping languages requires
-//! coordinated schema, fixture, and host-bridge updates.
+//! [`language::Language`] covers the general-purpose languages
+//! (TypeScript/TSX, JavaScript/JSX, Python, Go, Rust, Java, C, C++, C#,
+//! Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig, Elixir, Lua, Haskell, R)
+//! plus data/markup/config grammars (JSON, YAML, TOML, CSS, HTML, SQL,
+//! Markdown). The latter support the query-driven edit primitives but
+//! carry no symbol-graph projection — see
+//! [`language::Language::edit_capabilities`] for the per-language matrix.
+//! Adding/dropping languages requires coordinated schema, fixture, and
+//! host-bridge updates.
 //!
 
 use std::sync::Arc;
@@ -32,6 +37,7 @@ use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, Syn
 
 mod apply_node;
 mod bracket_balance;
+mod capabilities;
 mod dry_run;
 mod edit_common;
 mod function_body;
@@ -49,7 +55,7 @@ mod types;
 mod undefined_names;
 mod unified_diff;
 
-pub use language::Language;
+pub use language::{EditCapabilities, Language, TEXT_PATCH_FALLBACK};
 pub use types::{OutlineItem, ParseError, ParsedNode, Symbol, SymbolKind, UndefinedName};
 
 /// Programmatic entry point to the AST builtins. Embedders typically go
@@ -220,6 +226,12 @@ impl HostlibCapability for AstCapability {
             insert_at_anchor::run,
         );
         register(registry, "hostlib_ast_dry_run", "dry_run", dry_run::run);
+        register(
+            registry,
+            "hostlib_ast_capabilities",
+            "capabilities",
+            capabilities::run,
+        );
     }
 }
 

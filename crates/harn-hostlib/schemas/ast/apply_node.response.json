@@ -101,6 +101,10 @@
       "type": "integer",
       "minimum": 0,
       "description": "Tree-sitter query error column when `result == \"invalid_query\"`."
+    },
+    "fallback_suggestion": {
+      "type": "string",
+      "description": "Text-edit degradation path; set when `result == \"unsupported_language\"`."
     }
   },
   "required": ["result", "applied"],

@@ -53,6 +53,16 @@ pub(super) fn extract(tree: &Tree, source: &str, language: Language) -> Vec<Symb
         Language::Lua => extract_lua(root, source, &mut out),
         Language::Haskell => extract_haskell(root, source, &mut out),
         Language::R => extract_r(root, source, &mut out),
+        // Data/markup/config grammars carry no nameable symbols; they
+        // support the edit primitives but expose an empty symbol/outline
+        // projection (see `Language::supports_symbol_extraction`).
+        Language::Json
+        | Language::Yaml
+        | Language::Toml
+        | Language::Css
+        | Language::Html
+        | Language::Sql
+        | Language::Markdown => {}
     }
 
     out

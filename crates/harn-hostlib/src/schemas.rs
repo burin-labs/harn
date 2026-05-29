@@ -205,6 +205,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/ast/dry_run.response.json"),
     ),
+    (
+        "ast",
+        "capabilities",
+        SchemaKind::Request,
+        include_str!("../schemas/ast/capabilities.request.json"),
+    ),
+    (
+        "ast",
+        "capabilities",
+        SchemaKind::Response,
+        include_str!("../schemas/ast/capabilities.response.json"),
+    ),
     // code_index/
     (
         "code_index",

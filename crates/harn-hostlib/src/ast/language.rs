@@ -3,13 +3,35 @@
 //! The set of languages, their canonical names, and their file extensions
 //! form the hostlib AST wire contract. Adding or dropping a language
 //! requires coordinated schema, fixture, and host-bridge updates.
+//!
+//! ## Per-language onboarding contract (B.7)
+//!
+//! Each [`Language`] variant carries the full adapter contract on the enum
+//! itself — there is no separate `LanguageAdapter` object to keep in sync:
+//!
+//! 1. **grammar binding** — [`Language::ts_language`]
+//! 2. **wire name + aliases** — [`Language::name`] / [`Language::from_name`]
+//! 3. **extension detection** — [`Language::from_extension`]
+//! 4. **symbol-graph projection** (drives `rename_symbol`) —
+//!    [`Language::rename_identifier_kinds`]
+//! 5. **symbol/outline extraction** — `ast::symbols::extract`
+//! 6. **test fixture** — `tests/fixtures/ast/<name>/`
+//!
+//! Format-preserving span replacement and trivia/indentation handling are
+//! grammar-agnostic (byte-span splice + inferred indent), so they need no
+//! per-language code. The result is that adding a language is a bounded
+//! ticket: register the grammar, add the four mapping arms, drop in a
+//! fixture, and (optionally) an identifier-kind table for rename support.
 
 use tree_sitter::Language as TsLanguage;
 
-/// Languages with tree-sitter symbol extraction support.
+/// Languages with tree-sitter grammar support.
 ///
 /// The string returned by [`Language::name`] is the canonical wire name;
-/// callers (and the JSON schemas) refer to languages by that string.
+/// callers (and the JSON schemas) refer to languages by that string. The
+/// trailing group (`Json`..`Markdown`) are data/markup/config grammars:
+/// they support the query-driven edit primitives but have no symbol-graph
+/// projection (see [`Language::edit_capabilities`]).
 #[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
@@ -35,6 +57,41 @@ pub enum Language {
     Lua,
     Haskell,
     R,
+    Json,
+    Yaml,
+    Toml,
+    Css,
+    Html,
+    Sql,
+    Markdown,
+}
+
+/// The text-level fallback the agent loop should reach for when an
+/// AST-precise edit is unavailable for a file. Surfaced verbatim as the
+/// `fallback_suggestion` field on every `unsupported_*` edit response so
+/// the loop can degrade gracefully without per-call branching.
+pub const TEXT_PATCH_FALLBACK: &str =
+    "fall back to a text-level edit (std/edit `edit_safe_text_patch`)";
+
+/// Which AST-precise edit primitives are available for a language.
+///
+/// `apply_node` and `insert_at_anchor` are query-driven and work against
+/// any registered tree-sitter grammar, so they are always `true`.
+/// `rename_symbol` needs a per-language identifier-kind projection (see
+/// [`Language::rename_identifier_kinds`]); `symbols`/`outline` need a
+/// per-language extractor (see `ast::symbols`). The matrix is the
+/// onboarding contract: it tells the agent loop which primitive to reach
+/// for and is rendered into the capability-matrix docs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditCapabilities {
+    /// Tree-sitter query → format-preserving replace.
+    pub apply_node: bool,
+    /// Anchored sibling/child insertion.
+    pub insert_at_anchor: bool,
+    /// Cross-file safe rename via the symbol graph.
+    pub rename_symbol: bool,
+    /// Symbol + outline extraction.
+    pub symbols: bool,
 }
 
 impl Language {
@@ -63,6 +120,13 @@ impl Language {
             Language::Lua => "lua",
             Language::Haskell => "haskell",
             Language::R => "r",
+            Language::Json => "json",
+            Language::Yaml => "yaml",
+            Language::Toml => "toml",
+            Language::Css => "css",
+            Language::Html => "html",
+            Language::Sql => "sql",
+            Language::Markdown => "markdown",
         }
     }
 
@@ -91,6 +155,16 @@ impl Language {
             Language::Lua => tree_sitter_lua::LANGUAGE.into(),
             Language::Haskell => tree_sitter_haskell::LANGUAGE.into(),
             Language::R => tree_sitter_r::LANGUAGE.into(),
+            Language::Json => tree_sitter_json::LANGUAGE.into(),
+            Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
+            Language::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
+            Language::Css => tree_sitter_css::LANGUAGE.into(),
+            Language::Html => tree_sitter_html::LANGUAGE.into(),
+            Language::Sql => tree_sitter_sequel::LANGUAGE.into(),
+            // tree-sitter-md ships a split block/inline grammar; the block
+            // grammar is the structural tree the edit primitives operate
+            // on (headings, lists, fenced code, …).
+            Language::Markdown => tree_sitter_md::LANGUAGE.into(),
         }
     }
 
@@ -122,6 +196,13 @@ impl Language {
             "lua" => Language::Lua,
             "haskell" | "hs" => Language::Haskell,
             "r" => Language::R,
+            "json" => Language::Json,
+            "yaml" | "yml" => Language::Yaml,
+            "toml" => Language::Toml,
+            "css" => Language::Css,
+            "html" | "htm" => Language::Html,
+            "sql" => Language::Sql,
+            "markdown" | "md" => Language::Markdown,
             _ => return None,
         })
     }
@@ -152,6 +233,13 @@ impl Language {
             "lua" => Language::Lua,
             "hs" | "lhs" => Language::Haskell,
             "r" => Language::R,
+            "json" => Language::Json,
+            "yaml" | "yml" => Language::Yaml,
+            "toml" => Language::Toml,
+            "css" => Language::Css,
+            "html" | "htm" => Language::Html,
+            "sql" => Language::Sql,
+            "md" | "markdown" => Language::Markdown,
             _ => return None,
         })
     }
@@ -164,6 +252,121 @@ impl Language {
         }
         let ext = path.extension().and_then(|s| s.to_str())?;
         Self::from_extension(ext)
+    }
+
+    /// A representative file extension for the language (no leading dot).
+    /// Used by docs and the onboarding probe; not necessarily the only
+    /// extension [`Language::from_extension`] accepts.
+    pub fn primary_extension(self) -> &'static str {
+        match self {
+            Language::TypeScript => "ts",
+            Language::Tsx => "tsx",
+            Language::JavaScript => "js",
+            Language::Jsx => "jsx",
+            Language::Python => "py",
+            Language::Go => "go",
+            Language::Rust => "rs",
+            Language::Java => "java",
+            Language::C => "c",
+            Language::Cpp => "cpp",
+            Language::CSharp => "cs",
+            Language::Ruby => "rb",
+            Language::Kotlin => "kt",
+            Language::Php => "php",
+            Language::Scala => "scala",
+            Language::Bash => "sh",
+            Language::Swift => "swift",
+            Language::Zig => "zig",
+            Language::Elixir => "ex",
+            Language::Lua => "lua",
+            Language::Haskell => "hs",
+            Language::R => "r",
+            Language::Json => "json",
+            Language::Yaml => "yaml",
+            Language::Toml => "toml",
+            Language::Css => "css",
+            Language::Html => "html",
+            Language::Sql => "sql",
+            Language::Markdown => "md",
+        }
+    }
+
+    /// Per-language allow-list of tree-sitter node kinds that represent an
+    /// identifier token bound to a name (variables, functions, types,
+    /// fields). This is the symbol-graph projection that drives
+    /// `rename_symbol`: anything not in this table is treated as a literal
+    /// or punctuation node and left alone, which keeps a rename out of
+    /// comments and string bodies even though those *contain* identifier
+    /// substrings. `None` means the language has no rename projection yet.
+    pub fn rename_identifier_kinds(self) -> Option<&'static [&'static str]> {
+        Some(match self {
+            Language::Rust => &[
+                "identifier",
+                "type_identifier",
+                "field_identifier",
+                "shorthand_field_identifier",
+            ],
+            Language::TypeScript | Language::Tsx => &[
+                "identifier",
+                "type_identifier",
+                "property_identifier",
+                "shorthand_property_identifier",
+                "shorthand_property_identifier_pattern",
+            ],
+            Language::JavaScript | Language::Jsx => &[
+                "identifier",
+                "property_identifier",
+                "shorthand_property_identifier",
+                "shorthand_property_identifier_pattern",
+            ],
+            Language::Python => &["identifier"],
+            Language::Go => &[
+                "identifier",
+                "type_identifier",
+                "field_identifier",
+                "package_identifier",
+            ],
+            Language::Swift => &["simple_identifier", "type_identifier"],
+            _ => return None,
+        })
+    }
+
+    /// Whether `rename_symbol` can operate on this language (i.e. it has a
+    /// [`Language::rename_identifier_kinds`] projection).
+    pub fn supports_rename(self) -> bool {
+        self.rename_identifier_kinds().is_some()
+    }
+
+    /// Data / markup / config grammars that carry no nameable symbols, so
+    /// symbol + outline extraction is intentionally empty for them.
+    fn is_data_format(self) -> bool {
+        matches!(
+            self,
+            Language::Json
+                | Language::Yaml
+                | Language::Toml
+                | Language::Css
+                | Language::Html
+                | Language::Sql
+                | Language::Markdown
+        )
+    }
+
+    /// Whether `symbols`/`outline` produce meaningful results. Data/markup
+    /// grammars parse and edit fine but expose no symbol projection.
+    pub fn supports_symbol_extraction(self) -> bool {
+        !self.is_data_format()
+    }
+
+    /// The AST-precise edit capability matrix for this language. See
+    /// [`EditCapabilities`].
+    pub fn edit_capabilities(self) -> EditCapabilities {
+        EditCapabilities {
+            apply_node: true,
+            insert_at_anchor: true,
+            rename_symbol: self.supports_rename(),
+            symbols: self.supports_symbol_extraction(),
+        }
     }
 
     /// Every language we ship support for. Useful for tests + introspection.
@@ -191,6 +394,13 @@ impl Language {
             Language::Lua,
             Language::Haskell,
             Language::R,
+            Language::Json,
+            Language::Yaml,
+            Language::Toml,
+            Language::Css,
+            Language::Html,
+            Language::Sql,
+            Language::Markdown,
         ]
     }
 }
@@ -234,6 +444,14 @@ mod tests {
             ("lua", Language::Lua),
             ("hs", Language::Haskell),
             ("r", Language::R),
+            ("json", Language::Json),
+            ("yaml", Language::Yaml),
+            ("yml", Language::Yaml),
+            ("toml", Language::Toml),
+            ("css", Language::Css),
+            ("html", Language::Html),
+            ("sql", Language::Sql),
+            ("md", Language::Markdown),
         ];
         for (ext, want) in cases {
             assert_eq!(Language::from_extension(ext), Some(*want), "ext {ext}");
@@ -248,6 +466,18 @@ mod tests {
     }
 
     #[test]
+    fn primary_extension_resolves_back_to_the_language() {
+        for &lang in Language::all() {
+            assert_eq!(
+                Language::from_extension(lang.primary_extension()),
+                Some(lang),
+                "primary extension for {} does not round-trip",
+                lang.name()
+            );
+        }
+    }
+
+    #[test]
     fn detect_prefers_hint_over_extension() {
         let path = std::path::Path::new("foo.ts");
         assert_eq!(Language::detect(path, None), Some(Language::TypeScript));
@@ -255,5 +485,29 @@ mod tests {
             Language::detect(path, Some("javascript")),
             Some(Language::JavaScript)
         );
+    }
+
+    #[test]
+    fn edit_primitives_are_universal_rename_is_gated() {
+        for &lang in Language::all() {
+            let caps = lang.edit_capabilities();
+            assert!(caps.apply_node, "{} should support apply_node", lang.name());
+            assert!(
+                caps.insert_at_anchor,
+                "{} should support insert_at_anchor",
+                lang.name()
+            );
+            assert_eq!(
+                caps.rename_symbol,
+                lang.rename_identifier_kinds().is_some(),
+                "{} rename capability must match its identifier-kind table",
+                lang.name()
+            );
+        }
+        // Data/markup formats edit but carry no symbol projection.
+        assert!(!Language::Json.edit_capabilities().rename_symbol);
+        assert!(!Language::Json.edit_capabilities().symbols);
+        assert!(Language::Rust.edit_capabilities().rename_symbol);
+        assert!(Language::Rust.edit_capabilities().symbols);
     }
 }
