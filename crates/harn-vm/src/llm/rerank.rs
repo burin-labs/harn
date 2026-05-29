@@ -1,8 +1,6 @@
 use std::rc::Rc;
 
-use crate::stdlib::macros::{
-    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
-};
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -11,10 +9,6 @@ const SELF_CERTAINTY_PROMPT_SUFFIX: &str = "\n</text>";
 
 pub(crate) fn register_rerank_builtins(vm: &mut Vm) {
     register_builtin_defs(vm, RERANK_BUILTINS);
-}
-
-pub(crate) fn register_deferred_rerank_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_defs(vm, RERANK_BUILTINS, registrar);
 }
 
 const RERANK_BUILTINS: &[&VmBuiltinDef] = &[&SELF_CERTAINTY_BUILTIN_DEF];

@@ -12,9 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::clock::now_wall_ms;
-use crate::stdlib::macros::{
-    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
-};
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -91,10 +89,6 @@ impl CacheRecord {
 
 pub(crate) fn register_cache_builtins(vm: &mut Vm) {
     register_builtin_defs(vm, CACHE_BUILTINS);
-}
-
-pub(crate) fn register_deferred_cache_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_defs(vm, CACHE_BUILTINS, registrar);
 }
 
 const CACHE_BUILTINS: &[&VmBuiltinDef] = &[

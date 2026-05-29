@@ -63,20 +63,3 @@ pub fn register_builtin_defs(vm: &mut crate::vm::Vm, defs: &'static [&'static Vm
         vm.register_builtin_def(def);
     }
 }
-
-/// Deferred-registration helper: register names + aliases as deferred
-/// builtins on `vm`. The first time any of them dispatches, `registrar`
-/// runs (typically installs the LLM stack), which re-registers the real
-/// impls.
-pub fn register_deferred_builtin_defs(
-    vm: &mut crate::vm::Vm,
-    defs: &[&'static VmBuiltinDef],
-    registrar: fn(&mut crate::vm::Vm),
-) {
-    for def in defs {
-        vm.register_deferred_builtin(def.sig.name, registrar);
-        for alias in def.aliases {
-            vm.register_deferred_builtin(alias, registrar);
-        }
-    }
-}

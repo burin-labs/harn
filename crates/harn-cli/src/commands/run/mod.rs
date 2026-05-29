@@ -1410,7 +1410,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         vm.install_interrupt_signal_token(interrupt_tokens.signal_token);
         vm.install_cancel_token(interrupt_tokens.cancel_token);
     }
-    harn_vm::register_vm_stdlib_with_deferred_llm(&mut vm);
+    harn_vm::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     let source_parent = std::path::Path::new(path)
         .parent()

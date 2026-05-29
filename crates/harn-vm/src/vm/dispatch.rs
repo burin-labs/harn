@@ -142,7 +142,6 @@ impl Vm {
         Rc::make_mut(&mut self.builtins).insert(name.to_string(), Rc::new(f));
         Rc::make_mut(&mut self.builtin_metadata)
             .insert(name.to_string(), VmBuiltinMetadata::sync(name.to_string()));
-        Rc::make_mut(&mut self.deferred_builtin_registrars).remove(name);
         self.refresh_builtin_id(name);
     }
 
@@ -155,7 +154,6 @@ impl Vm {
         Rc::make_mut(&mut self.builtins).insert(name.clone(), Rc::new(f));
         Rc::make_mut(&mut self.builtin_metadata)
             .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Sync));
-        Rc::make_mut(&mut self.deferred_builtin_registrars).remove(&name);
         self.refresh_builtin_id(&name);
     }
 
@@ -225,7 +223,6 @@ impl Vm {
             name.to_string(),
             VmBuiltinMetadata::async_builtin(name.to_string()),
         );
-        Rc::make_mut(&mut self.deferred_builtin_registrars).remove(name);
         self.refresh_builtin_id(name);
     }
 
@@ -243,26 +240,7 @@ impl Vm {
             .insert(name.clone(), Rc::new(move |args| Box::pin(f(args))));
         Rc::make_mut(&mut self.builtin_metadata)
             .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Async));
-        Rc::make_mut(&mut self.deferred_builtin_registrars).remove(&name);
         self.refresh_builtin_id(&name);
-    }
-
-    /// Register a builtin name whose implementation should be installed only
-    /// if a script actually resolves that name.
-    pub(crate) fn register_deferred_builtin(&mut self, name: &str, registrar: fn(&mut Vm)) {
-        if self.builtins.contains_key(name) || self.async_builtins.contains_key(name) {
-            return;
-        }
-        Rc::make_mut(&mut self.deferred_builtin_registrars).insert(name.to_string(), registrar);
-    }
-
-    pub(crate) fn ensure_deferred_builtin(&mut self, name: &str) -> bool {
-        let Some(registrar) = self.deferred_builtin_registrars.get(name).copied() else {
-            return false;
-        };
-        registrar(self);
-        Rc::make_mut(&mut self.deferred_builtin_registrars).remove(name);
-        self.builtins.contains_key(name) || self.async_builtins.contains_key(name)
     }
 
     pub(crate) fn registered_builtin_id(&self, name: &str) -> Option<BuiltinId> {
@@ -467,7 +445,6 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             }));
         }
-        self.ensure_deferred_builtin(name);
         let builtin = match self.resolve_sync_builtin_id_or_name(direct_id, name)? {
             Ok(builtin) => builtin,
             Err(error) => return Some(Err(error)),
@@ -493,7 +470,6 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             }));
         }
-        self.ensure_deferred_builtin(name);
         let builtin = match self.resolve_sync_builtin_id_or_name(direct_id, name)? {
             Ok(builtin) => builtin,
             Err(error) => return Some(Err(error)),
@@ -553,8 +529,6 @@ impl Vm {
             return result;
         }
 
-        self.ensure_deferred_builtin(name);
-
         if let Some(id) = direct_id {
             if let Some(entry) = self.builtins_by_id.get(&id).cloned() {
                 if entry.name.as_ref() == name {
@@ -585,7 +559,6 @@ impl Vm {
                 .builtins
                 .keys()
                 .chain(self.async_builtins.keys())
-                .chain(self.deferred_builtin_registrars.keys())
                 .map(|s| s.as_str());
             if let Some(suggestion) = crate::value::closest_match(name, all_builtins) {
                 return Err(VmError::Runtime(format!(

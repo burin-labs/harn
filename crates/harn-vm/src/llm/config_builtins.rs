@@ -3,9 +3,7 @@ use std::rc::Rc;
 
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{
-    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
-};
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -14,10 +12,6 @@ use super::helpers::vm_value_to_json;
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
     register_builtin_defs(vm, LLM_CONFIG_DEFS);
-}
-
-pub(crate) fn register_deferred_config_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_defs(vm, LLM_CONFIG_DEFS, registrar);
 }
 
 const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[

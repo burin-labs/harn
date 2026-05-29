@@ -31,24 +31,6 @@ pub(crate) fn register_harn_entrypoint_category(vm: &mut Vm, category: &str) {
     }
 }
 
-pub(crate) fn register_deferred_harn_entrypoint_category(
-    vm: &mut Vm,
-    category: &str,
-    registrar: fn(&mut Vm),
-) {
-    for module in harn_stdlib::entrypoint_modules() {
-        if module.category != category {
-            continue;
-        }
-        let Some(module_name) = module.import_path.strip_prefix("std/") else {
-            continue;
-        };
-        for export in harn_stdlib::public_functions_for_module(module_name) {
-            vm.register_deferred_builtin(&export.name, registrar);
-        }
-    }
-}
-
 fn arity_for_export(export: &harn_stdlib::StdlibPublicFunction) -> VmBuiltinArity {
     if export.variadic {
         VmBuiltinArity::Variadic
