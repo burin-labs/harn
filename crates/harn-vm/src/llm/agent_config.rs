@@ -23,6 +23,7 @@ const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
 const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
     &AGENT_SUBSCRIBE_BUILTIN_DEF,
     &AGENT_INJECT_FEEDBACK_BUILTIN_DEF,
+    &PROMPT_EXPLAIN_BUILTIN_DEF,
 ];
 
 pub(crate) fn agent_feedback_message(kind: &str, content: &str) -> VmValue {
@@ -357,6 +358,38 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
     crate::agent_sessions::inject_message(&session_id, agent_feedback_message(&kind, &content))
         .map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
+}
+
+/// Assemble the system prompt from the given agent options and return the
+/// final string plus per-fragment provenance — the audit primitive for
+/// "why is this in the prompt?" and "what changes if tool X is absent?".
+///
+/// Pass the same `options` dict you would hand `agent_loop` (with `system`,
+/// `system_preamble`/`prefix`/`context`/`parts`/`appendix`/`suffix`, and
+/// `tools`). Returns `{ system, fragments: [{id, source, bucket, included,
+/// reason, bytes}], included, excluded }`. Each tool that carries a
+/// `guidance` string contributes a fragment gated on the tool's own presence,
+/// so you can see exactly which capability-gated instructions are active and
+/// why. Session reminders are layered at live call time and are not included
+/// in this static view.
+#[harn_builtin(sig = "prompt_explain(options: dict?) -> dict", category = "agent")]
+fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let options = match args.first() {
+        Some(VmValue::Dict(map)) => Some((**map).clone()),
+        Some(VmValue::Nil) | None => None,
+        _ => {
+            return Err(VmError::Runtime(
+                "prompt_explain(options): options must be a dict or nil".into(),
+            ))
+        }
+    };
+    let assembled = super::helpers::assemble_system_prompt(None, options.as_ref(), &[])?;
+    let mut result = assembled.provenance_json();
+    result["system"] = match &assembled.system {
+        Some(text) => serde_json::Value::String(text.clone()),
+        None => serde_json::Value::Null,
+    };
+    Ok(crate::schema::json_to_vm_value(&result))
 }
 
 /// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.

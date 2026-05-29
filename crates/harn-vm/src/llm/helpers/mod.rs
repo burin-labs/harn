@@ -14,8 +14,8 @@ pub(crate) use messages::{
 };
 pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub(crate) use options::{
-    compose_system_prompt, expects_structured_output, extract_json, extract_llm_options,
-    system_prompt_event_metadata, system_prompt_metadata,
+    assemble_system_prompt, compose_system_prompt, expects_structured_output, extract_json,
+    extract_llm_options, system_prompt_event_metadata, system_prompt_metadata,
 };
 pub use provider::no_credentials_message;
 #[cfg(test)]

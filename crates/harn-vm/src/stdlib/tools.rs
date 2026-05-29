@@ -502,7 +502,11 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 // Unknown config keys (beyond parameters/handler/returns/annotations) are
-// preserved verbatim so integrators can attach policy/effect metadata.
+// preserved verbatim so integrators can attach policy/effect metadata. This
+// is also how `guidance` rides through to the tool entry: the prompt
+// assembler (`llm::prompt`) reads it off the active tool set and injects a
+// capability-gated system-prompt fragment, so a tool's instruction and the
+// tool itself share one source of truth and cannot drift.
 #[harn_builtin(
     sig = "tool_define(registry: dict | closure, name: string, description: string, config: dict) -> dict",
     category = "tools"

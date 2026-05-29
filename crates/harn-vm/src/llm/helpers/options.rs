@@ -764,13 +764,6 @@ fn system_prompt_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
 }
 
-fn push_system_prompt_part(parts: &mut Vec<String>, part: String) {
-    let trimmed = part.trim();
-    if !trimmed.is_empty() {
-        parts.push(trimmed.to_string());
-    }
-}
-
 fn system_prompt_position(
     value: Option<&VmValue>,
     source: &str,
@@ -825,30 +818,36 @@ fn render_system_prompt_part(content: String, part: &BTreeMap<String, VmValue>) 
     }
 }
 
-fn append_system_prompt_parts(
-    before: &mut Vec<String>,
-    after: &mut Vec<String>,
+/// Expand a host-provided system-prompt option (`system_preamble`,
+/// `system_prompt_parts`, …) into [`crate::llm::prompt::PromptFragment`]s,
+/// faithfully mirroring the legacy string / list / dict shapes
+/// (`{content|text|prompt, position, parts, enabled, label}`). The resulting
+/// fragments are reduced by [`crate::llm::prompt::assemble`].
+fn append_host_fragments(
+    out: &mut Vec<crate::llm::prompt::PromptFragment>,
     value: Option<&VmValue>,
     source: &str,
     forced_position: SystemPromptPosition,
 ) -> Result<(), VmError> {
+    use crate::llm::prompt::PromptFragment;
     let Some(value) = value else {
         return Ok(());
     };
     match value {
         VmValue::Nil | VmValue::Bool(false) => Ok(()),
         VmValue::String(text) => {
-            match forced_position {
-                SystemPromptPosition::Before => push_system_prompt_part(before, text.to_string()),
-                SystemPromptPosition::After => push_system_prompt_part(after, text.to_string()),
-            }
+            out.push(PromptFragment::new(
+                format!("host:{source}"),
+                format!("host:{source}"),
+                fragment_bucket(forced_position),
+                text.to_string(),
+            ));
             Ok(())
         }
         VmValue::List(items) => {
             for (index, item) in items.iter().enumerate() {
-                append_system_prompt_parts(
-                    before,
-                    after,
+                append_host_fragments(
+                    out,
                     Some(item),
                     &format!("{source}[{index}]"),
                     forced_position,
@@ -862,7 +861,7 @@ fn append_system_prompt_parts(
             }
             let position = system_prompt_position(part.get("position"), source, forced_position)?;
             if let Some(parts) = part.get("parts") {
-                return append_system_prompt_parts(before, after, Some(parts), source, position);
+                return append_host_fragments(out, Some(parts), source, position);
             }
             let content = system_prompt_part_content(part).ok_or_else(|| {
                 system_prompt_error(format!(
@@ -870,16 +869,25 @@ fn append_system_prompt_parts(
                 ))
             })?;
             let rendered = render_system_prompt_part(content, part);
-            match position {
-                SystemPromptPosition::Before => push_system_prompt_part(before, rendered),
-                SystemPromptPosition::After => push_system_prompt_part(after, rendered),
-            }
+            out.push(PromptFragment::new(
+                format!("host:{source}"),
+                format!("host:{source}"),
+                fragment_bucket(position),
+                rendered,
+            ));
             Ok(())
         }
         other => Err(system_prompt_error(format!(
             "{source}: expected a string, dict, list, nil, or false; got {}",
             other.type_name()
         ))),
+    }
+}
+
+fn fragment_bucket(position: SystemPromptPosition) -> crate::llm::prompt::FragmentBucket {
+    match position {
+        SystemPromptPosition::Before => crate::llm::prompt::FragmentBucket::Before,
+        SystemPromptPosition::After => crate::llm::prompt::FragmentBucket::After,
     }
 }
 
@@ -1182,52 +1190,63 @@ fn compose_system_prompt_with_reminders(
     options: Option<&BTreeMap<String, VmValue>>,
     rendered_reminders: &[RenderedReminder],
 ) -> Result<Option<String>, VmError> {
-    let mut before = Vec::new();
-    let mut after = Vec::new();
+    Ok(assemble_system_prompt(system, options, rendered_reminders)?.system)
+}
+
+/// Build the system prompt as an ordered list of fragments and reduce them,
+/// returning the assembled string together with per-fragment provenance.
+///
+/// This is the single assembly path: host-provided parts, the primary system
+/// text, capability-gated tool guidance, and rendered system reminders all
+/// flow through the same [`crate::llm::prompt::assemble`] reducer.
+/// [`compose_system_prompt_with_reminders`] is the thin string-only wrapper.
+pub(crate) fn assemble_system_prompt(
+    system: Option<String>,
+    options: Option<&BTreeMap<String, VmValue>>,
+    rendered_reminders: &[RenderedReminder],
+) -> Result<crate::llm::prompt::AssembledPrompt, VmError> {
+    use crate::llm::prompt::{assemble, FragmentBucket, PromptFragment};
+
+    let mut fragments: Vec<PromptFragment> = Vec::new();
     if let Some(options) = options {
-        append_system_prompt_parts(
-            &mut before,
-            &mut after,
+        append_host_fragments(
+            &mut fragments,
             options.get("system_preamble"),
             "system_preamble",
             SystemPromptPosition::Before,
         )?;
-        append_system_prompt_parts(
-            &mut before,
-            &mut after,
+        append_host_fragments(
+            &mut fragments,
             options.get("system_prefix"),
             "system_prefix",
             SystemPromptPosition::Before,
         )?;
-        append_system_prompt_parts(
-            &mut before,
-            &mut after,
+        append_host_fragments(
+            &mut fragments,
             options.get("system_context"),
             "system_context",
             SystemPromptPosition::Before,
         )?;
-        append_system_prompt_parts(
-            &mut before,
-            &mut after,
+        append_host_fragments(
+            &mut fragments,
             options.get("system_prompt_parts"),
             "system_prompt_parts",
             SystemPromptPosition::Before,
         )?;
-        append_system_prompt_parts(
-            &mut before,
-            &mut after,
+        append_host_fragments(
+            &mut fragments,
             options.get("system_appendix"),
             "system_appendix",
             SystemPromptPosition::After,
         )?;
-        append_system_prompt_parts(
-            &mut before,
-            &mut after,
+        append_host_fragments(
+            &mut fragments,
             options.get("system_suffix"),
             "system_suffix",
             SystemPromptPosition::After,
         )?;
     }
+
     let primary_system = system
         .filter(|system| !system.trim().is_empty())
         .or_else(|| {
@@ -1238,18 +1257,117 @@ fn compose_system_prompt_with_reminders(
                 .filter(|system| !system.trim().is_empty())
         });
     if let Some(system) = primary_system {
-        push_system_prompt_part(&mut before, system);
+        fragments.push(PromptFragment::new(
+            "primary",
+            "primary",
+            FragmentBucket::Before,
+            system,
+        ));
     }
+
+    // Capability-gated tool guidance: each active tool that declares a
+    // `guidance` string contributes an instruction fragment gated on the
+    // tool's own presence. Tool and instruction share one source of truth and
+    // cannot drift. Dormant until a tool actually carries `guidance`.
+    append_tool_guidance_fragments(&mut fragments, options);
+
     for reminder in rendered_reminders {
         if let RenderedReminder::SystemText(text) = reminder {
-            push_system_prompt_part(&mut before, text.clone());
+            fragments.push(PromptFragment::new(
+                "reminder",
+                "reminder",
+                FragmentBucket::Before,
+                text.clone(),
+            ));
         }
     }
-    before.extend(after);
-    if before.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(before.join("\n\n")))
+
+    let ctx = assemble_ctx(options);
+    Ok(assemble(&fragments, &ctx))
+}
+
+/// Names of the tools active for this call, read from the `tools` option
+/// (either a list of tool dicts or a `{tools: [...]}` registry).
+fn tool_names_from_options(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    let Some(list) = options.and_then(|options| tool_entry_list(options.get("tools"))) else {
+        return names;
+    };
+    for entry in list.iter() {
+        if let Some(name) = entry
+            .as_dict()
+            .and_then(|dict| dict.get("name"))
+            .map(VmValue::display)
+            .filter(|name| !name.is_empty())
+        {
+            names.insert(name);
+        }
+    }
+    names
+}
+
+/// Resolve the `tools` option into the flat list of tool dicts, accepting both
+/// a bare list and a `{tools: [...]}` registry wrapper.
+fn tool_entry_list(value: Option<&VmValue>) -> Option<Vec<VmValue>> {
+    match value? {
+        VmValue::List(items) => Some((**items).clone()),
+        VmValue::Dict(dict) => match dict.get("tools") {
+            Some(VmValue::List(items)) => Some((**items).clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Append a capability-gated guidance fragment for every active tool that
+/// declares a `guidance` (or `system_guidance`) string. The fragment is gated
+/// on the tool's own presence so instruction and tool can never drift.
+fn append_tool_guidance_fragments(
+    fragments: &mut Vec<crate::llm::prompt::PromptFragment>,
+    options: Option<&BTreeMap<String, VmValue>>,
+) {
+    use crate::llm::prompt::{FragmentBucket, PromptFragment};
+    let Some(list) = options.and_then(|options| tool_entry_list(options.get("tools"))) else {
+        return;
+    };
+    for entry in list.iter() {
+        let Some(dict) = entry.as_dict() else {
+            continue;
+        };
+        let Some(name) = dict
+            .get("name")
+            .map(VmValue::display)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        let guidance = dict
+            .get("guidance")
+            .or_else(|| dict.get("system_guidance"))
+            .map(VmValue::display)
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty());
+        let Some(guidance) = guidance else {
+            continue;
+        };
+        fragments.push(
+            PromptFragment::new(
+                format!("tool:{name}.guidance"),
+                format!("tool:{name}"),
+                FragmentBucket::Before,
+                guidance,
+            )
+            .requiring_tools(vec![name]),
+        );
+    }
+}
+
+fn assemble_ctx(options: Option<&BTreeMap<String, VmValue>>) -> crate::llm::prompt::AssembleCtx {
+    crate::llm::prompt::AssembleCtx {
+        tool_names: tool_names_from_options(options),
+        caps: std::collections::BTreeSet::new(),
     }
 }
 
@@ -2555,6 +2673,155 @@ mod reminder_render_tests {
         .expect("non-empty prompt");
 
         assert_eq!(prompt, "parts\n\nbase\n\nreminder\n\nappendix");
+    }
+
+    fn s(text: &str) -> VmValue {
+        VmValue::String(std::rc::Rc::from(text))
+    }
+
+    fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
+        VmValue::Dict(std::rc::Rc::new(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        ))
+    }
+
+    fn list(items: Vec<VmValue>) -> VmValue {
+        VmValue::List(std::rc::Rc::new(items))
+    }
+
+    #[test]
+    fn full_host_option_ordering_is_faithful() {
+        let options = BTreeMap::from([
+            ("system_preamble".to_string(), s("P")),
+            ("system_prefix".to_string(), s("X")),
+            ("system_context".to_string(), s("C")),
+            ("system_prompt_parts".to_string(), s("parts")),
+            ("system_appendix".to_string(), s("A")),
+            ("system_suffix".to_string(), s("S")),
+        ]);
+        let prompt = compose_system_prompt_with_reminders(
+            Some("base".to_string()),
+            Some(&options),
+            &[RenderedReminder::SystemText("R".to_string())],
+        )
+        .expect("system prompt")
+        .expect("non-empty prompt");
+        // Before bucket in declaration order (preamble, prefix, context,
+        // parts, primary, reminder), then After bucket (appendix, suffix).
+        assert_eq!(prompt, "P\n\nX\n\nC\n\nparts\n\nbase\n\nR\n\nA\n\nS");
+    }
+
+    #[test]
+    fn dict_part_position_override_moves_to_after() {
+        let options = BTreeMap::from([(
+            "system_prompt_parts".to_string(),
+            dict(&[("content", s("moved")), ("position", s("after"))]),
+        )]);
+        let prompt = compose_system_prompt(Some("base".to_string()), Some(&options))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(prompt, "base\n\nmoved");
+    }
+
+    #[test]
+    fn dict_part_with_title_renders_heading() {
+        let options = BTreeMap::from([(
+            "system_prompt_parts".to_string(),
+            dict(&[("content", s("body")), ("title", s("Title"))]),
+        )]);
+        let prompt = compose_system_prompt(None, Some(&options))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(prompt, "## Title\nbody");
+    }
+
+    #[test]
+    fn list_parts_expand_in_declaration_order() {
+        let options = BTreeMap::from([(
+            "system_prompt_parts".to_string(),
+            list(vec![s("one"), s("two")]),
+        )]);
+        let prompt = compose_system_prompt(None, Some(&options))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(prompt, "one\n\ntwo");
+    }
+
+    #[test]
+    fn nil_system_arg_falls_back_to_opts_system() {
+        let options = BTreeMap::from([("system".to_string(), s("fromopts"))]);
+        let prompt = compose_system_prompt(None, Some(&options))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(prompt, "fromopts");
+    }
+
+    #[test]
+    fn tool_guidance_is_injected_only_when_the_tool_is_present() {
+        // Tool carrying `guidance` → instruction auto-included after primary.
+        let with_guidance = BTreeMap::from([(
+            "tools".to_string(),
+            list(vec![dict(&[
+                ("name", s("todo")),
+                ("description", s("Track tasks")),
+                (
+                    "guidance",
+                    s("Always update the TODO tracker when working from a plan."),
+                ),
+            ])]),
+        )]);
+        let prompt = compose_system_prompt(Some("base".to_string()), Some(&with_guidance))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(
+            prompt,
+            "base\n\nAlways update the TODO tracker when working from a plan."
+        );
+
+        // Same tool without `guidance`, or a different tool set → no fragment.
+        let no_guidance = BTreeMap::from([(
+            "tools".to_string(),
+            list(vec![dict(&[
+                ("name", s("read")),
+                ("description", s("Read files")),
+            ])]),
+        )]);
+        let prompt = compose_system_prompt(Some("base".to_string()), Some(&no_guidance))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(prompt, "base");
+    }
+
+    #[test]
+    fn assemble_records_provenance_for_every_fragment() {
+        let options = BTreeMap::from([
+            ("system_prompt_parts".to_string(), s("parts")),
+            (
+                "tools".to_string(),
+                list(vec![dict(&[
+                    ("name", s("todo")),
+                    ("description", s("Track tasks")),
+                    ("guidance", s("Update the tracker.")),
+                ])]),
+            ),
+        ]);
+        let assembled = assemble_system_prompt(Some("base".to_string()), Some(&options), &[])
+            .expect("assembled");
+        // host:system_prompt_parts, primary, tool:todo.guidance — all included.
+        let ids: Vec<&str> = assembled.provenance.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains(&"host:system_prompt_parts"));
+        assert!(ids.contains(&"primary"));
+        assert!(ids.contains(&"tool:todo.guidance"));
+        let todo = assembled
+            .provenance
+            .iter()
+            .find(|t| t.id == "tool:todo.guidance")
+            .expect("todo guidance trace");
+        assert!(todo.included);
+        assert!(todo.reason.contains("tool(s) present: todo"));
     }
 }
 

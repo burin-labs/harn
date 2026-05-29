@@ -11,8 +11,16 @@ type ToolDefinitionConfig = {
   defer_loading?: bool,
   namespace?: string,
   annotations?: dict,
+  guidance?: string,
 }
 
+/**
+ * System-prompt guidance co-located with the tool. When this tool is
+ * present in the active tool set, the runtime auto-injects this text as a
+ * capability-gated system-prompt fragment (gated on the tool's own
+ * presence), so instruction and tool can never drift. Omit it and the
+ * instruction never appears. See docs/src/prompt-assembly.md.
+ */
 type ToolDefinitionSpec = {
   name: string,
   description?: string,
@@ -28,6 +36,7 @@ type ToolDefinitionSpec = {
   defer_loading?: bool,
   namespace?: string,
   annotations?: dict,
+  guidance?: string,
 }
 
 type PathScopeMatcherOptions = {
