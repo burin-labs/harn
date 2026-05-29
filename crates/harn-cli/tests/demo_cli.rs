@@ -337,6 +337,43 @@ fn obs_primitive_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn edit_language_coverage_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("edit-language-coverage");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "edit-language-coverage demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("edit_language_coverage_receipt"),
+        "demo should emit the coverage receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"json_result\":\"applied\""),
+        "apply_node must round-trip on the JSON seed:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"css_result\":\"applied\""),
+        "apply_node must round-trip on the CSS seed:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"dockerfile_result\":\"unsupported_language\""),
+        "a language with no grammar must degrade to unsupported_language:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"dockerfile_has_fallback\":true"),
+        "the unsupported result must carry a fallback_suggestion:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all
@@ -349,6 +386,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "stdlib-toolkit",
         "compaction-policy",
         "edit-rename-symbol",
+        "edit-language-coverage",
         "http-transport",
         "obs-primitive",
     ]

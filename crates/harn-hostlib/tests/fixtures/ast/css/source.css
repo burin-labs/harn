@@ -1,0 +1,20 @@
+:root {
+  --accent: #2b6cb0;
+  --gap: 8px;
+}
+
+.button {
+  color: var(--accent);
+  padding: var(--gap);
+  border-radius: 4px;
+}
+
+.button:hover {
+  opacity: 0.9;
+}
+
+@media (max-width: 600px) {
+  .button {
+    width: 100%;
+  }
+}

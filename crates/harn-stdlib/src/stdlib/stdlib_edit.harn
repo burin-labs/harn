@@ -951,6 +951,7 @@ pub fn edit_apply_node(params) {
     query: payload?.query,
     target_capture: payload?.target_capture,
     details: payload?.details,
+    fallback_suggestion: payload?.fallback_suggestion,
     error_row: payload?.error_row,
     error_column: payload?.error_column,
     errors: [],
@@ -1028,6 +1029,7 @@ pub fn edit_insert_at_anchor(params) {
     query: payload?.query,
     target_capture: payload?.target_capture,
     details: payload?.details,
+    fallback_suggestion: payload?.fallback_suggestion,
     error_row: payload?.error_row,
     error_column: payload?.error_column,
     errors: [],
@@ -1393,5 +1395,42 @@ pub fn edit_dry_run(params) {
     errors: [],
     warnings: [],
     provenance: {module: "std/edit", helper: "edit_dry_run", caller: params?.provenance},
+  }
+}
+
+/**
+ * Report the per-language AST-precise edit capability matrix — the
+ * runtime face of the B.7 onboarding contract. The agent loop calls this
+ * to decide which edit primitive a file qualifies for (and what to fall
+ * back to) instead of hard-coding a language list in prompts.
+ *
+ * Pass `{language: "rust"}` (canonical name or alias) to filter to one
+ * language; omit it to enumerate every shipped grammar. `apply_node` and
+ * `insert_at_anchor` are available for every registered grammar;
+ * `rename_symbol` and `symbols` require a per-language projection.
+ *
+ * Returns `{ok, result, fallback_suggestion, languages, details}` where
+ * each `languages` row is `{language, extension, apply_node,
+ * insert_at_anchor, rename_symbol, symbols}`. `result` is `"ok"` or
+ * `"unsupported_language"` when a `language` filter names no grammar.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_capabilities({language: "yaml"})
+ */
+pub fn edit_capabilities(params = nil) {
+  let raw = hostlib_ast_capabilities(params ?? {})
+  let payload = raw ?? {}
+  return {
+    ok: payload?.result ?? "" == "ok",
+    result: payload?.result ?? "ok",
+    fallback_suggestion: payload?.fallback_suggestion,
+    languages: payload?.languages ?? [],
+    details: payload?.details,
+    errors: [],
+    warnings: [],
+    provenance: {module: "std/edit", helper: "edit_capabilities", caller: params?.provenance},
   }
 }

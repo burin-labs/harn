@@ -137,6 +137,18 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/edit-rename-symbol/scenario.harn"),
         tape: include_str!("../../assets/demo/edit-rename-symbol/tape.jsonl"),
     },
+    Scenario {
+        id: "edit-language-coverage",
+        title: "edit.capabilities + apply_node span the B.7 tier-1 languages",
+        description: "Read the per-language AST-precise edit capability matrix (#2519), show \
+                      graceful degradation for a language with no grammar (Dockerfile returns \
+                      `unsupported_language` plus a text-edit fallback), then drive \
+                      `edit_apply_node` (dry-run) against bundled JSON and CSS seeds to prove a \
+                      format-preserving edit round-trips on the data/markup grammars added in \
+                      B.7. Fully offline.",
+        script: include_str!("../../assets/demo/edit-language-coverage/scenario.harn"),
+        tape: include_str!("../../assets/demo/edit-language-coverage/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]

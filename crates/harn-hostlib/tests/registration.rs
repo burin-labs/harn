@@ -42,6 +42,7 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_apply_node",
             "hostlib_ast_insert_at_anchor",
             "hostlib_ast_dry_run",
+            "hostlib_ast_capabilities",
         ]
     );
     // Each AST builtin must reject empty input with a structured

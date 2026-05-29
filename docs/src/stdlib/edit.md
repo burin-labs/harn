@@ -20,6 +20,10 @@ source files. Three flavors live side by side:
 - `edit_dry_run` — render a multi-op plan to a per-file unified diff
   without touching disk. The default reach when an agent wants to
   "measure twice, cut once" before committing a multi-step edit.
+- `edit_capabilities` — report which AST-precise primitives are
+  available per language. The default reach when the loop needs to
+  decide between an AST edit and a text fallback before acting (see
+  [Language coverage](#language-coverage--capability-matrix)).
 - Validators and helpers — `edit_changed_regions`,
   `edit_validate_changed_regions`, `edit_check_lazy_truncation`,
   `edit_explain_whitespace_difference`, `edit_strip_line_number_prefixes`.
@@ -746,6 +750,96 @@ pipeline default() {
   __io_println(bundle.ops[1].reason)                // "no_match"
 }
 ```
+
+## Language coverage & capability matrix
+
+The edit primitives are **query-driven and grammar-agnostic**:
+`edit_apply_node` and `edit_insert_at_anchor` work against every
+registered tree-sitter grammar with no per-language code, because span
+replacement and indentation inference operate on bytes and tree depth,
+not language semantics. `edit_rename_symbol` is the exception — it needs
+a per-language identifier-kind projection — and symbol/outline
+extraction needs a per-language extractor.
+
+| Capability | Languages |
+|---|---|
+| `apply_node`, `insert_at_anchor` | **all** registered grammars |
+| `rename_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python, Go, Swift |
+| `symbols` / `outline` | every general-purpose language (not the data/markup grammars) |
+
+Registered grammars fall into two groups:
+
+- **General-purpose** — TypeScript/TSX, JavaScript/JSX, Python, Go,
+  Rust, Java, C, C++, C#, Ruby, Kotlin, PHP, Scala, Bash, Swift, Zig,
+  Elixir, Lua, Haskell, R. Symbol extraction works; rename works for the
+  subset above.
+- **Data / markup / config** (B.7) — JSON, YAML, TOML, CSS, HTML, SQL,
+  Markdown. The query-driven edit primitives work; there is no nameable
+  symbol projection, so `rename_symbol` and `symbols`/`outline` return
+  empty / `unsupported_language`.
+
+> **Dockerfile** has no tree-sitter grammar compatible with the current
+> tree-sitter ABI, so it is intentionally absent. Files the loop can't
+> address with a grammar degrade gracefully (see below).
+
+Query the matrix at runtime with `edit_capabilities`:
+
+```harn
+import "std/edit"
+
+pipeline default() {
+  // Whole matrix, or pass {language: "yaml"} to filter to one row.
+  let caps = edit_capabilities()
+  for row in caps.languages {
+    __io_println("${row.language}: rename=${row.rename_symbol}")
+  }
+}
+```
+
+Each row is `{language, extension, apply_node, insert_at_anchor,
+rename_symbol, symbols}`. A `language` filter that names no grammar
+returns `result == "unsupported_language"` plus a `fallback_suggestion`.
+
+### Graceful degradation
+
+When a file's language has no grammar (or the requested operation isn't
+available for it), the edit builtins return
+`result == "unsupported_language"` with a `fallback_suggestion` field
+naming the text-level path:
+
+```text
+fall back to a text-level edit (std/edit `edit_safe_text_patch`)
+```
+
+The agent loop branches on `result` rather than maintaining its own
+language list: reach for an AST primitive first, and on
+`unsupported_language` fall back to `edit_safe_text_patch` /
+`edit_apply_old_new_patch`.
+
+### Adding a new language (onboarding contract)
+
+The per-language contract lives on the `Language` enum in
+`harn-hostlib` (`crates/harn-hostlib/src/ast/language.rs`) — there is no
+separate adapter object to wire up. Adding a language is a bounded
+ticket:
+
+1. **Grammar dep** — add the `tree-sitter-<lang>` crate (must be
+   compatible with the workspace's tree-sitter version).
+2. **Enum + mappings** — add a `Language` variant and its arms in
+   `name`, `ts_language`, `from_name`, `from_extension`, and
+   `primary_extension`.
+3. **Symbol extraction** — add a match arm in `ast::symbols::extract`
+   (empty for data/markup formats).
+4. **Rename projection** *(optional)* — add an arm to
+   `Language::rename_identifier_kinds` to enable `rename_symbol`.
+5. **Fixture** — drop `tests/fixtures/ast/<name>/source.<ext>` and run
+   `HARN_AST_UPDATE_GOLDEN=1 cargo test -p harn-hostlib --test ast_fixtures`
+   to generate the goldens.
+6. **Conformance** — add an `EditCase` row to
+   `tests/ast_language_coverage.rs` proving a real edit round-trips.
+
+The capability matrix (`Language::edit_capabilities`) and the
+`every_language_has_a_fixture` test then keep the new language honest.
 
 ## See also
 

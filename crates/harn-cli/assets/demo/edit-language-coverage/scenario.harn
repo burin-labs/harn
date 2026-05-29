@@ -1,0 +1,99 @@
+/**
+ * edit-language-coverage demo: exercise the B.7 AST language-coverage
+ * surface end-to-end, fully offline (no LLM, no network).
+ *
+ * The agent loop's contract for "can I edit this file with an AST
+ * primitive?" is the capability matrix exposed by `edit_capabilities`
+ * (#2519) plus the query-driven `edit_apply_node` primitive (#2506),
+ * which works against any registered tree-sitter grammar — including
+ * the data/markup grammars added in B.7 (JSON, YAML, TOML, CSS, HTML,
+ * SQL, Markdown).
+ *
+ * This scenario:
+ *
+ *   1. Reads the capability matrix and reports how many languages
+ *      support each primitive — the runtime face of the onboarding
+ *      contract.
+ *   2. Demonstrates graceful degradation: a language with no grammar
+ *      returns `unsupported_language` plus a `fallback_suggestion`.
+ *   3. Runs `edit_apply_node` (dry-run, so the demo stays
+ *      sandbox-clean) against bundled JSON and CSS seeds, proving a
+ *      real format-preserving edit round-trips on data formats.
+ *
+ * The receipt at the end captures the matrix totals and the per-edit
+ * results so the demo-gate smoke test can assert end-to-end behaviour.
+ */
+import { edit_apply_node, edit_capabilities } from "std/edit"
+
+fn count_supporting(rows, field) {
+  var total = 0
+  for row in rows {
+    if row[field] {
+      total = total + 1
+    }
+  }
+  return total
+}
+
+pipeline default(_task) {
+  // The edit primitives that write to disk share the deterministic-tools
+  // gate; enable it once before any apply_node call (even dry-run).
+  let _gate = hostlib_enable("tools:deterministic")
+  // 1. Capability matrix — the onboarding contract, queryable.
+  let caps = edit_capabilities()
+  let rows = caps.languages
+  let apply_count = count_supporting(rows, "apply_node")
+  let rename_count = count_supporting(rows, "rename_symbol")
+  // 2. Graceful degradation for a language with no registered grammar.
+  let dockerfile = edit_capabilities({language: "dockerfile"})
+  // 3. Real format-preserving edits against bundled data-format seeds.
+  let assets = asset_root()
+  let json_edit = edit_apply_node(
+    {
+      path: assets + "/seed/config.json",
+      query: "(pair value: (number) @target)",
+      replacement: "2",
+      dry_run: true,
+    },
+  )
+  let css_edit = edit_apply_node(
+    {
+      path: assets + "/seed/theme.css",
+      query: "(declaration (plain_value) @target)",
+      replacement: "blue",
+      select: "first",
+      dry_run: true,
+    },
+  )
+  __io_println("=== edit-language-coverage demo ===")
+  __io_println(
+    "languages: " + to_string(len(rows)) + " — apply_node=" + to_string(apply_count)
+      + ", rename_symbol="
+      + to_string(rename_count),
+  )
+  __io_println(
+    "dockerfile: " + dockerfile.result + " — fallback: "
+      + dockerfile.fallback_suggestion ?? "none",
+  )
+  __io_println(
+    "json apply_node: " + json_edit.result + " — " + to_string(json_edit.match_count) + " edit(s)",
+  )
+  __io_println(
+    "css apply_node: " + css_edit.result + " — " + to_string(css_edit.match_count) + " edit(s)",
+  )
+  __io_println("")
+  let receipt = {
+    receipt_kind: "edit_language_coverage_receipt",
+    language_count: len(rows),
+    apply_node_count: apply_count,
+    rename_symbol_count: rename_count,
+    dockerfile_result: dockerfile.result,
+    dockerfile_has_fallback: dockerfile.fallback_suggestion != nil,
+    json_result: json_edit.result,
+    json_match_count: json_edit.match_count,
+    css_result: css_edit.result,
+    css_match_count: css_edit.match_count,
+  }
+  __io_println(json_stringify(receipt))
+  return receipt
+}

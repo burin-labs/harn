@@ -1,0 +1,5 @@
+{
+  "name": "harn-demo",
+  "version": 1,
+  "features": ["ast", "edit"]
+}

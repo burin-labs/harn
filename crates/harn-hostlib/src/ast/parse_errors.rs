@@ -339,7 +339,14 @@ fn declaration_kinds(language: Language) -> (&'static [&'static str], &'static [
         | Language::Elixir
         | Language::Lua
         | Language::Haskell
-        | Language::R => (&[], &[]),
+        | Language::R
+        | Language::Json
+        | Language::Yaml
+        | Language::Toml
+        | Language::Css
+        | Language::Html
+        | Language::Sql
+        | Language::Markdown => (&[], &[]),
     }
 }
 
