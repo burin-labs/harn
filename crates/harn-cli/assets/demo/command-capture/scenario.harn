@@ -1,0 +1,104 @@
+/**
+ * command-capture demo: never re-run a slow command just to see what a
+ * trailing filter threw away.
+ *
+ * When an agent runs `slow_cmd | tail -5`, the shell applies `tail` before
+ * Harn's command runner sees any bytes, so only the 5 surviving lines are
+ * captured and the full `slow_cmd` output is gone — recovering it means
+ * re-running the slow command. The std/agent/command_capture recognizer
+ * spots that shape and rewrites it to
+ *
+ *     slow_cmd | tee '<capture>' 2>/dev/null | tail -5
+ *
+ * `tee` is transparent (the filter sees identical bytes, the exit status is
+ * unchanged) so the agent still gets exactly the filtered output it asked
+ * for — but the producer's COMPLETE output is now preserved on disk, and a
+ * post-run `output_capture` hint points the agent at it.
+ *
+ * This scenario walks the recognizer through realistic commands, shows the
+ * cases it deliberately leaves untouched (false-negatives over false-
+ * positives), then materializes a capture file and demonstrates the
+ * `output_capture` hint an agent would receive. Fully offline — no LLM, no
+ * subprocess, no network.
+ */
+import {
+  command_capture_annotate,
+  command_capture_plan,
+  command_capture_rewrite,
+} from "std/agent/command_capture"
+
+pipeline default(_task) {
+  __io_println("=== command-capture demo ===")
+  __io_println("")
+  // 1. Rewrites: a `tee` is woven in just before the final consume-all
+  //    filter, capturing everything the filter would otherwise discard.
+  let cap = "/tmp/full-output.txt"
+  __io_println("rewritten (full output preserved):")
+  let rewritable = [
+    "cargo build 2>&1 | tail -20",
+    "find . -name '*.rs' | xargs wc -l | sort -n | tail -1",
+    "cd crates && git log --oneline | grep fix",
+  ]
+  for cmd in rewritable {
+    __io_println("  " + cmd)
+    __io_println("    -> " + command_capture_rewrite(cmd, cap))
+  }
+  __io_println("")
+  // 2. Left untouched on purpose. `head` and `grep -q` stop the producer
+  //    early (capturing them would be a partial lie); command substitution
+  //    and subshell grouping are refused rather than parsed heuristically.
+  __io_println("left untouched (bail-preferring):")
+  let bails = [
+    "build.sh | head -10",
+    "deploy.sh 2>&1 | grep -q DEPLOYED",
+    "cat \"$(config-path)\" | tail",
+    "(setup && teardown) | wc -l",
+  ]
+  for cmd in bails {
+    let result = command_capture_rewrite(cmd, cap)
+    let shown = if result == nil {
+      "(unchanged)"
+    } else {
+      result
+    }
+    __io_println("  " + cmd + "  ->  " + shown)
+  }
+  __io_println("")
+  // 3. End-to-end effect: materialize the full output `tee` would have
+  //    written, then show the post-run result an agent receives — the
+  //    filtered tail it asked for PLUS an output_capture hint pointing at
+  //    the complete output. The hint is added only because the capture file
+  //    exists, so a sandbox that blocks the write produces no false promise.
+  // Write under the workspace root so the demo stays inside its sandbox
+  // (a real run captures to the host temp dir instead).
+  let capture_path = path_join(execution_root(), "harn-demo-capture-" + uuid() + ".out")
+  var full = ""
+  var i = 1
+  while i <= 200 {
+    full = full + to_string(i) + "\n"
+    i = i + 1
+  }
+  harness.fs.write_text(capture_path, full)
+  let plan = command_capture_plan("seq 200 | tail -3", capture_path)
+  let agent_result = {stdout: "198\n199\n200\n", exit_code: 0, success: true}
+  let annotated = command_capture_annotate(agent_result, plan)
+  __io_println("agent's run_command result:")
+  __io_println("  stdout (filtered): " + json_stringify(annotated.stdout))
+  __io_println("  output_capture.producer: " + annotated.output_capture.producer)
+  __io_println("  output_capture.hint: " + annotated.output_capture.hint)
+  __io_println("")
+  let captured_lines = len(read_file(capture_path).trim().split("\n"))
+  let filtered_lines = len(annotated.stdout.trim().split("\n"))
+  harness.fs.delete(capture_path)
+  let receipt = {
+    receipt_kind: "command_capture_receipt",
+    rewrite_example: command_capture_rewrite("seq 200 | tail -3", "/tmp/full.out"),
+    head_left_untouched: command_capture_rewrite("ls | head -5", cap) == nil,
+    captured_lines: captured_lines,
+    filtered_lines: filtered_lines,
+    capture_hint_present: annotated?.output_capture != nil,
+    producer: plan.producer,
+  }
+  __io_println(json_stringify(receipt))
+  return receipt
+}

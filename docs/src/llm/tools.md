@@ -211,6 +211,21 @@ want BM25, hybrid ranking, embeddings, or an LLM reranker for deferred tools.
 - `read_command_output_tail` — read the last bytes of command output without
   requiring the model to calculate offsets
 
+When `run_command` runs a `producer | tail/wc/grep/sort/…` shell pipeline (a
+shell-mode command, or `argv: ["sh", "-c", …]`), the trailing consume-all
+filter is applied by the shell *before* Harn captures any output, so the
+producer's full output would normally be lost — recovering it means re-running
+a potentially slow command. The command runner detects this shape and
+transparently rewrites it to `producer | tee '<capture>' 2>/dev/null | filter`:
+the model still sees exactly the filtered output it asked for, while the
+producer's complete output is preserved to a temp file. A post-run
+`output_capture` field then points the model at that file (read it with
+`read_command_output`/`read_file` instead of re-running). The rewrite is
+deliberately conservative — it leaves early-terminating filters (`head`,
+`grep -q`/`-m`) and anything it cannot parse safely (command substitution,
+subshells, backgrounded jobs, …) untouched — and is on by default; set
+`preserve_filtered_output: false` to disable it.
+
 `agent_read_tools(...)` installs root-scoped `read_file`, `read_file_tail`,
 `list_directory`, `get_file_outline`, `search_files`, and read-only
 `git_inspect`. `agent_host_tools(...)` composes both groups.
@@ -281,6 +296,7 @@ Useful options:
 | `search_max_matches` / `max_search_matches` | Default `search_files.max_matches` when the model omits one; callers can still request a different cap per call. |
 | `exclude_globs` / `search_exclude_globs` | Baseline exclusions for `search_files` using root-relative globs. Tool-call `exclude_globs` are merged with these defaults, not substituted for them. |
 | `allow_argv_prefixes` | Deny `run_command` calls unless `argv` starts with a listed string or list prefix. |
+| `preserve_filtered_output` | Default `true`. For a `producer \| tail/wc/grep/…` pipeline, tee the producer's full output to a temp file so the model can read it via `output_capture` instead of re-running a slow command. Conservative (skips `head`, `grep -q`/`-m`, command substitution, subshells, …). Set `false` to disable. |
 | `command_policy` / `allow_command` | Closure hook for custom command approval, denial, or rewrite. |
 | `annotations` | Merge extra annotations into generated tool definitions. |
 | `tool_config` | Advanced raw `tool_define(...)` config overrides per logical tool or `"*"`. |
