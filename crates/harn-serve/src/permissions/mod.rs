@@ -25,14 +25,22 @@
 //!   without touching any caller.
 //! - [`audit`] — [`AuditEntry`] events emitted on every grant / deny /
 //!   escalation, queryable through `store.history(filter)`.
+//! - [`enforcement`] — the runtime arm: lowers a [`PermissionPolicy`]
+//!   into the [`CapabilityPolicy`](harn_vm::orchestration::CapabilityPolicy)
+//!   the VM enforces and (with the `hostlib` feature) the
+//!   [`SandboxSpec`](harn_hostlib::sandbox::SandboxSpec) a sandbox
+//!   backend provisions from.
 
 pub mod audit;
+pub mod enforcement;
 pub mod policy;
 pub mod request;
 pub mod rules;
 pub mod store;
 
 pub use audit::{AuditEntry, AuditFilter, AuditOutcome};
+#[cfg(feature = "hostlib")]
+pub use enforcement::sandbox;
 pub use policy::{LlmPolicy, PermissionPolicy, PolicyVersion, RedactionPolicy};
 pub use request::{ActionClass, DecisionScope, PermissionDecision, PermissionRequest, Risk};
 pub use rules::{RememberRule, RuleId};

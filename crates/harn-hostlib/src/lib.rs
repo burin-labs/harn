@@ -34,6 +34,7 @@ pub mod fs;
 pub mod fs_snapshot;
 pub mod fs_watch;
 pub mod process;
+pub mod sandbox;
 pub mod scanner;
 pub mod schemas;
 pub mod secret_store;
