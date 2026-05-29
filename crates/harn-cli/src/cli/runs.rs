@@ -39,6 +39,11 @@ pub(crate) struct ReplayArgs {
     /// SQLite EventLog database to read for `--session-id`.
     #[arg(long, value_name = "PATH", requires = "session_id")]
     pub events_db: Option<String>,
+    /// Time-travel: rehydrate the session only up to (and including) this
+    /// event id, replaying it as it stood at that point. Requires
+    /// `--session-id`; omit to replay the whole session.
+    #[arg(long, value_name = "EVENT_ID", requires = "session_id")]
+    pub at: Option<u64>,
     /// Number of replay reads to compare for deterministic output.
     #[arg(long, default_value_t = 1)]
     pub runs: usize,

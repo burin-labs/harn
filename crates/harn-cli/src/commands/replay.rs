@@ -79,6 +79,10 @@ pub(crate) struct ReplaySourceSummary {
     pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub events_db: Option<String>,
+    /// Time-travel cutoff event id (`--at`), when the replay was
+    /// rehydrated to a past point. `None` for a full-session replay.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at_event_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +112,10 @@ enum ReplaySource {
     Session {
         session_id: String,
         events_db: PathBuf,
+        /// Time-travel cutoff: when set, only events with `event_id <=
+        /// at` are rehydrated, replaying the session as it stood at that
+        /// point. `None` replays the whole session.
+        at: Option<u64>,
     },
 }
 
@@ -119,21 +127,25 @@ impl ReplaySource {
                 path: Some(path.to_string_lossy().into_owned()),
                 session_id: None,
                 events_db: None,
+                at_event_id: None,
             },
             Self::ReplayTrace { path, .. } => ReplaySourceSummary {
                 kind: "replay_trace".to_string(),
                 path: Some(path.to_string_lossy().into_owned()),
                 session_id: None,
                 events_db: None,
+                at_event_id: None,
             },
             Self::Session {
                 session_id,
                 events_db,
+                at,
             } => ReplaySourceSummary {
                 kind: "event_log_session".to_string(),
                 path: None,
                 session_id: Some(session_id.clone()),
                 events_db: Some(events_db.to_string_lossy().into_owned()),
+                at_event_id: *at,
             },
         }
     }
@@ -254,6 +266,9 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
             return 1;
         }
     };
+    if let ReplaySource::Session { at: Some(at), .. } = &source {
+        println!("Time-travelled to event {at}: replaying the session as it stood at that point.");
+    }
     for (index, execution) in executions.iter().enumerate() {
         if runs > 1 {
             println!("Replay run {}:", index + 1);
@@ -287,6 +302,7 @@ fn resolve_source(args: &ReplayArgs) -> Result<ReplaySource, String> {
         return Ok(ReplaySource::Session {
             session_id: session_id.clone(),
             events_db: PathBuf::from(events_db),
+            at: args.at,
         });
     }
     if let Some(fixture) = &args.fixture {
@@ -333,7 +349,8 @@ fn execute_once(source: &ReplaySource, index: usize) -> Result<ReplayExecution, 
         ReplaySource::Session {
             session_id,
             events_db,
-        } => execute_session_replay(session_id, events_db),
+            at,
+        } => execute_session_replay(session_id, events_db, *at),
     }
 }
 
@@ -355,7 +372,28 @@ fn execute_run_record(path: &Path) -> Result<ReplayExecution, String> {
     })
 }
 
-fn execute_session_replay(session_id: &str, events_db: &Path) -> Result<ReplayExecution, String> {
+/// Number of leading events to keep for a `--at <event-id>` time-travel
+/// cutoff. Agent-session events arrive in ascending `event_id` order, so
+/// the events with `event_id <= at` form a contiguous prefix and replaying
+/// it reconstructs the run as it stood at that point. Errors when the
+/// cutoff precedes every recorded event — a usage mistake, not a silent
+/// empty replay.
+fn time_travel_keep_count(event_ids: &[u64], at: u64, session_id: &str) -> Result<usize, String> {
+    let keep = event_ids.partition_point(|&id| id <= at);
+    if keep == 0 {
+        return Err(format!(
+            "session {session_id:?} has no events at or before event id {at} \
+             (the earliest recorded event is later)"
+        ));
+    }
+    Ok(keep)
+}
+
+fn execute_session_replay(
+    session_id: &str,
+    events_db: &Path,
+    at: Option<u64>,
+) -> Result<ReplayExecution, String> {
     let log = AnyEventLog::Sqlite(
         SqliteEventLog::open_read_only(events_db.to_path_buf(), 1).map_err(|error| {
             format!(
@@ -364,7 +402,7 @@ fn execute_session_replay(session_id: &str, events_db: &Path) -> Result<ReplayEx
             )
         })?,
     );
-    let events =
+    let mut events =
         futures::executor::block_on(load_agent_session_replay_events_from_log(&log, session_id))
             .map_err(|error| format!("failed to read session events: {error}"))?;
     if events.is_empty() {
@@ -372,6 +410,14 @@ fn execute_session_replay(session_id: &str, events_db: &Path) -> Result<ReplayEx
             "event log {} does not contain events for session_id {session_id:?}",
             events_db.display()
         ));
+    }
+
+    // Time-travel: rehydrate the session as it stood at `--at` by keeping
+    // only the event prefix up to and including the cutoff.
+    if let Some(cutoff) = at {
+        let event_ids: Vec<u64> = events.iter().map(|event| event.event_id).collect();
+        let keep = time_travel_keep_count(&event_ids, cutoff, session_id)?;
+        events.truncate(keep);
     }
     let run =
         harn_vm::session_bundle::import_run_record_from_agent_session_events(session_id, &events)
@@ -745,4 +791,42 @@ fn print_json_error(code: &str, message: impl Into<String>) {
 
 fn to_string_pretty<T: Serialize>(value: &T) -> String {
     serde_json::to_string_pretty(value).expect("replay JSON payload serializes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::time_travel_keep_count;
+
+    #[test]
+    fn time_travel_keeps_prefix_through_inclusive_cutoff() {
+        let ids = [1, 2, 3, 4, 5];
+        // The cutoff is inclusive: `--at 3` keeps events 1..=3.
+        assert_eq!(time_travel_keep_count(&ids, 3, "s").unwrap(), 3);
+    }
+
+    #[test]
+    fn time_travel_cutoff_past_the_end_keeps_everything() {
+        let ids = [1, 2, 3];
+        assert_eq!(time_travel_keep_count(&ids, 99, "s").unwrap(), 3);
+    }
+
+    #[test]
+    fn time_travel_cutoff_between_ids_keeps_the_lower_prefix() {
+        // Event ids need not be contiguous; `--at 4` over [2,4,6] keeps the
+        // events at or before 4 (i.e. 2 and 4), and a cutoff that falls in
+        // a gap keeps only the events below it.
+        let ids = [2, 4, 6];
+        assert_eq!(time_travel_keep_count(&ids, 4, "s").unwrap(), 2);
+        assert_eq!(time_travel_keep_count(&ids, 5, "s").unwrap(), 2);
+    }
+
+    #[test]
+    fn time_travel_cutoff_before_first_event_is_an_error() {
+        let ids = [10, 11, 12];
+        let error = time_travel_keep_count(&ids, 9, "sess-abc").unwrap_err();
+        assert!(
+            error.contains("sess-abc") && error.contains("event id 9"),
+            "error should name the session and cutoff: {error}"
+        );
+    }
 }
