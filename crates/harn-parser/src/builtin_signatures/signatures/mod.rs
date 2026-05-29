@@ -8,8 +8,8 @@
 
 mod agents;
 mod integrations;
+mod llm;
 mod project;
-mod schema;
 mod shapes;
 mod stdlib;
 mod workflow;
@@ -25,8 +25,8 @@ pub(crate) fn groups() -> [&'static [BuiltinSignature]; 6] {
         stdlib::SIGNATURES,
         agents::SIGNATURES,
         integrations::SIGNATURES,
+        llm::SIGNATURES,
         project::SIGNATURES,
-        schema::SIGNATURES,
         workflow::SIGNATURES,
     ]
 }

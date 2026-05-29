@@ -349,7 +349,7 @@ pub(crate) fn llm_catalog_value() -> VmValue {
 /// quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`.
 /// Alias for the read-only `harness.llm.catalog()` handle method, available for
 /// scripts that do not receive a `Harness` parameter.
-#[harn_builtin(sig = "llm_catalog() -> list", category = "llm.config")]
+#[harn_builtin(sig_expr = harn_builtin_meta::signatures::LLM_CATALOG, category = "llm.config")]
 fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(llm_catalog_value())
 }
@@ -419,7 +419,7 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
 /// `"ok"`, `"missing"`, `"not_required"`, `"deferred"`. Alias for the
 /// read-only `harness.llm.providers()` handle method, available for scripts that
 /// do not receive a `Harness` parameter.
-#[harn_builtin(sig = "llm_provider_status() -> list", category = "llm.config")]
+#[harn_builtin(sig_expr = harn_builtin_meta::signatures::LLM_PROVIDER_STATUS, category = "llm.config")]
 fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(llm_provider_status_value())
 }

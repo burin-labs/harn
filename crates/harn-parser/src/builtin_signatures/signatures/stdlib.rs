@@ -11,38 +11,6 @@ use super::{
 const TY_DURATION_OR_INT: Ty = Ty::Union(&[TY_DURATION, TY_INT]);
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
-    BuiltinSignature::simple(
-        "__cache_clear",
-        &[Param::optional("options", TY_DICT_OR_NIL)],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple(
-        "__cache_get",
-        &[
-            Param::new("key", TY_STRING),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__cache_put",
-        &[
-            Param::new("key", TY_STRING),
-            Param::new("value", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__cache_stats",
-        &[Param::optional("options", TY_DICT_OR_NIL)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__cache_stats_reset",
-        &[Param::optional("options", TY_DICT_OR_NIL)],
-        TY_NIL,
-    ),
     // `__deep_merge`, `__dict_filter_nil`, `__dict_from_pairs`,
     // `__dict_merge`, `__list_unique`, `__dict_omit`, `__dict_pick`,
     BuiltinSignature::simple(
@@ -92,15 +60,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "__oauth_dynreg_validate_metadata",
         &[Param::new("metadata", TY_DICT)],
         TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "__llm_cache_key",
-        &[
-            Param::new("prompt", TY_ANY),
-            Param::optional("system", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_STRING,
     ),
     BuiltinSignature::simple("__select_list", &[Param::new("channels", TY_LIST)], TY_DICT),
     BuiltinSignature::simple(
@@ -453,7 +412,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("waitpoint_create", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("waitpoint_wait", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("window", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("with_rate_limit", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::simple("yield_now", &[], TY_NIL),
     // Clone / merge / dedupe helpers — see crates/harn-vm/src/stdlib/collections.rs.
     // `clone`, `deep_clone`, `deep_merge`, `unique`,

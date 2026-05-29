@@ -14,6 +14,7 @@
 //! `@NAME` signature injection.
 
 pub mod shapes;
+pub mod signatures;
 
 /// A complete, static description of one builtin: identifier, arity range,
 /// per-parameter types, generic type parameters, return type, and any

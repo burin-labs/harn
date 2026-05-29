@@ -492,25 +492,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_STRING,
     ),
-    BuiltinSignature::simple(
-        "provider_capabilities",
-        &[
-            Param::new("provider", TY_STRING),
-            Param::optional("model", TY_STRING_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("provider_capabilities_clear", &[], TY_BOOL),
-    BuiltinSignature::simple(
-        "provider_capabilities_install",
-        &[Param::new("toml_src", TY_STRING)],
-        TY_BOOL,
-    ),
-    BuiltinSignature::simple(
-        "provider_register",
-        &[Param::new("name", TY_STRING)],
-        TY_BOOL,
-    ),
     BuiltinSignature::simple("sse_close", &[Param::new("stream", TY_STRING)], TY_BOOL),
     BuiltinSignature::simple(
         "sse_connect",
