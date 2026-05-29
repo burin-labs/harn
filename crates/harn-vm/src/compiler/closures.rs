@@ -278,17 +278,11 @@ impl Compiler {
             }
 
             for sn in body {
-                self.compile_node(sn)?;
-                if Self::produces_value(&sn.node) {
-                    self.chunk.emit(Op::Pop, self.line);
-                }
+                self.compile_discarded_stmt(sn)?;
             }
             if let Some(summary_body) = summarize {
                 for sn in summary_body {
-                    self.compile_node(sn)?;
-                    if Self::produces_value(&sn.node) {
-                        self.chunk.emit(Op::Pop, self.line);
-                    }
+                    self.compile_discarded_stmt(sn)?;
                 }
             }
             self.drain_finallys_to_floor(finally_floor)?;

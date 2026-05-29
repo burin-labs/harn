@@ -170,10 +170,7 @@ impl Compiler {
         self.compile_destructuring(pattern, true)?;
         self.record_binding_type(pattern, item_type);
         for sn in body {
-            self.compile_node(sn)?;
-            if Self::produces_value(&sn.node) {
-                self.chunk.emit(Op::Pop, self.line);
-            }
+            self.compile_discarded_stmt(sn)?;
         }
         self.drain_finallys_to_floor(finally_floor)?;
         self.end_scope();

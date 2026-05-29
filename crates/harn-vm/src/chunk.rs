@@ -304,6 +304,23 @@ pub struct Chunk {
     /// shape) emit none of the flagged opcodes, so the walk is wasted
     /// work on every invocation.
     pub(crate) references_outer_names: bool,
+    /// Compile-time operand-stack-depth tracking for the debug-build
+    /// balance assertion (issue #2622). `balance_depth` is the running net
+    /// effect of every *linearly-modeled* opcode emitted so far;
+    /// `balance_nonlinear` counts emits whose effect can't be tracked by a
+    /// straight-line sum (jumps, `return`, async/handler ops, variadic ops
+    /// whose count isn't an emit argument). A statement is "balance-exact"
+    /// only when `balance_nonlinear` is unchanged across its compilation,
+    /// at which point `balance_depth`'s delta is its true net stack effect.
+    /// Transient compile-time state: reset by [`Chunk::new`], never
+    /// serialized into [`CachedChunk`], and read only by debug assertions —
+    /// so a wrong absolute value (which a non-exact statement can leave
+    /// behind) is harmless; only per-statement *deltas over exact spans*
+    /// are ever trusted.
+    #[cfg(debug_assertions)]
+    balance_depth: i32,
+    #[cfg(debug_assertions)]
+    balance_nonlinear: u32,
 }
 
 pub type ChunkRef = Rc<Chunk>;
@@ -504,6 +521,73 @@ impl CompiledFunction {
     }
 }
 
+/// A snapshot of [`Chunk`]'s compile-time balance model, returned by
+/// [`Chunk::balance_probe`] and consumed by [`Chunk::balance_delta_since`].
+#[cfg(debug_assertions)]
+#[derive(Clone, Copy)]
+pub(crate) struct BalanceProbe {
+    depth: i32,
+    nonlinear: u32,
+}
+
+/// Net operand-stack effect (`pushes - pops`) of one emitted opcode, for
+/// the debug-build balance assertion (issue #2622). `count` is the opcode's
+/// variadic arity when that arity is the emit-call argument (`BuildList`
+/// length, `Call` argc, …) and `0` otherwise.
+///
+/// `Some(delta)` means the effect is exactly modeled. `None` marks an
+/// opcode a straight-line running sum can't track — control flow that
+/// branches or terminates (`Jump*`, `Return`, `Throw`, `TailCall`),
+/// async/handler ops, and variadic ops whose arity rides in a raw operand
+/// byte rather than the emit argument (`BuildEnum`, `MatchEnum`). Such an
+/// opcode taints its enclosing statement as non-exact, so the assertion
+/// skips it instead of risking a false trip.
+///
+/// The `match` is intentionally exhaustive with no `_` arm: adding an
+/// opcode forces a classification here (a compile error otherwise), so the
+/// balance model can't silently drift out of sync with the instruction set.
+#[cfg(debug_assertions)]
+fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
+    use Op::*;
+    let count = count as i32;
+    Some(match op {
+        // Push one value.
+        Constant | Nil | True | False | GetVar | GetArgc | GetLocalSlot | Closure | Dup => 1,
+        // Consume one value (into a binding / property / discard). `SetVar`,
+        // `SetProperty` and the local-slot stores read their target by name
+        // or slot index, so they only pop the value being stored.
+        DefLet | DefVar | SetVar | DefLocalSlot | SetLocalSlot | SetProperty | Pop => -1,
+        // Value-preserving: unary ops, by-name lookups/checks, and scope /
+        // iterator / exception-handler bookkeeping (the last three touch
+        // side stacks, not the operand stack).
+        Negate | Not | GetProperty | GetPropertyOpt | CheckType | TryUnwrap | TryWrapOk | Swap
+        | PushScope | PopScope | PopIterator | PopHandler => 0,
+        // Pop two, push one.
+        Add | Sub | Mul | Div | Mod | Pow | AddInt | SubInt | MulInt | DivInt | ModInt
+        | AddFloat | SubFloat | MulFloat | DivFloat | ModFloat | Equal | NotEqual | Less
+        | Greater | LessEqual | GreaterEqual | EqualInt | NotEqualInt | LessInt | GreaterInt
+        | LessEqualInt | GreaterEqualInt | EqualFloat | NotEqualFloat | LessFloat
+        | GreaterFloat | LessEqualFloat | GreaterEqualFloat | EqualBool | NotEqualBool
+        | EqualString | NotEqualString | Contains | Subscript | SubscriptOpt => -1,
+        // `IterInit` consumes the iterable and pushes nothing (the iterator
+        // lives on a side stack).
+        IterInit => -1,
+        // Pop three (or two values + a by-name target), push one.
+        Slice | SetSubscript => -2,
+        // Variadic whose arity is the emit argument: pop `count`, push one.
+        BuildList | Concat | CallBuiltin => 1 - count,
+        BuildDict => 1 - 2 * count,
+        // Calls also pop the callee/receiver beneath the args.
+        Call | MethodCall | MethodCallOpt => -count,
+        // Non-linear (see doc comment): branches, terminators, async/handler
+        // ops, and variadic ops whose arity isn't the emit argument.
+        Jump | JumpIfFalse | JumpIfTrue | IterNext | Return | TailCall | Throw | TryCatchSetup
+        | Spawn | Pipe | Parallel | ParallelMap | ParallelMapStream | ParallelSettle
+        | SyncMutexEnter | Import | SelectiveImport | DeadlineSetup | DeadlineEnd | BuildEnum
+        | MatchEnum | Yield | CallSpread | CallBuiltinSpread | MethodCallSpread => return None,
+    })
+}
+
 impl Chunk {
     pub fn new() -> Self {
         Self {
@@ -520,6 +604,10 @@ impl Chunk {
             constant_strings: Rc::new(RefCell::new(Vec::new())),
             local_slots: Vec::new(),
             references_outer_names: false,
+            #[cfg(debug_assertions)]
+            balance_depth: 0,
+            #[cfg(debug_assertions)]
+            balance_nonlinear: 0,
         }
     }
 
@@ -542,6 +630,8 @@ impl Chunk {
 
     /// Emit a single-byte instruction.
     pub fn emit(&mut self, op: Op, line: u32) {
+        #[cfg(debug_assertions)]
+        self.note_balance(op, 0);
         let col = self.current_col;
         let op_offset = self.code.len();
         self.code.push(op as u8);
@@ -557,6 +647,8 @@ impl Chunk {
 
     /// Emit an instruction with a u16 argument.
     pub fn emit_u16(&mut self, op: Op, arg: u16, line: u32) {
+        #[cfg(debug_assertions)]
+        self.note_balance(op, arg);
         let col = self.current_col;
         let op_offset = self.code.len();
         self.code.push(op as u8);
@@ -581,6 +673,8 @@ impl Chunk {
 
     /// Emit an instruction with a u8 argument.
     pub fn emit_u8(&mut self, op: Op, arg: u8, line: u32) {
+        #[cfg(debug_assertions)]
+        self.note_balance(op, arg as u16);
         let col = self.current_col;
         let op_offset = self.code.len();
         self.code.push(op as u8);
@@ -605,6 +699,8 @@ impl Chunk {
         arg_count: u8,
         line: u32,
     ) {
+        #[cfg(debug_assertions)]
+        self.note_balance(Op::CallBuiltin, arg_count as u16);
         let col = self.current_col;
         let op_offset = self.code.len();
         self.code.push(Op::CallBuiltin as u8);
@@ -622,6 +718,8 @@ impl Chunk {
 
     /// Emit a direct builtin spread call.
     pub fn emit_call_builtin_spread(&mut self, id: crate::BuiltinId, name_idx: u16, line: u32) {
+        #[cfg(debug_assertions)]
+        self.note_balance(Op::CallBuiltinSpread, 0);
         let col = self.current_col;
         self.code.push(Op::CallBuiltinSpread as u8);
         self.code.extend_from_slice(&id.raw().to_be_bytes());
@@ -645,6 +743,8 @@ impl Chunk {
     }
 
     fn emit_method_call_inner(&mut self, op: Op, name_idx: u16, arg_count: u8, line: u32) {
+        #[cfg(debug_assertions)]
+        self.note_balance(op, arg_count as u16);
         let col = self.current_col;
         let op_offset = self.code.len();
         self.code.push(op as u8);
@@ -669,6 +769,8 @@ impl Chunk {
 
     /// Emit a jump instruction with a placeholder offset. Returns the position to patch.
     pub fn emit_jump(&mut self, op: Op, line: u32) -> usize {
+        #[cfg(debug_assertions)]
+        self.note_balance(op, 0);
         let col = self.current_col;
         self.code.push(op as u8);
         let patch_pos = self.code.len();
@@ -700,6 +802,41 @@ impl Chunk {
     /// Read a u16 argument at the given position.
     pub fn read_u16(&self, pos: usize) -> u16 {
         ((self.code[pos] as u16) << 8) | (self.code[pos + 1] as u16)
+    }
+
+    /// Fold one just-emitted opcode into the compile-time operand-stack
+    /// balance model (issue #2622). See [`op_stack_delta`] for the
+    /// linear-vs-non-linear classification.
+    #[cfg(debug_assertions)]
+    fn note_balance(&mut self, op: Op, count: u16) {
+        match op_stack_delta(op, count) {
+            Some(delta) => self.balance_depth += delta,
+            None => self.balance_nonlinear += 1,
+        }
+    }
+
+    /// Snapshot the balance model before compiling a statement; pair with
+    /// [`Chunk::balance_delta_since`].
+    #[cfg(debug_assertions)]
+    pub(crate) fn balance_probe(&self) -> BalanceProbe {
+        BalanceProbe {
+            depth: self.balance_depth,
+            nonlinear: self.balance_nonlinear,
+        }
+    }
+
+    /// Net operand-stack effect emitted since `probe`, or `None` when any
+    /// non-linearly-modeled opcode was emitted in that span (which makes
+    /// the running sum untrustworthy, so callers must not assert on it).
+    /// The absolute `balance_depth` may be meaningless after a non-exact
+    /// span — only deltas over a fully-exact span are valid.
+    #[cfg(debug_assertions)]
+    pub(crate) fn balance_delta_since(&self, probe: BalanceProbe) -> Option<i32> {
+        if self.balance_nonlinear == probe.nonlinear {
+            Some(self.balance_depth - probe.depth)
+        } else {
+            None
+        }
     }
 
     fn register_inline_cache(&mut self, op_offset: usize) {
@@ -925,6 +1062,10 @@ impl Chunk {
             constant_strings: Rc::new(RefCell::new(vec![None; constants_count])),
             local_slots: cached.local_slots.clone(),
             references_outer_names: cached.references_outer_names,
+            #[cfg(debug_assertions)]
+            balance_depth: 0,
+            #[cfg(debug_assertions)]
+            balance_nonlinear: 0,
         }
     }
 
