@@ -13,6 +13,10 @@ fn write_fixture(dir: string, name: string, body: string) -> string {
 }
 
 pipeline default() {
+  // `edit_safe_text_patch` calls `hostlib_fs_read_text` and
+  // `hostlib_fs_safe_text_patch`, both of which require the
+  // deterministic-tools feature gate (issue #2548).
+  hostlib_enable("tools:deterministic")
   let root = path_join(
     harness.fs.temp_dir(),
     "harn_edit_safe_text_patch_" + to_string(harness.random.gen_range(100000, 999999)),
@@ -136,7 +140,6 @@ pipeline default() {
   let staged_path = write_fixture(root, "staged.txt", "v1\n")
   let staged_pre = "sha256:" + sha256("v1\n")
   let staged_session = "harn-edit-safe-text-patch-" + to_string(harness.random.gen_range(100000, 999999))
-  hostlib_enable("tools:deterministic")
   hostlib_fs_set_mode({session_id: staged_session, mode: "staged", root: root})
   // Sibling agent stages a competing write — overlay hash diverges from disk.
   hostlib_tools_write_file({session_id: staged_session, path: staged_path, content: "competing\n"})

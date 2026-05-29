@@ -24,6 +24,16 @@ source files. Three flavors live side by side:
   `edit_validate_changed_regions`, `edit_check_lazy_truncation`,
   `edit_explain_whitespace_difference`, `edit_strip_line_number_prefixes`.
 
+> **Feature gate.** Every helper that reads or writes a file on disk —
+> `edit_apply_node`, `edit_insert_at_anchor`, and `edit_safe_text_patch` —
+> is gated on the deterministic-tools feature, the same gate the
+> `hostlib_tools_*` file I/O builtins use. Call
+> `hostlib_enable("tools:deterministic")` once at the start of the
+> pipeline before invoking them; otherwise the underlying builtin returns
+> a structured error pointing you back here. Pure in-memory helpers
+> (`edit_apply_old_new_patch`, `edit_dry_run`, the validators) are not
+> gated.
+
 ## `edit_apply_node` — Tree-Sitter query → format-preserving replace
 
 `edit_apply_node({path, query, replacement, ...})` locates AST node(s)
@@ -36,6 +46,9 @@ Backed by the `hostlib_ast_apply_node` builtin (issue
 [#2506](https://github.com/burin-labs/harn/issues/2506)) under the
 `std/edit` umbrella epic
 [#2497](https://github.com/burin-labs/harn/issues/2497).
+
+Requires `hostlib_enable("tools:deterministic")` first — it writes the
+edited source to disk (see [Feature gate](#edit-stdlib)).
 
 ### Parameters
 
@@ -211,6 +224,9 @@ Backed by the `hostlib_ast_insert_at_anchor` builtin (issue
 [#2497](https://github.com/burin-labs/harn/issues/2497) umbrella epic
 as `edit_apply_node`.
 
+Requires `hostlib_enable("tools:deterministic")` first — it writes the
+edited source to disk (see [Feature gate](#edit-stdlib)).
+
 ### Parameters
 
 | Field | Required | Notes |
@@ -346,6 +362,10 @@ retry, never blindly clobber.
 
 Backed by the `hostlib_fs_safe_text_patch` builtin (issue
 [#2509](https://github.com/burin-labs/harn/issues/2509)).
+
+Requires `hostlib_enable("tools:deterministic")` first — it reads
+(`hostlib_fs_read_text`) and writes the target file on disk (see
+[Feature gate](#edit-stdlib)).
 
 ### Parameters
 

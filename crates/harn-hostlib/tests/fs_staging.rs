@@ -580,10 +580,8 @@ fn safe_text_patch_serializes_concurrent_staged_commits() {
         handles.push(thread::spawn(move || {
             // tools:deterministic is thread-local; each spawned thread
             // must re-enable the gate the registry helper installed on
-            // the main thread before driving any gated builtin. The
-            // safe-text-patch primitive itself is un-gated, but we
-            // enable here so future maintainers don't trip when adding
-            // a `tools_*` call to the race scenario.
+            // the main thread before driving `hostlib_fs_safe_text_patch`,
+            // which is gated on the deterministic-tools feature.
             permissions::enable_for_test();
             let response = (reg.find("hostlib_fs_safe_text_patch").unwrap().handler)(&dict_arg(&[
                 ("session_id", vm_string(&session)),

@@ -10,8 +10,8 @@
 use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, fs::FsCapability,
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability, scanner::ScannerCapability,
-    schemas, secret_store::SecretStoreCapability, tools::ToolsCapability, BuiltinRegistry,
-    HostlibCapability, HostlibError, HostlibRegistry,
+    schemas, secret_store::SecretStoreCapability, tools::permissions, tools::ToolsCapability,
+    BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry,
 };
 
 fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
@@ -67,6 +67,10 @@ fn ast_capability_registers_documented_methods() {
         ("hostlib_ast_insert_at_anchor", "path"),
         ("hostlib_ast_dry_run", "plan"),
     ];
+    // `apply_node` / `insert_at_anchor` write edited source to disk and are
+    // gated on the deterministic-tools feature (#2548); enable it so the
+    // handlers reach their parameter validation rather than the gate.
+    permissions::enable_for_test();
     for (name, expected_param) in expected_missing {
         let entry = registry.find(name).expect("registered");
         let err = (entry.handler)(&[]).expect_err("must reject empty args");
@@ -193,6 +197,10 @@ fn fs_capability_registers_documented_methods() {
         ("hostlib_fs_read_text", "path"),
         ("hostlib_fs_emit_safe_text_patch_result", "path"),
     ];
+    // `safe_text_patch` / `read_text` touch arbitrary host paths and are
+    // gated on the deterministic-tools feature (#2548); enable it so the
+    // handlers reach their parameter validation rather than the gate.
+    permissions::enable_for_test();
     for (name, expected_param) in expected_missing {
         let entry = registry.find(name).expect("registered");
         let err = (entry.handler)(&[]).expect_err("must reject empty args");
@@ -203,6 +211,48 @@ fn fs_capability_registers_documented_methods() {
             }
             other => panic!("expected MissingParameter for {name}, got {other:?}"),
         }
+    }
+}
+
+/// Every hostlib builtin that reads or writes arbitrary host paths must
+/// refuse to run before `hostlib_enable("tools:deterministic")`, matching
+/// the `tools::*` file I/O gate (#2548). This guards against the asymmetry
+/// where the std/edit helpers could mutate files a sandboxed script was
+/// denied via the `tools` surface.
+#[test]
+fn fs_and_ast_edit_primitives_require_deterministic_gate() {
+    let mut registry = collect_into_registry(FsCapability);
+    AstCapability.register_builtins(&mut registry);
+    permissions::reset();
+    for name in [
+        "hostlib_fs_safe_text_patch",
+        "hostlib_fs_read_text",
+        "hostlib_ast_apply_node",
+        "hostlib_ast_insert_at_anchor",
+    ] {
+        let entry = registry.find(name).expect("registered");
+        let err = (entry.handler)(&[]).expect_err("gated before enable");
+        match err {
+            HostlibError::Backend { builtin, message } => {
+                assert_eq!(builtin, name);
+                assert!(
+                    message.contains("hostlib_enable"),
+                    "gating error must point users at hostlib_enable: {message}"
+                );
+            }
+            other => panic!("expected Backend gate error for {name}, got {other:?}"),
+        }
+    }
+    // Telemetry routing cannot mutate files, so it stays un-gated: an empty
+    // payload must surface parameter validation, not the feature gate.
+    let entry = registry
+        .find("hostlib_fs_emit_safe_text_patch_result")
+        .expect("registered");
+    match (entry.handler)(&[]).expect_err("must reject empty args") {
+        HostlibError::MissingParameter { builtin, .. } => {
+            assert_eq!(builtin, "hostlib_fs_emit_safe_text_patch_result");
+        }
+        other => panic!("emit result must stay un-gated, got {other:?}"),
     }
 }
 

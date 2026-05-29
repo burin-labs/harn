@@ -65,13 +65,15 @@ impl HostlibCapability for FsCapability {
             "discard_staged",
             discard_staged_builtin,
         );
-        register(
+        // `safe_text_patch` and `read_text` touch arbitrary host paths, so
+        // they share the deterministic-tools gate with `tools::*` file I/O.
+        register_gated(
             registry,
             SAFE_TEXT_PATCH_BUILTIN,
             "safe_text_patch",
             safe_text_patch_builtin,
         );
-        register(registry, READ_TEXT_BUILTIN, "read_text", read_text_builtin);
+        register_gated(registry, READ_TEXT_BUILTIN, "read_text", read_text_builtin);
         register(
             registry,
             EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN,
@@ -93,6 +95,20 @@ fn register(
         module: "fs",
         method,
         handler,
+    });
+}
+
+fn register_gated(
+    registry: &mut BuiltinRegistry,
+    name: &'static str,
+    method: &'static str,
+    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+) {
+    registry.register(RegisteredBuiltin {
+        name,
+        module: "fs",
+        method,
+        handler: crate::tools::permissions::gated_handler(name, runner),
     });
 }
 
