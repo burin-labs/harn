@@ -136,6 +136,7 @@ is_e2e_subprocess_path() {
   local path="$1"
   local rel="${path#"$ROOT_DIR/"}"
   case "$rel" in
+    crates/harn-cli/tests/attributed_decl_cli.rs | \
     crates/harn-cli/tests/acp_server_cli.rs | \
     crates/harn-cli/tests/burin_mini_playground.rs | \
     crates/harn-cli/tests/flow_ship_cli.rs | \
