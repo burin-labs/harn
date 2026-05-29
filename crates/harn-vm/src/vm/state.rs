@@ -142,8 +142,6 @@ pub(crate) struct VmBuiltinEntry {
     pub(crate) dispatch: VmBuiltinDispatch,
 }
 
-pub(crate) type DeferredBuiltinRegistrar = fn(&mut Vm);
-
 /// The Harn bytecode virtual machine.
 pub struct Vm {
     pub(crate) stack: Vec<VmValue>,
@@ -158,8 +156,6 @@ pub struct Vm {
     /// IDs with detected name collisions. Collided names safely fall back to
     /// the authoritative name-keyed lookup path.
     pub(crate) builtin_id_collisions: Rc<HashSet<BuiltinId>>,
-    /// Builtins whose registration can be deferred until first use.
-    pub(crate) deferred_builtin_registrars: Rc<BTreeMap<String, DeferredBuiltinRegistrar>>,
     /// Iterator state for for-in loops.
     pub(crate) iterators: Vec<IterState>,
     /// Call frame stack.
@@ -268,7 +264,6 @@ pub struct VmBaseline {
     builtin_metadata: Rc<BTreeMap<String, VmBuiltinMetadata>>,
     builtins_by_id: Rc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
     builtin_id_collisions: Rc<HashSet<BuiltinId>>,
-    deferred_builtin_registrars: Rc<BTreeMap<String, DeferredBuiltinRegistrar>>,
     source_dir: Option<std::path::PathBuf>,
     source_file: Option<String>,
     source_text: Option<String>,
@@ -286,7 +281,6 @@ impl VmBaseline {
             builtin_metadata: Rc::clone(&vm.builtin_metadata),
             builtins_by_id: Rc::clone(&vm.builtins_by_id),
             builtin_id_collisions: Rc::clone(&vm.builtin_id_collisions),
-            deferred_builtin_registrars: Rc::clone(&vm.deferred_builtin_registrars),
             source_dir: vm.source_dir.clone(),
             source_file: vm.source_file.clone(),
             source_text: vm.source_text.clone(),
@@ -315,7 +309,6 @@ impl VmBaseline {
             builtin_metadata: Rc::clone(&self.builtin_metadata),
             builtins_by_id: Rc::clone(&self.builtins_by_id),
             builtin_id_collisions: Rc::clone(&self.builtin_id_collisions),
-            deferred_builtin_registrars: Rc::clone(&self.deferred_builtin_registrars),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
@@ -539,7 +532,6 @@ impl Vm {
             builtin_metadata: Rc::new(BTreeMap::new()),
             builtins_by_id: Rc::new(BTreeMap::new()),
             builtin_id_collisions: Rc::new(HashSet::new()),
-            deferred_builtin_registrars: Rc::new(BTreeMap::new()),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
@@ -687,7 +679,6 @@ impl Vm {
             builtin_metadata: Rc::clone(&self.builtin_metadata),
             builtins_by_id: Rc::clone(&self.builtins_by_id),
             builtin_id_collisions: Rc::clone(&self.builtin_id_collisions),
-            deferred_builtin_registrars: Rc::clone(&self.deferred_builtin_registrars),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),

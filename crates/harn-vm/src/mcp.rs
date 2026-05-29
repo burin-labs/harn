@@ -3046,7 +3046,7 @@ llm_mock_clear()
     async fn execute_test_harn(source: &str) {
         let chunk = crate::compile_source(source).expect("test Harn source should compile");
         let mut vm = crate::Vm::new();
-        crate::register_vm_stdlib_with_deferred_llm(&mut vm);
+        crate::register_vm_stdlib(&mut vm);
         vm.execute(&chunk)
             .await
             .expect("test Harn source should execute");

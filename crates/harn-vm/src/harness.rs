@@ -1297,7 +1297,22 @@ fn main(harness: Harness) {
         )
         .expect_err("wrong argument type fails");
 
-        assert!(error.contains("HarnessFs.read_text expects string argument 1, got int"));
+        // A wrong-typed argument is rejected by one of two layers, and which
+        // one fires depends on whether the process-global builtin-signature
+        // registry was already populated (by any prior `register_vm_stdlib`
+        // call in the test binary) when `compile_source` ran:
+        //   - empty registry  -> the harness runtime guard (`string_arg`)
+        //   - populated registry -> static type-check at compile time, which
+        //     matches the `read_text` method against the same-named stdlib
+        //     `read_text(path: string)` signature.
+        // Both correctly reject the int, so accept either message.
+        let runtime_rejection =
+            error.contains("HarnessFs.read_text expects string argument 1, got int");
+        let static_rejection = error.contains("argument 1 `path`: expected string, found int");
+        assert!(
+            runtime_rejection || static_rejection,
+            "expected a string/int type rejection for read_text, got: {error}"
+        );
     }
 
     #[test]

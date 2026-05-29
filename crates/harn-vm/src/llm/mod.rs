@@ -172,9 +172,7 @@ pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value
     )))
 }
 
-use crate::stdlib::macros::{
-    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
-};
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use std::rc::Rc;
@@ -641,31 +639,11 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     transcript_stats::register_transcript_builtins(vm);
 }
 
-/// Register LLM builtin names without installing their handlers. The first
-/// resolution of any deferred name installs the complete LLM surface.
-pub(crate) fn register_deferred_llm_builtins(vm: &mut Vm) {
-    agent_config::register_deferred_agent_control_primitives(vm, register_llm_builtins);
-    register_deferred_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS, register_llm_builtins);
-    agent_config::register_deferred_agent_loop(vm, register_llm_builtins);
-    agent_session_host::register_deferred_agent_session_host_primitives(vm, register_llm_builtins);
-
-    conversation::register_deferred_conversation_builtins(vm, register_llm_builtins);
-    cache::register_deferred_cache_builtins(vm, register_llm_builtins);
-    config_builtins::register_deferred_config_builtins(vm, register_llm_builtins);
-    cost::register_deferred_cost_builtins(vm, register_llm_builtins);
-    rerank::register_deferred_rerank_builtins(vm, register_llm_builtins);
-    mock_builtins::register_deferred_llm_mock_builtins(vm, register_llm_builtins);
-    transcript_stats::register_deferred_transcript_builtins(vm, register_llm_builtins);
-}
-
 #[cfg(test)]
 mod tests {
     use super::api::LlmCallOptions;
     use super::call::{build_schema_nudge, compute_validation_errors, SchemaNudge};
-    use super::{
-        execute_llm_call, register_deferred_llm_builtins, register_llm_builtins, reset_llm_state,
-        structured_output_errors,
-    };
+    use super::{execute_llm_call, reset_llm_state, structured_output_errors};
     use crate::llm::mock;
     use crate::value::VmValue;
     use std::rc::Rc;
@@ -736,24 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn deferred_llm_builtins_install_on_first_resolution() {
-        let mut vm = crate::Vm::new();
-        crate::register_vm_stdlib_with_deferred_llm(&mut vm);
-
-        assert!(!vm
-            .builtin_names()
-            .iter()
-            .any(|name| name == "llm_rate_limit"));
-        assert!(vm.ensure_deferred_builtin("llm_rate_limit"));
-        assert!(vm
-            .builtin_names()
-            .iter()
-            .any(|name| name == "llm_rate_limit"));
-        assert!(vm.builtin_names().iter().any(|name| name == "llm_call"));
-    }
-
-    #[test]
-    fn deferred_sync_llm_builtin_installs_on_direct_call() {
+    fn llm_stack_registers_and_dispatches_through_full_stdlib() {
         mock::reset_llm_mock_state();
         let chunk = crate::compile_source("llm_mock({text: \"ok\"})\n").expect("compile");
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -766,34 +727,15 @@ mod tests {
             local
                 .run_until(async {
                     let mut vm = crate::Vm::new();
-                    crate::register_vm_stdlib_with_deferred_llm(&mut vm);
+                    crate::register_vm_stdlib(&mut vm);
                     vm.execute(&chunk).await.expect("execute");
                     assert!(mock::builtin_llm_mock_active());
                     assert!(vm.builtin_names().iter().any(|name| name == "llm_mock"));
+                    assert!(vm.builtin_names().iter().any(|name| name == "llm_call"));
                 })
                 .await;
         });
         mock::reset_llm_mock_state();
-    }
-
-    #[test]
-    fn deferred_llm_builtin_names_match_eager_registration() {
-        let mut eager = crate::Vm::new();
-        register_llm_builtins(&mut eager);
-        let eager_names = eager
-            .builtin_names()
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>();
-
-        let mut deferred = crate::Vm::new();
-        register_deferred_llm_builtins(&mut deferred);
-        let deferred_names = deferred
-            .deferred_builtin_registrars
-            .keys()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert_eq!(deferred_names, eager_names);
     }
 
     #[test]

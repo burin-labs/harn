@@ -16,9 +16,7 @@ use crate::orchestration::{
     push_command_policy, push_execution_policy, CapabilityPolicy, NestedExecutionGuard,
     NestedExecutionKind, ToolApprovalPolicy, NESTED_KIND_OPTION_KEY, NESTED_LABEL_OPTION_KEY,
 };
-use crate::stdlib::macros::{
-    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
-};
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -2761,10 +2759,6 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_AGENT_DAEMON_WAIT_DEF,
     &HOST_AGENT_SESSION_PROJECT_TURN_DEF,
 ];
-
-pub fn register_deferred_agent_session_host_primitives(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_defs(vm, HOST_SESSION_BUILTINS, registrar);
-}
 
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, HOST_SESSION_BUILTINS);

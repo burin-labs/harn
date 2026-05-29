@@ -1,9 +1,7 @@
 use std::rc::Rc;
 
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{
-    harn_builtin, register_builtin_defs, register_deferred_builtin_defs, VmBuiltinDef,
-};
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -20,10 +18,6 @@ const LLM_MOCK_BUILTINS: &[&VmBuiltinDef] = &[
 /// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
 pub(super) fn register_llm_mock_builtins(vm: &mut Vm) {
     register_builtin_defs(vm, LLM_MOCK_BUILTINS);
-}
-
-pub(super) fn register_deferred_llm_mock_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    register_deferred_builtin_defs(vm, LLM_MOCK_BUILTINS, registrar);
 }
 
 /// Register a deterministic LLM mock response for tests.

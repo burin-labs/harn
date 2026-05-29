@@ -28,45 +28,6 @@ const INJECT_REMINDER_KEYS: &[&str] = &[
 ];
 const CLEAR_REMINDER_KEYS: &[&str] = &["id", "tag", "dedupe_key"];
 
-const CONVERSATION_BUILTIN_NAMES: &[&str] = &[
-    "conversation",
-    "transcript",
-    "transcript.inject_reminder",
-    "transcript.clear_reminders",
-    "transcript_from_messages",
-    "transcript_messages",
-    "transcript_assets",
-    "transcript_add_asset",
-    "transcript_events",
-    "transcript_reminder_event",
-    "transcript_suspension_event",
-    "transcript_resumption_event",
-    "transcript_drain_decision_event",
-    "transcript_summary",
-    "transcript_id",
-    "transcript_render_visible",
-    "transcript_render_full",
-    "transcript_summarize",
-    "transcript_export",
-    "transcript_import",
-    "transcript_fork",
-    "transcript_reset",
-    "transcript_archive",
-    "transcript_abandon",
-    "transcript_resume",
-    "add_message",
-    "add_user",
-    "add_assistant",
-    "add_system",
-    "add_tool_result",
-];
-
-pub(crate) fn register_deferred_conversation_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
-    for name in CONVERSATION_BUILTIN_NAMES {
-        vm.register_deferred_builtin(name, registrar);
-    }
-}
-
 /// Extract and validate a transcript dict from the first argument.
 fn require_transcript<'a>(
     args: &'a [VmValue],

@@ -107,7 +107,7 @@ pub mod workflow_messages;
 mod xml;
 
 use crate::http::register_http_builtins;
-use crate::llm::{register_deferred_llm_builtins, register_llm_builtins};
+use crate::llm::register_llm_builtins;
 use crate::mcp::register_mcp_builtins;
 use crate::mcp_server::register_mcp_server_builtins;
 use crate::vm::Vm;
@@ -228,12 +228,6 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     register_agent_stdlib_after_llm(vm);
 }
 
-fn register_agent_stdlib_with_deferred_llm(vm: &mut Vm) {
-    register_agent_stdlib_before_llm(vm);
-    register_deferred_llm_builtins(vm);
-    register_agent_stdlib_after_llm(vm);
-}
-
 /// Register all standard builtins on a VM (core + io + agent). Also
 /// installs the macro-emitted signature slice into the parser registry
 /// (idempotent under repeat calls with the same slice pointer).
@@ -241,15 +235,6 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_core_stdlib(vm);
     register_io_stdlib(vm);
     register_agent_stdlib(vm);
-    harn_builtin_registry::install_builtin_signatures(all_builtin_signatures());
-}
-
-/// Register the stdlib shape used by latency-sensitive CLI execution. Also
-/// installs the macro-emitted signature slice into the parser registry.
-pub fn register_vm_stdlib_with_deferred_llm(vm: &mut Vm) {
-    register_core_stdlib(vm);
-    register_io_stdlib(vm);
-    register_agent_stdlib_with_deferred_llm(vm);
     harn_builtin_registry::install_builtin_signatures(all_builtin_signatures());
 }
 
