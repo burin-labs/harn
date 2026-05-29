@@ -38,6 +38,7 @@ mod pack;
 mod package;
 mod parse_tokens;
 mod persona;
+mod pg;
 mod playground;
 mod portal;
 mod precompile;
@@ -149,6 +150,7 @@ pub(crate) use persona::{
     PersonaSupervisionCommand, PersonaSupervisionTailArgs, PersonaTemplateKind, PersonaTickArgs,
     PersonaTriggerArgs,
 };
+pub(crate) use pg::{PgArgs, PgCodegenArgs, PgCommand};
 pub(crate) use playground::PlaygroundArgs;
 pub(crate) use portal::PortalArgs;
 pub use precompile::PrecompileArgs;
@@ -441,6 +443,8 @@ SCRIPTING
     Publish(PublishArgs),
     /// List and inspect durable agent persona manifests.
     Persona(PersonaArgs),
+    /// Postgres developer tooling (codegen Harn record types from migrations).
+    Pg(PgArgs),
     /// Merge Captain transcript oracle and audit (#1013).
     #[command(name = "merge-captain")]
     MergeCaptain(MergeCaptainArgs),

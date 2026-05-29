@@ -29,7 +29,7 @@ use std::{env, fs, panic, process, thread};
 use cli::{
     Cli, Command, CompletionShell, EvalCommand, MergeCaptainCommand, MergeCaptainMockCommand,
     ModelInfoArgs, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
-    PackageScaffoldCommand, PersonaCommand, PersonaSupervisionCommand, ProvidersCommand,
+    PackageScaffoldCommand, PersonaCommand, PersonaSupervisionCommand, PgCommand, ProvidersCommand,
     RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
     TimeCommand, ToolCommand,
 };
@@ -1374,6 +1374,14 @@ async fn async_main() {
                         commands::merge_captain_mock::run_scenarios()
                     }
                 };
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
+        },
+        Command::Pg(args) => match args.command {
+            PgCommand::Codegen(codegen) => {
+                let code = commands::pg_codegen::run(&codegen);
                 if code != 0 {
                     process::exit(code);
                 }

@@ -154,6 +154,50 @@ or branching — keep using SQLx CLI, Sqitch, or Flyway and call
 `pg_migrate` only when your `.harn` pipeline is the authoritative
 schema owner.
 
+## Typed rows from migrations
+
+`pg_query` / `pg_query_one` return rows as plain dicts. To get
+compile-time field checking, generate a Harn record type per table from
+your migration files and annotate the result:
+
+```sh
+harn pg codegen --dir migrations --out src/db_types.harn
+```
+
+This replays every forward migration (`.sql`, excluding `.down.sql`) in
+lexicographic order — the same discovery rule `pg_migrate` uses — and
+emits one `type <Table>Row = {…}` per table whose columns mirror the
+live schema. `CREATE TABLE`, `ALTER TABLE … ADD/DROP/ALTER/RENAME
+COLUMN`, `RENAME TO`, and `DROP TABLE` are all replayed, so the
+generated file always reflects the schema state on disk. No live
+database is required — this is build-time codegen.
+
+```harn,ignore
+import { ReceiptsRow } from "./db_types.harn"
+
+let receipt: ReceiptsRow = pg_query_one(pool, "select * from receipts where id = $1", [id])
+log(receipt.kind)   // type-checked against the column set
+```
+
+SQL types map to the same Harn types the row decoder produces at
+runtime: integer families → `int`, `real`/`double precision` → `float`,
+`numeric`/temporal/`uuid`/text families → `string`, `json`/`jsonb` →
+`any`, `bytea` → `bytes`, `T[]` → `list<T>`. Columns that are not
+`NOT NULL` (and not a primary key) become optional (`field: T?`).
+
+Pass `--check` (with `--out`) to verify the generated file is current
+without writing it — wire it into CI so a migration that changes a
+column fails the build until the types are regenerated:
+
+```sh
+harn pg codegen --dir migrations --out src/db_types.harn --check
+```
+
+Inferring types from arbitrary `SELECT` projections is out of scope —
+that needs a live `PREPARE` round-trip. Codegen reflects the table
+shape; annotate `select *` queries, or hand-write a narrower shape for
+projections.
+
 ## Advisory locks
 
 Advisory locks coordinate work across processes that share a Postgres
