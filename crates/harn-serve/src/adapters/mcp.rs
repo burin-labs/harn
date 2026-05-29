@@ -44,14 +44,13 @@ use harn_vm::mcp_protocol::{
 };
 use serde_json::{json, Value as JsonValue};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::LocalSet;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
     mcp_context::McpContextCatalog, AdapterDescriptor, AuthPolicy, AuthRequest,
     AuthorizationDecision, CallArguments, CallRequest, CallResponse, DispatchCore, DispatchError,
-    ExportCatalog, HttpTlsConfig, TransportAdapter,
+    DispatchRuntime, ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
 pub const MCP_PROTOCOL_VERSION: &str = mcp_protocol::PROTOCOL_VERSION;
@@ -113,7 +112,7 @@ pub struct McpServer {
     catalog: ExportCatalog,
     context: McpContextCatalog,
     auth_policy: AuthPolicy,
-    executor: ExecutionRuntime,
+    executor: DispatchRuntime,
 }
 
 #[derive(Clone, Debug)]
@@ -222,15 +221,6 @@ impl SharedSession {
     }
 }
 
-struct ExecutionRuntime {
-    tx: mpsc::UnboundedSender<ExecutionJob>,
-}
-
-struct ExecutionJob {
-    request: CallRequest,
-    response_tx: oneshot::Sender<Result<CallResponse, DispatchError>>,
-}
-
 #[derive(Clone)]
 struct HttpState {
     server: Arc<McpServer>,
@@ -281,7 +271,7 @@ impl McpServer {
             catalog,
             context,
             auth_policy,
-            executor: ExecutionRuntime::start(core),
+            executor: DispatchRuntime::start("MCP", core),
         }
     }
 
@@ -1013,41 +1003,5 @@ fn requires_protocol_auth(method: &str) -> bool {
 impl TransportAdapter for McpServer {
     fn descriptor(&self) -> AdapterDescriptor {
         self.descriptor.clone()
-    }
-}
-
-impl ExecutionRuntime {
-    fn start(core: Arc<DispatchCore>) -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel::<ExecutionJob>();
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build MCP runtime");
-            let local = LocalSet::new();
-            local.block_on(&runtime, async move {
-                while let Some(job) = rx.recv().await {
-                    let core = core.clone();
-                    tokio::task::spawn_local(async move {
-                        let result = core.dispatch(job.request).await;
-                        let _ = job.response_tx.send(result);
-                    });
-                }
-            });
-        });
-        Self { tx }
-    }
-
-    async fn call(&self, request: CallRequest) -> Result<CallResponse, DispatchError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.tx
-            .send(ExecutionJob {
-                request,
-                response_tx,
-            })
-            .map_err(|_| DispatchError::Execution("MCP executor is not running".to_string()))?;
-        response_rx
-            .await
-            .map_err(|_| DispatchError::Execution("MCP executor dropped response".to_string()))?
     }
 }
