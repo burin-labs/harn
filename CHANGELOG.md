@@ -8,6 +8,97 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.50
+
+### Added
+
+`harn serve site <file>` hosts a script's own HTTP routes: each routed
+`pub fn` (via a `@route("METHOD", "/path")` attribute or the `handler_*`
+convention) answers a path, receiving a request dict and returning a
+value or an `http_*` response envelope. WebSocket handlers upgrade via
+`http_upgrade_ws(req, { on_message })`. (#2574)
+`llm_call(..., { fast: true })` wires the catalog's accelerated-serving
+("fast mode") tier into the live request path (#2619). The knob is
+provider-agnostic: Harn reads `fast_mode.param`/`value` from the model
+catalog and injects `speed: "fast"` for Anthropic (plus the
+`fast-mode-2026-02-01` beta header) or `service_tier: "fast"` for OpenAI —
+no hardcoded provider quirks. Requesting `fast` on a model with no
+`fast_mode` tier, or a deprecated one, fails fast with a clear diagnostic.
+Cost accounting bills at the premium `fast_mode.pricing` only when the
+provider confirms it served fast (echoed `speed`/`service_tier`), surfaced
+as `result.served_fast`; a capacity downgrade bills at standard rates.
+`provider_capabilities()` now reports `fast_mode_supported` plus a
+`fast_mode` metadata dict. (#2619)
+
+- **`run_command` preserves a slow command's full output past a `| tail`-style filter (#2625).** When an
+  agent runs a `producer | tail/wc/grep/sort/…` shell pipeline, the new `std/agent/command_capture`
+  recognizer transparently rewrites it to `producer | tee '<capture>' 2>/dev/null | filter` so the model
+  still sees exactly the filtered output while the producer's complete output is preserved to a temp file —
+  a post-run `output_capture` field points the model at it so it never has to re-run the slow command. The
+  rewrite is conservative (it leaves `head`, `grep -q`/`-m`, command substitution, subshells, and anything
+  it can't parse safely untouched) and on by default; set `preserve_filtered_output: false` on
+  `agent_command_tools` / `agent_host_tools` to disable it.
+- **Tool definitions can carry `guidance` — a system-prompt instruction co-located with the tool
+  (#2631).** When the tool is in the active tool set, the runtime injects the guidance as a
+  capability-gated system-prompt fragment, so an instruction like "always update the TODO tracker
+  when working from a plan" appears only when the tool is available and is omitted otherwise.
+  Instruction and tool share one source of truth and cannot drift.
+- **New `prompt_explain(options)` builtin** assembles the system prompt from `agent_loop`-shaped
+  options and returns the final string plus per-fragment provenance (`id`, `source`, `bucket`,
+  `included`, `reason`, `bytes`) — so you can audit exactly why each piece is in the prompt and what
+  changes when a tool is absent. See `docs/src/prompt-assembly.md` and the `harn demo
+  prompt-guidance` scenario.
+
+### Changed
+
+- **System-prompt assembly is now a single fragment reducer (#2631).** Host-provided parts
+  (`system_preamble`/`prefix`/`context`/`parts`/`appendix`/`suffix`), the primary system text,
+  capability-gated tool guidance, and rendered system reminders all flow through one deterministic
+  `assemble()` that records per-fragment provenance, replacing the previous two-stage string
+  concatenation (`append_system_prompt_parts` / `push_system_prompt_part`, both removed). Output is
+  byte-identical for existing prompts.
+
+### Fixed
+
+Defining an attribute-decorated top-level function — e.g. a
+`@route("GET", "/path") pub fn` handler for `harn serve site` — no longer
+crashes at runtime with "Stack underflow". In script mode (a file with a
+top-level `fn main`), the compiler classified an attributed declaration by
+the catch-all expression rule and emitted a spurious module-level `Pop`,
+underflowing the operand stack even when the function was never called.
+Attributed declarations are now classified by their inner declaration, so
+they leave the stack balanced like any other top-level `fn`. (#2610)
+Bytecode cache entries are now keyed on a build-time fingerprint of the compiler
+front-end, so a compiler change that alters emitted bytecode for unchanged source
+invalidates stale `.harnbc` artifacts automatically — no version bump or manual
+cache wipe required.
+A `produces_value` misclassification — the compiler's "did this statement
+leave a value on the operand stack?" rule that drives every value-discarding
+`Op::Pop` — is now caught at compile time in debug builds instead of
+surfacing only as a runtime "Stack underflow" (the class of bug fixed in the
+attributed-decl regression, often masked further by the bytecode cache). A
+lightweight balance model folds each emitted opcode's net stack effect into
+the chunk and asserts that straight-line statements net exactly what their
+classification predicts; the seven duplicated "compile node, then pop its
+value" loops are unified behind one helper that carries the check. The model
+surfaced two pre-existing imbalances, now fixed: metadata-only declarations
+(`enum`/`type`/`interface`/`override`/nested pipelines) and `defer`
+statements each emitted an unpopped placeholder `Nil`, leaking an
+operand-stack slot per execution — unbounded in a loop body for `defer`.
+(#2622)
+`harn serve site` now diagnoses malformed `@route(...)` / `@scopes(...)`
+attributes instead of silently dropping them. A `@route` with a
+non-string argument, zero arguments, or more than a method and a path
+emits a `HARN-SRV-001` / `HARN-SRV-002` warning at startup and leaves the
+handler unmounted (rather than mis-routing it, e.g. collapsing
+`@route("GET", some_var)` to `/GET`); a non-string `@scopes` argument
+emits `HARN-SRV-003` and is dropped, flagging the unintended loosening of
+the route's scope requirement. The same parsing bug also meant
+`harn serve site <file>` itself never reached the site server — the
+legacy `serve`→`a2a` argument shim didn't recognize the `site`
+subcommand and rewrote it; the shim now derives the transport list from
+the command tree so new transports are handled automatically. (#2623)
+
 ## v0.8.49
 
 ### Added
