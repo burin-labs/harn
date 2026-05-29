@@ -302,10 +302,9 @@ async fn cost_route_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 
 /// Execute one LLM call and return the normalized Harn result dict.
 #[harn_builtin(
-    sig = "llm_call(prompt: any, system?: any, options?: dict|nil) -> dict",
+    sig = "llm_call(prompt: string, system?: string, options?: @LLM_CALL_OPTIONS) -> @LLM_CALL_RESULT",
     kind = "async",
-    category = "llm.host",
-    runtime_only = true
+    category = "llm.host"
 )]
 async fn llm_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     llm_call_impl(args).await
@@ -313,10 +312,9 @@ async fn llm_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 
 /// Execute one streaming LLM call and return the normalized Harn result dict.
 #[harn_builtin(
-    sig = "llm_stream_call(prompt: any, system?: any, options?: dict|nil) -> dict",
+    sig = "llm_stream_call(prompt: string, system?: string, options?: @LLM_CALL_OPTIONS) -> stream",
     kind = "async",
-    category = "llm.host",
-    runtime_only = true
+    category = "llm.host"
 )]
 async fn llm_stream_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     llm_stream_call_impl(args).await
@@ -368,11 +366,7 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
 /// observe: {emit_event?}} and pipe the result through `llm_call(... routing: policy ...)`
 /// to drive the chain with failover, latency-aware racing, and budget caps. Tape events:
 /// <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.
-#[harn_builtin(
-    sig = "routing_policy(config: dict) -> dict",
-    category = "llm.host",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "routing_policy(config: dict) -> dict", category = "llm.host")]
 fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = match args.first() {
         Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
@@ -398,8 +392,7 @@ fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// `runtime_introspection_tools(registry)`; this builtin is the underlying read.
 #[harn_builtin(
     sig = "runtime_introspection() -> dict",
-    category = "llm.introspection",
-    runtime_only = true
+    category = "llm.introspection"
 )]
 fn runtime_introspection_builtin_wrap(
     args: &[VmValue],
@@ -447,10 +440,9 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
 
 /// Execute one LLM call and return a non-throwing safe envelope.
 #[harn_builtin(
-    sig = "llm_call_safe(prompt: any, system?: any, options?: dict|nil) -> dict",
+    sig = "llm_call_safe(prompt: string, system?: string, options?: @LLM_CALL_OPTIONS) -> @LLM_CALL_SAFE_RESULT",
     kind = "async",
-    category = "llm.host",
-    runtime_only = true
+    category = "llm.host"
 )]
 async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     match llm_call_impl(args).await {
@@ -461,10 +453,9 @@ async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 
 /// Call an LLM for JSON data and return parsed schema-valid data.
 #[harn_builtin(
-    sig = "llm_call_structured(prompt: any, schema: dict, options?: dict|nil) -> any",
+    sig = "llm_call_structured(prompt: string, schema: dict|Schema<any>, options?: @LLM_CALL_OPTIONS) -> any",
     kind = "async",
-    category = "llm.structured",
-    runtime_only = true
+    category = "llm.structured"
 )]
 async fn llm_call_structured_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let rewritten = rewrite_structured_args(args)?;
@@ -474,10 +465,9 @@ async fn llm_call_structured_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
 
 /// Call an LLM for JSON data and return a non-throwing schema envelope.
 #[harn_builtin(
-    sig = "llm_call_structured_safe(prompt: any, schema: dict, options?: dict|nil) -> dict",
+    sig = "llm_call_structured_safe(prompt: string, schema: dict|Schema<any>, options?: @LLM_CALL_OPTIONS) -> dict",
     kind = "async",
-    category = "llm.structured",
-    runtime_only = true
+    category = "llm.structured"
 )]
 async fn llm_call_structured_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let rewritten = match rewrite_structured_args(args) {
@@ -494,10 +484,9 @@ async fn llm_call_structured_safe_builtin(args: Vec<VmValue>) -> Result<VmValue,
 
 /// Call an LLM for JSON data and return a diagnostic structured-output envelope.
 #[harn_builtin(
-    sig = "llm_call_structured_result(prompt: any, schema: dict, options?: dict|nil) -> dict",
+    sig = "llm_call_structured_result(prompt: string, schema: dict|Schema<any>, options?: @LLM_CALL_OPTIONS) -> any",
     kind = "async",
-    category = "llm.structured",
-    runtime_only = true
+    category = "llm.structured"
 )]
 async fn llm_call_structured_result_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     structured_envelope::llm_call_structured_result_impl(args, None).await
@@ -505,10 +494,9 @@ async fn llm_call_structured_result_builtin(args: Vec<VmValue>) -> Result<VmValu
 
 /// Recover malformed JSON text against a schema using deterministic and optional LLM repair.
 #[harn_builtin(
-    sig = "schema_recover(text: string, schema: dict, options?: dict|nil) -> dict",
+    sig = "<T>schema_recover(text: string, schema: Schema<T>, options?: dict|nil) -> @SCHEMA_RECOVER_ENVELOPE",
     kind = "async",
-    category = "schema.recovery",
-    runtime_only = true
+    category = "schema.recovery"
 )]
 async fn schema_recover_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     schema_recover::schema_recover_impl(args, None).await
@@ -518,8 +506,7 @@ async fn schema_recover_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
 #[harn_builtin(
     sig = "with_rate_limit(provider: string, callback: closure, options?: dict|nil) -> any",
     kind = "async",
-    category = "llm.rate_limit",
-    runtime_only = true
+    category = "llm.rate_limit"
 )]
 async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
@@ -577,10 +564,9 @@ async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
 
 /// Execute a fill-in-the-middle LLM completion request.
 #[harn_builtin(
-    sig = "llm_completion(prefix: string, suffix?: string|nil, system?: any, options?: dict|nil) -> dict",
+    sig = "llm_completion(prefix: string, suffix?: string, system?: string, options?: @LLM_CALL_OPTIONS) -> @LLM_CALL_RESULT",
     kind = "async",
-    category = "llm.host",
-    runtime_only = true
+    category = "llm.host"
 )]
 async fn llm_completion_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let prefix = args.first().map(|a| a.display()).unwrap_or_default();
@@ -631,10 +617,9 @@ async fn llm_completion_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
 
 /// Execute a channel-based streaming LLM request.
 #[harn_builtin(
-    sig = "llm_stream(prompt: any, system?: any, options?: dict|nil) -> dict",
+    sig = "llm_stream(prompt: string, system?: string, options?: dict) -> channel",
     kind = "async",
-    category = "llm.host",
-    runtime_only = true
+    category = "llm.host"
 )]
 async fn llm_stream_builtin_wrap(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     llm_stream_builtin(args).await

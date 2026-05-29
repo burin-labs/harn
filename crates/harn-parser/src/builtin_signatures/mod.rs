@@ -32,7 +32,7 @@ mod types;
 
 pub use lookup::{
     builtin_return_type, is_builtin, is_untyped_boundary_source, iter_builtin_metadata,
-    iter_builtin_names, lookup,
+    iter_builtin_names, lookup, static_signature_names,
 };
 pub use types::{
     ty_to_type_expr, BuiltinMetadata, BuiltinSignature, BuiltinSignatureExt, Param,

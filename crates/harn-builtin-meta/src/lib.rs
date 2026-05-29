@@ -7,6 +7,13 @@
 //!
 //! `Ty::to_type_expr` and friends, which convert into the parser's runtime
 //! `TypeExpr`, live in `harn-parser` since they depend on parser-internal AST.
+//!
+//! The [`shapes`] submodule holds the named structural-record consts
+//! (`LLM_CALL_OPTIONS`, `LLM_CALL_RESULT`, `TRANSCRIPT`, …) shared by the
+//! parser's static typechecking tables and the `#[harn_builtin]` macro's
+//! `@NAME` signature injection.
+
+pub mod shapes;
 
 /// A complete, static description of one builtin: identifier, arity range,
 /// per-parameter types, generic type parameters, return type, and any

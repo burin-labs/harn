@@ -103,6 +103,17 @@ fn every_builtin_signature_text_round_trips_through_display() {
             continue;
         };
 
+        // `@NAME` shape injection (e.g. `options?: @LLM_CALL_OPTIONS`) resolves
+        // to a named `Ty::Shape` const from `harn_builtin_meta::shapes`. The
+        // injected const has no name in the parsed `Ty`, so `Display` renders
+        // the *expanded* structural shape, which by design cannot round-trip
+        // back to the `@NAME` alias. The `@NAME` token is a direct const
+        // reference with no parsing ambiguity to guard against, so skip the
+        // round-trip for these sigs.
+        if raw_text.contains('@') {
+            continue;
+        }
+
         let rendered = format!("{}", &def.sig as &BuiltinSignature);
         if canonical(raw_text) != canonical(&rendered) {
             mismatches.push(format!(

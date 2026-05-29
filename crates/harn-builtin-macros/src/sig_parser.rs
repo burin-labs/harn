@@ -18,7 +18,9 @@
 //!             | "(" ty ("," ty)* ")" "->" ty        // fn type
 //!             | "{" field ("," field)* "}"          // shape literal
 //!             | int_literal | string_literal        // literal types
-//!             | "@" path                             // Rust path injection (Ty::Shape(path))
+//!             | "@" name                             // Ty const injection: `@NAME` →
+//!                                                    //   `<support>::shapes::NAME`;
+//!                                                    //   `@a::b::C` → absolute path
 //! field       = ident ":" ty ("?")?                 // ? AFTER type = optional field
 //! ```
 //!
@@ -513,17 +515,30 @@ impl<'a> Parser<'a> {
                 return self.maybe_trailing_optional(quote!(#support::Ty::LitString(#s)));
             }
         }
-        // Path injection: "@SIGNAL_HANDLER_OPTIONS" or "@my::path::CONST".
+        // Shape/type injection: `@LLM_CALL_OPTIONS` or `@my::crate::CONST`.
+        //
+        // The named const must evaluate to a `Ty` (typically a
+        // `Ty::Shape(&[...])` from `harn_builtin_meta::shapes`). A bare
+        // `@NAME` resolves under `#support::shapes` (which re-exports
+        // `harn_builtin_meta::shapes`); a `::`-qualified `@a::b::C` is used
+        // verbatim as an absolute path. This lets a single readable `sig`
+        // string name the rich structural contracts the grammar can't spell
+        // inline, e.g. `options?: @LLM_CALL_OPTIONS) -> @LLM_CALL_RESULT`.
         if let Some(Tok::PathInject(_)) = self.peek() {
             if let Some(Tok::PathInject(p)) = self.bump() {
-                let path: syn::Path = syn::parse_str(&p).map_err(|e| {
-                    syn::Error::new(
-                        self.span,
-                        format!("invalid Rust path after `@`: {p:?} ({e})"),
-                    )
-                })?;
-                // Path injection is currently always a shape-field slice.
-                return self.maybe_trailing_optional(quote!(#support::Ty::Shape(#path)));
+                let injected = if p.contains("::") {
+                    let path: syn::Path = syn::parse_str(&p).map_err(|e| {
+                        syn::Error::new(
+                            self.span,
+                            format!("invalid Rust path after `@`: {p:?} ({e})"),
+                        )
+                    })?;
+                    quote!(#path)
+                } else {
+                    let ident = syn::Ident::new(&p, self.span);
+                    quote!(#support::shapes::#ident)
+                };
+                return self.maybe_trailing_optional(injected);
             }
         }
         // Ident, ident<...>, ident?

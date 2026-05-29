@@ -304,6 +304,55 @@ fn migrated_stdlib_modules_publish_runtime_metadata() {
     }
 }
 
+/// Anti-drift guard: a `runtime_only` `#[harn_builtin]` def must never share
+/// a name with a hand-written static parser entry.
+///
+/// `runtime_only = true` suppresses the macro's own `BuiltinSignature` from
+/// the published registry, so if a static entry carries the same name it
+/// becomes a *second*, independently-edited source of truth that the
+/// typechecker consults instead — and the two silently drift. That is exactly
+/// how the LLM config signatures (`provider_capabilities`, `llm_config`,
+/// `llm_rate_limit`, …) drifted before they were migrated to published macro
+/// sigs backed by the shared `harn_builtin_meta::shapes` vocabulary.
+///
+/// If this fails: either drop `runtime_only = true` and delete the redundant
+/// static entry from `crates/harn-parser/src/builtin_signatures/signatures/*.rs`
+/// (the SSOT migration), or, if the builtin is genuinely host-internal, add it
+/// to `RUNTIME_ONLY_EXCEPTIONS` *and* ensure it has no static parser entry.
+///
+/// Note: published (non-`runtime_only`) macros that still carry a shadowed
+/// static entry are pre-existing, benign tech debt — `lookup` prefers the
+/// installed macro signature, so there is no enforcement drift. Cleaning those
+/// is tracked separately; this guard intentionally covers only the
+/// `runtime_only` drift surface.
+#[test]
+fn runtime_only_builtins_never_shadow_a_static_parser_entry() {
+    let static_names: BTreeSet<&str> = harn_parser::static_signature_names().collect();
+
+    let mut collisions: Vec<String> = Vec::new();
+    for def in harn_vm::stdlib::macros::ALL_BUILTIN_DEFS.iter() {
+        if !def.runtime_only {
+            continue;
+        }
+        let names = std::iter::once(def.sig.name).chain(def.aliases.iter().copied());
+        for name in names {
+            if static_names.contains(name) {
+                collisions.push(name.to_string());
+            }
+        }
+    }
+    collisions.sort();
+    collisions.dedup();
+
+    assert!(
+        collisions.is_empty(),
+        "These builtins are `runtime_only` (macro signature suppressed) yet still \
+         have a static parser entry — the silent-drift surface this guard prevents. \
+         Drop `runtime_only` and delete the static entry, or keep it host-internal \
+         with no static entry:\n  {collisions:#?}",
+    );
+}
+
 #[test]
 fn linkme_distributed_slice_populates_with_all_builtins() {
     let linkme_count = harn_vm::stdlib::macros::ALL_BUILTIN_DEFS.len();

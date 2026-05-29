@@ -48,8 +48,7 @@ const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
 /// Return provider/model capability metadata from the loaded capability matrix.
 #[harn_builtin(
     sig = "provider_capabilities(provider: string, model?: string|nil) -> dict",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn provider_capabilities_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
@@ -66,8 +65,7 @@ fn provider_capabilities_builtin(args: &[VmValue], _out: &mut String) -> Result<
 /// Install raw TOML capability overrides for provider/model capability lookup.
 #[harn_builtin(
     sig = "provider_capabilities_install(toml_src: string) -> bool",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn provider_capabilities_install_builtin(
     args: &[VmValue],
@@ -86,11 +84,7 @@ fn provider_capabilities_install_builtin(
 }
 
 /// Clear installed provider/model capability overrides.
-#[harn_builtin(
-    sig = "provider_capabilities_clear() -> bool",
-    category = "llm.config",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "provider_capabilities_clear() -> bool", category = "llm.config")]
 fn provider_capabilities_clear_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -102,8 +96,7 @@ fn provider_capabilities_clear_builtin(
 /// Infer the configured provider name for a model identifier.
 #[harn_builtin(
     sig = "llm_infer_provider(model_id: string) -> string",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
@@ -115,8 +108,7 @@ fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 /// Return the configured capability tier for a model identifier.
 #[harn_builtin(
     sig = "llm_model_tier(model_id: string) -> string",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_model_tier_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
@@ -126,8 +118,7 @@ fn llm_model_tier_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// Resolve a model alias or selector to full model metadata.
 #[harn_builtin(
     sig = "llm_resolve_model(alias: string) -> dict",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_resolve_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let alias = args.first().map(|a| a.display()).unwrap_or_default();
@@ -139,8 +130,7 @@ fn llm_resolve_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
 /// Return catalog metadata for a resolved model selector.
 #[harn_builtin(
     sig = "llm_model_info(selector: string) -> dict",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_model_info_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let selector = args.first().map(|a| a.display()).unwrap_or_default();
@@ -149,21 +139,13 @@ fn llm_model_info_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 /// List configured model alias names.
-#[harn_builtin(
-    sig = "llm_known_models() -> list",
-    category = "llm.config",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_known_models() -> list", category = "llm.config")]
 fn llm_known_models_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(string_list_to_vm_value(llm_config::known_model_names()))
 }
 
 /// List providers usable in the current environment.
-#[harn_builtin(
-    sig = "llm_available_providers() -> list",
-    category = "llm.config",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_available_providers() -> list", category = "llm.config")]
 fn llm_available_providers_builtin(
     _args: &[VmValue],
     _out: &mut String,
@@ -176,8 +158,7 @@ fn llm_available_providers_builtin(
 /// Return the configured cheap QC/repair model for a provider.
 #[harn_builtin(
     sig = "llm_qc_default_model(provider: string) -> string|nil",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
@@ -194,8 +175,7 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 /// Return glob-merged model_defaults for `model_id`.
 #[harn_builtin(
     sig = "llm_model_defaults(model_id: string) -> dict",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
@@ -215,8 +195,7 @@ fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 /// Return the fully-merged llm_call options for `opts`. Requires opts.model.
 #[harn_builtin(
     sig = "llm_resolved_options(opts: dict) -> dict",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let opts = args
@@ -261,8 +240,7 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 /// Apply Harn's provider-aware reasoning_policy/thinking_policy defaults to an llm_call option dict.
 #[harn_builtin(
     sig = "llm_apply_reasoning_policy(opts: dict) -> dict",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_apply_reasoning_policy_builtin(
     args: &[VmValue],
@@ -297,11 +275,7 @@ fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
 }
 
 /// Return the loaded provider, alias, model, pricing, and availability catalog.
-#[harn_builtin(
-    sig = "llm_provider_catalog() -> dict",
-    category = "llm.config",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_provider_catalog() -> dict", category = "llm.config")]
 fn llm_provider_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(provider_catalog_to_vm_value())
 }
@@ -309,8 +283,7 @@ fn llm_provider_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<
 /// Resolve a model alias or tier to an `{id, provider, tier}` dict.
 #[harn_builtin(
     sig = "llm_pick_model(target: string, options?: dict|nil) -> dict",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let target = args.first().map(|a| a.display()).unwrap_or_default();
@@ -340,11 +313,7 @@ fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 /// List all configured and runtime-registered LLM provider names.
-#[harn_builtin(
-    sig = "llm_providers() -> list",
-    category = "llm.config",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_providers() -> list", category = "llm.config")]
 fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config_names = llm_config::provider_names();
     let registry_names = super::provider::registered_provider_names();
@@ -360,8 +329,7 @@ fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// Register a custom OpenAI-compatible provider name for runtime dispatch.
 #[harn_builtin(
     sig = "provider_register(name: string) -> bool",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn provider_register_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
@@ -387,11 +355,7 @@ pub(crate) fn llm_catalog_value() -> VmValue {
 /// quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`.
 /// Alias for the read-only `harness.llm.catalog()` handle method, available for
 /// scripts that do not receive a `Harness` parameter.
-#[harn_builtin(
-    sig = "llm_catalog() -> list",
-    category = "llm.config",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_catalog() -> list", category = "llm.config")]
 fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(llm_catalog_value())
 }
@@ -461,11 +425,7 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
 /// `"ok"`, `"missing"`, `"not_required"`, `"deferred"`. Alias for the
 /// read-only `harness.llm.providers()` handle method, available for scripts that
 /// do not receive a `Harness` parameter.
-#[harn_builtin(
-    sig = "llm_provider_status() -> list",
-    category = "llm.config",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_provider_status() -> list", category = "llm.config")]
 fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(llm_provider_status_value())
 }
@@ -473,8 +433,7 @@ fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
 /// Return configured provider settings, or all provider settings when no provider is passed.
 #[harn_builtin(
     sig = "llm_config(provider?: string|nil) -> dict|nil",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider_name = args.first().map(|a| a.display());
@@ -501,8 +460,7 @@ fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 /// Set, query, or clear per-provider requests-per-minute rate limits.
 #[harn_builtin(
     sig = "llm_rate_limit(provider: string, options?: dict|nil) -> bool|int|nil",
-    category = "llm.rate_limit",
-    runtime_only = true
+    category = "llm.rate_limit"
 )]
 fn llm_rate_limit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
@@ -536,10 +494,9 @@ fn llm_rate_limit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 /// Validate provider health, API key reachability, and optional model readiness.
 #[harn_builtin(
-    sig = "llm_healthcheck(provider_or_options?: any, options?: dict|nil) -> dict",
+    sig = "llm_healthcheck(provider_or_options?: string|dict, options?: dict|nil) -> dict",
     kind = "async",
-    category = "llm.config",
-    runtime_only = true
+    category = "llm.config"
 )]
 async fn llm_healthcheck_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let (provider_name, api_key) = parse_healthcheck_args(&args);

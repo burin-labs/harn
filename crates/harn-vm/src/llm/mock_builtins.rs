@@ -27,11 +27,7 @@ pub(super) fn register_deferred_llm_mock_builtins(vm: &mut Vm, registrar: fn(&mu
 }
 
 /// Register a deterministic LLM mock response for tests.
-#[harn_builtin(
-    sig = "llm_mock(config: dict) -> nil",
-    category = "llm.mock",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_mock(config: dict) -> nil", category = "llm.mock")]
 fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = match args.first() {
         Some(VmValue::Dict(d)) => d,
@@ -209,11 +205,7 @@ fn optional_display_field(
 }
 
 /// Return recorded LLM mock calls.
-#[harn_builtin(
-    sig = "llm_mock_calls() -> list",
-    category = "llm.mock",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_mock_calls() -> list", category = "llm.mock")]
 fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let calls = mock::get_llm_mock_calls();
     let result: Vec<VmValue> = calls
@@ -316,33 +308,21 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 /// Clear deterministic LLM mocks and recorded calls.
-#[harn_builtin(
-    sig = "llm_mock_clear() -> nil",
-    category = "llm.mock",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_mock_clear() -> nil", category = "llm.mock")]
 fn llm_mock_clear_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     mock::reset_llm_mock_state();
     Ok(VmValue::Nil)
 }
 
 /// Push an isolated LLM mock scope.
-#[harn_builtin(
-    sig = "llm_mock_push_scope() -> nil",
-    category = "llm.mock",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_mock_push_scope() -> nil", category = "llm.mock")]
 fn llm_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     mock::push_llm_mock_scope();
     Ok(VmValue::Nil)
 }
 
 /// Pop the current isolated LLM mock scope.
-#[harn_builtin(
-    sig = "llm_mock_pop_scope() -> nil",
-    category = "llm.mock",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "llm_mock_pop_scope() -> nil", category = "llm.mock")]
 fn llm_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !mock::pop_llm_mock_scope() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(

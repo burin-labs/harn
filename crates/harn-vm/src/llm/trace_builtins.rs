@@ -7,11 +7,7 @@ use crate::value::{VmError, VmValue};
 use super::{helpers, trace};
 
 /// Return captured agent trace events for the current process.
-#[harn_builtin(
-    sig = "agent_trace() -> list",
-    category = "agent.trace",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "agent_trace() -> list", category = "agent.trace")]
 fn agent_trace_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let events = trace::peek_agent_trace();
     let list: Vec<VmValue> = events
@@ -23,11 +19,7 @@ fn agent_trace_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 /// Return a summarized view of captured agent trace events.
-#[harn_builtin(
-    sig = "agent_trace_summary() -> dict",
-    category = "agent.trace",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "agent_trace_summary() -> dict", category = "agent.trace")]
 fn agent_trace_summary_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let summary = trace::agent_trace_summary();
     Ok(json_to_vm_value(&summary))
