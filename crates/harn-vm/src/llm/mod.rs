@@ -302,7 +302,7 @@ async fn cost_route_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 
 /// Execute one LLM call and return the normalized Harn result dict.
 #[harn_builtin(
-    sig = "llm_call(prompt: string, system?: string, options?: @LLM_CALL_OPTIONS) -> @LLM_CALL_RESULT",
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL,
     kind = "async",
     category = "llm.host"
 )]
@@ -440,7 +440,7 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
 
 /// Execute one LLM call and return a non-throwing safe envelope.
 #[harn_builtin(
-    sig = "llm_call_safe(prompt: string, system?: string, options?: @LLM_CALL_OPTIONS) -> @LLM_CALL_SAFE_RESULT",
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_SAFE,
     kind = "async",
     category = "llm.host"
 )]
@@ -453,7 +453,7 @@ async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 
 /// Call an LLM for JSON data and return parsed schema-valid data.
 #[harn_builtin(
-    sig = "llm_call_structured(prompt: string, schema: dict|Schema<any>, options?: @LLM_CALL_OPTIONS) -> any",
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED,
     kind = "async",
     category = "llm.structured"
 )]
@@ -465,7 +465,7 @@ async fn llm_call_structured_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
 
 /// Call an LLM for JSON data and return a non-throwing schema envelope.
 #[harn_builtin(
-    sig = "llm_call_structured_safe(prompt: string, schema: dict|Schema<any>, options?: @LLM_CALL_OPTIONS) -> dict",
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_SAFE,
     kind = "async",
     category = "llm.structured"
 )]
@@ -484,7 +484,7 @@ async fn llm_call_structured_safe_builtin(args: Vec<VmValue>) -> Result<VmValue,
 
 /// Call an LLM for JSON data and return a diagnostic structured-output envelope.
 #[harn_builtin(
-    sig = "llm_call_structured_result(prompt: string, schema: dict|Schema<any>, options?: @LLM_CALL_OPTIONS) -> any",
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_RESULT,
     kind = "async",
     category = "llm.structured"
 )]
@@ -494,7 +494,7 @@ async fn llm_call_structured_result_builtin(args: Vec<VmValue>) -> Result<VmValu
 
 /// Recover malformed JSON text against a schema using deterministic and optional LLM repair.
 #[harn_builtin(
-    sig = "<T>schema_recover(text: string, schema: Schema<T>, options?: dict|nil) -> @SCHEMA_RECOVER_ENVELOPE",
+    sig_expr = harn_builtin_meta::signatures::SCHEMA_RECOVER,
     kind = "async",
     category = "schema.recovery"
 )]
@@ -564,7 +564,7 @@ async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
 
 /// Execute a fill-in-the-middle LLM completion request.
 #[harn_builtin(
-    sig = "llm_completion(prefix: string, suffix?: string, system?: string, options?: @LLM_CALL_OPTIONS) -> @LLM_CALL_RESULT",
+    sig_expr = harn_builtin_meta::signatures::LLM_COMPLETION,
     kind = "async",
     category = "llm.host"
 )]

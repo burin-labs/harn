@@ -645,6 +645,14 @@ fn builtin_def_metadata(
     }
     if let Some(sig_text) = def.signature_text {
         meta = meta.signature_static(sig_text);
+    } else {
+        // Builtins declared via `sig_expr = …` (a canonical
+        // `harn_builtin_meta::signatures` const) carry no human-typed `sig`
+        // string, so render the parsed signature back through its `Display`
+        // impl. `Display` round-trips through the macro sig grammar (enforced
+        // by the signature-text drift test), so `harn explain` / LSP hover
+        // still surface an accurate, canonical signature.
+        meta = meta.signature_owned(format!("{}", def.sig));
     }
     meta
 }

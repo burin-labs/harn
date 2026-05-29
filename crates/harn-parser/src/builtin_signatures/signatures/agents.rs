@@ -1,9 +1,8 @@
 //! Agent / orchestration / sub-agent builtin signatures.
 
 use super::shapes::{
-    AGENT_SPAWN_CONFIG, LLM_CALL_OPTIONS, LLM_CALL_RESULT, LLM_CALL_SAFE_RESULT,
-    RESUME_CONDITIONS_OR_NIL, SESSION_SNAPSHOT, SUB_AGENT_OPTIONS, SUB_AGENT_RESULT, TRANSCRIPT,
-    WORKER_SUMMARY,
+    AGENT_SPAWN_CONFIG, LLM_CALL_RESULT, RESUME_CONDITIONS_OR_NIL, SESSION_SNAPSHOT,
+    SUB_AGENT_OPTIONS, SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
@@ -14,10 +13,6 @@ use super::{
 /// transcripts/message-list arguments where either a raw `messages` list, a
 /// dynamic transcript dict, or one of the typed transcript shapes is accepted.
 const TY_MESSAGES_OR_TRANSCRIPT: Ty = Ty::Union(&[TY_LIST, TY_DICT, TRANSCRIPT, SESSION_SNAPSHOT]);
-
-/// `string | dict` — low-level LLM helpers accept raw text or an
-/// `llm_call` result dictionary.
-const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
 
 /// `list | dict | Transcript | SessionSnapshot | nil` — read-only transcript
 /// helpers are often fed values through optional chaining. Runtime validation
@@ -39,19 +34,7 @@ const TY_DICT_OR_LIST: Ty = Ty::Union(&[TY_DICT, TY_LIST]);
 /// budget is set).
 const TY_FLOAT_OR_NIL: Ty = Ty::Union(&[TY_FLOAT, TY_NIL]);
 
-/// `bool | int | nil` — return for `llm_rate_limit` which doubles as a
-/// setter (returns Bool) and a getter (returns Int or Nil).
-const TY_BOOL_OR_INT_OR_NIL: Ty = Ty::Union(&[TY_BOOL, TY_INT, TY_NIL]);
-
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
-    BuiltinSignature::simple(
-        "__llm_self_certainty",
-        &[
-            Param::new("text_or_result", TY_STRING_OR_DICT),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_FLOAT,
-    ),
     BuiltinSignature::simple(
         "add_assistant",
         &[
@@ -133,15 +116,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("iteration", TY_INT),
         ],
         TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_inject_feedback",
-        &[
-            Param::new("session_id", TY_STRING),
-            Param::new("kind", TY_STRING),
-            Param::new("content", TY_STRING),
-        ],
-        TY_NIL,
     ),
     BuiltinSignature::simple(
         "agent_dispatch_tool_batch",
@@ -308,16 +282,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING_OR_NIL,
     ),
     BuiltinSignature::simple(
-        "agent_subscribe",
-        &[
-            Param::new("session_id", TY_STRING),
-            Param::new("callback", TY_CLOSURE),
-        ],
-        TY_NIL,
-    ),
-    BuiltinSignature::simple("agent_trace", &[], TY_LIST),
-    BuiltinSignature::simple("agent_trace_summary", &[], TY_DICT),
-    BuiltinSignature::simple(
         "agent_typed_output_checkpoint",
         &[
             Param::new("name", TY_STRING),
@@ -370,75 +334,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
-        "llm_call",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::optional("system", TY_STRING),
-            Param::optional("options", LLM_CALL_OPTIONS),
-        ],
-        LLM_CALL_RESULT,
-    ),
-    BuiltinSignature::simple(
-        "llm_call_safe",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::optional("system", TY_STRING),
-            Param::optional("options", LLM_CALL_OPTIONS),
-        ],
-        LLM_CALL_SAFE_RESULT,
-    ),
-    BuiltinSignature::simple(
-        "llm_stream_call",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::optional("system", TY_STRING),
-            Param::optional("options", LLM_CALL_OPTIONS),
-        ],
-        Ty::Named("stream"),
-    ),
-    BuiltinSignature::simple(
-        "llm_call_structured",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::new("schema", TY_SCHEMA_VALUE),
-            Param::optional("options", LLM_CALL_OPTIONS),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "llm_call_structured_safe",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::new("schema", TY_SCHEMA_VALUE),
-            Param::optional("options", LLM_CALL_OPTIONS),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "llm_call_structured_result",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::new("schema", TY_SCHEMA_VALUE),
-            Param::optional("options", LLM_CALL_OPTIONS),
-        ],
-        TY_ANY,
-    ),
-    BuiltinSignature::simple(
-        "llm_completion",
-        &[
-            Param::new("prefix", TY_STRING),
-            Param::optional("suffix", TY_STRING),
-            Param::optional("system", TY_STRING),
-            Param::optional("options", LLM_CALL_OPTIONS),
-        ],
-        LLM_CALL_RESULT,
-    ),
-    BuiltinSignature::simple(
-        "llm_config",
-        &[Param::optional("provider", TY_STRING)],
-        TY_DICT_OR_NIL,
-    ),
-    BuiltinSignature::simple(
         "llm_compare_costs",
         &[
             Param::new("candidates", TY_LIST),
@@ -464,59 +359,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
-        "llm_healthcheck",
-        &[
-            Param::optional("provider_or_options", Ty::Union(&[TY_STRING, TY_DICT])),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "llm_apply_reasoning_policy",
-        &[Param::new("opts", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("llm_available_providers", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "llm_infer_provider",
-        &[Param::new("model_id", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple("llm_mock", &[Param::new("config", TY_DICT)], TY_NIL),
-    BuiltinSignature::simple("llm_mock_calls", &[], TY_LIST),
-    BuiltinSignature::simple("llm_mock_clear", &[], TY_NIL),
-    BuiltinSignature::simple("llm_mock_pop_scope", &[], TY_NIL),
-    BuiltinSignature::simple("llm_mock_push_scope", &[], TY_NIL),
-    BuiltinSignature::simple(
-        "llm_model_tier",
-        &[Param::new("model_id", TY_STRING)],
-        TY_STRING,
-    ),
-    BuiltinSignature::simple(
-        "llm_model_info",
-        &[Param::new("selector", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "llm_model_defaults",
-        &[Param::new("model_id", TY_STRING)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "llm_resolved_options",
-        &[Param::new("opts", TY_DICT)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple("llm_known_models", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "llm_pick_model",
-        &[
-            Param::new("target", TY_STRING),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
         "llm_pricing",
         &[
             Param::new("model_or_dict", Ty::Union(&[TY_STRING, TY_DICT])),
@@ -524,31 +366,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT_OR_NIL,
     ),
-    BuiltinSignature::simple("llm_catalog", &[], TY_LIST),
-    BuiltinSignature::simple("llm_provider_catalog", &[], TY_DICT),
-    BuiltinSignature::simple("llm_provider_status", &[], TY_LIST),
-    BuiltinSignature::simple("llm_providers", &[], TY_LIST),
-    BuiltinSignature::simple(
-        "llm_qc_default_model",
-        &[Param::new("provider", TY_STRING)],
-        TY_STRING_OR_NIL,
-    ),
-    BuiltinSignature::simple(
-        "llm_rate_limit",
-        &[
-            Param::new("provider", TY_STRING),
-            Param::optional("options", TY_DICT),
-        ],
-        TY_BOOL_OR_INT_OR_NIL,
-    ),
-    BuiltinSignature::simple(
-        "llm_resolve_model",
-        &[Param::new("alias", TY_STRING)],
-        TY_DICT,
-    ),
     BuiltinSignature::simple("llm_session_cost", &[], TY_DICT),
-    BuiltinSignature::simple("routing_policy", &[Param::new("config", TY_DICT)], TY_DICT),
-    BuiltinSignature::simple("runtime_introspection", &[], TY_DICT),
     BuiltinSignature::simple(
         "runtime_introspection_tools",
         &[
@@ -556,15 +374,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("options", TY_DICT_OR_NIL),
         ],
         TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "llm_stream",
-        &[
-            Param::new("prompt", TY_STRING),
-            Param::optional("system", TY_STRING),
-            Param::optional("options", TY_DICT),
-        ],
-        Ty::Named("channel"),
     ),
     BuiltinSignature::simple(
         "parse_resume_conditions",
