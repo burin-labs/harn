@@ -312,8 +312,7 @@ pub(crate) fn register_deferred_agent_control_primitives(vm: &mut Vm, registrar:
 /// Subscribe a Harn callback to events for an agent session.
 #[harn_builtin(
     sig = "agent_subscribe(session_id: string, callback: closure) -> nil",
-    category = "agent.host",
-    runtime_only = true
+    category = "agent.host"
 )]
 fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
@@ -339,8 +338,7 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 /// Inject pending feedback into an agent session.
 #[harn_builtin(
     sig = "agent_inject_feedback(session_id: string, kind: string, content: string) -> nil",
-    category = "agent.host",
-    runtime_only = true
+    category = "agent.host"
 )]
 fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let session_id = match args.first() {

@@ -54,6 +54,21 @@ pub fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
     )
 }
 
+/// Names that come *only* from the hand-written static fallback tables
+/// (`signatures::groups()`), independent of whatever the driver installed.
+///
+/// Exposed so cross-crate drift guards (see the builtin-registry alignment
+/// test in `harn-vm`) can assert the static tables never overlap with
+/// `#[harn_builtin]`-published or `runtime_only` macro builtins — the exact
+/// duplication that let LLM config signatures silently drift before the
+/// shapes-in-`harn-builtin-meta` migration.
+pub fn static_signature_names() -> impl Iterator<Item = &'static str> {
+    signatures::groups()
+        .into_iter()
+        .flat_map(|g| g.iter())
+        .map(|s| s.name)
+}
+
 /// Iterate over every builtin's name and statically-known return-type
 /// strings. Used by `harn-lint` and other consumers that want a
 /// lightweight "what does this builtin return" view without bringing in

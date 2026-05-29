@@ -40,6 +40,14 @@ pub fn known_builtin_metadata() -> impl Iterator<Item = builtin_signatures::Buil
     builtin_signatures::iter_builtin_metadata()
 }
 
+/// Names sourced only from the parser's hand-written static fallback tables
+/// (not the driver-installed `#[harn_builtin]` registry). Lets cross-crate
+/// drift guards assert the static tables don't overlap with macro-published
+/// or `runtime_only` builtins.
+pub fn static_signature_names() -> impl Iterator<Item = &'static str> {
+    builtin_signatures::static_signature_names()
+}
+
 /// Error from a source processing pipeline stage. Wraps the inner error
 /// types so callers can dispatch on the failing stage.
 #[derive(Debug)]

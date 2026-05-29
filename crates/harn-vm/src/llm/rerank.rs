@@ -21,10 +21,9 @@ const RERANK_BUILTINS: &[&VmBuiltinDef] = &[&SELF_CERTAINTY_BUILTIN_DEF];
 
 /// Return length-normalized confidence from token log probabilities.
 #[harn_builtin(
-    sig = "__llm_self_certainty(text: string|dict, options?: dict|nil) -> float",
+    sig = "__llm_self_certainty(text_or_result: string|dict, options?: dict|nil) -> float",
     kind = "async",
-    category = "llm.rerank",
-    runtime_only = true
+    category = "llm.rerank"
 )]
 async fn self_certainty_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let text = match args.first() {

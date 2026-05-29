@@ -122,8 +122,7 @@ fn cache_envelope_base(options: &CacheOptions) -> BTreeMap<String, VmValue> {
 /// Return a persistent cache hit envelope for key.
 #[harn_builtin(
     sig = "__cache_get(key: string, options?: dict|nil) -> dict",
-    category = "cache",
-    runtime_only = true
+    category = "cache"
 )]
 fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = required_string_arg(args, 0, "__cache_get(key, options?)")?;
@@ -142,8 +141,7 @@ fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 /// Persist a cache value with TTL and LRU eviction.
 #[harn_builtin(
     sig = "__cache_put(key: string, value: any, options?: dict|nil) -> dict",
-    category = "cache",
-    runtime_only = true
+    category = "cache"
 )]
 fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = required_string_arg(args, 0, "__cache_put(key, value, options?)")?;
@@ -165,11 +163,7 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 }
 
 /// Clear one persistent cache namespace.
-#[harn_builtin(
-    sig = "__cache_clear(options?: dict|nil) -> nil",
-    category = "cache",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "__cache_clear(options?: dict|nil) -> nil", category = "cache")]
 fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
     match options.backend {
@@ -182,11 +176,7 @@ fn cache_clear_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 /// Return {hits, misses, lookups, hit_rate} for a cache namespace.
-#[harn_builtin(
-    sig = "__cache_stats(options?: dict|nil) -> dict",
-    category = "cache",
-    runtime_only = true
-)]
+#[harn_builtin(sig = "__cache_stats(options?: dict|nil) -> dict", category = "cache")]
 fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
     let snapshot = metrics_snapshot(&options);
@@ -220,8 +210,7 @@ fn saturating_u64_to_i64(value: u64) -> i64 {
 /// Reset the in-process hit/miss counters for a cache namespace.
 #[harn_builtin(
     sig = "__cache_stats_reset(options?: dict|nil) -> nil",
-    category = "cache",
-    runtime_only = true
+    category = "cache"
 )]
 fn cache_stats_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_cache_options(args.first())?;
@@ -232,8 +221,7 @@ fn cache_stats_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
 /// Derive the canonical LLM with_cache key.
 #[harn_builtin(
     sig = "__llm_cache_key(prompt: any, system?: any, options?: dict|nil) -> string",
-    category = "cache",
-    runtime_only = true
+    category = "cache"
 )]
 fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let explicit_options = match args.get(2) {

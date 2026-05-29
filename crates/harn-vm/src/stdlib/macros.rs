@@ -17,6 +17,10 @@ pub use harn_builtin_meta::{
     TY_NEVER, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
 };
 pub use harn_builtin_registry::BuiltinDef;
+// Re-export the shared shape vocabulary so `#[harn_builtin]` sig strings can
+// reference a named structural shape via the `@NAME` injection form, which
+// the macro expands to `crate::stdlib::macros::shapes::NAME`.
+pub use harn_builtin_meta::shapes;
 // Re-export so the `#[harn_builtin]` proc-macro can name the
 // distributed-slice attribute without each call-site importing linkme.
 pub use linkme::distributed_slice;
