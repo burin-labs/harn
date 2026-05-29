@@ -10,6 +10,18 @@ use super::error::CompileError;
 use super::yield_scan::body_contains_yield;
 use super::{peel_node, Compiler, CompilerOptions, FinallyEntry};
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only override for the value-discarding classification used by
+    /// [`Compiler::compile_discarded_stmt`]. Setting it forces a
+    /// `produces_value` answer regardless of the node, letting tests
+    /// deliberately miswire the classification and prove the #2622 balance
+    /// assertion fires (see
+    /// `compiler::tests::miswired_produces_value_trips_balance_assertion`).
+    pub(super) static FORCE_DISCARDED_PRODUCES_VALUE: std::cell::Cell<Option<bool>> =
+        const { std::cell::Cell::new(None) };
+}
+
 impl Compiler {
     pub fn new() -> Self {
         Self::with_options(CompilerOptions::from_env())
@@ -239,10 +251,7 @@ impl Compiler {
                 })
                 .collect();
             for sn in &top_level {
-                self.compile_node(sn)?;
-                if Self::produces_value(&sn.node) {
-                    self.chunk.emit(Op::Pop, self.line);
-                }
+                self.compile_discarded_stmt(sn)?;
             }
             // E4.1 entrypoint convention: a top-level `fn main(harness: Harness)`
             // is invoked automatically with the runtime-provided `harness`
@@ -334,10 +343,7 @@ impl Compiler {
                     self.compile_parent_pipeline(program, grandparent)?;
                 }
                 for stmt in body {
-                    self.compile_node(stmt)?;
-                    if Self::produces_value(&stmt.node) {
-                        self.chunk.emit(Op::Pop, self.line);
-                    }
+                    self.compile_discarded_stmt(stmt)?;
                 }
             }
         }
@@ -861,10 +867,7 @@ impl Compiler {
         self.begin_scope();
         let finally_floor = self.finally_bodies.len();
         for sn in stmts {
-            self.compile_node(sn)?;
-            if Self::produces_value(&sn.node) {
-                self.chunk.emit(Op::Pop, self.line);
-            }
+            self.compile_discarded_stmt(sn)?;
         }
         self.drain_finallys_to_floor(finally_floor)?;
         self.end_scope();
@@ -923,17 +926,64 @@ impl Compiler {
         self.finally_bodies.push(FinallyEntry::Finally(vec![call]));
     }
 
+    /// Compile a statement that appears in a value-discarding sequence —
+    /// the script-mode module body, an inherited pipeline body, and block
+    /// interiors — then pop its value when `produces_value` says it left
+    /// one.
+    ///
+    /// In debug builds this also asserts the operand stack stayed balanced
+    /// across the statement: a straight-line statement must net exactly one
+    /// value when `produces_value` is true and zero otherwise. That turns a
+    /// `produces_value` misclassification — like the attributed-decl gap
+    /// fixed in #2610, where the loop popped against an empty stack — from a
+    /// latent runtime "Stack underflow" (often masked further by the
+    /// bytecode cache, #2621) into a loud compile-time failure in tests/CI.
+    /// Statements containing branches or other non-linearly-modeled opcodes
+    /// can't be summed by the lightweight model, so the assertion skips them
+    /// (see [`Chunk::balance_delta_since`]).
+    pub(super) fn compile_discarded_stmt(&mut self, sn: &SNode) -> Result<(), CompileError> {
+        #[cfg(debug_assertions)]
+        let probe = self.chunk.balance_probe();
+        self.compile_node(sn)?;
+        #[allow(unused_mut)]
+        let mut produces = Self::produces_value(&sn.node);
+        // Test-only hook: deliberately miswire the classification to prove
+        // the balance assertion below trips on a `produces_value` gap (the
+        // #2622 verification). No-op in non-test builds.
+        #[cfg(test)]
+        if let Some(forced) = FORCE_DISCARDED_PRODUCES_VALUE.with(std::cell::Cell::get) {
+            produces = forced;
+        }
+        #[cfg(debug_assertions)]
+        if let Some(delta) = self.chunk.balance_delta_since(probe) {
+            let expected = i32::from(produces);
+            debug_assert_eq!(
+                delta, expected,
+                "operand-stack imbalance at line {}: produces_value={produces} but the \
+                 node's emitted bytecode netted {delta} (expected {expected}). A \
+                 `produces_value` arm is out of sync with this node's codegen — see #2622.\n\
+                 node: {:?}",
+                self.line, sn.node,
+            );
+        }
+        if produces {
+            self.chunk.emit(Op::Pop, self.line);
+        }
+        Ok(())
+    }
+
     pub(super) fn compile_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
         for (i, snode) in stmts.iter().enumerate() {
-            self.compile_node(snode)?;
-            let is_last = i == stmts.len() - 1;
-            if is_last {
-                // Ensure the block always leaves exactly one value on the stack.
+            if i == stmts.len() - 1 {
+                // The block's value is its last statement's. Backfill a `Nil`
+                // when that statement produced none, so the block always
+                // leaves exactly one value on the stack.
+                self.compile_node(snode)?;
                 if !Self::produces_value(&snode.node) {
                     self.chunk.emit(Op::Nil, self.line);
                 }
-            } else if Self::produces_value(&snode.node) {
-                self.chunk.emit(Op::Pop, self.line);
+            } else {
+                self.compile_discarded_stmt(snode)?;
             }
         }
         Ok(())
@@ -1264,6 +1314,10 @@ impl Compiler {
             | Node::EnumDecl { .. }
             | Node::InterfaceDecl { .. }
             | Node::TypeDecl { .. }
+            // Metadata-only declarations that emit no bytecode — see the
+            // matching arm in `compile_node`.
+            | Node::OverrideDecl { .. }
+            | Node::Pipeline { .. }
             | Node::ThrowStmt { .. }
             | Node::BreakStmt
             | Node::ContinueStmt

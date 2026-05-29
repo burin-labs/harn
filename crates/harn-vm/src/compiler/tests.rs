@@ -376,3 +376,61 @@ fn attributed_top_level_fn_does_not_emit_spurious_pop() {
         attributed.disassemble("module"),
     );
 }
+
+/// #2622: the debug-build balance model classifies straight-line statements
+/// exactly. A bare `Op::Closure` leaves one value (`Some(1)`); pairing it
+/// with the matching bind (`Op::DefVar`) nets zero (`Some(0)`); and emitting
+/// a branch taints the span so the model declines to judge it (`None`).
+#[test]
+fn balance_model_tracks_straight_line_and_declines_branches() {
+    let mut chunk = Chunk::new();
+
+    let push_probe = chunk.balance_probe();
+    chunk.emit_u16(Op::Closure, 0, 1);
+    assert_eq!(chunk.balance_delta_since(push_probe), Some(1));
+
+    // Closure + matching bind is the shape every top-level `fn`/`struct`
+    // declaration lowers to — it must net zero.
+    let decl_probe = chunk.balance_probe();
+    chunk.emit_u16(Op::Closure, 0, 1);
+    chunk.emit_u16(Op::DefVar, 0, 1);
+    assert_eq!(chunk.balance_delta_since(decl_probe), Some(0));
+
+    // A jump is non-linear: the running sum can't be trusted across it, so
+    // the model reports `None` rather than risk a false assertion.
+    let branch_probe = chunk.balance_probe();
+    let _ = chunk.emit_jump(Op::JumpIfFalse, 1);
+    assert_eq!(chunk.balance_delta_since(branch_probe), None);
+}
+
+/// #2622: a `produces_value` gap must fail loudly at compile time. We force
+/// the value-discarding classification to lie (`true` for a top-level `fn`,
+/// which emits a balanced `Closure; DefVar` and leaves nothing to pop) and
+/// confirm the balance assertion panics instead of letting the compiler emit
+/// the unbalanced `Op::Pop` that #2610 only caught as a runtime underflow.
+#[test]
+fn miswired_produces_value_trips_balance_assertion() {
+    struct ResetGuard;
+    impl Drop for ResetGuard {
+        fn drop(&mut self) {
+            super::state::FORCE_DISCARDED_PRODUCES_VALUE.with(|c| c.set(None));
+        }
+    }
+
+    let _guard = ResetGuard;
+    super::state::FORCE_DISCARDED_PRODUCES_VALUE.with(|c| c.set(Some(true)));
+
+    // Swallow the expected panic's backtrace so it doesn't clutter test output.
+    let prior_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        compile_source("fn f() -> int { return 1 }\nfn main(harness: Harness) { let _ = 1 }")
+    }));
+    std::panic::set_hook(prior_hook);
+
+    assert!(
+        result.is_err(),
+        "miswiring produces_value to `true` for a balanced top-level decl \
+         must trip the #2622 stack-balance assertion",
+    );
+}

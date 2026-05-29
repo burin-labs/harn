@@ -457,20 +457,23 @@ impl Compiler {
                 let key_idx = self.string_constant("__default__");
                 self.chunk.emit_u16(Op::SyncMutexEnter, key_idx, self.line);
                 for sn in body {
-                    self.compile_node(sn)?;
-                    if Self::produces_value(&sn.node) {
-                        self.chunk.emit(Op::Pop, self.line);
-                    }
+                    self.compile_discarded_stmt(sn)?;
                 }
                 self.drain_finallys_to_floor(finally_floor)?;
                 self.chunk.emit(Op::Nil, self.line);
                 self.end_scope();
             }
             Node::DeferStmt { body } => {
-                // Push onto the finally stack so it runs on return/throw/scope-exit.
+                // Register the body to run on return/throw/scope-exit. The
+                // statement emits no bytecode of its own — the deferred body
+                // is inlined later by the finally-draining machinery — so it
+                // leaves the operand stack untouched, matching
+                // `produces_value` == false. Emitting a `Nil` here instead
+                // leaked an unpopped slot per execution, which in a loop body
+                // grew the operand stack without bound (surfaced by the
+                // #2622 balance assertion).
                 self.finally_bodies
                     .push(FinallyEntry::Finally(body.clone()));
-                self.chunk.emit(Op::Nil, self.line);
             }
             Node::YieldExpr { value } => {
                 if let Some(val) = value {
@@ -544,14 +547,21 @@ impl Compiler {
             Node::StructDecl { name, fields, .. } => {
                 self.compile_struct_decl(name, fields)?;
             }
-            // Metadata-only declarations (no runtime effect).
+            // Metadata-only declarations: resolved entirely at compile time
+            // (enum names, type aliases, struct/interface layouts are
+            // pre-scanned), so they emit no bytecode and leave the operand
+            // stack untouched. `produces_value` classifies them as
+            // non-value-producing to match; contexts that require a block to
+            // yield a value (last statement of a block, match-arm body) emit
+            // their own `Nil` placeholder. Emitting one here instead left an
+            // unpopped `Nil` on the stack in every value-discarding context
+            // (`compile_top_level_declarations` pops nothing) — a latent
+            // imbalance surfaced by the #2622 balance assertion.
             Node::Pipeline { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
             | Node::EnumDecl { .. }
-            | Node::InterfaceDecl { .. } => {
-                self.chunk.emit(Op::Nil, self.line);
-            }
+            | Node::InterfaceDecl { .. } => {}
             Node::TryCatch {
                 has_catch: _,
                 body,
