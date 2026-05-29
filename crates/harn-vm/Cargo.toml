@@ -150,3 +150,6 @@ harness = false
 
 [lints]
 workspace = true
+
+[build-dependencies]
+sha2 = "0.11"
