@@ -65,7 +65,7 @@ fn provider_capabilities_builtin(args: &[VmValue], _out: &mut String) -> Result<
 
 /// Install raw TOML capability overrides for provider/model capability lookup.
 #[harn_builtin(
-    sig = "provider_capabilities_install(toml_src: string) -> nil",
+    sig = "provider_capabilities_install(toml_src: string) -> bool",
     category = "llm.config",
     runtime_only = true
 )]
@@ -87,7 +87,7 @@ fn provider_capabilities_install_builtin(
 
 /// Clear installed provider/model capability overrides.
 #[harn_builtin(
-    sig = "provider_capabilities_clear() -> nil",
+    sig = "provider_capabilities_clear() -> bool",
     category = "llm.config",
     runtime_only = true
 )]
@@ -359,7 +359,7 @@ fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 /// Register a custom OpenAI-compatible provider name for runtime dispatch.
 #[harn_builtin(
-    sig = "provider_register(name: string) -> nil",
+    sig = "provider_register(name: string) -> bool",
     category = "llm.config",
     runtime_only = true
 )]
@@ -472,7 +472,7 @@ fn llm_provider_status_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
 
 /// Return configured provider settings, or all provider settings when no provider is passed.
 #[harn_builtin(
-    sig = "llm_config(provider?: string|nil) -> dict",
+    sig = "llm_config(provider?: string|nil) -> dict|nil",
     category = "llm.config",
     runtime_only = true
 )]
@@ -500,7 +500,7 @@ fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 /// Set, query, or clear per-provider requests-per-minute rate limits.
 #[harn_builtin(
-    sig = "llm_rate_limit(provider: string, options?: dict|nil) -> dict",
+    sig = "llm_rate_limit(provider: string, options?: dict|nil) -> bool|int|nil",
     category = "llm.rate_limit",
     runtime_only = true
 )]
