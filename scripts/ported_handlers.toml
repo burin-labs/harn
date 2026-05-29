@@ -52,7 +52,10 @@ path = "crates/harn-cli/src/lib.rs"
 # Bumped from 3162 to 3175 to fit one-time growth from the workspace lint
 # floor commit (clippy::semicolon_if_nothing_returned + reformatted call
 # sites + a single #[allow(clippy::large_stack_frames)] attr on async_main).
-max_loc = 3175
+# Re-bumped to 3218: lib.rs reached 3213 on main via #2628 (fast-mode
+# speed/service_tier wiring into the live request path + cost calc) without a
+# matching budget bump, leaving the ratchet stale for every downstream PR.
+max_loc = 3218
 
 [[handler]]
 path = "crates/harn-cli/src/commands/models/list.rs"
