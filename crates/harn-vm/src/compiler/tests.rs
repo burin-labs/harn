@@ -337,3 +337,42 @@ pipeline test(task) {
         chunk.constants
     );
 }
+
+/// Regression: an attribute on a top-level declaration must not add a
+/// module-level `Op::Pop` in script mode (a file with `fn main`). The
+/// script-mode top-level loop pops after any item whose `produces_value`
+/// is true; before the fix, a `Node::AttributedDecl` wrapping a `FnDecl`
+/// fell through `produces_value`'s `_ => true` catch-all and emitted a
+/// `Pop` against an empty operand stack — surfacing only at runtime as
+/// "Stack underflow", which broke every `@route`-decorated handler in
+/// `harn serve site`.
+///
+/// `@deprecated` emits no registration bytecode of its own, so the
+/// attributed program's module-level op stream must match the bare one
+/// exactly. Function bodies live in separate chunks (stored as
+/// constants), so the top chunk's disassembly is purely module-level.
+#[test]
+fn attributed_top_level_fn_does_not_emit_spurious_pop() {
+    let bare = compile_source(
+        "fn f(x: int) -> int { return x + 1 }\nfn main(harness: Harness) { let _ = 1 }",
+    );
+    let attributed = compile_source(
+        "@deprecated\nfn f(x: int) -> int { return x + 1 }\nfn main(harness: Harness) { let _ = 1 }",
+    );
+
+    let pop_count = |chunk: &Chunk| {
+        disasm_opcodes(&chunk.disassemble("module"))
+            .into_iter()
+            .filter(|op| *op == "Pop")
+            .count()
+    };
+
+    assert_eq!(
+        pop_count(&attributed),
+        pop_count(&bare),
+        "an attributed top-level fn must not add a module-level Pop\n\
+         bare:\n{}\nattributed:\n{}",
+        bare.disassemble("module"),
+        attributed.disassemble("module"),
+    );
+}

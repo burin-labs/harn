@@ -1898,7 +1898,7 @@ impl TypeChecker {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
                 | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy"
-                | "scopes" => {}
+                | "scopes" | "route" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,

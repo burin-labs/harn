@@ -13,6 +13,7 @@ use std::thread;
 
 use harn_cli::commands::demo::scenario_ids;
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
+use harn_cli::tests::common::scoped_env::ScopedEnvVar;
 use harn_cli::tests::common::{cwd_lock, env_lock};
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
@@ -46,6 +47,19 @@ fn run_demo_scenario(id: &str) -> RunOutcome {
     run_in_harn_runtime(move || async move {
         let _env_guard = env_lock::lock_env().lock().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        // Hermetic bytecode cache: point `harn run` at a fresh per-test
+        // directory so the demo always compiles the scenario from source
+        // instead of replaying whatever the ambient `$HOME/.cache/harn`
+        // happens to hold. Without this, a stale artifact written by an
+        // earlier (or buggy) compiler masks both regressions and fixes —
+        // and on a persistent runner the result is order-dependent and
+        // flaky. The guards are held across `execute_run` and restore the
+        // previous env / delete the temp dir on drop.
+        let cache_dir = tempfile::TempDir::new().expect("create temp bytecode cache dir");
+        let _cache_guard = ScopedEnvVar::set(
+            harn_vm::bytecode_cache::CACHE_DIR_ENV,
+            cache_dir.path().to_str().expect("temp cache path is utf-8"),
+        );
         harn_vm::reset_thread_local_state();
         execute_run(
             script.to_string_lossy().as_ref(),
