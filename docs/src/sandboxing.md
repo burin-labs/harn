@@ -178,6 +178,28 @@ compile time via `cfg`-gated `mod` declarations. Adding a new
 backend means writing one file under `sandbox/` and adding the
 `mod` plus `type ActiveBackend` lines.
 
+## Sandboxes are the runtime arm of a permission policy
+
+A sandbox is the runtime answer to a declared permission policy. The
+authoritative policy model (`policy { read, write, exec, net }`) lives
+in `harn-serve`'s `permissions` module; `permissions::enforcement`
+lowers it into the two enforcement vocabularies described above:
+
+- `to_capability_policy` derives the in-VM `CapabilityPolicy` ceiling
+  — `read`/`write`/`exec` become `workspace`/`process` capabilities and
+  the `side_effect_level`, threaded with a chosen `SandboxProfile`.
+- `to_sandbox_spec` / `to_network_policy` (behind the `hostlib`
+  feature) turn the `net` allowlist into a `SandboxSpec` egress policy
+  for a `SandboxBackend` to provision against.
+
+The pluggable backend contract — `SandboxBackend`, `SandboxSpec`,
+`ExecRequest`/`ExecResult`, `NetworkPolicy`, mounts, and limits — lives
+in `harn-hostlib`'s `sandbox` module, alongside the `LocalSandbox`
+backend. `LocalSandbox` does not reimplement OS confinement: it pushes
+a `CapabilityPolicy` and runs each command through the same `harn-vm`
+process sandbox documented here. Remote backends (Fly Machines, Modal,
+E2B, …) implement the same trait from wherever they run.
+
 ## Diagnostics from a script
 
 Three Harn builtins surface backend identity for `harn doctor`-style
@@ -204,8 +226,9 @@ mechanism.
 
 ## Out of scope
 
-- gVisor / Firecracker / Kata containers — those belong to
-  `harn-cloud`'s `SandboxBackend` impl, not the local runtime.
+- gVisor / Firecracker / Kata containers — those belong to a remote
+  `SandboxBackend` impl (Fly Machines, Modal, …), not the local
+  runtime; the trait lives in `harn-hostlib`'s `sandbox` module.
 - Destination-level network egress allow/deny — use `egress_policy(...)`
   or `HARN_EGRESS_*` once a host policy allows network side effects.
 - Sandboxing for in-process work (LLM calls, deterministic Harn

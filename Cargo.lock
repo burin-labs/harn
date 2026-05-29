@@ -2337,6 +2337,7 @@ dependencies = [
 name = "harn-hostlib"
 version = "0.8.47"
 dependencies = [
+ "async-trait",
  "base64",
  "criterion",
  "filetime",
@@ -2382,6 +2383,7 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "tree-sitter-zig",
+ "uuid",
  "walkdir",
  "windows-sys 0.61.2",
 ]
