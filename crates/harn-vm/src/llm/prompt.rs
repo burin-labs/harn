@@ -21,7 +21,7 @@ use std::collections::BTreeSet;
 /// assembled bytes are stable: all included `Before` fragments in declaration
 /// order, then all included `After` fragments in declaration order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FragmentBucket {
+pub enum FragmentBucket {
     /// Emitted before/around the primary system text and reminders
     /// (preamble / prefix / context / parts / primary / reminders).
     Before,
@@ -30,7 +30,7 @@ pub(crate) enum FragmentBucket {
 }
 
 impl FragmentBucket {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Before => "before",
             Self::After => "after",
@@ -43,7 +43,7 @@ impl FragmentBucket {
 /// `body` is already rendered (templates run upstream, in `.harn` or in the
 /// reminder pipeline). `assemble` trims the body and skips empty fragments.
 #[derive(Clone, Debug)]
-pub(crate) struct PromptFragment {
+pub struct PromptFragment {
     /// Stable, unique-ish identifier, e.g. `host:system_preamble`,
     /// `primary`, `reminder`, `tool:todo.guidance`.
     pub id: String,
@@ -64,7 +64,7 @@ pub(crate) struct PromptFragment {
 }
 
 impl PromptFragment {
-    pub(crate) fn new(
+    pub fn new(
         id: impl Into<String>,
         source: impl Into<String>,
         bucket: FragmentBucket,
@@ -80,13 +80,13 @@ impl PromptFragment {
         }
     }
 
-    pub(crate) fn requiring_tools(mut self, tools: Vec<String>) -> Self {
+    pub fn requiring_tools(mut self, tools: Vec<String>) -> Self {
         self.requires_tools = tools;
         self
     }
 
     #[allow(dead_code)] // used by capability-gated fragments (Wave 1+)
-    pub(crate) fn requiring_caps(mut self, caps: Vec<String>) -> Self {
+    pub fn requiring_caps(mut self, caps: Vec<String>) -> Self {
         self.requires_caps = caps;
         self
     }
@@ -94,7 +94,7 @@ impl PromptFragment {
 
 /// Provenance for one fragment: whether it made the prompt and why.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-pub(crate) struct FragmentTrace {
+pub struct FragmentTrace {
     pub id: String,
     pub source: String,
     pub bucket: &'static str,
@@ -106,7 +106,7 @@ pub(crate) struct FragmentTrace {
 /// Result of [`assemble`]: the system string (if any) plus full provenance
 /// for every fragment that was considered.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct AssembledPrompt {
+pub struct AssembledPrompt {
     pub system: Option<String>,
     pub provenance: Vec<FragmentTrace>,
 }
@@ -114,7 +114,7 @@ pub(crate) struct AssembledPrompt {
 impl AssembledPrompt {
     /// Provenance serialized for the `prompt_explain` builtin / CLI and for
     /// transcript audit metadata.
-    pub(crate) fn provenance_json(&self) -> serde_json::Value {
+    pub fn provenance_json(&self) -> serde_json::Value {
         serde_json::json!({
             "fragments": self.provenance,
             "included": self.provenance.iter().filter(|t| t.included).count(),
@@ -126,7 +126,7 @@ impl AssembledPrompt {
 /// Inputs that gate fragment inclusion: which tools and capability flags are
 /// active for this assembly.
 #[derive(Default, Debug)]
-pub(crate) struct AssembleCtx {
+pub struct AssembleCtx {
     pub tool_names: BTreeSet<String>,
     pub caps: BTreeSet<String>,
 }
@@ -154,7 +154,7 @@ impl AssembleCtx {
 /// `Before` fragments in declaration order, then included `After` fragments
 /// in declaration order, joined with a blank line. Bodies are trimmed; empty
 /// (or gated-out) fragments are excluded but still recorded with a reason.
-pub(crate) fn assemble(fragments: &[PromptFragment], ctx: &AssembleCtx) -> AssembledPrompt {
+pub fn assemble(fragments: &[PromptFragment], ctx: &AssembleCtx) -> AssembledPrompt {
     let mut provenance = Vec::with_capacity(fragments.len());
     let mut before: Vec<String> = Vec::new();
     let mut after: Vec<String> = Vec::new();
