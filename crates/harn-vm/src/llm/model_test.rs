@@ -84,6 +84,7 @@ pub async fn run_model_smoke_test(
         seed: None,
         frequency_penalty: None,
         presence_penalty: None,
+        fast: false,
         output_format: OutputFormat::Text,
         response_format: None,
         json_schema: None,

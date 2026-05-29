@@ -347,6 +347,14 @@ pub(crate) struct LlmCallOptions {
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
 
+    // --- Serving tier ---
+    /// Opt into the model's accelerated-serving ("fast mode") tier. Maps to
+    /// the per-provider knob declared in the catalog (`speed` for Anthropic,
+    /// `service_tier` for OpenAI) and bills at the premium `fast_mode.pricing`
+    /// when the provider confirms it served the request fast. Off by default;
+    /// validated against the catalog at option extraction time.
+    pub fast: bool,
+
     // --- Structured output ---
     pub output_format: OutputFormat,
     /// Legacy compatibility mirror for older internals and replay hashes.
@@ -467,6 +475,9 @@ impl LlmCallOptions {
                 crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
             );
         }
+        if let Some(header) = crate::llm::fast_mode::beta_header(&self.model, self.fast) {
+            push_unique_anthropic_beta_feature(&mut features, &header);
+        }
         features
     }
 }
@@ -498,6 +509,10 @@ pub(crate) struct LlmRequestPayload {
     pub seed: Option<i64>,
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
+    /// See [`LlmCallOptions::fast`]. Forwarded to provider body builders so
+    /// they can inject the catalog's fast-mode knob, and to cost recording
+    /// so confirmed-fast responses bill at the premium tier.
+    pub fast: bool,
     pub output_format: OutputFormat,
     pub response_format: Option<String>,
     pub json_schema: Option<serde_json::Value>,
@@ -574,6 +589,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             seed: opts.seed,
             frequency_penalty: opts.frequency_penalty,
             presence_penalty: opts.presence_penalty,
+            fast: opts.fast,
             output_format: opts.output_format.clone(),
             response_format: opts.response_format.clone(),
             json_schema: opts.json_schema.clone(),
@@ -672,6 +688,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         seed: Some(7),
         frequency_penalty: Some(0.1),
         presence_penalty: Some(0.2),
+        fast: false,
         output_format: OutputFormat::JsonSchema {
             schema: serde_json::json!({"type": "object"}),
             strict: true,

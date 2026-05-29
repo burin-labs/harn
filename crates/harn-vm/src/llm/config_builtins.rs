@@ -1007,6 +1007,56 @@ pub(crate) fn capabilities_to_vm_value(
         "presence_penalty_supported".to_string(),
         VmValue::Bool(caps.presence_penalty_supported),
     );
+    // Accelerated-serving ("fast mode") tier, read from the catalog so
+    // callers can branch on `llm_call(..., { fast: true })` support without
+    // re-parsing the model row. `fast_mode_supported` is true only for a
+    // usable (non-deprecated) tier; the nested `fast_mode` dict mirrors the
+    // catalog metadata when any tier is declared.
+    let fast_mode = super::fast_mode::lookup(model);
+    dict.insert(
+        "fast_mode_supported".to_string(),
+        VmValue::Bool(
+            fast_mode
+                .as_ref()
+                .map(super::fast_mode::is_usable)
+                .unwrap_or(false),
+        ),
+    );
+    if let Some(fast_mode) = fast_mode {
+        let mut fast = BTreeMap::new();
+        fast.insert(
+            "param".to_string(),
+            VmValue::String(Rc::from(fast_mode.param.as_str())),
+        );
+        fast.insert(
+            "value".to_string(),
+            VmValue::String(Rc::from(fast_mode.value.as_str())),
+        );
+        fast.insert(
+            "status".to_string(),
+            fast_mode
+                .status
+                .as_deref()
+                .map(|s| VmValue::String(Rc::from(s)))
+                .unwrap_or(VmValue::Nil),
+        );
+        fast.insert(
+            "beta_header".to_string(),
+            fast_mode
+                .beta_header
+                .as_deref()
+                .map(|s| VmValue::String(Rc::from(s)))
+                .unwrap_or(VmValue::Nil),
+        );
+        fast.insert(
+            "otps_speedup".to_string(),
+            fast_mode
+                .otps_speedup
+                .map(VmValue::Float)
+                .unwrap_or(VmValue::Nil),
+        );
+        dict.insert("fast_mode".to_string(), VmValue::Dict(Rc::new(fast)));
+    }
     VmValue::Dict(Rc::new(dict))
 }
 
@@ -1496,6 +1546,54 @@ mod tests {
             Some(VmValue::String(style)) => assert_eq!(style.as_ref(), "inline"),
             other => panic!("expected thinking_block_style string, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_provider_capabilities_surfaces_fast_mode() {
+        super::super::capabilities::clear_user_overrides();
+        let mut out = String::new();
+
+        // Opus 4.8 advertises a usable (research-preview) fast tier.
+        let opus = provider_capabilities_builtin(
+            &[
+                VmValue::String(Rc::from("anthropic")),
+                VmValue::String(Rc::from("claude-opus-4-8")),
+            ],
+            &mut out,
+        )
+        .expect("builtin returned error");
+        let opus = opus.as_dict().expect("expected dict");
+        let expect_str =
+            |dict: &BTreeMap<String, VmValue>, key: &str, want: &str| match dict.get(key) {
+                Some(VmValue::String(s)) => assert_eq!(s.as_ref(), want, "{key}"),
+                other => panic!("expected String for {key}, got {other:?}"),
+            };
+        assert!(matches!(
+            opus.get("fast_mode_supported"),
+            Some(VmValue::Bool(true))
+        ));
+        let fast = opus
+            .get("fast_mode")
+            .and_then(VmValue::as_dict)
+            .expect("fast_mode dict present");
+        expect_str(fast, "param", "speed");
+        expect_str(fast, "beta_header", "fast-mode-2026-02-01");
+
+        // A model with no fast tier reports false and omits the dict.
+        let gpt4o = provider_capabilities_builtin(
+            &[
+                VmValue::String(Rc::from("openai")),
+                VmValue::String(Rc::from("gpt-4o")),
+            ],
+            &mut out,
+        )
+        .expect("builtin returned error");
+        let gpt4o = gpt4o.as_dict().expect("expected dict");
+        assert!(matches!(
+            gpt4o.get("fast_mode_supported"),
+            Some(VmValue::Bool(false))
+        ));
+        assert!(gpt4o.get("fast_mode").is_none());
     }
 
     #[test]

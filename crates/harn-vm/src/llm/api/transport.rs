@@ -634,6 +634,9 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     let mut blocks: Vec<serde_json::Value> = Vec::new();
     let mut telemetry = ProviderTelemetry::default();
     let mut anth_request_id: Option<String> = None;
+    // Set once the provider echoes the fast-mode knob (`speed` /
+    // `service_tier`) on a streamed event; drives premium-tier billing.
+    let mut served_fast = false;
 
     struct ToolBlock {
         id: String,
@@ -712,6 +715,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
                         input_tokens = n;
                     }
+                    served_fast |= crate::llm::fast_mode::served_fast(model, &json["message"]);
                     let usage = &json["message"]["usage"];
                     let cr = extract_cache_read_tokens(usage);
                     if cr > 0 {
@@ -1041,6 +1045,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 }
             }
 
+            served_fast |= crate::llm::fast_mode::served_fast(model, &json);
             if let Some(usage) = json.get("usage") {
                 if let Some(n) = usage["prompt_tokens"].as_i64() {
                     input_tokens = n;
@@ -1156,6 +1161,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         },
         thinking_summary: None,
         stop_reason,
+        served_fast,
         blocks,
         logprobs: Vec::new(),
         telemetry,
@@ -1343,6 +1349,8 @@ where
         thinking,
         thinking_summary: None,
         stop_reason: None,
+        // NDJSON (Ollama) has no accelerated-serving tier.
+        served_fast: false,
         blocks,
         logprobs: Vec::new(),
         telemetry,

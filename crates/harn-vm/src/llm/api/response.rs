@@ -489,6 +489,7 @@ pub(crate) fn parse_openai_responses_response(
             Some(thinking_summary)
         },
         stop_reason,
+        served_fast: crate::llm::fast_mode::served_fast(model, json),
         blocks,
         logprobs: Vec::new(),
         telemetry,
@@ -629,6 +630,7 @@ pub(crate) fn parse_llm_response(
             },
             thinking_summary: None,
             stop_reason,
+            served_fast: crate::llm::fast_mode::served_fast(model, json),
             blocks,
             logprobs: Vec::new(),
             telemetry,
@@ -808,6 +810,7 @@ pub(crate) fn parse_llm_response(
                 Some(reasoning_summary)
             },
             stop_reason,
+            served_fast: crate::llm::fast_mode::served_fast(model, json),
             blocks,
             logprobs: extract_openai_choice_logprobs(choice),
             telemetry,

@@ -138,6 +138,7 @@ async fn vm_call_completion_openai_style(
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
     Ok(LlmResult {
+        served_fast: false,
         text: json["choices"][0]["text"]
             .as_str()
             .unwrap_or("")
@@ -240,6 +241,7 @@ async fn vm_call_completion_ollama(
 
     let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
     Ok(LlmResult {
+        served_fast: false,
         text: json["response"].as_str().unwrap_or("").to_string(),
         tool_calls: Vec::new(),
         input_tokens: json["prompt_eval_count"].as_i64().unwrap_or(0),

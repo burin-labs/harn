@@ -433,6 +433,9 @@ pub(crate) struct PricingDetail {
 pub(crate) enum PricingSource {
     /// Exact model entry in the catalog (configured `[llm.models.<id>]`).
     CatalogModel,
+    /// The model's accelerated-serving tier (`fast_mode.pricing`), used when
+    /// the provider confirmed it served the request fast.
+    CatalogFastMode,
     /// Provider-level catalog economics (`[llm.providers.<name>]`).
     ProviderEconomics,
 }
@@ -441,6 +444,7 @@ impl PricingSource {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             PricingSource::CatalogModel => "catalog_model",
+            PricingSource::CatalogFastMode => "catalog_fast_mode",
             PricingSource::ProviderEconomics => "provider_economics",
         }
     }
@@ -475,6 +479,30 @@ pub(crate) fn pricing_detail_for(provider: &str, model: &str) -> Option<PricingD
 
 pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f64)> {
     pricing_detail_for(provider, model).map(|p| (p.input_per_1k, p.output_per_1k))
+}
+
+/// Resolve pricing for a (provider, model) pair, billing at the premium
+/// accelerated-serving tier when `served_fast` is set and the catalog
+/// declares `fast_mode.pricing`. Falls back to standard pricing when the
+/// request was served at the standard tier (e.g. a capacity downgrade) or
+/// the fast tier omits explicit rates.
+pub(crate) fn pricing_detail_for_tier(
+    provider: &str,
+    model: &str,
+    served_fast: bool,
+) -> Option<PricingDetail> {
+    if served_fast {
+        if let Some(pricing) = crate::llm_config::model_fast_pricing_per_mtok(model) {
+            return Some(PricingDetail {
+                input_per_1k: pricing.input_per_mtok / 1000.0,
+                output_per_1k: pricing.output_per_mtok / 1000.0,
+                cache_read_per_1k: pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
+                cache_write_per_1k: pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
+                source: PricingSource::CatalogFastMode,
+            });
+        }
+    }
+    pricing_detail_for(provider, model)
 }
 
 pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
@@ -557,8 +585,15 @@ pub(crate) fn accumulate_cost_for_provider(
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
+    served_fast: bool,
 ) -> Result<(), VmError> {
-    let cost = calculate_cost_for_provider(provider, model, input_tokens, output_tokens);
+    let cost = pricing_detail_for_tier(provider, model, served_fast)
+        .map(|detail| {
+            (input_tokens as f64 * detail.input_per_1k
+                + output_tokens as f64 * detail.output_per_1k)
+                / 1000.0
+        })
+        .unwrap_or(0.0);
     // Always attribute usage to the active `@step` (if any), even when
     // the per-call cost is zero — token-only step budgets need the
     // count regardless of pricing.
@@ -607,8 +642,9 @@ pub(crate) fn record_llm_usage_for_provider(
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
+    served_fast: bool,
 ) -> Result<(), VmError> {
-    accumulate_cost_for_provider(provider, model, input_tokens, output_tokens)
+    accumulate_cost_for_provider(provider, model, input_tokens, output_tokens, served_fast)
 }
 
 pub(crate) fn register_cost_builtins(vm: &mut Vm) {
@@ -1159,6 +1195,25 @@ mod tests {
     }
 
     #[test]
+    fn fast_tier_bills_premium_pricing_when_served_fast() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        crate::llm_config::clear_user_overrides();
+
+        // Opus 4.8 fast mode is 2x standard ($5/$25 -> $10/$50 per MTok).
+        let standard = pricing_detail_for_tier("anthropic", "claude-opus-4-8", false).unwrap();
+        let fast = pricing_detail_for_tier("anthropic", "claude-opus-4-8", true).unwrap();
+        assert_eq!(standard.source, PricingSource::CatalogModel);
+        assert_eq!(fast.source, PricingSource::CatalogFastMode);
+        assert!((fast.input_per_1k - 2.0 * standard.input_per_1k).abs() < 1e-9);
+        assert!((fast.output_per_1k - 2.0 * standard.output_per_1k).abs() < 1e-9);
+
+        // A model with no fast tier ignores the flag and bills standard.
+        let no_fast =
+            pricing_detail_for_tier("anthropic", "claude-sonnet-4-20250514", true).unwrap();
+        assert_eq!(no_fast.source, PricingSource::CatalogModel);
+    }
+
+    #[test]
     fn project_call_cost_excludes_cached_input_from_full_rate() {
         let detail = pricing_detail_for("anthropic", "claude-sonnet-4-20250514").unwrap();
         let with_cache = project_call_cost(&detail, 10_000, 500, 8_000, 0);
@@ -1221,11 +1276,13 @@ mod tests {
         let _budget = install_llm_token_budget(10);
 
         // First call within budget — admits.
-        let first = accumulate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 5, 0);
+        let first =
+            accumulate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 5, 0, false);
         assert!(first.is_ok());
 
         // Second call pushes over — raises BudgetExceeded.
-        let second = accumulate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 8, 0);
+        let second =
+            accumulate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 8, 0, false);
         match second {
             Err(VmError::CategorizedError { category, message }) => {
                 assert_eq!(category, ErrorCategory::BudgetExceeded);

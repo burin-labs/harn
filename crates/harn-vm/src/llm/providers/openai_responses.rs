@@ -182,6 +182,7 @@ impl OpenAiResponsesProvider {
             body["tools"] = serde_json::Value::Array(tools);
         }
 
+        crate::llm::fast_mode::apply_request_knob(&mut body, &opts.model, opts.fast);
         body
     }
 

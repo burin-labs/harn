@@ -132,6 +132,7 @@ pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult,
         &result.model,
         result.input_tokens,
         result.output_tokens,
+        result.served_fast,
     )?;
     Ok(result)
 }
@@ -148,6 +149,7 @@ pub(crate) async fn vm_call_llm_full_streaming(
         &result.model,
         result.input_tokens,
         result.output_tokens,
+        result.served_fast,
     )?;
     Ok(result)
 }
@@ -191,6 +193,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
         &result.model,
         result.input_tokens,
         result.output_tokens,
+        result.served_fast,
     )?;
     Ok(result)
 }

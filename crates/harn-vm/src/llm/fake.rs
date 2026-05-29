@@ -451,6 +451,7 @@ async fn play_stream(
     });
 
     Ok(LlmResult {
+        served_fast: false,
         text,
         tool_calls,
         input_tokens: count_input_tokens(&request.messages),
@@ -524,6 +525,7 @@ mod tests {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            fast: false,
             output_format: OutputFormat::Text,
             response_format: None,
             json_schema: None,

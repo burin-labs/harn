@@ -90,7 +90,8 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `cache_creation_input_tokens` | int | Anthropic-compatible alias for `cache_write_tokens` |
 | `cache_hit_ratio` | float | Fraction of prompt tokens served from provider-side cache |
 | `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; cache writes can be negative when writes cost more than normal input |
-| `usage` | dict | Token and prompt-cache accounting fields, including the cache fields above |
+| `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
+| `usage` | dict | Token and prompt-cache accounting fields, including the cache fields above and `served_fast` |
 | `data` | any | Parsed JSON (when `response_format: "json"`) |
 | `tool_calls` | list | Tool calls (when model uses tools) |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
@@ -146,6 +147,7 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `max_tool_calls` | int | nil | OpenAI Responses provider-executed tool-call limit. |
 | `budget` | dict | nil | Pre-flight LLM budget envelope. Supports `max_cost_usd`, `max_input_tokens`, `max_output_tokens`, and `total_budget_usd` |
 | `cache` | bool | `false` | Enable prompt caching (Anthropic) |
+| `fast` | bool | `false` | Opt into the model's accelerated-serving ("fast mode") tier. Maps to the per-provider knob declared in the catalog (`speed` for Anthropic, `service_tier` for OpenAI) and injects the Anthropic beta header when required. Rejected for models with no `fast_mode` tier or a deprecated one. Billed at the catalog's premium `fast_mode.pricing` only when the provider confirms it served fast (`result.served_fast`). `speed: "fast"` is accepted as an alias. |
 | `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
 | `timeout` | int | `120` | Request timeout in seconds. `timeout_ms` accepted as an alias and rounded up to whole seconds (HTTP transports take `Duration::from_secs`); sub-second budgets must be enforced at the caller. |
 | `messages` | list | nil | Full message list (overrides prompt) |
@@ -334,7 +336,7 @@ Envelope fields:
 | `attempts` | int | Number of model calls made. `1` = no retries; `2+` = schema retries kicked in. `0` only when arg parsing failed before any call. |
 | `repaired` | bool | `true` when the repair pass produced valid JSON. |
 | `extracted_json` | bool | `true` when JSON had to be lifted from prose / markdown fences. |
-| `usage` | `{input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd}` | Token and prompt-cache accounting from the final attempt. |
+| `usage` | `{input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd, served_fast}` | Token and prompt-cache accounting from the final attempt. |
 | `model` | string | Model that produced the final attempt. |
 | `provider` | string | Provider that produced the final attempt. |
 

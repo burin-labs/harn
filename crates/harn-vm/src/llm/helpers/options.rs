@@ -1794,6 +1794,33 @@ pub(crate) fn extract_llm_options(
         .and_then(|o| o.get("reminders"))
         .map(vm_value_to_json);
 
+    // `fast: true` (or the provider-flavored `speed: "fast"`) opts into the
+    // model's accelerated-serving tier. The catalog is the source of truth
+    // for the per-provider knob, so we only validate the request is sane
+    // here; the provider body builder reads `fast_mode.param`/`value`.
+    let fast = opt_bool(&options, "fast") || opt_str(&options, "speed").as_deref() == Some("fast");
+    if fast && enforce_capability_gates {
+        match crate::llm::fast_mode::gate(&model) {
+            crate::llm::fast_mode::FastModeGate::Usable => {}
+            crate::llm::fast_mode::FastModeGate::Unsupported => {
+                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    format!(
+                    "fast: model \"{model}\" (provider \"{provider}\") has no accelerated-serving \
+                     tier in the catalog; remove `fast` or pick a model that advertises `fast_mode`"
+                ),
+                ))));
+            }
+            crate::llm::fast_mode::FastModeGate::Deprecated { note } => {
+                let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
+                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    format!(
+                    "fast: the accelerated-serving tier for model \"{model}\" is deprecated{detail}"
+                ),
+                ))));
+            }
+        }
+    }
+
     let opts = LlmCallOptions {
         provider,
         model,
@@ -1820,6 +1847,7 @@ pub(crate) fn extract_llm_options(
         seed,
         frequency_penalty,
         presence_penalty,
+        fast,
         output_format,
         response_format,
         json_schema,
@@ -2627,6 +2655,64 @@ mod routing_tests {
             .alternatives
             .iter()
             .any(|alt| alt.provider == "fast"));
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+    }
+
+    fn extract_with_options(
+        opts: BTreeMap<String, VmValue>,
+    ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
+        extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(opts)),
+        ])
+    }
+
+    fn fast_options(model: &str) -> BTreeMap<String, VmValue> {
+        let mut options = BTreeMap::new();
+        options.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from(model.to_string())),
+        );
+        options.insert("fast".to_string(), VmValue::Bool(true));
+        options
+    }
+
+    #[test]
+    fn fast_opts_into_tier_for_supported_model_and_guards_others() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        crate::llm_config::clear_user_overrides();
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        std::env::set_var("OPENAI_API_KEY", "test-key");
+        super::super::reset_provider_key_cache();
+
+        match extract_with_options(fast_options("claude-opus-4-8")) {
+            Ok(opus) => assert!(opus.fast, "fast must be set for a model with a usable tier"),
+            Err(e) => panic!("opus fast should succeed: {e:?}"),
+        }
+
+        // No fast tier -> rejected with a clear diagnostic.
+        match extract_with_options(fast_options("gpt-4o")) {
+            Err(VmError::Thrown(VmValue::String(message))) => {
+                assert!(message.contains("no accelerated-serving tier"), "{message}");
+            }
+            other => panic!("expected thrown error for gpt-4o, got {:?}", other.is_ok()),
+        }
+
+        // Deprecated tier -> rejected.
+        match extract_with_options(fast_options("claude-opus-4-6")) {
+            Err(VmError::Thrown(VmValue::String(message))) => {
+                assert!(message.contains("deprecated"), "{message}");
+            }
+            other => panic!(
+                "expected thrown error for opus 4.6, got {:?}",
+                other.is_ok()
+            ),
+        }
+
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("OPENAI_API_KEY");
         crate::llm_config::clear_user_overrides();
         super::super::reset_provider_key_cache();
     }
