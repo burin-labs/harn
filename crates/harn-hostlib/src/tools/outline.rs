@@ -10,10 +10,12 @@
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, optional_int, require_string, str_value};
+use crate::tools::permissions::enforce_path_scope;
 
 const BUILTIN: &str = "hostlib_tools_get_file_outline";
 
@@ -34,6 +36,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let _ = max_depth;
 
     let path = PathBuf::from(&path_str);
+    enforce_path_scope(BUILTIN, &path, FsAccess::Read)?;
     let language = detect_language(&path);
 
     let content = match crate::fs::read_to_string(&path, session_id.as_deref()) {

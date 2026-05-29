@@ -1,0 +1,55 @@
+/**
+ * Workspace-root path-scope enforcement for the hostlib `tools` and `fs`
+ * filesystem builtins (issue #2600, follow-up to the coarse
+ * `tools:deterministic` gate from #2548).
+ *
+ * Under a restricted `worktree` sandbox profile scoped to a single
+ * workspace root, a path that resolves outside that root must be refused
+ * — for writes and reads alike — with a `tool_rejected` violation that
+ * names the offending path. In-root paths still succeed. This mirrors what
+ * the VM-native `harness.fs.*` surface enforces, so both filesystem
+ * surfaces reject the same out-of-root path identically.
+ */
+pipeline default() {
+  hostlib_enable("tools:deterministic")
+  let base = path_join(
+    harness.fs.temp_dir(),
+    "harn_fs_path_scope_" + to_string(harness.random.gen_range(100000, 999999)),
+  )
+  let root = path_join(base, "workspace")
+  harness.fs.mkdir(root)
+  let in_path = path_join(root, "in.txt")
+  let out_path = path_join(base, "outside.txt")
+  with_execution_policy(
+    {sandbox_profile: "worktree", workspace_roots: [root]},
+    { ->
+      let ok = hostlib_tools_write_file({path: in_path, content: "ok\n"})
+      __io_println(ok.bytes_written)
+      let write_err = try {
+        hostlib_tools_write_file({path: out_path, content: "nope\n"})
+        nil
+      } catch (e) {
+        e
+      }
+      __io_println(write_err.kind)
+      __io_println(write_err.builtin)
+      __io_println(contains(write_err.message, "outside workspace_roots"))
+      __io_println(contains(write_err.path, "outside.txt"))
+      let read_err = try {
+        hostlib_fs_read_text({path: out_path})
+        nil
+      } catch (e) {
+        e
+      }
+      __io_println(read_err.kind)
+      __io_println(read_err.builtin)
+    },
+  )
+  // The in-root write landed; the rejected out-of-root write never did.
+  __io_println(harness.fs.read_text(in_path) == "ok\n")
+  __io_println(harness.fs.exists(out_path))
+}
+// In-root write is allowed.
+// Out-of-root write is refused with the typed violation, before any
+// bytes reach disk.
+// Reads obey the same scope.

@@ -7,13 +7,18 @@
 //! `sandbox-exec` wrapping, Windows AppContainer + Job Object launches
 //! through `command_output`, plus workspace-root cwd enforcement.
 //!
+//! The same surface also exposes [`check_fs_path_scope`] so embedders that
+//! resolve host *paths* on behalf of Harn scripts (the `harn-hostlib`
+//! `fs/*`, `tools/*`, and `ast/*` builtins) can enforce the active policy's
+//! workspace-root scope without depending on `VmError`.
+//!
 //! The helpers themselves live next to the rest of the sandbox state in
 //! [`crate::stdlib::sandbox`]. This module exists so external crates have a
 //! stable, documented surface to depend on without reaching into
 //! `stdlib::*` plumbing.
 
 pub use crate::stdlib::sandbox::{
-    active_backend_available, active_backend_name, command_output, enforce_process_cwd,
-    process_spawn_error, process_violation_error, std_command_for, tokio_command_for,
-    ProcessCommandConfig,
+    active_backend_available, active_backend_name, check_fs_path_scope, command_output,
+    enforce_process_cwd, process_spawn_error, process_violation_error, std_command_for,
+    tokio_command_for, FsAccess, ProcessCommandConfig, SandboxViolation,
 };

@@ -59,8 +59,12 @@ thread_local! {
     static WARNED_KEYS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum FsAccess {
+/// The kind of filesystem access a path-scope check is guarding. Drives
+/// only the verb rendered in a rejection message — the scope decision
+/// itself is identical for reads, writes, and deletes (a path is either
+/// inside the workspace roots or it is not).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FsAccess {
     Read,
     Write,
     Delete,
@@ -276,7 +280,57 @@ fn sandbox_active_profile_impl(_args: &[VmValue], _out: &mut String) -> Result<V
     Ok(VmValue::String(Rc::from(profile.as_str())))
 }
 
-pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
+/// A workspace-root scope violation: a path that resolved outside every
+/// configured workspace root under a restricted [`SandboxProfile`].
+///
+/// This is the `VmError`-free shape returned by [`check_fs_path_scope`] so
+/// that crates outside `harn-vm` (today: `harn-hostlib`) can enforce the
+/// same scope policy and render the violation onto their own error type.
+#[derive(Clone, Debug)]
+pub struct SandboxViolation {
+    /// The path the call attempted to touch, normalized against the
+    /// active policy (CWD-relative paths resolved to absolute, `..`
+    /// collapsed, symlinks canonicalized where the path exists).
+    pub attempted: PathBuf,
+    /// The workspace roots the path was checked against, normalized the
+    /// same way as `attempted`.
+    pub roots: Vec<PathBuf>,
+    /// Whether the rejected access was a read, write, or delete.
+    pub access: FsAccess,
+}
+
+impl SandboxViolation {
+    /// Render the canonical rejection message. Matches the text produced
+    /// by [`enforce_fs_path`] so the `harness.fs.*` and hostlib surfaces
+    /// reject an out-of-root path identically.
+    pub fn message(&self, builtin: &str) -> String {
+        format!(
+            "sandbox violation: builtin '{builtin}' attempted to {} '{}' outside workspace_roots [{}]",
+            self.access.verb(),
+            self.attempted.display(),
+            self.roots
+                .iter()
+                .map(|root| root.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+/// Check whether `path` is inside the active policy's workspace roots.
+///
+/// Returns `Ok(())` when no execution policy is active, when the active
+/// profile is [`SandboxProfile::Unrestricted`], or when the normalized
+/// path falls within one of the workspace roots. Otherwise returns a
+/// [`SandboxViolation`] describing the rejected path and the roots it was
+/// checked against.
+///
+/// This is the public, `VmError`-free entry point embedders use to apply
+/// workspace-root scoping to their own host calls. The in-crate
+/// `harness.fs.*` builtins funnel through [`enforce_fs_path`], which wraps
+/// this with a `VmError`; both share the same path normalization and
+/// rejection text.
+pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxViolation> {
     let Some(policy) = crate::orchestration::current_execution_policy() else {
         return Ok(());
     };
@@ -288,16 +342,16 @@ pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> R
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
         return Ok(());
     }
-    Err(sandbox_rejection(format!(
-        "sandbox violation: builtin '{builtin}' attempted to {} '{}' outside workspace_roots [{}]",
-        access.verb(),
-        candidate.display(),
-        roots
-            .iter()
-            .map(|root| root.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    )))
+    Err(SandboxViolation {
+        attempted: candidate,
+        roots,
+        access,
+    })
+}
+
+pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
+    check_fs_path_scope(path, access)
+        .map_err(|violation| sandbox_rejection(violation.message(builtin)))
 }
 
 pub fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {

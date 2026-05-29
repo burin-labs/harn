@@ -9,12 +9,14 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use base64::Engine;
+use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, require_string, str_value,
 };
+use crate::tools::permissions::enforce_path_scope;
 
 const READ_FILE_BUILTIN: &str = "hostlib_tools_read_file";
 const WRITE_FILE_BUILTIN: &str = "hostlib_tools_write_file";
@@ -69,6 +71,7 @@ pub(super) fn read_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
 
     let path = PathBuf::from(&path_str);
+    enforce_path_scope(READ_FILE_BUILTIN, &path, FsAccess::Read)?;
     let offset_u64 = offset as u64;
     let (buf, total_size) = read_bytes(
         &path,
@@ -119,6 +122,7 @@ pub(super) fn write_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let session_id = optional_string(WRITE_FILE_BUILTIN, dict, "session_id")?;
 
     let path = PathBuf::from(&path_str);
+    enforce_path_scope(WRITE_FILE_BUILTIN, &path, FsAccess::Write)?;
 
     let bytes: Vec<u8> = match encoding_raw.as_deref() {
         None | Some("utf-8") => content.into_bytes(),
@@ -197,6 +201,7 @@ pub(super) fn delete_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let session_id = optional_string(DELETE_FILE_BUILTIN, dict, "session_id")?;
 
     let path = PathBuf::from(&path_str);
+    enforce_path_scope(DELETE_FILE_BUILTIN, &path, FsAccess::Delete)?;
     if let Some(removed) = crate::fs::stage_delete_or_none(
         DELETE_FILE_BUILTIN,
         &path,
@@ -282,6 +287,7 @@ pub(super) fn list_directory(args: &[VmValue]) -> Result<VmValue, HostlibError> 
     };
 
     let path = PathBuf::from(&path_str);
+    enforce_path_scope(LIST_DIRECTORY_BUILTIN, &path, FsAccess::Read)?;
     let mut entries: Vec<(String, VmValue)> = Vec::new();
     let mut truncated = false;
     let mut all_names: Vec<(String, bool, bool, u64)> = Vec::new();

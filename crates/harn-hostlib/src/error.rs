@@ -55,6 +55,21 @@ pub enum HostlibError {
         /// Human-readable failure description.
         message: String,
     },
+
+    /// A path the builtin resolved fell outside the session's workspace
+    /// roots under a restricted sandbox profile. The mirror of the
+    /// `harness.fs.*` `tool_rejected` rejection — both surfaces reject an
+    /// out-of-root path with the same message.
+    #[error("{message}")]
+    SandboxViolation {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// The normalized path that was rejected, for telemetry.
+        path: String,
+        /// The canonical rejection message (see
+        /// [`harn_vm::process_sandbox::SandboxViolation::message`]).
+        message: String,
+    },
 }
 
 impl HostlibError {
@@ -65,7 +80,8 @@ impl HostlibError {
             HostlibError::Unimplemented { builtin }
             | HostlibError::MissingParameter { builtin, .. }
             | HostlibError::InvalidParameter { builtin, .. }
-            | HostlibError::Backend { builtin, .. } => builtin,
+            | HostlibError::Backend { builtin, .. }
+            | HostlibError::SandboxViolation { builtin, .. } => builtin,
         }
     }
 }
@@ -80,6 +96,13 @@ impl From<HostlibError> for VmError {
             HostlibError::MissingParameter { .. } => "missing_parameter",
             HostlibError::InvalidParameter { .. } => "invalid_parameter",
             HostlibError::Backend { .. } => "backend_error",
+            HostlibError::SandboxViolation { .. } => "tool_rejected",
+        };
+        // Carry the offending path on sandbox violations so `catch` blocks
+        // and telemetry can branch on it without re-parsing the message.
+        let path = match &err {
+            HostlibError::SandboxViolation { path, .. } => Some(path.clone()),
+            _ => None,
         };
         let builtin = err.builtin();
         let message = err.to_string();
@@ -88,6 +111,9 @@ impl From<HostlibError> for VmError {
         dict.insert("kind".to_string(), VmValue::String(Rc::from(kind)));
         dict.insert("builtin".to_string(), VmValue::String(Rc::from(builtin)));
         dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
+        if let Some(path) = path {
+            dict.insert("path".to_string(), VmValue::String(Rc::from(path)));
+        }
         VmError::Thrown(VmValue::Dict(Rc::new(dict)))
     }
 }

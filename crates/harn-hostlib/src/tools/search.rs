@@ -13,6 +13,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkMatch};
+use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 use ignore::WalkBuilder;
 
@@ -21,6 +22,7 @@ use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
     require_string, str_value,
 };
+use crate::tools::permissions::enforce_path_scope;
 
 const BUILTIN: &str = "hostlib_tools_search";
 
@@ -41,6 +43,10 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let path = optional_string(BUILTIN, dict, "path")?
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
+    // The walk descends from `path`; workspace-root scope is a prefix
+    // check, so guarding the root rejects an out-of-scope search before it
+    // can enumerate any file beneath it.
+    enforce_path_scope(BUILTIN, &path, FsAccess::Read)?;
     let glob = optional_string(BUILTIN, dict, "glob")?;
     let exclude_globs = optional_string_list(BUILTIN, dict, "exclude_globs")?;
     let case_insensitive = optional_bool(BUILTIN, dict, "case_insensitive", false)?;
