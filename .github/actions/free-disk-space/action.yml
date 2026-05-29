@@ -1,0 +1,31 @@
+name: Free disk space
+description: >-
+  Reclaim disk on GitHub-hosted Ubuntu runners before a full-workspace Rust
+  build. The default image ships ~30 GB of preinstalled SDKs (Android, .NET,
+  GHC/Haskell, CodeQL) the Rust jobs never touch; the cold `target/` tree plus
+  sccache and nextest archives for this workspace otherwise push the ~14 GB of
+  free root space over the edge ("No space left on device").
+
+runs:
+  using: composite
+  steps:
+    - name: Remove unused preinstalled SDKs
+      shell: bash
+      run: |
+        echo "Disk before reclaim:"
+        df -h /
+        # Each path is removed best-effort; a missing one on a future image
+        # revision must not fail the build.
+        for path in \
+          /usr/local/lib/android \
+          /usr/share/dotnet \
+          /opt/ghc \
+          /usr/local/.ghcup \
+          /opt/hostedtoolcache/CodeQL \
+          /usr/local/share/powershell \
+          /usr/local/share/chromium; do
+          sudo rm -rf "$path" || true
+        done
+        sudo docker image prune --all --force >/dev/null 2>&1 || true
+        echo "Disk after reclaim:"
+        df -h /

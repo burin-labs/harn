@@ -615,6 +615,27 @@ daily, hourly, run, and token budgets before recording expensive-work receipts.
 optional `persona_version`, `actor`, `update_kind`, `occurred_at`, and
 `payload`.
 
+## harn pg codegen
+
+Generate Harn record types from a directory of `.sql` migrations so
+Postgres query results can be type-checked without a live database.
+
+```bash
+harn pg codegen --dir migrations
+harn pg codegen --dir migrations --out src/db_types.harn
+harn pg codegen --dir migrations --out src/db_types.harn --check
+harn pg codegen --dir migrations --out src/db_types.harn --suffix Record
+```
+
+Replays every forward migration (`.sql`, excluding `.down.sql`) in
+lexicographic order — the same discovery rule `pg_migrate` uses —
+applying `CREATE TABLE`, `ALTER TABLE … ADD/DROP/ALTER/RENAME COLUMN`,
+`RENAME TO`, and `DROP TABLE`, then emits one `type <Table>Row = {…}`
+per table mirroring the live schema. Prints to stdout unless `--out` is
+given. `--check` (requires `--out`) verifies the file is current without
+writing and exits non-zero on drift — wire it into CI. See
+[Postgres → Typed rows from migrations](./postgres.md#typed-rows-from-migrations).
+
 ## harn fmt
 
 Format `.harn` source files. Accepts files or directories.
