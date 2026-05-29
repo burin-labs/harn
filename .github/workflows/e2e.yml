@@ -54,3 +54,9 @@ jobs:
       - run: make test-e2e
         env:
           NEXTEST_PROFILE: e2e
+      # Postgres hostlib loadgen. Self-skips when HARN_TEST_POSTGRES_URL is
+      # unset, which it is until a Postgres instance + dedicated runner are
+      # provisioned (tracked separately). Wired here so the acceptance bar
+      # runs automatically once that env is supplied.
+      - name: Postgres hostlib loadgen
+        run: make loadgen-postgres

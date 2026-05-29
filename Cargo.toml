@@ -24,6 +24,7 @@ members = [
     "perf/llm",
     "perf/vm",
     "perf/orchestration",
+    "perf/postgres",
 ]
 # Build harn-wasm separately: cd crates/harn-wasm && wasm-pack build
 exclude = ["crates/harn-wasm"]

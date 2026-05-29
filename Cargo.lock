@@ -2506,6 +2506,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-postgres-perf"
+version = "0.0.0"
+dependencies = [
+ "harn-vm",
+ "tokio",
+]
+
+[[package]]
 name = "harn-serve"
 version = "0.8.47"
 dependencies = [
