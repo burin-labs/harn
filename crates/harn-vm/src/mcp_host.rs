@@ -520,6 +520,12 @@ pub async fn call(name: &str, tool: &str, args: JsonValue) -> Result<JsonValue, 
         }
     }
 
+    // Charge the logical call against any active `@budget(mcp_calls: …)`
+    // ceiling before doing work — including cache hits, since the budget
+    // caps how many tool calls a dispatch may *issue*, not how many miss
+    // the cache. Caps a runaway tool loop at the dispatcher boundary.
+    crate::call_budget::charge_mcp_call()?;
+
     let now = Instant::now();
     let args_hash = hash_args(&args);
     if let Some(payload) = take_cache_hit(name, tool, &args_hash, now) {

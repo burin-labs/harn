@@ -574,6 +574,7 @@ pub(super) async fn query_rows(
     params: &[VmValue],
     routing: QueryRouting,
 ) -> Result<Vec<VmValue>, VmError> {
+    crate::call_budget::charge_pg_query()?;
     match handle_kind(target).as_deref() {
         Some(HANDLE_MOCK) => return mock_query(target, sql, params, false),
         Some(HANDLE_TX) => {
@@ -615,6 +616,7 @@ pub(super) async fn execute_stmt(
     sql: &str,
     params: &[VmValue],
 ) -> Result<VmValue, VmError> {
+    crate::call_budget::charge_pg_query()?;
     let started = std::time::Instant::now();
     if handle_kind(target).as_deref() == Some(HANDLE_MOCK) {
         let rows = mock_query(target, sql, params, true)?;
