@@ -401,13 +401,21 @@ fn append_llm_transcript_event_log(entry: &serde_json::Value) {
         }
     }
     let event = crate::event_log::LogEvent::new(kind, entry.clone()).with_headers(headers);
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(async move {
-            let _ = log.append(&topic, event).await;
-        });
-    } else {
-        let _ = futures::executor::block_on(log.append(&topic, event));
-    }
+    // Append synchronously. Earlier this fire-and-forget `handle.spawn`ed the
+    // append on the ambient tokio runtime, but the agent loop and the test
+    // runner drive their runtime with `LocalSet::run_until`, which stops
+    // polling once the driving future resolves. Detached append tasks were
+    // therefore never polled to completion: each stranded task pinned its
+    // transcript-sized `LogEvent` payload plus an `Arc<AnyEventLog>` clone for
+    // the lifetime of the runtime — across an entire `harn test --parallel`
+    // worker, that accumulated ~one transcript per test and OOM'd CI (#2660).
+    //
+    // None of the event-log backends actually yield to the tokio reactor on
+    // `append` (memory = `Mutex`, sqlite = blocking `Mutex<Connection>`, file =
+    // blocking fs), so a private `futures::executor::block_on` runs the append
+    // to completion on this thread without touching the ambient runtime. This
+    // is the same path the non-runtime branch already used.
+    let _ = futures::executor::block_on(log.append(&topic, event));
 }
 
 /// Record a `template.render` transcript event for a `render()` /
@@ -1236,6 +1244,55 @@ mod retry_tests {
             Some("/tmp/harn-transcript-a")
         );
         pop_llm_transcript_dir();
+    }
+
+    // Regression for #2660. `append_llm_transcript_event_log` used to
+    // `handle.spawn` the event-log append as a detached task. The agent loop
+    // and the test runner drive their tokio runtime with
+    // `LocalSet::run_until`, which stops polling the moment the driving future
+    // resolves — so those detached appends were never run to completion. Each
+    // stranded task pinned a transcript-sized payload plus an
+    // `Arc<AnyEventLog>` clone for the lifetime of the runtime, leaking ~one
+    // transcript per test across a `harn test --parallel` worker until CI
+    // OOM'd. The append must therefore complete synchronously: the entry has
+    // to be readable from the log the instant the producing future resolves,
+    // without any further runtime polling.
+    #[test]
+    fn transcript_event_is_appended_synchronously_under_run_until() {
+        use crate::event_log::{
+            install_memory_for_current_thread, reset_active_event_log, EventLog, Topic,
+        };
+
+        reset_active_event_log();
+        let log = install_memory_for_current_thread(128);
+        let topic = Topic::new("agent.transcript.llm").expect("static topic");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let local = tokio::task::LocalSet::new();
+        runtime.block_on(local.run_until(async {
+            // Emit a transcript entry from inside the run_until future, exactly
+            // as the agent loop does. With the old detached-spawn path the
+            // append task is left scheduled-but-unpolled when this future
+            // resolves; with the synchronous path it has already landed.
+            append_llm_transcript_entry(&serde_json::json!({
+                "type": "provider_call_request",
+                "iteration": 0,
+                "marker": "regression-2660",
+            }));
+        }));
+
+        // The driving future has resolved and we are no longer polling the
+        // runtime. The event must already be in the log — proving the append
+        // ran synchronously rather than on a stranded detached task.
+        let latest = futures::executor::block_on(log.latest(&topic))
+            .expect("latest query")
+            .expect("transcript event must be present immediately after run_until resolves");
+        assert_eq!(latest, 1, "exactly one transcript event should be recorded");
+
+        reset_active_event_log();
     }
 
     #[test]
