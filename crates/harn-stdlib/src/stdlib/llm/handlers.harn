@@ -564,10 +564,15 @@ pub fn with_prompt_rewrite(next, rewriter) {
     } else {
       call?.system
     }
-    let new_opts = if patch_dict?.opts != nil {
+    let base_opts = if patch_dict?.opts != nil {
       patch_dict.opts
     } else {
       call?.opts
+    }
+    let new_opts = if patch_dict?.system != nil {
+      base_opts + {_system_fragments: nil}
+    } else {
+      base_opts
     }
     let new_call = {
       prompt: new_prompt,
@@ -578,6 +583,11 @@ pub fn with_prompt_rewrite(next, rewriter) {
     return __safe_invoke(next, new_call)
   }
 }
+
+// A rewritten primary system supersedes the decomposed `_system_fragments`
+// channel the agent loop attaches: clearing it lets the new system text win
+// as the primary block, otherwise the assembler would keep reducing the
+// stale fragments and ignore the rewrite.
 
 // -------------------------------------------------------------------------------------------------
 // with_logging

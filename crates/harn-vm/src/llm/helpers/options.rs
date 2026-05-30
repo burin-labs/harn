@@ -1247,22 +1247,32 @@ pub(crate) fn assemble_system_prompt(
         )?;
     }
 
-    let primary_system = system
-        .filter(|system| !system.trim().is_empty())
-        .or_else(|| {
-            options
-                .and_then(|options| options.get("system"))
-                .filter(|value| !matches!(value, VmValue::Nil | VmValue::Bool(false)))
-                .map(VmValue::display)
-                .filter(|system| !system.trim().is_empty())
-        });
-    if let Some(system) = primary_system {
-        fragments.push(PromptFragment::new(
-            "primary",
-            "primary",
-            FragmentBucket::Before,
-            system,
-        ));
+    // The agent loop hands us the primary block pre-decomposed into its
+    // constituent parts (system text, MCP advisory, active skills, skill
+    // catalog, progress nudge, loop/tool contracts) via `_system_fragments`,
+    // so each part is individually auditable instead of opaque inside one
+    // joined string. When present it fully supersedes the single-string
+    // primary path (the `system` arg / `opts.system` is already represented as
+    // one of those fragments).
+    let decomposed = append_decomposed_primary_fragments(&mut fragments, options);
+    if !decomposed {
+        let primary_system = system
+            .filter(|system| !system.trim().is_empty())
+            .or_else(|| {
+                options
+                    .and_then(|options| options.get("system"))
+                    .filter(|value| !matches!(value, VmValue::Nil | VmValue::Bool(false)))
+                    .map(VmValue::display)
+                    .filter(|system| !system.trim().is_empty())
+            });
+        if let Some(system) = primary_system {
+            fragments.push(PromptFragment::new(
+                "primary",
+                "primary",
+                FragmentBucket::Before,
+                system,
+            ));
+        }
     }
 
     // Capability-gated tool guidance: each active tool that declares a
@@ -1362,6 +1372,53 @@ fn append_tool_guidance_fragments(
             .requiring_tools(vec![name]),
         );
     }
+}
+
+/// Expand the agent loop's `_system_fragments` channel — an ordered list of
+/// `{id, source?, body, requires_tools?}` dicts — into primary-region
+/// [`PromptFragment`]s. This is how `agent_build_turn_system` ships the
+/// primary block already decomposed into its parts, so the whole system prompt
+/// (not just the host parts and reminders) is auditable through `assemble`.
+///
+/// Returns `true` if the channel was present (a list), in which case the
+/// caller skips the single-string primary path. An empty list still counts as
+/// present: the agent computed zero non-empty parts, so there is no primary.
+fn append_decomposed_primary_fragments(
+    fragments: &mut Vec<crate::llm::prompt::PromptFragment>,
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> bool {
+    use crate::llm::prompt::{FragmentBucket, PromptFragment};
+    let Some(VmValue::List(items)) = options.and_then(|options| options.get("_system_fragments"))
+    else {
+        return false;
+    };
+    for (index, item) in items.iter().enumerate() {
+        let Some(dict) = item.as_dict() else {
+            continue;
+        };
+        let Some(body) = dict.get("body").map(VmValue::display) else {
+            continue;
+        };
+        let id = dict
+            .get("id")
+            .map(VmValue::display)
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| format!("primary[{index}]"));
+        let source = dict
+            .get("source")
+            .map(VmValue::display)
+            .filter(|source| !source.is_empty())
+            .unwrap_or_else(|| "primary".to_string());
+        let requires_tools = match dict.get("requires_tools") {
+            Some(VmValue::List(tools)) => tools.iter().map(VmValue::display).collect(),
+            _ => Vec::new(),
+        };
+        fragments.push(
+            PromptFragment::new(id, source, FragmentBucket::Before, body)
+                .requiring_tools(requires_tools),
+        );
+    }
+    true
 }
 
 fn assemble_ctx(options: Option<&BTreeMap<String, VmValue>>) -> crate::llm::prompt::AssembleCtx {
@@ -2822,6 +2879,102 @@ mod reminder_render_tests {
             .expect("todo guidance trace");
         assert!(todo.included);
         assert!(todo.reason.contains("tool(s) present: todo"));
+    }
+
+    fn fragment(id: &str, body: &str) -> VmValue {
+        dict(&[("id", s(id)), ("source", s("primary")), ("body", s(body))])
+    }
+
+    #[test]
+    fn system_fragments_expand_in_place_of_the_single_primary() {
+        // The decomposed channel yields the same bytes as the equivalent
+        // joined-string primary, while keeping each part individually traced.
+        let decomposed = BTreeMap::from([
+            ("system_prefix".to_string(), s("X")),
+            (
+                "_system_fragments".to_string(),
+                list(vec![
+                    fragment("primary:system", "base"),
+                    fragment("primary:active_skills", "## Active skills"),
+                    fragment("primary:loop_contract", "Keep going until done."),
+                ]),
+            ),
+            ("system_appendix".to_string(), s("A")),
+        ]);
+        let joined = "base\n\n## Active skills\n\nKeep going until done.";
+        let baseline = BTreeMap::from([
+            ("system_prefix".to_string(), s("X")),
+            ("system_appendix".to_string(), s("A")),
+        ]);
+
+        let from_fragments = compose_system_prompt(None, Some(&decomposed))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        let from_string = compose_system_prompt(Some(joined.to_string()), Some(&baseline))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(from_fragments, from_string);
+        assert_eq!(
+            from_fragments,
+            "X\n\nbase\n\n## Active skills\n\nKeep going until done.\n\nA"
+        );
+
+        // Each part is its own provenance entry; there is no opaque `primary`.
+        let assembled = assemble_system_prompt(None, Some(&decomposed), &[]).expect("assembled");
+        let ids: Vec<&str> = assembled.provenance.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains(&"primary:system"));
+        assert!(ids.contains(&"primary:active_skills"));
+        assert!(ids.contains(&"primary:loop_contract"));
+        assert!(!ids.contains(&"primary"));
+    }
+
+    #[test]
+    fn system_fragments_supersede_the_system_arg() {
+        // When the channel is present, the `system` arg / `opts.system` no
+        // longer contributes a primary fragment — the channel owns that block.
+        let options = BTreeMap::from([
+            ("system".to_string(), s("ignored opts.system")),
+            (
+                "_system_fragments".to_string(),
+                list(vec![fragment("primary:system", "decomposed")]),
+            ),
+        ]);
+        let prompt = compose_system_prompt(Some("ignored system arg".to_string()), Some(&options))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(prompt, "decomposed");
+    }
+
+    #[test]
+    fn empty_system_fragments_yield_no_primary() {
+        // An empty list still claims the primary block: the agent computed zero
+        // non-empty parts, so the `system` arg must not leak back in.
+        let options = BTreeMap::from([("_system_fragments".to_string(), list(vec![]))]);
+        let prompt = compose_system_prompt(Some("should not appear".to_string()), Some(&options))
+            .expect("system prompt");
+        assert_eq!(prompt, None);
+    }
+
+    #[test]
+    fn system_fragments_honor_per_part_tool_gating() {
+        let options = BTreeMap::from([(
+            "_system_fragments".to_string(),
+            list(vec![dict(&[
+                ("id", s("primary:todo_nudge")),
+                ("body", s("Keep the TODO list current.")),
+                ("requires_tools", list(vec![s("todo")])),
+            ])]),
+        )]);
+        // Tool absent → gated out, recorded with a reason.
+        let assembled = assemble_system_prompt(None, Some(&options), &[]).expect("assembled");
+        assert_eq!(assembled.system, None);
+        let trace = assembled
+            .provenance
+            .iter()
+            .find(|t| t.id == "primary:todo_nudge")
+            .expect("nudge trace");
+        assert!(!trace.included);
+        assert!(trace.reason.contains("requires tool `todo`"));
     }
 }
 

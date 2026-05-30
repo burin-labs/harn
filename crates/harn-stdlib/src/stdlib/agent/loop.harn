@@ -15,7 +15,7 @@ import {
   agent_compute_post_turn,
   agent_reset_tool_surface_narrowing,
 } from "std/agent/postturn"
-import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
+import { agent_build_turn_messages, agent_build_turn_system_fragments } from "std/agent/preflight"
 import { agent_dispatch_tool_batch, agent_dispatch_tool_call } from "std/agent/primitives"
 import { agent_progress_apply_options } from "std/agent/progress"
 import { native_tool_contract_feedback_prompt } from "std/agent/prompts"
@@ -1732,7 +1732,12 @@ fn __agent_loop_run(message, session, initial_opts) {
         stop_reason = "out_of_scope"
         break
       }
-      let turn_system = agent_build_turn_system(session, turn_opts, iteration_index)
+      let turn_system_fragments = agent_build_turn_system_fragments(session, turn_opts, iteration_index)
+      var turn_system_parts = []
+      for fragment in turn_system_fragments {
+        turn_system_parts = turn_system_parts.push(fragment.body)
+      }
+      let turn_system = join(turn_system_parts, "\n\n")
       let turn_messages = agent_build_turn_messages(session, turn_opts, iteration_index)
       let llm_overrides = turn_opts?.llm_options ?? {}
       let base_opts = turn_opts + llm_overrides
@@ -1742,6 +1747,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         session_id: session.session_id,
         tool_format: turn_opts.tool_format,
         _iteration: iteration_index + 1,
+        _system_fragments: turn_system_fragments,
       }
       let call = __invoke_llm(message, turn_system, llm_opts)
       if !call.ok {
