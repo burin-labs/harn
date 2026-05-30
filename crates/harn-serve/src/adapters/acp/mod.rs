@@ -805,6 +805,35 @@ impl AcpServer {
                 return;
             }
         };
+        // A policy with no configured methods advertises the synthetic
+        // local "none" flow (see `AuthPolicy::acp_auth_methods`). Honour
+        // an explicit authenticate against it as a no-op success so the
+        // advertised method is real: the caller is already an anonymous
+        // principal.
+        if self.auth_policy.methods.is_empty() && method_id == crate::ACP_LOCAL_NONE_METHOD_ID {
+            let principal = AuthenticatedPrincipal {
+                subject: "anonymous".to_string(),
+                scheme: "none".to_string(),
+                granted_scopes: std::collections::BTreeSet::new(),
+                tenant_id: None,
+            };
+            self.authenticated_principal = Some(principal.clone());
+            self.send_response(
+                id,
+                serde_json::json!({
+                    "_meta": {
+                        "harn": {
+                            "authenticated": true,
+                            "principal": {
+                                "subject": principal.subject,
+                                "scheme": principal.scheme,
+                            }
+                        }
+                    }
+                }),
+            );
+            return;
+        }
         let Some(method) = self.auth_policy.method_by_acp_id(method_id) else {
             self.send_error_with_data(
                 id,

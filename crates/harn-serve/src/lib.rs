@@ -45,7 +45,7 @@ pub use adapters::site::{SiteHttpServeOptions, SiteServer, SiteServerConfig};
 pub use auth::{
     AllowlistOutcome, ApiKeyAuthConfig, ApiKeyEntry, AuthMethodConfig, AuthPolicy, AuthRequest,
     AuthenticatedPrincipal, AuthorizationDecision, HmacAuthConfig, McpAllowlist, McpAllowlistTools,
-    OAuth21AuthConfig, OAuthClaims,
+    OAuth21AuthConfig, OAuthClaims, ACP_LOCAL_NONE_METHOD_ID,
 };
 pub use core::{
     CallArguments, CallRequest, CallResponse, DispatchCore, DispatchCoreConfig, NoopVmConfigurator,

@@ -137,7 +137,24 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
             let initialize = recv_json(&mut response_rx).await;
             assert_eq!(initialize["id"], 1);
             assert_eq!(initialize["result"]["agentInfo"]["name"], "harn");
-            assert_eq!(initialize["result"]["authMethods"], serde_json::json!([]));
+            // A file-less attach server (no configured auth methods)
+            // still advertises the spec-conformant local "none" method so
+            // `initialize` passes the ACP registry auth gate.
+            assert_eq!(
+                initialize["result"]["authMethods"],
+                serde_json::json!([{
+                    "id": "none",
+                    "type": "agent",
+                    "name": "Local (no authentication)",
+                    "description": "Connect without credentials. The agent runs locally and accepts the session as an anonymous principal.",
+                    "_meta": {
+                        "harn": {
+                            "scheme": "none",
+                            "challenge": { "type": "none" }
+                        }
+                    }
+                }])
+            );
             assert_eq!(
                 initialize["result"]["agentCapabilities"]["loadSession"],
                 true

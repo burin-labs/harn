@@ -164,6 +164,45 @@ async fn acp_authenticate_uses_shared_auth_policy() {
         .await;
 }
 
+/// A file-less attach server (default allow-all policy) advertises the
+/// local "none" method in `initialize` and honours an explicit
+/// `authenticate` against it as a no-op success.
+#[tokio::test(flavor = "current_thread")]
+async fn acp_attach_server_advertises_and_authenticates_local_none_method() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+        }))
+        .await;
+    let initialize = recv_json(&mut rx).await;
+    let methods = initialize["result"]["authMethods"]
+        .as_array()
+        .expect("authMethods array");
+    assert_eq!(methods.len(), 1);
+    assert_eq!(methods[0]["id"], "none");
+    assert_eq!(methods[0]["type"], "agent");
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "authenticate",
+            "params": {"methodId": "none"},
+        }))
+        .await;
+    let authenticated = recv_json(&mut rx).await;
+    assert_eq!(authenticated["id"], 2);
+    assert_eq!(
+        authenticated["result"]["_meta"]["harn"]["principal"]["scheme"],
+        "none"
+    );
+}
+
 /// `session/new` returns the legacy `SessionModeState` and the
 /// preferred `configOptions` selector from the same catalog.
 #[tokio::test(flavor = "current_thread")]

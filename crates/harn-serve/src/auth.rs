@@ -298,6 +298,18 @@ impl AuthPolicy {
     }
 
     pub fn acp_auth_methods(&self) -> Vec<serde_json::Value> {
+        // The ACP spec (and the agentclientprotocol/registry auth gate)
+        // require `initialize` to advertise a NON-EMPTY `authMethods`
+        // array with at least one method whose `type` is `agent` or
+        // `terminal`. A policy with no configured methods is the common
+        // local/attach case (`harn serve acp` with no `--api-key` /
+        // `--hmac-secret`): callers are accepted as `anonymous` without a
+        // credential exchange. Advertise that local flow as a single
+        // `agent`-type "none" method so the handshake is still spec
+        // conformant rather than emitting an empty array.
+        if self.methods.is_empty() {
+            return vec![acp_local_none_auth_method()];
+        }
         let mut counts = BTreeMap::new();
         self.methods
             .iter()
@@ -411,6 +423,34 @@ impl AuthPolicy {
     }
 }
 
+/// Stable ACP `methodId` for harn's local "no credential required"
+/// flow. Advertised when an `AuthPolicy` has no configured methods so
+/// the `initialize` handshake stays spec conformant (a non-empty
+/// `authMethods` array). Authenticating against this id is a no-op:
+/// callers are already accepted as `anonymous`.
+pub const ACP_LOCAL_NONE_METHOD_ID: &str = "none";
+
+/// Build the synthetic `agent`-type "none" auth method advertised when a
+/// policy has no configured credentials. The top-level `type: "agent"`
+/// is what the ACP registry validator keys on; the `_meta.harn` block
+/// mirrors the shape of the credentialed methods for harn-aware clients.
+fn acp_local_none_auth_method() -> serde_json::Value {
+    serde_json::json!({
+        "id": ACP_LOCAL_NONE_METHOD_ID,
+        "type": "agent",
+        "name": "Local (no authentication)",
+        "description": "Connect without credentials. The agent runs locally and accepts the session as an anonymous principal.",
+        "_meta": {
+            "harn": {
+                "scheme": "none",
+                "challenge": {
+                    "type": "none"
+                }
+            }
+        }
+    })
+}
+
 fn acp_auth_method_kind(method: &AuthMethodConfig) -> &'static str {
     match method {
         AuthMethodConfig::ApiKey(_) => "apiKey",
@@ -438,6 +478,7 @@ fn acp_auth_method(method: &AuthMethodConfig, id: String) -> serde_json::Value {
     match method {
         AuthMethodConfig::ApiKey(_) => serde_json::json!({
             "id": id,
+            "type": "agent",
             "name": "Harn API key",
             "description": "Authenticate with an API key supplied as `Authorization: Bearer <key>` or `X-API-Key`.",
             "_meta": {
@@ -453,6 +494,7 @@ fn acp_auth_method(method: &AuthMethodConfig, id: String) -> serde_json::Value {
         }),
         AuthMethodConfig::Hmac(config) => serde_json::json!({
             "id": id,
+            "type": "agent",
             "name": "Harn HMAC signature",
             "description": "Authenticate with an HMAC-SHA256 canonical request signature.",
             "_meta": {
@@ -473,6 +515,7 @@ fn acp_auth_method(method: &AuthMethodConfig, id: String) -> serde_json::Value {
         }),
         AuthMethodConfig::OAuth21(config) => serde_json::json!({
             "id": id,
+            "type": "agent",
             "name": "OAuth 2.1 bearer token",
             "description": "Authenticate with a bearer token validated by the transport.",
             "_meta": {
@@ -638,6 +681,9 @@ mod tests {
         };
 
         let methods = policy.acp_auth_methods();
+        // Every credentialed method advertises a top-level ACP `type`
+        // (the registry auth gate keys on it) of `agent`.
+        assert!(methods.iter().all(|m| m["type"] == "agent"));
         assert_eq!(methods[0]["id"], "apiKey");
         assert_eq!(methods[1]["id"], "hmac");
         assert_eq!(methods[2]["id"], "apiKey-2");
@@ -645,6 +691,56 @@ mod tests {
             policy.method_by_acp_id("hmac"),
             Some(AuthMethodConfig::Hmac(_))
         ));
+    }
+
+    /// Mirror of the agentclientprotocol/registry validator's type
+    /// resolution (`client.py::parse_auth_methods`): direct `type` wins,
+    /// then `_meta` `terminal-auth`/`agent-auth` keys, else default
+    /// `agent`. Returns the resolved type for one advertised method.
+    fn registry_resolved_type(method: &serde_json::Value) -> &str {
+        if let Some(direct) = method.get("type").and_then(|value| value.as_str()) {
+            return direct;
+        }
+        if let Some(meta) = method.get("_meta").and_then(|value| value.as_object()) {
+            if meta.contains_key("terminal-auth") {
+                return "terminal";
+            }
+            if meta.contains_key("agent-auth") {
+                return "agent";
+            }
+        }
+        "agent"
+    }
+
+    /// The registry gate requires `initialize` to advertise a non-empty
+    /// `authMethods` with at least one method whose resolved type is
+    /// `agent` or `terminal`. An allow-all policy (no credentials, the
+    /// `harn serve acp` attach default) must still pass.
+    #[test]
+    fn allow_all_policy_advertises_conformant_local_auth_method() {
+        let methods = AuthPolicy::allow_all().acp_auth_methods();
+        assert!(!methods.is_empty(), "authMethods must not be empty");
+        let valid = methods
+            .iter()
+            .filter(|method| matches!(registry_resolved_type(method), "agent" | "terminal"))
+            .count();
+        assert!(valid >= 1, "at least one agent/terminal method required");
+        assert_eq!(methods[0]["id"], ACP_LOCAL_NONE_METHOD_ID);
+        assert_eq!(methods[0]["type"], "agent");
+    }
+
+    /// Credentialed policies must also resolve to `agent`/`terminal`
+    /// under the registry's type-resolution rules.
+    #[test]
+    fn credentialed_policy_passes_registry_type_resolution() {
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
+            mcp_allowlist: None,
+        };
+        let methods = policy.acp_auth_methods();
+        assert!(methods
+            .iter()
+            .any(|method| matches!(registry_resolved_type(method), "agent" | "terminal")));
     }
 
     #[tokio::test]

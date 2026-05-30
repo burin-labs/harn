@@ -89,7 +89,7 @@ fn guard_serve_bind_auth(
 pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
     apply_obs_mode(args.obs)?;
     crate::acp::run_acp_server(
-        Some(&args.file),
+        args.file.as_deref(),
         build_auth_policy(&args.api_key, args.hmac_secret.as_ref()),
         args.trace,
         harn_serve::AcpProfileConfig {

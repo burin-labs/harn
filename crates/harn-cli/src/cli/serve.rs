@@ -94,8 +94,11 @@ pub(crate) struct ServeAcpArgs {
     pub obs: ServeObsMode,
     #[command(flatten)]
     pub profile: ProfileArgs,
-    /// Path to the .harn file to serve.
-    pub file: String,
+    /// Path to the `.harn` file to serve. Optional: when omitted, `harn
+    /// serve acp` boots a file-less ("attach") ACP stdio server that
+    /// waits for `initialize` / `session/new` from the connecting editor
+    /// instead of binding to a script up front.
+    pub file: Option<String>,
 }
 
 #[derive(Debug, Args)]
