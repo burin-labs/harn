@@ -316,6 +316,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
                 "Diagnostic-code catalog: per-code summary, repair, safety, related codes.",
             schema_json: None,
         },
+        SchemaEntry {
+            command: "mcp presets",
+            schema_version: crate::commands::mcp::presets::MCP_PRESETS_SCHEMA_VERSION,
+            description:
+                "Canonical catalog of well-known MCP server presets (Notion, Linear, GitHub, filesystem): id, transport, command/url template, auth kind, and required placeholders.",
+            schema_json: None,
+        },
     ]
 }
 
