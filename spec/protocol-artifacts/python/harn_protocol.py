@@ -220,6 +220,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "judge_decision",
     "loop_control_decision",
     "loop_stuck",
+    "mcp_notification",
     "progress_reported",
     "scope_classifier_verdict",
     "session_closed",

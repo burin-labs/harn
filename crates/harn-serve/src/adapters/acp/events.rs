@@ -1440,6 +1440,24 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 self.emit_agent_event_ext("loop_checkpoint", session_id, payload);
             }
+            AgentEvent::McpNotification {
+                session_id,
+                server,
+                method,
+                direction,
+                params,
+            } => {
+                self.emit_agent_event_ext(
+                    "mcp_notification",
+                    session_id,
+                    serde_json::json!({
+                        "server": server,
+                        "method": method,
+                        "direction": direction,
+                        "params": params,
+                    }),
+                );
+            }
         }
     }
 }

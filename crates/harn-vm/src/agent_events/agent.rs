@@ -657,6 +657,27 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         dispatch_skipped: bool,
     },
+    /// Surfaced when Harn is acting as an MCP **client** and a peer
+    /// server sends a server-to-client message during an agent session:
+    /// a `notifications/progress` / `notifications/message` /
+    /// `notifications/*/list_changed` notification, or an inbound
+    /// `elicitation/create` / `sampling/createMessage` request.
+    ///
+    /// Emitted alongside (not in place of) the existing agent-inbox
+    /// relay so a thin ACP client can render a live progress bar, log
+    /// line, elicitation prompt, or sampling affordance without parsing
+    /// the inbox transcript. `direction` is `"notification"` for
+    /// fire-and-forget server notifications and `"request"` for inbound
+    /// requests that still resolve through the existing client-role
+    /// dispatch path (this event does not change that response). `method`
+    /// is the raw MCP JSON-RPC method; `params` is its untouched payload.
+    McpNotification {
+        session_id: String,
+        server: String,
+        method: String,
+        direction: String,
+        params: serde_json::Value,
+    },
 }
 
 fn is_zero_usize(value: &usize) -> bool {
@@ -716,7 +737,8 @@ impl AgentEvent {
             | Self::CompositionChildResult { session_id, .. }
             | Self::CompositionFinish { session_id, .. }
             | Self::CompositionError { session_id, .. }
-            | Self::LoopCheckpoint { session_id, .. } => session_id,
+            | Self::LoopCheckpoint { session_id, .. }
+            | Self::McpNotification { session_id, .. } => session_id,
         }
     }
 }

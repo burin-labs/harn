@@ -86,4 +86,9 @@ pub(crate) struct McpServerRefArgs {
     /// Explicit server URL for ad hoc login or status checks.
     #[arg(long)]
     pub url: Option<String>,
+    /// Emit machine-readable JSON instead of a human summary. With no
+    /// target, `mcp status` reports every configured MCP server; with a
+    /// target it reports that one server's OAuth status.
+    #[arg(long)]
+    pub json: bool,
 }

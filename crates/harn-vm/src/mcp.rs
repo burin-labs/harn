@@ -506,6 +506,13 @@ fn relay_progress_notification(server_name: &str, msg: &serde_json::Value) {
             "raw": payload,
         });
     }
+    emit_mcp_notification_event(
+        &session_id,
+        server_name,
+        "notifications/progress",
+        "notification",
+        &payload,
+    );
     let content = serde_json::to_string(&payload).unwrap_or_default();
     crate::orchestration::agent_inbox::push(
         &session_id,
@@ -513,6 +520,26 @@ fn relay_progress_notification(server_name: &str, msg: &serde_json::Value) {
         &content,
         "mcp.notifications/progress",
     );
+}
+
+/// Emit an `AgentEvent::McpNotification` so observers (notably the ACP
+/// adapter's `_harn/agentEvent` channel) can render the server-to-client
+/// message live. This is purely additive — the inbox relay still runs so
+/// the agent loop continues to see these messages as feedback.
+fn emit_mcp_notification_event(
+    session_id: &str,
+    server_name: &str,
+    method: &str,
+    direction: &str,
+    params: &serde_json::Value,
+) {
+    crate::agent_events::emit_event(&crate::agent_events::AgentEvent::McpNotification {
+        session_id: session_id.to_string(),
+        server: server_name.to_string(),
+        method: method.to_string(),
+        direction: direction.to_string(),
+        params: params.clone(),
+    });
 }
 
 fn relay_log_notification(server_name: &str, msg: &serde_json::Value) {
@@ -529,6 +556,13 @@ fn relay_log_notification(server_name: &str, msg: &serde_json::Value) {
             serde_json::Value::String(server_name.to_string()),
         );
     }
+    emit_mcp_notification_event(
+        &session_id,
+        server_name,
+        "notifications/message",
+        "notification",
+        &payload,
+    );
     let content = serde_json::to_string(&payload).unwrap_or_default();
     crate::orchestration::agent_inbox::push(
         &session_id,
@@ -547,6 +581,7 @@ fn relay_resource_notification(server_name: &str, method: &str, msg: &serde_json
         "method": method,
         "params": msg.get("params").cloned().unwrap_or(serde_json::Value::Null),
     });
+    emit_mcp_notification_event(&session_id, server_name, method, "notification", &payload);
     let content = serde_json::to_string(&payload).unwrap_or_default();
     crate::orchestration::agent_inbox::push(
         &session_id,

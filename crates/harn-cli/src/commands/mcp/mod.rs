@@ -104,6 +104,15 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
             );
         }
         McpCommand::Status(server_ref) => {
+            // With no target/url, report every configured MCP server.
+            // With a target, keep the focused per-server OAuth detail.
+            if server_ref.target.is_none() && server_ref.url.is_none() {
+                if let Err(error) = run_mcp_status_report(server_ref.json).await {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+                return;
+            }
             let server = resolve_server_reference(server_ref).unwrap_or_else(|error| {
                 eprintln!("error: {error}");
                 process::exit(1);
@@ -148,6 +157,154 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
     }
 }
 
+/// Schema version for `harn mcp status --json`. Bump when the
+/// `McpStatusReport` shape changes in a way agents must detect.
+pub(crate) const MCP_STATUS_SCHEMA_VERSION: u32 = 1;
+
+/// Aggregate readiness report for every MCP server declared in the
+/// nearest `harn.toml`. Mirrors the `connect status` report shape: a
+/// versioned envelope with the resolving manifest path plus one entry
+/// per server, sorted by name for stable diffs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct McpStatusReport {
+    pub schema_version: u32,
+    /// Absolute path of the `harn.toml` that declared these servers,
+    /// or `None` when no manifest was found in the cwd ancestry.
+    pub manifest: Option<String>,
+    pub servers: Vec<McpServerStatus>,
+}
+
+/// One MCP server's configured shape and derived connection state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct McpServerStatus {
+    pub name: String,
+    /// `"stdio"` or `"http"` — the configured transport.
+    pub transport: String,
+    /// Derived connection state: `connected`, `disconnected`,
+    /// `auth_required`, or `error`.
+    pub state: String,
+    /// Remote URL for HTTP transports; empty for stdio.
+    pub url: String,
+    /// `true` when the server boots lazily (on first use) rather than
+    /// eagerly at session start.
+    pub lazy: bool,
+    /// Count of tools advertised by the server, when a live handle is
+    /// available in the process registry; `None` otherwise (the
+    /// standalone CLI does not boot servers to probe them).
+    pub tools: Option<usize>,
+    /// Resource count when known; see `tools`.
+    pub resources: Option<usize>,
+    /// Prompt count when known; see `tools`.
+    pub prompts: Option<usize>,
+    /// Human-readable diagnostic when `state` is `error`, else `None`.
+    pub last_error: Option<String>,
+}
+
+/// Build and print the all-servers MCP status report.
+async fn run_mcp_status_report(json: bool) -> Result<(), String> {
+    let report = mcp_status_report().await;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("failed to encode JSON output: {error}"))?
+        );
+    } else if report.servers.is_empty() {
+        println!("No [[mcp]] servers declared in the nearest harn.toml.");
+    } else {
+        for server in &report.servers {
+            let counts = match (server.tools, server.resources, server.prompts) {
+                (Some(t), Some(r), Some(p)) => format!("tools={t} resources={r} prompts={p}"),
+                _ => "tools=? resources=? prompts=?".to_string(),
+            };
+            let mut line = format!(
+                "{}\t{}\t{}\t{}",
+                server.name, server.transport, server.state, counts
+            );
+            if let Some(error) = &server.last_error {
+                line.push_str(&format!("\terror={error}"));
+            }
+            println!("{line}");
+        }
+    }
+    Ok(())
+}
+
+/// Assemble the report by reading the nearest manifest's `[[mcp]]`
+/// entries and deriving each server's state. HTTP servers that rely on
+/// OAuth probe local stored-token state (no network beyond discovery,
+/// which the OAuth helpers already perform); stdio servers report as
+/// `connected` since they have no auth gate. Live tool/resource/prompt
+/// counts are filled from the in-process registry when a handle exists
+/// (e.g. when invoked inside a running session); otherwise `None`.
+pub(crate) async fn mcp_status_report() -> McpStatusReport {
+    let (manifest_path, servers) = match find_manifest() {
+        Ok((path, manifest)) => (Some(path.display().to_string()), manifest.mcp),
+        Err(_) => (None, Vec::new()),
+    };
+
+    let mut entries = Vec::with_capacity(servers.len());
+    for server in servers {
+        entries.push(derive_server_status(&server).await);
+    }
+    entries.sort_by(|left, right| left.name.cmp(&right.name));
+
+    McpStatusReport {
+        schema_version: MCP_STATUS_SCHEMA_VERSION,
+        manifest: manifest_path,
+        servers: entries,
+    }
+}
+
+async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
+    let transport = server
+        .transport
+        .clone()
+        .unwrap_or_else(|| "stdio".to_string());
+    let registry = harn_vm::mcp_snapshot_status()
+        .into_iter()
+        .find(|entry| entry.name == server.name);
+    let active = registry.as_ref().map(|entry| entry.active).unwrap_or(false);
+
+    let mut last_error = None;
+    let state = if transport == "http" && !server.url.is_empty() {
+        // A configured static bearer token is treated as connected; an
+        // OAuth server is `auth_required` until a token is stored.
+        if server.auth_token.as_deref().is_some_and(|t| !t.is_empty()) {
+            "connected".to_string()
+        } else {
+            match resolve_auth_for_server(server).await {
+                Ok(AuthResolution::Bearer(_)) => "connected".to_string(),
+                Ok(AuthResolution::None) => "auth_required".to_string(),
+                Err(error) => {
+                    last_error = Some(error);
+                    "error".to_string()
+                }
+            }
+        }
+    } else if active {
+        // Stdio (or already-booted) server with a live handle.
+        "connected".to_string()
+    } else {
+        // Declared stdio server with no live handle in this process.
+        "disconnected".to_string()
+    };
+
+    McpServerStatus {
+        name: server.name.clone(),
+        transport,
+        state,
+        url: server.url.clone(),
+        lazy: server.lazy,
+        // The standalone CLI does not boot servers, so counts are only
+        // known when a live handle is already registered in-process.
+        tools: None,
+        resources: None,
+        prompts: None,
+        last_error,
+    }
+}
+
 pub(crate) async fn resolve_auth_for_server(
     server: &McpServerConfig,
 ) -> Result<AuthResolution, String> {
@@ -180,6 +337,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
     let server = resolve_server_reference(&McpServerRefArgs {
         target: options.target.clone(),
         url: options.url.clone(),
+        json: false,
     })?;
     // RFC 8707 resource indicator: the MCP server's canonical URI, sent in both
     // the authorization and token requests regardless of AS advertisement.
@@ -895,5 +1053,61 @@ mod tests {
             resource_param.as_deref(),
             Some("https://mcp.example.com/mcp/")
         );
+    }
+
+    fn parse_server(toml_table: &str) -> McpServerConfig {
+        toml::from_str::<McpServerConfig>(toml_table).expect("mcp server config")
+    }
+
+    #[tokio::test]
+    async fn stdio_server_without_live_handle_is_disconnected() {
+        let server =
+            parse_server("name = \"fs\"\ntransport = \"stdio\"\ncommand = \"/bin/true\"\n");
+        let status = derive_server_status(&server).await;
+        assert_eq!(status.name, "fs");
+        assert_eq!(status.transport, "stdio");
+        assert_eq!(status.state, "disconnected");
+        assert_eq!(status.url, "");
+        assert!(status.tools.is_none());
+        assert!(status.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn http_server_with_static_token_is_connected() {
+        let server = parse_server(
+            "name = \"api\"\ntransport = \"http\"\nurl = \"https://mcp.example.com/mcp\"\nauth_token = \"static-bearer\"\n",
+        );
+        let status = derive_server_status(&server).await;
+        assert_eq!(status.transport, "http");
+        assert_eq!(status.state, "connected");
+        assert_eq!(status.url, "https://mcp.example.com/mcp");
+    }
+
+    #[test]
+    fn status_report_serializes_with_stable_keys() {
+        let report = McpStatusReport {
+            schema_version: MCP_STATUS_SCHEMA_VERSION,
+            manifest: Some("/repo/harn.toml".to_string()),
+            servers: vec![McpServerStatus {
+                name: "fs".to_string(),
+                transport: "stdio".to_string(),
+                state: "disconnected".to_string(),
+                url: String::new(),
+                lazy: true,
+                tools: None,
+                resources: None,
+                prompts: None,
+                last_error: None,
+            }],
+        };
+        let value: serde_json::Value = serde_json::to_value(&report).expect("serialize");
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["manifest"], "/repo/harn.toml");
+        assert_eq!(value["servers"][0]["name"], "fs");
+        assert_eq!(value["servers"][0]["transport"], "stdio");
+        assert_eq!(value["servers"][0]["state"], "disconnected");
+        assert_eq!(value["servers"][0]["lazy"], true);
+        assert!(value["servers"][0]["tools"].is_null());
+        assert!(value["servers"][0]["last_error"].is_null());
     }
 }
