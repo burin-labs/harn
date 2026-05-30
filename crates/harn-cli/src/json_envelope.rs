@@ -158,6 +158,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "mcp status",
+            schema_version: crate::commands::mcp::MCP_STATUS_SCHEMA_VERSION,
+            description: "Per-server MCP readiness: transport, connection state, tool/resource/prompt counts, last error.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "run",
             schema_version: crate::commands::run::json_events::RUN_JSON_SCHEMA_VERSION,
             description: "Pipeline-run NDJSON event stream (stdout, stderr, transcript, tool, hook, persona, result, error).",

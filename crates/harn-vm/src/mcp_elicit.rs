@@ -296,6 +296,21 @@ pub(crate) async fn dispatch_inbound_elicitation(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
+    // Surface the inbound elicitation to live observers (the ACP adapter
+    // renders it as an `_harn/agentEvent` of kind `mcp_notification`) so a
+    // thin client can show the prompt. This is observability only — the
+    // request still resolves through the host bridge / decline fallback
+    // below; the response semantics are unchanged.
+    if let Some(session_id) = crate::llm::current_agent_session_id() {
+        crate::agent_events::emit_event(&crate::agent_events::AgentEvent::McpNotification {
+            session_id,
+            server: server_name.to_string(),
+            method: ELICITATION_METHOD.to_string(),
+            direction: "request".to_string(),
+            params,
+        });
+    }
+
     // Build the params bundle dispatched to the host bridge / mock.
     // Includes the originating server name so a single host can route
     // by source, and copies the raw schema through unmodified.

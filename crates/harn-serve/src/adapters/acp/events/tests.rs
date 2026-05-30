@@ -648,6 +648,62 @@ async fn tool_format_override_agent_event_uses_camel_case_fields() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn mcp_progress_notification_reaches_acp_as_ext_event() {
+    let actual = collect_notifications(vec![AgentEvent::McpNotification {
+        session_id: "session-1".to_string(),
+        server: "filesystem".to_string(),
+        method: "notifications/progress".to_string(),
+        direction: "notification".to_string(),
+        params: serde_json::json!({
+            "progressToken": "tok-1",
+            "progress": 42.0,
+            "total": 100.0,
+            "server": "filesystem",
+            "tool": "search_files"
+        }),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "mcp_notification");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["server"], "filesystem");
+    assert_eq!(params["method"], "notifications/progress");
+    assert_eq!(params["direction"], "notification");
+    assert_eq!(params["params"]["progress"], 42.0);
+    assert_eq!(params["params"]["progressToken"], "tok-1");
+    assert!(
+        HARN_AGENT_EVENT_KINDS.contains(&"mcp_notification"),
+        "mcp_notification must be advertised so clients can subscribe"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mcp_elicitation_request_reaches_acp_as_ext_event() {
+    let actual = collect_notifications(vec![AgentEvent::McpNotification {
+        session_id: "session-1".to_string(),
+        server: "deploy-bot".to_string(),
+        method: "elicitation/create".to_string(),
+        direction: "request".to_string(),
+        params: serde_json::json!({
+            "message": "Confirm production deploy?",
+            "requestedSchema": {"type": "object"}
+        }),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "mcp_notification");
+    assert_eq!(params["direction"], "request");
+    assert_eq!(params["method"], "elicitation/create");
+    assert_eq!(params["params"]["message"], "Confirm production deploy?");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn harn_extension_session_update_fixtures_are_pinned() {
     let actual = collect_notifications(extension_fixture_events()).await;
     let expected: serde_json::Value = serde_json::from_str(include_str!(

@@ -93,6 +93,21 @@ pub async fn dispatch_inbound_sampling(server_name: &str, request: &JsonValue) -
     let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
     let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
+    // Surface the inbound sampling request to live observers (the ACP
+    // adapter renders it as an `_harn/agentEvent` of kind
+    // `mcp_notification`) so a thin client can show the affordance. This
+    // is observability only — the request still resolves through the host
+    // approval / decline path below with unchanged response semantics.
+    if let Some(session_id) = crate::llm::current_agent_session_id() {
+        crate::agent_events::emit_event(&crate::agent_events::AgentEvent::McpNotification {
+            session_id,
+            server: server_name.to_string(),
+            method: SAMPLING_METHOD.to_string(),
+            direction: "request".to_string(),
+            params: params.clone(),
+        });
+    }
+
     let parsed = match parse_sampling_request(&params) {
         Ok(p) => p,
         Err(detail) => return crate::jsonrpc::error_response(id, -32602, &detail),
