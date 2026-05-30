@@ -135,12 +135,17 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           NEXTEST_PROFILE: ci
+          # Route the (event-derived) base ref through env vars rather than
+          # expanding `${{ }}` inside the run: script — inline expansion in a
+          # shell block is a template-injection sink (zizmor). Env-var
+          # assignment is safe; the script reads the value via "$BASE_REF".
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
         run: |
           # fetch-depth:0 gives full history; ensure the base branch is present
           # as a remote-tracking ref so `origin/<base>...HEAD` resolves its
           # merge-base for the diff.
-          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+          git fetch --no-tags origin "$BASE_REF"
           make test-affected
       - name: Run full test suite (merge queue + push backstop)
         if: github.event_name != 'pull_request'
