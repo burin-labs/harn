@@ -10,16 +10,22 @@
       "method": "session/request_permission",
       "params": {
         "sessionId": "session-1",
-        "toolCallId": "tool-1",
-        "toolName": "edit",
+        "toolCall": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "tool-1",
+          "title": "edit",
+          "kind": "other"
+        },
         "options": [
           {
-            "id": "approve",
-            "label": "Approve"
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
           },
           {
-            "id": "deny",
-            "label": "Deny"
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
           }
         ]
       }
@@ -28,7 +34,10 @@
       "jsonrpc": "2.0",
       "id": 77,
       "result": {
-        "outcome": "approved"
+        "outcome": {
+          "outcome": "selected",
+          "optionId": "allow"
+        }
       }
     }
   ],
@@ -39,7 +48,7 @@
     "source": {
       "kind": "adapter_generated",
       "generator": "cargo test -p harn-serve adapters::acp::tests::acp_bridge_routes_session_request_permission_response",
-      "description": "Permission request and response shape from AcpBridge::call_client."
+      "description": "Canonical ACP v0.12.2 permission request/response shape from AcpBridge::call_client (#2639)."
     }
   }
 }

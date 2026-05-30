@@ -169,17 +169,20 @@ impl InProcessHost {
         &self,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
+        // No exported `request_permission` ⇒ default-allow: emit a canonical
+        // `selected` outcome on the allow option (#2639).
         let Some(closure) = self.exported_functions.get("request_permission") else {
-            return Ok(serde_json::json!({ "granted": true }));
+            return Ok(canonical_allow_response());
         };
 
-        let tool_name = params
-            .get("toolCall")
-            .and_then(|tool_call| tool_call.get("toolName"))
+        let tool_call = params.get("toolCall");
+        let tool_name = tool_call
+            .and_then(|tool_call| tool_call.pointer("/_meta/harn/toolName"))
+            .or_else(|| tool_call.and_then(|tool_call| tool_call.get("toolName")))
+            .or_else(|| tool_call.and_then(|tool_call| tool_call.get("title")))
             .and_then(|value| value.as_str())
             .unwrap_or_default();
-        let tool_args = params
-            .get("toolCall")
+        let tool_args = tool_call
             .and_then(|tool_call| tool_call.get("rawInput"))
             .map(json_result_to_vm_value)
             .unwrap_or(VmValue::Nil);
@@ -202,27 +205,69 @@ impl InProcessHost {
 
         let mut vm = self.vm.child_vm_for_host();
         let result = vm.call_closure_pub(closure, &args).await?;
+        // Translate the script's verdict into a canonical ACP response
+        // (`{ outcome: { outcome: "selected" | "cancelled", optionId? } }`).
+        // The script API stays ergonomic — bool / string-reason / dict — but
+        // the wire shape is canonical.
         let payload = match result {
-            VmValue::Bool(granted) => serde_json::json!({ "granted": granted }),
+            VmValue::Bool(granted) => {
+                if granted {
+                    canonical_allow_response()
+                } else {
+                    canonical_reject_response(None)
+                }
+            }
             VmValue::String(reason) if !reason.is_empty() => {
-                serde_json::json!({ "granted": false, "reason": reason.to_string() })
+                canonical_reject_response(Some(reason.to_string()))
             }
             other => {
                 let json = crate::llm::vm_value_to_json(&other);
-                if json
-                    .get("granted")
-                    .and_then(|value| value.as_bool())
-                    .is_some()
-                    || json.get("outcome").is_some()
-                {
+                if let Some(granted) = json.get("granted").and_then(|value| value.as_bool()) {
+                    if granted {
+                        canonical_allow_response()
+                    } else {
+                        canonical_reject_response(
+                            json.get("reason")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                        )
+                    }
+                } else if json.get("outcome").is_some() {
+                    // The script already returned a canonical-shaped outcome.
                     json
+                } else if other.is_truthy() {
+                    canonical_allow_response()
                 } else {
-                    serde_json::json!({ "granted": other.is_truthy() })
+                    canonical_reject_response(None)
                 }
             }
         };
         Ok(payload)
     }
+}
+
+/// Canonical ACP `RequestPermissionResponse` granting the call: a
+/// `selected` outcome on the `allow` option (#2639).
+fn canonical_allow_response() -> serde_json::Value {
+    serde_json::json!({
+        "outcome": { "outcome": "selected", "optionId": "allow" }
+    })
+}
+
+/// Canonical ACP `RequestPermissionResponse` rejecting the call: a
+/// `selected` outcome on the `reject` option, with an optional harn-vendor
+/// `reason` extension (#2639).
+fn canonical_reject_response(reason: Option<String>) -> serde_json::Value {
+    let mut response = serde_json::json!({
+        "outcome": { "outcome": "selected", "optionId": "reject" }
+    });
+    if let Some(reason) = reason {
+        response
+            .as_object_mut()
+            .expect("object")
+            .insert("reason".to_string(), serde_json::Value::String(reason));
+    }
+    response
 }
 
 /// How a queued bridge injection is delivered into the agent loop.

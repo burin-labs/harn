@@ -42,7 +42,7 @@
         "boundary": "session/request_permission",
         "fixture_ref": "conformance/protocols/fixtures/acp/session_request_permission.valid.json",
         "request": {"method": "session/request_permission", "action": "write_file", "resource": "notes/triage.md"},
-        "response": {"outcome": "approved", "reviewer": "operator"},
+        "response": {"outcome": {"outcome": "selected", "optionId": "allow"}, "reviewer": "operator"},
         "latency_ms": 42
       }
     ],
@@ -80,7 +80,7 @@
         "boundary": "session/request_permission",
         "fixture_ref": "conformance/protocols/fixtures/acp/session_request_permission.valid.json",
         "request": {"method": "session/request_permission", "action": "write_file", "resource": "notes/triage.md"},
-        "response": {"outcome": "approved", "reviewer": "operator"},
+        "response": {"outcome": {"outcome": "selected", "optionId": "allow"}, "reviewer": "operator"},
         "latency_ms": 7
       }
     ],

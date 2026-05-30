@@ -348,7 +348,9 @@ impl ApiState {
             .and_then(Value::as_str)
             .map(str::to_string);
         let request_id = params
-            .pointer("/approvalRequest/id")
+            .pointer("/toolCall/toolCallId")
+            .or_else(|| params.pointer("/toolCall/_meta/harn/approvalRequest/id"))
+            .or_else(|| params.pointer("/approvalRequest/id"))
             .or_else(|| params.get("toolCallId"))
             .and_then(Value::as_str)
             .map(str::to_string)
@@ -367,7 +369,14 @@ impl ApiState {
             "task_id": task_id,
             "status": "pending",
             "source": "acp",
-            "action": params.pointer("/approvalRequest/action")
+            // Canonical ACP request carries the action under the harn vendor
+            // extension on `toolCall`; older shapes used top-level/approval
+            // fields. Read all of them so the public resource stays stable
+            // across the #2639 wire change.
+            "action": params.pointer("/toolCall/_meta/harn/toolName")
+                .or_else(|| params.pointer("/toolCall/toolName"))
+                .or_else(|| params.pointer("/toolCall/title"))
+                .or_else(|| params.pointer("/approvalRequest/action"))
                 .or_else(|| params.get("toolName"))
                 .cloned()
                 .unwrap_or(Value::Null),
@@ -1934,11 +1943,14 @@ async fn respond_permission_request(
             return api_error(StatusCode::BAD_GATEWAY, "acp_error", &error);
         }
     } else if let Some(rpc_id) = rpc_id {
+        // Canonical ACP `RequestPermissionResponse` (#2639): a `selected`
+        // outcome on the allow/reject option. There is no `{outcome:
+        // "approved"}` in canonical ACP — that was the pre-#2639 harn shape.
         let result = if approved {
-            json!({"outcome": "approved"})
+            json!({"outcome": {"outcome": "selected", "optionId": "allow"}})
         } else {
             json!({
-                "outcome": "denied",
+                "outcome": {"outcome": "selected", "optionId": "reject"},
                 "reason": input.get("reason").and_then(Value::as_str).unwrap_or("denied by API client")
             })
         };
