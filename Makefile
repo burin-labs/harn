@@ -78,6 +78,24 @@ test:
 		HARN_LLM_CALLS_DISABLED=1 cargo test --workspace; \
 	fi
 
+# Run only the tests in crates affected by the changes vs AFFECTED_BASE
+# (default origin/main), expanded by the reverse-dependency closure. Used on
+# `pull_request` CI for fast feedback (#2663). The merge queue and pushes to
+# main run the FULL `make test` instead — see `.github/workflows/ci.yml`.
+# A global/workspace-level change (Cargo.lock, .cargo/, toolchain, etc.)
+# falls back to the full workspace automatically. Requires cargo-nextest.
+AFFECTED_BASE ?= origin/main
+test-affected:
+	@command -v cargo-nextest >/dev/null 2>&1 || { \
+		echo "test-affected requires cargo-nextest; run 'make setup'"; exit 1; }
+	@args="$$(python3 scripts/affected-crates.py --base "$(AFFECTED_BASE)" --output args)"; \
+	if [ -z "$$args" ]; then \
+		echo "make test-affected: no affected crates; skipping Rust tests."; \
+		exit 0; \
+	fi; \
+	echo "make test-affected: cargo nextest run $$args"; \
+	HARN_LLM_CALLS_DISABLED=1 cargo nextest run $$args
+
 # Run the slow E2E / smoke suite: subprocess-spawning CLI surface tests,
 # signal handling, MCP server launch, real ProcessHandle smoke tests, etc.
 # Runs on schedule (nightly), manually, and on PRs with the `e2e` label.
