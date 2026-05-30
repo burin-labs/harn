@@ -492,7 +492,7 @@ fn generate_readme() -> String {
          - `harn-protocol.ts`: TypeScript definitions for ACP session updates,\n\
            tool lifecycle metadata, A2A task events, and MCP metadata.\n\
          - `HarnProtocol.swift`: Swift definitions for the same host-facing surface.\n\
-         - `harn-protocol.rs`: dependency-free Rust module of ACP method-name, \n\
+         - `harn-protocol.rs`: dependency-free Rust module of ACP method-name,\n\
            session-update discriminator, content-extension key, and protocol\n\
            version `pub const`s. The only binding that publishes the complete\n\
            dispatched ACP method surface; Burin Code vendors it as\n\
