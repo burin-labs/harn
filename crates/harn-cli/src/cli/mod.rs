@@ -114,7 +114,9 @@ pub(crate) use local::{
     LocalArgs, LocalCommand, LocalListArgs, LocalProfileArgs, LocalStatusArgs, LocalStopArgs,
     LocalSwitchArgs,
 };
-pub(crate) use mcp::{McpArgs, McpCommand, McpLoginArgs, McpServeArgs, McpServerRefArgs};
+pub(crate) use mcp::{
+    McpArgs, McpCommand, McpLoginArgs, McpPresetsArgs, McpServeArgs, McpServerRefArgs,
+};
 pub(crate) use merge_captain::{
     MergeCaptainArgs, MergeCaptainAuditArgs, MergeCaptainAuditFormat, MergeCaptainBackendKind,
     MergeCaptainCommand, MergeCaptainIterateArgs, MergeCaptainIterateFormat,

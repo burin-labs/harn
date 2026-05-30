@@ -44,6 +44,7 @@ pub mod mcp_card;
 pub mod mcp_elicit;
 pub mod mcp_file_upload;
 pub mod mcp_host;
+pub mod mcp_presets;
 pub mod mcp_progress;
 pub mod mcp_protocol;
 pub mod mcp_registry;

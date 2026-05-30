@@ -23,6 +23,15 @@ pub(crate) enum McpCommand {
     Status(McpServerRefArgs),
     /// Print the default OAuth redirect URI.
     RedirectUri,
+    /// List the canonical catalog of well-known MCP server presets.
+    Presets(McpPresetsArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpPresetsArgs {
+    /// Emit the catalog as a stable JSON envelope instead of a table.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

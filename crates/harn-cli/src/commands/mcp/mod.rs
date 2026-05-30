@@ -20,6 +20,7 @@ use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
 use crate::package::{self, McpServerConfig};
 
 mod oauth_resource;
+pub(crate) mod presets;
 pub(crate) mod serve;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
@@ -144,6 +145,9 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
         }
         McpCommand::RedirectUri => {
             println!("{DEFAULT_REDIRECT_URI}");
+        }
+        McpCommand::Presets(args) => {
+            presets::run(args);
         }
     }
 }
