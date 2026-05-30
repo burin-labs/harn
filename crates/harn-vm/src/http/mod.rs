@@ -802,7 +802,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_request", |args| async move {
+    vm.register_async_builtin("http_server_request", |_ctx, args| async move {
         if args.len() < 2 {
             return Err(vm_error("http_server_request: requires server and request"));
         }
@@ -810,7 +810,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         run_http_server_request(&server_id, args[1].clone()).await
     });
 
-    vm.register_async_builtin("http_server_test", |args| async move {
+    vm.register_async_builtin("http_server_test", |_ctx, args| async move {
         if args.len() < 2 {
             return Err(vm_error("http_server_test: requires server and request"));
         }
@@ -860,7 +860,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_ready", |args| async move {
+    vm.register_async_builtin("http_server_ready", |_ctx, args| async move {
         let Some(server_arg) = args.first() else {
             return Err(vm_error("http_server_ready: requires server"));
         };
@@ -907,7 +907,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_shutdown", |args| async move {
+    vm.register_async_builtin("http_server_shutdown", |_ctx, args| async move {
         let Some(server_arg) = args.first() else {
             return Err(vm_error("http_server_shutdown: requires server"));
         };

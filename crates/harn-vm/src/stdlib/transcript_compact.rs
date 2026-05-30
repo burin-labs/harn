@@ -16,7 +16,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_transcript_compaction_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("transcript_compact", |args| async move {
+    vm.register_async_builtin("transcript_compact", |_ctx, args| async move {
         let transcript = args
             .first()
             .and_then(|value| value.as_dict())

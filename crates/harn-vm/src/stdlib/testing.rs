@@ -27,7 +27,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     kind = "async",
     category = "testing"
 )]
-async fn testing_call_body_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn testing_call_body_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let body = args
         .first()
         .cloned()
@@ -55,11 +58,9 @@ async fn testing_call_body_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> 
         _ => Vec::new(),
     };
 
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("__testing_call_body: builtin requires VM execution context".to_string())
-    })?;
+    let mut vm = ctx.child_vm();
     let result = vm.call_callable_owned(&body, call_args).await;
-    crate::vm::forward_child_output_to_parent(&vm.take_output());
+    ctx.forward_output(&vm.take_output());
     result
 }
 

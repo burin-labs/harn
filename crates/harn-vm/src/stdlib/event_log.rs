@@ -26,7 +26,10 @@ pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
     kind = "async",
     category = "event_log"
 )]
-async fn event_log_emit_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn event_log_emit_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let topic = parse_topic(args.first(), "event_log.emit")?;
     let kind = required_string(args.get(1), "event_log.emit", "kind")?;
     let payload = args
@@ -46,7 +49,10 @@ async fn event_log_emit_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "event_log"
 )]
-async fn event_log_latest_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn event_log_latest_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let topic = parse_topic(args.first(), "event_log.latest")?;
     let latest = ensure_event_log().latest(&topic).await.map_err(log_error)?;
     Ok(latest
@@ -59,7 +65,10 @@ async fn event_log_latest_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "event_log"
 )]
-async fn event_log_subscribe_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn event_log_subscribe_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let options = parse_subscribe_options(&args)?;
     let log = ensure_event_log();
     let mut events = log

@@ -377,7 +377,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         ))
     });
 
-    vm.register_async_builtin("transcript_summarize", |args| async move {
+    vm.register_async_builtin("transcript_summarize", |_ctx, args| async move {
         let transcript = require_transcript(&args, "transcript_summarize")?;
         let mut opts = extract_llm_options(&[
             VmValue::String(Rc::from("")),

@@ -987,7 +987,7 @@ let value = test_async("ok")
 log(value)
 }"#,
         |vm| {
-            vm.register_async_builtin("test_async", |args| async move {
+            vm.register_async_builtin("test_async", |_ctx, args| async move {
                 Ok(VmValue::String(Rc::from(format!(
                     "async:{}",
                     args[0].display()

@@ -299,7 +299,7 @@ async fn upload_file(path: String, provider: String) -> Result<String, VmError> 
 }
 
 pub(crate) fn register_file_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("__files_upload", |args| async move {
+    vm.register_async_builtin("__files_upload", |_ctx, args| async move {
         let path = expect_string(&args, 0, "__files_upload")?;
         let provider = expect_string(&args, 1, "__files_upload")?;
         let file_id = upload_file(path, provider).await?;

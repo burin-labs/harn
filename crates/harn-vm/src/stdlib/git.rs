@@ -53,7 +53,7 @@ enum GitDataParser {
 pub(crate) fn register_git_builtins(vm: &mut Vm) {
     register_git_namespace(vm);
 
-    vm.register_async_builtin("git.repo.discover", |args| async move {
+    vm.register_async_builtin("git.repo.discover", |_ctx, args| async move {
         let path = required_path_arg(&args, 0, "git.repo.discover")?;
         run_git_command(GitCommand {
             operation: "git.repo.discover",
@@ -76,7 +76,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.worktree.create", |args| async move {
+    vm.register_async_builtin("git.worktree.create", |_ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.worktree.create")?;
         let branch = required_string_arg(&args, 1, "git.worktree.create", "branch")?;
         let path = required_string_arg(&args, 2, "git.worktree.create", "path")?;
@@ -112,7 +112,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.worktree.remove", |args| async move {
+    vm.register_async_builtin("git.worktree.remove", |_ctx, args| async move {
         let path = required_string_arg(&args, 0, "git.worktree.remove", "path")?;
         let options = optional_dict_arg(&args, 1);
         let force = bool_option(options, "force").unwrap_or(false);
@@ -163,7 +163,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.fetch", |args| async move {
+    vm.register_async_builtin("git.fetch", |_ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.fetch")?;
         let remote = required_string_arg(&args, 1, "git.fetch", "remote")?;
         let refspecs = string_list_arg(&args, 2, "git.fetch", "refspecs")?.unwrap_or_default();
@@ -181,7 +181,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.rebase", |args| async move {
+    vm.register_async_builtin("git.rebase", |_ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.rebase")?;
         let base_ref = required_string_arg(&args, 1, "git.rebase", "base_ref")?;
         run_git_command(GitCommand {
@@ -196,7 +196,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.status", |args| async move {
+    vm.register_async_builtin("git.status", |_ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.status")?;
         run_git_command(GitCommand {
             operation: "git.status",
@@ -215,7 +215,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.conflicts", |args| async move {
+    vm.register_async_builtin("git.conflicts", |_ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.conflicts")?;
         run_git_command(GitCommand {
             operation: "git.conflicts",
@@ -233,7 +233,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.push", |args| async move {
+    vm.register_async_builtin("git.push", |_ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.push")?;
         let remote = required_string_arg(&args, 1, "git.push", "remote")?;
         let refspec = required_string_arg(&args, 2, "git.push", "refspec")?;
@@ -303,7 +303,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.diff", |args| async move {
+    vm.register_async_builtin("git.diff", |_ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.diff")?;
         let selector = args.get(1);
         let mut argv = vec!["git".to_string(), "diff".to_string()];
@@ -336,7 +336,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         .await
     });
 
-    vm.register_async_builtin("git.merge_base", |args| async move {
+    vm.register_async_builtin("git.merge_base", |_ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.merge_base")?;
         let left = required_string_arg(&args, 1, "git.merge_base", "left")?;
         let right = required_string_arg(&args, 2, "git.merge_base", "right")?;

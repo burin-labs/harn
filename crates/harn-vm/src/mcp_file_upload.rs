@@ -55,11 +55,13 @@ pub fn register_mcp_file_upload_builtins(vm: &mut Vm) {
         file_input_schema(args.first().unwrap_or(&VmValue::Nil))
     });
 
-    vm.register_async_builtin("mcp_upload_file", |args| async move { upload_file(&args) });
     vm.register_async_builtin(
-        "harn.mcp.upload_file",
-        |args| async move { upload_file(&args) },
+        "mcp_upload_file",
+        |_ctx, args| async move { upload_file(&args) },
     );
+    vm.register_async_builtin("harn.mcp.upload_file", |_ctx, args| async move {
+        upload_file(&args)
+    });
 }
 
 fn configure(config: &VmValue) -> Result<VmValue, VmError> {

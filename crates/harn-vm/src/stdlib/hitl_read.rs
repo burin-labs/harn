@@ -68,7 +68,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&HITL_PENDING_BUILTIN_DEF
     kind = "async",
     category = "hitl"
 )]
-async fn hitl_pending_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn hitl_pending_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     hitl_pending_impl(&args).await
 }
 

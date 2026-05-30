@@ -82,7 +82,10 @@ pub(super) fn reset_state() {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_listen_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_listen_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool_handle = required_arg(&args, 0, "pg_listen", "pool handle")?;
     let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_listen")?;
     let pool = pool_by_id(&pool_id)?;
@@ -140,7 +143,10 @@ async fn pg_listen_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_listener_recv_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_listener_recv_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let handle = required_arg(&args, 0, "pg_listener_recv", "listener handle")?;
     let id = handle_id(Some(handle), HANDLE_LISTENER, "pg_listener_recv")?;
     let record = listener_by_id(&id)?;
@@ -207,7 +213,10 @@ async fn pg_listener_recv_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_listener_close_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_listener_close_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let handle = required_arg(&args, 0, "pg_listener_close", "listener handle")?;
     let id = handle_id(Some(handle), HANDLE_LISTENER, "pg_listener_close")?;
     let removed = LISTENERS.with(|listeners| listeners.borrow_mut().remove(&id));
@@ -229,7 +238,10 @@ async fn pg_listener_close_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     kind = "async",
     category = "postgres"
 )]
-async fn pg_notify_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_notify_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = required_arg(&args, 0, "pg_notify", "pool or transaction handle")?;
     let channel = required_arg(&args, 1, "pg_notify", "channel name")?;
     let channel = match channel {

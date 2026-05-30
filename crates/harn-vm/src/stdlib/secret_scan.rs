@@ -176,7 +176,7 @@ pub async fn audit_secret_scan_active(
 }
 
 pub(crate) fn register_secret_scan_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("secret_scan", |args| async move {
+    vm.register_async_builtin("secret_scan", |_ctx, args| async move {
         let content = match args.first() {
             Some(VmValue::Nil) | None => {
                 return Err(VmError::Runtime("secret_scan: content is required".into()));

@@ -31,7 +31,7 @@ use crate::vm::Vm;
 pub(crate) const TRANSCRIPT_PROJECTION_EVENT_KIND: &str = "transcript.projection";
 
 pub(crate) fn register_transcript_projection_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("transcript_project", |args| async move {
+    vm.register_async_builtin("transcript_project", |_ctx, args| async move {
         let transcript_value = args.first().cloned().unwrap_or(VmValue::Nil);
         let transcript = transcript_value
             .as_dict()

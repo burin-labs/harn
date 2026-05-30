@@ -37,7 +37,10 @@ impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_capture_events_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_capture_events_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(text)) if !text.is_empty() => text.to_string(),
         Some(VmValue::String(_)) => {
@@ -73,14 +76,10 @@ async fn host_agent_capture_events_impl(args: Vec<VmValue>) -> Result<VmValue, V
         events: captured_events.clone(),
     });
     let _guard = agent_runtime::LoopSinkGuard::install(Some(sink));
-    let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime(
-            "__host_agent_capture_events requires an async builtin VM context".to_string(),
-        )
-    })?;
+    let mut child_vm = ctx.child_vm();
     let result = child_vm.call_closure_pub(&body, &[]).await;
     let output = child_vm.take_output();
-    crate::vm::forward_child_output_to_parent(&output);
+    ctx.forward_output(&output);
     let result = result?;
     let events = captured_events
         .lock()
@@ -314,7 +313,10 @@ fn attach_hook_reminder_audit(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_parse_tool_calls_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let text = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),
         Some(other) => {
@@ -409,7 +411,10 @@ async fn host_agent_dispatch_tool_batch_capped(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_dispatch_tool_batch_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let mut args = args.into_iter();
     let calls = match args.next() {
         Some(VmValue::List(calls)) => {
@@ -452,7 +457,10 @@ async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmVal
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_dispatch_tool_call_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let mut args = args.into_iter();
     let call = args.next().ok_or_else(|| {
         VmError::Runtime(
@@ -1098,7 +1106,10 @@ fn tag_mcp_tool(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_mcp_bootstrap_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     use std::collections::BTreeMap;
 
     let session_id = match args.first() {
@@ -1223,7 +1234,10 @@ async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_mcp_disconnect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_mcp_disconnect_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),
         Some(other) => {
@@ -1253,7 +1267,10 @@ async fn host_mcp_disconnect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_reminder_providers_fire_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_reminder_providers_fire_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) if !s.trim().is_empty() => s.to_string(),
         Some(other) => {

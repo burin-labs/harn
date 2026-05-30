@@ -228,7 +228,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
     //   - {action: "cancel"}
     //
     // Spec: https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation
-    vm.register_async_builtin("mcp_elicit", |args| async move {
+    vm.register_async_builtin("mcp_elicit", |_ctx, args| async move {
         let dict = match args.first() {
             Some(VmValue::Dict(d)) => d.clone(),
             _ => {

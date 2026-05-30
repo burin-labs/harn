@@ -420,7 +420,7 @@ fn register_composition_call_builtin(
     state: Rc<RefCell<ExecutionState>>,
     host: Rc<dyn CompositionToolHost>,
 ) {
-    vm.register_async_builtin("__composition_call", move |args| {
+    vm.register_async_builtin("__composition_call", move |_ctx, args| {
         let state = state.clone();
         let host = host.clone();
         async move {
@@ -737,7 +737,7 @@ pub fn register_composition_builtins(vm: &mut Vm) {
         )))
     });
 
-    vm.register_async_builtin("composition_execute", |args| async move {
+    vm.register_async_builtin("composition_execute", |_ctx, args| async move {
         let snippet = args
             .first()
             .map(VmValue::display)

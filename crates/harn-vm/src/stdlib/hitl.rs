@@ -288,7 +288,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     kind = "async",
     category = "hitl"
 )]
-async fn ask_user_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn ask_user_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     ask_user_impl(&args).await
 }
 
@@ -297,7 +300,10 @@ async fn ask_user_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "hitl"
 )]
-async fn request_approval_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn request_approval_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     request_approval_impl(&args).await
 }
 
@@ -306,7 +312,10 @@ async fn request_approval_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError
     kind = "async",
     category = "hitl"
 )]
-async fn dual_control_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn dual_control_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     dual_control_impl(&args).await
 }
 
@@ -315,7 +324,10 @@ async fn dual_control_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "hitl"
 )]
-async fn escalate_to_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn escalate_to_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     escalate_to_impl(&args).await
 }
 

@@ -162,7 +162,10 @@ fn trigger_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     kind = "async",
     category = "triggers"
 )]
-async fn trigger_register_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trigger_register_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let config = require_dict_arg(&args, 0, "trigger_register")?;
     let spec = parse_trigger_config(config)?;
     let id = dynamic_register(spec)
@@ -178,7 +181,10 @@ async fn trigger_register_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn trigger_fire_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trigger_fire_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let (binding_id, binding_version) = trigger_handle_from_args(&args, "trigger_fire")?;
     let raw_event = args
         .get(1)
@@ -192,7 +198,10 @@ async fn trigger_fire_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn trigger_replay_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trigger_replay_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let event_id = args
         .first()
         .and_then(|value| match value {
@@ -208,7 +217,10 @@ async fn trigger_replay_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn trigger_inspect_dlq_impl(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trigger_inspect_dlq_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    _args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let entries = inspect_dlq_entries().await?;
     Ok(VmValue::List(Rc::new(
         entries
@@ -223,7 +235,10 @@ async fn trigger_inspect_dlq_impl(_args: Vec<VmValue>) -> Result<VmValue, VmErro
     kind = "async",
     category = "triggers"
 )]
-async fn trigger_inspect_lifecycle_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trigger_inspect_lifecycle_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let kind = args.first().and_then(|value| match value {
         VmValue::String(text) => Some(text.to_string()),
         VmValue::Nil => None,
@@ -243,7 +258,10 @@ async fn trigger_inspect_lifecycle_impl(args: Vec<VmValue>) -> Result<VmValue, V
     kind = "async",
     category = "triggers"
 )]
-async fn trigger_inspect_action_graph_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trigger_inspect_action_graph_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let trace_id = args.first().and_then(|value| match value {
         VmValue::String(text) => Some(text.to_string()),
         VmValue::Nil => None,
@@ -263,7 +281,10 @@ async fn trigger_inspect_action_graph_impl(args: Vec<VmValue>) -> Result<VmValue
     kind = "async",
     category = "triggers"
 )]
-async fn trust_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_record_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     append_trust_record_from_parts("trust_record", &args)
         .await
         .map(|record| value_from_serde(&record))
@@ -274,7 +295,10 @@ async fn trust_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn trust_graph_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_graph_record_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let decision = args.first().ok_or_else(|| {
         VmError::Runtime("trust_graph_record: expected decision dict".to_string())
     })?;
@@ -287,7 +311,10 @@ async fn trust_graph_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
     kind = "async",
     category = "triggers"
 )]
-async fn trust_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_query_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let filters = args
         .first()
         .map(parse_trust_query_filters)
@@ -313,7 +340,10 @@ async fn trust_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn trust_graph_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_graph_query_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let agent = required_string_arg(&args, 0, "trust_graph_query", "agent")?;
     let action = optional_string_arg(&args, 1, "trust_graph_query", "action")?;
     let log = ensure_trigger_event_log();
@@ -328,7 +358,10 @@ async fn trust_graph_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     kind = "async",
     category = "triggers"
 )]
-async fn trust_graph_policy_for_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_graph_policy_for_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let agent = required_string_arg(&args, 0, "trust_graph_policy_for", "agent")?;
     let log = ensure_trigger_event_log();
     let policy = policy_for_agent(&log, &agent)
@@ -342,7 +375,10 @@ async fn trust_graph_policy_for_impl(args: Vec<VmValue>) -> Result<VmValue, VmEr
     kind = "async",
     category = "triggers"
 )]
-async fn trust_graph_verify_chain_impl(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_graph_verify_chain_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    _args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let log = ensure_trigger_event_log();
     let report = verify_trust_chain(&log)
         .await
@@ -355,7 +391,10 @@ async fn trust_graph_verify_chain_impl(_args: Vec<VmValue>) -> Result<VmValue, V
     kind = "async",
     category = "triggers"
 )]
-async fn trust_query_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_query_ns_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let filters = args
         .first()
         .map(parse_trust_query_filters)
@@ -378,7 +417,10 @@ async fn trust_query_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn trust_record_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_record_ns_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let decision = args
         .first()
         .ok_or_else(|| VmError::Runtime("trust.record: expected decision dict".to_string()))?;
@@ -391,7 +433,10 @@ async fn trust_record_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn trust_score_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_score_ns_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let agent = required_string_arg(&args, 0, "trust.score", "actor_id")?;
     let action = optional_string_arg(&args, 1, "trust.score", "action")?;
     let log = ensure_trigger_event_log();
@@ -406,7 +451,10 @@ async fn trust_score_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn trust_policy_for_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_policy_for_ns_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let agent = required_string_arg(&args, 0, "trust.policy_for", "actor_id")?;
     let log = ensure_trigger_event_log();
     let policy = policy_for_agent(&log, &agent)
@@ -420,7 +468,10 @@ async fn trust_policy_for_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     kind = "async",
     category = "triggers"
 )]
-async fn trust_verify_chain_ns_impl(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trust_verify_chain_ns_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    _args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let log = ensure_trigger_event_log();
     let report = verify_trust_chain(&log)
         .await
@@ -433,7 +484,10 @@ async fn trust_verify_chain_ns_impl(_args: Vec<VmValue>) -> Result<VmValue, VmEr
     kind = "async",
     category = "triggers"
 )]
-async fn correction_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn correction_record_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let value = args.first().ok_or_else(|| {
         VmError::Runtime("correction_record: expected correction dict".to_string())
     })?;
@@ -450,7 +504,10 @@ async fn correction_record_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     kind = "async",
     category = "triggers"
 )]
-async fn correction_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn correction_query_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let filters = args
         .first()
         .map(|value| correction_query_filters_from_value("correction_query", value))
@@ -473,7 +530,10 @@ async fn correction_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "triggers"
 )]
-async fn corrections_record_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn corrections_record_ns_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let value = args.first().ok_or_else(|| {
         VmError::Runtime("corrections.record: expected correction dict".to_string())
     })?;
@@ -490,7 +550,10 @@ async fn corrections_record_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
     kind = "async",
     category = "triggers"
 )]
-async fn corrections_query_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn corrections_query_ns_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let filters = args
         .first()
         .map(|value| correction_query_filters_from_value("corrections.query", value))
@@ -513,7 +576,10 @@ async fn corrections_query_ns_impl(args: Vec<VmValue>) -> Result<VmValue, VmErro
     kind = "async",
     category = "triggers"
 )]
-async fn webhook_intake_register_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn webhook_intake_register_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let config = require_dict_arg(&args, 0, "webhook_intake_register")?;
     let parsed = parse_webhook_intake_config(config)?;
     let snapshot = register_webhook_intake(parsed).map_err(webhook_intake_error)?;
@@ -525,7 +591,10 @@ async fn webhook_intake_register_impl(args: Vec<VmValue>) -> Result<VmValue, VmE
     kind = "async",
     category = "triggers"
 )]
-async fn webhook_intake_feed_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn webhook_intake_feed_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let intake_id = required_string_arg(&args, 0, "webhook_intake_feed", "intake_id")?;
     let request_dict = require_dict_arg(&args, 1, "webhook_intake_feed")?;
     let request = parse_webhook_intake_request(request_dict)?;
@@ -540,7 +609,10 @@ async fn webhook_intake_feed_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     kind = "async",
     category = "triggers"
 )]
-async fn webhook_intake_deregister_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn webhook_intake_deregister_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let intake_id = required_string_arg(&args, 0, "webhook_intake_deregister", "intake_id")?;
     Ok(VmValue::Bool(deregister_webhook_intake(&intake_id)))
 }
@@ -563,7 +635,10 @@ fn webhook_intake_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmVa
     kind = "async",
     category = "triggers"
 )]
-async fn webhook_intake_recent_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn webhook_intake_recent_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let intake_id = required_string_arg(&args, 0, "webhook_intake_recent", "intake_id")?;
     let limit = match args.get(1) {
         Some(VmValue::Int(value)) if *value >= 0 => *value as usize,
@@ -591,7 +666,10 @@ async fn webhook_intake_recent_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
     kind = "async",
     category = "triggers"
 )]
-async fn trigger_test_harness_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn trigger_test_harness_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let fixture = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),
         Some(VmValue::Dict(map)) => required_string(map, "fixture", "trigger_test_harness")?,

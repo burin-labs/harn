@@ -120,7 +120,10 @@ fn compaction_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     kind = "async",
     category = "compaction"
 )]
-async fn compaction_run_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn compaction_run_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = resolve_session_id(args.first(), "compaction.run")?;
     let plan = match args.get(1) {
         Some(VmValue::Dict(map)) => (**map).clone(),

@@ -135,7 +135,10 @@ fn tool_synthesize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     category = "tools",
     kind = "async"
 )]
-async fn tool_synth_invoke_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn tool_synth_invoke_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let id = match args.first() {
         Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
         _ => {

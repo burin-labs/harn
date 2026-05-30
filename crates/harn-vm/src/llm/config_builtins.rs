@@ -492,7 +492,10 @@ fn llm_rate_limit_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     kind = "async",
     category = "llm.config"
 )]
-async fn llm_healthcheck_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_healthcheck_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let (provider_name, api_key) = parse_healthcheck_args(&args);
 
     // Ollama-specific readiness probe (issue #675): supports `model`,

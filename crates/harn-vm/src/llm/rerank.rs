@@ -19,7 +19,10 @@ const RERANK_BUILTINS: &[&VmBuiltinDef] = &[&SELF_CERTAINTY_BUILTIN_DEF];
     kind = "async",
     category = "llm.rerank"
 )]
-async fn self_certainty_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn self_certainty_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let text = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),
         Some(VmValue::Dict(dict)) => {

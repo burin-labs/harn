@@ -1281,7 +1281,10 @@ fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     category = "pool",
     runtime_only = true
 )]
-async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pool_submit_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool_id = pool_id_from_value(
         args.first()
             .ok_or_else(|| VmError::Runtime("pool.submit: pool handle is required".to_string()))?,
@@ -2381,7 +2384,10 @@ fn finalize_task(
     category = "pool",
     runtime_only = true
 )]
-async fn pool_wait_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pool_wait_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("pool_wait: task handle is required".to_string()))?;

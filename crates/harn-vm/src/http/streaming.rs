@@ -1081,7 +1081,7 @@ pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    vm.register_async_builtin("sse_connect", |args| async move {
+    vm.register_async_builtin("sse_connect", |_ctx, args| async move {
         let method = args
             .first()
             .map(|arg| arg.display())
@@ -1096,7 +1096,7 @@ pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
         vm_sse_connect(&method, &url, &options).await
     });
 
-    vm.register_async_builtin("sse_receive", |args| async move {
+    vm.register_async_builtin("sse_receive", |_ctx, args| async move {
         let Some(handle) = args.first() else {
             return Err(vm_error("sse_receive: requires a stream handle"));
         };

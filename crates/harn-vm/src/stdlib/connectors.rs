@@ -35,7 +35,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     kind = "async",
     category = "connectors"
 )]
-async fn connector_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn connector_call_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let provider = required_string_arg(&args, 0, "connector_call", "provider")?;
     let method = required_string_arg(&args, 1, "connector_call", "method")?;
     let params = match args.get(2) {
@@ -66,7 +69,10 @@ async fn connector_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "connectors"
 )]
-async fn secret_get_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn secret_get_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let raw = required_string_arg(&args, 0, "secret_get", "secret_id")?;
     let ctx = active_harn_connector_ctx().ok_or_else(|| {
         VmError::Thrown(VmValue::String(Rc::from(
@@ -97,7 +103,10 @@ async fn secret_get_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "connectors"
 )]
-async fn event_log_emit_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn event_log_emit_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let topic_name = required_string_arg(&args, 0, "event_log_emit", "topic")?;
     let kind = required_string_arg(&args, 1, "event_log_emit", "kind")?;
     let payload = args
@@ -132,7 +141,10 @@ async fn event_log_emit_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "connectors"
 )]
-async fn metrics_inc_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn metrics_inc_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let name = required_string_arg(&args, 0, "metrics_inc", "name")?;
     let amount = match args.get(1) {
         Some(VmValue::Int(value)) => *value,
@@ -160,7 +172,10 @@ async fn metrics_inc_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "connectors"
 )]
-async fn connector_shared_verify_jwt_inline_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn connector_shared_verify_jwt_inline_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let token = required_string_arg(&args, 0, "connector_shared_verify_jwt_inline", "token")?;
     let jwks = required_json_arg(&args, 1, "connector_shared_verify_jwt_inline", "jwks")?;
     let options = optional_json_arg(&args, 2, "connector_shared_verify_jwt_inline")?;

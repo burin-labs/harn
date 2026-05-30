@@ -587,7 +587,10 @@ fn workflow_query_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     kind = "async",
     category = "workflow.messages"
 )]
-async fn workflow_update_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn workflow_update_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = parse_target_vm(args.first(), None, "workflow.update")?;
     let name = args
         .get(1)

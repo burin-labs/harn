@@ -85,7 +85,7 @@ pub(crate) fn string_discriminator(value: &VmValue, builtin: &str) -> Result<Str
 }
 
 pub(crate) fn register_collection_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("chunk", |args| async move {
+    vm.register_async_builtin("chunk", |_ctx, args| async move {
         let items = list_arg(&args, "chunk")?;
         let size = positive_usize_arg(&args, 1, 1, "chunk");
         Ok(VmValue::List(Rc::new(
@@ -96,7 +96,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         )))
     });
 
-    vm.register_async_builtin("window", |args| async move {
+    vm.register_async_builtin("window", |_ctx, args| async move {
         let items = list_arg(&args, "window")?;
         let size = positive_usize_arg(&args, 1, 2, "window");
         let step = positive_usize_arg(&args, 2, 1, "window");
@@ -112,7 +112,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(windows)))
     });
 
-    vm.register_async_builtin("group_by", |args| async move {
+    vm.register_async_builtin("group_by", |_ctx, args| async move {
         let items = list_arg(&args, "group_by")?;
         let callable = args
             .get(1)
@@ -138,7 +138,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         )))
     });
 
-    vm.register_async_builtin("partition", |args| async move {
+    vm.register_async_builtin("partition", |_ctx, args| async move {
         let items = list_arg(&args, "partition")?;
         let callable = args
             .get(1)
@@ -166,7 +166,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         ]))))
     });
 
-    vm.register_async_builtin("dedup_by", |args| async move {
+    vm.register_async_builtin("dedup_by", |_ctx, args| async move {
         let items = list_arg(&args, "dedup_by")?;
         let callable = args
             .get(1)
@@ -189,7 +189,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
-    vm.register_async_builtin("flat_map", |args| async move {
+    vm.register_async_builtin("flat_map", |_ctx, args| async move {
         let items = list_arg(&args, "flat_map")?;
         let callable = args
             .get(1)
@@ -211,7 +211,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
-    vm.register_async_builtin("take_while", |args| async move {
+    vm.register_async_builtin("take_while", |_ctx, args| async move {
         let items = list_arg(&args, "take_while")?;
         let callable = args
             .get(1)
@@ -234,7 +234,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
-    vm.register_async_builtin("drop_while", |args| async move {
+    vm.register_async_builtin("drop_while", |_ctx, args| async move {
         let items = list_arg(&args, "drop_while")?;
         let callable = args
             .get(1)
@@ -261,7 +261,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
-    vm.register_async_builtin("count_by", |args| async move {
+    vm.register_async_builtin("count_by", |_ctx, args| async move {
         let items = list_arg(&args, "count_by")?;
         let callable = args
             .get(1)

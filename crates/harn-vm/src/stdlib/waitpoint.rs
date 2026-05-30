@@ -179,7 +179,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     kind = "async",
     category = "waitpoint"
 )]
-async fn waitpoint_create_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn waitpoint_create_builtin_macro(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     waitpoint_create_builtin(&args).await
 }
 
@@ -188,7 +191,10 @@ async fn waitpoint_create_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, V
     kind = "async",
     category = "waitpoint"
 )]
-async fn waitpoint_wait_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn waitpoint_wait_builtin_macro(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     waitpoint_wait_builtin(&args).await
 }
 
@@ -197,7 +203,10 @@ async fn waitpoint_wait_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmE
     kind = "async",
     category = "waitpoint"
 )]
-async fn waitpoint_complete_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn waitpoint_complete_builtin_macro(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     waitpoint_complete_builtin(&args).await
 }
 
@@ -206,7 +215,10 @@ async fn waitpoint_complete_builtin_macro(args: Vec<VmValue>) -> Result<VmValue,
     kind = "async",
     category = "waitpoint"
 )]
-async fn waitpoint_cancel_builtin_macro(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn waitpoint_cancel_builtin_macro(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     waitpoint_cancel_builtin(&args).await
 }
 
