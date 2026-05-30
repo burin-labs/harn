@@ -423,7 +423,7 @@ Imports starting with `std/` load embedded stdlib modules:
   (query, record)
 - `import "std/postgres"` — Postgres persistence helpers (pg_pool,
   pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
-  pg_mock_pool, pg_mock_calls)
+  pg_stmt_cache_clear, pg_mock_pool, pg_mock_calls)
 - `import "std/llm/handlers"` — LLM call-handler middleware
   (with_circuit_breaker)
 - `import "std/llm/prompts"` — deterministic prompt builders and system
@@ -5419,6 +5419,7 @@ receipts, claims, and audit records.
 | `pg_execute(handle, sql, params?)` | Execute a statement and return `{rows_affected}` |
 | `pg_transaction(pool, callback, options?)` | Pass a scoped transaction handle to a closure, commit on success, rollback on thrown error |
 | `pg_close(pool)` | Close a pool handle |
+| `pg_stmt_cache_clear(pool)` | Clear prepared-statement caches on idle primary and replica connections |
 | `pg_mock_pool(fixtures)` | Create an in-process fixture-backed Postgres handle for tests |
 | `pg_mock_calls(mock)` | Inspect recorded mock SQL calls |
 

@@ -751,6 +751,7 @@ claims, and audit records:
 | `pg_execute(handle, sql, params?)` | Run a statement and return `{rows_affected}` |
 | `pg_transaction(pool, callback, options?)` | Run a closure with a scoped transaction handle, committing on success and rolling back on error |
 | `pg_close(pool)` | Close a pool handle |
+| `pg_stmt_cache_clear(pool)` | Clear prepared-statement caches on idle primary and replica connections |
 | `pg_mock_pool(fixtures)` | Create fixture-backed Postgres test handle |
 | `pg_mock_calls(mock)` | Inspect mock SQL calls |
 

@@ -41,6 +41,7 @@ pipeline default() {
 | `pg_rollback_to_savepoint(tx, name)` | `bool` | Roll work back to a savepoint while keeping the outer transaction open. |
 | `pg_migrate(pool, {dir, table?, dry_run?})` | `PgMigrateResult` | Apply `.sql` files from a directory; track the applied set in `harn_migrations` (override via `table`). |
 | `pg_close(pool)` | `bool` | Close and unregister a pool handle. |
+| `pg_stmt_cache_clear(pool)` | `PgStmtCacheClearResult` | Clear prepared-statement caches on idle primary and replica connections without closing the pool. |
 | `pg_mock_pool(fixtures)` | `PgMockPool` | Create an in-process fixture-backed pool for tests. |
 | `pg_mock_calls(mock)` | `list<dict>` | Inspect SQL, params, and execute/query mode recorded by a mock pool. |
 
@@ -53,7 +54,12 @@ Pool options include `max_connections`, `min_connections`,
 `acquire_timeout_ms`, `timeout_ms`, `idle_timeout_ms`, `max_lifetime_ms`,
 `ssl_mode` or `tls_mode`, `application_name`, and
 `statement_cache_capacity`. Prepared statement caching is driver-managed by
-SQLx; tune it with `statement_cache_capacity` when needed.
+SQLx; tune it with `statement_cache_capacity` when needed. After a migration
+changes result column types, call `pg_stmt_cache_clear(pool)` to evict cached
+prepared statements from currently idle primary and replica connections.
+Connections checked out by in-flight queries are left alone and counted in
+`connections_skipped`, so callers that need a full sweep can retry once work
+has drained.
 
 ## Parameters and decoding
 
