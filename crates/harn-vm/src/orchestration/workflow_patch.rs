@@ -214,6 +214,8 @@ pub struct WorkflowPatchCapabilityDelta {
     pub added_capabilities: BTreeMap<String, Vec<String>>,
     pub raised_side_effect_level: Option<RaisedSideEffectLevel>,
     pub added_workspace_roots: Vec<String>,
+    #[serde(default)]
+    pub added_read_only_roots: Vec<String>,
     pub added_connector_scopes: BTreeMap<String, Vec<String>>,
     pub added_command_gates: Vec<String>,
     pub raised_autonomy_tier: Option<RaisedAutonomyTier>,
@@ -329,6 +331,7 @@ pub fn bundle_capability_ceiling(bundle: &WorkflowBundle) -> CapabilityPolicy {
     let mut tools: BTreeSet<String> = bundle.policy.tool_policy.keys().cloned().collect();
     let mut capabilities: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut workspace_roots: BTreeSet<String> = BTreeSet::new();
+    let mut read_only_roots: BTreeSet<String> = BTreeSet::new();
     let mut max_side_effect: Option<&'static str> = None;
 
     for node in bundle.workflow.nodes.values() {
@@ -343,6 +346,9 @@ pub fn bundle_capability_ceiling(bundle: &WorkflowBundle) -> CapabilityPolicy {
         }
         for root in &node.capability_policy.workspace_roots {
             workspace_roots.insert(root.clone());
+        }
+        for root in &node.capability_policy.read_only_roots {
+            read_only_roots.insert(root.clone());
         }
         if let Some(level) = node.capability_policy.side_effect_level.as_deref() {
             max_side_effect = match max_side_effect {
@@ -390,6 +396,7 @@ pub fn bundle_capability_ceiling(bundle: &WorkflowBundle) -> CapabilityPolicy {
             .map(|(k, v)| (k, v.into_iter().collect()))
             .collect(),
         workspace_roots: workspace_roots.into_iter().collect(),
+        read_only_roots: read_only_roots.into_iter().collect(),
         side_effect_level: max_side_effect.map(|level| level.to_string()),
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
@@ -793,6 +800,13 @@ fn compute_capability_delta(
         .cloned()
         .collect();
 
+    let added_read_only_roots: Vec<String> = after
+        .read_only_roots
+        .iter()
+        .filter(|root| !before.read_only_roots.contains(root))
+        .cloned()
+        .collect();
+
     let mut added_connector_scopes: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let before_scopes_by_id: BTreeMap<&str, BTreeSet<&str>> = before_bundle
         .connectors
@@ -860,6 +874,7 @@ fn compute_capability_delta(
         added_capabilities,
         raised_side_effect_level,
         added_workspace_roots,
+        added_read_only_roots,
         added_connector_scopes,
         added_command_gates,
         raised_autonomy_tier,
@@ -927,6 +942,18 @@ fn collect_ceiling_violations(
                 violations.push(CapabilityCeilingViolation {
                     kind: "workspace_root".to_string(),
                     detail: format!("workspace_root '{root}' exceeds parent allowlist"),
+                });
+            }
+        }
+    }
+    // A read-only root is within ceiling if the parent could read it —
+    // any of its writable or read-only roots.
+    if !parent.workspace_roots.is_empty() || !parent.read_only_roots.is_empty() {
+        for root in &requested.read_only_roots {
+            if !parent.workspace_roots.contains(root) && !parent.read_only_roots.contains(root) {
+                violations.push(CapabilityCeilingViolation {
+                    kind: "read_only_root".to_string(),
+                    detail: format!("read_only_root '{root}' exceeds parent allowlist"),
                 });
             }
         }

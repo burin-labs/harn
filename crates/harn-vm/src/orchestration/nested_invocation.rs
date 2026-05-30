@@ -168,6 +168,21 @@ fn collect_violations(
             }
         }
     }
+    // A read-only root is in scope if the parent could read it — i.e. it
+    // is one of the parent's writable or read-only roots. The parent only
+    // bounds this dimension once it declares roots of either kind.
+    if !parent.workspace_roots.is_empty() || !parent.read_only_roots.is_empty() {
+        for root in &requested.read_only_roots {
+            if !parent.workspace_roots.contains(root) && !parent.read_only_roots.contains(root) {
+                violations.push(CapabilityCeilingViolation {
+                    kind: "read_only_root".to_string(),
+                    detail: format!(
+                        "nested target requests read_only_root '{root}' outside parent allowlist"
+                    ),
+                });
+            }
+        }
+    }
     violations
 }
 
@@ -214,6 +229,7 @@ fn scan_harn_script_ceiling(source: &str) -> CapabilityPolicy {
             .map(|(k, v)| (k, v.into_iter().collect()))
             .collect(),
         workspace_roots: Vec::new(),
+        read_only_roots: Vec::new(),
         side_effect_level: max_side_effect.map(|level| level.to_string()),
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
@@ -243,6 +259,7 @@ fn scan_burin_manifest_ceiling(manifest: &serde_json::Value) -> CapabilityPolicy
         tools,
         capabilities: std::collections::BTreeMap::new(),
         workspace_roots: Vec::new(),
+        read_only_roots: Vec::new(),
         side_effect_level: Some("network".to_string()),
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
@@ -429,6 +446,7 @@ mod tests {
             tools: Vec::new(),
             capabilities,
             workspace_roots: Vec::new(),
+            read_only_roots: Vec::new(),
             side_effect_level: Some("network".to_string()),
             recursion_limit: None,
             tool_arg_constraints: Vec::new(),
@@ -451,6 +469,7 @@ mod tests {
             tools: Vec::new(),
             capabilities,
             workspace_roots: Vec::new(),
+            read_only_roots: Vec::new(),
             side_effect_level: Some("read_only".to_string()),
             recursion_limit: None,
             tool_arg_constraints: Vec::new(),

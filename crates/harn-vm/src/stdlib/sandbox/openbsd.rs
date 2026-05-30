@@ -9,8 +9,8 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write, process_sandbox_roots, PrepareOutcome,
-    SandboxBackend,
+    policy_allows_network, policy_allows_workspace_write, process_sandbox_readonly_roots,
+    process_sandbox_roots, PrepareOutcome, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -82,6 +82,11 @@ fn profile_setup(policy: &CapabilityPolicy) -> Result<ProcessProfile, VmError> {
             root.display().to_string(),
             workspace_permissions.to_string(),
         ));
+    }
+    // Read-only roots get read+execute but never write/create, even when
+    // the policy otherwise allows workspace writes.
+    for root in process_sandbox_readonly_roots(policy) {
+        unveil_rules.push((root.display().to_string(), "rx".to_string()));
     }
 
     let mut promises = vec!["stdio", "rpath", "proc", "exec"];

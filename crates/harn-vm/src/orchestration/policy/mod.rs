@@ -574,6 +574,7 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         tools: Vec::new(),
         capabilities: BTreeMap::new(),
         workspace_roots: Vec::new(),
+        read_only_roots: Vec::new(),
         side_effect_level: Some("network".to_string()),
         recursion_limit: Some(RuntimeLimits::DEFAULT.max_nested_execution_depth),
         tool_arg_constraints: Vec::new(),

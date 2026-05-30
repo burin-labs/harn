@@ -25,6 +25,30 @@ fn capability_intersection_rejects_privilege_expansion() {
 }
 
 #[test]
+fn capability_intersection_narrows_read_only_roots_to_common_set() {
+    let ceiling = CapabilityPolicy {
+        workspace_roots: vec!["/work".to_string()],
+        read_only_roots: vec!["/mnt/memory".to_string(), "/mnt/bundle".to_string()],
+        ..Default::default()
+    };
+    let requested = CapabilityPolicy {
+        workspace_roots: vec!["/work".to_string()],
+        read_only_roots: vec!["/mnt/memory".to_string(), "/mnt/other".to_string()],
+        ..Default::default()
+    };
+    let merged = ceiling.intersect(&requested).unwrap();
+    assert_eq!(merged.read_only_roots, vec!["/mnt/memory".to_string()]);
+
+    // An empty side defers to the other, mirroring workspace_roots.
+    let unbounded = CapabilityPolicy::default();
+    let merged = unbounded.intersect(&requested).unwrap();
+    assert_eq!(
+        merged.read_only_roots,
+        vec!["/mnt/memory".to_string(), "/mnt/other".to_string()]
+    );
+}
+
+#[test]
 fn mutation_session_normalize_fills_defaults() {
     let normalized = MutationSessionRecord::default().normalize();
     assert!(normalized.session_id.starts_with("session_"));

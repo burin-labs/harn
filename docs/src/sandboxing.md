@@ -40,6 +40,22 @@ for the `worktree` profile. `os_hardened` ignores the env var on
 purpose: a profile that means "the OS sandbox is required" cannot be
 silently downgraded by an environment variable.
 
+### Writable vs. read-only roots
+
+A policy declares two root lists. `workspace_roots` are read-write: a
+path resolving under one passes every scope check, and the OS profile
+grants it write when the `workspace.write_text`/`workspace.delete`
+capability is present. `read_only_roots` are additive read-only scope:
+a path under one passes `read_text`/`list`/`exists` checks but
+`write_text`/`delete` are rejected with a `tool_rejected` "read-only
+workspace root" violation, and the generated OS profile grants the root
+read but never write — even when the policy otherwise allows workspace
+writes. The two lists are intended to be disjoint. This lets a caller
+mount a reference tree (a shared memory dir, a persona bundle) that the
+workload can read but cannot mutate. `CapabilityPolicy::intersect`
+narrows each list to the roots common to both sides, with an empty list
+on either side deferring to the other.
+
 ## Selecting a profile
 
 ### From a pipeline
@@ -100,6 +116,7 @@ small, named kernel feature, never an open-ended escape hatch.
 | `workspace.read_text` / `workspace.list` / `workspace.exists` | Landlock LSM `LANDLOCK_ACCESS_FS_READ_FILE` + `_READ_DIR` + `_EXECUTE` | reads under `workspace_roots` and the `system_read_roots()` allowlist (`/bin`, `/lib`, `/lib64`, `/usr`, `/etc`, `/nix/store`, `/System`) |
 | `workspace.write_text` | Landlock `_WRITE_FILE` + `_REMOVE_*` + `_MAKE_*` + (ABI ≥ 2) `_REFER` + (ABI ≥ 3) `_TRUNCATE` | writes scoped to `workspace_roots` |
 | `workspace.delete` | Landlock `_REMOVE_DIR` + `_REMOVE_FILE` | removes scoped to `workspace_roots` |
+| `read_only_roots: [...]` | Landlock `_READ_FILE` + `_READ_DIR` + `_EXECUTE` only | each read-only root is readable but never writable, regardless of the `workspace.*` capabilities |
 | `side_effect_level < network` | seccomp-bpf blocklist on `socket`, `socketpair`, `connect`, `accept`, `accept4`, `bind`, `listen`, `sendto`, `sendmsg`, `recvfrom`, `recvmsg` (return `EPERM`) | network syscalls fail without taking down the process |
 | always | seccomp-bpf blocklist on `bpf`, `mount`, `umount2`, `init_module`, `delete_module`, `finit_module`, `kexec_*`, `ptrace`, `process_vm_readv`/`process_vm_writev`, `perf_event_open`, `swapon`/`swapoff`, `reboot`, `userfaultfd`, `fanotify_init`, `open_by_handle_at` (return `EPERM`) | tier-1 dangerous syscalls are denied unconditionally |
 | always | `prctl(PR_SET_NO_NEW_PRIVS, 1)` | no setuid escalation across `exec` |
@@ -116,8 +133,8 @@ falls back to the warn/enforce decision documented above.
 | always | `(deny default)` | every operation requires an explicit allow |
 | always | `(allow process*)` + `(allow sysctl-read)` + `(allow mach-lookup)` + `(allow file-read-data (literal "/"))` + `(allow file-write* (subpath "/dev"))` | minimum surface required to exec a binary and reach `/dev` |
 | always | `(allow file-read* (subpath "/bin" \| "/etc" \| "/Library" \| "/opt/homebrew" \| "/private/etc" \| "/System" \| "/usr"))` | read access to the directories the dynamic linker and most CLI tools need |
-| `workspace_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace roots are readable |
-| `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | `(allow file-write* (subpath "/tmp" \| "/private/tmp" \| "/var/tmp"))` + `(allow file-write* (subpath "<root>"))` | scratch dirs and workspace roots are writable |
+| `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
+| `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | `(allow file-write* (subpath "/tmp" \| "/private/tmp" \| "/var/tmp"))` + `(allow file-write* (subpath "<root>"))` | scratch dirs and writable `workspace_roots` are writable; `read_only_roots` get no write rule |
 | `side_effect_level >= network` | `(allow network*)` | otherwise outbound network is denied |
 
 `sandbox-exec` is officially deprecated but remains the platform
@@ -131,7 +148,7 @@ successor when one exists.
 |---|---|---|
 | always | `CreateAppContainerProfile` + `STARTUPINFOEX` + `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` | the process runs inside a per-spawn AppContainer with no capability SIDs |
 | `workspace.write_text` / `workspace.delete` | `icacls /grant *<sid>:(OI)(CI)M /T /C` on each `workspace_roots` entry | the AppContainer SID gets Modify access on the roots; revoked on `Drop` |
-| read-only | `icacls /grant *<sid>:(OI)(CI)RX /T /C` | the AppContainer SID gets ReadAndExecute |
+| read-only (denied workspace write, or any `read_only_roots` entry) | `icacls /grant *<sid>:(OI)(CI)RX /T /C` | the AppContainer SID gets ReadAndExecute; `read_only_roots` always use this grant even when workspace writes are allowed |
 | always | `CreateJobObjectW` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `_DIE_ON_UNHANDLED_EXCEPTION`, `_ACTIVE_PROCESS` (cap 32), `_PROCESS_MEMORY` (cap 512 MiB) | resource caps and lifecycle binding |
 | always | `JOBOBJECT_BASIC_UI_RESTRICTIONS` blocking `HANDLES`, `READCLIPBOARD`, `WRITECLIPBOARD`, `SYSTEMPARAMETERS`, `DISPLAYSETTINGS`, `GLOBALATOMS`, `DESKTOP`, `EXITWINDOWS` | UI surface is blocked |
 | always | direct `CreateProcessW` with explicit handle list and `STARTF_USESTDHANDLES` | stdin/stdout/stderr inheritance is restricted to the three pipes the runtime created |
@@ -149,6 +166,7 @@ policy.
 |---|---|---|
 | always | `unveil("/bin", "rx")`, `("/usr", "rx")`, `("/lib", "rx")`, `("/etc", "r")`, `("/dev", "rw")` | minimum surface required to exec |
 | `workspace_roots: [...]` | `unveil("<root>", "rwcx" \| "rx")` | rwcx when `workspace.write_text` / `workspace.delete` present, otherwise rx |
+| `read_only_roots: [...]` | `unveil("<root>", "rx")` | each read-only root is read+execute only, never write/create |
 | always | `pledge("stdio rpath proc exec", NULL)` | minimum process-exec promise set |
 | `workspace.write_text` / `workspace.delete` | adds `wpath cpath dpath` to pledge | filesystem mutation promises |
 | `side_effect_level >= network` | adds `inet dns` to pledge | network promises |

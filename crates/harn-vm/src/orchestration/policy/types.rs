@@ -170,6 +170,15 @@ pub struct CapabilityPolicy {
     pub tools: Vec<String>,
     pub capabilities: BTreeMap<String, Vec<String>>,
     pub workspace_roots: Vec<String>,
+    /// Roots the workload may read but never write. A path resolving
+    /// under one of these passes read scope checks yet is rejected for
+    /// `write_text`/`delete`, and the generated OS sandbox profile
+    /// grants it read-only. Intended to be disjoint from
+    /// `workspace_roots` (which are read-write); cloud mounts lower
+    /// their `FilesystemAccess::ReadOnly` entries here so a "read-only"
+    /// mount is actually unwritable inside the sandbox.
+    #[serde(default)]
+    pub read_only_roots: Vec<String>,
     pub side_effect_level: Option<String>,
     /// Remaining Harn-side nested-execution depth. The
     /// `enter_nested_execution_policy` helper validates this at every
@@ -275,18 +284,8 @@ impl CapabilityPolicy {
                 .collect()
         };
 
-        let workspace_roots = if self.workspace_roots.is_empty() {
-            requested.workspace_roots.clone()
-        } else if requested.workspace_roots.is_empty() {
-            self.workspace_roots.clone()
-        } else {
-            requested
-                .workspace_roots
-                .iter()
-                .filter(|root| self.workspace_roots.contains(*root))
-                .cloned()
-                .collect()
-        };
+        let workspace_roots = intersect_roots(&self.workspace_roots, &requested.workspace_roots);
+        let read_only_roots = intersect_roots(&self.read_only_roots, &requested.read_only_roots);
 
         let recursion_limit = match (self.recursion_limit, requested.recursion_limit) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -320,12 +319,32 @@ impl CapabilityPolicy {
             tools,
             capabilities,
             workspace_roots,
+            read_only_roots,
             side_effect_level,
             recursion_limit,
             tool_arg_constraints,
             tool_annotations,
             sandbox_profile,
         })
+    }
+}
+
+/// Intersect two root allowlists with the same "empty means unbounded"
+/// convention the rest of `intersect` uses: an empty list on either side
+/// is treated as "no ceiling on this dimension", so the other side passes
+/// through untouched. When both are populated the result keeps only the
+/// roots present in both.
+fn intersect_roots(host: &[String], requested: &[String]) -> Vec<String> {
+    if host.is_empty() {
+        requested.to_vec()
+    } else if requested.is_empty() {
+        host.to_vec()
+    } else {
+        requested
+            .iter()
+            .filter(|root| host.contains(*root))
+            .cloned()
+            .collect()
     }
 }
 

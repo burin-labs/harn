@@ -11,8 +11,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use super::{
-    policy_allows_capability, policy_allows_network, process_sandbox_roots, sandbox_rejection,
-    warn_once, PrepareOutcome, SandboxBackend, SandboxFallback,
+    policy_allows_capability, policy_allows_network, process_sandbox_readonly_roots,
+    process_sandbox_roots, sandbox_rejection, warn_once, PrepareOutcome, SandboxBackend,
+    SandboxFallback,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -167,6 +168,11 @@ fn landlock_profile(
     let workspace_access = workspace_access(policy);
     for root in process_sandbox_roots(policy) {
         push_rule(&mut profile, root, workspace_access, false)?;
+    }
+    let read_only_access =
+        LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE;
+    for root in process_sandbox_readonly_roots(policy) {
+        push_rule(&mut profile, root, read_only_access, false)?;
     }
     Ok(Some(profile))
 }

@@ -328,10 +328,17 @@ impl LocalSession {
     }
 
     fn execution_policy(&self) -> SandboxResult<CapabilityPolicy> {
+        // The session root is always writable; declared mounts split by
+        // their access so a `ReadOnly` mount lowers to a read-only root
+        // the VM and OS sandbox both refuse to write.
         let mut roots = vec![self.tempdir.path().display().to_string()];
+        let mut read_only_roots = Vec::new();
         for mount in self.mounts()? {
             if let Some(path) = mount.host_path {
-                roots.push(path.display().to_string());
+                match mount.access {
+                    FilesystemAccess::ReadWrite => roots.push(path.display().to_string()),
+                    FilesystemAccess::ReadOnly => read_only_roots.push(path.display().to_string()),
+                }
             }
         }
         let mut capabilities = BTreeMap::new();
@@ -350,6 +357,7 @@ impl LocalSession {
         Ok(CapabilityPolicy {
             capabilities,
             workspace_roots: roots,
+            read_only_roots,
             side_effect_level: Some("process_exec".to_string()),
             sandbox_profile: self.sandbox_profile,
             ..Default::default()
@@ -614,6 +622,44 @@ mod tests {
         let policy = local.execution_policy().unwrap();
 
         assert_eq!(policy.sandbox_profile, SandboxProfile::Unrestricted);
+    }
+
+    #[tokio::test]
+    async fn read_only_mounts_lower_to_read_only_roots() {
+        let backend = LocalSandbox::default();
+        let session = backend
+            .provision(SandboxSpec {
+                mounts: vec![FilesystemMount {
+                    source: PathBuf::new(),
+                    target: "/mnt/reference".to_string(),
+                    access: FilesystemAccess::ReadOnly,
+                }],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let local = backend.session(&session.id).unwrap();
+
+        let policy = local.execution_policy().unwrap();
+
+        // The canonical memory/outputs mounts plus the session root stay
+        // writable; only the declared read-only mount lands in read_only_roots.
+        assert!(
+            policy
+                .read_only_roots
+                .iter()
+                .any(|root| root.ends_with("reference")),
+            "read-only mount should lower to read_only_roots, got {:?}",
+            policy.read_only_roots
+        );
+        assert!(
+            !policy
+                .workspace_roots
+                .iter()
+                .any(|root| root.ends_with("reference")),
+            "read-only mount must not appear among writable workspace_roots, got {:?}",
+            policy.workspace_roots
+        );
     }
 
     #[test]
