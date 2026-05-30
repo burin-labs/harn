@@ -338,6 +338,14 @@ export const MCP_OAUTH_CLIENT_REGISTRATION_MODES = [
 ] as const
 export type MCPOAuthClientRegistrationMode = (typeof MCP_OAUTH_CLIENT_REGISTRATION_MODES)[number]
 
+export const MCP_OAUTH_AUTH_MODES = [
+  "cimd",
+  "dcr",
+  "static",
+  "byo",
+] as const
+export type MCPOAuthAuthMode = (typeof MCP_OAUTH_AUTH_MODES)[number]
+
 export const MCP_OAUTH_APPLICATION_TYPES = [
   "native",
   "web",

@@ -292,6 +292,12 @@
       "native",
       "web"
     ],
+    "oauthAuthModes": [
+      "cimd",
+      "dcr",
+      "static",
+      "byo"
+    ],
     "oauthClientRegistrationModes": [
       "pre_registered",
       "client_id_metadata_document",

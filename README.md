@@ -118,6 +118,10 @@ harn mcp redirect-uri
 harn mcp login https://mcp.notion.com/mcp
 ```
 
+`harn mcp login` prefers Harn's published CIMD client metadata document and
+falls back to dynamic client registration when the authorization server does
+not advertise CIMD support.
+
 Simple LLM call:
 
 ```harn

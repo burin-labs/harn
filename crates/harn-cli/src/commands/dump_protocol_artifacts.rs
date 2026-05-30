@@ -185,6 +185,7 @@ const MCP_OAUTH_CLIENT_REGISTRATION_MODES: &[&str] = &[
     "dynamic_client_registration",
     "manual",
 ];
+const MCP_OAUTH_AUTH_MODES: &[&str] = &["cimd", "dcr", "static", "byo"];
 const MCP_OAUTH_APPLICATION_TYPES: &[&str] = &["native", "web"];
 const MCP_LOGGING_LEVELS: &[&str] = &[
     "debug",
@@ -435,6 +436,7 @@ fn generate_manifest() -> Result<String, String> {
                 "message": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE,
             },
             "oauthClientRegistrationModes": MCP_OAUTH_CLIENT_REGISTRATION_MODES,
+            "oauthAuthModes": MCP_OAUTH_AUTH_MODES,
             "oauthApplicationTypes": MCP_OAUTH_APPLICATION_TYPES,
             "loggingLevels": MCP_LOGGING_LEVELS,
         },
@@ -680,6 +682,11 @@ fn generate_typescript() -> String {
         "MCP_OAUTH_CLIENT_REGISTRATION_MODES",
         MCP_OAUTH_CLIENT_REGISTRATION_MODES,
         "MCPOAuthClientRegistrationMode",
+    ));
+    out.push_str(&ts_array(
+        "MCP_OAUTH_AUTH_MODES",
+        MCP_OAUTH_AUTH_MODES,
+        "MCPOAuthAuthMode",
     ));
     out.push_str(&ts_array(
         "MCP_OAUTH_APPLICATION_TYPES",
@@ -1164,6 +1171,10 @@ fn generate_swift() -> String {
         MCP_OAUTH_CLIENT_REGISTRATION_MODES,
     ));
     out.push_str(&swift_string_array(
+        "mcpOAuthAuthModes",
+        MCP_OAUTH_AUTH_MODES,
+    ));
+    out.push_str(&swift_string_array(
         "mcpOAuthApplicationTypes",
         MCP_OAUTH_APPLICATION_TYPES,
     ));
@@ -1260,6 +1271,10 @@ fn generate_swift() -> String {
     out.push_str(&swift_enum(
         "HarnMCPOAuthClientRegistrationMode",
         &strs_to_strings(MCP_OAUTH_CLIENT_REGISTRATION_MODES),
+    ));
+    out.push_str(&swift_enum(
+        "HarnMCPOAuthAuthMode",
+        &strs_to_strings(MCP_OAUTH_AUTH_MODES),
     ));
     out.push_str(&swift_enum(
         "HarnMCPOAuthApplicationType",
@@ -4078,6 +4093,7 @@ mod tests {
         assert!(ts.contains("export interface MCPInputRequiredResult"));
         assert!(ts.contains("export interface MCPOAuthDiscoveryResult"));
         assert!(ts.contains("MCP_OAUTH_CLIENT_REGISTRATION_MODES"));
+        assert!(ts.contains("MCP_OAUTH_AUTH_MODES"));
         assert!(ts.contains("application_type: MCPOAuthApplicationType"));
         assert!(ts.contains("MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR"));
         assert!(ts.contains("server/discover"));
@@ -4102,6 +4118,7 @@ mod tests {
         assert!(swift.contains("public struct HarnMCPInputRequiredResult"));
         assert!(swift.contains("public struct HarnMCPOAuthDiscoveryResult"));
         assert!(swift.contains("public enum HarnMCPOAuthClientRegistrationMode"));
+        assert!(swift.contains("public enum HarnMCPOAuthAuthMode"));
         assert!(swift.contains("case applicationType = \"application_type\""));
         assert!(swift.contains("HarnMCPUnsupportedProtocolVersionError"));
         assert!(

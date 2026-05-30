@@ -1,10 +1,9 @@
 use base64::Engine;
 use harn_vm::mcp_auth::{
     determine_token_endpoint_auth_method, discover_mcp_oauth, dynamic_client_registration_body,
-    ensure_pkce_s256_supported, select_client_registration_mode,
-    validate_authorization_response_issuer, validate_issuer_binding,
-    validate_token_endpoint_auth_method, OAuthClientRegistrationMode,
-    OAuthClientRegistrationOptions,
+    ensure_pkce_s256_supported, select_oauth_client_auth, validate_authorization_response_issuer,
+    validate_issuer_binding, validate_token_endpoint_auth_method, OAuthClientAuthMode,
+    OAuthClientAuthOptions, DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL,
 };
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -337,26 +336,62 @@ pub(super) async fn resolve_oauth_client(
     discovery: Option<&OAuthDiscoveryResult>,
     registration_endpoint: Option<&str>,
 ) -> Result<(String, Option<String>, String), String> {
-    let registration_mode = discovery
-        .map(|discovery| {
-            select_client_registration_mode(
-                &discovery.metadata,
-                OAuthClientRegistrationOptions {
-                    client_id: request.client_id.as_deref(),
-                    client_secret: request.client_secret.as_deref(),
-                    client_id_metadata_document_url: request.client_id.as_deref(),
-                },
-            )
-        })
-        .unwrap_or_else(|| {
-            if request.client_id.is_some() {
-                OAuthClientRegistrationMode::PreRegistered
-            } else if registration_endpoint.is_some() {
-                OAuthClientRegistrationMode::DynamicClientRegistration
-            } else {
-                OAuthClientRegistrationMode::Manual
+    if let Some(discovery) = discovery {
+        let auth_selection = select_oauth_client_auth(
+            &discovery.metadata,
+            OAuthClientAuthOptions {
+                client_id: request.client_id.as_deref(),
+                client_secret: request.client_secret.as_deref(),
+                client_id_metadata_document_url: request.client_id.as_deref(),
+                ..OAuthClientAuthOptions::default()
+            },
+        )?;
+        return match auth_selection.mode {
+            OAuthClientAuthMode::Cimd => Ok((
+                auth_selection
+                    .client_id
+                    .unwrap_or(DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL)
+                    .to_string(),
+                None,
+                "none".to_string(),
+            )),
+            OAuthClientAuthMode::Byo => {
+                let token_auth_method = request
+                    .token_auth_method
+                    .clone()
+                    .or_else(|| {
+                        determine_token_auth_method(&discovery.metadata, request.client_secret.as_ref())
+                            .ok()
+                    })
+                    .unwrap_or_else(|| {
+                        if request.client_secret.is_some() {
+                            "client_secret_post".to_string()
+                        } else {
+                            "none".to_string()
+                        }
+                    });
+                validate_token_auth_method(&token_auth_method)?;
+                Ok((
+                    auth_selection
+                        .client_id
+                        .ok_or_else(|| "BYO OAuth auth requires client_id".to_string())?
+                        .to_string(),
+                    request.client_secret.clone(),
+                    token_auth_method,
+                ))
             }
-        });
+            OAuthClientAuthMode::Dcr => {
+                let registration_endpoint = registration_endpoint.ok_or_else(|| {
+                    "dynamic client registration endpoint missing".to_string()
+                })?;
+                register_dynamic_client(request, registration_endpoint).await
+            }
+            OAuthClientAuthMode::Static => Err(
+                "static auth does not run the OAuth browser flow; store the token with `harn connect api-key`".to_string(),
+            ),
+        };
+    }
+
     if let Some(client_id) = request.client_id.clone() {
         let token_auth_method = request
             .token_auth_method
@@ -378,14 +413,16 @@ pub(super) async fn resolve_oauth_client(
         return Ok((client_id, request.client_secret.clone(), token_auth_method));
     }
 
-    if registration_mode != OAuthClientRegistrationMode::DynamicClientRegistration {
-        return Err(
-            "No client_id available. Supply --client-id, use a Client ID Metadata Document URL as --client-id when supported, or use a server that supports dynamic client registration.".to_string()
-        );
-    }
     let registration_endpoint = registration_endpoint.ok_or_else(|| {
         "No client_id available. Supply --client-id or use a server that supports dynamic client registration.".to_string()
     })?;
+    register_dynamic_client(request, registration_endpoint).await
+}
+
+async fn register_dynamic_client(
+    request: &OAuthConnectRequest,
+    registration_endpoint: &str,
+) -> Result<(String, Option<String>, String), String> {
     let registration = dynamic_client_registration(
         registration_endpoint,
         &request.redirect_uri,

@@ -12,11 +12,11 @@ use fs2::FileExt;
 use harn_vm::mcp_auth::{
     authorization_code_token_form, build_oauth_authorization_url, canonical_resource_indicator,
     determine_token_endpoint_auth_method, discover_mcp_oauth, dynamic_client_registration_body,
-    ensure_pkce_s256_supported, refresh_token_form, select_client_registration_mode,
+    ensure_pkce_s256_supported, refresh_token_form, select_oauth_client_auth,
     validate_authorization_response_issuer, validate_issuer_binding,
     validate_token_endpoint_auth_method, OAuthAuthorizationCodeTokenForm,
-    OAuthAuthorizationUrlOptions, OAuthClientRegistrationMode, OAuthClientRegistrationOptions,
-    OAuthRefreshTokenForm,
+    OAuthAuthorizationUrlOptions, OAuthClientAuthMode, OAuthClientAuthOptions,
+    OAuthRefreshTokenForm, DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL,
 };
 use harn_vm::secrets::{KeyringSecretProvider, SecretBytes, SecretId, SecretProvider};
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
 use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
-use crate::package::{self, McpServerConfig};
+use crate::package::{self, McpAuthConfig, McpServerConfig};
 
 mod oauth_resource;
 pub(crate) mod presets;
@@ -42,6 +42,7 @@ use harn_vm::mcp_protocol::PROTOCOL_VERSION as MCP_PROTOCOL_VERSION;
 pub(crate) struct ResolvedMcpServer {
     pub name: String,
     pub url: String,
+    pub auth: Option<McpAuthConfig>,
     pub client_id: Option<String>,
     pub client_secret: Option<String>,
     pub scopes: Option<String>,
@@ -355,8 +356,8 @@ async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
 
     let mut last_error = None;
     let state = if transport == "http" && !server.url.is_empty() {
-        // A configured static bearer token is treated as connected; an
-        // OAuth server is `auth_required` until a token is stored.
+        // HTTP servers are connected when a static bearer token or stored OAuth
+        // token is available; otherwise callers need to run the configured auth flow.
         if server.auth_token.as_deref().is_some_and(|t| !t.is_empty()) {
             "connected".to_string()
         } else {
@@ -395,6 +396,20 @@ async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
 pub(crate) async fn resolve_auth_for_server(
     server: &McpServerConfig,
 ) -> Result<AuthResolution, String> {
+    if let Some(auth) = server.auth.as_ref() {
+        if auth.mode == Some(OAuthClientAuthMode::Static) || auth.secret_id.is_some() {
+            let secret_id = auth.secret_id.as_deref().ok_or_else(|| {
+                format!(
+                    "MCP server '{}' uses static auth but does not set auth.secret_id",
+                    server.name
+                )
+            })?;
+            let token =
+                crate::commands::connect::store::load_connect_secret_text(secret_id).await?;
+            return Ok(AuthResolution::Bearer(token));
+        }
+    }
+
     if let Some(token) = &server.auth_token {
         if !token.is_empty() {
             return Ok(AuthResolution::Bearer(token.clone()));
@@ -442,53 +457,92 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
     let requested_scopes = options
         .scope
         .clone()
+        .or_else(|| server.auth.as_ref().and_then(|auth| auth.scopes.clone()))
         .or(server.scopes.clone())
         .or_else(|| (!discovery.scopes.is_empty()).then(|| discovery.scopes.join(" ")));
 
-    let configured_client_id = options.client_id.clone().or(server.client_id.clone());
-    let configured_client_secret = options
-        .client_secret
+    let configured_client_id = options
+        .client_id
         .clone()
-        .or(server.client_secret.clone());
-    let registration_mode = select_client_registration_mode(
+        .or_else(|| server.auth.as_ref().and_then(|auth| auth.client_id.clone()))
+        .or(server.client_id.clone());
+    let configured_client_secret = if let Some(secret) = options.client_secret.clone() {
+        Some(secret)
+    } else if let Some(secret_id) = server
+        .auth
+        .as_ref()
+        .and_then(|auth| auth.client_secret_id.as_deref())
+    {
+        Some(crate::commands::connect::store::load_connect_secret_text(secret_id).await?)
+    } else {
+        server.client_secret.clone()
+    };
+    let auth_selection = select_oauth_client_auth(
         &discovery.metadata,
-        OAuthClientRegistrationOptions {
+        OAuthClientAuthOptions {
+            mode: server.auth.as_ref().and_then(|auth| auth.mode),
             client_id: configured_client_id.as_deref(),
             client_secret: configured_client_secret.as_deref(),
             client_id_metadata_document_url: configured_client_id.as_deref(),
+            static_secret_id: server
+                .auth
+                .as_ref()
+                .and_then(|auth| auth.secret_id.as_deref()),
         },
-    );
-    let (client_id, client_secret, token_auth_method) = if let Some(client_id) =
-        configured_client_id.clone()
-    {
-        let token_auth_method =
-            determine_token_auth_method(&discovery.metadata, configured_client_secret.as_ref())?;
-        (client_id, configured_client_secret, token_auth_method)
-    } else if registration_mode == OAuthClientRegistrationMode::DynamicClientRegistration {
-        let registration_endpoint = discovery
-            .metadata
-            .registration_endpoint
-            .as_deref()
-            .ok_or_else(|| "dynamic client registration endpoint missing".to_string())?;
-        let registration = dynamic_client_registration(
-            registration_endpoint,
-            &options.redirect_uri,
-            requested_scopes.as_deref(),
-        )
-        .await?;
-        let auth_method = registration
-            .token_endpoint_auth_method
-            .clone()
-            .unwrap_or_else(|| "none".to_string());
-        (
-            registration.client_id,
-            registration.client_secret,
-            auth_method,
-        )
-    } else {
-        return Err(
-            "No client_id available. Supply --client-id, use a Client ID Metadata Document URL as --client-id when supported, or use a server that supports dynamic client registration.".to_string()
-        );
+    )?;
+    let (client_id, client_secret, token_auth_method) = match auth_selection.mode {
+        OAuthClientAuthMode::Cimd => {
+            let client_id = auth_selection
+                .client_id
+                .unwrap_or(DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL)
+                .to_string();
+            (client_id, None, "none".to_string())
+        }
+        OAuthClientAuthMode::Byo => {
+            let client_id = auth_selection
+                .client_id
+                .ok_or_else(|| "BYO OAuth auth requires client_id".to_string())?
+                .to_string();
+            let token_auth_method = server
+                .auth
+                .as_ref()
+                .and_then(|auth| auth.token_endpoint_auth_method.clone())
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    determine_token_auth_method(
+                        &discovery.metadata,
+                        configured_client_secret.as_ref(),
+                    )
+                })?;
+            (client_id, configured_client_secret, token_auth_method)
+        }
+        OAuthClientAuthMode::Dcr => {
+            let registration_endpoint = discovery
+                .metadata
+                .registration_endpoint
+                .as_deref()
+                .ok_or_else(|| "dynamic client registration endpoint missing".to_string())?;
+            let registration = dynamic_client_registration(
+                registration_endpoint,
+                &options.redirect_uri,
+                requested_scopes.as_deref(),
+            )
+            .await?;
+            let auth_method = registration
+                .token_endpoint_auth_method
+                .clone()
+                .unwrap_or_else(|| "none".to_string());
+            (
+                registration.client_id,
+                registration.client_secret,
+                auth_method,
+            )
+        }
+        OAuthClientAuthMode::Static => {
+            return Err(
+                "static MCP auth uses a stored bearer token and does not run OAuth login; use `harn connect api-key --connector <name> --secret-id <namespace/name>` to store it".to_string()
+            );
+        }
     };
 
     let (code_verifier, code_challenge) = generate_pkce_pair();
@@ -558,6 +612,7 @@ fn resolve_server_reference(server_ref: &McpServerRefArgs) -> Result<ResolvedMcp
                 .clone()
                 .unwrap_or_else(|| infer_name_from_url(url)),
             url: url.clone(),
+            auth: None,
             client_id: None,
             client_secret: None,
             scopes: None,
@@ -572,6 +627,7 @@ fn resolve_server_reference(server_ref: &McpServerRefArgs) -> Result<ResolvedMcp
         return Ok(ResolvedMcpServer {
             name: infer_name_from_url(target),
             url: target.clone(),
+            auth: None,
             client_id: None,
             client_secret: None,
             scopes: None,
@@ -593,6 +649,7 @@ fn resolve_server_reference(server_ref: &McpServerRefArgs) -> Result<ResolvedMcp
     Ok(ResolvedMcpServer {
         name: server.name,
         url: server.url,
+        auth: server.auth,
         client_id: server.client_id,
         client_secret: server.client_secret,
         scopes: server.scopes,
@@ -1574,6 +1631,27 @@ mod tests {
 
     fn parse_server(toml_table: &str) -> McpServerConfig {
         toml::from_str::<McpServerConfig>(toml_table).expect("mcp server config")
+    }
+
+    #[test]
+    fn mcp_server_parses_unified_auth_config() {
+        let server = parse_server(
+            r#"
+name = "remote"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+auth = { mode = "byo", client_id = "registered-client", client_secret_id = "mcp/client-secret", token_auth_method = "client_secret_post", scopes = "read write" }
+"#,
+        );
+        let auth = server.auth.expect("auth config");
+        assert_eq!(auth.mode, Some(OAuthClientAuthMode::Byo));
+        assert_eq!(auth.client_id.as_deref(), Some("registered-client"));
+        assert_eq!(auth.client_secret_id.as_deref(), Some("mcp/client-secret"));
+        assert_eq!(
+            auth.token_endpoint_auth_method.as_deref(),
+            Some("client_secret_post")
+        );
+        assert_eq!(auth.scopes.as_deref(), Some("read write"));
     }
 
     #[tokio::test]

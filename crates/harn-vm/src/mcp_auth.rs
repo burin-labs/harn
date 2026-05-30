@@ -17,6 +17,8 @@ pub const OAUTH_PROTECTED_RESOURCE_WELL_KNOWN_PATH: &str = "/.well-known/oauth-p
 pub const OAUTH_AUTHORIZATION_SERVER_WELL_KNOWN_PATH: &str =
     "/.well-known/oauth-authorization-server";
 pub const OIDC_CONFIGURATION_WELL_KNOWN_PATH: &str = "/.well-known/openid-configuration";
+pub const DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL: &str =
+    "https://harnlang.com/.well-known/oauth-client.json";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WwwAuthenticateChallenge {
@@ -117,6 +119,26 @@ impl OAuthClientRegistrationMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OAuthClientAuthMode {
+    Cimd,
+    Dcr,
+    Static,
+    Byo,
+}
+
+impl OAuthClientAuthMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cimd => "cimd",
+            Self::Dcr => "dcr",
+            Self::Static => "static",
+            Self::Byo => "byo",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OAuthApplicationType {
@@ -138,6 +160,21 @@ pub struct OAuthClientRegistrationOptions<'a> {
     pub client_id: Option<&'a str>,
     pub client_secret: Option<&'a str>,
     pub client_id_metadata_document_url: Option<&'a str>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct OAuthClientAuthOptions<'a> {
+    pub mode: Option<OAuthClientAuthMode>,
+    pub client_id: Option<&'a str>,
+    pub client_secret: Option<&'a str>,
+    pub client_id_metadata_document_url: Option<&'a str>,
+    pub static_secret_id: Option<&'a str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OAuthClientAuthSelection<'a> {
+    pub mode: OAuthClientAuthMode,
+    pub client_id: Option<&'a str>,
 }
 
 #[derive(Clone, Debug)]
@@ -639,23 +676,126 @@ pub fn select_client_registration_mode(
     metadata: &OAuthAuthorizationServerMetadata,
     options: OAuthClientRegistrationOptions<'_>,
 ) -> OAuthClientRegistrationMode {
-    if let Some(client_id) = options.client_id {
-        if options.client_secret.is_none() && is_client_id_metadata_document_url(client_id) {
-            return OAuthClientRegistrationMode::ClientIdMetadataDocument;
-        }
-        return OAuthClientRegistrationMode::PreRegistered;
+    match select_oauth_client_auth(
+        metadata,
+        OAuthClientAuthOptions {
+            client_id: options.client_id,
+            client_secret: options.client_secret,
+            client_id_metadata_document_url: options.client_id_metadata_document_url,
+            ..OAuthClientAuthOptions::default()
+        },
+    ) {
+        Ok(selection) => match selection.mode {
+            OAuthClientAuthMode::Cimd => OAuthClientRegistrationMode::ClientIdMetadataDocument,
+            OAuthClientAuthMode::Dcr => OAuthClientRegistrationMode::DynamicClientRegistration,
+            OAuthClientAuthMode::Byo => OAuthClientRegistrationMode::PreRegistered,
+            OAuthClientAuthMode::Static => OAuthClientRegistrationMode::Manual,
+        },
+        Err(_) => OAuthClientRegistrationMode::Manual,
     }
-    if options
-        .client_id_metadata_document_url
-        .is_some_and(is_client_id_metadata_document_url)
-        && metadata.client_id_metadata_document_supported
-    {
-        return OAuthClientRegistrationMode::ClientIdMetadataDocument;
+}
+
+pub fn select_oauth_client_auth<'a>(
+    metadata: &OAuthAuthorizationServerMetadata,
+    options: OAuthClientAuthOptions<'a>,
+) -> Result<OAuthClientAuthSelection<'a>, String> {
+    if let Some(mode) = options.mode {
+        return match mode {
+            OAuthClientAuthMode::Static => {
+                if options.static_secret_id.is_none() {
+                    return Err("static MCP auth requires a secret_id".to_string());
+                }
+                Ok(OAuthClientAuthSelection {
+                    mode,
+                    client_id: None,
+                })
+            }
+            OAuthClientAuthMode::Byo => {
+                let client_id = options
+                    .client_id
+                    .ok_or_else(|| "BYO OAuth auth requires client_id".to_string())?;
+                Ok(OAuthClientAuthSelection {
+                    mode,
+                    client_id: Some(client_id),
+                })
+            }
+            OAuthClientAuthMode::Cimd => {
+                if !metadata.client_id_metadata_document_supported {
+                    return Err(
+                        "authorization server does not advertise Client ID Metadata Document support"
+                            .to_string(),
+                    );
+                }
+                let client_id = cimd_client_id(options);
+                if !is_client_id_metadata_document_url(client_id) {
+                    return Err(
+                        "CIMD OAuth auth requires an HTTPS client metadata document URL"
+                            .to_string(),
+                    );
+                }
+                Ok(OAuthClientAuthSelection {
+                    mode,
+                    client_id: Some(client_id),
+                })
+            }
+            OAuthClientAuthMode::Dcr => {
+                if metadata.registration_endpoint.is_none() {
+                    return Err(
+                        "authorization server does not advertise dynamic client registration"
+                            .to_string(),
+                    );
+                }
+                Ok(OAuthClientAuthSelection {
+                    mode,
+                    client_id: None,
+                })
+            }
+        };
+    }
+
+    if options.static_secret_id.is_some() {
+        return Ok(OAuthClientAuthSelection {
+            mode: OAuthClientAuthMode::Static,
+            client_id: None,
+        });
+    }
+
+    if let Some(client_id) = options.client_id {
+        if options.client_secret.is_none()
+            && is_client_id_metadata_document_url(client_id)
+            && metadata.client_id_metadata_document_supported
+        {
+            return Ok(OAuthClientAuthSelection {
+                mode: OAuthClientAuthMode::Cimd,
+                client_id: Some(client_id),
+            });
+        }
+        return Ok(OAuthClientAuthSelection {
+            mode: OAuthClientAuthMode::Byo,
+            client_id: Some(client_id),
+        });
+    }
+
+    if metadata.client_id_metadata_document_supported {
+        return Ok(OAuthClientAuthSelection {
+            mode: OAuthClientAuthMode::Cimd,
+            client_id: Some(cimd_client_id(options)),
+        });
     }
     if metadata.registration_endpoint.is_some() {
-        return OAuthClientRegistrationMode::DynamicClientRegistration;
+        return Ok(OAuthClientAuthSelection {
+            mode: OAuthClientAuthMode::Dcr,
+            client_id: None,
+        });
     }
-    OAuthClientRegistrationMode::Manual
+    Err("No OAuth client authentication mode is available. Configure auth.mode = \"byo\" with a client_id, auth.mode = \"static\" with a secret_id, or use an authorization server that supports CIMD or dynamic client registration.".to_string())
+}
+
+fn cimd_client_id<'a>(options: OAuthClientAuthOptions<'a>) -> &'a str {
+    options
+        .client_id_metadata_document_url
+        .or(options.client_id)
+        .unwrap_or(DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL)
 }
 
 pub fn is_client_id_metadata_document_url(client_id: &str) -> bool {
@@ -1194,6 +1334,10 @@ mod tests {
         );
         meta.client_id_metadata_document_supported = true;
         assert_eq!(
+            select_client_registration_mode(&meta, OAuthClientRegistrationOptions::default()),
+            OAuthClientRegistrationMode::ClientIdMetadataDocument
+        );
+        assert_eq!(
             select_client_registration_mode(
                 &meta,
                 OAuthClientRegistrationOptions {
@@ -1203,6 +1347,65 @@ mod tests {
             ),
             OAuthClientRegistrationMode::ClientIdMetadataDocument
         );
+    }
+
+    #[test]
+    fn oauth_client_auth_prefers_cimd_before_dcr() {
+        let mut meta = metadata(
+            "https://auth.example.com",
+            Some("https://auth.example.com/reg"),
+        );
+        meta.client_id_metadata_document_supported = true;
+        let selection = select_oauth_client_auth(&meta, OAuthClientAuthOptions::default()).unwrap();
+        assert_eq!(selection.mode, OAuthClientAuthMode::Cimd);
+        assert_eq!(
+            selection.client_id,
+            Some(DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL)
+        );
+    }
+
+    #[test]
+    fn oauth_client_auth_falls_back_to_dcr_without_cimd() {
+        let meta = metadata(
+            "https://auth.example.com",
+            Some("https://auth.example.com/reg"),
+        );
+        let selection = select_oauth_client_auth(&meta, OAuthClientAuthOptions::default()).unwrap();
+        assert_eq!(selection.mode, OAuthClientAuthMode::Dcr);
+        assert_eq!(selection.client_id, None);
+    }
+
+    #[test]
+    fn oauth_client_auth_accepts_byo_secret_references_as_byo() {
+        let meta = metadata("https://auth.example.com", None);
+        let selection = select_oauth_client_auth(
+            &meta,
+            OAuthClientAuthOptions {
+                mode: Some(OAuthClientAuthMode::Byo),
+                client_id: Some("registered-client"),
+                client_secret: Some("secret-from-store"),
+                ..OAuthClientAuthOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(selection.mode, OAuthClientAuthMode::Byo);
+        assert_eq!(selection.client_id, Some("registered-client"));
+    }
+
+    #[test]
+    fn explicit_cimd_auth_requires_metadata_document_url() {
+        let mut meta = metadata("https://auth.example.com", None);
+        meta.client_id_metadata_document_supported = true;
+        let error = select_oauth_client_auth(
+            &meta,
+            OAuthClientAuthOptions {
+                mode: Some(OAuthClientAuthMode::Cimd),
+                client_id: Some("registered-client"),
+                ..OAuthClientAuthOptions::default()
+            },
+        )
+        .expect_err("invalid CIMD client id");
+        assert!(error.contains("metadata document URL"));
     }
 
     #[test]
