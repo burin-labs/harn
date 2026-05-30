@@ -196,6 +196,22 @@ pub(super) fn insert_workflow_state(state: WorkflowRunState) {
     });
 }
 
+/// Drop every in-flight workflow run state. Normal completion removes a
+/// state via [`remove_workflow_state`], but a workflow that is abandoned
+/// mid-run (test timeout, early error, host teardown) leaves its
+/// transcript, tool recordings, and artifacts interned here. The
+/// per-test reset path calls this so a reused worker thread does not
+/// accumulate one transcript-sized entry per workflow turn.
+pub(crate) fn reset_workflow_run_states() {
+    WORKFLOW_RUN_STATES.with(|states| states.borrow_mut().clear());
+}
+
+/// Number of interned workflow run states on this thread. Test-only.
+#[cfg(test)]
+pub(crate) fn workflow_run_state_count() -> usize {
+    WORKFLOW_RUN_STATES.with(|states| states.borrow().len())
+}
+
 pub(super) fn remove_workflow_state(
     state_id: &str,
     context: &str,

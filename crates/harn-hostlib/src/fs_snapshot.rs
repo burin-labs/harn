@@ -249,6 +249,37 @@ pub fn drop_session_snapshots(session_id: &str) -> usize {
     count
 }
 
+/// Drop every registered session's snapshots, in memory and on disk.
+/// Returns the number of sessions removed.
+///
+/// [`drop_session_snapshots`] handles a single conversation on ACP
+/// session close. This drains the entire process-global map and is
+/// intended for host reset paths (e.g. the test runner between cases)
+/// where the worker is reused and snapshot bundles would otherwise
+/// accumulate one session at a time.
+pub fn reset_all_sessions() -> usize {
+    let mut guard = sessions()
+        .lock()
+        .expect("fs_snapshot session mutex poisoned");
+    let session_count = guard.len();
+    for bundle in guard.values() {
+        for snapshot in &bundle.snapshots {
+            remove_snapshot_dir(snapshot);
+        }
+    }
+    guard.clear();
+    session_count
+}
+
+/// Number of sessions with registered snapshots. Test-only.
+#[cfg(test)]
+pub fn session_count() -> usize {
+    sessions()
+        .lock()
+        .expect("fs_snapshot session mutex poisoned")
+        .len()
+}
+
 /// Take a snapshot. When `paths` is empty the snapshot is "open" — bytes
 /// are captured lazily as `auto_capture_for_write` fires from inside
 /// the mutating tool builtins.

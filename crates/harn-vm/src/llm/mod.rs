@@ -277,6 +277,7 @@ pub fn reset_llm_state() {
     trace::reset_agent_trace_state();
     provider::register_default_providers();
     rate_limit::reset_rate_limit_state();
+    routing::clear_policy_registry();
     mock::reset_llm_mock_state();
     autonomy_budget::reset_autonomy_budget_state();
     agent_session_host::reset_agent_session_host_state();

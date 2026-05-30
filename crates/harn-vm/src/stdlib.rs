@@ -404,6 +404,7 @@ pub fn reset_stdlib_state() {
     triggers_stdlib::reset_auto_resume_timeouts();
     compaction::reset_compaction_state();
     agents::reset_agent_worker_state();
+    agents::workflow::reset_workflow_run_states();
     pool::reset_pool_state();
     postgres::reset_postgres_state();
     supervisor::reset_supervisor_state();

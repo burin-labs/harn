@@ -1,5 +1,6 @@
 use super::artifact::{load_run_tree, snapshot_trace_spans};
 use super::stage::{execute_stage_attempts, replay_stage};
+use super::state::{prepare_workflow_state, reset_workflow_run_states, workflow_run_state_count};
 use crate::orchestration::{
     save_run_record, stage_verification_contracts, verification_contract_from_verify,
     workflow_verification_contracts, RunChildRecord, RunExecutionRecord, RunRecord, RunStageRecord,
@@ -323,4 +324,49 @@ fn stage_verification_contracts_can_scope_to_local_contract_only() {
     assert_eq!(contracts.len(), 1);
     assert_eq!(contracts[0].required_paths, vec!["src/current.ts"]);
     assert!(contracts[0].required_text.is_empty());
+}
+
+/// Regression for harn#2660: an abandoned workflow run leaves its
+/// transcript-sized `WorkflowRunState` interned in the thread-local
+/// `WORKFLOW_RUN_STATES`. `reset_thread_local_state` (via
+/// `reset_stdlib_state`) must drain it so a reused test worker does not
+/// accumulate one run per case.
+#[test]
+fn reset_drains_interned_workflow_run_state() {
+    crate::reset_thread_local_state();
+    let graph = WorkflowGraph {
+        entry: "act".to_string(),
+        nodes: BTreeMap::from([(
+            "act".to_string(),
+            WorkflowNode {
+                id: Some("act".to_string()),
+                kind: "act".to_string(),
+                ..Default::default()
+            },
+        )]),
+        ..Default::default()
+    };
+    let state = prepare_workflow_state(
+        "leak-probe".to_string(),
+        graph,
+        Vec::new(),
+        &BTreeMap::new(),
+    )
+    .expect("prepare workflow state");
+    super::state::insert_workflow_state(state);
+    assert!(
+        workflow_run_state_count() > 0,
+        "workflow state should be interned"
+    );
+
+    crate::reset_thread_local_state();
+    assert_eq!(
+        workflow_run_state_count(),
+        0,
+        "WORKFLOW_RUN_STATES must be empty after reset"
+    );
+
+    // Belt-and-suspenders: the direct reset also drains.
+    reset_workflow_run_states();
+    assert_eq!(workflow_run_state_count(), 0);
 }

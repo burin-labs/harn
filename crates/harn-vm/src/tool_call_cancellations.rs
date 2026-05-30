@@ -297,9 +297,25 @@ pub fn cancel(
     }
 }
 
+/// Drop every in-flight cancellation handle on this thread. A handle is
+/// normally unregistered by its [`Guard`] on drop, but an abandoned
+/// dispatch (test timeout, panic during teardown) can leave a
+/// `(session_id, call_id)` entry behind. The per-test reset path calls
+/// this so a reused worker thread does not accumulate stale handles
+/// across the suite.
+pub fn reset_registry() {
+    REGISTRY.with(|registry| registry.borrow_mut().clear());
+}
+
+/// Number of in-flight cancellation handles on this thread. Test-only.
+#[cfg(test)]
+pub fn registry_len() -> usize {
+    REGISTRY.with(|registry| registry.borrow().len())
+}
+
 #[cfg(test)]
 pub fn clear_registry_for_test() {
-    REGISTRY.with(|registry| registry.borrow_mut().clear());
+    reset_registry();
 }
 
 #[cfg(test)]
