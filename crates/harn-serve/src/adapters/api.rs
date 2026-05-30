@@ -350,8 +350,6 @@ impl ApiState {
         let request_id = params
             .pointer("/toolCall/toolCallId")
             .or_else(|| params.pointer("/toolCall/_meta/harn/approvalRequest/id"))
-            .or_else(|| params.pointer("/approvalRequest/id"))
-            .or_else(|| params.get("toolCallId"))
             .and_then(Value::as_str)
             .map(str::to_string)
             .unwrap_or_else(|| format!("permission_{}", Uuid::now_v7()));
@@ -369,15 +367,8 @@ impl ApiState {
             "task_id": task_id,
             "status": "pending",
             "source": "acp",
-            // Canonical ACP request carries the action under the harn vendor
-            // extension on `toolCall`; older shapes used top-level/approval
-            // fields. Read all of them so the public resource stays stable
-            // across the #2639 wire change.
             "action": params.pointer("/toolCall/_meta/harn/toolName")
-                .or_else(|| params.pointer("/toolCall/toolName"))
                 .or_else(|| params.pointer("/toolCall/title"))
-                .or_else(|| params.pointer("/approvalRequest/action"))
-                .or_else(|| params.get("toolName"))
                 .cloned()
                 .unwrap_or(Value::Null),
             "request": params,
@@ -1943,9 +1934,6 @@ async fn respond_permission_request(
             return api_error(StatusCode::BAD_GATEWAY, "acp_error", &error);
         }
     } else if let Some(rpc_id) = rpc_id {
-        // Canonical ACP `RequestPermissionResponse` (#2639): a `selected`
-        // outcome on the allow/reject option. There is no `{outcome:
-        // "approved"}` in canonical ACP — that was the pre-#2639 harn shape.
         let result = if approved {
             json!({"outcome": {"outcome": "selected", "optionId": "allow"}})
         } else {

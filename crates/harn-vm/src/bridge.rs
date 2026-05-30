@@ -169,10 +169,10 @@ impl InProcessHost {
         &self,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
-        // No exported `request_permission` ⇒ default-allow: emit a canonical
-        // `selected` outcome on the allow option (#2639).
+        // No exported `request_permission` means the playground host has no
+        // approval policy, so it grants through the canonical ACP option.
         let Some(closure) = self.exported_functions.get("request_permission") else {
-            return Ok(canonical_allow_response());
+            return Ok(crate::llm::acp_permission::allow_response());
         };
 
         let tool_call = params.get("toolCall");
@@ -212,21 +212,21 @@ impl InProcessHost {
         let payload = match result {
             VmValue::Bool(granted) => {
                 if granted {
-                    canonical_allow_response()
+                    crate::llm::acp_permission::allow_response()
                 } else {
-                    canonical_reject_response(None)
+                    crate::llm::acp_permission::reject_response(None)
                 }
             }
             VmValue::String(reason) if !reason.is_empty() => {
-                canonical_reject_response(Some(reason.to_string()))
+                crate::llm::acp_permission::reject_response(Some(reason.to_string()))
             }
             other => {
                 let json = crate::llm::vm_value_to_json(&other);
                 if let Some(granted) = json.get("granted").and_then(|value| value.as_bool()) {
                     if granted {
-                        canonical_allow_response()
+                        crate::llm::acp_permission::allow_response()
                     } else {
-                        canonical_reject_response(
+                        crate::llm::acp_permission::reject_response(
                             json.get("reason")
                                 .and_then(|value| value.as_str())
                                 .map(str::to_string),
@@ -236,38 +236,14 @@ impl InProcessHost {
                     // The script already returned a canonical-shaped outcome.
                     json
                 } else if other.is_truthy() {
-                    canonical_allow_response()
+                    crate::llm::acp_permission::allow_response()
                 } else {
-                    canonical_reject_response(None)
+                    crate::llm::acp_permission::reject_response(None)
                 }
             }
         };
         Ok(payload)
     }
-}
-
-/// Canonical ACP `RequestPermissionResponse` granting the call: a
-/// `selected` outcome on the `allow` option (#2639).
-fn canonical_allow_response() -> serde_json::Value {
-    serde_json::json!({
-        "outcome": { "outcome": "selected", "optionId": "allow" }
-    })
-}
-
-/// Canonical ACP `RequestPermissionResponse` rejecting the call: a
-/// `selected` outcome on the `reject` option, with an optional harn-vendor
-/// `reason` extension (#2639).
-fn canonical_reject_response(reason: Option<String>) -> serde_json::Value {
-    let mut response = serde_json::json!({
-        "outcome": { "outcome": "selected", "optionId": "reject" }
-    });
-    if let Some(reason) = reason {
-        response
-            .as_object_mut()
-            .expect("object")
-            .insert("reason".to_string(), serde_json::Value::String(reason));
-    }
-    response
 }
 
 /// How a queued bridge injection is delivered into the agent loop.

@@ -512,16 +512,40 @@ export interface HarnAgentEventNotification {
   }
 }
 
+export interface ACPPermissionToolCall {
+  sessionUpdate?: "tool_call_update"
+  toolCallId: string
+  title?: string
+  kind?: string
+  rawInput?: ACPValue
+  _meta?: HarnExtensionMeta
+}
+
+export type ACPPermissionOptionKind =
+  | "allow_once"
+  | "allow_always"
+  | "reject_once"
+  | "reject_always"
+
+export interface ACPPermissionOption {
+  optionId: string
+  name: string
+  kind: ACPPermissionOptionKind
+}
+
 export interface ACPSessionRequestPermissionParams {
   sessionId: string
-  approvalRequest?: ACPObject
-  toolCall?: {
-    toolCallId: string
-    toolName: string
-    rawInput?: ACPValue
-  }
-  mutation?: ACPObject
-  options?: ACPValue[]
+  toolCall: ACPPermissionToolCall
+  options: ACPPermissionOption[]
+}
+
+export type ACPPermissionOutcome =
+  | { outcome: "selected"; optionId: string }
+  | { outcome: "cancelled" }
+
+export interface ACPSessionRequestPermissionResult {
+  outcome: ACPPermissionOutcome
+  reason?: string
 }
 
 export interface ACPPromptCapabilities {
