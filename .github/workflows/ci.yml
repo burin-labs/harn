@@ -50,23 +50,48 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
 
-  # `make lint` and `make test` each take roughly half of the historical
-  # combined runtime (~5 min each on a warm cache), but they don't share
-  # cargo artifacts in a way the other could reuse: clippy is check-mode and
-  # nextest is full-codegen test binaries with different metadata hashes.
-  # Splitting them into parallel jobs cuts the Linux Rust critical path in
-  # half (and the merge-queue pass with it) for free. Each job gets its own
-  # rust-cache shared-key so two jobs with the same Cargo.lock don't race
-  # to overwrite each other's saves with partial target/ contents.
-  rust-lint:
-    name: Rust lint
+  # The long Linux Rust lanes are intentionally one matrix job with
+  # fail-fast enabled: if any required Rust lane fails, GitHub cancels the
+  # sibling Rust lanes that are still queued or running. That keeps the
+  # existing parallel critical path when the branch is healthy while avoiding
+  # needless minutes after the branch is already known-bad.
+  rust-builds:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - kind: lint
+            name: Rust lint
+            cache_key: workspace-lint
+            fetch_depth: 1
+            rust_components: clippy
+          - kind: test
+            name: Rust test
+            cache_key: workspace-test
+            # Affected-crate selection (#2663) diffs `origin/<base>...HEAD`,
+            # which needs the merge-base on PRs. Unused on merge_group/push.
+            fetch_depth: 0
+            rust_components: ""
+          - kind: audit
+            name: Harn conformance + audit
+            cache_key: workspace-audit
+            # Full history + tags so the changelog retroactive-edit check can
+            # traverse BASE..HEAD and inspect commit trailers.
+            fetch_depth: 0
+            rust_components: ""
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: ${{ matrix.fetch_depth }}
       - uses: ./.github/actions/free-disk-space
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: matrix.rust_components == ''
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: matrix.rust_components != ''
         with:
-          components: clippy
+          components: ${{ matrix.rust_components }}
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
         # sccache is a build-cache optimization, not a build requirement. The
         # upstream action sometimes fails on merge_group / restricted-token
@@ -79,48 +104,25 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
-          shared-key: workspace-lint
-          cache-bin: false
-      # `make lint` also runs `lint-no-xfail-regression`, which compiles
-      # `harn-cli` via `cargo run` just to walk conformance/ and count
-      # `@xfail:` markers. That ~1-2 min cost is paid by the harn-audit job
-      # for free (it already has harn-cli warm from `make conformance`), so
-      # the CI invocation here drops the prereq and runs just the cheap
-      # python prelude plus clippy.
-      - run: make lint-no-rust-prompt-prose
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-
-  rust-test:
-    name: Rust test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # Affected-crate selection (#2663) diffs `origin/<base>...HEAD`,
-          # which needs the merge-base — fetch full history so it's available
-          # on PRs. Unused on merge_group/push (those run the full suite).
-          fetch-depth: 0
-      - uses: ./.github/actions/free-disk-space
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-        # sccache is a build-cache optimization, not a build requirement. The
-        # upstream action sometimes fails on merge_group / restricted-token
-        # events with "Bad credentials" when api.github.com gates the release
-        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
-        continue-on-error: true
-      - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        continue-on-error: true
-        with:
-          shared-key: workspace-test
+          shared-key: ${{ matrix.cache_key }}
           cache-bin: false
       - name: Install cargo-nextest
+        if: matrix.kind == 'test'
         uses: taiki-e/install-action@b550161ef8a7bc4f2a671c0b03a18ac9ccedea1e # v2.79.1
         continue-on-error: true
         with:
           tool: nextest@0.9.133
+      # `make lint` also runs `lint-no-xfail-regression`, which compiles
+      # `harn-cli` via `cargo run` just to walk conformance/ and count
+      # `@xfail:` markers. That ~1-2 min cost is paid by the harn-audit lane
+      # for free (it already has harn-cli warm from `make conformance`), so
+      # the CI invocation here drops the prereq and runs just the cheap
+      # python prelude plus clippy.
+      - name: Run Rust lint
+        if: matrix.kind == 'lint'
+        run: |
+          make lint-no-rust-prompt-prose
+          cargo clippy --workspace --all-targets -- -D warnings
       # SAFETY PRINCIPLE — prune for PR fast feedback, run the FULL suite on
       # the merge queue and post-merge backstop (#2663). On `pull_request`
       # events we run only the tests in crates affected by the diff, expanded
@@ -132,7 +134,7 @@ jobs:
       # .cargo/, toolchain, this workflow) auto-fall-back to the full
       # workspace inside `scripts/affected-crates.py`.
       - name: Run affected-crate tests (PR fast feedback)
-        if: github.event_name == 'pull_request'
+        if: matrix.kind == 'test' && github.event_name == 'pull_request'
         env:
           NEXTEST_PROFILE: ci
           # Route the (event-derived) base ref through env vars rather than
@@ -148,68 +150,41 @@ jobs:
           git fetch --no-tags origin "$BASE_REF"
           make test-affected
       - name: Run full test suite (merge queue + push backstop)
-        if: github.event_name != 'pull_request'
+        if: matrix.kind == 'test' && github.event_name != 'pull_request'
         env:
           NEXTEST_PROFILE: ci
         run: make test
-
-  harn-audit:
-    name: Harn conformance + audit
-    # These checks use the harn CLI and generated artifacts, but they do not
-    # need to serialize behind clippy and nextest.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # Full history + tags so the changelog retroactive-edit check can
-          # traverse BASE..HEAD and inspect commit trailers.
-          fetch-depth: 0
-      - uses: ./.github/actions/free-disk-space
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-        # sccache is a build-cache optimization, not a build requirement. The
-        # upstream action sometimes fails on merge_group / restricted-token
-        # events with "Bad credentials" when api.github.com gates the release
-        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
-        continue-on-error: true
-      - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        continue-on-error: true
-        with:
-          shared-key: workspace-audit
-          cache-bin: false
-      - run: make conformance
-      - run: make protocol-conformance
-      # NOTE: `make mcp-rc-conformance` used to run here as well, but its two
-      # `cargo test -p ... --tests` invocations are a strict subset of
-      # `cargo nextest run --workspace` in the parallel `rust-test` job —
-      # they were paying ~4 min to redo work the workspace test run already
-      # covers. Removed in favor of relying on `rust-test`; kept as a
-      # developer-convenience target in the Makefile for local iteration.
-      # Promoted out of `make lint` (in the rust-lint job) so the Linux
-      # critical path doesn't pay ~1-2 min to compile harn-cli from scratch
-      # just to count `@xfail:` markers. `make conformance` above already
-      # warmed target/debug/harn, so this is effectively free here.
-      - run: make lint-no-xfail-regression
-      - run: make lint-harn
-      - run: make fmt-harn
-      # Audit gates promoted from release_gate.sh audit so a stale
-      # generated artifact (highlight keywords, language-spec mirror,
-      # trigger quickref, provider/connector matrices, docs snippets)
-      # fails the PR instead of waiting until release time. These all
-      # use the already-warm `target/debug/harn` binary built by
-      # `make conformance` above, so they're effectively free here.
-      - run: make check-highlight
-      - run: make check-language-spec
-      - run: make check-trigger-quickref
-      - run: make check-provider-matrix
-      - run: make check-provider-support
-      - run: make check-connector-matrix
-      - run: make check-trigger-examples
-      - run: make check-docs-snippets
-      - run: make check-diagnostics-catalog
+      # These checks use the harn CLI and generated artifacts, but they do not
+      # need to serialize behind clippy and nextest.
+      - name: Run Harn conformance and audit
+        if: matrix.kind == 'audit'
+        run: |
+          make conformance
+          make protocol-conformance
+          # NOTE: `make mcp-rc-conformance` used to run here as well, but its
+          # two `cargo test -p ... --tests` invocations are a strict subset of
+          # `cargo nextest run --workspace` in the parallel Rust test lane.
+          # Promoted out of `make lint` so the Linux critical path doesn't pay
+          # ~1-2 min to compile harn-cli from scratch just to count `@xfail:`
+          # markers. `make conformance` above already warmed target/debug/harn.
+          make lint-no-xfail-regression
+          make lint-harn
+          make fmt-harn
+          # Audit gates promoted from release_gate.sh audit so a stale
+          # generated artifact (highlight keywords, language-spec mirror,
+          # trigger quickref, provider/connector matrices, docs snippets)
+          # fails the PR instead of waiting until release time. These all
+          # use the already-warm `target/debug/harn` binary built by
+          # `make conformance` above, so they're effectively free here.
+          make check-highlight
+          make check-language-spec
+          make check-trigger-quickref
+          make check-provider-matrix
+          make check-provider-support
+          make check-connector-matrix
+          make check-trigger-examples
+          make check-docs-snippets
+          make check-diagnostics-catalog
 
   audit-scripts:
     name: Audit scripts
@@ -442,16 +417,14 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust-lint, rust-test, harn-audit, audit-scripts, windows, portal, actions, e2e]
+    needs: [fmt, lint-md, rust-builds, audit-scripts, windows, portal, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
           declare -A results=(
             ["Format check"]="${{ needs.fmt.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["Rust lint"]="${{ needs['rust-lint'].result }}"
-            ["Rust test"]="${{ needs['rust-test'].result }}"
-            ["Harn conformance + audit"]="${{ needs['harn-audit'].result }}"
+            ["Rust build group"]="${{ needs['rust-builds'].result }}"
             ["Audit scripts"]="${{ needs['audit-scripts'].result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
