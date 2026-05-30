@@ -55,7 +55,17 @@ impl Dispatcher {
         let _execution_context_guard = DispatchProcessContextGuard::install(&vm);
         crate::orchestration::push_execution_policy(effective_policy);
         let _policy_guard = DispatchExecutionPolicyGuard;
-        let future = vm.call_closure_pub(closure, &args);
+        // Bind a child of the dispatcher's base VM as the async-builtin context
+        // for the handler's execution. The dispatcher fires from a spawned task
+        // (timeout sleeper, stream poller, etc.) with no ambient `task_local`
+        // context — it carries its own `base_vm` precisely because triggers run
+        // detached — so handler-invoked async builtins must resolve their
+        // `clone_async_builtin_child_vm` root here, or the resumed agent loop
+        // hangs waiting on a context that never appears. See harn#2667.
+        let future = crate::vm::scope_async_builtin(
+            self.base_vm.child_vm(),
+            vm.call_closure_pub(closure, &args),
+        );
         pin_mut!(future);
         let (binding_id, binding_version) = split_binding_key(binding_key);
         let prior_context = ACTIVE_DISPATCH_CONTEXT.with(|slot| {

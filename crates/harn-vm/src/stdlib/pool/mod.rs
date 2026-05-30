@@ -67,6 +67,16 @@ struct PendingTask {
     key: Option<String>,
     /// Tiebreaker so FIFO order is preserved among equal priorities.
     seq: u64,
+    /// Async-builtin execution context captured at submit time, while the
+    /// `__pool_submit` builtin still holds the `task_local` context. Pool tasks
+    /// are dispatched from slot-free callbacks (a sibling task finishing, a
+    /// `pool_wait`, etc.) that run with NO ambient context — `task_local` is
+    /// task-scoped and, unlike the old `thread_local!` stack, does not leak
+    /// across `spawn_local`. So the runner VM must travel with the task rather
+    /// than be re-cloned from ambient context at dispatch time. See harn#2667.
+    /// Wrapped in `Rc<RefCell<_>>` because `PendingTask` is `Clone` and `Vm`
+    /// is not; the handle is only ever cloned-into a single dispatch.
+    context_vm: Option<Rc<RefCell<crate::vm::Vm>>>,
 }
 
 struct TaskState {
@@ -1760,6 +1770,10 @@ fn create_pending_task(
         priority,
         key,
         seq,
+        // Capture the execution context now, synchronously, while the submit
+        // builtin still holds the task_local async-builtin context. Dispatch
+        // happens later from a context-free callback. See harn#2667.
+        context_vm: crate::vm::clone_async_builtin_child_vm().map(|vm| Rc::new(RefCell::new(vm))),
     };
     (state, pending)
 }
@@ -2221,6 +2235,7 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
         task_id,
         closure,
         state,
+        context_vm,
         ..
     } = pending;
 
@@ -2279,13 +2294,14 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     // place would deadlock the next caller of `dispatch_ready`.
     tokio::task::spawn_local(emit_pool_dequeue_receipt(dequeue_receipt));
 
-    // Snapshot the active async-builtin VM now (synchronously, while the
-    // submit builtin is still on the stack). The cloned VM moves into the
-    // local task and runs the closure with a fresh execution context, so
-    // each pool task is isolated from siblings.
-    let Some(mut child_vm) = crate::vm::clone_async_builtin_child_vm() else {
+    // Use the execution context captured at submit time (see `PendingTask`).
+    // The VM moves into the local task and runs the closure with a fresh
+    // execution context, so each pool task is isolated from siblings. Dispatch
+    // runs from a context-free callback, so we must NOT re-clone the ambient
+    // task_local context here (it would be empty). See harn#2667.
+    let Some(child_vm_cell) = context_vm else {
         // Pool submissions are always called from an async builtin
-        // (`__pool_submit`), so the slot should never be empty here.
+        // (`__pool_submit`), so the captured context should never be empty.
         // Fail the task cleanly instead of leaving it stuck "running".
         dequeue_span.end();
         finalize_task(
@@ -2303,10 +2319,23 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     dequeue_span.end();
 
     tokio::task::spawn_local(async move {
-        let outcome = child_vm
-            .call_closure_args(&closure, crate::vm::CallArgs::Empty)
-            .await
-            .map_err(|error| error.to_string());
+        // The async-builtin context is task-scoped (`tokio::task_local`): unlike
+        // the old `thread_local!` stack, it does NOT leak into a `spawn_local`
+        // child running on the same thread. So this spawned pool task binds its
+        // own context from the VM captured at submit time (`child_vm_cell`), so
+        // the closure — and the async builtins it invokes — resolve a
+        // `clone_async_builtin_child_vm` root. See harn#2667.
+        let context_root = child_vm_cell.borrow().child_vm();
+        let outcome = crate::vm::scope_async_builtin(context_root, async move {
+            let Some(mut runner) = crate::vm::clone_async_builtin_child_vm() else {
+                return Err("pool: lost VM execution context".to_string());
+            };
+            runner
+                .call_closure_args(&closure, crate::vm::CallArgs::Empty)
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .await;
         finalize_task(&pool, &state, outcome);
     });
 }
