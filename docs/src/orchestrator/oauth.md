@@ -123,7 +123,9 @@ origin.
 Harn always sends PKCE S256 parameters. The generic flow validates advertised
 PKCE support when authorization-server metadata is available. The generic flow
 also sends the `resource` parameter to both the authorization endpoint and token
-endpoint; provider-specific flows let you override `--resource` when a provider
+endpoint; MCP server URLs are canonicalized first by lowercasing the scheme and
+host, dropping default ports, and removing query strings, fragments, and trailing
+slashes. Provider-specific flows let you override `--resource` when a provider
 requires one.
 
 ## Stored secrets
