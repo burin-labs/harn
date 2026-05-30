@@ -138,6 +138,15 @@ pub const HTTP: VocabNamespace = VocabNamespace {
     ],
 };
 
+/// Burin compass tool-rewrite router (B.9, #2612). The `harn.compass.*`
+/// counters (`suggested`/`rewritten`/`fell_back`) tag each routing
+/// decision with the persona and the freeform/structural tool names so
+/// eval dashboards can attribute the agent-loop edit-reliability win.
+pub const COMPASS: VocabNamespace = VocabNamespace {
+    prefix: "harn.compass",
+    keys: &["persona", "tool", "target", "mode", "outcome"],
+};
+
 /// Cross-cutting attributes every primitive may emit alongside its
 /// namespace-specific ones. Centralising them here keeps the conformance
 /// audit's "is this key declared?" check single-pass.
@@ -156,7 +165,9 @@ pub const COMMON: VocabNamespace = VocabNamespace {
 /// Every published namespace, in registration order. The conformance
 /// audit iterates this slice — adding a new namespace is just a one-line
 /// edit here plus the `VocabNamespace` constant.
-pub const ALL: &[VocabNamespace] = &[SESSION, PERMISSION, MCP, COMPACTION, PG, HTTP, COMMON];
+pub const ALL: &[VocabNamespace] = &[
+    SESSION, PERMISSION, MCP, COMPACTION, PG, HTTP, COMPASS, COMMON,
+];
 
 /// Map a `harn.<ns>.<key>` (or `<ns>.<key>`) string to the namespace
 /// that owns it. Returns `None` for any other prefix — call sites should

@@ -56,6 +56,15 @@ pub(crate) fn reset_observability_state() {
     OBS_STATE.with(|state| *state.borrow_mut() = ObsState::default());
 }
 
+/// Snapshot of the buffered emission payloads on the current thread.
+/// Used by tests (e.g. the compass router) to assert that a primitive
+/// emitted the metric it claims to. Mirrors the `__obs_events` builtin
+/// without going through the Harn-script surface.
+#[cfg(test)]
+pub(crate) fn captured_emissions() -> Vec<serde_json::Value> {
+    OBS_STATE.with(|state| state.borrow().emissions.clone())
+}
+
 /// Replace the active observability backend with a single named
 /// backend. Callers pass values like `"pretty_stdout"`, `"pretty_stderr"`,
 /// or `"otel"` — anything [`normalize_backend`] accepts. Errors when the
