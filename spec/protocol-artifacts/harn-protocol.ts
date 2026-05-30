@@ -134,6 +134,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "judge_decision",
   "loop_control_decision",
   "loop_stuck",
+  "mcp_catalog_changed",
   "mcp_notification",
   "progress_reported",
   "scope_classifier_verdict",

@@ -39,6 +39,7 @@ pub mod jsonrpc;
 pub mod llm;
 pub mod llm_config;
 pub mod mcp;
+pub mod mcp_allowlist;
 pub mod mcp_auth;
 pub mod mcp_card;
 pub mod mcp_elicit;
@@ -174,6 +175,12 @@ pub use llm::{
     register_session_end_hook, LlmBudgetGuard, LlmTokenBudgetGuard,
 };
 pub use mcp::{connect_mcp_server_from_json, connect_mcp_server_from_spec, register_mcp_builtins};
+pub use mcp_allowlist::{
+    build_catalog as build_mcp_catalog, catalog_for_request as mcp_catalog_for_request,
+    AdvertisedItem as McpAdvertisedItem, CatalogRequest as McpCatalogRequest, McpAllowlist,
+    McpAllowlistItem, McpCatalog, McpCatalogItem, McpCatalogServer, McpItemKind,
+    MCP_ALLOWLIST_SCHEMA_VERSION,
+};
 pub use mcp_card::{fetch_server_card, load_server_card_from_path, CardError};
 pub use mcp_host::{
     cache_stats as mcp_host_cache_stats, set_allowlist as set_mcp_host_allowlist,

@@ -103,6 +103,8 @@ const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.workflow.pause",
     "workflow/resume",
     "harn.workflow.resume",
+    "mcp/catalog",
+    "harn.mcp.catalog",
 ];
 const ACP_AGENT_NOTIFICATIONS: &[&str] = &["session/message", "session/update", "terminal/output"];
 const ACP_CONTENT_BLOCK_TYPES: &[&str] = &["text", "resource_link", "resource", "image", "audio"];
