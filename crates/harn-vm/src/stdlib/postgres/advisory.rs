@@ -50,7 +50,10 @@ use super::{
     kind = "async",
     category = "postgres"
 )]
-async fn pg_advisory_xact_lock_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_advisory_xact_lock_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     advisory_xact_op(&args, false).await
 }
 
@@ -63,7 +66,10 @@ async fn pg_advisory_xact_lock_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
     kind = "async",
     category = "postgres"
 )]
-async fn pg_try_advisory_xact_lock_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_try_advisory_xact_lock_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     advisory_xact_op(&args, true).await
 }
 
@@ -76,7 +82,10 @@ async fn pg_try_advisory_xact_lock_impl(args: Vec<VmValue>) -> Result<VmValue, V
     kind = "async",
     category = "postgres"
 )]
-async fn pg_with_advisory_lock_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_with_advisory_lock_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool_handle = required_arg(&args, 0, "pg_with_advisory_lock", "pool handle")?;
     let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_with_advisory_lock")?;
     let key_value = required_arg(&args, 1, "pg_with_advisory_lock", "key")?;

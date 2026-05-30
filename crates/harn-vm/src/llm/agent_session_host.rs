@@ -207,7 +207,10 @@ fn now_id() -> String {
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_session_init(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let message = args.first().map(|v| v.display()).unwrap_or_default();
     let system = match args.get(1) {
         Some(VmValue::String(s)) => Some(s.to_string()),
@@ -498,7 +501,10 @@ fn agent_init_control_done(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_session_finalize(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = args
         .first()
         .map(|v| v.display())
@@ -1445,7 +1451,10 @@ fn host_agent_session_replace_messages_builtin(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_skill_score(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_skill_score(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let context = args.first().cloned().unwrap_or(VmValue::Nil);
     let registry = args.get(1).cloned().unwrap_or(VmValue::Nil);
     let options = args.get(2).cloned().unwrap_or(VmValue::Nil);
@@ -1478,7 +1487,10 @@ fn host_agent_budget_pre_call_builtin(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_emit_event(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
         _ => {
@@ -2030,7 +2042,10 @@ fn host_agent_record_compaction_builtin(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_session_project_turn(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_session_project_turn(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
         Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
         _ => {
@@ -2322,7 +2337,10 @@ async fn daemon_checkpoint_drain(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_session_push_bridge_injection(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_session_push_bridge_injection(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     if session_id.trim().is_empty() {
         return Err(VmError::Runtime(format!(
@@ -2358,7 +2376,10 @@ async fn host_agent_session_push_bridge_injection(args: Vec<VmValue>) -> Result<
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_session_pending_injections(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_session_pending_injections(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     if session_id.trim().is_empty() {
         return Err(VmError::Runtime(format!(
@@ -2381,7 +2402,10 @@ async fn host_agent_session_pending_injections(args: Vec<VmValue>) -> Result<VmV
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_session_revoke_reminder(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_session_revoke_reminder(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     if session_id.trim().is_empty() {
         return Err(VmError::Runtime(format!(
@@ -2420,6 +2444,7 @@ async fn host_agent_session_revoke_reminder(args: Vec<VmValue>) -> Result<VmValu
     runtime_only = true
 )]
 async fn host_agent_session_drain_bridge_injections(
+    _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
@@ -2455,7 +2480,10 @@ async fn host_agent_session_drain_bridge_injections(
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_agent_daemon_wait(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let timeout_ms = args
         .get(1)
@@ -2516,7 +2544,10 @@ fn nil_json() -> serde_json::Value {
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_autonomy_budget_check(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_autonomy_budget_check(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = args
         .first()
         .map(|value| value.display())

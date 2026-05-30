@@ -326,7 +326,10 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
     category = "concurrency",
     doc = "Acquire a named mutex permit."
 )]
-async fn sync_mutex_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn sync_mutex_acquire_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("sync_mutex_acquire")?;
     let key = args
         .first()
@@ -347,7 +350,10 @@ async fn sync_mutex_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErr
     category = "concurrency",
     doc = "Acquire permits from a named semaphore."
 )]
-async fn sync_semaphore_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn sync_semaphore_acquire_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("sync_semaphore_acquire")?;
     let key = args
         .first()
@@ -377,7 +383,10 @@ async fn sync_semaphore_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, V
     category = "concurrency",
     doc = "Acquire one permit from a named gate."
 )]
-async fn sync_gate_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn sync_gate_acquire_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("sync_gate_acquire")?;
     let key = args
         .first()
@@ -399,7 +408,10 @@ async fn sync_gate_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErro
     category = "concurrency",
     doc = "Acquire a read or write permit from a named read-write lock."
 )]
-async fn sync_rwlock_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn sync_rwlock_acquire_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     const RWLOCK_CAPACITY: u32 = 1024;
     let vm = current_async_vm("sync_rwlock_acquire")?;
     let key = args
@@ -455,7 +467,10 @@ fn sync_release_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     category = "concurrency",
     doc = "Return synchronization runtime metrics."
 )]
-async fn sync_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn sync_metrics_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("sync_metrics")?;
     let kind = args.first().map(|v| v.display());
     let key = args.get(1).map(|v| v.display());
@@ -468,7 +483,10 @@ async fn sync_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Resolve a shared-state scope identifier."
 )]
-async fn shared_scope_id_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_scope_id_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_scope_id")?;
     let options = args.get(1).and_then(VmValue::as_dict);
     let raw_scope = args.first().map(VmValue::display);
@@ -486,7 +504,10 @@ async fn shared_scope_id_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     category = "concurrency",
     doc = "Open or create a scoped shared cell."
 )]
-async fn shared_cell_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_cell_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_cell")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "shared_cell", "key")?;
@@ -504,7 +525,10 @@ async fn shared_cell_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Read a shared cell value."
 )]
-async fn shared_get_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_get_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_get")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let handle = args
@@ -520,7 +544,10 @@ async fn shared_get_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Return a shared cell snapshot."
 )]
-async fn shared_snapshot_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_snapshot_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_snapshot")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let handle = args
@@ -536,7 +563,10 @@ async fn shared_snapshot_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     category = "concurrency",
     doc = "Set a shared cell value."
 )]
-async fn shared_set_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_set_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_set")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let handle = args
@@ -553,7 +583,10 @@ async fn shared_set_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Compare and swap a shared cell value."
 )]
-async fn shared_cas_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_cas_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 3 {
         return Err(VmError::Runtime(
             "shared_cas: requires handle, expected, and new value".to_string(),
@@ -575,7 +608,10 @@ async fn shared_cas_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Open or create a scoped shared map."
 )]
-async fn shared_map_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_map_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_map")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "shared_map", "key")?;
@@ -594,7 +630,10 @@ async fn shared_map_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Read a shared map entry."
 )]
-async fn shared_map_get_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_map_get_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
             "shared_map_get: requires handle and key".to_string(),
@@ -613,7 +652,10 @@ async fn shared_map_get_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     category = "concurrency",
     doc = "Return a shared map entry snapshot."
 )]
-async fn shared_map_snapshot_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_map_snapshot_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
             "shared_map_snapshot: requires handle and key".to_string(),
@@ -631,7 +673,10 @@ async fn shared_map_snapshot_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
     category = "concurrency",
     doc = "Return all shared map entries."
 )]
-async fn shared_map_entries_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_map_entries_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_map_entries")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let handle = args
@@ -647,7 +692,10 @@ async fn shared_map_entries_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErr
     category = "concurrency",
     doc = "Set a shared map entry."
 )]
-async fn shared_map_set_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_map_set_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 3 {
         return Err(VmError::Runtime(
             "shared_map_set: requires handle, key, and value".to_string(),
@@ -665,7 +713,10 @@ async fn shared_map_set_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     category = "concurrency",
     doc = "Delete a shared map entry."
 )]
-async fn shared_map_delete_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_map_delete_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
             "shared_map_delete: requires handle and key".to_string(),
@@ -683,7 +734,10 @@ async fn shared_map_delete_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErro
     category = "concurrency",
     doc = "Compare and swap a shared map entry."
 )]
-async fn shared_map_cas_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_map_cas_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 4 {
         return Err(VmError::Runtime(
             "shared_map_cas: requires handle, key, expected, and new value".to_string(),
@@ -706,7 +760,10 @@ async fn shared_map_cas_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     category = "concurrency",
     doc = "Return shared-state runtime metrics."
 )]
-async fn shared_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn shared_metrics_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("shared_metrics")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let Some(handle) = args.first() else {
@@ -727,7 +784,10 @@ async fn shared_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     category = "concurrency",
     doc = "Open or create a scoped mailbox."
 )]
-async fn mailbox_open_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn mailbox_open_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_open")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "mailbox_open", "name")?;
@@ -745,7 +805,10 @@ async fn mailbox_open_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Look up a scoped mailbox handle."
 )]
-async fn mailbox_lookup_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn mailbox_lookup_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_lookup")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let target = args.first().ok_or_else(|| {
@@ -761,7 +824,10 @@ async fn mailbox_lookup_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     category = "concurrency",
     doc = "Send a value to a mailbox."
 )]
-async fn mailbox_send_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn mailbox_send_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
             "mailbox_send: requires target and value".to_string(),
@@ -788,7 +854,10 @@ async fn mailbox_send_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Try to receive one mailbox value without blocking."
 )]
-async fn mailbox_try_receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn mailbox_try_receive_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_try_receive")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let target = args
@@ -816,7 +885,10 @@ async fn mailbox_try_receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
     category = "concurrency",
     doc = "Receive one mailbox value."
 )]
-async fn mailbox_receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn mailbox_receive_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_receive")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let cancel_token = vm.cancel_token.clone();
@@ -868,7 +940,10 @@ async fn mailbox_receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     category = "concurrency",
     doc = "Close a scoped mailbox."
 )]
-async fn mailbox_close_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn mailbox_close_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_close")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let target = args
@@ -884,7 +959,10 @@ async fn mailbox_close_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Return metrics for a scoped mailbox."
 )]
-async fn mailbox_metrics_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn mailbox_metrics_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_metrics")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let target = args
@@ -1062,7 +1140,10 @@ fn atomic_cas_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     category = "concurrency",
     doc = "Suspend execution for a duration in milliseconds."
 )]
-async fn sleep_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn sleep_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let ms = match args.first() {
         Some(VmValue::Duration(ms)) => (*ms).max(0) as u64,
         Some(VmValue::Int(n)) => (*n).max(0) as u64,
@@ -1077,20 +1158,19 @@ async fn sleep_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
     let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(ms));
     tokio::pin!(sleep);
-    if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
-        let mut poll = tokio::time::interval(Duration::from_millis(10));
-        loop {
-            tokio::select! {
-                _ = &mut sleep => break,
-                _ = poll.tick() => {
-                    if vm.is_cancel_requested() {
-                        return Err(cancelled_vm_error());
-                    }
+    // The explicit ctx always carries a child VM, so we always poll for
+    // cancellation while sleeping rather than blocking opaquely.
+    let vm = ctx.child_vm();
+    let mut poll = tokio::time::interval(Duration::from_millis(10));
+    loop {
+        tokio::select! {
+            _ = &mut sleep => break,
+            _ = poll.tick() => {
+                if vm.is_cancel_requested() {
+                    return Err(cancelled_vm_error());
                 }
             }
         }
-    } else {
-        sleep.await;
     }
     Ok(VmValue::Nil)
 }
@@ -1101,7 +1181,10 @@ async fn sleep_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Yield cooperatively to other scheduled tasks."
 )]
-async fn yield_now_builtin(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn yield_now_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    _args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     tokio::task::yield_now().await;
     Ok(VmValue::Nil)
 }
@@ -1112,7 +1195,10 @@ async fn yield_now_builtin(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Send a value to a channel."
 )]
-async fn send_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn send_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
             "send: requires channel and value",
@@ -1140,7 +1226,10 @@ async fn send_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Receive one value from a channel."
 )]
-async fn receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn receive_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
             "receive: requires a channel",
@@ -1172,7 +1261,10 @@ async fn receive_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Wait until one of the provided channels yields a value."
 )]
-async fn select_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn select_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
             "select: requires at least one channel",
@@ -1203,7 +1295,10 @@ async fn select_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Select from a channel list with a timeout."
 )]
-async fn select_timeout_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn select_timeout_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
             "__select_timeout: requires channel list and timeout",
@@ -1241,7 +1336,10 @@ async fn select_timeout_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     category = "concurrency",
     doc = "Select from a channel list without blocking."
 )]
-async fn select_try_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn select_try_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
             "__select_try: requires channel list",
@@ -1269,7 +1367,10 @@ async fn select_try_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Wait until one channel in a list yields a value."
 )]
-async fn select_list_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn select_list_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
             "__select_list: requires channel list",
@@ -1301,7 +1402,10 @@ async fn select_list_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     category = "concurrency",
     doc = "Select over a list of channels with an optional timeout."
 )]
-async fn channel_select_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn channel_select_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let channels = require_channel_list(&args, "channel_select")?;
     let timeout_ms = optional_timeout_ms(args.get(1));
     let deadline =

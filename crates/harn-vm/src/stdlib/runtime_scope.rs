@@ -60,7 +60,10 @@ fn current_policy_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     kind = "async",
     category = "runtime_scope"
 )]
-async fn with_autonomy_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn with_autonomy_policy_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let policy_value = args
         .first()
         .ok_or_else(|| VmError::Runtime("with_autonomy_policy: policy is required".into()))?;
@@ -78,7 +81,10 @@ async fn with_autonomy_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmErro
     kind = "async",
     category = "runtime_scope"
 )]
-async fn with_execution_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn with_execution_policy_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let policy_value = args
         .first()
         .ok_or_else(|| VmError::Runtime("with_execution_policy: policy is required".into()))?;
@@ -102,7 +108,10 @@ async fn with_execution_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
     category = "runtime_scope",
     runtime_only = true
 )]
-async fn harn_with_execution_policy_override_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn harn_with_execution_policy_override_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let policy_value = args.first().ok_or_else(|| {
         VmError::Runtime("__harn_with_execution_policy_override: policy is required".into())
     })?;
@@ -125,7 +134,10 @@ async fn harn_with_execution_policy_override_impl(args: Vec<VmValue>) -> Result<
     kind = "async",
     category = "runtime_scope"
 )]
-async fn with_approval_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn with_approval_policy_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let policy_value = args
         .first()
         .ok_or_else(|| VmError::Runtime("with_approval_policy: policy is required".into()))?;
@@ -144,7 +156,10 @@ async fn with_approval_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmErro
     kind = "async",
     category = "runtime_scope"
 )]
-async fn with_command_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn with_command_policy_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let policy =
         crate::orchestration::parse_command_policy_value(args.first(), "with_command_policy")?
             .ok_or_else(|| VmError::Runtime("with_command_policy: policy is required".into()))?;
@@ -159,7 +174,10 @@ async fn with_command_policy_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     kind = "async",
     category = "runtime_scope"
 )]
-async fn with_dynamic_permissions_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn with_dynamic_permissions_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let permissions = crate::llm::permissions::parse_dynamic_permission_policy(
         args.first(),
         "with_dynamic_permissions",

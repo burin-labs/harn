@@ -64,6 +64,7 @@ pub(super) fn host_workflow_prepare_run_builtin(
     runtime_only = true
 )]
 pub(super) async fn host_workflow_stage_prepare_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let state_id = parse_state_id_arg(args.first(), "__host_workflow_stage_prepare")?;
@@ -91,6 +92,7 @@ pub(super) async fn host_workflow_stage_prepare_builtin(
     runtime_only = true
 )]
 pub(super) async fn host_workflow_stage_complete_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let state_id = parse_state_id_arg(args.first(), "__host_workflow_stage_complete")?;
@@ -179,7 +181,10 @@ pub(super) fn host_workflow_finalize_run_builtin(
     category = "workflow.host",
     runtime_only = true
 )]
-pub(super) async fn host_workflow_map_plan_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+pub(super) async fn host_workflow_map_plan_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let node: crate::orchestration::WorkflowNode =
         parse_json_arg(args.first(), HOST_WORKFLOW_MAP_PLAN_BUILTIN)?;
     let artifacts = parse_artifact_list(args.get(1))?;
@@ -220,6 +225,7 @@ pub(super) fn host_workflow_map_branch_artifact_builtin(
     runtime_only = true
 )]
 pub(super) async fn host_workflow_map_execute_branch_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let node_id = args
@@ -315,6 +321,7 @@ pub(super) async fn host_workflow_map_execute_branch_builtin(
     runtime_only = true
 )]
 pub(super) async fn host_workflow_map_finalize_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let strategy = args

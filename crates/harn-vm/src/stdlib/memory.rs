@@ -200,7 +200,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     kind = "async",
     category = "memory"
 )]
-async fn memory_store_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn memory_store_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let namespace = required_string(&args, 0, "__memory_store", "namespace")?;
     let key = required_string(&args, 1, "__memory_store", "key")?;
     let value = args.get(2).cloned().ok_or_else(|| {
@@ -240,7 +243,10 @@ async fn memory_store_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "memory"
 )]
-async fn memory_recall_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn memory_recall_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let namespace = required_string(&args, 0, "__memory_recall", "namespace")?;
     let query = required_string(&args, 1, "__memory_recall", "query")?;
     let limit = optional_usize(args.get(2))
@@ -282,7 +288,10 @@ async fn memory_recall_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "memory"
 )]
-async fn memory_open_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn memory_open_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let namespace = required_string(&args, 0, "__memory_open", "namespace")?;
     let options = args.get(1).and_then(VmValue::as_dict);
     let backend = match option_string(options, "backend") {

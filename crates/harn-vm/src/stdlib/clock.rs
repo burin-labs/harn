@@ -178,7 +178,10 @@ fn now_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     kind = "async",
     category = "clock"
 )]
-async fn sleep_ms_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn sleep_ms_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
     if ms <= 0 {
         return Ok(VmValue::Nil);

@@ -118,7 +118,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&MONITOR_WAIT_FOR_NATIVE_
     kind = "async",
     category = "monitor"
 )]
-async fn monitor_wait_for_native_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn monitor_wait_for_native_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     monitor_wait_for_impl(&args).await
 }
 

@@ -99,10 +99,9 @@ struct ReviewTrustInput<'a> {
 }
 
 pub(crate) fn register_review_builtins(vm: &mut Vm) {
-    vm.register_async_builtin(
-        "self_review",
-        |args| async move { self_review_impl(args).await },
-    );
+    vm.register_async_builtin("self_review", |_ctx, args| async move {
+        self_review_impl(args).await
+    });
 }
 
 async fn self_review_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {

@@ -1164,7 +1164,7 @@ pub(super) fn register_websocket_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    vm.register_async_builtin("websocket_connect", |args| async move {
+    vm.register_async_builtin("websocket_connect", |_ctx, args| async move {
         let url = args.first().map(|arg| arg.display()).unwrap_or_default();
         if url.is_empty() {
             return Err(vm_error("websocket_connect: URL is required"));
@@ -1198,7 +1198,7 @@ pub(super) fn register_websocket_builtins(vm: &mut Vm) {
         vm_websocket_route(&server_id, &path, &options)
     });
 
-    vm.register_async_builtin("websocket_accept", |args| async move {
+    vm.register_async_builtin("websocket_accept", |_ctx, args| async move {
         let Some(handle) = args.first() else {
             return Err(vm_error("websocket_accept: requires a server handle"));
         };
@@ -1207,7 +1207,7 @@ pub(super) fn register_websocket_builtins(vm: &mut Vm) {
         vm_websocket_accept(&server_id, timeout_ms).await
     });
 
-    vm.register_async_builtin("websocket_send", |args| async move {
+    vm.register_async_builtin("websocket_send", |_ctx, args| async move {
         if args.len() < 2 {
             return Err(vm_error(
                 "websocket_send: requires socket handle and message",
@@ -1219,7 +1219,7 @@ pub(super) fn register_websocket_builtins(vm: &mut Vm) {
         vm_websocket_send(&socket_id, message, &options).await
     });
 
-    vm.register_async_builtin("websocket_receive", |args| async move {
+    vm.register_async_builtin("websocket_receive", |_ctx, args| async move {
         let Some(handle) = args.first() else {
             return Err(vm_error("websocket_receive: requires a socket handle"));
         };
@@ -1228,7 +1228,7 @@ pub(super) fn register_websocket_builtins(vm: &mut Vm) {
         vm_websocket_receive(&socket_id, timeout_ms).await
     });
 
-    vm.register_async_builtin("websocket_close", |args| async move {
+    vm.register_async_builtin("websocket_close", |_ctx, args| async move {
         let Some(handle) = args.first() else {
             return Err(vm_error("websocket_close: requires a socket handle"));
         };

@@ -222,7 +222,7 @@ fn install_test_backend(backend: Rc<dyn OcrBackend>) {
 }
 
 pub(crate) fn register_vision_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("vision_ocr", |args| async move {
+    vm.register_async_builtin("vision_ocr", |_ctx, args| async move {
         let input = normalize_image_input(args.first())?;
         let options = parse_ocr_options(args.get(1))?;
         let backend = current_backend();

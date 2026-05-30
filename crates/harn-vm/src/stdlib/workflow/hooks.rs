@@ -577,7 +577,10 @@ pub(super) fn settlement_agent_active_builtin(
     category = "workflow.host",
     runtime_only = true
 )]
-pub(super) async fn fire_session_hook_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+pub(super) async fn fire_session_hook_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let event_name = args
         .first()
         .map(VmValue::display)
@@ -668,7 +671,10 @@ pub(super) fn notify_file_edited_builtin(
     category = "workflow.host",
     runtime_only = true
 )]
-pub(super) async fn drain_file_edits_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+pub(super) async fn drain_file_edits_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = args.first().map(VmValue::display).unwrap_or_default();
     let drained = crate::orchestration::drain_file_edits();
     let mut paths: Vec<VmValue> = Vec::with_capacity(drained.len());

@@ -1051,7 +1051,10 @@ fn host_has_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     kind = "async",
     category = "host"
 )]
-async fn host_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_call_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     let params = args
         .get(1)
@@ -1067,7 +1070,10 @@ async fn host_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 }
 
 #[harn_builtin(sig = "host_tool_list() -> list", kind = "async", category = "host")]
-async fn host_tool_list_builtin(_args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_tool_list_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    _args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     dispatch_host_tool_list().await
 }
 
@@ -1076,7 +1082,10 @@ async fn host_tool_list_builtin(_args: Vec<VmValue>) -> Result<VmValue, VmError>
     kind = "async",
     category = "host"
 )]
-async fn host_tool_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn host_tool_call_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if name.is_empty() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(

@@ -2035,7 +2035,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     register_harn_mcp_namespace(vm);
     register_supervised_mcp_host_builtins(vm);
 
-    vm.register_async_builtin("mcp_connect", |args| async move {
+    vm.register_async_builtin("mcp_connect", |_ctx, args| async move {
         let command = args.first().map(|a| a.display()).unwrap_or_default();
         if command.is_empty() {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -2063,7 +2063,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     // Lazy registry: ensure a registered server is booted and return its
     // live client handle. Used by skill activation (`requires_mcp`) and
     // by user code that wants to trigger a lazy connect explicitly.
-    vm.register_async_builtin("mcp_ensure_active", |args| async move {
+    vm.register_async_builtin("mcp_ensure_active", |_ctx, args| async move {
         let name = match args.first() {
             Some(VmValue::String(s)) => s.to_string(),
             Some(other) => other.display(),
@@ -2126,7 +2126,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     // `mcp_server_card("notion")`           -> looks up `card = ...` in harn.toml
     // `mcp_server_card("https://.../card")` -> fetches that URL directly
     // `mcp_server_card("./card.json")`      -> reads that file directly
-    vm.register_async_builtin("mcp_server_card", |args| async move {
+    vm.register_async_builtin("mcp_server_card", |_ctx, args| async move {
         let target = match args.first() {
             Some(VmValue::String(s)) => s.to_string(),
             Some(other) => other.display(),
@@ -2176,7 +2176,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(json_to_vm_value(&card))
     });
 
-    vm.register_async_builtin("mcp_list_tools", |args| async move {
+    vm.register_async_builtin("mcp_list_tools", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2214,7 +2214,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_tools)))
     });
 
-    vm.register_async_builtin("mcp_call", |args| async move {
+    vm.register_async_builtin("mcp_call", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2247,7 +2247,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         ))
     });
 
-    vm.register_async_builtin("mcp_server_info", |args| async move {
+    vm.register_async_builtin("mcp_server_info", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2303,7 +2303,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(info)))
     });
 
-    vm.register_async_builtin("mcp_disconnect", |args| async move {
+    vm.register_async_builtin("mcp_disconnect", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2317,7 +2317,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    vm.register_async_builtin("mcp_list_resources", |args| async move {
+    vm.register_async_builtin("mcp_list_resources", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2339,7 +2339,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_resources)))
     });
 
-    vm.register_async_builtin("mcp_read_resource", |args| async move {
+    vm.register_async_builtin("mcp_read_resource", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2382,7 +2382,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         }
     });
 
-    vm.register_async_builtin("mcp_list_resource_templates", |args| async move {
+    vm.register_async_builtin("mcp_list_resource_templates", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2409,7 +2409,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_templates)))
     });
 
-    vm.register_async_builtin("mcp_list_prompts", |args| async move {
+    vm.register_async_builtin("mcp_list_prompts", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2432,7 +2432,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_prompts)))
     });
 
-    vm.register_async_builtin("mcp_get_prompt", |args| async move {
+    vm.register_async_builtin("mcp_get_prompt", |_ctx, args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
             _ => {
@@ -2556,7 +2556,7 @@ fn register_harn_mcp_namespace(vm: &mut Vm) {
 /// and delegates to the host module. The host module owns supervision
 /// state, the response cache, allowlist enforcement, and tracing spans.
 fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("harn.mcp.spawn", |args| async move {
+    vm.register_async_builtin("harn.mcp.spawn", |_ctx, args| async move {
         let spec_value = args
             .first()
             .ok_or_else(|| VmError::Runtime("harn.mcp.spawn: spec dict is required".into()))?;
@@ -2574,7 +2574,7 @@ fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(name)))
     });
 
-    vm.register_async_builtin("harn.mcp.tools", |args| async move {
+    vm.register_async_builtin("harn.mcp.tools", |_ctx, args| async move {
         let name = match args.first() {
             Some(VmValue::String(s)) => s.to_string(),
             Some(other) => other.display(),
@@ -2590,7 +2590,7 @@ fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
         )))
     });
 
-    vm.register_async_builtin("harn.mcp.call", |args| async move {
+    vm.register_async_builtin("harn.mcp.call", |_ctx, args| async move {
         let name = match args.first() {
             Some(VmValue::String(s)) => s.to_string(),
             Some(other) => other.display(),
@@ -2652,7 +2652,7 @@ fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    vm.register_async_builtin("harn.mcp.discover", |_args| async move {
+    vm.register_async_builtin("harn.mcp.discover", |_ctx, _args| async move {
         let entries = crate::mcp_host::discover().await?;
         Ok(VmValue::List(Rc::new(
             entries.iter().map(json_to_vm_value).collect(),

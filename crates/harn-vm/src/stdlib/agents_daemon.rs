@@ -114,10 +114,11 @@ pub fn register_daemon_builtins(vm: &mut Vm) {
     kind = "async",
     category = "agent.daemon"
 )]
-async fn daemon_spawn_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("daemon_spawn requires an async builtin VM context".to_string())
-    })?;
+async fn daemon_spawn_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let child_vm = ctx.child_vm();
     let config = options::dict_arg(&args, 0, "daemon_spawn", "config", ErrorKind::Runtime)?;
     let spec = parse_spawn_spec(config, None, None)?;
     if find_daemon_by_root(&spec.persist_root)
@@ -180,7 +181,10 @@ async fn daemon_spawn_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "agent.daemon"
 )]
-async fn daemon_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn daemon_trigger_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("daemon_trigger: missing daemon handle".to_string()))?;
@@ -267,7 +271,10 @@ fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     kind = "async",
     category = "agent.daemon"
 )]
-async fn daemon_stop_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn daemon_stop_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("daemon_stop: missing daemon handle".to_string()))?;
@@ -326,10 +333,11 @@ async fn daemon_stop_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "agent.daemon"
 )]
-async fn daemon_resume_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("daemon_resume requires an async builtin VM context".to_string())
-    })?;
+async fn daemon_resume_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let child_vm = ctx.child_vm();
     let persist_root =
         options::required_string_arg(&args, 0, "daemon_resume", "path", ErrorKind::Runtime)?;
     let paths = daemon_paths(&persist_root);

@@ -65,7 +65,7 @@ struct CacheRecord {
 }
 
 pub(crate) fn register_project_enrich_builtin(vm: &mut Vm) {
-    vm.register_async_builtin("project_enrich_native", |args| async move {
+    vm.register_async_builtin("project_enrich_native", |_ctx, args| async move {
         project_enrich_impl(args).await
     });
 }

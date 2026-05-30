@@ -299,7 +299,10 @@ pub fn reset_llm_state() {
     category = "llm.host",
     runtime_only = true
 )]
-async fn cost_route_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn cost_route_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     cost_route::cost_route_impl(args).await
 }
 
@@ -309,7 +312,10 @@ async fn cost_route_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "llm.host"
 )]
-async fn llm_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_call_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     llm_call_impl(args).await
 }
 
@@ -319,7 +325,10 @@ async fn llm_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "llm.host"
 )]
-async fn llm_stream_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_stream_call_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     llm_stream_call_impl(args).await
 }
 
@@ -447,7 +456,10 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     kind = "async",
     category = "llm.host"
 )]
-async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_call_safe_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     match llm_call_impl(args).await {
         Ok(response) => Ok(llm_safe_envelope_ok(response)),
         Err(err) => Ok(llm_safe_envelope_err(&err)),
@@ -460,7 +472,10 @@ async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "llm.structured"
 )]
-async fn llm_call_structured_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_call_structured_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let rewritten = rewrite_structured_args(args)?;
     let response = llm_call_impl(rewritten).await?;
     Ok(extract_structured_data(response))
@@ -472,7 +487,10 @@ async fn llm_call_structured_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
     kind = "async",
     category = "llm.structured"
 )]
-async fn llm_call_structured_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_call_structured_safe_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let rewritten = match rewrite_structured_args(args) {
         Ok(v) => v,
         Err(err) => return Ok(structured_safe_envelope_err(&err)),
@@ -491,7 +509,10 @@ async fn llm_call_structured_safe_builtin(args: Vec<VmValue>) -> Result<VmValue,
     kind = "async",
     category = "llm.structured"
 )]
-async fn llm_call_structured_result_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_call_structured_result_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     structured_envelope::llm_call_structured_result_impl(args, None).await
 }
 
@@ -501,7 +522,10 @@ async fn llm_call_structured_result_builtin(args: Vec<VmValue>) -> Result<VmValu
     kind = "async",
     category = "schema.recovery"
 )]
-async fn schema_recover_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn schema_recover_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     schema_recover::schema_recover_impl(args, None).await
 }
 
@@ -511,7 +535,10 @@ async fn schema_recover_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     kind = "async",
     category = "llm.rate_limit"
 )]
-async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn with_rate_limit_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
     if provider.is_empty() {
         return Err(VmError::Runtime(
@@ -571,7 +598,10 @@ async fn with_rate_limit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
     kind = "async",
     category = "llm.host"
 )]
-async fn llm_completion_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_completion_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let prefix = args.first().map(|a| a.display()).unwrap_or_default();
     let suffix = args.get(1).and_then(|a| {
         if matches!(a, VmValue::Nil) {
@@ -624,7 +654,10 @@ async fn llm_completion_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     kind = "async",
     category = "llm.host"
 )]
-async fn llm_stream_builtin_wrap(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn llm_stream_builtin_wrap(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     llm_stream_builtin(args).await
 }
 

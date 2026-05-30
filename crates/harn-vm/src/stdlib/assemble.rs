@@ -18,7 +18,7 @@ use crate::vm::Vm;
 use super::agents::parse_artifact_list;
 
 pub(crate) fn register_assemble_context_builtin(vm: &mut Vm) {
-    vm.register_async_builtin("assemble_context", |args| async move {
+    vm.register_async_builtin("assemble_context", |_ctx, args| async move {
         assemble_context_impl(args).await
     });
 }

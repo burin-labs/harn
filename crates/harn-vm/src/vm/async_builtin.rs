@@ -20,15 +20,32 @@ tokio::task_local! {
     /// stack would silently read the wrong (or empty) context. Nesting is
     /// handled by nested `scope` calls: `with` sees the innermost binding,
     /// which restores the parent on unwind. See harn#2667.
+    ///
+    /// As of harn#2668 the canonical path is an *explicit* [`AsyncBuiltinCtx`]
+    /// handle threaded into every async builtin's signature by the
+    /// `#[harn_builtin]` macro + the dispatch loop, so builtin bodies no longer
+    /// read this ambient binding. The task-local survives only as a bridge for
+    /// the deep sync helpers (pool submitter resolution, channel context,
+    /// HITL host notification, daemon bridge construction, …) that have not yet
+    /// been threaded; those still resolve via [`clone_async_builtin_child_vm`].
+    /// Removing the task-local entirely is the remaining follow-up — see #2668.
     static ASYNC_BUILTIN_CTX: AsyncBuiltinCtx;
 }
 
-/// Shared handle to the parent VM's execution context for the duration of one
-/// async-builtin call. Holds the "template" child VM that closure-invoking
-/// host helpers clone via [`clone_async_builtin_child_vm`], and whose `output`
-/// buffer collects text forwarded from VM-side closures via
-/// [`forward_child_output_to_parent`]. Cheap to construct — everything heavy
-/// inside the `Vm` is `Rc`/`Arc`-shared.
+/// Explicit handle to the parent VM's execution context for the duration of one
+/// async-builtin call. Threaded into every async builtin by the dispatch loop
+/// (and the `#[harn_builtin]` macro), so context can no longer be "lost across a
+/// spawn boundary": a handler that needs a child VM holds the `ctx` it was given
+/// rather than reaching for an ambient task-local that may not be bound on the
+/// current task.
+///
+/// Holds the "template" child VM that closure-invoking host helpers clone via
+/// [`AsyncBuiltinCtx::child_vm`], and whose `output` buffer collects text
+/// forwarded from VM-side closures via [`AsyncBuiltinCtx::forward_output`]. The
+/// dispatch loop drains that buffer back to the original parent VM after the
+/// async builtin returns. Cheap to clone — it is an `Rc` handle and everything
+/// heavy inside the `Vm` is `Rc`/`Arc`-shared.
+#[derive(Clone)]
 pub struct AsyncBuiltinCtx {
     child: Rc<RefCell<Vm>>,
 }
@@ -39,28 +56,58 @@ impl AsyncBuiltinCtx {
             child: Rc::new(RefCell::new(vm)),
         }
     }
+
+    /// Construct a standalone ctx around `vm` for unit tests that drive an async
+    /// builtin handler directly (outside the dispatch loop). Production code
+    /// receives its ctx from the dispatch path, never this.
+    #[cfg(test)]
+    pub fn for_test(vm: Vm) -> Self {
+        Self::new(vm)
+    }
+
+    /// Clone a fresh child VM from this context. The returned `Vm` shares the
+    /// parent's heavy state (env, builtins, bridge, module_cache) via `Arc`/`Rc`,
+    /// so each closure-invoking handler gets its own cheap execution context.
+    pub fn child_vm(&self) -> Vm {
+        self.child.borrow().child_vm()
+    }
+
+    /// Forward captured output from a transient child VM (typically created via
+    /// [`AsyncBuiltinCtx::child_vm`] and used to invoke a closure) back into this
+    /// context's output buffer. The dispatch loop drains that buffer back to the
+    /// original parent VM after the async builtin returns.
+    ///
+    /// Without this hook, `log()`/`__io_print()` calls inside
+    /// `post_turn_callback` closures, tool handlers, and other VM-side closures
+    /// invoked from async builtins would silently disappear because the transient
+    /// child VM's output buffer is dropped on scope exit.
+    pub fn forward_output(&self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.child.borrow_mut().append_output(text);
+    }
 }
 
-/// Clone a fresh child VM from the current async-builtin context. Returns
-/// `None` when called outside any async-builtin scope (e.g. top-level sync
-/// code), matching the old empty-stack behaviour. The returned `Vm` shares the
-/// parent's heavy state (env, builtins, bridge, module_cache) via `Arc`/`Rc`,
-/// so each closure-invoking handler gets its own cheap execution context.
+/// Clone a fresh child VM from the current ambient async-builtin context.
+/// Returns `None` when called outside any async-builtin scope (e.g. top-level
+/// sync code), matching the old empty-stack behaviour.
+///
+/// Prefer the explicit [`AsyncBuiltinCtx::child_vm`] threaded into the builtin's
+/// signature. This ambient accessor survives only for the deep sync helpers not
+/// yet threaded (see #2668) and for spawn boundaries that re-scope the context.
 pub fn clone_async_builtin_child_vm() -> Option<Vm> {
     ASYNC_BUILTIN_CTX
         .try_with(|ctx| ctx.child.borrow().child_vm())
         .ok()
 }
 
-/// Forward captured output from a transient child VM (typically created via
-/// [`clone_async_builtin_child_vm`] and used to invoke a closure) back into the
-/// current async-builtin context's output buffer. The dispatch loop drains
-/// that buffer back to the original parent VM after the async builtin returns.
+/// Forward output into the current ambient async-builtin context's output
+/// buffer. A no-op outside any async-builtin scope.
 ///
-/// Without this hook, `log()`/`__io_print()` calls inside `post_turn_callback`
-/// closures, tool handlers, and other VM-side closures invoked from async
-/// builtins would silently disappear because the transient child VM's output
-/// buffer is dropped on scope exit. A no-op outside any async-builtin scope.
+/// Prefer the explicit [`AsyncBuiltinCtx::forward_output`]. This ambient
+/// accessor survives only for the deep sync helpers not yet threaded (see
+/// #2668).
 pub fn forward_child_output_to_parent(text: &str) {
     if text.is_empty() {
         return;
@@ -68,17 +115,21 @@ pub fn forward_child_output_to_parent(text: &str) {
     let _ = ASYNC_BUILTIN_CTX.try_with(|ctx| ctx.child.borrow_mut().append_output(text));
 }
 
-/// Run `fut` (an async builtin's future) with `child` installed as the current
-/// async-builtin context, returning the future's output plus any output that
-/// VM-side closures forwarded into the context. The dispatch loop appends the
-/// captured output to the real parent VM. Cancel-safe: if `fut` is dropped, the
-/// task-local binding and the child `Vm` are dropped with it — no strand.
-pub(crate) fn run_async_builtin_with<F>(
+/// Run an async builtin's future with `child` installed as its explicit
+/// [`AsyncBuiltinCtx`] (also bound as the ambient task-local for the deep sync
+/// helpers that have not yet been threaded). `make_fut` receives the ctx handle
+/// and returns the handler's future; the ctx is moved into the future, so it
+/// lives exactly as long as the call. Returns the future's output plus any
+/// output that VM-side closures forwarded into the context, which the dispatch
+/// loop appends to the real parent VM. Cancel-safe: if the returned future is
+/// dropped, the ctx + child `Vm` are dropped with it — no strand.
+pub(crate) fn run_async_builtin_with<F, M>(
     child: Vm,
-    fut: F,
+    make_fut: M,
 ) -> impl Future<Output = (F::Output, String)>
 where
     F: Future,
+    M: FnOnce(AsyncBuiltinCtx) -> F,
 {
     // Build the context + scope synchronously so the by-value `child: Vm` moves
     // onto the heap (Rc) *before* any async state machine exists. If this were
@@ -88,6 +139,7 @@ where
     // harn#2667.
     let ctx = AsyncBuiltinCtx::new(child);
     let sink = Rc::clone(&ctx.child);
+    let fut = make_fut(ctx.clone());
     let scoped = ASYNC_BUILTIN_CTX.scope(ctx, fut);
     async move {
         let output = scoped.await;
@@ -164,22 +216,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scope_binds_ctx_and_captures_forwarded_output() {
-        let visible_inside = run_async_builtin_with(Vm::new(), async {
+    async fn explicit_ctx_mints_child_and_captures_forwarded_output() {
+        let (present, captured) = run_async_builtin_with(Vm::new(), |ctx| async move {
+            // The handler holds the explicit ctx — no ambient lookup needed.
+            let _child = ctx.child_vm();
+            ctx.forward_output("hello ");
+            ctx.forward_output("world");
+            true
+        })
+        .await;
+        assert!(present);
+        // `forward_output` appends into the same buffer the dispatch loop drains.
+        assert_eq!(captured, "hello world");
+    }
+
+    #[tokio::test]
+    async fn ambient_bridge_still_visible_inside_scope() {
+        // The deep sync helpers (not yet threaded) still resolve a child via the
+        // ambient task-local that dispatch binds. Verify the bridge is live
+        // inside the scope and gone after.
+        let (visible_inside, captured) = run_async_builtin_with(Vm::new(), |_ctx| async move {
             let present = clone_async_builtin_child_vm().is_some();
             forward_child_output_to_parent("hello ");
             forward_child_output_to_parent("world");
             present
         })
         .await;
-        assert_eq!(visible_inside, (true, "hello world".to_string()));
-        // The binding is dropped with the future — no strand, context gone.
+        assert!(visible_inside);
+        assert_eq!(captured, "hello world");
         assert!(clone_async_builtin_child_vm().is_none());
     }
 
     #[tokio::test]
     async fn nested_scopes_restore_the_parent_context() {
-        run_async_builtin_with(Vm::new(), async {
+        run_async_builtin_with(Vm::new(), |_ctx| async move {
             assert!(clone_async_builtin_child_vm().is_some());
             scope_async_builtin(Vm::new(), async {
                 assert!(clone_async_builtin_child_vm().is_some());
@@ -199,7 +269,7 @@ mod tests {
         // polling to completion. With the old thread_local stack a manual
         // push with no matching pop would strand the child Vm; with a
         // task_local scope the binding only exists while the future is live.
-        let never = run_async_builtin_with(Vm::new(), pending::<()>());
+        let never = run_async_builtin_with(Vm::new(), |_ctx| pending::<()>());
         drop(never);
         assert!(clone_async_builtin_child_vm().is_none());
     }

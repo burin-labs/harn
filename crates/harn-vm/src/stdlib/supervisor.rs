@@ -135,10 +135,11 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     kind = "async",
     category = "supervisor"
 )]
-async fn supervisor_start_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let base_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("supervisor_start: requires VM execution context".to_string())
-    })?;
+async fn supervisor_start_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let base_vm = ctx.child_vm();
     let spec = args
         .first()
         .ok_or_else(|| VmError::Runtime("supervisor_start: spec is required".to_string()))?;
@@ -182,7 +183,10 @@ fn supervisor_metrics_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
     kind = "async",
     category = "supervisor"
 )]
-async fn supervisor_stop_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn supervisor_stop_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let id = supervisor_id_from_args(&args, "supervisor_stop")?;
     let timeout_ms = args
         .get(1)

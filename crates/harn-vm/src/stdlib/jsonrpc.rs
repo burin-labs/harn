@@ -39,7 +39,7 @@ pub(crate) fn reset_jsonrpc_state() {
 }
 
 pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("jsonrpc_call", |args| async move {
+    vm.register_async_builtin("jsonrpc_call", |_ctx, args| async move {
         let url = args.first().map(|a| a.display()).unwrap_or_default();
         if url.is_empty() {
             return Err(jsonrpc_err("jsonrpc_call: url is required"));
@@ -74,7 +74,7 @@ pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
         unwrap_jsonrpc_response(response)
     });
 
-    vm.register_async_builtin("jsonrpc_batch", |args| async move {
+    vm.register_async_builtin("jsonrpc_batch", |_ctx, args| async move {
         let url = args.first().map(|a| a.display()).unwrap_or_default();
         if url.is_empty() {
             return Err(jsonrpc_err("jsonrpc_batch: url is required"));

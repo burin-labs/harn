@@ -870,7 +870,10 @@ const REANCHOR_OPT_KEYS: &[&str] = &["carry_transcript", "compact", "reason"];
     category = "agent.session",
     doc = "Atomically replace a session primary workspace anchor (#2218)."
 )]
-async fn agent_session_reanchor_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn agent_session_reanchor_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let id = arg_string_required(&args, 0, "agent_session_reanchor", "id")?;
     if !agent_sessions::exists(&id) {
         return Err(err(format!(
@@ -930,8 +933,11 @@ async fn agent_session_reanchor_builtin(args: Vec<VmValue>) -> Result<VmValue, V
     };
     let mut compacted = false;
     if compact {
-        let _ = agent_session_compact_builtin(vec![VmValue::String(Rc::from(target_id.clone()))])
-            .await?;
+        let _ = agent_session_compact_builtin(
+            ctx.clone(),
+            vec![VmValue::String(Rc::from(target_id.clone()))],
+        )
+        .await?;
         compacted = true;
     }
     let outcome = agent_sessions::reanchor_session(
@@ -958,7 +964,10 @@ async fn agent_session_reanchor_builtin(args: Vec<VmValue>) -> Result<VmValue, V
     category = "agent.session",
     doc = "Compact an agent session transcript with the host compaction runtime."
 )]
-async fn agent_session_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn agent_session_compact_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let id = arg_string_required(&args, 0, "agent_session_compact", "id")?;
     if !agent_sessions::exists(&id) {
         return Err(err(format!(
@@ -1119,7 +1128,10 @@ const CANCEL_TOOL_CALL_DEFAULT_TIMEOUT_MS: i64 = 5_000;
     category = "agent.session",
     doc = "Abort a specific in-flight tool call."
 )]
-async fn cancel_in_flight_tool_call_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn cancel_in_flight_tool_call_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = arg_string_required(&args, 0, "cancel_in_flight_tool_call", "session_id")?;
     let call_id = arg_string_required(&args, 1, "cancel_in_flight_tool_call", "call_id")?;
     if call_id.trim().is_empty() {

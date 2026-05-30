@@ -66,7 +66,10 @@ use super::{
     kind = "async",
     category = "postgres"
 )]
-async fn pg_introspect_tables_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_introspect_tables_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool = pool_arg(&args, "pg_introspect_tables")?;
     let options = args.get(1).and_then(VmValue::as_dict);
     let schema = options
@@ -111,7 +114,10 @@ async fn pg_introspect_tables_impl(args: Vec<VmValue>) -> Result<VmValue, VmErro
     kind = "async",
     category = "postgres"
 )]
-async fn pg_introspect_columns_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_introspect_columns_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool = pool_arg(&args, "pg_introspect_columns")?;
     let (schema, table) = split_qualified(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
@@ -148,7 +154,10 @@ async fn pg_introspect_columns_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
     kind = "async",
     category = "postgres"
 )]
-async fn pg_introspect_indexes_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_introspect_indexes_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool = pool_arg(&args, "pg_introspect_indexes")?;
     let (schema, table) = split_qualified(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
@@ -186,7 +195,10 @@ async fn pg_introspect_indexes_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
     kind = "async",
     category = "postgres"
 )]
-async fn pg_pool_stats_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_pool_stats_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool_handle = required_arg(&args, 0, "pg_pool_stats", "pool handle")?;
     let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_pool_stats")?;
     let record = pool_record_by_id(&pool_id)?;
@@ -253,7 +265,10 @@ async fn pg_pool_stats_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_partition_attach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_partition_attach_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool = pool_arg(&args, "pg_partition_attach")?;
     let parent = qualified_identifier(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
@@ -292,7 +307,10 @@ async fn pg_partition_attach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     kind = "async",
     category = "postgres"
 )]
-async fn pg_partition_detach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_partition_detach_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool = pool_arg(&args, "pg_partition_detach")?;
     let parent = qualified_identifier(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
@@ -330,7 +348,10 @@ async fn pg_partition_detach_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     kind = "async",
     category = "postgres"
 )]
-async fn pg_partition_prune_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_partition_prune_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool = pool_arg(&args, "pg_partition_prune")?;
     let parent = qualified_identifier(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
@@ -365,7 +386,10 @@ async fn pg_partition_prune_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
     kind = "async",
     category = "postgres"
 )]
-async fn pg_partition_retain_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_partition_retain_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool = pool_arg(&args, "pg_partition_retain")?;
     let parent = qualified_identifier(
         args.get(1).map(VmValue::display).as_deref().unwrap_or(""),
@@ -399,7 +423,10 @@ async fn pg_partition_retain_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     kind = "async",
     category = "postgres"
 )]
-async fn pg_partition_create_for_window_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_partition_create_for_window_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let builtin = "pg_partition_create_for_window";
     let pool = pool_arg(&args, builtin)?;
     let parent = qualified_identifier(

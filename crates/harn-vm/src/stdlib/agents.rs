@@ -415,7 +415,10 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
     runtime_only = true,
     doc = "Run or spawn a normalized Harn-authored sub-agent request."
 )]
-async fn sub_agent_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn sub_agent_run_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let request = parse_sub_agent_request(&args)?;
     if !request.background {
         let result = execute_sub_agent(request.spec).await?;
@@ -522,7 +525,10 @@ fn worker_mode_label(config: &WorkerConfig) -> &'static str {
     runtime_only = true,
     doc = "Spawn a workflow, stage, or sub-agent host worker."
 )]
-async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn spawn_agent_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let config = args
         .first()
         .ok_or_else(|| VmError::Runtime("spawn_agent: missing config".to_string()))?;
@@ -539,7 +545,10 @@ async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     runtime_only = true,
     doc = "Resume a stopped host worker with new task input."
 )]
-async fn send_input_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn send_input_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
             "send_input: requires worker handle and task text".to_string(),
@@ -575,7 +584,10 @@ async fn send_input_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     runtime_only = true,
     doc = "Trigger an awaiting retriggerable host worker."
 )]
-async fn worker_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn worker_trigger_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
             "worker_trigger: requires worker handle and payload".to_string(),
@@ -648,7 +660,10 @@ async fn worker_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     runtime_only = true,
     doc = "Cooperatively suspend a host worker at the next turn boundary."
 )]
-async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn suspend_agent_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("suspend_agent: missing worker handle".to_string()))?;
@@ -943,7 +958,10 @@ pub(crate) fn all_registered_worker_ids() -> Vec<String> {
     runtime_only = true,
     doc = "Persist a top-level agent_loop suspend checkpoint as a resumable worker."
 )]
-async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn top_level_agent_suspend_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let session_id = args
         .first()
         .map(|value| value.display())
@@ -1295,7 +1313,10 @@ fn apply_resume_transcript_policy(
     runtime_only = true,
     doc = "Resume a suspended or persisted worker into the local host worker registry."
 )]
-async fn resume_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn resume_agent_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target_value = args
         .first()
         .ok_or_else(|| VmError::Runtime("resume_agent: missing worker handle".to_string()))?
@@ -1832,7 +1853,10 @@ fn cold_load_worker(snapshot_target: &str) -> Result<Rc<RefCell<WorkerState>>, V
     runtime_only = true,
     doc = "Wait for one or more host workers to reach a terminal state."
 )]
-async fn wait_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn wait_agent_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("wait_agent: missing worker handle".to_string()))?;
@@ -1860,7 +1884,10 @@ async fn wait_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     runtime_only = true,
     doc = "Cancel a host worker and emit the cancellation lifecycle event."
 )]
-async fn close_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn close_agent_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("close_agent: missing worker handle".to_string()))?;
@@ -2464,14 +2491,17 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-suspend-snapshot");
 
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("waiting on external review")),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
-                "initiator".to_string(),
-                VmValue::String(Rc::from("parent")),
-            )]))),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("waiting on external review")),
+                VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "initiator".to_string(),
+                    VmValue::String(Rc::from("parent")),
+                )]))),
+            ],
+        )
         .await
         .expect("suspend worker");
 
@@ -2543,10 +2573,13 @@ mod suspend_tests {
         // verify the panic broadcast is a no-op (no double-suspend, no
         // overwritten reason, no second event).
         let (already_suspended, dir1) = seed_test_worker("worker-panic-already-suspended");
-        suspend_agent_builtin(vec![
-            handle_value(&already_suspended),
-            VmValue::String(Rc::from("operator pause")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&already_suspended),
+                VmValue::String(Rc::from("operator pause")),
+            ],
+        )
         .await
         .expect("operator-suspend first");
 
@@ -2620,10 +2653,13 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-reset-snapshot");
 
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("waiting on external review")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("waiting on external review")),
+            ],
+        )
         .await
         .expect("suspend worker");
         assert!(
@@ -2651,10 +2687,13 @@ mod suspend_tests {
         // Idempotency: second suspend on an already-suspended worker is
         // a no-op summary read, and the suspension metadata recorded on
         // the first call is preserved verbatim.
-        let first = suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("waiting on external review")),
-        ])
+        let first = suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("waiting on external review")),
+            ],
+        )
         .await
         .expect("first suspend");
         assert_eq!(summary_status(&first), "suspended");
@@ -2663,10 +2702,13 @@ mod suspend_tests {
             first_suspension.is_some() && first_suspension.as_ref().unwrap().display() != "nil"
         );
 
-        let second = suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("different reason — should be ignored")),
-        ])
+        let second = suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("different reason — should be ignored")),
+            ],
+        )
         .await
         .expect("second suspend");
         assert_eq!(summary_status(&second), "suspended");
@@ -2683,10 +2725,13 @@ mod suspend_tests {
 
         // Resume transitions back to running and wires the resume input
         // into the worker's task slot.
-        let resumed = resume_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("next: write the report")),
-        ])
+        let resumed = resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("next: write the report")),
+            ],
+        )
         .await
         .expect("resume");
         assert_eq!(summary_status(&resumed), "running");
@@ -2708,9 +2753,12 @@ mod suspend_tests {
         // Closing a (re-)running worker still works the same way as
         // before — proves that the close path is not gated on a
         // specific upstream status.
-        let closed = close_agent_builtin(vec![handle_value(&worker_id)])
-            .await
-            .expect("close");
+        let closed = close_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id)],
+        )
+        .await
+        .expect("close");
         assert_eq!(summary_status(&closed), "cancelled");
 
         teardown(&dir, &worker_id);
@@ -2723,11 +2771,14 @@ mod suspend_tests {
         crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
         let (worker_id, dir) = seed_test_worker("worker-auto-resume-register");
 
-        let suspended = suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("waiting for review")),
-            suspend_options(auto_resume_conditions("review.approved")),
-        ])
+        let suspended = suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("waiting for review")),
+                suspend_options(auto_resume_conditions("review.approved")),
+            ],
+        )
         .await
         .expect("suspend with auto-resume trigger");
         assert_eq!(summary_status(&suspended), "suspended");
@@ -2738,9 +2789,12 @@ mod suspend_tests {
         assert_eq!(binding.handler.kind(), "auto_resume");
         assert_eq!(binding.match_events, vec!["review.approved".to_string()]);
 
-        let resumed = resume_agent_builtin(vec![handle_value(&worker_id)])
-            .await
-            .expect("operator resume");
+        let resumed = resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id)],
+        )
+        .await
+        .expect("operator resume");
         assert_eq!(summary_status(&resumed), "running");
         let snapshot = crate::triggers::snapshot_trigger_bindings()
             .into_iter()
@@ -2765,14 +2819,17 @@ mod suspend_tests {
         std::fs::create_dir_all(&dir).unwrap();
         unsafe { std::env::set_var("HARN_WORKER_STATE_DIR", &dir) };
 
-        let suspended = top_level_agent_suspend_builtin(vec![
-            VmValue::String(Rc::from("session-top-level-auto-resume")),
-            VmValue::String(Rc::from("continue the top-level task")),
-            VmValue::Nil,
-            VmValue::Dict(Rc::new(BTreeMap::new())),
-            VmValue::String(Rc::from("waiting for review")),
-            auto_resume_conditions("review.approved"),
-        ])
+        let suspended = top_level_agent_suspend_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                VmValue::String(Rc::from("session-top-level-auto-resume")),
+                VmValue::String(Rc::from("continue the top-level task")),
+                VmValue::Nil,
+                VmValue::Dict(Rc::new(BTreeMap::new())),
+                VmValue::String(Rc::from("waiting for review")),
+                auto_resume_conditions("review.approved"),
+            ],
+        )
         .await
         .expect("top-level suspend with auto-resume trigger");
         assert_eq!(summary_status(&suspended), "suspended");
@@ -2807,11 +2864,14 @@ mod suspend_tests {
                 let log = crate::event_log::install_memory_for_current_thread(128);
                 let (worker_id, dir) = seed_test_worker("worker-auto-resume-dispatch");
 
-                let suspended = suspend_agent_builtin(vec![
-                    handle_value(&worker_id),
-                    VmValue::String(Rc::from("waiting for review")),
-                    suspend_options(auto_resume_conditions("review.approved")),
-                ])
+                let suspended = suspend_agent_builtin(
+                    crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+                    vec![
+                        handle_value(&worker_id),
+                        VmValue::String(Rc::from("waiting for review")),
+                        suspend_options(auto_resume_conditions("review.approved")),
+                    ],
+                )
                 .await
                 .expect("suspend with auto-resume trigger");
                 let trigger_id = auto_resume_trigger_id(&suspended);
@@ -2886,14 +2946,17 @@ mod suspend_tests {
                     crate::triggers::test_util::clock::install_override(clock.clone());
                 let (worker_id, dir) = seed_test_worker("worker-auto-resume-timeout");
 
-                let suspended = suspend_agent_builtin(vec![
-                    handle_value(&worker_id),
-                    VmValue::String(Rc::from("waiting for review or timeout")),
-                    suspend_options(auto_resume_conditions_with_timeout(
-                        "review.approved",
-                        "resume_with_input",
-                    )),
-                ])
+                let suspended = suspend_agent_builtin(
+                    crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+                    vec![
+                        handle_value(&worker_id),
+                        VmValue::String(Rc::from("waiting for review or timeout")),
+                        suspend_options(auto_resume_conditions_with_timeout(
+                            "review.approved",
+                            "resume_with_input",
+                        )),
+                    ],
+                )
                 .await
                 .expect("suspend with auto-resume timeout");
                 let trigger_id = auto_resume_trigger_id(&suspended);
@@ -2947,23 +3010,29 @@ mod suspend_tests {
                 None,
             ));
         });
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("park before fresh prompt")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("park before fresh prompt")),
+            ],
+        )
         .await
         .expect("suspend");
 
-        let resumed = resume_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::Dict(Rc::new(BTreeMap::from([
-                (
-                    "input".to_string(),
-                    VmValue::String(Rc::from("fresh prompt")),
-                ),
-                ("continue_transcript".to_string(), VmValue::Bool(false)),
-            ]))),
-        ])
+        let resumed = resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    (
+                        "input".to_string(),
+                        VmValue::String(Rc::from("fresh prompt")),
+                    ),
+                    ("continue_transcript".to_string(), VmValue::Bool(false)),
+                ]))),
+            ],
+        )
         .await
         .expect("resume with transcript reset");
         assert_eq!(summary_status(&resumed), "running");
@@ -3022,16 +3091,22 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-suspend-close");
 
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("park me")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("park me")),
+            ],
+        )
         .await
         .expect("suspend");
 
-        let summary = close_agent_builtin(vec![handle_value(&worker_id)])
-            .await
-            .expect("close");
+        let summary = close_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id)],
+        )
+        .await
+        .expect("close");
         assert_eq!(summary_status(&summary), "cancelled");
 
         teardown(&dir, &worker_id);
@@ -3051,10 +3126,13 @@ mod suspend_tests {
                 .clone()
         });
 
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("checkpoint before restart")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("checkpoint before restart")),
+            ],
+        )
         .await
         .expect("suspend");
 
@@ -3085,9 +3163,12 @@ mod suspend_tests {
                 .borrow_mut()
                 .insert(worker_id.clone(), Rc::new(RefCell::new(reloaded)));
         });
-        let resumed = resume_agent_builtin(vec![handle_value(&worker_id)])
-            .await
-            .expect("resume after restart");
+        let resumed = resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id)],
+        )
+        .await
+        .expect("resume after restart");
         assert_eq!(summary_status(&resumed), "running");
 
         teardown(&dir, &worker_id);
@@ -3113,10 +3194,13 @@ mod suspend_tests {
             crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "pipeline".to_string());
         let pipeline_span_link =
             crate::tracing::span_link(pipeline_span_id).expect("open pipeline span link");
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("checkpoint before restart")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("checkpoint before restart")),
+            ],
+        )
         .await
         .expect("suspend");
         crate::tracing::span_end(pipeline_span_id);
@@ -3151,9 +3235,12 @@ mod suspend_tests {
                 .borrow_mut()
                 .insert(worker_id.clone(), Rc::new(RefCell::new(reloaded)));
         });
-        resume_agent_builtin(vec![handle_value(&worker_id)])
-            .await
-            .expect("resume after restart");
+        resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id)],
+        )
+        .await
+        .expect("resume after restart");
 
         let spans = crate::tracing::peek_spans();
         let suspension = spans
@@ -3209,28 +3296,34 @@ mod suspend_tests {
 
         let pipeline_span_id =
             crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "pipeline".to_string());
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("waiting on review")),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
-                "initiator".to_string(),
-                VmValue::String(Rc::from("triggered")),
-            )]))),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("waiting on review")),
+                VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "initiator".to_string(),
+                    VmValue::String(Rc::from("triggered")),
+                )]))),
+            ],
+        )
         .await
         .expect("suspend");
         crate::tracing::span_end(pipeline_span_id);
 
-        resume_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::Dict(Rc::new(BTreeMap::from([
-                (
-                    "input".to_string(),
-                    VmValue::String(Rc::from("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS")),
-                ),
-                ("continue_transcript".to_string(), VmValue::Bool(false)),
-            ]))),
-        ])
+        resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    (
+                        "input".to_string(),
+                        VmValue::String(Rc::from("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS")),
+                    ),
+                    ("continue_transcript".to_string(), VmValue::Bool(false)),
+                ]))),
+            ],
+        )
         .await
         .expect("resume");
 
@@ -3341,10 +3434,13 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-loop-suspend");
 
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("pause before another model call")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("pause before another model call")),
+            ],
+        )
         .await
         .expect("suspend");
 
@@ -3398,10 +3494,13 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-sub-agent-suspend");
 
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("checkpoint the child loop")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("checkpoint the child loop")),
+            ],
+        )
         .await
         .expect("suspend");
 
@@ -3439,9 +3538,12 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-resume-not-suspended");
 
-        let err = resume_agent_builtin(vec![handle_value(&worker_id)])
-            .await
-            .expect_err("running worker should reject warm resume");
+        let err = resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id)],
+        )
+        .await
+        .expect_err("running worker should reject warm resume");
         assert_error_code(err, Code::ResumeWorkerNotSuspended);
 
         teardown(&dir, &worker_id);
@@ -3452,19 +3554,28 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-resume-closed");
 
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("park before close")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("park before close")),
+            ],
+        )
         .await
         .expect("suspend");
-        close_agent_builtin(vec![handle_value(&worker_id)])
-            .await
-            .expect("close");
+        close_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id)],
+        )
+        .await
+        .expect("close");
 
-        let err = resume_agent_builtin(vec![handle_value(&worker_id)])
-            .await
-            .expect_err("closed worker should reject resume");
+        let err = resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id)],
+        )
+        .await
+        .expect_err("closed worker should reject resume");
         assert_error_code(err, Code::ResumeWorkerClosed);
 
         teardown(&dir, &worker_id);
@@ -3475,16 +3586,19 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-empty-resume-input");
 
-        suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("park before empty input")),
-        ])
+        suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("park before empty input")),
+            ],
+        )
         .await
         .expect("suspend");
-        let err = resume_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("")),
-        ])
+        let err = resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![handle_value(&worker_id), VmValue::String(Rc::from(""))],
+        )
         .await
         .expect_err("empty resume input should be rejected");
         assert_error_code(err, Code::ResumeInputInvalid);
@@ -3502,9 +3616,10 @@ mod suspend_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let missing = dir.join("missing-worker.json");
 
-        let err = resume_agent_builtin(vec![VmValue::String(Rc::from(
-            missing.display().to_string(),
-        ))])
+        let err = resume_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![VmValue::String(Rc::from(missing.display().to_string()))],
+        )
         .await
         .expect_err("missing snapshot should reject resume");
         assert_error_code(err, Code::ResumeSnapshotInvalid);
@@ -3537,11 +3652,14 @@ mod suspend_tests {
             VmValue::Dict(Rc::new(BTreeMap::new())),
         )])));
 
-        let err = suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("bad trigger")),
-            suspend_options(invalid_trigger),
-        ])
+        let err = suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("bad trigger")),
+                suspend_options(invalid_trigger),
+            ],
+        )
         .await
         .expect_err("invalid raw trigger registration should fail");
         assert_error_code(err, Code::ResumeTriggerRegistrationFailed);
@@ -3558,14 +3676,17 @@ mod suspend_tests {
         crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
         let (worker_id, dir) = seed_test_worker("worker-timeout-action-error");
 
-        let err = suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("bad timeout")),
-            suspend_options(auto_resume_conditions_with_timeout(
-                "review.approved",
-                "explode",
-            )),
-        ])
+        let err = suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("bad timeout")),
+                suspend_options(auto_resume_conditions_with_timeout(
+                    "review.approved",
+                    "explode",
+                )),
+            ],
+        )
         .await
         .expect_err("unsupported raw timeout action should fail");
         assert_error_code(err, Code::ResumeTimeoutUnsupported);
@@ -3584,10 +3705,13 @@ mod suspend_tests {
             state.borrow_mut().status = "completed".to_string();
         });
 
-        let err = suspend_agent_builtin(vec![
-            handle_value(&worker_id),
-            VmValue::String(Rc::from("late suspend")),
-        ])
+        let err = suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(Rc::from("late suspend")),
+            ],
+        )
         .await
         .expect_err("terminal worker should reject suspend");
         match err {

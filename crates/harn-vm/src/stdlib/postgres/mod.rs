@@ -130,7 +130,10 @@ mod migrate;
     kind = "async",
     category = "postgres"
 )]
-async fn pg_pool_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_pool_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let source = args.first().ok_or_else(|| {
         runtime_error("pg_pool: url, env:, secret:, or {url|env|secret} is required")
     })?;
@@ -143,7 +146,10 @@ async fn pg_pool_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_connect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_connect_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let source = args.first().ok_or_else(|| {
         runtime_error("pg_connect: url, env:, secret:, or {url|env|secret} is required")
     })?;
@@ -156,7 +162,10 @@ async fn pg_connect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_close_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_close_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let id = handle_id(args.first(), HANDLE_POOL, "pg_close")?;
     let removed = POOLS.with(|pools| pools.borrow_mut().remove(&id));
     if let Some(record) = removed {
@@ -175,7 +184,10 @@ async fn pg_close_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_stmt_cache_clear_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_stmt_cache_clear_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = required_arg(&args, 0, "pg_stmt_cache_clear", "pool handle")?;
     if handle_kind(target).as_deref() == Some(HANDLE_MOCK) {
         handle_id(Some(target), HANDLE_MOCK, "pg_stmt_cache_clear")?;
@@ -244,7 +256,10 @@ async fn clear_idle_statement_caches(
     kind = "async",
     category = "postgres"
 )]
-async fn pg_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_query_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| runtime_error("pg_query: pool or transaction handle is required"))?;
@@ -260,7 +275,10 @@ async fn pg_query_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_query_one_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_query_one_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| runtime_error("pg_query_one: pool or transaction handle is required"))?;
@@ -277,7 +295,10 @@ async fn pg_query_one_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_execute_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_execute_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| runtime_error("pg_execute: pool or transaction handle is required"))?;
@@ -291,7 +312,10 @@ async fn pg_execute_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_transaction_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_transaction_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let pool_id = handle_id(args.first(), HANDLE_POOL, "pg_transaction")?;
     let closure = match args.get(1) {
         Some(VmValue::Closure(closure)) => closure.clone(),
@@ -382,7 +406,10 @@ pub(super) async fn run_managed_transaction(
     kind = "async",
     category = "postgres"
 )]
-async fn pg_savepoint_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_savepoint_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     savepoint_op(&args, "pg_savepoint", SavepointOp::Create).await
 }
 
@@ -391,7 +418,10 @@ async fn pg_savepoint_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "postgres"
 )]
-async fn pg_release_savepoint_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_release_savepoint_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     savepoint_op(&args, "pg_release_savepoint", SavepointOp::Release).await
 }
 
@@ -400,7 +430,10 @@ async fn pg_release_savepoint_impl(args: Vec<VmValue>) -> Result<VmValue, VmErro
     kind = "async",
     category = "postgres"
 )]
-async fn pg_rollback_to_savepoint_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_rollback_to_savepoint_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     savepoint_op(&args, "pg_rollback_to_savepoint", SavepointOp::RollbackTo).await
 }
 
@@ -409,7 +442,10 @@ async fn pg_rollback_to_savepoint_impl(args: Vec<VmValue>) -> Result<VmValue, Vm
     kind = "async",
     category = "postgres"
 )]
-async fn pg_migrate_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn pg_migrate_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     migrate::run(&args).await
 }
 

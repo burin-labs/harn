@@ -124,7 +124,10 @@ fn http_reply_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     kind = "async",
     category = "http_response"
 )]
-async fn http_stream_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn http_stream_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let source = args
         .first()
         .cloned()
@@ -153,7 +156,10 @@ async fn http_stream_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "http_response"
 )]
-async fn http_sse_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn http_sse_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let source = args
         .first()
         .cloned()
@@ -1077,10 +1083,13 @@ mod tests {
             VmValue::String(Rc::from("b")),
         ];
         let response = run_sync(|| {
-            http_stream_impl(vec![
-                VmValue::List(Rc::new(items.clone())),
-                VmValue::String(Rc::from("text/plain")),
-            ])
+            http_stream_impl(
+                crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+                vec![
+                    VmValue::List(Rc::new(items.clone())),
+                    VmValue::String(Rc::from("text/plain")),
+                ],
+            )
         })
         .expect("stream");
         let map = dict(&response);
@@ -1115,10 +1124,10 @@ mod tests {
             VmValue::String(Rc::from("ping")),
         )])))];
         let response = run_sync(|| {
-            http_sse_impl(vec![
-                VmValue::List(Rc::new(events.clone())),
-                VmValue::Int(2500),
-            ])
+            http_sse_impl(
+                crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+                vec![VmValue::List(Rc::new(events.clone())), VmValue::Int(2500)],
+            )
         })
         .expect("sse");
         let map = dict(&response);

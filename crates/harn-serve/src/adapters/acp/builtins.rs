@@ -63,7 +63,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
     });
 
     let b = bridge.clone();
-    vm.register_async_builtin("host_call", move |args| {
+    vm.register_async_builtin("host_call", move |_ctx, args| {
         let bridge = b.clone();
         async move {
             let name = args.first().map(|a| a.display()).unwrap_or_default();
@@ -121,7 +121,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
 
     let b = bridge.clone();
     let shell = selected_shell.clone();
-    vm.register_async_builtin("run_command", move |args| {
+    vm.register_async_builtin("run_command", move |_ctx, args| {
         let bridge = b.clone();
         let shell = shell.clone();
         async move { acp_terminal_exec(&bridge, &args, &shell).await }
@@ -196,7 +196,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
 
     let b = bridge.clone();
     let shell = selected_shell.clone();
-    vm.register_async_builtin("exec", move |args| {
+    vm.register_async_builtin("exec", move |_ctx, args| {
         let bridge = b.clone();
         let shell = shell.clone();
         async move { acp_terminal_exec(&bridge, &args, &shell).await }
@@ -204,7 +204,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
 
     let b = bridge;
     let shell = selected_shell;
-    vm.register_async_builtin("shell", move |args| {
+    vm.register_async_builtin("shell", move |_ctx, args| {
         let bridge = b.clone();
         let shell = shell.clone();
         async move { acp_terminal_exec(&bridge, &args, &shell).await }

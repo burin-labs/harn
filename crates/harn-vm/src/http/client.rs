@@ -1556,25 +1556,25 @@ pub(super) fn vm_http_stream_info(stream_id: &str) -> Result<VmValue, VmError> {
 }
 
 pub(super) fn register_http_verb_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("http_get", |args| async move {
+    vm.register_async_builtin("http_get", |_ctx, args| async move {
         http_verb_handler("GET", false, args).await
     });
-    vm.register_async_builtin("http_post", |args| async move {
+    vm.register_async_builtin("http_post", |_ctx, args| async move {
         http_verb_handler("POST", true, args).await
     });
-    vm.register_async_builtin("http_put", |args| async move {
+    vm.register_async_builtin("http_put", |_ctx, args| async move {
         http_verb_handler("PUT", true, args).await
     });
-    vm.register_async_builtin("http_patch", |args| async move {
+    vm.register_async_builtin("http_patch", |_ctx, args| async move {
         http_verb_handler("PATCH", true, args).await
     });
-    vm.register_async_builtin("http_delete", |args| async move {
+    vm.register_async_builtin("http_delete", |_ctx, args| async move {
         http_verb_handler("DELETE", false, args).await
     });
 }
 
 pub(super) fn register_http_client_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("http_request", |args| async move {
+    vm.register_async_builtin("http_request", |_ctx, args| async move {
         let method = args
             .first()
             .map(|a| a.display())
@@ -1598,7 +1598,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
         vm_execute_http_request(&method, &url, &options).await
     });
 
-    vm.register_async_builtin("http_download", |args| async move {
+    vm.register_async_builtin("http_download", |_ctx, args| async move {
         let url = args.first().map(|a| a.display()).unwrap_or_default();
         if url.is_empty() {
             return Err(vm_error("http_download: URL is required"));
@@ -1611,7 +1611,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
         vm_http_download(&url, &dst_path, &options).await
     });
 
-    vm.register_async_builtin("http_stream_open", |args| async move {
+    vm.register_async_builtin("http_stream_open", |_ctx, args| async move {
         let url = args.first().map(|a| a.display()).unwrap_or_default();
         if url.is_empty() {
             return Err(vm_error("http_stream_open: URL is required"));
@@ -1620,7 +1620,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
         vm_http_stream_open(&url, &options).await
     });
 
-    vm.register_async_builtin("http_stream_read", |args| async move {
+    vm.register_async_builtin("http_stream_read", |_ctx, args| async move {
         let Some(handle) = args.first() else {
             return Err(vm_error("http_stream_read: requires a stream handle"));
         };
@@ -1668,7 +1668,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(id)))
     });
 
-    vm.register_async_builtin("http_session_request", |args| async move {
+    vm.register_async_builtin("http_session_request", |_ctx, args| async move {
         if args.len() < 3 {
             return Err(vm_error(
                 "http_session_request: requires session, method, and URL",

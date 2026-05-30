@@ -400,7 +400,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
         .arity(VmBuiltinArity::Range { min: 1, max: 3 })
         .category_static("llm.host")
         .doc_static("Execute one bridge-observed LLM call and return the normalized result dict.");
-    vm.register_async_builtin_with_metadata(metadata, move |args| {
+    vm.register_async_builtin_with_metadata(metadata, move |_ctx, args| {
         let bridge = b.clone();
         async move {
             let mut opts = extract_llm_options(&args)?;
@@ -457,7 +457,7 @@ pub fn register_llm_call_structured_with_bridge(
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
         .category_static("llm.structured")
         .doc_static("Call an LLM through the bridge for schema-valid JSON data.");
-    vm.register_async_builtin_with_metadata(structured, move |args| {
+    vm.register_async_builtin_with_metadata(structured, move |_ctx, args| {
         let bridge = b1.clone();
         async move {
             let rewritten = crate::llm::rewrite_structured_args(args)?;
@@ -473,7 +473,7 @@ pub fn register_llm_call_structured_with_bridge(
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
         .category_static("llm.structured")
         .doc_static("Call an LLM through the bridge and return a non-throwing schema envelope.");
-    vm.register_async_builtin_with_metadata(structured_safe, move |args| {
+    vm.register_async_builtin_with_metadata(structured_safe, move |_ctx, args| {
         let bridge = b2.clone();
         async move {
             let rewritten = match crate::llm::rewrite_structured_args(args) {
@@ -501,7 +501,7 @@ pub fn register_llm_call_structured_with_bridge(
         .doc_static(
             "Call an LLM through the bridge and return a diagnostic structured-output envelope.",
         );
-    vm.register_async_builtin_with_metadata(structured_result, move |args| {
+    vm.register_async_builtin_with_metadata(structured_result, move |_ctx, args| {
         let bridge = b3.clone();
         async move {
             crate::llm::structured_envelope::llm_call_structured_result_impl(args, Some(&bridge))

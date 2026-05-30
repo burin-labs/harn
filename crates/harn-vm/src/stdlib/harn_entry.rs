@@ -57,7 +57,7 @@ struct HarnEntrypoint {
 
 impl HarnEntrypoint {
     fn register(self, vm: &mut Vm) {
-        vm.register_async_builtin_with_metadata(self.metadata(), move |args| {
+        vm.register_async_builtin_with_metadata(self.metadata(), move |_ctx, args| {
             let entrypoint = self.clone();
             Box::pin(async move { call_harn_export(entrypoint, args).await })
         });

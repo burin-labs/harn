@@ -739,7 +739,10 @@ fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     category = "skills",
     kind = "async"
 )]
-async fn load_skill_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn load_skill_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let (requested, inline_options) = parse_load_skill_request(args.first())?;
     let call_options = parse_load_skill_options(args.get(1))?;
     let session_id = call_options

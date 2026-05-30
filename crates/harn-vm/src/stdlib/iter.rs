@@ -394,12 +394,13 @@ fn stream_debounce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     kind = "async",
     category = "iter"
 )]
-async fn stream_collect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn stream_collect_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(&args, 0, "stream.collect")?)?;
     let max = collect_max_arg(&args)?;
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("stream.collect: builtin requires VM execution context".to_string())
-    })?;
+    let mut vm = ctx.child_vm();
     Ok(VmValue::List(Rc::new(
         drain_capped(&inner, &mut vm, max).await?,
     )))
@@ -410,13 +411,14 @@ async fn stream_collect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "iter"
 )]
-async fn stream_fold_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn stream_fold_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(&args, 0, "stream.fold")?)?;
     let mut acc = require_arg(&args, 1, "stream.fold")?;
     let f = require_callable(&args, 2, "stream.fold")?;
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("stream.fold: builtin requires VM execution context".to_string())
-    })?;
+    let mut vm = ctx.child_vm();
     loop {
         match next_handle(&inner, &mut vm).await? {
             Some(v) => acc = vm.call_callable_two(&f, &acc, &v).await?,
@@ -430,11 +432,12 @@ async fn stream_fold_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "iter"
 )]
-async fn stream_first_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn stream_first_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(&args, 0, "stream.first")?)?;
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("stream.first: builtin requires VM execution context".to_string())
-    })?;
+    let mut vm = ctx.child_vm();
     Ok(next_handle(&inner, &mut vm).await?.unwrap_or(VmValue::Nil))
 }
 
@@ -443,7 +446,10 @@ async fn stream_first_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "iter"
 )]
-async fn parallel_race_impl_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn parallel_race_impl_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let items = match require_arg(&args, 0, "parallel_race")? {
         VmValue::List(items) => items,
         other => {
@@ -455,9 +461,7 @@ async fn parallel_race_impl_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErr
     };
     let callable = require_callable(&args, 1, "parallel_race")?;
     let cap = parallel_race_cap(args.get(2), items.len())?;
-    let parent_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("parallel_race: builtin requires VM execution context".to_string())
-    })?;
+    let parent_vm = ctx.child_vm();
     parallel_race_impl(parent_vm, items.iter().cloned().collect(), callable, cap).await
 }
 

@@ -252,15 +252,21 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         (_, true) => (quote!(#support::VmBuiltinHandler::None), quote!()),
         (BuiltinKind::Sync, _) => (quote!(#support::VmBuiltinHandler::Sync(#fn_name)), quote!()),
         (BuiltinKind::Async, _) => {
+            // Async builtins receive an explicit `AsyncBuiltinCtx` handle as
+            // their first parameter (harn#2668). The macro threads it from the
+            // dispatch loop into the user fn so handler bodies mint child VMs /
+            // forward output through the ctx they were given, never an ambient
+            // task-local.
             let is_async_fn = item_fn.sig.asyncness.is_some();
             if is_async_fn {
                 let thunk = quote! {
                     #[doc(hidden)]
                     #[allow(non_snake_case)]
                     fn #async_thunk_ident(
+                        ctx: crate::vm::AsyncBuiltinCtx,
                         args: ::std::vec::Vec<#support::VmValue>,
                     ) -> #support::AsyncBuiltinFuture {
-                        ::std::boxed::Box::pin(#fn_name(args))
+                        ::std::boxed::Box::pin(#fn_name(ctx, args))
                     }
                 };
                 (

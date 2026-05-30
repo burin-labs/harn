@@ -67,7 +67,10 @@ pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
     kind = "async",
     category = "durable_step"
 )]
-async fn step_run_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn step_run_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     step_run(args).await
 }
 
@@ -76,7 +79,10 @@ async fn step_run_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     kind = "async",
     category = "durable_step"
 )]
-async fn step_inspect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn step_inspect_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     step_inspect(args).await
 }
 

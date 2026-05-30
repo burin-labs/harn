@@ -786,7 +786,10 @@ fn tool_hooks_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     category = "tool_hooks",
     kind = "async"
 )]
-async fn tool_hooks_match_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn tool_hooks_match_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let registry = require_tagged(
         args.first()
             .ok_or_else(|| err("tool_hooks_match: requires a registry"))?,

@@ -161,7 +161,10 @@ fn oauth_storage_cloud_handle_impl(
     kind = "async",
     category = "oauth_storage"
 )]
-async fn oauth_storage_get_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn oauth_storage_get_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let handle = require_handle(&args, 0, "__oauth_storage_get")?;
     let key = required_string_arg(&args, 1, "__oauth_storage_get", "key")?;
     backend_get(&handle, &key).await
@@ -172,7 +175,10 @@ async fn oauth_storage_get_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     kind = "async",
     category = "oauth_storage"
 )]
-async fn oauth_storage_set_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn oauth_storage_set_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let handle = require_handle(&args, 0, "__oauth_storage_set")?;
     let key = required_string_arg(&args, 1, "__oauth_storage_set", "key")?;
     let token_dict = require_dict_arg(&args, 2, "__oauth_storage_set", "token_set")?;
@@ -186,7 +192,10 @@ async fn oauth_storage_set_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     kind = "async",
     category = "oauth_storage"
 )]
-async fn oauth_storage_delete_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn oauth_storage_delete_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let handle = require_handle(&args, 0, "__oauth_storage_delete")?;
     let key = required_string_arg(&args, 1, "__oauth_storage_delete", "key")?;
     backend_delete(&handle, &key).await?;
