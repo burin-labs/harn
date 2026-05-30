@@ -8,6 +8,68 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.52
+
+### Added
+
+New harn-owned MCP enable/disable allowlist (`harn_vm::mcp_allowlist`) covering
+tools, resources, and prompts from one persisted config plus an optional
+per-project overlay, and an effective-catalog projection (servers → items +
+`enabled`) exposed over ACP via the `mcp/catalog` request. A new additive
+`mcp_catalog_changed` agent event cues thin clients (the burin-code TUI / GUI)
+to re-fetch and re-render their MCP toggle UI, so no client stores toggle state
+of its own. (#2647)
+The macOS `sandbox-exec` renderer now emits a trailing `(deny file-write*
+(subpath "<root>"))` for every `read_only_roots` entry after the broad
+workspace write allow, so a read-only root nested under a writable workspace
+root stays hermetically unwritable (`sandbox-exec` is last-match-wins,
+defeating a chmod-back write). The Linux Landlock renderer's read-only access
+bits (read + dir-read + execute, never write/create/remove) are extracted into
+a tested `read_only_access()` helper; Landlock rules are additive (no deny), so
+the two root lists must stay disjoint when targeting the Linux backend. No-op
+when `read_only_roots` is empty. (#2654)
+
+### Changed
+
+MCP tools now use **progressive disclosure by default** when bootstrapped into
+an agent's tool surface. Each MCP tool ships a lightweight catalog entry (name +
+one-line description) up front, and its full JSON input schema is held back until
+the agent surfaces the tool via `tool_search` or calls it directly
+(`defer_loading: true`). This cuts the upfront context/token cost for MCP servers
+that expose many tools.
+
+This is a behavior-default change and is opt-out-able: set `eager_schemas: true`
+on an `mcp_servers` spec entry to ship that server's full schemas eagerly (the
+previous behavior). A per-tool `defer_loading` that a server advertises itself is
+always preserved.
+
+### Fixed
+
+- **Per-test reset now drains several registries that previously accumulated across a reused worker thread
+  (#2660).** `reset_thread_local_state` (and the harn-cli test runner) now clear the workflow run-state map,
+  the agent inbox, the LLM routing-policy registry, the tool-call cancellation registry, and `harn-hostlib`'s
+  filesystem-snapshot sessions. Each of these was only drained on a specific normal-completion path, so a
+  workflow, inbox, policy, cancellation, or snapshot session abandoned mid-run (test timeout, early error,
+  host teardown) leaked one entry per case. Regression tests assert each registry is empty after a reset.
+- **Async-builtin VM context is now cancel-safe and multi-thread-correct (#2667).** The per-call child VM is
+  propagated through a `tokio::task_local` scope instead of a manually push/pop'd `thread_local!` stack. A cancelled
+  or panicked async builtin can no longer strand a child `Vm` (which `Rc`-pins the compiled module graph + env
+  snapshot) — the binding is dropped with the future — so long-running and cancellation-heavy agent loops no longer
+  accumulate stranded contexts, and the context is read correctly when a task resumes on another worker thread.
+  Removes the deprecated `take_async_builtin_child_vm`/`restore_async_builtin_child_vm` shims and the
+  `AsyncBuiltinChildVmGuard`. Groundwork for explicit context passing (#2668).
+- **Fixed an unbounded memory leak in the test runner and long-running agent loops (#2660).** Transcript and daemon
+  event-log appends were dispatched as detached `tokio::runtime::Handle::spawn` tasks. The agent loop and
+  `harn test` drive their runtime with `LocalSet::run_until`, which stops polling once the driving future resolves,
+  so those detached append tasks were never run to completion — each stranded task pinned its transcript-sized
+  `LogEvent` payload plus an `Arc<AnyEventLog>` clone for the lifetime of the runtime. Across a
+  `harn test --parallel` worker this accumulated roughly one transcript per test (~18 MB) and OOM'd CI. The appends
+  now run synchronously via a private `futures::executor::block_on`; no event-log backend yields to the tokio
+  reactor on `append`, so this is leak-free and does not touch the ambient runtime. A counting-allocator probe
+  measured the regression at ~18 MB/round of steady-state growth before the fix; a regression test now asserts the
+  append lands in the log the instant the producing `run_until` future resolves, proving no detached task can
+  strand the payload.
+
 ## v0.8.51
 
 ### Breaking
