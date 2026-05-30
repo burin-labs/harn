@@ -5,19 +5,43 @@ use std::process;
 use crate::config as harn_config;
 use crate::package::CheckConfig;
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct HarnLintConfig {
+    pub(crate) disabled: Vec<String>,
+    pub(crate) require_file_header: bool,
+    pub(crate) complexity_threshold: Option<usize>,
+    pub(crate) persona_step_allowlist: Vec<String>,
+    pub(crate) template_variant_branch_threshold: Option<usize>,
+}
+
+pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
+    match harn_config::load_for_path(path) {
+        Ok(cfg) => HarnLintConfig {
+            disabled: cfg.lint.disabled.unwrap_or_default(),
+            require_file_header: cfg.lint.require_file_header.unwrap_or(false),
+            complexity_threshold: cfg.lint.complexity_threshold,
+            persona_step_allowlist: cfg.lint.persona_step_allowlist,
+            template_variant_branch_threshold: cfg.lint.template_variant_branch_threshold,
+        },
+        Err(e) => {
+            eprintln!("warning: {e}");
+            HarnLintConfig::default()
+        }
+    }
+}
+
 /// Merge `[lint].disabled` from the nearest harn.toml into `disable_rules`.
 /// The `require_file_header` flag is handled separately via
 /// [`harn_lint_require_file_header`] so it can be enabled without a full
 /// `[check]` section.
 pub(crate) fn apply_harn_lint_config(path: &Path, config: &mut CheckConfig) {
-    let Ok(cfg) = harn_config::load_for_path(path) else {
-        return;
-    };
-    if let Some(disabled) = cfg.lint.disabled {
-        for rule in disabled {
-            if !config.disable_rules.iter().any(|r| r == &rule) {
-                config.disable_rules.push(rule);
-            }
+    apply_loaded_harn_lint_config(&load_harn_lint_config(path), config);
+}
+
+pub(crate) fn apply_loaded_harn_lint_config(lint: &HarnLintConfig, config: &mut CheckConfig) {
+    for rule in &lint.disabled {
+        if !config.disable_rules.iter().any(|r| r == rule) {
+            config.disable_rules.push(rule.clone());
         }
     }
 }
@@ -59,57 +83,8 @@ pub(crate) fn harn_lint_persona_step_allowlist(path: &Path) -> Vec<String> {
     }
 }
 
-/// Read `[lint] template_variant_branch_threshold` from the nearest
-/// harn.toml. Returns `None` when unset; the
-/// `template-variant-explosion` rule falls back to
-/// [`harn_lint::DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD`].
-pub(crate) fn harn_lint_template_variant_branch_threshold(path: &Path) -> Option<usize> {
-    match harn_config::load_for_path(path) {
-        Ok(cfg) => cfg.lint.template_variant_branch_threshold,
-        Err(e) => {
-            eprintln!("warning: {e}");
-            None
-        }
-    }
-}
-
-/// Read `[lint] disabled` from the nearest harn.toml.
-pub(crate) fn harn_lint_disabled_rules(path: &Path) -> Vec<String> {
-    match harn_config::load_for_path(path) {
-        Ok(cfg) => cfg.lint.disabled.unwrap_or_default(),
-        Err(e) => {
-            eprintln!("warning: {e}");
-            Vec::new()
-        }
-    }
-}
-
 pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for target in targets {
-        let path = Path::new(target);
-        if path.is_dir() {
-            super::super::collect_harn_files(path, &mut files);
-        } else if is_harn_program_file(path) {
-            files.push(path.to_path_buf());
-        }
-    }
-    files.sort();
-    files.dedup();
-    files
-}
-
-/// Recognize `.harn` program files while excluding `.harn.prompt`
-/// (which `harn lint` routes through the prompt-template lint pass
-/// instead — see `commands::check::template_lint`).
-fn is_harn_program_file(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        return false;
-    };
-    if name.ends_with(".harn.prompt") || name.ends_with(".prompt") {
-        return false;
-    }
-    path.extension().is_some_and(|ext| ext == "harn")
+    super::super::collect_source_targets(targets, true, false).harn
 }
 
 /// Collect every function name that appears in a selective import across

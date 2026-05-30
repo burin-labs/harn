@@ -17,45 +17,9 @@ use harn_lint::LintSeverity;
 
 use super::outcome::{print_lint_diagnostics, CommandOutcome};
 
-/// Recursively gather `.harn.prompt` / `.prompt` files under `targets`.
-/// Targets that are files themselves are returned as-is when they
-/// match one of those extensions.
-pub(crate) fn collect_prompt_targets(targets: &[&str]) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for target in targets {
-        let path = Path::new(target);
-        if path.is_dir() {
-            collect_prompt_files(path, &mut files);
-        } else if is_prompt_file(path) {
-            files.push(path.to_path_buf());
-        }
-    }
-    files.sort();
-    files.dedup();
-    files
-}
-
-fn collect_prompt_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    entries.sort_by_key(|e| e.path());
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_prompt_files(&path, out);
-        } else if is_prompt_file(&path) {
-            out.push(path);
-        }
-    }
-}
-
-fn is_prompt_file(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        return false;
-    };
-    name.ends_with(".harn.prompt") || name.ends_with(".prompt")
+pub(crate) fn collect_lint_targets(targets: &[&str]) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let files = super::super::collect_source_targets(targets, true, true);
+    (files.harn, files.prompts)
 }
 
 /// Lint a single `.harn.prompt` template. Prints diagnostics through
