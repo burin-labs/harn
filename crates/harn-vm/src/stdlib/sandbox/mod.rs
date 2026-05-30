@@ -292,11 +292,15 @@ pub struct SandboxViolation {
     /// active policy (CWD-relative paths resolved to absolute, `..`
     /// collapsed, symlinks canonicalized where the path exists).
     pub attempted: PathBuf,
-    /// The workspace roots the path was checked against, normalized the
-    /// same way as `attempted`.
+    /// The writable workspace roots the path was checked against,
+    /// normalized the same way as `attempted`.
     pub roots: Vec<PathBuf>,
     /// Whether the rejected access was a read, write, or delete.
     pub access: FsAccess,
+    /// True when the path resolved *inside* a read-only root: it is in
+    /// scope for reads, and only the attempted mutation is denied. False
+    /// when the path fell outside every configured root entirely.
+    pub read_only: bool,
 }
 
 impl SandboxViolation {
@@ -304,6 +308,13 @@ impl SandboxViolation {
     /// by [`enforce_fs_path`] so the `harness.fs.*` and hostlib surfaces
     /// reject an out-of-root path identically.
     pub fn message(&self, builtin: &str) -> String {
+        if self.read_only {
+            return format!(
+                "sandbox violation: builtin '{builtin}' attempted to {} '{}' under a read-only workspace root",
+                self.access.verb(),
+                self.attempted.display(),
+            );
+        }
         format!(
             "sandbox violation: builtin '{builtin}' attempted to {} '{}' outside workspace_roots [{}]",
             self.access.verb(),
@@ -320,10 +331,11 @@ impl SandboxViolation {
 /// Check whether `path` is inside the active policy's workspace roots.
 ///
 /// Returns `Ok(())` when no execution policy is active, when the active
-/// profile is [`SandboxProfile::Unrestricted`], or when the normalized
-/// path falls within one of the workspace roots. Otherwise returns a
-/// [`SandboxViolation`] describing the rejected path and the roots it was
-/// checked against.
+/// profile is [`SandboxProfile::Unrestricted`], when the normalized path
+/// falls within a writable workspace root, or — for [`FsAccess::Read`]
+/// only — when it falls within a read-only root. A write/delete that
+/// resolves under a read-only root is rejected with `read_only` set, as
+/// is any access that falls outside every configured root.
 ///
 /// This is the public, `VmError`-free entry point embedders use to apply
 /// workspace-root scoping to their own host calls. The in-crate
@@ -342,10 +354,18 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
         return Ok(());
     }
+    let read_only_roots = normalized_read_only_roots(&policy);
+    let within_read_only = read_only_roots
+        .iter()
+        .any(|root| path_is_within(&candidate, root));
+    if within_read_only && access == FsAccess::Read {
+        return Ok(());
+    }
     Err(SandboxViolation {
         attempted: candidate,
         roots,
         access,
+        read_only: within_read_only,
     })
 }
 
@@ -664,6 +684,28 @@ fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
 
 pub(crate) fn process_sandbox_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     normalized_workspace_roots(policy)
+}
+
+/// Normalize the policy's read-only roots. Unlike
+/// [`normalized_workspace_roots`], an empty list stays empty — read-only
+/// scope is purely additive, so there is no execution-root fallback to
+/// synthesize.
+fn normalized_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    policy
+        .read_only_roots
+        .iter()
+        .map(|root| normalize_for_policy(&resolve_policy_path(root)))
+        .collect()
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn process_sandbox_readonly_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    normalized_read_only_roots(policy)
 }
 
 fn resolve_policy_path(path: &str) -> PathBuf {

@@ -15,8 +15,8 @@ use std::path::Path;
 use std::process::Command;
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write, process_sandbox_roots, unavailable,
-    PrepareOutcome, SandboxBackend,
+    policy_allows_network, policy_allows_workspace_write, process_sandbox_readonly_roots,
+    process_sandbox_roots, unavailable, PrepareOutcome, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -79,6 +79,7 @@ fn wrap_with_sandbox_exec(
 
 fn render_profile(policy: &CapabilityPolicy) -> String {
     let roots = process_sandbox_roots(policy);
+    let read_only_roots = process_sandbox_readonly_roots(policy);
     let mut profile = String::from(
         "(version 1)\n\
          (deny default)\n\
@@ -98,7 +99,9 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
             sandbox_profile_escape(root)
         ));
     }
-    for root in &roots {
+    // Read-only roots are granted read but never write — the write block
+    // below iterates only the writable `roots`.
+    for root in roots.iter().chain(read_only_roots.iter()) {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
             sandbox_profile_escape(&root.display().to_string())
@@ -149,6 +152,7 @@ mod tests {
                 ops.iter().map(|op| op.to_string()).collect(),
             )]),
             workspace_roots: vec!["/tmp/harn-workspace".to_string()],
+            read_only_roots: Vec::new(),
             side_effect_level: Some("read_only".to_string()),
             recursion_limit: None,
             tool_arg_constraints: Vec::new(),
@@ -184,5 +188,28 @@ mod tests {
 
         let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
         assert!(writable.contains("(subpath \"/tmp\") (subpath \"/private/tmp\")"));
+    }
+
+    #[test]
+    fn read_only_roots_are_granted_read_but_never_write() {
+        let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+        policy.read_only_roots = vec!["/mnt/memory".to_string()];
+        let profile = render_profile(&policy);
+
+        assert!(
+            profile.contains("(allow file-read* (subpath \"/mnt/memory\"))"),
+            "read-only root should be granted read: {profile}"
+        );
+        assert!(
+            !profile.contains("(allow file-write* (subpath \"/mnt/memory\"))"),
+            "read-only root must never be granted write even when workspace_write is allowed: {profile}"
+        );
+        assert!(
+            profile
+                .lines()
+                .any(|line| line.starts_with("(allow file-write*")
+                    && line.contains("harn-workspace")),
+            "writable workspace root should still get write: {profile}"
+        );
     }
 }

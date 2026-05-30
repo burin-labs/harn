@@ -20,6 +20,7 @@ fn policy_with(profile: SandboxProfile, workspace: &std::path::Path) -> Capabili
         tools: Vec::new(),
         capabilities: BTreeMap::new(),
         workspace_roots: vec![workspace.display().to_string()],
+        read_only_roots: Vec::new(),
         side_effect_level: Some("workspace_write".to_string()),
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
@@ -80,6 +81,37 @@ fn unrestricted_profile_skips_cwd_enforcement() {
         "Unrestricted profile must skip workspace_root enforcement so escape-hatch \
          workflows still spawn",
     );
+}
+
+#[test]
+fn read_only_root_allows_reads_but_rejects_writes_and_deletes() {
+    use harn_vm::process_sandbox::{check_fs_path_scope, FsAccess};
+
+    let writable = tempfile::tempdir().unwrap();
+    let read_only = tempfile::tempdir().unwrap();
+    let policy = CapabilityPolicy {
+        workspace_roots: vec![writable.path().display().to_string()],
+        read_only_roots: vec![read_only.path().display().to_string()],
+        side_effect_level: Some("workspace_write".to_string()),
+        sandbox_profile: SandboxProfile::Worktree,
+        ..Default::default()
+    };
+    push_execution_policy(policy);
+
+    let read_only_file = read_only.path().join("memory.txt");
+    let writable_file = writable.path().join("scratch.txt");
+
+    // Reads under a read-only root are in scope.
+    assert!(check_fs_path_scope(&read_only_file, FsAccess::Read).is_ok());
+    // Writes and deletes under a read-only root are rejected even though
+    // the path is otherwise in scope.
+    let write_violation = check_fs_path_scope(&read_only_file, FsAccess::Write).unwrap_err();
+    assert!(write_violation.read_only);
+    assert!(check_fs_path_scope(&read_only_file, FsAccess::Delete).is_err());
+    // The writable root keeps full access.
+    assert!(check_fs_path_scope(&writable_file, FsAccess::Write).is_ok());
+
+    pop_execution_policy();
 }
 
 #[test]

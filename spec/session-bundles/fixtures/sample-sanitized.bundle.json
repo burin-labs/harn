@@ -235,6 +235,7 @@
       "persona_runtime": [],
       "policy": {
         "capabilities": {},
+        "read_only_roots": [],
         "recursion_limit": null,
         "sandbox_profile": "worktree",
         "side_effect_level": null,

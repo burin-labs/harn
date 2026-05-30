@@ -39,8 +39,9 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::{
-    policy_allows_workspace_write, process_sandbox_roots, process_spawn_error, sandbox_rejection,
-    unavailable, PrepareOutcome, ProcessCommandConfig, SandboxBackend,
+    policy_allows_workspace_write, process_sandbox_readonly_roots, process_sandbox_roots,
+    process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
+    SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -294,13 +295,22 @@ struct WorkspaceAclGrants {
 
 impl WorkspaceAclGrants {
     fn grant(sid: &str, policy: &CapabilityPolicy) -> io::Result<Self> {
-        let permission = if policy_allows_workspace_write(policy) {
+        // Read-execute for the entire profile when writes are denied;
+        // otherwise Modify on the writable roots. Read-only roots always
+        // get read-execute regardless of the workspace-write capability.
+        let workspace_permission = if policy_allows_workspace_write(policy) {
             "(OI)(CI)M"
         } else {
             "(OI)(CI)RX"
         };
         let mut paths = Vec::new();
-        for root in process_sandbox_roots(policy) {
+        let writable = process_sandbox_roots(policy)
+            .into_iter()
+            .map(|root| (root, workspace_permission));
+        let read_only = process_sandbox_readonly_roots(policy)
+            .into_iter()
+            .map(|root| (root, "(OI)(CI)RX"));
+        for (root, permission) in writable.chain(read_only) {
             if !root.exists() {
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,

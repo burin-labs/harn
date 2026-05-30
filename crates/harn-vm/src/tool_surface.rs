@@ -304,6 +304,7 @@ pub fn tool_capability_policy_from_spec(value: &serde_json::Value) -> Capability
         tools,
         capabilities,
         workspace_roots: Vec::new(),
+        read_only_roots: Vec::new(),
         side_effect_level,
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
