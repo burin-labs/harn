@@ -8,6 +8,120 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.51
+
+### Breaking
+
+- **ACP `session/request_permission` now uses the canonical ACP v0.12.2 wire
+  shape (#2639).** The request the agent sends is
+  `{ sessionId, toolCall: <ToolCallUpdate>, options: [{ optionId, name, kind }] }`,
+  and the only accepted responses are `{ outcome: { outcome: "selected",
+  optionId } }` and `{ outcome: { outcome: "cancelled" } }`. The pre-#2639
+  harn shapes — the top-level `toolName`/`rawInput` request fields and the
+  `{ outcome: "approved" }` / `{ granted: true }` responses — are no longer
+  emitted or honored; a `selected` outcome on the `allow` option grants the
+  call, `reject` and `cancelled` stop it (fail-closed on anything else). Harn's
+  internal permission *policy* decision (allow / deny / suspend), the
+  `ApprovalPolicy` receipt, and the out-of-band `harn.hitl.respond` HITL path
+  are unchanged — they now ride alongside the canonical fields as a vendor
+  extension under `toolCall._meta.harn`. ACP clients (e.g. the Burin IDE) must
+  send the canonical `selected`/`cancelled` response.
+
+### Added
+
+- **`harn replay --counterfactual <plan.harn>` answers "what if the agent had
+  edited differently?" (#2611).** After rehydrating a session at the `--at`
+  cutoff, the flag evaluates an alternate `.harn` edit plan through
+  `edit.dry_run` against a throw-away staged-fs overlay (#1722) and reports the
+  divergent file set — the files the plan's edits would touch, each tagged
+  `created`/`modified`/`deleted` with line deltas — in both human and `--json`
+  (`data.counterfactual`) modes. The recorded session and the on-disk tree are
+  never mutated. Closes #2522.
+- **Burin compass tool-rewrite router + `harn.compass.*` counters (#2612).** The compass steer
+  (#2521) now has an active routing layer: a per-tool-call hook in the agent loop observes freeform /
+  whole-file edit calls (`str_replace`, `write_file`, `edit_safe_text_patch`-shape) on parseable files
+  and steers them toward the AST-precise primitives. On by default in `suggest` mode — it injects an
+  advisory reminder naming the structural tool (`edit_apply_node` / `edit_rename_symbol` /
+  `edit_safe_text_patch`) and leaves the original call untouched. In `rewrite` mode it silently
+  substitutes the provably-equivalent hash-guarded `edit_safe_text_patch` for a raw text replace, and
+  falls back to a suggestion otherwise. Each decision increments `harn.compass.suggested`,
+  `harn.compass.rewritten`, or `harn.compass.fell_back`, tagged with the persona and tool names.
+  Configure per session/persona via the `compass` option (`compass: false` /
+  `compass: {mode: "rewrite"|"suggest"|"off", prefer: [...]}`); the router consumes the
+  `edit_strategy.prefer` signal from `personas/fixer/manifest.harn`. The hook is additive and inert
+  when the compass is disabled or the call is not a freeform edit. Closes #2521.
+- **`harn dump-protocol-artifacts` now emits a Rust binding (#2640).** A
+  dependency-free `spec/protocol-artifacts/harn-protocol.rs` of ACP method-name,
+  session-update discriminator, content/tool-lifecycle extension-key, and
+  protocol-version `pub const`s (+ published slices). It is the first binding to
+  publish the complete *dispatched* ACP method surface (not just the stable
+  subset), so Rust hosts (Burin Code) vendor it as `protocol/src/generated.rs`
+  instead of hand-maintaining a parallel method list.
+- **`harn-serve` gains an in-process ACP embedding API (#2636).** `run_acp_channel_server_with_handle`
+  returns the (`!Send`) server future plus a `Send` `AcpChannelHandle` exposing graceful `shutdown()`,
+  `wait_ready()`, and `wait_terminated()`; and `EmbeddedAgent` packages the dedicated-thread +
+  current-thread-runtime setup an in-process host otherwise hand-rolls, handing back the request sender,
+  response receiver, and handle. Existing `run_acp_channel_server` / `run_acp_server` signatures and
+  behavior are unchanged.
+- **MCP OAuth now sends the RFC 8707 `resource` indicator (#2643).** The MCP authorization profile
+  requires the client to send `resource=<canonical MCP server URI>` in both the authorization request
+  and the token request — regardless of whether the authorization server advertises support. A new
+  `harn_vm::mcp_auth::canonical_resource_indicator` helper canonicalizes the server URL (lowercased
+  scheme/host, default ports and the query/fragment dropped, lone trailing slash stripped), and the
+  `harn mcp login` flow now threads that canonical resource into the authorization URL, the
+  authorization-code exchange, and refresh-token requests.
+`harn mcp presets [--json]` prints a harn-owned catalog of well-known MCP
+server presets (Notion, Linear, GitHub, filesystem) — transport,
+command/url template, auth kind, and required placeholders — so thin clients
+render one identical, drift-free "one-click server" list. The `--json`
+envelope is a versioned stable contract. (#2657)
+`harn mcp status` with no target now reports every `[[mcp]]` server in the
+nearest `harn.toml` — transport, derived state
+(connected/disconnected/auth_required/error), url, lazy flag, and live
+tool/resource/prompt counts when known — with a versioned `--json` envelope.
+A new additive `mcp_notification` agent event also surfaces server-to-client
+MCP messages (progress, log, and inbound elicitation/sampling requests) over
+the ACP `_harn/agentEvent` channel, so a thin client can render them live
+without parsing the agent inbox. (#2658)
+
+### Changed
+
+- Prompt assembly: the agent's per-turn primary system block is now decomposed
+  into individually auditable fragments. `agent_build_turn_system_fragments`
+  emits one `{id, source, body}` per internal part (system text, MCP advisory,
+  active skills, skill catalog, progress nudge, loop/tool contracts); the agent
+  loop forwards them to `llm_call` over the `_system_fragments` channel so the
+  whole primary block — not just host parts and reminders — shows up in
+  `prompt_explain` provenance under `primary:<part>` ids. The assembled prompt
+  is byte-for-byte unchanged; only its provenance is finer-grained.
+`harn test --parallel` now sizes its default worker count by available
+memory as well as CPU count, capping at
+`min(cores, (available - reserve) / per-worker-budget)`. Available memory is
+the lesser of the host figure and (on Linux) this process's cgroup-v2 slice
+headroom, so a container or a self-hosted runner that shares a box no longer
+oversubscribes RAM and triggers swap-thrash runner-loss. The cap only ever
+lowers the core-based default; explicit `--jobs` / `HARN_TEST_JOBS` still win,
+and the per-worker budget is tunable via `HARN_TEST_WORKER_MEMORY_MB`. (#2659)
+
+### Security
+
+- **`harn serve site` no longer trusts `X-Forwarded-For` / `X-Real-IP` by default (#2624).** `req.client_ip`
+  now defaults to the real transport peer, so a direct caller can no longer forge it with a spoofed header.
+  Pass `--trusted-proxy <CIDR>` (repeatable; or `HARN_SERVE_SITE_TRUSTED_PROXIES`) with your reverse proxy's
+  ranges to opt back in — the forwarded chain is then honoured only when the connection arrives from a trusted
+  proxy, and the client is taken as the rightmost hop that is not itself trusted. The `req` dict also gains a
+  populated `remote_addr` (`ip:port` of the transport peer), wired through from the listener.
+- **`CapabilityPolicy` can express read-only workspace roots, closing a sandbox-escape where "read-only"
+  mounts were writable (#2634).** A new `read_only_roots` list sits alongside `workspace_roots`: a path
+  resolving under one is in scope for `read_text`/`list`/`exists` but rejected for `write_text`/`delete`
+  with a `tool_rejected` "read-only workspace root" violation, and every OS sandbox backend (Linux
+  Landlock, macOS `sandbox-exec`, Windows AppContainer ACLs, OpenBSD `unveil`) grants the root read but
+  never write — even when the policy otherwise allows workspace writes. The local hostlib sandbox now
+  lowers each `FilesystemAccess::ReadOnly` mount into `read_only_roots`, so a snippet or persona can no
+  longer `echo x > /mnt/memory/file` or delete bundle files under a mount the caller declared read-only.
+  Nested-execution and workflow-patch ceilings reject a child that widens read-only scope past its parent,
+  and `intersect` narrows `read_only_roots` to the common set.
+
 ## v0.8.50
 
 ### Added
