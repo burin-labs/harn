@@ -2141,10 +2141,19 @@ impl Dispatcher {
                 })
             }
             DispatchUri::AutoResume { worker_id } => {
-                let value =
-                    crate::stdlib::agents::resume_worker_from_auto_resume_trigger(worker_id, event)
-                        .await
-                        .map_err(|error| DispatchError::Local(error.to_string()))?;
+                // Auto-resume is invoked directly in Rust (not via a VM closure
+                // through `invoke_vm_callable`), so bind the dispatcher's base VM
+                // as the async-builtin context here too: the resume path's
+                // respawn gate (`agents::warm_resume_worker`) reads
+                // `clone_async_builtin_child_vm()` and silently skips the
+                // respawn when it's empty, leaving the worker suspended forever.
+                // See harn#2667.
+                let value = crate::vm::scope_async_builtin(
+                    self.base_vm.child_vm(),
+                    crate::stdlib::agents::resume_worker_from_auto_resume_trigger(worker_id, event),
+                )
+                .await
+                .map_err(|error| DispatchError::Local(error.to_string()))?;
                 let mut metadata = route.dispatch_boundary_metadata();
                 metadata.insert("worker_id".to_string(), serde_json::json!(worker_id));
                 metadata.insert("resume_kind".to_string(), serde_json::json!("auto_resume"));
@@ -2305,12 +2314,18 @@ impl Dispatcher {
         // The dispatcher installs its own child VM on the async-builtin
         // stack so the pool can clone an execution context when (or after)
         // the task is scheduled to run.
+        // Bind the dispatcher's child VM as the async-builtin context for the
+        // duration of the pool submit, so the pool can clone an execution
+        // context when the task is scheduled. `submit` is the only await here;
+        // a task-local scope around it is cancel-safe and avoids the old
+        // thread-local stack strand risk.
         let child_vm = self.base_vm.child_vm();
-        let _vm_guard = crate::vm::install_async_builtin_child_vm(child_vm);
-        let outcome =
-            crate::stdlib::pool::submit_closure_to_named_pool(pool, closure, priority, key.clone())
-                .await
-                .map_err(|error| DispatchError::Local(error.to_string()))?;
+        let outcome = crate::vm::scope_async_builtin(
+            child_vm,
+            crate::stdlib::pool::submit_closure_to_named_pool(pool, closure, priority, key.clone()),
+        )
+        .await
+        .map_err(|error| DispatchError::Local(error.to_string()))?;
 
         let mut metadata = route.dispatch_boundary_metadata();
         metadata.insert("pool".to_string(), serde_json::json!(pool));

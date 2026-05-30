@@ -9,7 +9,7 @@ use harn_vm::orchestration::{
     clear_runtime_hooks, matching_vm_lifecycle_hooks, register_vm_hook, run_lifecycle_hooks,
     HookEvent,
 };
-use harn_vm::{install_async_builtin_child_vm, register_vm_stdlib, reset_thread_local_state, Vm};
+use harn_vm::{register_vm_stdlib, reset_thread_local_state, with_async_builtin_ctx_sync, Vm};
 use serde_json::{json, Value as JsonValue};
 use tokio::runtime::{Builder, Runtime};
 
@@ -161,27 +161,31 @@ fn measure_once(runtime: &Runtime, fixture: &HookDispatchFixture) {
 fn bench_hook_dispatch(c: &mut Criterion) {
     let runtime = runtime();
     let vm = install_noop_hook(&runtime);
-    let _vm_context = install_async_builtin_child_vm(vm);
+    // Bind the VM as the async-builtin context for the whole bench: hook
+    // dispatch resolves a `clone_async_builtin_child_vm` root, and `block_on`
+    // polls inline on this thread so the sync scope is visible throughout.
+    // (Replaces the old `install_async_builtin_child_vm` RAII guard.) harn#2667.
+    with_async_builtin_ctx_sync(vm, || {
+        let fixtures: Vec<HookDispatchFixture> = FANOUTS.into_iter().map(fixture).collect();
+        for fixture in &fixtures {
+            measure_once(&runtime, fixture);
+        }
 
-    let fixtures: Vec<HookDispatchFixture> = FANOUTS.into_iter().map(fixture).collect();
-    for fixture in &fixtures {
-        measure_once(&runtime, fixture);
-    }
-
-    let mut group = c.benchmark_group("hook_dispatch/noop_lifecycle_hook");
-    for fixture in &fixtures {
-        group.throughput(Throughput::Elements(fixture.fanout as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(format!("fanout_{:03}", fixture.fanout)),
-            fixture,
-            |b, fixture| {
-                b.iter(|| {
-                    runtime.block_on(dispatch_fanout(black_box(&fixture.payloads)));
-                });
-            },
-        );
-    }
-    group.finish();
+        let mut group = c.benchmark_group("hook_dispatch/noop_lifecycle_hook");
+        for fixture in &fixtures {
+            group.throughput(Throughput::Elements(fixture.fanout as u64));
+            group.bench_with_input(
+                BenchmarkId::from_parameter(format!("fanout_{:03}", fixture.fanout)),
+                fixture,
+                |b, fixture| {
+                    b.iter(|| {
+                        runtime.block_on(dispatch_fanout(black_box(&fixture.payloads)));
+                    });
+                },
+            );
+        }
+        group.finish();
+    });
 }
 
 criterion_group! {

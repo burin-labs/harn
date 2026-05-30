@@ -20,10 +20,10 @@ mod tests_debug;
 #[cfg(test)]
 mod tests_runtime;
 
-#[allow(deprecated)]
+pub(crate) use async_builtin::run_async_builtin_with;
 pub use async_builtin::{
-    clone_async_builtin_child_vm, forward_child_output_to_parent, install_async_builtin_child_vm,
-    restore_async_builtin_child_vm, take_async_builtin_child_vm, AsyncBuiltinChildVmGuard,
+    clone_async_builtin_child_vm, forward_child_output_to_parent, scope_async_builtin,
+    spawn_local_with_async_builtin_ctx, with_async_builtin_ctx_sync, AsyncBuiltinCtx,
 };
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use debug::{DebugAction, DebugState};

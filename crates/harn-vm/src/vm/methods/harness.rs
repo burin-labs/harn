@@ -480,8 +480,11 @@ impl crate::vm::Vm {
                 // root to invoke registered handlers). Without this guard
                 // the settlement loop still runs and records audits, but
                 // VM-side `on_drain_decision` hooks would silently skip.
-                let _vm_context = crate::vm::install_async_builtin_child_vm(self.child_vm());
-                Ok(record_spawn_settlement_agent_with_hooks(args).await)
+                Ok(crate::vm::scope_async_builtin(
+                    self.child_vm(),
+                    record_spawn_settlement_agent_with_hooks(args),
+                )
+                .await)
             }
             _ => Err(method_unsupported(handle, method)),
         }
