@@ -558,8 +558,7 @@ async fn async_main() {
         }
         Command::Lint(args) => {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
-            let files = commands::check::collect_harn_targets(&targets);
-            let prompt_files = commands::check::collect_prompt_targets(&targets);
+            let (files, prompt_files) = commands::check::collect_lint_targets(&targets);
             if files.is_empty() && prompt_files.is_empty() {
                 if args.json {
                     print_lint_error(
@@ -581,13 +580,11 @@ async fn async_main() {
                 let mut json_files: Vec<commands::check::LintFileReport> = Vec::new();
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
-                    commands::check::apply_harn_lint_config(file, &mut config);
-                    let require_header = args.require_file_header
-                        || commands::check::harn_lint_require_file_header(file);
-                    let complexity_threshold =
-                        commands::check::harn_lint_complexity_threshold(file);
-                    let persona_step_allowlist =
-                        commands::check::harn_lint_persona_step_allowlist(file);
+                    let lint_config = commands::check::load_harn_lint_config(file);
+                    commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
+                    let require_header =
+                        args.require_file_header || lint_config.require_file_header;
+                    let complexity_threshold = lint_config.complexity_threshold;
                     let report = commands::check::lint_file_report(
                         &mut analysis,
                         file,
@@ -596,7 +593,7 @@ async fn async_main() {
                         &module_graph,
                         require_header,
                         complexity_threshold,
-                        &persona_step_allowlist,
+                        &lint_config.persona_step_allowlist,
                     );
                     should_fail |= report.outcome().should_fail(config.strict);
                     json_files.push(report);
@@ -626,13 +623,11 @@ async fn async_main() {
             if args.fix {
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
-                    commands::check::apply_harn_lint_config(file, &mut config);
-                    let require_header = args.require_file_header
-                        || commands::check::harn_lint_require_file_header(file);
-                    let complexity_threshold =
-                        commands::check::harn_lint_complexity_threshold(file);
-                    let persona_step_allowlist =
-                        commands::check::harn_lint_persona_step_allowlist(file);
+                    let lint_config = commands::check::load_harn_lint_config(file);
+                    commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
+                    let require_header =
+                        args.require_file_header || lint_config.require_file_header;
+                    let complexity_threshold = lint_config.complexity_threshold;
                     commands::check::lint_fix_file(
                         &mut analysis,
                         file,
@@ -641,30 +636,30 @@ async fn async_main() {
                         &module_graph,
                         require_header,
                         complexity_threshold,
-                        &persona_step_allowlist,
+                        &lint_config.persona_step_allowlist,
                     );
                 }
                 for file in &prompt_files {
-                    let threshold =
-                        commands::check::harn_lint_template_variant_branch_threshold(file);
-                    let disabled = commands::check::harn_lint_disabled_rules(file);
+                    let lint_config = commands::check::load_harn_lint_config(file);
                     // The template lint rules don't carry autofix
                     // edits yet (intentionally — see
                     // `template_provider_identity::make_diagnostic`),
                     // so `--fix` is equivalent to a regular run.
-                    commands::check::lint_prompt_file_inner(file, threshold, &disabled);
+                    commands::check::lint_prompt_file_inner(
+                        file,
+                        lint_config.template_variant_branch_threshold,
+                        &lint_config.disabled,
+                    );
                 }
             } else {
                 let mut should_fail = false;
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
-                    commands::check::apply_harn_lint_config(file, &mut config);
-                    let require_header = args.require_file_header
-                        || commands::check::harn_lint_require_file_header(file);
-                    let complexity_threshold =
-                        commands::check::harn_lint_complexity_threshold(file);
-                    let persona_step_allowlist =
-                        commands::check::harn_lint_persona_step_allowlist(file);
+                    let lint_config = commands::check::load_harn_lint_config(file);
+                    commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
+                    let require_header =
+                        args.require_file_header || lint_config.require_file_header;
+                    let complexity_threshold = lint_config.complexity_threshold;
                     let outcome = commands::check::lint_file_inner(
                         &mut analysis,
                         file,
@@ -673,17 +668,18 @@ async fn async_main() {
                         &module_graph,
                         require_header,
                         complexity_threshold,
-                        &persona_step_allowlist,
+                        &lint_config.persona_step_allowlist,
                     );
                     should_fail |= outcome.should_fail(config.strict);
                 }
                 for file in &prompt_files {
-                    let threshold =
-                        commands::check::harn_lint_template_variant_branch_threshold(file);
-                    let disabled = commands::check::harn_lint_disabled_rules(file);
+                    let lint_config = commands::check::load_harn_lint_config(file);
                     let config = package::load_check_config(Some(file));
-                    let outcome =
-                        commands::check::lint_prompt_file_inner(file, threshold, &disabled);
+                    let outcome = commands::check::lint_prompt_file_inner(
+                        file,
+                        lint_config.template_variant_branch_threshold,
+                        &lint_config.disabled,
+                    );
                     should_fail |= outcome.should_fail(config.strict);
                 }
                 if should_fail {

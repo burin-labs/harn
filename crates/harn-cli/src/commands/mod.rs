@@ -78,6 +78,148 @@ pub(crate) mod workflow;
 
 use std::path::{Path, PathBuf};
 
+use ignore::WalkBuilder;
+
+const GENERATED_SOURCE_WALK_DIRS: &[&str] = &[
+    ".burin",
+    ".build",
+    ".claude",
+    ".codex",
+    ".git",
+    ".harn",
+    ".harn-runs",
+    ".next",
+    ".svelte-kit",
+    ".turbo",
+    ".venv",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+];
+
+pub(crate) fn should_skip_recursive_source_dir(dir: &Path) -> bool {
+    let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    GENERATED_SOURCE_WALK_DIRS.contains(&name) || name.starts_with(".harn-")
+}
+
+pub(crate) fn should_skip_recursive_source_file(file: &Path) -> bool {
+    let Some(name) = file.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name.starts_with(".harn-")
+}
+
+#[derive(Default)]
+pub(crate) struct SourceTargets {
+    pub(crate) harn: Vec<PathBuf>,
+    pub(crate) prompts: Vec<PathBuf>,
+}
+
+impl SourceTargets {
+    fn sort_and_dedup(&mut self) {
+        self.harn.sort();
+        self.harn.dedup();
+        self.prompts.sort();
+        self.prompts.dedup();
+    }
+}
+
+pub(crate) fn collect_source_targets(
+    targets: &[&str],
+    include_harn: bool,
+    include_prompts: bool,
+) -> SourceTargets {
+    let mut files = SourceTargets::default();
+    for target in targets {
+        let path = Path::new(target);
+        if path.is_dir() {
+            collect_source_targets_dir(path, include_harn, include_prompts, &mut files);
+        } else {
+            push_matching_source_target(path, include_harn, include_prompts, false, &mut files);
+        }
+    }
+    files.sort_and_dedup();
+    files
+}
+
+fn collect_source_targets_dir(
+    dir: &Path,
+    include_harn: bool,
+    include_prompts: bool,
+    files: &mut SourceTargets,
+) {
+    let root = dir.to_path_buf();
+    let mut walker = WalkBuilder::new(dir);
+    walker
+        .hidden(false)
+        .ignore(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .require_git(false)
+        .parents(true)
+        .follow_links(false)
+        .filter_entry(move |entry| {
+            let path = entry.path();
+            if path == root {
+                return true;
+            }
+            if path.is_dir() {
+                !should_skip_recursive_source_dir(path)
+            } else {
+                !should_skip_recursive_source_file(path)
+            }
+        });
+
+    for entry in walker.build().filter_map(Result::ok) {
+        let path = entry.path();
+        if entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file())
+        {
+            push_matching_source_target(path, include_harn, include_prompts, true, files);
+        }
+    }
+}
+
+fn push_matching_source_target(
+    path: &Path,
+    include_harn: bool,
+    include_prompts: bool,
+    honor_skip_marker: bool,
+    files: &mut SourceTargets,
+) {
+    if include_prompts && is_harn_prompt_file(path) {
+        files.prompts.push(path.to_path_buf());
+    } else if include_harn && is_harn_program_file(path) {
+        let skip_marker = path.with_extension("conformance-skip");
+        if !honor_skip_marker || !skip_marker.exists() {
+            files.harn.push(path.to_path_buf());
+        }
+    }
+}
+
+pub(crate) fn is_harn_program_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if name.ends_with(".harn.prompt") || name.ends_with(".prompt") {
+        return false;
+    }
+    path.extension().is_some_and(|ext| ext == "harn")
+}
+
+pub(crate) fn is_harn_prompt_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name.ends_with(".harn.prompt") || name.ends_with(".prompt")
+}
+
 /// Recursively collect `.harn` files under `dir`, sorted by path. Files with a
 /// sibling `<name>.conformance-skip` marker are excluded — used to temporarily
 /// park tests that are tracking a known regression in an issue so `make test`
@@ -89,7 +231,12 @@ pub(crate) fn collect_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in entries {
             let path = entry.path();
             if path.is_dir() {
+                if should_skip_recursive_source_dir(&path) {
+                    continue;
+                }
                 collect_harn_files(&path, out);
+            } else if should_skip_recursive_source_file(&path) {
+                continue;
             } else if path.extension().is_some_and(|ext| ext == "harn") {
                 let skip_marker = path.with_extension("conformance-skip");
                 if skip_marker.exists() {

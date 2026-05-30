@@ -1067,8 +1067,52 @@ pipeline main() {
 fn collect_harn_targets_recurses_directories_and_deduplicates() {
     let dir = unique_temp_dir("harn-check-targets");
     std::fs::create_dir_all(dir.join("nested")).unwrap();
+    std::fs::create_dir_all(dir.join(".build").join("generated")).unwrap();
+    std::fs::create_dir_all(dir.join(".claude").join("worktrees").join("copy")).unwrap();
+    std::fs::create_dir_all(dir.join(".harn-eval-abc123")).unwrap();
+    std::fs::create_dir_all(dir.join("node_modules").join("pkg")).unwrap();
     std::fs::write(dir.join("a.harn"), "pipeline a() {}\n").unwrap();
     std::fs::write(dir.join("nested").join("b.harn"), "pipeline b() {}\n").unwrap();
+    std::fs::write(
+        dir.join("nested").join("skipped.harn"),
+        "pipeline skipped() {}\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("nested").join("skipped.conformance-skip"), "").unwrap();
+    std::fs::write(
+        dir.join("ignored_by_gitignore.harn"),
+        "pipeline ignored() {}\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join(".gitignore"), "ignored_by_gitignore.harn\n").unwrap();
+    std::fs::write(
+        dir.join(".build").join("generated").join("ignored.harn"),
+        "pipeline generated() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".claude")
+            .join("worktrees")
+            .join("copy")
+            .join("ignored.harn"),
+        "pipeline worktree_copy() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".harn-eval-abc123").join("ignored.harn"),
+        "pipeline eval_scratch() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".harn-eval-abc123.harn"),
+        "pipeline eval_scratch_file() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("node_modules").join("pkg").join("ignored.harn"),
+        "pipeline dependency() {}\n",
+    )
+    .unwrap();
     std::fs::write(dir.join("nested").join("ignore.txt"), "x\n").unwrap();
 
     let target_dir = dir.display().to_string();
@@ -1078,6 +1122,29 @@ fn collect_harn_targets_recurses_directories_and_deduplicates() {
     assert_eq!(files.len(), 2);
     assert!(files.contains(&dir.join("a.harn")));
     assert!(files.contains(&dir.join("nested").join("b.harn")));
+    assert!(!files.contains(&dir.join("ignored_by_gitignore.harn")));
+    assert!(!files.contains(&dir.join("nested").join("skipped.harn")));
+
+    let ignored_file = dir.join("ignored_by_gitignore.harn").display().to_string();
+    let skipped_file = dir
+        .join("nested")
+        .join("skipped.harn")
+        .display()
+        .to_string();
+    let explicit_files = collect_harn_targets(&[ignored_file.as_str(), skipped_file.as_str()]);
+    assert_eq!(
+        explicit_files,
+        vec![
+            dir.join("ignored_by_gitignore.harn"),
+            dir.join("nested").join("skipped.harn"),
+        ]
+    );
+    let explicit_generated_dir = dir.join(".harn-eval-abc123").display().to_string();
+    let generated_files = collect_harn_targets(&[explicit_generated_dir.as_str()]);
+    assert_eq!(
+        generated_files,
+        vec![dir.join(".harn-eval-abc123").join("ignored.harn")]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1448,17 +1515,38 @@ fn lint_prompt_file_respects_disabled_rules() {
 
 #[test]
 fn lint_collects_prompt_targets_from_directories() {
-    use super::template_lint::collect_prompt_targets;
+    use super::template_lint::collect_lint_targets;
     let dir = unique_temp_dir("harn-lint-prompt-collect");
     std::fs::create_dir_all(dir.join("nested")).unwrap();
+    std::fs::create_dir_all(dir.join("target").join("debug")).unwrap();
+    std::fs::create_dir_all(dir.join(".harn").join("cache")).unwrap();
     std::fs::write(dir.join("a.harn.prompt"), "x").unwrap();
     std::fs::write(dir.join("nested").join("b.harn.prompt"), "y").unwrap();
+    std::fs::write(dir.join("ignored_by_gitignore.prompt"), "ignored").unwrap();
+    std::fs::write(dir.join(".gitignore"), "ignored_by_gitignore.prompt\n").unwrap();
+    std::fs::write(
+        dir.join("target").join("debug").join("ignored.harn.prompt"),
+        "z",
+    )
+    .unwrap();
+    std::fs::write(dir.join(".harn").join("cache").join("ignored.prompt"), "z").unwrap();
     std::fs::write(dir.join("c.txt"), "ignore").unwrap();
     let target = dir.display().to_string();
-    let files = collect_prompt_targets(&[target.as_str()]);
+    let (_harn_files, files) = collect_lint_targets(&[target.as_str()]);
     assert_eq!(files.len(), 2);
     assert!(files.contains(&dir.join("a.harn.prompt")));
     assert!(files.contains(&dir.join("nested").join("b.harn.prompt")));
+    assert!(!files.contains(&dir.join("ignored_by_gitignore.prompt")));
+
+    let explicit = dir
+        .join("ignored_by_gitignore.prompt")
+        .display()
+        .to_string();
+    let (_harn_files, explicit_files) = collect_lint_targets(&[explicit.as_str()]);
+    assert_eq!(
+        explicit_files,
+        vec![dir.join("ignored_by_gitignore.prompt")]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

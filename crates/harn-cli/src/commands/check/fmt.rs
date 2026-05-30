@@ -106,11 +106,13 @@ pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOpti
     for target in targets {
         let path = std::path::Path::new(target);
         if path.is_dir() {
-            super::super::collect_harn_files(path, &mut files);
+            files.extend(super::super::collect_source_targets(&[target], true, false).harn);
         } else {
             files.push(path.to_path_buf());
         }
     }
+    files.sort();
+    files.dedup();
     if files.is_empty() {
         return FmtReport {
             files: Vec::new(),
