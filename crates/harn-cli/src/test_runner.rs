@@ -129,6 +129,24 @@ const DEFAULT_PARALLEL_JOBS_CAP: usize = 8;
 const TIMINGS_CACHE_RELATIVE_PATH: &str = ".harn/test-timings.json";
 const HARN_TEST_JOBS_ENV: &str = "HARN_TEST_JOBS";
 
+/// Per-worker memory budget (MiB) used to cap *auto-detected* parallelism on
+/// memory-constrained or oversubscribed hosts. Overridable via
+/// `HARN_TEST_WORKER_MEMORY_MB`. A worker runs a full VM and may drive nested
+/// agent loops, so this is a deliberately conservative estimate. The cap only
+/// ever *lowers* the core-based default — it never raises it, and an explicit
+/// `--jobs` / `HARN_TEST_JOBS` always wins.
+const DEFAULT_WORKER_MEMORY_MB: u64 = 1024;
+const HARN_TEST_WORKER_MEMORY_MB_ENV: &str = "HARN_TEST_WORKER_MEMORY_MB";
+
+/// Memory (MiB) held back for the OS, the CI runner agent, and any co-tenant
+/// job, so an auto-sized suite cannot consume the last scrap of RAM and starve
+/// the runner's heartbeat. This is the failure mode behind the self-hosted
+/// "The operation was canceled" runner-loss cancellations: two runner agents
+/// share one box, two heavy jobs overcommit RAM + swap, and the kernel never
+/// fires the OOM-killer — instead a starved runner agent stops phoning home
+/// and the control plane declares the job lost.
+const RESERVED_SYSTEM_MEMORY_MB: u64 = 1024;
+
 /// Options that shape how a user-test suite is discovered and executed.
 ///
 /// Held separately from the positional path so call sites (one-shot run,
@@ -377,7 +395,119 @@ fn resolve_workers(options: &RunOptions) -> usize {
     let detected = thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    detected.clamp(1, DEFAULT_PARALLEL_JOBS_CAP)
+    let core_cap = detected.clamp(1, DEFAULT_PARALLEL_JOBS_CAP);
+    apply_memory_cap(core_cap)
+}
+
+/// Lower `core_cap` to what currently-available system memory can hold, so an
+/// auto-sized parallel suite backs off on a loaded or small host instead of
+/// overcommitting RAM. Returns `core_cap` unchanged when memory is plentiful
+/// or cannot be measured. Emits a one-line notice when the cap bites so CI
+/// logs explain the reduced parallelism.
+fn apply_memory_cap(core_cap: usize) -> usize {
+    let Some(available_mb) = available_memory_mb() else {
+        return core_cap;
+    };
+    let budget = per_worker_memory_mb();
+    let mem_cap = memory_worker_cap(available_mb, budget, RESERVED_SYSTEM_MEMORY_MB);
+    if mem_cap < core_cap {
+        eprintln!(
+            "harn test: capping workers {core_cap} -> {mem_cap} \
+             (~{available_mb} MiB available, {budget} MiB/worker; \
+             override with --jobs / HARN_TEST_JOBS)"
+        );
+        return mem_cap;
+    }
+    core_cap
+}
+
+/// Pure worker-count-from-memory math, factored out so it is unit-testable
+/// without touching the host. Always yields at least one worker.
+fn memory_worker_cap(available_mb: u64, per_worker_mb: u64, reserved_mb: u64) -> usize {
+    let usable = available_mb.saturating_sub(reserved_mb);
+    let per_worker = per_worker_mb.max(1);
+    ((usable / per_worker).max(1)) as usize
+}
+
+/// Per-worker memory budget, honoring the `HARN_TEST_WORKER_MEMORY_MB`
+/// override (values `>= 1`), else [`DEFAULT_WORKER_MEMORY_MB`].
+fn per_worker_memory_mb() -> u64 {
+    std::env::var(HARN_TEST_WORKER_MEMORY_MB_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|&n| n >= 1)
+        .unwrap_or(DEFAULT_WORKER_MEMORY_MB)
+}
+
+/// Best-effort "memory available for new work" in MiB: the lesser of the
+/// host's available memory and (on Linux) this process's cgroup-v2 headroom.
+///
+/// Host memory comes from `sysinfo`, so it is correct on Linux, macOS, and
+/// Windows. The cgroup min means a container or a systemd-sliced CI runner
+/// sizes to its *slice* rather than the whole host — the key to stopping two
+/// runner agents on one box from each sizing to ~100% and collectively
+/// overcommitting RAM (the "thundering herd" behind the self-hosted
+/// runner-loss cancellations). Returns `None` when nothing can be measured,
+/// leaving the core-based cap in force.
+fn available_memory_mb() -> Option<u64> {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let host_mb = match sys.available_memory() {
+        0 => None, // unsupported / detection failed — don't over-throttle
+        bytes => Some(bytes / (1024 * 1024)),
+    };
+    match (host_mb, cgroup_v2_headroom_mb()) {
+        (Some(h), Some(c)) => Some(h.min(c)),
+        (Some(h), None) => Some(h),
+        (None, c) => c,
+    }
+}
+
+/// cgroup-v2 memory headroom (MiB) for this process's own cgroup, or `None`
+/// when not on cgroup v2, no limit is set, or the files cannot be read.
+#[cfg(target_os = "linux")]
+fn cgroup_v2_headroom_mb() -> Option<u64> {
+    let dir = own_cgroup_v2_dir()?;
+    let max_raw = fs::read_to_string(dir.join("memory.max")).ok()?;
+    let current_raw = fs::read_to_string(dir.join("memory.current")).ok()?;
+    cgroup_headroom_mb(&max_raw, &current_raw)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn cgroup_v2_headroom_mb() -> Option<u64> {
+    None
+}
+
+/// Resolve this process's own cgroup-v2 directory under `/sys/fs/cgroup` from
+/// the unified-hierarchy line (`0::<path>`) in `/proc/self/cgroup`. A limit
+/// set directly on a systemd service slice or on a container's namespaced
+/// root lives here; ancestor-only limits are not chased (the host min still
+/// backstops those). `None` on cgroup v1 / hybrid (no `0::` line).
+#[cfg(target_os = "linux")]
+fn own_cgroup_v2_dir() -> Option<PathBuf> {
+    let content = fs::read_to_string("/proc/self/cgroup").ok()?;
+    let rel = content
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))?
+        .trim();
+    let rel = rel.strip_prefix('/').unwrap_or(rel);
+    Some(Path::new("/sys/fs/cgroup").join(rel))
+}
+
+/// Pure headroom math from raw `memory.max` / `memory.current` file contents
+/// (both bytes; `memory.max` may be the literal `"max"` sentinel = unlimited).
+/// `memory.current` counts reclaimable page cache, so the result is a
+/// conservative (under-)estimate of true headroom — the safe direction for
+/// OOM avoidance.
+#[cfg(any(target_os = "linux", test))]
+fn cgroup_headroom_mb(memory_max: &str, memory_current: &str) -> Option<u64> {
+    let max = memory_max.trim();
+    if max == "max" {
+        return None;
+    }
+    let max: u64 = max.parse().ok()?;
+    let current: u64 = memory_current.trim().parse().ok()?;
+    Some(max.saturating_sub(current) / (1024 * 1024))
 }
 
 struct Discovery {
@@ -1103,6 +1233,50 @@ pipeline test_cli_skills(task) {
         opts.parallel = false;
         opts.jobs = Some(8);
         assert_eq!(resolve_workers(&opts), 1);
+    }
+
+    #[test]
+    fn memory_worker_cap_backs_off_under_pressure() {
+        // ~4 GiB available, 1 GiB reserved, 1 GiB/worker -> 3 workers.
+        assert_eq!(memory_worker_cap(4096, 1024, 1024), 3);
+    }
+
+    #[test]
+    fn memory_worker_cap_is_generous_when_memory_is_plentiful() {
+        // A roomy box dwarfs the core cap; resolve_workers then min()s this
+        // against DEFAULT_PARALLEL_JOBS_CAP, so the core cap stays in force.
+        assert!(memory_worker_cap(32_768, 1024, 1024) >= DEFAULT_PARALLEL_JOBS_CAP);
+    }
+
+    #[test]
+    fn memory_worker_cap_never_starves_to_zero() {
+        // Even when reserved >= available, at least one worker must run.
+        assert_eq!(memory_worker_cap(512, 1024, 1024), 1);
+    }
+
+    #[test]
+    fn cgroup_headroom_unlimited_is_none() {
+        // The `max` sentinel means no cgroup limit -> defer to host memory.
+        assert_eq!(cgroup_headroom_mb("max\n", "1048576\n"), None);
+    }
+
+    #[test]
+    fn cgroup_headroom_computes_slice_remainder() {
+        // 4 GiB limit, 1 GiB in use -> 3 GiB (3072 MiB) headroom.
+        let four_gib = (4_u64 * 1024 * 1024 * 1024).to_string();
+        let one_gib = (1024_u64 * 1024 * 1024).to_string();
+        assert_eq!(cgroup_headroom_mb(&four_gib, &one_gib), Some(3072));
+    }
+
+    #[test]
+    fn cgroup_headroom_saturates_when_over_limit() {
+        // A transient current > max must yield 0, not an underflow panic.
+        assert_eq!(cgroup_headroom_mb("1024", "999999999"), Some(0));
+    }
+
+    #[test]
+    fn cgroup_headroom_rejects_garbage() {
+        assert_eq!(cgroup_headroom_mb("not-a-number", "123"), None);
     }
 
     #[test]
