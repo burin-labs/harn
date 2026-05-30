@@ -2196,8 +2196,16 @@ mod tests {
                     "method": "session/request_permission",
                     "params": {
                         "sessionId": "session-1",
-                        "toolCallId": "tool-1",
-                        "toolName": "edit"
+                        "toolCall": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": "tool-1",
+                            "title": "edit",
+                            "kind": "other"
+                        },
+                        "options": [
+                            {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                            {"optionId": "reject", "name": "Reject", "kind": "reject_once"}
+                        ]
                     },
                 })
                 .to_string(),
@@ -2219,14 +2227,15 @@ mod tests {
                 json!({
                     "jsonrpc": "2.0",
                     "id": 77,
-                    "result": {"outcome": "approved"},
+                    "result": {"outcome": {"outcome": "selected", "optionId": "allow"}},
                 }),
             )
             .await
             .expect("first controller decision wins");
         let forwarded = request_rx.recv().await.expect("forwarded response");
         assert_eq!(forwarded["id"], 77);
-        assert_eq!(forwarded["result"]["outcome"], "approved");
+        assert_eq!(forwarded["result"]["outcome"]["outcome"], "selected");
+        assert_eq!(forwarded["result"]["outcome"]["optionId"], "allow");
 
         let duplicate = worker
             .send_client_request(
@@ -2235,7 +2244,7 @@ mod tests {
                 json!({
                     "jsonrpc": "2.0",
                     "id": 77,
-                    "result": {"outcome": "approved"},
+                    "result": {"outcome": {"outcome": "selected", "optionId": "allow"}},
                 }),
             )
             .await
@@ -2252,7 +2261,7 @@ mod tests {
                 json!({
                     "jsonrpc": "2.0",
                     "id": 77,
-                    "result": {"outcome": "denied"},
+                    "result": {"outcome": {"outcome": "selected", "optionId": "reject"}},
                 }),
             )
             .await
@@ -2265,7 +2274,7 @@ mod tests {
             } => {
                 assert_eq!(decision.actor.client_id, "controller");
                 assert_eq!(attempted_actor.client_id, "owner");
-                assert_eq!(attempted_payload["result"]["outcome"], "denied");
+                assert_eq!(attempted_payload["result"]["outcome"]["optionId"], "reject");
             }
             other => panic!("expected AlreadyDecided, got {other:?}"),
         }

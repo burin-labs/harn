@@ -48,7 +48,7 @@
     "source": {
       "kind": "adapter_generated",
       "generator": "cargo test -p harn-serve adapters::acp::tests::acp_bridge_routes_session_request_permission_response",
-      "description": "Canonical ACP v0.12.2 permission request/response shape from AcpBridge::call_client (#2639)."
+      "description": "Canonical ACP v0.12.2 permission request/response shape from AcpBridge::call_client."
     }
   }
 }

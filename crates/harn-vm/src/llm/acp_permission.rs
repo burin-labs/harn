@@ -1,4 +1,4 @@
-//! Canonical ACP `session/request_permission` wire helpers (#2639).
+//! Canonical ACP `session/request_permission` wire helpers.
 //!
 //! ACP v0.12.2 makes the request/response shapes for
 //! `session/request_permission` canonical:
@@ -33,6 +33,27 @@ fn canonical_options() -> JsonValue {
         { "optionId": OPTION_ALLOW, "name": "Allow", "kind": "allow_once" },
         { "optionId": OPTION_REJECT, "name": "Reject", "kind": "reject_once" },
     ])
+}
+
+/// Canonical ACP `RequestPermissionResponse` granting the call.
+pub(crate) fn allow_response() -> JsonValue {
+    json!({
+        "outcome": { "outcome": "selected", "optionId": OPTION_ALLOW }
+    })
+}
+
+/// Canonical ACP `RequestPermissionResponse` rejecting the call.
+pub(crate) fn reject_response(reason: Option<String>) -> JsonValue {
+    let mut response = json!({
+        "outcome": { "outcome": "selected", "optionId": OPTION_REJECT }
+    });
+    if let Some(reason) = reason {
+        response
+            .as_object_mut()
+            .expect("object")
+            .insert("reason".to_string(), JsonValue::String(reason));
+    }
+    response
 }
 
 /// Build the canonical `session/request_permission` request params.
@@ -163,13 +184,13 @@ mod tests {
 
     #[test]
     fn selected_allow_is_allowed() {
-        let response = json!({"outcome": {"outcome": "selected", "optionId": "allow"}});
+        let response = allow_response();
         assert_eq!(parse_response(&response), WireOutcome::Allowed);
     }
 
     #[test]
     fn selected_reject_is_rejected() {
-        let response = json!({"outcome": {"outcome": "selected", "optionId": "reject"}});
+        let response = reject_response(None);
         assert!(matches!(
             parse_response(&response),
             WireOutcome::Rejected { .. }
@@ -187,8 +208,6 @@ mod tests {
 
     #[test]
     fn non_canonical_outcome_fails_closed() {
-        // Legacy `{ outcome: "approved" }` and `{ granted: true }` are no
-        // longer honored — canonical ACP carries no such shape.
         assert!(matches!(
             parse_response(&json!({"outcome": "approved"})),
             WireOutcome::Rejected { .. }

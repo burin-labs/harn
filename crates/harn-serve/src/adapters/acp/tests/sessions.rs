@@ -1167,8 +1167,6 @@ async fn acp_bridge_routes_session_request_permission_response() {
         assistant_state: Mutex::new(VisibleTextState::default()),
     });
 
-    // Canonical ACP v0.12.2 request shape (#2639): `{ sessionId, toolCall,
-    // options: [{ optionId, name, kind }] }`.
     let call = bridge.call_client(
         "session/request_permission",
         serde_json::json!({
@@ -1194,8 +1192,6 @@ async fn acp_bridge_routes_session_request_permission_response() {
     assert_eq!(outgoing["id"], 77);
     assert_eq!(outgoing["method"], "session/request_permission");
 
-    // Canonical ACP response shape: `{ outcome: { outcome: "selected",
-    // optionId } }`. No `{outcome: "approved"}` / `{granted}` in ACP.
     let response = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 77,
