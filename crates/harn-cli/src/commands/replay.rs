@@ -24,6 +24,10 @@ pub(crate) struct ReplayReport {
     pub transitions: Vec<ReplayTransition>,
     pub transcript_event_count: usize,
     pub fixture: ReplayFixtureResult,
+    /// Divergence from a `--counterfactual <plan.harn>` evaluated against
+    /// the workspace state at the `--at` cutoff. `None` for a plain replay.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterfactual: Option<crate::commands::counterfactual::CounterfactualReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +120,9 @@ enum ReplaySource {
         /// at` are rehydrated, replaying the session as it stood at that
         /// point. `None` replays the whole session.
         at: Option<u64>,
+        /// Counterfactual: path to a `.harn` edit plan to evaluate against
+        /// the workspace state at the cutoff. `None` for a plain replay.
+        counterfactual: Option<PathBuf>,
     },
 }
 
@@ -140,6 +147,7 @@ impl ReplaySource {
                 session_id,
                 events_db,
                 at,
+                ..
             } => ReplaySourceSummary {
                 kind: "event_log_session".to_string(),
                 path: None,
@@ -162,6 +170,18 @@ impl ReplaySource {
             Self::RunRecord { .. } => "run_record_load_failed",
             Self::ReplayTrace { .. } => "replay_fixture_load_failed",
             Self::Session { .. } => "replay_load_failed",
+        }
+    }
+
+    /// Path to the counterfactual `.harn` plan, when `--counterfactual` was
+    /// passed (Session sources only).
+    fn counterfactual_plan(&self) -> Option<&Path> {
+        match self {
+            Self::Session {
+                counterfactual: Some(path),
+                ..
+            } => Some(path.as_path()),
+            _ => None,
         }
     }
 }
@@ -188,21 +208,52 @@ pub(crate) fn run(args: ReplayArgs) -> i32 {
         }
     };
 
+    // The counterfactual is composed *after* the recorded replay is
+    // reconstructed at the `--at` cutoff: the recorded path defines the
+    // baseline, and the plan's dry-run divergence is reported against it.
+    let counterfactual = match source.counterfactual_plan() {
+        Some(plan_path) => match crate::commands::counterfactual::evaluate(plan_path) {
+            Ok(report) => Some(report),
+            Err(error) => {
+                if args.json {
+                    print_json_error("replay_counterfactual_failed", error);
+                } else {
+                    eprintln!("error: {error}");
+                }
+                return 1;
+            }
+        },
+        None => None,
+    };
+
     if args.json {
-        run_json(source, args.runs)
+        run_json(source, args.runs, counterfactual)
     } else {
-        run_human(source, args.runs)
+        run_human(source, args.runs, counterfactual)
     }
 }
 
-fn run_json(source: ReplaySource, runs: usize) -> i32 {
-    let executions = match execute_runs(&source, runs) {
+fn run_json(
+    source: ReplaySource,
+    runs: usize,
+    counterfactual: Option<crate::commands::counterfactual::CounterfactualReport>,
+) -> i32 {
+    let mut executions = match execute_runs(&source, runs) {
         Ok(executions) => executions,
         Err(error) => {
             print_json_error(source.load_error_code(), error);
             return 1;
         }
     };
+
+    // The counterfactual divergence rides on the first replay read — it is
+    // a property of the rehydrated state at the cutoff, not of any one
+    // deterministic re-read.
+    if let Some(report) = counterfactual {
+        if let Some(first) = executions.first_mut() {
+            first.report.counterfactual = Some(report);
+        }
+    }
 
     if runs == 1 {
         let execution = executions
@@ -258,7 +309,11 @@ fn run_json(source: ReplaySource, runs: usize) -> i32 {
     exit
 }
 
-fn run_human(source: ReplaySource, runs: usize) -> i32 {
+fn run_human(
+    source: ReplaySource,
+    runs: usize,
+    counterfactual: Option<crate::commands::counterfactual::CounterfactualReport>,
+) -> i32 {
     let executions = match execute_runs(&source, runs) {
         Ok(executions) => executions,
         Err(error) => {
@@ -274,6 +329,9 @@ fn run_human(source: ReplaySource, runs: usize) -> i32 {
             println!("Replay run {}:", index + 1);
         }
         print_report_human(&execution.report);
+    }
+    if let Some(report) = &counterfactual {
+        crate::commands::counterfactual::print_human(report);
     }
     if runs > 1 {
         let determinism = determinism_summary(&source, &executions);
@@ -303,6 +361,7 @@ fn resolve_source(args: &ReplayArgs) -> Result<ReplaySource, String> {
             session_id: session_id.clone(),
             events_db: PathBuf::from(events_db),
             at: args.at,
+            counterfactual: args.counterfactual.as_ref().map(PathBuf::from),
         });
     }
     if let Some(fixture) = &args.fixture {
@@ -350,6 +409,7 @@ fn execute_once(source: &ReplaySource, index: usize) -> Result<ReplayExecution, 
             session_id,
             events_db,
             at,
+            ..
         } => execute_session_replay(session_id, events_db, *at),
     }
 }
@@ -475,6 +535,7 @@ fn execute_replay_trace(
         transitions: Vec::new(),
         transcript_event_count: trace_run.event_log_entries.len(),
         fixture,
+        counterfactual: None,
     };
     let event_sequence = canonical_event_sequence(&trace_run, &trace.allowlist)?;
     Ok(ReplayExecution {
@@ -532,6 +593,7 @@ fn replay_report_from_run(run: &harn_vm::orchestration::RunRecord) -> ReplayRepo
             failures: report.failures.clone(),
             stage_count: report.stage_count,
         },
+        counterfactual: None,
     }
 }
 
