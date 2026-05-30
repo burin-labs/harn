@@ -65,19 +65,6 @@ pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
 #[cfg(not(feature = "hostlib"))]
 pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 
-/// Drain `harn-hostlib`'s process-global fs-snapshot sessions. The
-/// snapshot map is keyed by session id and only drained per-session by
-/// `drop_session_snapshots`, which a transient test workflow never
-/// reaches. Without this, a reused test worker accumulates one snapshot
-/// bundle per case. No-op when the `hostlib` feature is disabled.
-#[cfg(feature = "hostlib")]
-pub(crate) fn reset_hostlib_state() {
-    harn_hostlib::fs_snapshot::reset_all_sessions();
-}
-
-#[cfg(not(feature = "hostlib"))]
-pub(crate) fn reset_hostlib_state() {}
-
 /// Entry point used by `src/main.rs`. Hosts the CLI runtime thread and
 /// drives the async dispatcher in `async_main`.
 pub fn run() {

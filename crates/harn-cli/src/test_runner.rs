@@ -10,6 +10,21 @@ use harn_parser::{Attribute, Node, Parser, SNode};
 
 use crate::env_guard::ScopedEnvVar;
 
+/// Drain `harn-hostlib`'s process-global fs-snapshot sessions between test
+/// cases. The snapshot map is keyed by session id and only drained
+/// per-session by `drop_session_snapshots`, which a transient test workflow
+/// never reaches, so a reused test worker would otherwise accumulate one
+/// snapshot bundle per case. No-op when the `hostlib` feature is disabled.
+/// Lives here (next to its only callers) rather than in `lib.rs` to keep the
+/// ported-handler dispatch path off the LOC ratchet.
+#[cfg(feature = "hostlib")]
+fn reset_hostlib_state() {
+    harn_hostlib::fs_snapshot::reset_all_sessions();
+}
+
+#[cfg(not(feature = "hostlib"))]
+fn reset_hostlib_state() {}
+
 #[derive(Clone, Debug)]
 pub struct TestResult {
     pub name: String,
@@ -921,7 +936,7 @@ async fn execute_case(
     cli_skill_dirs: &[PathBuf],
 ) -> TestResult {
     harn_vm::reset_thread_local_state();
-    crate::reset_hostlib_state();
+    reset_hostlib_state();
 
     let mut phases = PhaseTimings::default();
     let total_start = Instant::now();
@@ -1021,7 +1036,7 @@ async fn execute_case(
     // sees a clean slate. Wall clock for this work lands in the
     // teardown bucket so the phase breakdown sums to wall time.
     harn_vm::reset_thread_local_state();
-    crate::reset_hostlib_state();
+    reset_hostlib_state();
     phases.teardown_ms = teardown_start.elapsed().as_millis() as u64;
 
     let elapsed_ms = total_start.elapsed().as_millis() as u64;
