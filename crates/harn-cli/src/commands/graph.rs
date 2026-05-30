@@ -323,7 +323,7 @@ fn direct_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         | "agent_loop" => {
             out.insert("llm.call".to_string());
         }
-        "llm_catalog" | "llm_provider_status" => {
+        "llm_catalog" | "llm_catalog_refresh" | "llm_provider_status" => {
             out.insert("llm.catalog".to_string());
         }
         "spawn_agent" | "send_input" | "resume_agent" | "wait_agent" | "close_agent"

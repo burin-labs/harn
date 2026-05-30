@@ -86,7 +86,7 @@ impl crate::vm::Vm {
             HarnessKind::Net => self.call_harness_net_method(handle, method, args).await,
             HarnessKind::Process => self.call_harness_process_method(handle, method, args),
             HarnessKind::Crypto => self.call_harness_crypto_method(handle, method, args),
-            HarnessKind::Llm => self.call_harness_llm_method(handle, method),
+            HarnessKind::Llm => self.call_harness_llm_method(handle, method, args).await,
             HarnessKind::Tenant => self.call_harness_tenant_method(handle, method, args),
             HarnessKind::Obs => self.call_harness_obs_method(handle, method, args).await,
         }
@@ -257,13 +257,32 @@ impl crate::vm::Vm {
         Ok(crate::stdlib::json_to_vm_value(&json))
     }
 
-    fn call_harness_llm_method(
+    async fn call_harness_llm_method(
         &mut self,
         handle: &VmHarness,
         method: &str,
+        args: &[VmValue],
     ) -> Result<VmValue, VmError> {
         match method {
             "catalog" => Ok(crate::llm::config_builtins::llm_catalog_value()),
+            "catalog_refresh" => {
+                if args.len() > 1 {
+                    return Err(VmError::TypeError(
+                        "HarnessLlm.catalog_refresh expects at most one options dict".to_string(),
+                    ));
+                }
+                let options = crate::llm::config_builtins::parse_catalog_refresh_options(
+                    args.first(),
+                    "HarnessLlm.catalog_refresh",
+                )?;
+                let report = crate::provider_catalog::refresh_runtime_catalog(options).await;
+                let json = serde_json::to_value(report).map_err(|error| {
+                    VmError::Runtime(format!(
+                        "HarnessLlm.catalog_refresh: serialize result: {error}"
+                    ))
+                })?;
+                Ok(crate::stdlib::json_to_vm_value(&json))
+            }
             "providers" => Ok(crate::llm::config_builtins::llm_provider_status_value()),
             _ => Err(method_unsupported(handle, method)),
         }
@@ -969,7 +988,7 @@ impl crate::vm::Vm {
                 };
                 Ok(crate::stdlib::json_to_vm_value(&json))
             }
-            HarnessKind::Llm => self.call_harness_llm_method(handle, method),
+            HarnessKind::Llm => self.call_harness_llm_method(handle, method, args).await,
             HarnessKind::Tenant => {
                 // Mock mode shares the same ambient stack as real mode
                 // so conformance fixtures can drive `enter_tenant(...)`

@@ -70,6 +70,28 @@ pub(crate) struct ProviderCatalogArgs {
     /// Only include providers that are usable in the current environment.
     #[arg(long)]
     pub available_only: bool,
+    /// Refresh the runtime provider catalog overlay before printing.
+    #[arg(long)]
+    pub refresh: bool,
+}
+
+pub(crate) async fn refresh_provider_catalog_if_requested(args: &ProviderCatalogArgs) {
+    if !args.refresh {
+        return;
+    }
+    let report = harn_vm::provider_catalog::refresh_runtime_catalog(
+        harn_vm::provider_catalog::CatalogRefreshOptions {
+            url: None,
+            force: false,
+        },
+    )
+    .await;
+    if let Some(warning) = report.warning.as_deref() {
+        eprintln!(
+            "warning: provider catalog refresh {}: {warning}",
+            report.status
+        );
+    }
 }
 
 #[derive(Debug, Args)]

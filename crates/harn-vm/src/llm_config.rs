@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 static CONFIG: OnceLock<ProvidersConfig> = OnceLock::new();
 static CONFIG_PATH: OnceLock<String> = OnceLock::new();
+static RUNTIME_CATALOG_OVERLAY: OnceLock<RwLock<Option<ProvidersConfig>>> = OnceLock::new();
 
 thread_local! {
     /// Thread-local provider config overlays installed by the CLI after it
@@ -509,14 +510,39 @@ pub fn clear_user_overrides() {
     set_user_overrides(None);
 }
 
+/// Install the process-wide runtime catalog overlay used by
+/// `provider_catalog::refresh_runtime_catalog`. Per-run user overlays still
+/// merge last so project-local provider config can override hosted catalog
+/// updates.
+pub fn set_runtime_catalog_overlay(config: Option<ProvidersConfig>) {
+    *runtime_catalog_overlay()
+        .write()
+        .expect("runtime catalog overlay poisoned") = config;
+}
+
+pub fn clear_runtime_catalog_overlay() {
+    set_runtime_catalog_overlay(None);
+}
+
 fn effective_config() -> ProvidersConfig {
     let mut merged = load_config().clone();
+    if let Some(overlay) = runtime_catalog_overlay()
+        .read()
+        .expect("runtime catalog overlay poisoned")
+        .as_ref()
+    {
+        merged.merge_from(overlay);
+    }
     USER_OVERRIDES.with(|cell| {
         if let Some(overlay) = cell.borrow().as_ref() {
             merged.merge_from(overlay);
         }
     });
     merged
+}
+
+fn runtime_catalog_overlay() -> &'static RwLock<Option<ProvidersConfig>> {
+    RUNTIME_CATALOG_OVERLAY.get_or_init(|| RwLock::new(None))
 }
 
 /// Resolve a model alias to (model_id, provider_name).

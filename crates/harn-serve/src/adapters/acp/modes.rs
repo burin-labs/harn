@@ -170,6 +170,21 @@ fn model_select_options(pinned_model: Option<&str>) -> Vec<serde_json::Value> {
             }));
         }
     }
+    for (model_id, model) in harn_vm::llm_config::model_catalog_entries() {
+        if seen.insert(model_id.clone()) {
+            let description = model
+                .tier
+                .as_deref()
+                .filter(|tier| !tier.is_empty())
+                .map(|tier| format!("tier: {tier}"))
+                .unwrap_or_else(|| model.provider.clone());
+            entries.push(serde_json::json!({
+                "value": model_id,
+                "name": format!("{} ({})", model.name, model.provider),
+                "description": description,
+            }));
+        }
+    }
     // The currently pinned selector may be a free-form id outside the
     // alias catalog. Surface it so the dropdown reflects the real
     // state instead of showing a stale "(none)" entry.

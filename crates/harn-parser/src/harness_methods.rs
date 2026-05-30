@@ -119,6 +119,7 @@ pub fn harness_system_ambient(method: &str) -> Option<&'static str> {
 pub fn harness_llm_ambient(method: &str) -> Option<&'static str> {
     match method {
         "catalog" => Some("llm_catalog"),
+        "catalog_refresh" => Some("llm_catalog_refresh"),
         "providers" => Some("llm_provider_status"),
         _ => None,
     }

@@ -3208,12 +3208,13 @@ fn test_parses_providers_support_args() {
 
 #[test]
 fn test_parses_provider_catalog_args() {
-    let cli = Cli::parse_from(["harn", "provider-catalog", "--available-only"]);
+    let cli = Cli::parse_from(["harn", "provider-catalog", "--available-only", "--refresh"]);
 
     let Command::ProviderCatalog(args) = cli.command.unwrap() else {
         panic!("expected provider-catalog command");
     };
     assert!(args.available_only);
+    assert!(args.refresh);
 }
 
 #[test]
