@@ -50,18 +50,46 @@
             "method": { "const": "session/request_permission" },
             "params": {
               "type": "object",
-              "required": ["sessionId"],
+              "required": ["sessionId", "toolCall", "options"],
               "additionalProperties": true,
               "properties": {
                 "sessionId": { "type": "string", "minLength": 1 },
-                "toolCallId": { "type": "string", "minLength": 1 },
-                "toolName": { "type": "string", "minLength": 1 },
-                "options": { "type": "array" }
+                "toolCall": { "$ref": "#/$defs/PermissionToolCall" },
+                "options": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "$ref": "#/$defs/PermissionOption" }
+                }
               }
             }
           }
         }
       ]
+    },
+    "PermissionToolCall": {
+      "type": "object",
+      "required": ["toolCallId"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "tool_call_update" },
+        "toolCallId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "kind": { "type": "string" },
+        "rawInput": {},
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    },
+    "PermissionOption": {
+      "type": "object",
+      "required": ["optionId", "name", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "optionId": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": ["allow_once", "allow_always", "reject_once", "reject_always"]
+        }
+      }
     },
     "HarnAgentEventNotification": {
       "type": "object",
