@@ -1,0 +1,10 @@
+import "std/postgres"
+
+pipeline default() {
+  let db = pg_mock_pool([])
+  let result = pg_stmt_cache_clear(db)
+  __io_println(result.pools)
+  __io_println(result.connections_cleared)
+  __io_println(result.connections_skipped)
+  __io_println(len(pg_mock_calls(db)))
+}

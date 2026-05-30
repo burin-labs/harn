@@ -1349,6 +1349,7 @@ http_stream_close(stream)
 | `pg_execute(handle, sql, params?)` | handle: dict, sql: string, params: list | dict | Execute a parameterized statement and return `{rows_affected}` |
 | `pg_transaction(pool, callback, options?)` | pool: dict, callback: closure, options: dict | any | Run a closure with a transaction handle, commit on success, rollback on throw |
 | `pg_close(pool)` | pool: dict | bool | Close and unregister a pool |
+| `pg_stmt_cache_clear(pool)` | pool: dict | dict | Clear prepared-statement caches on idle primary and replica connections |
 | `pg_mock_pool(fixtures)` | fixtures: list | dict | Create a fixture-backed Postgres handle for tests |
 | `pg_mock_calls(mock)` | mock: dict | list | Return recorded mock SQL calls |
 
@@ -1357,6 +1358,10 @@ or `{url}`, `{env}`, or `{secret}` dictionaries. Pool options include
 `max_connections`, `min_connections`, `acquire_timeout_ms`, `idle_timeout_ms`,
 `max_lifetime_ms`, `ssl_mode`, `application_name`, and
 `statement_cache_capacity`.
+
+`pg_stmt_cache_clear(pool)` returns `{pools, connections_cleared,
+connections_skipped}`. It does not close or recreate the pool; checked-out
+connections are skipped so in-flight queries are not interrupted.
 
 Use `params` for every dynamic value:
 

@@ -42,6 +42,8 @@
  *   let stats = pg_pool_stats(pool)
  *     // → {size, idle, in_use, max_connections, statement_cache_capacity,
  *     //    replicas, circuit_state, circuit_failures, circuit_opened_at_ms}
+ *   let cleared = pg_stmt_cache_clear(pool)
+ *     // → {pools, connections_cleared, connections_skipped}
  *
  *   // Schema introspection.
  *   pg_introspect_tables(pool, {schema: "public"})
@@ -102,6 +104,8 @@ type PgPoolStats = {
   circuit_failures: int,
   circuit_opened_at_ms: int?,
 }
+
+type PgStmtCacheClearResult = {pools: int, connections_cleared: int, connections_skipped: int}
 
 type PgIntrospectedTable = {schema: string, table: string, kind: string}
 

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx_core::column::Column;
+use sqlx_core::connection::Connection;
 use sqlx_core::query::{query, Query};
 use sqlx_core::row::Row;
 use sqlx_core::transaction::Transaction;
@@ -86,6 +87,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &PG_POOL_IMPL_DEF,
     &PG_CONNECT_IMPL_DEF,
     &PG_CLOSE_IMPL_DEF,
+    &PG_STMT_CACHE_CLEAR_IMPL_DEF,
     &PG_QUERY_IMPL_DEF,
     &PG_QUERY_ONE_IMPL_DEF,
     &PG_EXECUTE_IMPL_DEF,
@@ -166,6 +168,75 @@ async fn pg_close_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     } else {
         Ok(VmValue::Bool(false))
     }
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("pg_stmt_cache_clear", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "postgres"
+)]
+async fn pg_stmt_cache_clear_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target = required_arg(&args, 0, "pg_stmt_cache_clear", "pool handle")?;
+    if handle_kind(target).as_deref() == Some(HANDLE_MOCK) {
+        handle_id(Some(target), HANDLE_MOCK, "pg_stmt_cache_clear")?;
+        return Ok(stmt_cache_clear_result(0, 0, 0));
+    }
+
+    let record = pool_record_from_handle(target, "pg_stmt_cache_clear")?;
+
+    let mut pools = 0_i64;
+    let mut connections_cleared = 0_i64;
+    let mut connections_skipped = 0_i64;
+    for pool in std::iter::once(&record.pool).chain(record.replicas.iter()) {
+        pools += 1;
+        let (cleared, skipped) = clear_idle_statement_caches(pool, "pg_stmt_cache_clear").await?;
+        connections_cleared += i64::from(cleared);
+        connections_skipped += i64::from(skipped);
+    }
+
+    Ok(stmt_cache_clear_result(
+        pools,
+        connections_cleared,
+        connections_skipped,
+    ))
+}
+
+fn stmt_cache_clear_result(
+    pools: i64,
+    connections_cleared: i64,
+    connections_skipped: i64,
+) -> VmValue {
+    let mut result = BTreeMap::new();
+    result.insert("pools".to_string(), VmValue::Int(pools));
+    result.insert(
+        "connections_cleared".to_string(),
+        VmValue::Int(connections_cleared),
+    );
+    result.insert(
+        "connections_skipped".to_string(),
+        VmValue::Int(connections_skipped),
+    );
+    VmValue::Dict(Rc::new(result))
+}
+
+async fn clear_idle_statement_caches(
+    pool: &PgPool,
+    builtin: &'static str,
+) -> Result<(u32, u32), VmError> {
+    let size_before = pool.size();
+    let mut cleared = 0_u32;
+    let mut connections = Vec::new();
+
+    while let Some(mut connection) = pool.try_acquire() {
+        connection
+            .clear_cached_statements()
+            .await
+            .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
+        cleared += 1;
+        connections.push(connection);
+    }
+
+    Ok((cleared, size_before.saturating_sub(cleared)))
 }
 
 #[harn_builtin(
@@ -1846,6 +1917,11 @@ __io_println(stats.circuit_state)
 __io_println(stats.max_connections)
 __io_println(stats.replicas)
 
+let clear_result = pg_stmt_cache_clear(db)
+__io_println(clear_result.pools)
+__io_println(clear_result.connections_cleared >= 1)
+__io_println(clear_result.connections_skipped)
+
 // --- Schema setup --------------------------------------------------------
 pg_execute(db, "CREATE SCHEMA IF NOT EXISTS \"{schema}\"", [])
 pg_execute(db, "SET search_path TO \"{schema}\"", [])
@@ -1916,6 +1992,9 @@ pg_close(db)
                     //   disabled            // circuit_state
                     //   2                   // max_connections
                     //   0                   // replicas
+                    //   1                   // primary pool cache clear
+                    //   true                // at least one idle connection cleared
+                    //   0                   // no checked-out connections skipped
                     //   locked              // pg_advisory_xact_lock path label
                     //   raii                // pg_with_advisory_lock path label
                     //   1                   // tables in schema
@@ -1930,22 +2009,25 @@ pg_close(db)
                     assert_eq!(lines[0], "disabled");
                     assert_eq!(lines[1], "2");
                     assert_eq!(lines[2], "0");
-                    assert_eq!(lines[3], "locked");
-                    assert_eq!(lines[4], "raii");
-                    assert_eq!(lines[5], "1");
-                    assert_eq!(lines[6], "table");
-                    assert_eq!(lines[7], "2");
-                    assert_eq!(lines[8], "id:int4");
+                    assert_eq!(lines[3], "1");
+                    assert_eq!(lines[4], "true");
+                    assert_eq!(lines[5], "0");
+                    assert_eq!(lines[6], "locked");
+                    assert_eq!(lines[7], "raii");
+                    assert_eq!(lines[8], "1");
+                    assert_eq!(lines[9], "table");
+                    assert_eq!(lines[10], "2");
+                    assert_eq!(lines[11], "id:int4");
                     assert!(
-                        lines[9] == "tags:_text" || lines[9] == "tags:text[]",
+                        lines[12] == "tags:_text" || lines[12] == "tags:text[]",
                         "tags column type unexpected: {}",
-                        lines[9]
+                        lines[12]
                     );
                     // PK index + the explicit UNIQUE = 2 indexes
-                    assert_eq!(lines[10], "2");
-                    assert_eq!(lines[11], "alpha,beta");
-                    assert_eq!(lines[12], "0");
-                    assert_eq!(lines[13], "harn_v2_test:hello");
+                    assert_eq!(lines[13], "2");
+                    assert_eq!(lines[14], "alpha,beta");
+                    assert_eq!(lines[15], "0");
+                    assert_eq!(lines[16], "harn_v2_test:hello");
                 })
                 .await;
         });
