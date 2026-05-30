@@ -1995,12 +1995,18 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
     let (_out, value) = run_harn_with_policy(&read_source, policy.clone()).unwrap();
     assert_eq!(value.display(), "secret");
 
-    // Writing or deleting under a read-only root is rejected as a
-    // sandbox violation even though the workspace grants write_text/delete.
-    let mutations = [
+    // Mutating an existing file under a read-only root is rejected with
+    // the read-only-specific message even though the workspace grants
+    // write_text/delete. These target the existing file so the path
+    // canonicalizes identically on every platform (Windows resolves a
+    // non-existent target to a `\\?\` verbatim path that the generic
+    // out-of-scope branch reports instead — still rejected, just a
+    // coarser message; the path-scope logic itself is covered for the
+    // non-existent case by the `sandbox_hardened` integration test).
+    let existing_mutations = [
         format!(
             r#"pipeline t(task) {{ write_file("{}", "x") }}"#,
-            read_only.path().join("new.txt").display()
+            read_only_file.display()
         ),
         format!(
             r#"pipeline t(task) {{ append_file("{}", "x") }}"#,
@@ -2011,7 +2017,7 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
             read_only_file.display()
         ),
     ];
-    for source in mutations {
+    for source in existing_mutations {
         let err = run_harn_with_policy(&source, policy.clone()).unwrap_err();
         assert!(
             matches!(
@@ -2028,6 +2034,31 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
             "expected read-only rejection message, got {err}"
         );
     }
+
+    // Creating a new file under a read-only root is likewise rejected.
+    let create = format!(
+        r#"pipeline t(task) {{ write_file("{}", "x") }}"#,
+        read_only.path().join("new.txt").display()
+    );
+    let err = run_harn_with_policy(&create, policy.clone()).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            }
+        ),
+        "creating a new file under a read-only root must be rejected, got {err:?}"
+    );
+    assert!(
+        err.to_string().contains("sandbox violation"),
+        "expected sandbox violation, got {err}"
+    );
+    assert!(
+        !read_only.path().join("new.txt").exists(),
+        "rejected write must not touch disk"
+    );
 }
 
 #[test]
