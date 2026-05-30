@@ -1203,6 +1203,7 @@ fn build_policy_summary_reads_validation_metadata() {
                 vec!["read_text".to_string(), "list".to_string()],
             )]),
             workspace_roots: vec!["/tmp/project".to_string()],
+            read_only_roots: Vec::new(),
             side_effect_level: Some("workspace_write".to_string()),
             recursion_limit: Some(4),
             tool_arg_constraints: vec![harn_vm::orchestration::ToolArgConstraint {
