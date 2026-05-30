@@ -4,6 +4,7 @@ mod adapter;
 pub mod adapters;
 mod auth;
 mod core;
+pub mod embed;
 mod error;
 mod exports;
 pub mod http_codec;
@@ -32,8 +33,9 @@ pub(crate) use adapter::DispatchRuntime;
 pub use adapter::{AdapterDescriptor, TransportAdapter};
 pub use adapters::a2a::{A2aHttpServeOptions, A2aServer, A2aServerConfig, A2A_PROTOCOL_VERSION};
 pub use adapters::acp::{
-    run_acp_channel_server, run_acp_server, AcpProfileConfig, AcpRuntimeConfigurator, AcpServer,
-    AcpServerConfig, NoopAcpRuntimeConfigurator,
+    run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server, AcpChannelHandle,
+    AcpProfileConfig, AcpRuntimeConfigurator, AcpServer, AcpServerConfig,
+    NoopAcpRuntimeConfigurator,
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{
@@ -49,6 +51,7 @@ pub use core::{
     CallArguments, CallRequest, CallResponse, DispatchCore, DispatchCoreConfig, NoopVmConfigurator,
     VmConfigurator,
 };
+pub use embed::EmbeddedAgent;
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{
     emit_export_diagnostics, ExportCatalog, ExportDiagnostic, ExportedCallableKind,

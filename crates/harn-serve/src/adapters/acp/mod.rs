@@ -41,7 +41,10 @@ use sessions::{
     lookup_session_cancellation, preempt_session_interruption, prepare_session_prompt, Session,
     SessionCancellation, SessionInfo,
 };
-pub use transport::{run_acp_channel_server, run_acp_server};
+pub(crate) use transport::run_acp_channel_server_with_existing_handle;
+pub use transport::{
+    run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server, AcpChannelHandle,
+};
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
