@@ -169,10 +169,8 @@ fn landlock_profile(
     for root in process_sandbox_roots(policy) {
         push_rule(&mut profile, root, workspace_access, false)?;
     }
-    let read_only_access =
-        LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE;
     for root in process_sandbox_readonly_roots(policy) {
-        push_rule(&mut profile, root, read_only_access, false)?;
+        push_rule(&mut profile, root, read_only_access(), false)?;
     }
     Ok(Some(profile))
 }
@@ -347,6 +345,16 @@ fn denied_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
     syscalls
 }
 
+/// Access rights granted to every `read_only_roots` entry: read +
+/// directory-read + execute, and never any write/create/remove right —
+/// regardless of the policy's `workspace.*` capabilities. Landlock rules
+/// are additive (there is no deny), so a read-only root nested under a
+/// writable workspace root still inherits the parent's write grant; the
+/// two lists are intended to be disjoint (see `docs/src/sandboxing.md`).
+fn read_only_access() -> u64 {
+    LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE
+}
+
 fn workspace_access(policy: &CapabilityPolicy) -> u64 {
     let read_access =
         LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE;
@@ -449,3 +457,69 @@ const LANDLOCK_ACCESS_FS_MAKE_BLOCK: u64 = 1 << 11;
 const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 12;
 const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 13;
 const LANDLOCK_ACCESS_FS_TRUNCATE: u64 = 1 << 14;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WRITE_BITS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
+        | LANDLOCK_ACCESS_FS_REMOVE_DIR
+        | LANDLOCK_ACCESS_FS_REMOVE_FILE
+        | LANDLOCK_ACCESS_FS_MAKE_CHAR
+        | LANDLOCK_ACCESS_FS_MAKE_DIR
+        | LANDLOCK_ACCESS_FS_MAKE_REG
+        | LANDLOCK_ACCESS_FS_MAKE_SOCK
+        | LANDLOCK_ACCESS_FS_MAKE_FIFO
+        | LANDLOCK_ACCESS_FS_MAKE_BLOCK
+        | LANDLOCK_ACCESS_FS_MAKE_SYM
+        | LANDLOCK_ACCESS_FS_REFER
+        | LANDLOCK_ACCESS_FS_TRUNCATE;
+
+    fn linux_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
+        CapabilityPolicy {
+            tools: Vec::new(),
+            capabilities: std::collections::BTreeMap::from([(
+                "workspace".to_string(),
+                ops.iter().map(|op| op.to_string()).collect(),
+            )]),
+            workspace_roots: vec!["/ws".to_string()],
+            read_only_roots: Vec::new(),
+            side_effect_level: Some("read_only".to_string()),
+            recursion_limit: None,
+            tool_arg_constraints: Vec::new(),
+            tool_annotations: std::collections::BTreeMap::new(),
+            sandbox_profile: SandboxProfile::Worktree,
+        }
+    }
+
+    #[test]
+    fn read_only_access_grants_read_and_execute_but_never_write() {
+        let access = read_only_access();
+        assert_ne!(access & LANDLOCK_ACCESS_FS_READ_FILE, 0, "read file");
+        assert_ne!(access & LANDLOCK_ACCESS_FS_READ_DIR, 0, "read dir");
+        assert_ne!(access & LANDLOCK_ACCESS_FS_EXECUTE, 0, "execute");
+        assert_eq!(
+            access & WRITE_BITS,
+            0,
+            "read-only access must not carry any write/create/remove right",
+        );
+    }
+
+    #[test]
+    fn read_only_access_is_independent_of_workspace_write_capability() {
+        // Even when the policy otherwise allows workspace writes, the
+        // read-only access bits are unchanged: a read-only root gets
+        // read+execute only.
+        let writable = linux_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+        assert_ne!(
+            workspace_access(&writable) & LANDLOCK_ACCESS_FS_WRITE_FILE,
+            0,
+            "writable workspace root should carry write",
+        );
+        assert_eq!(
+            read_only_access() & WRITE_BITS,
+            0,
+            "read-only roots stay unwritable regardless of workspace write capability",
+        );
+    }
+}

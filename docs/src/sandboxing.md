@@ -50,7 +50,13 @@ a path under one passes `read_text`/`list`/`exists` checks but
 `write_text`/`delete` are rejected with a `tool_rejected` "read-only
 workspace root" violation, and the generated OS profile grants the root
 read but never write — even when the policy otherwise allows workspace
-writes. The two lists are intended to be disjoint. This lets a caller
+writes. The two lists are intended to be disjoint. macOS additionally
+re-denies write to each read-only root *after* the broad workspace
+write allow (`sandbox-exec` is last-match-wins), so a read-only root
+nested under a writable root stays hermetically unwritable; Linux
+Landlock rules are purely additive (no deny), so a nested read-only
+root under a writable parent inherits the parent's write grant — keep
+the lists disjoint when targeting the Linux backend. This lets a caller
 mount a reference tree (a shared memory dir, a persona bundle) that the
 workload can read but cannot mutate. `CapabilityPolicy::intersect`
 narrows each list to the roots common to both sides, with an empty list
@@ -134,7 +140,7 @@ falls back to the warn/enforce decision documented above.
 | always | `(allow process*)` + `(allow sysctl-read)` + `(allow mach-lookup)` + `(allow file-read-data (literal "/"))` + `(allow file-write* (subpath "/dev"))` | minimum surface required to exec a binary and reach `/dev` |
 | always | `(allow file-read* (subpath "/bin" \| "/etc" \| "/Library" \| "/opt/homebrew" \| "/private/etc" \| "/System" \| "/usr"))` | read access to the directories the dynamic linker and most CLI tools need |
 | `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
-| `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | `(allow file-write* (subpath "/tmp" \| "/private/tmp" \| "/var/tmp"))` + `(allow file-write* (subpath "<root>"))` | scratch dirs and writable `workspace_roots` are writable; `read_only_roots` get no write rule |
+| `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | `(allow file-write* (subpath "/tmp" \| "/private/tmp" \| "/var/tmp"))` + `(allow file-write* (subpath "<root>"))` + `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |
 | `side_effect_level >= network` | `(allow network*)` | otherwise outbound network is denied |
 
 `sandbox-exec` is officially deprecated but remains the platform

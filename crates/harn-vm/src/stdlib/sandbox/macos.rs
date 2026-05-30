@@ -117,6 +117,18 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
                 sandbox_profile_escape(&root.display().to_string())
             ));
         }
+        // A read-only root nested under a writable workspace root would
+        // otherwise inherit write from the broad allow above —
+        // `sandbox-exec` is last-match-wins, so an explicit deny emitted
+        // *after* every write allow re-asserts hermetic read-only scope
+        // even when the lists are not disjoint. The deny is a no-op for
+        // disjoint read-only roots (which never received a write allow).
+        for root in read_only_roots.iter() {
+            profile.push_str(&format!(
+                "(deny file-write* (subpath \"{}\"))\n",
+                sandbox_profile_escape(&root.display().to_string())
+            ));
+        }
     }
     if policy_allows_network(policy) {
         profile.push_str("(allow network*)\n");
@@ -210,6 +222,54 @@ mod tests {
                 .any(|line| line.starts_with("(allow file-write*")
                     && line.contains("harn-workspace")),
             "writable workspace root should still get write: {profile}"
+        );
+    }
+
+    #[test]
+    fn nested_read_only_root_is_denied_write_after_broad_workspace_allow() {
+        // /ws/vendor is a read-only root nested under the writable /ws.
+        let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+        policy.workspace_roots = vec!["/ws".to_string()];
+        policy.read_only_roots = vec!["/ws/vendor".to_string()];
+        let profile = render_profile(&policy);
+
+        // /ws/vendor is readable.
+        assert!(
+            profile.contains("(allow file-read* (subpath \"/ws/vendor\"))"),
+            "nested read-only root should be granted read: {profile}"
+        );
+        // /ws is writable.
+        assert!(
+            profile.contains("(allow file-write* (subpath \"/ws\"))"),
+            "writable workspace root should still get write: {profile}"
+        );
+        // The broad /ws write allow must be neutralized for /ws/vendor by a
+        // deny emitted after it (sandbox-exec is last-match-wins).
+        let write_allow = profile
+            .lines()
+            .position(|line| line == "(allow file-write* (subpath \"/ws\"))")
+            .expect("expected a write allow for /ws");
+        let vendor_deny = profile
+            .lines()
+            .position(|line| line == "(deny file-write* (subpath \"/ws/vendor\"))")
+            .expect("expected a write deny for /ws/vendor");
+        assert!(
+            vendor_deny > write_allow,
+            "deny for the nested read-only root must come after the broad write allow \
+             so last-match-wins keeps it unwritable: {profile}"
+        );
+    }
+
+    #[test]
+    fn read_only_root_deny_is_omitted_when_no_workspace_write() {
+        // No write capability: there is no broad write allow to neutralize,
+        // so no deny rule is emitted (pure read-only profile stays minimal).
+        let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+        policy.read_only_roots = vec!["/mnt/memory".to_string()];
+        let profile = render_profile(&policy);
+        assert!(
+            !profile.contains("(deny file-write*"),
+            "read-only profile must not emit spurious deny rules: {profile}"
         );
     }
 }
