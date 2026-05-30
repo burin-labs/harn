@@ -105,6 +105,10 @@ const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.workflow.resume",
     "mcp/catalog",
     "harn.mcp.catalog",
+    "mcp/authorize",
+    "harn.mcp.authorize",
+    "mcp/oauth_callback",
+    "harn.mcp.oauth_callback",
 ];
 const ACP_AGENT_NOTIFICATIONS: &[&str] = &["session/message", "session/update", "terminal/output"];
 const ACP_CONTENT_BLOCK_TYPES: &[&str] = &["text", "resource_link", "resource", "image", "audio"];

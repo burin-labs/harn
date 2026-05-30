@@ -693,6 +693,22 @@ pub enum AgentEvent {
         server: Option<String>,
         reason: String,
     },
+    /// Surfaced when an MCP server harn is acting as a client for answers a
+    /// request with `401 Unauthorized` mid-session, meaning its OAuth token is
+    /// missing or expired. This is a cue for a thin ACP client (the burin-code
+    /// TUI / GUI) to start an authorization: call `mcp/authorize` to mint a
+    /// browser URL, open it, and forward the redirect's `code`+`state` back via
+    /// `mcp/oauth_callback`. Token exchange and storage stay in harn. `server`
+    /// is the configured server name; `resource` is its canonical RFC 8707
+    /// resource indicator; `scope` is the `scope` parameter from the
+    /// `WWW-Authenticate` challenge, when present.
+    McpAuthRequired {
+        session_id: String,
+        server: String,
+        resource: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
 }
 
 fn is_zero_usize(value: &usize) -> bool {
@@ -754,7 +770,8 @@ impl AgentEvent {
             | Self::CompositionError { session_id, .. }
             | Self::LoopCheckpoint { session_id, .. }
             | Self::McpNotification { session_id, .. }
-            | Self::McpCatalogChanged { session_id, .. } => session_id,
+            | Self::McpCatalogChanged { session_id, .. }
+            | Self::McpAuthRequired { session_id, .. } => session_id,
         }
     }
 }

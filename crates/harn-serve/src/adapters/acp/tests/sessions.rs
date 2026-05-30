@@ -593,6 +593,98 @@ async fn acp_mcp_catalog_projects_allowlist_over_advertised_items() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn acp_mcp_authorize_requires_url() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (request_tx, mut response_rx, server, _session_id) =
+                start_acp_channel_session().await;
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 11,
+                    "method": "mcp/authorize",
+                    "params": {},
+                }))
+                .expect("send mcp/authorize");
+
+            let mut response = None;
+            for _ in 0..6 {
+                let message = recv_json(&mut response_rx).await;
+                if message["id"] == 11 {
+                    response = Some(message);
+                    break;
+                }
+            }
+            let response = response.expect("mcp/authorize response");
+            assert_eq!(response["error"]["code"], -32602);
+            assert!(response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("url"));
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_mcp_oauth_callback_validates_and_rejects_unknown_state() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (request_tx, mut response_rx, server, _session_id) =
+                start_acp_channel_session().await;
+
+            // Missing state/code → invalid params.
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 12,
+                    "method": "mcp/oauth_callback",
+                    "params": {"code": "abc"},
+                }))
+                .expect("send mcp/oauth_callback");
+            // Well-formed but no pending flow matches the state → -32000.
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 13,
+                    "method": "mcp/oauth_callback",
+                    "params": {"state": "no-such", "code": "abc"},
+                }))
+                .expect("send mcp/oauth_callback");
+
+            let mut invalid = None;
+            let mut unknown = None;
+            for _ in 0..8 {
+                let message = recv_json(&mut response_rx).await;
+                if message["id"] == 12 {
+                    invalid = Some(message);
+                } else if message["id"] == 13 {
+                    unknown = Some(message);
+                }
+                if invalid.is_some() && unknown.is_some() {
+                    break;
+                }
+            }
+            assert_eq!(invalid.expect("invalid response")["error"]["code"], -32602);
+            let unknown = unknown.expect("unknown-state response");
+            assert_eq!(unknown["error"]["code"], -32000);
+            assert!(unknown["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("no pending MCP authorization"));
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_session_truncate_validates_inputs() {
     let local = tokio::task::LocalSet::new();
     local

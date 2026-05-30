@@ -542,6 +542,35 @@ fn emit_mcp_notification_event(
     });
 }
 
+/// Emit an `AgentEvent::McpAuthRequired` when a server answers with `401` so a
+/// thin ACP client can start an interactive OAuth authorization. Token exchange
+/// and storage stay in harn (see [`crate::mcp_oauth`]); this is purely the cue.
+/// No-op outside an agent session (e.g. ad hoc CLI MCP calls).
+fn emit_mcp_auth_required_event(
+    server_name: &str,
+    server_url: &str,
+    headers: &reqwest::header::HeaderMap,
+) {
+    let Some(session_id) = crate::llm::current_agent_session_id() else {
+        return;
+    };
+    let resource = crate::mcp_auth::canonical_resource_indicator(server_url)
+        .unwrap_or_else(|_| server_url.to_string());
+    let challenges: Vec<&str> = headers
+        .get_all(reqwest::header::WWW_AUTHENTICATE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect();
+    let scope = crate::mcp_auth::bearer_challenge_from_headers(challenges.iter().copied())
+        .and_then(|challenge| challenge.bearer_scope().map(str::to_string));
+    crate::agent_events::emit_event(&crate::agent_events::AgentEvent::McpAuthRequired {
+        session_id,
+        server: server_name.to_string(),
+        resource,
+        scope,
+    });
+}
+
 fn relay_log_notification(server_name: &str, msg: &serde_json::Value) {
     let Some(session_id) = crate::llm::current_agent_session_id() else {
         return;
@@ -684,6 +713,7 @@ async fn send_http_request(
         }
 
         if status == 401 {
+            emit_mcp_auth_required_event(server_name, &inner.url, &headers);
             return Err(VmError::Thrown(VmValue::String(Rc::from(
                 "MCP authorization required",
             ))));

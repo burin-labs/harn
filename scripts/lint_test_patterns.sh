@@ -437,6 +437,10 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   # Agent host primitive tool dispatch records actual host monotonic
   # elapsed time for transcript / portal execution telemetry.
   "crates/harn-vm/src/llm/agent_host_primitives.rs"
+  # MCP OAuth stamps and compares token expiry against the host wall clock:
+  # the authorization server's `expires_in` is real-world time, so a
+  # VM-scheduled clock cannot decide when a stored token must be refreshed.
+  "crates/harn-vm/src/mcp_oauth.rs"
   "crates/harn-vm/src/llm/agent_runtime.rs"
   # `agent_inbox::wait_sync` is a sync blocking primitive for sync
   # builtins that already block the runtime thread (e.g.
