@@ -3325,7 +3325,6 @@ mod suspend_tests {
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
-        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
         let _runtime_context = crate::runtime_context::install_runtime_context_overlay(
             crate::runtime_context::RuntimeContextOverlay {
                 worker_id: Some(worker_id.clone()),
@@ -3333,18 +3332,21 @@ mod suspend_tests {
             },
         );
 
-        let result = crate::stdlib::harn_entry::call_harn_export_by_name(
-            "std/agent/loop",
-            "agent_loop",
-            "agent_loop_suspend_test",
-            &[
-                VmValue::String(Rc::from("continue the task")),
-                VmValue::Nil,
-                VmValue::Dict(Rc::new(BTreeMap::from([(
-                    "max_iterations".to_string(),
-                    VmValue::Int(3),
-                )]))),
-            ],
+        let result = crate::vm::scope_async_builtin(
+            vm,
+            crate::stdlib::harn_entry::call_harn_export_by_name(
+                "std/agent/loop",
+                "agent_loop",
+                "agent_loop_suspend_test",
+                &[
+                    VmValue::String(Rc::from("continue the task")),
+                    VmValue::Nil,
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "max_iterations".to_string(),
+                        VmValue::Int(3),
+                    )]))),
+                ],
+            ),
         )
         .await
         .expect("agent loop returns suspended checkpoint");
@@ -3380,7 +3382,6 @@ mod suspend_tests {
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
-        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
         let _runtime_context = crate::runtime_context::install_runtime_context_overlay(
             crate::runtime_context::RuntimeContextOverlay {
                 worker_id: Some(worker_id.clone()),
@@ -3388,13 +3389,16 @@ mod suspend_tests {
             },
         );
 
-        let result = execute_sub_agent(SubAgentRunSpec {
-            name: "worker-sub-agent-suspend".to_string(),
-            task: "continue the task".to_string(),
-            session_id: format!("session_{worker_id}"),
-            options: BTreeMap::from([("max_iterations".to_string(), VmValue::Int(3))]),
-            ..Default::default()
-        })
+        let result = crate::vm::scope_async_builtin(
+            vm,
+            execute_sub_agent(SubAgentRunSpec {
+                name: "worker-sub-agent-suspend".to_string(),
+                task: "continue the task".to_string(),
+                session_id: format!("session_{worker_id}"),
+                options: BTreeMap::from([("max_iterations".to_string(), VmValue::Int(3))]),
+                ..Default::default()
+            }),
+        )
         .await
         .expect("sub-agent execution returns suspended checkpoint");
 

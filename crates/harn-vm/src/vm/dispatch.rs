@@ -4,7 +4,6 @@ use std::rc::Rc;
 use crate::value::{ErrorCategory, VmBuiltinFn, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
-use super::async_builtin::CURRENT_ASYNC_BUILTIN_CHILD_VM;
 use super::{
     CallArgs, ScopeSpan, Vm, VmBuiltinArity, VmBuiltinDispatch, VmBuiltinEntry, VmBuiltinKind,
     VmBuiltinMetadata,
@@ -577,15 +576,12 @@ impl Vm {
         match dispatch {
             VmBuiltinDispatch::Sync(builtin) => builtin(&args, &mut self.output),
             VmBuiltinDispatch::Async(async_builtin) => {
-                CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
-                    slot.borrow_mut().push(self.child_vm());
-                });
-                let result = async_builtin(args).await;
-                let captured = CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
-                    let mut stack = slot.borrow_mut();
-                    let mut top = stack.pop();
-                    top.as_mut().map(|vm| vm.take_output()).unwrap_or_default()
-                });
+                // Bind a fresh child VM as the async-builtin context for the
+                // duration of this future (cancel-safe task-local scope), then
+                // drain any output VM-side closures forwarded into it back to
+                // the parent. See `vm::async_builtin`.
+                let (result, captured) =
+                    crate::vm::run_async_builtin_with(self.child_vm(), async_builtin(args)).await;
                 if !captured.is_empty() {
                     self.output.push_str(&captured);
                 }

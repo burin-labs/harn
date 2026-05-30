@@ -2305,12 +2305,18 @@ impl Dispatcher {
         // The dispatcher installs its own child VM on the async-builtin
         // stack so the pool can clone an execution context when (or after)
         // the task is scheduled to run.
+        // Bind the dispatcher's child VM as the async-builtin context for the
+        // duration of the pool submit, so the pool can clone an execution
+        // context when the task is scheduled. `submit` is the only await here;
+        // a task-local scope around it is cancel-safe and avoids the old
+        // thread-local stack strand risk.
         let child_vm = self.base_vm.child_vm();
-        let _vm_guard = crate::vm::install_async_builtin_child_vm(child_vm);
-        let outcome =
-            crate::stdlib::pool::submit_closure_to_named_pool(pool, closure, priority, key.clone())
-                .await
-                .map_err(|error| DispatchError::Local(error.to_string()))?;
+        let outcome = crate::vm::scope_async_builtin(
+            child_vm,
+            crate::stdlib::pool::submit_closure_to_named_pool(pool, closure, priority, key.clone()),
+        )
+        .await
+        .map_err(|error| DispatchError::Local(error.to_string()))?;
 
         let mut metadata = route.dispatch_boundary_metadata();
         metadata.insert("pool".to_string(), serde_json::json!(pool));

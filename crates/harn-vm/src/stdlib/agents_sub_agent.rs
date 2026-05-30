@@ -1284,8 +1284,9 @@ mod tests {
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
-        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
-        let result = execute_sub_agent(spec).await.unwrap();
+        let result = crate::vm::scope_async_builtin(vm, execute_sub_agent(spec))
+            .await
+            .unwrap();
         assert_eq!(result.payload["ok"].as_bool(), Some(true));
 
         let child_messages = crate::agent_sessions::messages_json("child-subagent");
@@ -1348,8 +1349,9 @@ mod tests {
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
-        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
-        let result = execute_sub_agent(spec).await.unwrap();
+        let result = crate::vm::scope_async_builtin(vm, execute_sub_agent(spec))
+            .await
+            .unwrap();
 
         assert_eq!(result.payload["ok"].as_bool(), Some(false));
         assert_eq!(result.payload["budget_exceeded"].as_bool(), Some(true));
