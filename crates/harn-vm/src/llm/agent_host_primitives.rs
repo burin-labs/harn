@@ -1036,6 +1036,61 @@ async fn host_agent_dispatch_tool_call(
 
 /// Connect to each MCP server in specs, list their tools (prefixed with
 /// server_name__), store handles keyed by session_id, and return
+/// Tag a single MCP tool descriptor for the agent tool surface.
+///
+/// Namespaces the tool name (`<server>__<tool>`), records the MCP
+/// executor wiring (`executor`/`mcp_server`/`_mcp_server`/
+/// `_mcp_tool_name`) so dispatch and the `tool_search` BM25 indexer can
+/// find it, and — unless `eager_schemas` is set on the spec — flags it
+/// `defer_loading: true`.
+///
+/// `defer_loading` is the progressive-disclosure default (harn#2649):
+/// the lightweight catalog (name + one-line description) ships up front,
+/// but the full JSON `inputSchema` is held back until the model surfaces
+/// the tool via `tool_search` or calls it directly. This keeps MCP
+/// servers with many tools from spending the whole tool budget on
+/// schemas the agent never reaches for. Callers opt back into eager
+/// schemas with `eager_schemas: true` on the server spec.
+fn tag_mcp_tool(
+    mut tool: serde_json::Value,
+    server_name: &str,
+    eager_schemas: bool,
+) -> serde_json::Value {
+    if let Some(obj) = tool.as_object_mut() {
+        let original_name = obj
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let prefixed_name = format!("{server_name}__{original_name}");
+        // Namespace to avoid conflicts between servers.
+        obj.insert("name".into(), serde_json::Value::String(prefixed_name));
+        obj.insert(
+            "executor".into(),
+            serde_json::Value::String("mcp_server".into()),
+        );
+        obj.insert(
+            "mcp_server".into(),
+            serde_json::Value::String(server_name.to_string()),
+        );
+        obj.insert(
+            "_mcp_server".into(),
+            serde_json::Value::String(server_name.to_string()),
+        );
+        obj.insert(
+            "_mcp_tool_name".into(),
+            serde_json::Value::String(original_name),
+        );
+        // Progressive disclosure on by default; opt out per-spec with
+        // `eager_schemas: true`. Never clobber an explicit per-tool
+        // `defer_loading` the server itself advertised.
+        if !eager_schemas && !obj.contains_key("defer_loading") {
+            obj.insert("defer_loading".into(), serde_json::Value::Bool(true));
+        }
+    }
+    tool
+}
+
 /// {tools_added, errors}.
 #[harn_builtin(
     sig = "__host_mcp_bootstrap(session_id: string, specs?: list|nil) -> dict",
@@ -1089,6 +1144,15 @@ async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
             continue;
         }
 
+        // Progressive disclosure is the default (harn#2649): defer each
+        // tool's schema until `tool_search`/dispatch reaches for it. A
+        // spec can opt back into eager full schemas with
+        // `eager_schemas: true`.
+        let eager_schemas = spec
+            .get("eager_schemas")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         match crate::mcp::connect_mcp_server_from_json(spec).await {
             Err(e) => {
                 errors.push(serde_json::json!({
@@ -1132,34 +1196,8 @@ async fn host_mcp_bootstrap_impl(args: Vec<VmValue>) -> Result<VmValue, VmError>
                             .and_then(|t| t.as_array())
                             .cloned()
                             .unwrap_or_default();
-                        for mut tool in raw_tools {
-                            if let Some(obj) = tool.as_object_mut() {
-                                let original_name = obj
-                                    .get("name")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let prefixed_name = format!("{server_name}__{original_name}");
-                                // Namespace to avoid conflicts between servers.
-                                obj.insert("name".into(), serde_json::Value::String(prefixed_name));
-                                obj.insert(
-                                    "executor".into(),
-                                    serde_json::Value::String("mcp_server".into()),
-                                );
-                                obj.insert(
-                                    "mcp_server".into(),
-                                    serde_json::Value::String(server_name.clone()),
-                                );
-                                obj.insert(
-                                    "_mcp_server".into(),
-                                    serde_json::Value::String(server_name.clone()),
-                                );
-                                obj.insert(
-                                    "_mcp_tool_name".into(),
-                                    serde_json::Value::String(original_name),
-                                );
-                            }
-                            tools_added.push(tool);
+                        for tool in raw_tools {
+                            tools_added.push(tag_mcp_tool(tool, &server_name, eager_schemas));
                         }
                         clients.insert(server_name, handle);
                     }
@@ -1266,4 +1304,117 @@ async fn host_agent_reminder_providers_fire_impl(args: Vec<VmValue>) -> Result<V
     )
     .await?;
     Ok(json_to_vm_value(&report))
+}
+
+#[cfg(test)]
+mod mcp_bootstrap_tests {
+    use super::tag_mcp_tool;
+
+    fn sample_tools() -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({
+                "name": "search_issues",
+                "description": "Search issues by query",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": { "query": { "type": "string" } },
+                    "required": ["query"],
+                },
+            }),
+            serde_json::json!({
+                "name": "create_issue",
+                "description": "Create a new issue",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": { "title": { "type": "string" } },
+                },
+            }),
+        ]
+    }
+
+    #[test]
+    fn catalog_defers_schemas_by_default() {
+        let tools: Vec<serde_json::Value> = sample_tools()
+            .into_iter()
+            .map(|tool| tag_mcp_tool(tool, "github", false))
+            .collect();
+        assert_eq!(tools.len(), 2);
+        for tool in &tools {
+            // Catalog surfaces name + one-line description...
+            assert!(tool.get("name").and_then(|v| v.as_str()).is_some());
+            assert!(tool.get("description").and_then(|v| v.as_str()).is_some());
+            // ...and defers the full input schema until tool_search /
+            // dispatch reaches for it.
+            assert_eq!(
+                tool.get("defer_loading").and_then(|v| v.as_bool()),
+                Some(true),
+                "MCP tools should defer their schema by default"
+            );
+        }
+        // Names are server-namespaced so cross-server collisions can't
+        // happen, and the MCP executor wiring is preserved so the tool
+        // stays callable once its schema is loaded on demand.
+        let first = &tools[0];
+        assert_eq!(
+            first.get("name").and_then(|v| v.as_str()),
+            Some("github__search_issues")
+        );
+        assert_eq!(
+            first.get("executor").and_then(|v| v.as_str()),
+            Some("mcp_server")
+        );
+        assert_eq!(
+            first.get("mcp_server").and_then(|v| v.as_str()),
+            Some("github")
+        );
+        assert_eq!(
+            first.get("_mcp_server").and_then(|v| v.as_str()),
+            Some("github")
+        );
+        assert_eq!(
+            first.get("_mcp_tool_name").and_then(|v| v.as_str()),
+            Some("search_issues")
+        );
+        // The full schema is still carried on the descriptor (it is held
+        // back at the provider/agent-loop layer, not discarded), so it
+        // resolves on demand when the tool is surfaced or called.
+        assert!(first
+            .get("inputSchema")
+            .and_then(|v| v.as_object())
+            .is_some());
+    }
+
+    #[test]
+    fn eager_opt_out_ships_schemas_upfront() {
+        let tools: Vec<serde_json::Value> = sample_tools()
+            .into_iter()
+            .map(|tool| tag_mcp_tool(tool, "github", true))
+            .collect();
+        for tool in &tools {
+            assert!(
+                tool.get("defer_loading").is_none(),
+                "eager_schemas: true must not defer MCP tool schemas"
+            );
+            assert!(tool
+                .get("inputSchema")
+                .and_then(|v| v.as_object())
+                .is_some());
+        }
+    }
+
+    #[test]
+    fn server_advertised_defer_loading_is_preserved() {
+        // A server that explicitly sets defer_loading: false keeps it,
+        // even under the progressive-disclosure default.
+        let tool = serde_json::json!({
+            "name": "ping",
+            "description": "Health check",
+            "defer_loading": false,
+        });
+        let tagged = tag_mcp_tool(tool, "ops", false);
+        assert_eq!(
+            tagged.get("defer_loading").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
 }
