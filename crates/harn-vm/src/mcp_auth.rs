@@ -259,6 +259,45 @@ pub fn bearer_challenge_from_headers<'a>(
     first_bearer
 }
 
+/// Canonicalize an MCP server URL into the RFC 8707 resource indicator that
+/// MUST be sent as `resource` in both the authorization request and the token
+/// request.
+///
+/// The MCP authorization profile reuses RFC 8707 §2 resource-indicator
+/// canonicalization: the scheme and host are lowercased, a default port for the
+/// scheme is dropped, the fragment and query are removed, and a lone trailing
+/// slash on an otherwise empty path is stripped. A non-empty path is preserved
+/// because RFC 8707 treats the path as part of the resource identity.
+pub fn canonical_resource_indicator(server_url: &str) -> Result<String, McpOAuthDiscoveryError> {
+    let mut url = Url::parse(server_url)
+        .map_err(|error| McpOAuthDiscoveryError::InvalidResourceUrl(error.to_string()))?;
+    // The `url` crate already lowercases the scheme and host on parse, but be
+    // explicit so the canonical form is stable regardless of input casing.
+    url.set_fragment(None);
+    url.set_query(None);
+    let _ = url.set_scheme(&url.scheme().to_ascii_lowercase());
+    if let Some(host) = url.host_str() {
+        let lowered = host.to_ascii_lowercase();
+        if lowered != host {
+            let _ = url.set_host(Some(&lowered));
+        }
+    }
+    // Drop a default port so `https://host:443` and `https://host` canonicalize
+    // identically, while leaving non-default ports intact.
+    if let Some(port) = url.port() {
+        if Some(port) == default_port_for_scheme(url.scheme()) {
+            let _ = url.set_port(None);
+        }
+    }
+    let mut canonical = url.to_string();
+    // Strip a lone trailing slash when the path carries no other segments, e.g.
+    // `https://mcp.example.com/` -> `https://mcp.example.com`.
+    if url.path() == "/" && canonical.ends_with('/') {
+        canonical.pop();
+    }
+    Ok(canonical)
+}
+
 pub fn protected_resource_metadata_candidates(resource_url: &Url) -> Vec<Url> {
     let mut urls = Vec::new();
     let path = resource_url
@@ -825,6 +864,14 @@ fn quote_auth_value(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn default_port_for_scheme(scheme: &str) -> Option<u16> {
+    match scheme {
+        "http" | "ws" => Some(80),
+        "https" | "wss" => Some(443),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -845,6 +892,64 @@ mod tests {
             authorization_response_iss_parameter_supported: false,
             extra: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn canonical_resource_indicator_strips_trailing_slash() {
+        assert_eq!(
+            canonical_resource_indicator("https://mcp.example.com/").unwrap(),
+            "https://mcp.example.com"
+        );
+        assert_eq!(
+            canonical_resource_indicator("https://mcp.example.com").unwrap(),
+            "https://mcp.example.com"
+        );
+    }
+
+    #[test]
+    fn canonical_resource_indicator_strips_fragment_and_query() {
+        assert_eq!(
+            canonical_resource_indicator("https://mcp.example.com/mcp?token=secret#section")
+                .unwrap(),
+            "https://mcp.example.com/mcp"
+        );
+    }
+
+    #[test]
+    fn canonical_resource_indicator_lowercases_scheme_and_host() {
+        assert_eq!(
+            canonical_resource_indicator("HTTPS://MCP.Example.COM/Path").unwrap(),
+            "https://mcp.example.com/Path"
+        );
+    }
+
+    #[test]
+    fn canonical_resource_indicator_drops_default_ports() {
+        assert_eq!(
+            canonical_resource_indicator("https://mcp.example.com:443/").unwrap(),
+            "https://mcp.example.com"
+        );
+        assert_eq!(
+            canonical_resource_indicator("http://mcp.example.com:80").unwrap(),
+            "http://mcp.example.com"
+        );
+        assert_eq!(
+            canonical_resource_indicator("https://mcp.example.com:8443/mcp").unwrap(),
+            "https://mcp.example.com:8443/mcp"
+        );
+    }
+
+    #[test]
+    fn canonical_resource_indicator_preserves_non_empty_path() {
+        assert_eq!(
+            canonical_resource_indicator("https://example.com/mcp/notion/").unwrap(),
+            "https://example.com/mcp/notion/"
+        );
+    }
+
+    #[test]
+    fn canonical_resource_indicator_rejects_invalid_url() {
+        assert!(canonical_resource_indicator("not a url").is_err());
     }
 
     #[test]

@@ -5,8 +5,8 @@ use std::{env, fs, process};
 
 use base64::Engine;
 use harn_vm::mcp_auth::{
-    determine_token_endpoint_auth_method, discover_mcp_oauth, dynamic_client_registration_body,
-    ensure_pkce_s256_supported, select_client_registration_mode,
+    canonical_resource_indicator, determine_token_endpoint_auth_method, discover_mcp_oauth,
+    dynamic_client_registration_body, ensure_pkce_s256_supported, select_client_registration_mode,
     validate_authorization_response_issuer, validate_issuer_binding,
     validate_token_endpoint_auth_method, OAuthClientRegistrationMode,
     OAuthClientRegistrationOptions,
@@ -181,6 +181,9 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         target: options.target.clone(),
         url: options.url.clone(),
     })?;
+    // RFC 8707 resource indicator: the MCP server's canonical URI, sent in both
+    // the authorization and token requests regardless of AS advertisement.
+    let resource = canonical_resource_indicator(&server.url).map_err(|error| error.to_string())?;
     let discovery = discover_oauth_server(&server.url).await?;
     ensure_pkce_support(&discovery.metadata)?;
     let requested_scopes = options
@@ -245,7 +248,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         &options.redirect_uri,
         &state,
         &code_challenge,
-        &server.url,
+        &resource,
         requested_scopes.as_deref(),
     )?;
 
@@ -267,7 +270,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
             client_secret: client_secret.as_deref(),
             token_auth_method: &token_auth_method,
             redirect_uri: &options.redirect_uri,
-            resource: &server.url,
+            resource: &resource,
             scopes: requested_scopes.as_deref(),
             code: &callback.code,
             code_verifier: &code_verifier,
@@ -286,7 +289,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
         client_secret,
         token_endpoint_auth_method: token_auth_method,
         issuer: discovery.issuer,
-        resource: server.url.clone(),
+        resource,
         scopes: requested_scopes,
     };
     save_stored_token(&stored).await?;
@@ -574,12 +577,16 @@ async fn refresh_token_if_needed(
     let refresh_token = token.refresh_token.clone().ok_or_else(|| {
         "Stored OAuth token has expired and does not include a refresh token".to_string()
     })?;
+    // Re-send the RFC 8707 resource indicator on refresh. Canonicalize again so
+    // tokens persisted before this change still emit the canonical form.
+    let resource =
+        canonical_resource_indicator(&token.resource).unwrap_or_else(|_| token.resource.clone());
     let client = reqwest::Client::new();
     let form = vec![
         ("grant_type", "refresh_token".to_string()),
         ("refresh_token", refresh_token),
         ("client_id", token.client_id.clone()),
-        ("resource", token.resource.clone()),
+        ("resource", resource),
     ];
     let refreshed = request_token(
         &client,
@@ -865,5 +872,28 @@ mod tests {
         let response = html_response(400, "<script>alert('x')</script>&");
         assert!(response.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;"));
         assert!(!response.contains("<script>"));
+    }
+
+    #[test]
+    fn authorization_url_includes_canonical_resource_indicator() {
+        let resource = canonical_resource_indicator("https://MCP.Example.com:443/mcp/").unwrap();
+        let url = build_authorization_url(
+            "https://auth.example.com/authorize",
+            "client-123",
+            "http://127.0.0.1:9783/oauth/callback",
+            "state-abc",
+            "challenge-xyz",
+            &resource,
+            Some("mcp.read"),
+        )
+        .unwrap();
+        let resource_param = url
+            .query_pairs()
+            .find(|(key, _)| key == "resource")
+            .map(|(_, value)| value.into_owned());
+        assert_eq!(
+            resource_param.as_deref(),
+            Some("https://mcp.example.com/mcp/")
+        );
     }
 }
