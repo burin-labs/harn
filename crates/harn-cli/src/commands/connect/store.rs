@@ -138,7 +138,7 @@ pub(super) async fn run_connect_revoke(
     Ok(())
 }
 
-pub(super) fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
+pub(crate) fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -157,13 +157,26 @@ pub(super) fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
     Some(harn_vm::secrets::SecretId::new(namespace, name).with_version(version))
 }
 
-pub(super) fn connect_secret_provider() -> Result<KeyringSecretProvider, String> {
+pub(crate) fn connect_secret_provider() -> Result<KeyringSecretProvider, String> {
     let manifest_dir = resolve_manifest_path(None)
         .map(|(_, dir)| dir)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     Ok(KeyringSecretProvider::new(secret_namespace_for(
         &manifest_dir,
     )))
+}
+
+pub(crate) async fn load_connect_secret_text(secret_id: &str) -> Result<String, String> {
+    let id = parse_secret_id(secret_id)
+        .ok_or_else(|| format!("invalid secret id `{secret_id}`; expected namespace/name"))?;
+    let provider = connect_secret_provider()?;
+    let secret = provider
+        .get(&id)
+        .await
+        .map_err(|error| format!("failed to load {id}: {error}"))?;
+    secret
+        .with_exposed(|bytes| String::from_utf8(bytes.to_vec()))
+        .map_err(|error| format!("secret {id} is not valid UTF-8: {error}"))
 }
 
 pub(super) async fn save_connector_token(token: &StoredConnectorToken) -> Result<(), String> {

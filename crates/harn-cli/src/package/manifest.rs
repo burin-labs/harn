@@ -644,6 +644,8 @@ pub struct McpServerConfig {
     #[serde(default)]
     pub auth_token: Option<String>,
     #[serde(default)]
+    pub auth: Option<McpAuthConfig>,
+    #[serde(default)]
     pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
@@ -670,6 +672,33 @@ pub struct McpServerConfig {
     /// immediately. Ignored for non-lazy servers.
     #[serde(default, alias = "keep-alive-ms", alias = "keep_alive")]
     pub keep_alive_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct McpAuthConfig {
+    #[serde(default)]
+    pub mode: Option<harn_vm::mcp_auth::OAuthClientAuthMode>,
+    #[serde(default, alias = "client-id")]
+    pub client_id: Option<String>,
+    #[serde(
+        default,
+        alias = "client_secret_id",
+        alias = "client-secret-id",
+        alias = "client_secret_ref",
+        alias = "client-secret-ref"
+    )]
+    pub client_secret_id: Option<String>,
+    #[serde(
+        default,
+        alias = "secret_id",
+        alias = "secret-id",
+        alias = "token-secret-id"
+    )]
+    pub secret_id: Option<String>,
+    #[serde(default, alias = "scope")]
+    pub scopes: Option<String>,
+    #[serde(default, alias = "token_auth_method", alias = "token-auth-method")]
+    pub token_endpoint_auth_method: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

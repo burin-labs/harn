@@ -48,6 +48,12 @@ public enum HarnProtocolConstants {
         "dynamic_client_registration",
         "manual",
     ]
+    public static let mcpOAuthAuthModes: [String] = [
+        "cimd",
+        "dcr",
+        "static",
+        "byo",
+    ]
     public static let mcpOAuthApplicationTypes: [String] = [
         "native",
         "web",
@@ -527,6 +533,20 @@ public enum HarnMCPOAuthClientRegistrationMode: String, Codable, Sendable, CaseI
         "client_id_metadata_document",
         "dynamic_client_registration",
         "manual",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnMCPOAuthAuthMode: String, Codable, Sendable, CaseIterable {
+    case cimd = "cimd"
+    case dcr = "dcr"
+    case `static` = "static"
+    case byo = "byo"
+
+    public static let allCases: [Self] = [
+        "cimd",
+        "dcr",
+        "static",
+        "byo",
     ].map { Self(rawValue: $0)! }
 }
 

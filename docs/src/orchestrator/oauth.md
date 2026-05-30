@@ -84,9 +84,12 @@ transient_provider_outage = "Retry after the provider or credential backend reco
 `transient_provider_outage`.
 
 When endpoints are not supplied, Harn discovers protected-resource metadata,
-then authorization-server metadata. If the server advertises dynamic client
-registration and no `--client-id` is supplied, Harn registers a loopback client
-for the selected redirect URI.
+then authorization-server metadata. For MCP login, the default client
+registration mode is CIMD: Harn sends
+`https://harnlang.com/.well-known/oauth-client.json` as its client id when the
+authorization server advertises Client ID Metadata Document support. If CIMD is
+not available and the server advertises dynamic client registration, Harn
+registers a loopback client for the selected redirect URI.
 
 GitHub App setup is separate from OAuth access tokens:
 

@@ -12,7 +12,7 @@ mod github;
 mod linear;
 mod oauth;
 mod status;
-mod store;
+pub(crate) mod store;
 mod workspace;
 
 use self::github::run_connect_github;

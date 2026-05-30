@@ -328,21 +328,50 @@ harn mcp redirect-uri
 harn mcp login notion
 ```
 
-If the server uses a pre-registered OAuth client, you can provide those
-values in `harn.toml` or on the CLI:
+OAuth client authentication uses one `auth` table. With no explicit
+configuration, `harn mcp login` prefers Client ID Metadata Document (CIMD)
+registration using Harn's published metadata document at
+`https://harnlang.com/.well-known/oauth-client.json`; if the authorization
+server does not advertise CIMD support, Harn falls back to dynamic client
+registration.
+
+For a pre-registered client, store the client secret with `harn connect
+api-key` and reference it from `auth.client_secret_id`:
+
+```bash
+harn connect api-key \
+  --connector internal-mcp \
+  --secret-id mcp/internal-client-secret
+```
 
 ```toml
 [[mcp]]
 name = "internal"
 transport = "http"
 url = "https://mcp.example.com"
-client_id = "https://client.example.com/metadata.json"
-client_secret = "super-secret"
-scopes = "read:docs write:docs"
+auth = { mode = "byo", client_id = "registered-client", client_secret_id = "mcp/internal-client-secret", scopes = "read:docs write:docs" }
 ```
 
-When no `client_id` is provided, Harn will attempt dynamic client
-registration if the authorization server advertises it.
+For a static bearer token or API key, reuse the same secret-store path:
+
+```bash
+harn connect api-key \
+  --connector internal-mcp \
+  --secret-id mcp/internal-bearer
+```
+
+```toml
+[[mcp]]
+name = "internal"
+transport = "http"
+url = "https://mcp.example.com"
+auth = { mode = "static", secret_id = "mcp/internal-bearer" }
+```
+
+The older top-level `client_id`, `client_secret`, `scopes`, and `auth_token`
+fields are accepted for local manifests, but new host-generated config should
+write the `auth = { mode = ... }` form so TUI and GUI clients do not need their
+own OAuth configuration model.
 
 ### Example: filesystem MCP server
 

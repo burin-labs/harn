@@ -479,6 +479,73 @@ async fn generic_mcp_oauth_discovers_metadata_and_registers_client() {
     server.join().expect("mock oauth server");
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn generic_oauth_prefers_default_cimd_client_before_dcr() {
+    let mut metadata = harn_vm::mcp_auth::OAuthAuthorizationServerMetadata {
+        issuer: "https://auth.example.com".to_string(),
+        authorization_endpoint: "https://auth.example.com/oauth/authorize".to_string(),
+        token_endpoint: "https://auth.example.com/oauth/token".to_string(),
+        registration_endpoint: Some("https://auth.example.com/oauth/register".to_string()),
+        token_endpoint_auth_methods_supported: vec!["none".to_string()],
+        code_challenge_methods_supported: vec!["S256".to_string()],
+        scopes_supported: vec![],
+        client_id_metadata_document_supported: true,
+        authorization_response_iss_parameter_supported: false,
+        extra: Default::default(),
+    };
+    let request = OAuthConnectRequest {
+        provider: "remote".to_string(),
+        resource: "https://mcp.example.com/mcp".to_string(),
+        authorization_endpoint: None,
+        token_endpoint: None,
+        registration_endpoint: None,
+        client_id: None,
+        client_secret: None,
+        scopes: None,
+        redirect_uri: "http://127.0.0.1:49152/oauth/callback".to_string(),
+        token_auth_method: None,
+        no_open: true,
+        json: false,
+    };
+    let discovery = OAuthDiscoveryResult {
+        metadata: metadata.clone(),
+        issuer: metadata.issuer.clone(),
+        scopes: vec![],
+    };
+    let (client_id, client_secret, auth_method) = resolve_oauth_client(
+        &request,
+        Some(&discovery),
+        metadata.registration_endpoint.as_deref(),
+    )
+    .await
+    .expect("client auth");
+    assert_eq!(
+        client_id,
+        harn_vm::mcp_auth::DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL
+    );
+    assert_eq!(client_secret, None);
+    assert_eq!(auth_method, "none");
+
+    metadata.client_id_metadata_document_supported = false;
+    let discovery = OAuthDiscoveryResult {
+        metadata: metadata.clone(),
+        issuer: metadata.issuer.clone(),
+        scopes: vec![],
+    };
+    let (base_url, server) = spawn_dynamic_registration_only_server();
+    let mut request = request;
+    request.registration_endpoint = Some(format!("{base_url}/oauth/register"));
+    let (client_id, _, _) = resolve_oauth_client(
+        &request,
+        Some(&discovery),
+        request.registration_endpoint.as_deref(),
+    )
+    .await
+    .expect("dcr client auth");
+    assert_eq!(client_id, "dynamic-client");
+    server.join().expect("mock dcr server");
+}
+
 fn spawn_token_endpoint<F>(assert_form: F) -> String
 where
     F: FnOnce(BTreeMap<String, String>) + Send + 'static,
@@ -499,6 +566,22 @@ where
         );
     });
     format!("http://127.0.0.1:{port}/oauth/token")
+}
+
+fn spawn_dynamic_registration_only_server() -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("mock dcr listener");
+    let port = listener.local_addr().unwrap().port();
+    let base_url = format!("http://127.0.0.1:{port}");
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("registration request");
+        let request = read_http_request(&mut stream);
+        assert!(request.contains("http://127.0.0.1:49152/oauth/callback"));
+        write_json_response(
+            &mut stream,
+            r#"{"client_id":"dynamic-client","token_endpoint_auth_method":"none"}"#,
+        );
+    });
+    (base_url, handle)
 }
 
 fn spawn_generic_mcp_oauth_server() -> (String, thread::JoinHandle<()>) {
