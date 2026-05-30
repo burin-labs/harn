@@ -518,6 +518,64 @@ __io_println(json_stringify({len: len(snap["messages"]), messages: snap["message
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn acp_mcp_catalog_projects_allowlist_over_advertised_items() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            harn_vm::reset_thread_local_state();
+            let (request_tx, mut response_rx, server, _session_id) =
+                start_acp_channel_session().await;
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "mcp/catalog",
+                    "params": {
+                        "allowlist": {
+                            "schemaVersion": 1,
+                            "defaultEnabled": true,
+                            "items": [
+                                {"server": "github", "kind": "tool", "name": "create_issue", "enabled": false}
+                            ]
+                        },
+                        "advertised": {
+                            "github": [
+                                {"kind": "tool", "name": "create_issue"},
+                                {"kind": "tool", "name": "list_issues"}
+                            ]
+                        }
+                    },
+                }))
+                .expect("send mcp/catalog");
+
+            let mut response = None;
+            for _ in 0..6 {
+                let message = recv_json(&mut response_rx).await;
+                if message["id"] == 7 {
+                    response = Some(message);
+                    break;
+                }
+            }
+            let response = response.expect("mcp/catalog response");
+            let result = &response["result"];
+            assert_eq!(result["schemaVersion"], 1);
+            assert_eq!(result["defaultEnabled"], true);
+            let github = &result["servers"][0];
+            assert_eq!(github["name"], "github");
+            // Items sorted by (kind, name): create_issue first, disabled by allowlist.
+            assert_eq!(github["items"][0]["name"], "create_issue");
+            assert_eq!(github["items"][0]["enabled"], false);
+            assert_eq!(github["items"][1]["name"], "list_issues");
+            assert_eq!(github["items"][1]["enabled"], true);
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_session_truncate_validates_inputs() {
     let local = tokio::task::LocalSet::new();
     local

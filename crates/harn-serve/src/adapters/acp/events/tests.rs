@@ -704,6 +704,43 @@ async fn mcp_elicitation_request_reaches_acp_as_ext_event() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn mcp_catalog_changed_reaches_acp_as_ext_event() {
+    let actual = collect_notifications(vec![AgentEvent::McpCatalogChanged {
+        session_id: "session-1".to_string(),
+        server: Some("github".to_string()),
+        reason: "list_changed".to_string(),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "mcp_catalog_changed");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["server"], "github");
+    assert_eq!(params["reason"], "list_changed");
+    assert!(
+        HARN_AGENT_EVENT_KINDS.contains(&"mcp_catalog_changed"),
+        "mcp_catalog_changed must be advertised so clients can subscribe"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mcp_catalog_changed_allows_serverless_allowlist_update() {
+    let actual = collect_notifications(vec![AgentEvent::McpCatalogChanged {
+        session_id: "session-1".to_string(),
+        server: None,
+        reason: "allowlist_updated".to_string(),
+    }])
+    .await;
+
+    let params = &actual[0]["params"];
+    assert_eq!(params["kind"], "mcp_catalog_changed");
+    assert!(params["server"].is_null());
+    assert_eq!(params["reason"], "allowlist_updated");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn harn_extension_session_update_fixtures_are_pinned() {
     let actual = collect_notifications(extension_fixture_events()).await;
     let expected: serde_json::Value = serde_json::from_str(include_str!(

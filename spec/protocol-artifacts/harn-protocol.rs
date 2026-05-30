@@ -272,6 +272,7 @@ pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
 pub const HARN_AGENT_EVENT_KIND_LOOP_CONTROL_DECISION: &str = "loop_control_decision";
 pub const HARN_AGENT_EVENT_KIND_LOOP_STUCK: &str = "loop_stuck";
+pub const HARN_AGENT_EVENT_KIND_MCP_CATALOG_CHANGED: &str = "mcp_catalog_changed";
 pub const HARN_AGENT_EVENT_KIND_MCP_NOTIFICATION: &str = "mcp_notification";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
 pub const HARN_AGENT_EVENT_KIND_SCOPE_CLASSIFIER_VERDICT: &str = "scope_classifier_verdict";
@@ -299,6 +300,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "judge_decision",
     "loop_control_decision",
     "loop_stuck",
+    "mcp_catalog_changed",
     "mcp_notification",
     "progress_reported",
     "scope_classifier_verdict",

@@ -1458,6 +1458,20 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::McpCatalogChanged {
+                session_id,
+                server,
+                reason,
+            } => {
+                self.emit_agent_event_ext(
+                    "mcp_catalog_changed",
+                    session_id,
+                    serde_json::json!({
+                        "server": server,
+                        "reason": reason,
+                    }),
+                );
+            }
         }
     }
 }

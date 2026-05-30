@@ -678,6 +678,21 @@ pub enum AgentEvent {
         direction: String,
         params: serde_json::Value,
     },
+    /// Surfaced when the effective MCP catalog changes — either because a
+    /// server emitted a `notifications/tools/list_changed` (or the
+    /// resource/prompt equivalents), or because the persisted enable/disable
+    /// allowlist was edited. A thin ACP client (the burin-code TUI / GUI)
+    /// treats this as a cue to re-fetch the catalog (e.g. via the
+    /// `mcp/catalog` request) and re-render its toggle UI, rather than
+    /// reconciling any local state. `server` is the server whose list
+    /// changed, or `None` when the change is allowlist-wide. `reason` is a
+    /// short tag (`"list_changed"` or `"allowlist_updated"`).
+    McpCatalogChanged {
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server: Option<String>,
+        reason: String,
+    },
 }
 
 fn is_zero_usize(value: &usize) -> bool {
@@ -738,7 +753,8 @@ impl AgentEvent {
             | Self::CompositionFinish { session_id, .. }
             | Self::CompositionError { session_id, .. }
             | Self::LoopCheckpoint { session_id, .. }
-            | Self::McpNotification { session_id, .. } => session_id,
+            | Self::McpNotification { session_id, .. }
+            | Self::McpCatalogChanged { session_id, .. } => session_id,
         }
     }
 }

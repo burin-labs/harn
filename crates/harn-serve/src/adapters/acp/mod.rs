@@ -2235,6 +2235,31 @@ impl AcpServer {
         self.send_response(id, serde_json::json!({"sessions": sessions}));
     }
 
+    /// `mcp/catalog`: project the persisted enable/disable allowlist (plus
+    /// optional per-project overlay) onto the advertised MCP items and
+    /// return the effective catalog (servers → items + `enabled`). The
+    /// merge/projection is harn-owned so thin clients (the burin-code TUI /
+    /// GUI) render the toggle UI without storing any toggle state. See
+    /// `harn_vm::mcp_allowlist`.
+    fn handle_mcp_catalog(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let request: harn_vm::McpCatalogRequest = match serde_json::from_value(params.clone()) {
+            Ok(request) => request,
+            Err(error) => {
+                self.send_error(id, -32602, &format!("Invalid mcp/catalog params: {error}"));
+                return;
+            }
+        };
+        let catalog = harn_vm::mcp_catalog_for_request(&request);
+        match serde_json::to_value(&catalog) {
+            Ok(value) => self.send_response(id, value),
+            Err(error) => self.send_error(
+                id,
+                -32000,
+                &format!("failed to encode mcp catalog: {error}"),
+            ),
+        }
+    }
+
     async fn handle_hitl_respond(&self, id: &serde_json::Value, params: &serde_json::Value) {
         let session_cwd = params
             .get("sessionId")
@@ -3276,6 +3301,12 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_list(&id, &params);
+            }
+            "mcp/catalog" | "harn.mcp.catalog" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_mcp_catalog(&id, &params);
             }
             _ => {
                 if !id.is_null() {
