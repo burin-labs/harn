@@ -2040,7 +2040,7 @@ fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
         r#"pipeline t(task) {{ write_file("{}", "x") }}"#,
         read_only.path().join("new.txt").display()
     );
-    let err = run_harn_with_policy(&create, policy.clone()).unwrap_err();
+    let err = run_harn_with_policy(&create, policy).unwrap_err();
     assert!(
         matches!(
             err,
