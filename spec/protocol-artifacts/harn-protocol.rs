@@ -90,6 +90,8 @@ pub const ACP_DISPATCHED_METHOD_WORKFLOW_PAUSE: &str = "workflow/pause";
 pub const ACP_DISPATCHED_METHOD_HARN_WORKFLOW_PAUSE: &str = "harn.workflow.pause";
 pub const ACP_DISPATCHED_METHOD_WORKFLOW_RESUME: &str = "workflow/resume";
 pub const ACP_DISPATCHED_METHOD_HARN_WORKFLOW_RESUME: &str = "harn.workflow.resume";
+pub const ACP_DISPATCHED_METHOD_MCP_CATALOG: &str = "mcp/catalog";
+pub const ACP_DISPATCHED_METHOD_HARN_MCP_CATALOG: &str = "harn.mcp.catalog";
 
 /// Every JSON-RPC method the ACP adapter actually dispatches, including the workspace-management, workflow-control, and HITL methods the stable bindings do not yet expose as typed enums. Reconciled against the `match` arms in `harn-serve`'s ACP adapter.
 pub const ACP_DISPATCHED_METHODS: &[&str] = &[
@@ -129,6 +131,8 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.workflow.pause",
     "workflow/resume",
     "harn.workflow.resume",
+    "mcp/catalog",
+    "harn.mcp.catalog",
 ];
 
 pub const ACP_CLIENT_METHOD_FS_READ_TEXT_FILE: &str = "fs/read_text_file";
