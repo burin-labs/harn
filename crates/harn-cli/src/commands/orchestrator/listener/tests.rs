@@ -458,7 +458,16 @@ async fn acp_websocket_requires_configured_bearer_auth() {
             .get("fork")
             .is_none()
     );
-    assert_eq!(response["result"]["authMethods"], json!([]));
+    // The WebSocket transport gates the upgrade on the bearer token, so
+    // the ACP-level auth policy is empty. `initialize` still advertises
+    // the spec-conformant local "none" method (agent type) rather than
+    // an empty array, so the response passes the ACP registry auth gate.
+    let auth_methods = response["result"]["authMethods"]
+        .as_array()
+        .expect("authMethods array");
+    assert_eq!(auth_methods.len(), 1);
+    assert_eq!(auth_methods[0]["id"], "none");
+    assert_eq!(auth_methods[0]["type"], "agent");
 
     listener
         .shutdown(Duration::from_secs(5))

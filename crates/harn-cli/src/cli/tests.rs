@@ -763,7 +763,22 @@ fn test_parses_serve_acp() {
         serve.profile.json_path.as_deref(),
         Some(std::path::Path::new("profiles/acp.ndjson"))
     );
-    assert_eq!(serve.file, "agent.harn");
+    assert_eq!(serve.file.as_deref(), Some("agent.harn"));
+}
+
+#[test]
+fn test_parses_serve_acp_without_file_for_attach_mode() {
+    // The ACP registry launches the bare `harn serve acp` with no
+    // positional file; the parse must succeed and leave `file` unset so
+    // the command boots the file-less attach server.
+    let cli = Cli::parse_from(["harn", "serve", "acp"]);
+    let Command::Serve(args) = cli.command.unwrap() else {
+        panic!("expected serve command");
+    };
+    let crate::cli::ServeCommand::Acp(serve) = args.command else {
+        panic!("expected serve acp");
+    };
+    assert_eq!(serve.file, None);
 }
 
 #[test]
