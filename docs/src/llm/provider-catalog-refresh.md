@@ -91,6 +91,49 @@ same precedence as runtime provider config, so private providers,
 aliases, deprecation notes, quality tags, pricing, and transport
 settings can be validated before they are published.
 
+## Runtime refresh
+
+Harn can also install a validated runtime overlay on top of the bundled
+catalog without rebuilding the binary:
+
+```harn
+fn main(harness: Harness) {
+  let report = harness.llm.catalog_refresh()
+  harness.stdio.println(to_string(report.status))
+}
+```
+
+The same primitive is available as the free builtin
+`llm_catalog_refresh(options?)` for scripts that do not receive a
+`Harness`. `options.url` overrides the source URL and `options.force`
+ignores a fresh cache entry. The default source is
+`https://burin-labs.github.io/harn-cloud/provider-catalog/provider-catalog.json`;
+set `HARN_PROVIDER_CATALOG_URL` to point at a private catalog.
+
+Refresh behavior is intentionally fail-closed:
+
+- `HARN_DISABLE_CATALOG_REFRESH=1` skips refresh and keeps the bundled
+  baseline.
+- Remote documents are deserialized against the generated provider
+  catalog contract and then checked with the same logical validator used
+  by `harn providers validate`.
+- Signed envelopes use an Ed25519 signature over the canonical catalog
+  JSON. Configure trusted keys with
+  `HARN_PROVIDER_CATALOG_TRUSTED_KEYS=key_id=base64_public_key`.
+- Unsigned documents are accepted only from loopback development URLs,
+  or when `HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED=1` is explicitly set.
+- Valid catalogs are cached under
+  `$HARN_STATE_DIR/cache/provider-catalog/` with their ETag and TTL.
+  Network failures or malformed documents fall back to a valid cached
+  catalog when one exists, otherwise to the bundled baseline.
+- Refresh is skipped inside a live `agent_loop`; call it before entering
+  the loop so model selection stays deterministic for the run.
+
+`harn provider-catalog --refresh` runs the same refresh path before
+printing the catalog. ACP model selectors read the merged runtime
+catalog, so newly refreshed model IDs appear in clients without
+regenerating Swift or TypeScript code.
+
 ## Architecture
 
 Three layers, kept deliberately small so other repos can extend or

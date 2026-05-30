@@ -26,5 +26,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     // Reachable from the parser via `harness.llm.{catalog,providers}` method
     // arity checking (see `harness_methods::harness_llm_ambient`).
     harn_builtin_meta::signatures::LLM_CATALOG,
+    harn_builtin_meta::signatures::LLM_CATALOG_REFRESH,
     harn_builtin_meta::signatures::LLM_PROVIDER_STATUS,
 ];

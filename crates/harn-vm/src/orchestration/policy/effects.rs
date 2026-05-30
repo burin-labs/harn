@@ -269,6 +269,13 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
             },
             EffectScope::Read,
         )),
+        "llm_catalog_refresh" => Some(EffectRecord::new(
+            EffectKind::Llm {
+                provider: None,
+                model: None,
+            },
+            EffectScope::Write,
+        )),
 
         // spawn / worker dispatch
         "spawn_agent"

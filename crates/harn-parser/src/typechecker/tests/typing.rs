@@ -1065,6 +1065,7 @@ fn test_harness_llm_method_return_type_inference() {
     let errs = errors(
         r"fn main(harness: Harness) {
   let catalog: list = harness.llm.catalog()
+  let refresh: dict = harness.llm.catalog_refresh({force: true})
   let providers: list = harness.llm.providers()
 }",
     );

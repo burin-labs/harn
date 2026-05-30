@@ -34,6 +34,7 @@ const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
     &PROVIDER_REGISTER_BUILTIN_DEF,
     &LLM_CONFIG_BUILTIN_DEF,
     &LLM_CATALOG_BUILTIN_DEF,
+    &LLM_CATALOG_REFRESH_BUILTIN_DEF,
     &LLM_PROVIDER_STATUS_BUILTIN_DEF,
     &LLM_RATE_LIMIT_BUILTIN_DEF,
     &LLM_HEALTHCHECK_BUILTIN_DEF,
@@ -354,6 +355,21 @@ fn llm_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     Ok(llm_catalog_value())
 }
 
+/// Refresh the process-wide provider/model catalog overlay from the configured
+/// hosted catalog, validating the remote document before installing it.
+#[harn_builtin(sig_expr = harn_builtin_meta::signatures::LLM_CATALOG_REFRESH, kind = "async", category = "llm.config")]
+async fn llm_catalog_refresh_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let options = parse_catalog_refresh_options(args.first(), "llm_catalog_refresh")?;
+    let report = crate::provider_catalog::refresh_runtime_catalog(options).await;
+    let json = serde_json::to_value(report).map_err(|error| {
+        VmError::Runtime(format!("llm_catalog_refresh: serialize result: {error}"))
+    })?;
+    Ok(crate::stdlib::json_to_vm_value(&json))
+}
+
 pub(crate) fn llm_provider_status_value() -> VmValue {
     // Mirror `llm_providers()` for the name set so runtime-registered
     // providers also show up, but enrich each entry with a credential
@@ -410,6 +426,30 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
         entries.push(VmValue::Dict(Rc::new(entry)));
     }
     VmValue::List(Rc::new(entries))
+}
+
+pub(crate) fn parse_catalog_refresh_options(
+    value: Option<&VmValue>,
+    context: &str,
+) -> Result<crate::provider_catalog::CatalogRefreshOptions, VmError> {
+    let Some(value) = value else {
+        return Ok(crate::provider_catalog::CatalogRefreshOptions::default());
+    };
+    if matches!(value, VmValue::Nil) {
+        return Ok(crate::provider_catalog::CatalogRefreshOptions::default());
+    }
+    let dict = value
+        .as_dict()
+        .ok_or_else(|| VmError::Runtime(format!("{context}: options must be a dict or nil")))?;
+    let url = dict
+        .get("url")
+        .map(|value| value.display())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let force = dict
+        .get("force")
+        .is_some_and(|value| matches!(value, VmValue::Bool(true)));
+    Ok(crate::provider_catalog::CatalogRefreshOptions { url, force })
 }
 
 /// Return a list of `{name, available, credential_status}` dicts describing every

@@ -6,8 +6,12 @@
 //! Rust literals.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::time::Duration;
 
-use serde::Serialize;
+use base64::Engine as _;
+use ed25519_dalek::Verifier as _;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::llm;
@@ -19,8 +23,19 @@ pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 2;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
     "https://harnlang.com/schemas/provider-catalog.v2.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn providers export";
+pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
+pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
+pub const HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV: &str = "HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED";
+pub const HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV: &str = "HARN_PROVIDER_CATALOG_TRUSTED_KEYS";
+pub const DEFAULT_PROVIDER_CATALOG_URL: &str =
+    "https://burin-labs.github.io/harn-cloud/provider-catalog/provider-catalog.json";
 
-#[derive(Debug, Clone, Serialize)]
+const DEFAULT_REMOTE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
+const REMOTE_CACHE_DIR: &str = "provider-catalog";
+const REMOTE_CACHE_BODY_FILE: &str = "catalog.json";
+const REMOTE_CACHE_META_FILE: &str = "catalog.meta.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderCatalogArtifact {
     pub schema_version: u32,
     pub schema: String,
@@ -32,7 +47,7 @@ pub struct ProviderCatalogArtifact {
     pub qc_defaults: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogProvider {
     pub id: String,
     pub display_name: String,
@@ -50,14 +65,14 @@ pub struct CatalogProvider {
     pub latency_p50_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderClassification {
     Hosted,
     Local,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderEndpoint {
     pub base_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,7 +82,7 @@ pub struct ProviderEndpoint {
     pub completion_endpoint: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderAuth {
     pub style: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,7 +91,7 @@ pub struct ProviderAuth {
     pub required: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogAlias {
     pub name: String,
     pub model_id: String,
@@ -87,7 +102,7 @@ pub struct CatalogAlias {
     pub tool_calling: Option<AliasToolCallingDef>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogModel {
     pub id: String,
     pub name: String,
@@ -128,7 +143,7 @@ pub struct CatalogModel {
     pub fast_mode: Option<ModelFastMode>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelAvailabilityStatus {
     Serverless,
@@ -146,13 +161,13 @@ impl From<ModelAvailability> for ModelAvailabilityStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelModalities {
     pub input: Vec<String>,
     pub output: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelToolSupport {
     pub native: bool,
     pub text: bool,
@@ -169,7 +184,7 @@ pub struct ModelToolSupport {
     pub max_tools: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelToolEmpiricalParity {
     pub verdict: String,
     pub preferred_format: String,
@@ -181,7 +196,7 @@ pub struct ModelToolEmpiricalParity {
     pub verifier_divergence_rate: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelFormatPreferences {
     pub prefers_xml_scaffolding: bool,
     pub prefers_markdown_scaffolding: bool,
@@ -192,7 +207,7 @@ pub struct ModelFormatPreferences {
     pub thinking_block_style: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelReasoning {
     pub modes: Vec<String>,
     pub effort_supported: bool,
@@ -201,7 +216,7 @@ pub struct ModelReasoning {
     pub preserve_thinking: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelDeprecation {
     pub status: DeprecationStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -213,7 +228,7 @@ pub struct ModelDeprecation {
     pub superseded_by: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeprecationStatus {
     Active,
@@ -224,7 +239,7 @@ pub enum DeprecationStatus {
 /// Surfaces `ModelDef::fast_mode` so downstream consumers can show the
 /// opt-in knob, premium pricing, and lifecycle without re-parsing the
 /// source TOML. Absent on models with no faster serving path.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelFastMode {
     pub param: String,
     pub value: String,
@@ -240,7 +255,7 @@ pub struct ModelFastMode {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogVariant {
     pub id: String,
     pub label: String,
@@ -260,6 +275,621 @@ impl ProviderCatalogValidation {
     pub fn is_ok(&self) -> bool {
         self.errors.is_empty()
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CatalogRefreshOptions {
+    pub url: Option<String>,
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogRefreshReport {
+    pub status: String,
+    pub refreshed: bool,
+    pub source_url: String,
+    pub cache_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
+    pub ttl_ms: u64,
+    pub provider_count: usize,
+    pub model_count: usize,
+    pub alias_count: usize,
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CatalogCacheMetadata {
+    source_url: String,
+    fetched_at_ms: u64,
+    ttl_ms: u64,
+    etag: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogDocument {
+    #[serde(default, alias = "ttl_ms", alias = "ttlMS")]
+    ttl_ms: Option<u64>,
+    catalog: ProviderCatalogArtifact,
+    #[serde(default)]
+    signature: Option<CatalogDocumentSignature>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogDocumentSignature {
+    #[serde(default)]
+    algorithm: String,
+    key_id: String,
+    signature: String,
+}
+
+struct DecodedCatalogDocument {
+    artifact: ProviderCatalogArtifact,
+    ttl_ms: u64,
+}
+
+pub async fn refresh_runtime_catalog(options: CatalogRefreshOptions) -> CatalogRefreshReport {
+    let source_url = options
+        .url
+        .clone()
+        .or_else(|| env_nonempty(HARN_PROVIDER_CATALOG_URL_ENV))
+        .unwrap_or_else(|| DEFAULT_PROVIDER_CATALOG_URL.to_string());
+    let cache_dir = default_refresh_cache_dir();
+    let cache_path = cache_dir.join(REMOTE_CACHE_BODY_FILE);
+    if refresh_disabled() {
+        return refresh_report(
+            "disabled",
+            false,
+            source_url,
+            cache_path,
+            None,
+            DEFAULT_REMOTE_TTL_MS,
+            None,
+        );
+    }
+    if crate::llm::current_agent_session_id().is_some() {
+        return refresh_report(
+            "skipped_agent_loop",
+            false,
+            source_url,
+            cache_path,
+            None,
+            DEFAULT_REMOTE_TTL_MS,
+            Some("catalog refresh is disabled inside a live agent loop".to_string()),
+        );
+    }
+
+    if !options.force {
+        if let Some((metadata, body)) = load_fresh_cached_catalog(&source_url, &cache_dir) {
+            return install_remote_catalog_from_body(
+                "cache_hit",
+                false,
+                &source_url,
+                &cache_path,
+                metadata.etag,
+                &body,
+                metadata.ttl_ms,
+                allow_unsigned_for_url(&source_url),
+            );
+        }
+    }
+
+    let metadata = read_cache_metadata(&cache_dir).filter(|meta| meta.source_url == source_url);
+    match fetch_remote_catalog(&source_url, metadata.as_ref()).await {
+        Ok(FetchedCatalog::NotModified) => {
+            if let Some((metadata, body)) = load_any_cached_catalog(&source_url, &cache_dir) {
+                let _ = write_cache_metadata(
+                    &cache_dir,
+                    &CatalogCacheMetadata {
+                        fetched_at_ms: now_ms(),
+                        ..metadata.clone()
+                    },
+                );
+                return install_remote_catalog_from_body(
+                    "not_modified",
+                    false,
+                    &source_url,
+                    &cache_path,
+                    metadata.etag,
+                    &body,
+                    metadata.ttl_ms,
+                    allow_unsigned_for_url(&source_url),
+                );
+            }
+            refresh_report(
+                "fallback",
+                false,
+                source_url,
+                cache_path,
+                None,
+                DEFAULT_REMOTE_TTL_MS,
+                Some("remote returned 304 but no cached catalog was available".to_string()),
+            )
+        }
+        Ok(FetchedCatalog::Body { body, etag }) => {
+            match decode_and_validate_document(&body, allow_unsigned_for_url(&source_url)) {
+                Ok(decoded) => {
+                    if let Err(error) = write_catalog_cache(
+                        &cache_dir,
+                        &body,
+                        &CatalogCacheMetadata {
+                            source_url: source_url.clone(),
+                            fetched_at_ms: now_ms(),
+                            ttl_ms: decoded.ttl_ms,
+                            etag: etag.clone(),
+                        },
+                    ) {
+                        eprintln!(
+                            "[provider_catalog] warning: failed to write runtime catalog cache: {error}"
+                        );
+                    }
+                    install_decoded_catalog(
+                        "refreshed",
+                        true,
+                        source_url,
+                        cache_path,
+                        etag,
+                        decoded,
+                        None,
+                    )
+                }
+                Err(error) => install_stale_or_fallback(
+                    source_url,
+                    cache_dir,
+                    cache_path,
+                    format!("remote catalog rejected: {error}"),
+                ),
+            }
+        }
+        Err(error) => install_stale_or_fallback(source_url, cache_dir, cache_path, error),
+    }
+}
+
+fn install_stale_or_fallback(
+    source_url: String,
+    cache_dir: PathBuf,
+    cache_path: PathBuf,
+    warning: String,
+) -> CatalogRefreshReport {
+    eprintln!("[provider_catalog] warning: {warning}");
+    if let Some((metadata, body)) = load_any_cached_catalog(&source_url, &cache_dir) {
+        return install_remote_catalog_from_body(
+            "stale_cache",
+            false,
+            &source_url,
+            &cache_path,
+            metadata.etag,
+            &body,
+            metadata.ttl_ms,
+            allow_unsigned_for_url(&source_url),
+        );
+    }
+    refresh_report(
+        "fallback",
+        false,
+        source_url,
+        cache_path,
+        None,
+        DEFAULT_REMOTE_TTL_MS,
+        Some(warning),
+    )
+}
+
+fn install_remote_catalog_from_body(
+    status: &str,
+    refreshed: bool,
+    source_url: &str,
+    cache_path: &std::path::Path,
+    etag: Option<String>,
+    body: &str,
+    fallback_ttl_ms: u64,
+    allow_unsigned: bool,
+) -> CatalogRefreshReport {
+    match decode_and_validate_document(body, allow_unsigned) {
+        Ok(mut decoded) => {
+            if decoded.ttl_ms == DEFAULT_REMOTE_TTL_MS {
+                decoded.ttl_ms = fallback_ttl_ms;
+            }
+            install_decoded_catalog(
+                status,
+                refreshed,
+                source_url.to_string(),
+                cache_path.to_path_buf(),
+                etag,
+                decoded,
+                None,
+            )
+        }
+        Err(error) => refresh_report(
+            "fallback",
+            false,
+            source_url.to_string(),
+            cache_path.to_path_buf(),
+            etag,
+            fallback_ttl_ms,
+            Some(format!("cached catalog rejected: {error}")),
+        ),
+    }
+}
+
+fn install_decoded_catalog(
+    status: &str,
+    refreshed: bool,
+    source_url: String,
+    cache_path: PathBuf,
+    etag: Option<String>,
+    decoded: DecodedCatalogDocument,
+    warning: Option<String>,
+) -> CatalogRefreshReport {
+    let provider_count = decoded.artifact.providers.len();
+    let model_count = decoded.artifact.models.len();
+    let alias_count = decoded.artifact.aliases.len();
+    crate::llm_config::set_runtime_catalog_overlay(Some(config_from_artifact(&decoded.artifact)));
+    CatalogRefreshReport {
+        status: status.to_string(),
+        refreshed,
+        source_url,
+        cache_path: cache_path.display().to_string(),
+        etag,
+        ttl_ms: decoded.ttl_ms,
+        provider_count,
+        model_count,
+        alias_count,
+        warning,
+    }
+}
+
+fn refresh_report(
+    status: &str,
+    refreshed: bool,
+    source_url: String,
+    cache_path: PathBuf,
+    etag: Option<String>,
+    ttl_ms: u64,
+    warning: Option<String>,
+) -> CatalogRefreshReport {
+    let current = artifact();
+    CatalogRefreshReport {
+        status: status.to_string(),
+        refreshed,
+        source_url,
+        cache_path: cache_path.display().to_string(),
+        etag,
+        ttl_ms,
+        provider_count: current.providers.len(),
+        model_count: current.models.len(),
+        alias_count: current.aliases.len(),
+        warning,
+    }
+}
+
+enum FetchedCatalog {
+    NotModified,
+    Body { body: String, etag: Option<String> },
+}
+
+async fn fetch_remote_catalog(
+    url: &str,
+    metadata: Option<&CatalogCacheMetadata>,
+) -> Result<FetchedCatalog, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|error| format!("failed to build HTTP client: {error}"))?;
+    let mut request = client.get(url);
+    if let Some(etag) = metadata.and_then(|meta| meta.etag.as_deref()) {
+        request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("failed to fetch runtime provider catalog: {error}"))?;
+    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(FetchedCatalog::NotModified);
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "runtime provider catalog fetch returned HTTP {}",
+            response.status()
+        ));
+    }
+    let etag = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("failed to read runtime provider catalog body: {error}"))?;
+    Ok(FetchedCatalog::Body { body, etag })
+}
+
+fn decode_and_validate_document(
+    body: &str,
+    allow_unsigned: bool,
+) -> Result<DecodedCatalogDocument, String> {
+    if let Ok(artifact) = serde_json::from_str::<ProviderCatalogArtifact>(body) {
+        if !allow_unsigned {
+            return Err(format!(
+                "unsigned provider catalog rejected; set {HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV}=1 only for trusted development sources"
+            ));
+        }
+        validate_remote_artifact(artifact, DEFAULT_REMOTE_TTL_MS)
+    } else {
+        let document: CatalogDocument = serde_json::from_str(body)
+            .map_err(|error| format!("catalog JSON does not match the runtime schema: {error}"))?;
+        verify_document_signature(&document)?;
+        validate_remote_artifact(
+            document.catalog,
+            document.ttl_ms.unwrap_or(DEFAULT_REMOTE_TTL_MS),
+        )
+    }
+}
+
+fn validate_remote_artifact(
+    artifact: ProviderCatalogArtifact,
+    ttl_ms: u64,
+) -> Result<DecodedCatalogDocument, String> {
+    let report = validate_artifact(&artifact);
+    if !report.errors.is_empty() {
+        return Err(report.errors.join("; "));
+    }
+    Ok(DecodedCatalogDocument {
+        artifact,
+        ttl_ms: ttl_ms.max(1),
+    })
+}
+
+fn verify_document_signature(document: &CatalogDocument) -> Result<(), String> {
+    let signature = document
+        .signature
+        .as_ref()
+        .ok_or_else(|| "signed catalog envelope is missing signature metadata".to_string())?;
+    if signature.algorithm != "ed25519" {
+        return Err(format!(
+            "unsupported catalog signature algorithm {}",
+            signature.algorithm
+        ));
+    }
+    let trusted_keys = trusted_catalog_keys()?;
+    let public_key = trusted_keys.get(&signature.key_id).ok_or_else(|| {
+        format!(
+            "catalog signature key {} is not trusted; configure {HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV}",
+            signature.key_id
+        )
+    })?;
+    let canonical = serde_json::to_vec(&document.catalog)
+        .map_err(|error| format!("failed to canonicalize signed catalog: {error}"))?;
+    let signature_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&signature.signature)
+        .map_err(|error| format!("catalog signature is not valid base64: {error}"))?;
+    let signature = ed25519_dalek::Signature::from_slice(&signature_bytes)
+        .map_err(|error| format!("catalog signature has invalid length: {error}"))?;
+    public_key
+        .verify(&canonical, &signature)
+        .map_err(|error| format!("catalog signature did not verify: {error}"))
+}
+
+fn trusted_catalog_keys() -> Result<BTreeMap<String, ed25519_dalek::VerifyingKey>, String> {
+    let mut keys = BTreeMap::new();
+    let Some(raw) = env_nonempty(HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV) else {
+        return Ok(keys);
+    };
+    for entry in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (key_id, encoded) = entry
+            .split_once('=')
+            .or_else(|| entry.split_once(':'))
+            .ok_or_else(|| {
+                format!(
+                    "{HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV} entries must use key_id=base64_public_key"
+                )
+            })?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .map_err(|error| format!("catalog public key {key_id} is not valid base64: {error}"))?;
+        let public_key = ed25519_dalek::VerifyingKey::from_bytes(
+            bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| format!("catalog public key {key_id} must be 32 bytes"))?,
+        )
+        .map_err(|error| format!("catalog public key {key_id} is invalid: {error}"))?;
+        keys.insert(key_id.trim().to_string(), public_key);
+    }
+    Ok(keys)
+}
+
+fn config_from_artifact(artifact: &ProviderCatalogArtifact) -> llm_config::ProvidersConfig {
+    llm_config::ProvidersConfig {
+        providers: artifact
+            .providers
+            .iter()
+            .map(|provider| (provider.id.clone(), provider_def_from_catalog(provider)))
+            .collect(),
+        aliases: artifact
+            .aliases
+            .iter()
+            .map(|alias| {
+                (
+                    alias.name.clone(),
+                    llm_config::AliasDef {
+                        id: alias.model_id.clone(),
+                        provider: alias.provider.clone(),
+                        tool_format: alias.tool_format.clone(),
+                    },
+                )
+            })
+            .collect(),
+        alias_tool_calling: artifact
+            .aliases
+            .iter()
+            .filter_map(|alias| {
+                alias
+                    .tool_calling
+                    .clone()
+                    .map(|tool_calling| (alias.name.clone(), tool_calling))
+            })
+            .collect(),
+        models: artifact
+            .models
+            .iter()
+            .map(|model| (model.id.clone(), model_def_from_catalog(model)))
+            .collect(),
+        qc_defaults: artifact.qc_defaults.clone(),
+        ..llm_config::ProvidersConfig::default()
+    }
+}
+
+fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::ProviderDef {
+    llm_config::ProviderDef {
+        display_name: Some(provider.display_name.clone()),
+        icon: provider.icon.clone(),
+        base_url: provider.endpoint.base_url.clone(),
+        base_url_env: provider.endpoint.base_url_env.clone(),
+        auth_style: provider.auth.style.clone(),
+        auth_header: provider.auth.header.clone(),
+        auth_env: match provider.auth.env.as_slice() {
+            [] => llm_config::AuthEnv::None,
+            [one] => llm_config::AuthEnv::Single(one.clone()),
+            many => llm_config::AuthEnv::Multiple(many.to_vec()),
+        },
+        chat_endpoint: provider.endpoint.chat_endpoint.clone(),
+        completion_endpoint: provider.endpoint.completion_endpoint.clone(),
+        features: provider.features.clone(),
+        rpm: provider.rpm,
+        latency_p50_ms: provider.latency_p50_ms,
+        ..llm_config::ProviderDef::default()
+    }
+}
+
+fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
+    llm_config::ModelDef {
+        name: model.name.clone(),
+        provider: model.provider.clone(),
+        context_window: model.context_window,
+        runtime_context_window: model.runtime_context_window,
+        stream_timeout: model.stream_timeout,
+        capabilities: model.capability_tags.clone(),
+        pricing: model.pricing.clone(),
+        deprecated: model.deprecation.status == DeprecationStatus::Deprecated,
+        deprecation_note: model.deprecation.note.clone(),
+        superseded_by: model.deprecation.superseded_by.clone(),
+        fast_mode: model
+            .fast_mode
+            .as_ref()
+            .map(|fast| llm_config::FastModeDef {
+                param: fast.param.clone(),
+                value: fast.value.clone(),
+                beta_header: fast.beta_header.clone(),
+                otps_speedup: fast.otps_speedup,
+                status: fast.status.clone(),
+                pricing: fast.pricing.clone(),
+                note: fast.note.clone(),
+            }),
+        quality_tags: model.quality_tags.clone(),
+        availability: match model.availability {
+            ModelAvailabilityStatus::Serverless => llm_config::ModelAvailability::Serverless,
+            ModelAvailabilityStatus::Dedicated => llm_config::ModelAvailability::Dedicated,
+            ModelAvailabilityStatus::Unknown => llm_config::ModelAvailability::Unknown,
+        },
+        tier: Some(model.tier.clone()),
+        open_weight: model.open_weight,
+        strengths: model.strengths.clone(),
+        benchmarks: model.benchmarks.clone(),
+    }
+}
+
+fn default_refresh_cache_dir() -> PathBuf {
+    crate::runtime_paths::state_root(&crate::stdlib::process::runtime_root_base())
+        .join("cache")
+        .join(REMOTE_CACHE_DIR)
+}
+
+fn load_fresh_cached_catalog(
+    source_url: &str,
+    cache_dir: &std::path::Path,
+) -> Option<(CatalogCacheMetadata, String)> {
+    let (metadata, body) = load_any_cached_catalog(source_url, cache_dir)?;
+    let age = now_ms().saturating_sub(metadata.fetched_at_ms);
+    (age < metadata.ttl_ms).then_some((metadata, body))
+}
+
+fn load_any_cached_catalog(
+    source_url: &str,
+    cache_dir: &std::path::Path,
+) -> Option<(CatalogCacheMetadata, String)> {
+    let metadata = read_cache_metadata(cache_dir)?;
+    if metadata.source_url != source_url {
+        return None;
+    }
+    let body = std::fs::read_to_string(cache_dir.join(REMOTE_CACHE_BODY_FILE)).ok()?;
+    Some((metadata, body))
+}
+
+fn read_cache_metadata(cache_dir: &std::path::Path) -> Option<CatalogCacheMetadata> {
+    let body = std::fs::read_to_string(cache_dir.join(REMOTE_CACHE_META_FILE)).ok()?;
+    serde_json::from_str(&body).ok()
+}
+
+fn write_catalog_cache(
+    cache_dir: &std::path::Path,
+    body: &str,
+    metadata: &CatalogCacheMetadata,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(cache_dir)?;
+    std::fs::write(cache_dir.join(REMOTE_CACHE_BODY_FILE), body)?;
+    write_cache_metadata(cache_dir, metadata)
+}
+
+fn write_cache_metadata(
+    cache_dir: &std::path::Path,
+    metadata: &CatalogCacheMetadata,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(cache_dir)?;
+    let body = serde_json::to_string_pretty(metadata).unwrap_or_else(|_| "{}".to_string());
+    std::fs::write(cache_dir.join(REMOTE_CACHE_META_FILE), body)
+}
+
+fn now_ms() -> u64 {
+    harn_clock::now_wall_ms(&harn_clock::RealClock::new()).max(0) as u64
+}
+
+fn refresh_disabled() -> bool {
+    matches!(
+        env_nonempty(HARN_DISABLE_CATALOG_REFRESH_ENV)
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase()),
+        Some(value) if matches!(value.as_str(), "1" | "true" | "yes" | "on")
+    )
+}
+
+fn allow_unsigned_for_url(url: &str) -> bool {
+    if matches!(
+        env_nonempty(HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV)
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase()),
+        Some(value) if matches!(value.as_str(), "1" | "true" | "yes" | "on")
+    ) {
+        return true;
+    }
+    url::Url::parse(url).ok().is_some_and(|parsed| {
+        matches!(
+            parsed.host_str(),
+            Some("localhost") | Some("127.0.0.1") | Some("::1")
+        )
+    })
+}
+
+fn env_nonempty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 pub fn artifact() -> ProviderCatalogArtifact {
@@ -1713,6 +2343,12 @@ public struct HarnCatalogVariant: Codable, Sendable, Equatable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer as _, SigningKey};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Mutex, MutexGuard};
+
+    static RUNTIME_REFRESH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     struct OverrideGuard;
 
@@ -1722,10 +2358,130 @@ mod tests {
         }
     }
 
+    struct RuntimeCatalogGuard {
+        _lock: MutexGuard<'static, ()>,
+        state_dir: tempfile::TempDir,
+        previous_state_dir: Option<String>,
+        previous_allow_unsigned: Option<String>,
+        previous_disable_refresh: Option<String>,
+        previous_trusted_keys: Option<String>,
+    }
+
+    impl RuntimeCatalogGuard {
+        fn new() -> Self {
+            let lock = RUNTIME_REFRESH_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let state_dir = tempfile::tempdir().expect("temp state dir");
+            let previous_state_dir = std::env::var(crate::runtime_paths::HARN_STATE_DIR_ENV).ok();
+            let previous_allow_unsigned =
+                std::env::var(HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV).ok();
+            let previous_disable_refresh = std::env::var(HARN_DISABLE_CATALOG_REFRESH_ENV).ok();
+            let previous_trusted_keys = std::env::var(HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV).ok();
+            unsafe {
+                std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, state_dir.path());
+                std::env::remove_var(HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV);
+                std::env::remove_var(HARN_DISABLE_CATALOG_REFRESH_ENV);
+                std::env::remove_var(HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV);
+            }
+            llm_config::clear_runtime_catalog_overlay();
+            Self {
+                _lock: lock,
+                state_dir,
+                previous_state_dir,
+                previous_allow_unsigned,
+                previous_disable_refresh,
+                previous_trusted_keys,
+            }
+        }
+    }
+
+    impl Drop for RuntimeCatalogGuard {
+        fn drop(&mut self) {
+            llm_config::clear_runtime_catalog_overlay();
+            match self.previous_state_dir.as_deref() {
+                Some(value) => unsafe {
+                    std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, value);
+                },
+                None => unsafe { std::env::remove_var(crate::runtime_paths::HARN_STATE_DIR_ENV) },
+            }
+            restore_env_var(
+                HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV,
+                self.previous_allow_unsigned.as_deref(),
+            );
+            restore_env_var(
+                HARN_DISABLE_CATALOG_REFRESH_ENV,
+                self.previous_disable_refresh.as_deref(),
+            );
+            restore_env_var(
+                HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV,
+                self.previous_trusted_keys.as_deref(),
+            );
+        }
+    }
+
+    fn restore_env_var(name: &str, value: Option<&str>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+
     fn install_overlay(toml_src: &str) -> OverrideGuard {
         let overlay = llm_config::parse_config_toml(toml_src).expect("overlay parses");
         llm_config::set_user_overrides(Some(overlay));
         OverrideGuard
+    }
+
+    fn remote_catalog_with_extra_model() -> ProviderCatalogArtifact {
+        let mut remote = artifact();
+        let mut provider = remote.providers[0].clone();
+        provider.id = "refreshco".to_string();
+        provider.display_name = "Refresh Co".to_string();
+        provider.endpoint.base_url = "https://refresh.example/v1".to_string();
+        provider.auth.style = "none".to_string();
+        provider.auth.required = false;
+        provider.auth.env.clear();
+        remote.providers.push(provider);
+
+        let mut model = remote.models[0].clone();
+        model.id = "refreshco/new-model".to_string();
+        model.name = "Refresh Co New Model".to_string();
+        model.provider = "refreshco".to_string();
+        model.aliases = vec!["refresh-new".to_string()];
+        model.context_window = 123_456;
+        model.deprecation.status = DeprecationStatus::Active;
+        model.deprecation.note = None;
+        model.deprecation.superseded_by = None;
+        remote.models.push(model);
+
+        remote.aliases.push(CatalogAlias {
+            name: "refresh-new".to_string(),
+            model_id: "refreshco/new-model".to_string(),
+            provider: "refreshco".to_string(),
+            tool_format: Some("text".to_string()),
+            tool_calling: None,
+        });
+        remote
+    }
+
+    fn spawn_catalog_stub(body: String) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind catalog stub");
+        let url = format!("http://{}/catalog.json", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept catalog request");
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\netag: \"fixture-v1\"\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write catalog response");
+        });
+        (url, handle)
     }
 
     #[test]
@@ -1737,6 +2493,96 @@ mod tests {
             "catalog validation errors: {:?}",
             report.errors
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_refresh_installs_valid_remote_catalog_overlay() {
+        let guard = RuntimeCatalogGuard::new();
+        let remote = remote_catalog_with_extra_model();
+        let body = serde_json::to_string(&remote).expect("remote catalog serializes");
+        let (url, server) = spawn_catalog_stub(body);
+
+        let report = refresh_runtime_catalog(CatalogRefreshOptions {
+            url: Some(url),
+            force: true,
+        })
+        .await;
+        server.join().expect("catalog server exits");
+
+        assert_eq!(report.status, "refreshed");
+        assert!(report.refreshed);
+        assert_eq!(report.etag.as_deref(), Some("\"fixture-v1\""));
+        assert!(guard
+            .state_dir
+            .path()
+            .join("cache/provider-catalog/catalog.json")
+            .is_file());
+
+        let refreshed = llm_config::model_catalog_entry("refreshco/new-model")
+            .expect("remote model installed into runtime catalog");
+        assert_eq!(refreshed.name, "Refresh Co New Model");
+        assert_eq!(refreshed.context_window, 123_456);
+        assert!(llm_config::known_model_names()
+            .iter()
+            .any(|name| name == "refresh-new"));
+    }
+
+    #[tokio::test]
+    async fn runtime_refresh_rejects_malformed_remote_without_emptying_catalog() {
+        let _guard = RuntimeCatalogGuard::new();
+        let baseline_count = llm_config::model_catalog_entries().len();
+        let (url, server) = spawn_catalog_stub(r#"{"schema_version":2,"models":[]}"#.to_string());
+
+        let report = refresh_runtime_catalog(CatalogRefreshOptions {
+            url: Some(url),
+            force: true,
+        })
+        .await;
+        server.join().expect("catalog server exits");
+
+        assert_eq!(report.status, "fallback");
+        assert!(report.warning.as_deref().is_some_and(|warning| {
+            warning.contains("catalog JSON does not match")
+                || warning.contains("catalog has no providers")
+                || warning.contains("unsigned")
+        }));
+        assert_eq!(llm_config::model_catalog_entries().len(), baseline_count);
+    }
+
+    #[test]
+    fn signed_catalog_envelope_accepts_trusted_key() {
+        let _guard = RuntimeCatalogGuard::new();
+        let catalog = remote_catalog_with_extra_model();
+        let signing_key = SigningKey::from_bytes(&[42; 32]);
+        let canonical = serde_json::to_vec(&catalog).expect("catalog canonicalizes");
+        let signature = signing_key.sign(&canonical);
+        let public_key = base64::engine::general_purpose::STANDARD
+            .encode(signing_key.verifying_key().to_bytes());
+        unsafe {
+            std::env::set_var(
+                HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV,
+                format!("test={public_key}"),
+            );
+        }
+        let document = json!({
+            "ttlMS": 1_234,
+            "catalog": catalog,
+            "signature": {
+                "algorithm": "ed25519",
+                "key_id": "test",
+                "signature": base64::engine::general_purpose::STANDARD.encode(signature.to_bytes()),
+            },
+        });
+
+        let decoded =
+            decode_and_validate_document(&document.to_string(), false).expect("signed catalog");
+
+        assert_eq!(decoded.ttl_ms, 1_234);
+        assert!(decoded
+            .artifact
+            .models
+            .iter()
+            .any(|model| model.id == "refreshco/new-model"));
     }
 
     #[test]

@@ -27,11 +27,11 @@ use std::sync::{Arc, Once};
 use std::{env, fs, panic, process, thread};
 
 use cli::{
-    Cli, Command, CompletionShell, EvalCommand, MergeCaptainCommand, MergeCaptainMockCommand,
-    ModelInfoArgs, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
-    PackageScaffoldCommand, PersonaCommand, PersonaSupervisionCommand, PgCommand, ProvidersCommand,
-    RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
-    TimeCommand, ToolCommand,
+    refresh_provider_catalog_if_requested, Cli, Command, CompletionShell, EvalCommand,
+    MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs, PackageArtifactsCommand,
+    PackageCacheCommand, PackageCommand, PackageScaffoldCommand, PersonaCommand,
+    PersonaSupervisionCommand, PgCommand, ProvidersCommand, RunsCommand, ServeCommand,
+    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -1516,6 +1516,7 @@ async fn async_main() {
             }
         }
         Command::ProviderCatalog(args) => {
+            refresh_provider_catalog_if_requested(&args).await;
             if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
                 print_provider_catalog(args.available_only);
             } else {

@@ -97,6 +97,14 @@ pub const LLM_CALL_STRUCTURED_RESULT: BuiltinSignature = BuiltinSignature::simpl
 /// `llm_catalog() -> list`. Reachable from the parser as `harness.llm.catalog`.
 pub const LLM_CATALOG: BuiltinSignature = BuiltinSignature::simple("llm_catalog", &[], TY_LIST);
 
+/// `llm_catalog_refresh(options?) -> dict`. Reachable from the parser as
+/// `harness.llm.catalog_refresh`.
+pub const LLM_CATALOG_REFRESH: BuiltinSignature = BuiltinSignature::simple(
+    "llm_catalog_refresh",
+    &[Param::optional("options", TY_DICT_OR_NIL)],
+    TY_DICT,
+);
+
 /// `llm_provider_status() -> list`. Reachable from the parser as
 /// `harness.llm.providers`.
 pub const LLM_PROVIDER_STATUS: BuiltinSignature =
