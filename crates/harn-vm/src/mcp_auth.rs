@@ -265,9 +265,7 @@ pub fn bearer_challenge_from_headers<'a>(
 ///
 /// The MCP authorization profile reuses RFC 8707 §2 resource-indicator
 /// canonicalization: the scheme and host are lowercased, a default port for the
-/// scheme is dropped, the fragment and query are removed, and a lone trailing
-/// slash on an otherwise empty path is stripped. A non-empty path is preserved
-/// because RFC 8707 treats the path as part of the resource identity.
+/// scheme is dropped, and the fragment, query, and trailing slash are removed.
 pub fn canonical_resource_indicator(server_url: &str) -> Result<String, McpOAuthDiscoveryError> {
     let mut url = Url::parse(server_url)
         .map_err(|error| McpOAuthDiscoveryError::InvalidResourceUrl(error.to_string()))?;
@@ -290,12 +288,83 @@ pub fn canonical_resource_indicator(server_url: &str) -> Result<String, McpOAuth
         }
     }
     let mut canonical = url.to_string();
-    // Strip a lone trailing slash when the path carries no other segments, e.g.
-    // `https://mcp.example.com/` -> `https://mcp.example.com`.
-    if url.path() == "/" && canonical.ends_with('/') {
-        canonical.pop();
-    }
+    canonical = canonical.trim_end_matches('/').to_string();
     Ok(canonical)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OAuthAuthorizationUrlOptions<'a> {
+    pub authorization_endpoint: &'a str,
+    pub client_id: &'a str,
+    pub redirect_uri: &'a str,
+    pub state: &'a str,
+    pub code_challenge: &'a str,
+    pub resource: &'a str,
+    pub scopes: Option<&'a str>,
+}
+
+pub fn build_oauth_authorization_url(
+    options: OAuthAuthorizationUrlOptions<'_>,
+) -> Result<Url, String> {
+    let mut url = Url::parse(options.authorization_endpoint)
+        .map_err(|error| format!("Invalid authorization endpoint: {error}"))?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("response_type", "code");
+        query.append_pair("client_id", options.client_id);
+        query.append_pair("redirect_uri", options.redirect_uri);
+        query.append_pair("state", options.state);
+        query.append_pair("code_challenge", options.code_challenge);
+        query.append_pair("code_challenge_method", "S256");
+        query.append_pair("resource", options.resource);
+        if let Some(scopes) = options.scopes {
+            query.append_pair("scope", scopes);
+        }
+    }
+    Ok(url)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OAuthAuthorizationCodeTokenForm<'a> {
+    pub client_id: &'a str,
+    pub redirect_uri: &'a str,
+    pub code: &'a str,
+    pub code_verifier: &'a str,
+    pub resource: &'a str,
+    pub scopes: Option<&'a str>,
+}
+
+pub fn authorization_code_token_form(
+    request: OAuthAuthorizationCodeTokenForm<'_>,
+) -> Vec<(&'static str, String)> {
+    let mut form = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", request.code.to_string()),
+        ("redirect_uri", request.redirect_uri.to_string()),
+        ("client_id", request.client_id.to_string()),
+        ("code_verifier", request.code_verifier.to_string()),
+        ("resource", request.resource.to_string()),
+    ];
+    if let Some(scopes) = request.scopes {
+        form.push(("scope", scopes.to_string()));
+    }
+    form
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OAuthRefreshTokenForm<'a> {
+    pub client_id: &'a str,
+    pub refresh_token: &'a str,
+    pub resource: &'a str,
+}
+
+pub fn refresh_token_form(request: OAuthRefreshTokenForm<'_>) -> Vec<(&'static str, String)> {
+    vec![
+        ("grant_type", "refresh_token".to_string()),
+        ("refresh_token", request.refresh_token.to_string()),
+        ("client_id", request.client_id.to_string()),
+        ("resource", request.resource.to_string()),
+    ]
 }
 
 pub fn protected_resource_metadata_candidates(resource_url: &Url) -> Vec<Url> {
@@ -904,6 +973,10 @@ mod tests {
             canonical_resource_indicator("https://mcp.example.com").unwrap(),
             "https://mcp.example.com"
         );
+        assert_eq!(
+            canonical_resource_indicator("https://mcp.example.com/mcp/").unwrap(),
+            "https://mcp.example.com/mcp"
+        );
     }
 
     #[test]
@@ -940,11 +1013,55 @@ mod tests {
     }
 
     #[test]
-    fn canonical_resource_indicator_preserves_non_empty_path() {
+    fn canonical_resource_indicator_preserves_non_empty_path_segments() {
         assert_eq!(
             canonical_resource_indicator("https://example.com/mcp/notion/").unwrap(),
-            "https://example.com/mcp/notion/"
+            "https://example.com/mcp/notion"
         );
+    }
+
+    #[test]
+    fn oauth_authorization_url_includes_resource_indicator() {
+        let url = build_oauth_authorization_url(OAuthAuthorizationUrlOptions {
+            authorization_endpoint: "https://auth.example.com/authorize",
+            client_id: "client-123",
+            redirect_uri: "http://127.0.0.1:9783/oauth/callback",
+            state: "state-abc",
+            code_challenge: "challenge-xyz",
+            resource: "https://mcp.example.com/mcp",
+            scopes: Some("mcp.read"),
+        })
+        .unwrap();
+        let params = url.query_pairs().collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            params.get("resource").map(|value| value.as_ref()),
+            Some("https://mcp.example.com/mcp")
+        );
+        assert_eq!(
+            params.get("scope").map(|value| value.as_ref()),
+            Some("mcp.read")
+        );
+    }
+
+    #[test]
+    fn token_forms_include_resource_indicator() {
+        let code_form = authorization_code_token_form(OAuthAuthorizationCodeTokenForm {
+            client_id: "client-123",
+            redirect_uri: "http://127.0.0.1:9783/oauth/callback",
+            code: "code-abc",
+            code_verifier: "verifier-xyz",
+            resource: "https://mcp.example.com/mcp",
+            scopes: Some("mcp.read"),
+        });
+        assert!(code_form.contains(&("resource", "https://mcp.example.com/mcp".to_string())));
+        assert!(code_form.contains(&("scope", "mcp.read".to_string())));
+
+        let refresh_form = refresh_token_form(OAuthRefreshTokenForm {
+            client_id: "client-123",
+            refresh_token: "refresh-abc",
+            resource: "https://mcp.example.com/mcp",
+        });
+        assert!(refresh_form.contains(&("resource", "https://mcp.example.com/mcp".to_string())));
     }
 
     #[test]

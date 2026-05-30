@@ -1301,7 +1301,9 @@ authorization request; custom redirect URIs must also include an explicit port.
 PKCE S256 is always enabled. Generic OAuth discovers protected-resource and
 authorization-server metadata when explicit endpoints are not supplied, attempts
 dynamic client registration when available, and sends the `resource` parameter
-to both the authorization and token endpoints.
+to both the authorization and token endpoints. `harn mcp login` derives that
+resource from the canonical MCP server URI: lowercase scheme and host, no
+default port, no query string, no fragment, and no trailing slash.
 
 `harn connect <provider>` is available for providers registered in the nearest
 `harn.toml` `[[providers]]` table with `oauth = { ... }` metadata. CLI flags

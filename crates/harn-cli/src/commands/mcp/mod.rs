@@ -5,11 +5,13 @@ use std::{env, fs, process};
 
 use base64::Engine;
 use harn_vm::mcp_auth::{
-    canonical_resource_indicator, determine_token_endpoint_auth_method, discover_mcp_oauth,
-    dynamic_client_registration_body, ensure_pkce_s256_supported, select_client_registration_mode,
+    authorization_code_token_form, build_oauth_authorization_url, canonical_resource_indicator,
+    determine_token_endpoint_auth_method, discover_mcp_oauth, dynamic_client_registration_body,
+    ensure_pkce_s256_supported, refresh_token_form, select_client_registration_mode,
     validate_authorization_response_issuer, validate_issuer_binding,
-    validate_token_endpoint_auth_method, OAuthClientRegistrationMode,
-    OAuthClientRegistrationOptions,
+    validate_token_endpoint_auth_method, OAuthAuthorizationCodeTokenForm,
+    OAuthAuthorizationUrlOptions, OAuthClientRegistrationMode, OAuthClientRegistrationOptions,
+    OAuthRefreshTokenForm,
 };
 use harn_vm::secrets::{KeyringSecretProvider, SecretBytes, SecretId, SecretProvider};
 use serde::{Deserialize, Serialize};
@@ -93,7 +95,11 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                     eprintln!("error: {error}");
                     process::exit(1);
                 });
-            delete_stored_token(&server.url, &discovery.issuer)
+            let resource = canonical_server_resource(&server.url).unwrap_or_else(|error| {
+                eprintln!("error: {error}");
+                process::exit(1);
+            });
+            delete_stored_token(&resource, &discovery.issuer)
                 .await
                 .unwrap_or_else(|error| {
                     eprintln!("error: {error}");
@@ -124,7 +130,11 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                     eprintln!("error: {error}");
                     process::exit(1);
                 });
-            match load_stored_token(&server.url, &discovery.issuer).await {
+            let resource = canonical_server_resource(&server.url).unwrap_or_else(|error| {
+                eprintln!("error: {error}");
+                process::exit(1);
+            });
+            match load_stored_token(&resource, &discovery.issuer).await {
                 Ok(Some(token)) => {
                     println!("Server: {}", server.name);
                     println!("URL: {}", server.url);
@@ -324,7 +334,8 @@ pub(crate) async fn resolve_auth_for_server(
     }
 
     let discovery = discover_oauth_server(&server.url).await?;
-    let Some(mut stored) = load_stored_token(&server.url, &discovery.issuer).await? else {
+    let resource = canonical_server_resource(&server.url)?;
+    let Some(mut stored) = load_stored_token(&resource, &discovery.issuer).await? else {
         return Ok(AuthResolution::None);
     };
     validate_issuer_binding(&stored.issuer, &discovery.issuer)?;
@@ -345,7 +356,7 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
     })?;
     // RFC 8707 resource indicator: the MCP server's canonical URI, sent in both
     // the authorization and token requests regardless of AS advertisement.
-    let resource = canonical_resource_indicator(&server.url).map_err(|error| error.to_string())?;
+    let resource = canonical_server_resource(&server.url)?;
     let discovery = discover_oauth_server(&server.url).await?;
     ensure_pkce_support(&discovery.metadata)?;
     let requested_scopes = options
@@ -404,15 +415,15 @@ async fn login(options: &McpLoginArgs) -> Result<(), String> {
     let state = random_hex(16);
     let callback_listener = bind_callback_listener(&options.redirect_uri)?;
 
-    let auth_url = build_authorization_url(
-        &discovery.metadata.authorization_endpoint,
-        &client_id,
-        &options.redirect_uri,
-        &state,
-        &code_challenge,
-        &resource,
-        requested_scopes.as_deref(),
-    )?;
+    let auth_url = build_oauth_authorization_url(OAuthAuthorizationUrlOptions {
+        authorization_endpoint: &discovery.metadata.authorization_endpoint,
+        client_id: &client_id,
+        redirect_uri: &options.redirect_uri,
+        state: &state,
+        code_challenge: &code_challenge,
+        resource: &resource,
+        scopes: requested_scopes.as_deref(),
+    })?;
 
     println!("Server: {} ({})", server.name, server.url);
     println!("Redirect URI: {}", options.redirect_uri);
@@ -539,6 +550,10 @@ async fn discover_oauth_server(server_url: &str) -> Result<OAuthDiscoveryResult,
     })
 }
 
+fn canonical_server_resource(server_url: &str) -> Result<String, String> {
+    canonical_resource_indicator(server_url).map_err(|error| error.to_string())
+}
+
 fn ensure_pkce_support(metadata: &OAuthServerMetadata) -> Result<(), String> {
     ensure_pkce_s256_supported(metadata)
 }
@@ -574,33 +589,6 @@ fn determine_token_auth_method(
     client_secret: Option<&String>,
 ) -> Result<String, String> {
     determine_token_endpoint_auth_method(metadata, client_secret.map(String::as_str))
-}
-
-fn build_authorization_url(
-    authorization_endpoint: &str,
-    client_id: &str,
-    redirect_uri: &str,
-    state: &str,
-    code_challenge: &str,
-    resource: &str,
-    scopes: Option<&str>,
-) -> Result<Url, String> {
-    let mut url = Url::parse(authorization_endpoint)
-        .map_err(|error| format!("Invalid authorization endpoint: {error}"))?;
-    {
-        let mut query = url.query_pairs_mut();
-        query.append_pair("response_type", "code");
-        query.append_pair("client_id", client_id);
-        query.append_pair("redirect_uri", redirect_uri);
-        query.append_pair("state", state);
-        query.append_pair("code_challenge", code_challenge);
-        query.append_pair("code_challenge_method", "S256");
-        query.append_pair("resource", resource);
-        if let Some(scopes) = scopes {
-            query.append_pair("scope", scopes);
-        }
-    }
-    Ok(url)
 }
 
 fn bind_callback_listener(redirect_uri: &str) -> Result<TcpListener, String> {
@@ -694,17 +682,14 @@ async fn exchange_authorization_code(
     request: AuthorizationCodeExchange<'_>,
 ) -> Result<TokenResponse, String> {
     let client = reqwest::Client::new();
-    let mut form = vec![
-        ("grant_type", "authorization_code".to_string()),
-        ("code", request.code.to_string()),
-        ("redirect_uri", request.redirect_uri.to_string()),
-        ("client_id", request.client_id.to_string()),
-        ("code_verifier", request.code_verifier.to_string()),
-        ("resource", request.resource.to_string()),
-    ];
-    if let Some(scopes) = request.scopes {
-        form.push(("scope", scopes.to_string()));
-    }
+    let form = authorization_code_token_form(OAuthAuthorizationCodeTokenForm {
+        client_id: request.client_id,
+        redirect_uri: request.redirect_uri,
+        code: request.code,
+        code_verifier: request.code_verifier,
+        resource: request.resource,
+        scopes: request.scopes,
+    });
     request_token(
         &client,
         &metadata.token_endpoint,
@@ -739,17 +724,16 @@ async fn refresh_token_if_needed(
     let refresh_token = token.refresh_token.clone().ok_or_else(|| {
         "Stored OAuth token has expired and does not include a refresh token".to_string()
     })?;
-    // Re-send the RFC 8707 resource indicator on refresh. Canonicalize again so
-    // tokens persisted before this change still emit the canonical form.
+    // Re-send the RFC 8707 resource indicator on refresh and keep the stored
+    // key aligned with the canonical resource.
     let resource =
         canonical_resource_indicator(&token.resource).unwrap_or_else(|_| token.resource.clone());
     let client = reqwest::Client::new();
-    let form = vec![
-        ("grant_type", "refresh_token".to_string()),
-        ("refresh_token", refresh_token),
-        ("client_id", token.client_id.clone()),
-        ("resource", resource),
-    ];
+    let form = refresh_token_form(OAuthRefreshTokenForm {
+        client_id: &token.client_id,
+        refresh_token: &refresh_token,
+        resource: &resource,
+    });
     let refreshed = request_token(
         &client,
         &discovery.metadata.token_endpoint,
@@ -772,7 +756,7 @@ async fn refresh_token_if_needed(
         client_secret: token.client_secret.clone(),
         token_endpoint_auth_method: token.token_endpoint_auth_method.clone(),
         issuer: token.issuer.clone(),
-        resource: token.resource.clone(),
+        resource,
         scopes: token.scopes.clone(),
     })
 }
@@ -1039,15 +1023,15 @@ mod tests {
     #[test]
     fn authorization_url_includes_canonical_resource_indicator() {
         let resource = canonical_resource_indicator("https://MCP.Example.com:443/mcp/").unwrap();
-        let url = build_authorization_url(
-            "https://auth.example.com/authorize",
-            "client-123",
-            "http://127.0.0.1:9783/oauth/callback",
-            "state-abc",
-            "challenge-xyz",
-            &resource,
-            Some("mcp.read"),
-        )
+        let url = build_oauth_authorization_url(OAuthAuthorizationUrlOptions {
+            authorization_endpoint: "https://auth.example.com/authorize",
+            client_id: "client-123",
+            redirect_uri: "http://127.0.0.1:9783/oauth/callback",
+            state: "state-abc",
+            code_challenge: "challenge-xyz",
+            resource: &resource,
+            scopes: Some("mcp.read"),
+        })
         .unwrap();
         let resource_param = url
             .query_pairs()
@@ -1055,7 +1039,7 @@ mod tests {
             .map(|(_, value)| value.into_owned());
         assert_eq!(
             resource_param.as_deref(),
-            Some("https://mcp.example.com/mcp/")
+            Some("https://mcp.example.com/mcp")
         );
     }
 
