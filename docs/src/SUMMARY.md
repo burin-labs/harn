@@ -236,6 +236,7 @@
 - [ADR 0001: Pipe operator](./adr/0001-pipe-operator.md)
 - [ADR 0002: Compile-time capability invariants](./adr/0002-compile-time-capability-invariants.md)
 - [ADR 0003: Hand-rolled MCP vs. the official rmcp SDK](./adr/0003-mcp-hand-rolled-vs-rmcp.md)
+- [ADR 0004: VM multithreading via Send values + share-nothing isolates](./adr/0004-vm-multithreading.md)
 
 # Operations
 
