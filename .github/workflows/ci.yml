@@ -95,6 +95,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Affected-crate selection (#2663) diffs `origin/<base>...HEAD`,
+          # which needs the merge-base — fetch full history so it's available
+          # on PRs. Unused on merge_group/push (those run the full suite).
+          fetch-depth: 0
       - uses: ./.github/actions/free-disk-space
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
@@ -116,9 +121,37 @@ jobs:
         continue-on-error: true
         with:
           tool: nextest@0.9.133
-      - run: make test
+      # SAFETY PRINCIPLE — prune for PR fast feedback, run the FULL suite on
+      # the merge queue and post-merge backstop (#2663). On `pull_request`
+      # events we run only the tests in crates affected by the diff, expanded
+      # by the reverse-dependency closure (a change to crate X must test X and
+      # everything that depends on X). On `merge_group` (the speculative merge
+      # commit — the ONLY place a cross-PR interaction regression is caught)
+      # and `push` to main (post-merge backstop) we run the WHOLE workspace
+      # unconditionally — never prune those. Global changes (Cargo.lock,
+      # .cargo/, toolchain, this workflow) auto-fall-back to the full
+      # workspace inside `scripts/affected-crates.py`.
+      - name: Run affected-crate tests (PR fast feedback)
+        if: github.event_name == 'pull_request'
         env:
           NEXTEST_PROFILE: ci
+          # Route the (event-derived) base ref through env vars rather than
+          # expanding `${{ }}` inside the run: script — inline expansion in a
+          # shell block is a template-injection sink (zizmor). Env-var
+          # assignment is safe; the script reads the value via "$BASE_REF".
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
+        run: |
+          # fetch-depth:0 gives full history; ensure the base branch is present
+          # as a remote-tracking ref so `origin/<base>...HEAD` resolves its
+          # merge-base for the diff.
+          git fetch --no-tags origin "$BASE_REF"
+          make test-affected
+      - name: Run full test suite (merge queue + push backstop)
+        if: github.event_name != 'pull_request'
+        env:
+          NEXTEST_PROFILE: ci
+        run: make test
 
   harn-audit:
     name: Harn conformance + audit
