@@ -41,6 +41,59 @@ fn install_test_agent_event_log_sink(
         harn_vm::agent_events::EventLogSink::new(log.clone(), session_id),
     );
 }
+
+async fn run_mock_llm_prompt(
+    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    session_id: &str,
+    id: u64,
+) -> serde_json::Value {
+    request_tx
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{
+                    "type": "text",
+                    "text": "llm_mock_clear()\nllm_mock({text: \"ok\", input_tokens: 1, output_tokens: 1, model: \"mock\", provider: \"mock\"})\nlet r = llm_call(\"hello\", nil, {provider: \"mock\", model: \"mock\", llm_retries: 0})\n__io_println(r.text)",
+                }],
+            },
+        }))
+        .expect("send session/prompt");
+
+    for _ in 0..32 {
+        let message = recv_json(response_rx).await;
+        if message["method"] == "host/capabilities" {
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": message["id"].clone(),
+                    "result": {},
+                }))
+                .expect("send host capabilities response");
+            continue;
+        }
+        if message["id"] == id {
+            return message;
+        }
+    }
+    panic!("timed out waiting for session/prompt response {id}");
+}
+
+async fn recv_response_with_id(
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    id: u64,
+) -> serde_json::Value {
+    for _ in 0..32 {
+        let message = recv_json(response_rx).await;
+        if message["id"] == id {
+            return message;
+        }
+    }
+    panic!("timed out waiting for response {id}");
+}
 #[tokio::test(flavor = "current_thread")]
 async fn acp_authenticate_uses_shared_auth_policy() {
     let local = tokio::task::LocalSet::new();
@@ -1205,6 +1258,147 @@ async fn acp_set_config_option_pins_thought_level_and_emits_update() {
     assert_eq!(cleared_value, "@inherit");
     let _clear_notification = recv_json(&mut rx).await;
     assert!(harn_vm::agent_sessions::pinned_reasoning_policy(&session_id).is_none());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_prompt_installs_default_llm_token_budget() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let config = AcpServerConfig::new(None).with_llm_token_budget(0);
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_code_session_with_config(config, serde_json::json!(".")).await;
+
+            let response = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 3).await;
+            assert_eq!(response["id"], 3);
+            assert_eq!(response["error"]["code"], -32000);
+            let message = response["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            assert!(
+                message.contains("LLM token budget exceeded"),
+                "prompt should fail under the inherited token budget: {message}"
+            );
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_set_config_option_budget_rearms_next_prompt() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_code_session_with_config(
+                    AcpServerConfig::new(None),
+                    serde_json::json!("."),
+                )
+                .await;
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "session/set_config_option",
+                    "params": {
+                        "sessionId": session_id,
+                        "configId": "budget",
+                        "value": "{\"llm_tokens\":0}",
+                    },
+                }))
+                .expect("send budget cap");
+            let ack = recv_response_with_id(&mut response_rx, 3).await;
+            assert_eq!(ack["id"], 3);
+            let budget_value = ack["result"]["configOptions"]
+                .as_array()
+                .expect("configOptions array")
+                .iter()
+                .find(|entry| entry["id"] == "budget")
+                .expect("budget option")
+                .get("currentValue")
+                .and_then(|value| value.as_str())
+                .expect("budget currentValue");
+            assert_eq!(budget_value, "{\"llm_tokens\":0}");
+            let _notification = recv_json(&mut response_rx).await;
+
+            let exhausted =
+                run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 4).await;
+            assert_eq!(exhausted["error"]["code"], -32000);
+            assert!(exhausted["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("LLM token budget exceeded"));
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "session/set_config_option",
+                    "params": {
+                        "sessionId": session_id,
+                        "configId": "budget",
+                        "value": "{\"llm_tokens\":100}",
+                    },
+                }))
+                .expect("send budget re-arm");
+            let rearm_ack = recv_response_with_id(&mut response_rx, 5).await;
+            assert_eq!(rearm_ack["id"], 5);
+            let _rearm_notification = recv_json(&mut response_rx).await;
+
+            let ok = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 6).await;
+            assert_eq!(ok["result"]["stopReason"], "end_turn");
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_set_config_option_budget_off_disables_inherited_default() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let config = AcpServerConfig::new(None).with_llm_token_budget(0);
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_code_session_with_config(config, serde_json::json!(".")).await;
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "session/set_config_option",
+                    "params": {
+                        "sessionId": session_id,
+                        "configId": "budget",
+                        "value": "off",
+                    },
+                }))
+                .expect("send budget off");
+            let ack = recv_response_with_id(&mut response_rx, 3).await;
+            let budget_value = ack["result"]["configOptions"]
+                .as_array()
+                .expect("configOptions array")
+                .iter()
+                .find(|entry| entry["id"] == "budget")
+                .expect("budget option")
+                .get("currentValue")
+                .and_then(|value| value.as_str())
+                .expect("budget currentValue");
+            assert_eq!(budget_value, "off");
+            let _notification = recv_json(&mut response_rx).await;
+
+            let ok = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 4).await;
+            assert_eq!(ok["result"]["stopReason"], "end_turn");
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
 }
 
 /// `session/set_config_option(configId="model")` rejects selectors that

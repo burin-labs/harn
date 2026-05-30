@@ -604,7 +604,7 @@ The ACP server supports these JSON-RPC methods:
 | `session/close` | Close a session and cancel any active prompt |
 | `session/stop` | Deprecated alias for `session/close` |
 | `session/set_mode` | Switch the active session mode |
-| `session/set_config_option` | Switch a preferred ACP session config option (`mode`, `model`, or `thought_level`) |
+| `session/set_config_option` | Switch a preferred ACP session config option (`mode`, `model`, `thought_level`, or `budget`) |
 | `workflow/signal` | Enqueue a workflow signal message in the current session workspace |
 | `workflow/query` | Read a named workflow query value from the current session workspace |
 | `workflow/update` | Send a workflow update request and wait for a response |
@@ -721,6 +721,18 @@ it; Harn keeps `modes` available for clients still on `session/set_mode`.
         { "value": "medium",   "name": "Medium", "description": "..." },
         { "value": "high",     "name": "High",   "description": "..." },
         { "value": "xhigh",    "name": "Extra High", "description": "..." }
+      ]
+    },
+    {
+      "id": "budget",
+      "name": "Call Budget",
+      "category": "_harn_budget",
+      "type": "select",
+      "currentValue": "@inherit",
+      "options": [
+        { "value": "@inherit", "name": "Inherit server default", "description": "..." },
+        { "value": "off", "name": "No session budget", "description": "..." },
+        { "value": "{\"llm_cost_usd\":0.05,\"llm_tokens\":200000}", "name": "$0.05 and 200k tokens", "description": "..." }
       ]
     }
   ],
@@ -878,6 +890,38 @@ Per-call options still win: `llm_call(..., {thinking: ...})` and
 `llm_call(..., {reasoning_effort: ...})` bypass the session thought pin.
 `session/fork` carries the parent's thought pin to the child, and later
 changes remain branch-local.
+
+### Session budget
+
+`AcpServerConfig::with_budget(BudgetSpec)` installs an inherited resource
+budget for every ACP session. The guard is applied around each
+`session/prompt` turn on the same runtime thread that executes the VM, using
+the same `BudgetSpec`/`call_budget` path as HTTP `@budget(...)` dispatch.
+Use `with_llm_cost_budget(...)` or `with_llm_token_budget(...)` when the
+embedder only needs an LLM-specific ceiling.
+
+Clients can re-arm or disable the session budget without restarting the
+server by setting `configId: "budget"`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 44,
+  "method": "session/set_config_option",
+  "params": {
+    "sessionId": "sess_abc",
+    "configId": "budget",
+    "value": "{\"llm_cost_usd\":0.05,\"llm_tokens\":200000}"
+  }
+}
+```
+
+The value is a string because ACP config options are string selectors. Harn
+accepts `@inherit` to use the server default, `off` to disable the session
+budget, or a compact JSON object with any of `llm_cost_usd`, `llm_tokens`,
+`mcp_calls`, and `pg_queries`. Exhaustion uses the existing budget error and
+agent-event path, so hosts that already render `_harn/agentEvent`
+`budget_exhausted` updates do not need a new event type.
 
 ### Queued user messages and reminders during agent execution
 
