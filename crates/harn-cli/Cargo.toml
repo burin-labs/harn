@@ -89,6 +89,9 @@ tracing = "0.1"
 fs2 = "0.4"
 thiserror = "2"
 which = "8"
+# Cross-platform host memory for memory-aware test-worker sizing. Already in
+# the tree via harn-vm; matched features keep the build unified.
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -36,8 +36,12 @@ pub(crate) struct TestArgs {
     #[arg(long)]
     pub parallel: bool,
     /// Maximum number of concurrent test workers. Defaults to available
-    /// parallelism, capped to keep system load bounded. Also honored via
-    /// the `HARN_TEST_JOBS` env var. Ignored unless `--parallel` is set.
+    /// parallelism, capped both by core count and by currently-available
+    /// system memory (so an auto-sized run backs off on a small or already-
+    /// loaded host instead of overcommitting RAM). Tune the per-worker memory
+    /// budget with `HARN_TEST_WORKER_MEMORY_MB`. This flag (also honored via
+    /// the `HARN_TEST_JOBS` env var) overrides both caps. Ignored unless
+    /// `--parallel` is set.
     #[arg(long = "jobs", short = 'j', value_name = "N", env = "HARN_TEST_JOBS")]
     pub jobs: Option<usize>,
     /// Re-run user tests when watched files change.
