@@ -220,6 +220,11 @@
       "minimumPythonVersion": "3.9",
       "stability": "stable"
     },
+    "rust": {
+      "artifact": "harn-protocol.rs",
+      "stability": "stable",
+      "vendorPath": "protocol/src/generated.rs"
+    },
     "swift": {
       "artifact": "HarnProtocol.swift",
       "stability": "stable"
