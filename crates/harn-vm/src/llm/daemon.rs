@@ -175,11 +175,11 @@ fn append_daemon_state_event(path: &str, kind: &str, snapshot: &DaemonSnapshot) 
     headers.insert("path".to_string(), path.to_string());
     let payload = serde_json::to_value(snapshot).unwrap_or(serde_json::Value::Null);
     let event = crate::event_log::LogEvent::new(kind, payload).with_headers(headers);
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(async move {
-            let _ = log.append(&topic, event).await;
-        });
-    } else {
-        let _ = futures::executor::block_on(log.append(&topic, event));
-    }
+    // Append synchronously — see the note in `agent_observe.rs`'s
+    // `append_llm_transcript_event_log`. The old `handle.spawn` detached the
+    // append onto a `run_until`-driven runtime that stops polling once the
+    // driving future resolves, stranding the task (and the `Arc<AnyEventLog>` +
+    // payload it held) for the runtime's lifetime (#2660). The backends don't
+    // yield to the reactor on `append`, so a private `block_on` is leak-free.
+    let _ = futures::executor::block_on(log.append(&topic, event));
 }
