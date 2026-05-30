@@ -20,7 +20,7 @@ A fragment is one contributor to the system string:
 
 | field | meaning |
 | --- | --- |
-| `id` | stable identifier, e.g. `host:system_preamble`, `primary`, `tool:todo.guidance` |
+| `id` | stable identifier, e.g. `host:system_preamble`, `primary:active_skills`, `tool:todo.guidance` |
 | `source` | who contributed it (`host:*`, `primary`, `reminder`, `tool:<name>`) |
 | `bucket` | `before` (preamble … primary … reminders) or `after` (appendix/suffix) |
 | `requires_tools` | included only when every named tool is in the active tool set |
@@ -29,6 +29,20 @@ A fragment is one contributor to the system string:
 
 The reducer emits all included `before` fragments in declaration order, then all
 included `after` fragments, joined by a blank line.
+
+## The primary block is decomposed
+
+The agent's per-turn primary system text is itself a composite — the base system
+prompt, MCP advisory context, active skills, the skill catalog, the progress-tool
+nudge, and the loop/tool contracts. Rather than glue these into one opaque
+`primary` string, [`agent_loop`](./agents.md) hands the assembler each part as its
+own fragment through the internal `_system_fragments` channel, so every part is
+traced on its own (`primary:system`, `primary:active_skills`,
+`primary:loop_contract`, …) and can be gated with `requires_tools` independently.
+Joining the fragment bodies with a blank line reproduces the single string the
+legacy path produced, so the assembled prompt is unchanged — only its provenance
+is finer-grained. `agent_build_turn_system_fragments` is the stdlib helper that
+emits the list; `agent_build_turn_system` is the thin wrapper that joins it.
 
 ## Tool guidance rides with the tool
 

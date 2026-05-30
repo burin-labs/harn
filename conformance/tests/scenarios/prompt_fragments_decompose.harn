@@ -1,0 +1,73 @@
+/**
+ * The per-turn primary system block is decomposed into individually
+ * auditable fragments (#2632). `agent_build_turn_system_fragments` emits one
+ * `{id, source, body}` per internal part; joining the bodies reproduces the
+ * legacy `agent_build_turn_system` string byte-for-byte, and feeding the
+ * fragments through `prompt_explain` traces each part on its own instead of
+ * one opaque `primary` block.
+ */
+import { agent_build_turn_system, agent_build_turn_system_fragments } from "std/agent/preflight"
+
+fn contains_id(items, needle) {
+  for item in items {
+    if item == needle {
+      return true
+    }
+  }
+  return false
+}
+
+pipeline test(task) {
+  let session = {session_id: "prompt-fragments-decompose"}
+  let opts = {
+    system: "You are a careful operator.",
+    active_skills: [{id: "disk_cleanup", description: "Free up disk space", when_to_use: "when low"}],
+    skill_catalog_prompt: "## Skills\nUse skills wisely.",
+    loop_until_done: true,
+    done_sentinel: "STOP",
+    tools: {tools: [{name: "read", description: "Read a file"}]},
+    tool_format: "text",
+  }
+  // Joining the fragment bodies reproduces the legacy string exactly.
+  let fragments = agent_build_turn_system_fragments(session, opts, 0)
+  let joined = join(fragments.map(fn(f) { return f.body }), "\n\n")
+  let legacy = agent_build_turn_system(session, opts, 0)
+  assert(joined == legacy, "joined fragment bodies equal agent_build_turn_system")
+  assert(len(fragments) >= 4, "primary block decomposed into multiple parts")
+  // Every fragment is namespaced under the primary region.
+  for fragment in fragments {
+    assert(fragment.source == "primary", "fragment source is primary")
+    assert(starts_with(fragment.id, "primary:"), "fragment id is primary-namespaced")
+  }
+  // prompt_explain expands the channel as the primary region and traces each
+  // part individually — no opaque single `primary` fragment remains.
+  let explained = prompt_explain({_system_fragments: fragments, tools: opts.tools})
+  assert(explained.system == legacy, "prompt_explain system equals legacy string")
+  let ids = explained.fragments.map(fn(t) { return t.id })
+  assert(contains_id(ids, "primary:system"), "traces primary:system")
+  assert(contains_id(ids, "primary:active_skills"), "traces primary:active_skills")
+  assert(contains_id(ids, "primary:skill_catalog"), "traces primary:skill_catalog")
+  assert(contains_id(ids, "primary:loop_contract"), "traces primary:loop_contract")
+  assert(contains_id(ids, "primary:text_tool_contract"), "traces primary:text_tool_contract")
+  assert(!contains_id(ids, "primary"), "no opaque single primary fragment")
+  // The live agent loop forwards the channel: the composed system surfaces the
+  // decomposed parts and carries no triple-newline runs from un-trimmed parts.
+  skill disk_cleanup {
+    description "Clean disk space by deleting caches"
+    when_to_use "Use when the user asks to reclaim disk space"
+    prompt "Remove disk caches carefully."
+  }
+  llm_mock_clear()
+  llm_mock({text: "Cleanup done."})
+  let res = agent_loop(
+    "run disk cleanup please",
+    "You are a careful operator.",
+    {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},
+  )
+  assert(res?.status == "done", "live loop completes")
+  let recorded = llm_mock_calls()[0].system
+  assert(contains(recorded, "## Active skills"), "live system surfaces active skills")
+  assert(contains(recorded, "You are a careful operator."), "live system surfaces primary text")
+  assert(!contains(recorded, "\n\n\n"), "no triple-newline runs in composed system")
+  log("prompt_fragments_decompose tests passed")
+}

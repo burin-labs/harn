@@ -274,6 +274,79 @@ fn __agent_has_system_prompt_options(opts) {
     || __agent_system_prompt_option_present(opts?.system_suffix)
 }
 
+fn __agent_push_system_fragment(fragments, id, body) {
+  let trimmed = trim(body ?? "")
+  if trimmed == "" {
+    return fragments
+  }
+  return fragments.push({id: "primary:" + id, source: "primary", body: trimmed})
+}
+
+fn __agent_primary_system_text(session, opts) {
+  if opts?.system != nil && opts.system != "" {
+    return opts.system
+  }
+  if !__agent_has_system_prompt_options(opts) {
+    let stored_system = agent_session_system_prompt(session.session_id)
+    if stored_system != nil && stored_system != "" {
+      return stored_system
+    }
+  }
+  return ""
+}
+
+/**
+ * agent_build_turn_system_fragments decomposes the per-turn primary system
+ * block into an ordered list of `{id, source, body}` fragments — one per
+ * internal part (system text, MCP advisory, active skills, skill catalog,
+ * progress nudge, loop contract, native/text tool contracts). The agent loop
+ * forwards this list to `llm_call` via the `_system_fragments` channel so the
+ * Rust assembler records per-part provenance instead of treating the whole
+ * primary block as one opaque string. Bodies are trimmed and empty parts are
+ * dropped, so joining the bodies with `\n\n` reproduces the string
+ * `agent_build_turn_system` returns.
+ *
+ * @effects: [agent, mcp]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_build_turn_system_fragments(session, opts, iteration)
+ */
+pub fn agent_build_turn_system_fragments(session, opts, iteration) {
+  var fragments = []
+  fragments = __agent_push_system_fragment(fragments, "system", __agent_primary_system_text(session, opts))
+  fragments = __agent_push_system_fragment(
+    fragments,
+    "mcp_advisory",
+    __agent_mcp_initialize_advisory_prompt(opts),
+  )
+  fragments = __agent_push_system_fragment(
+    fragments,
+    "active_skills",
+    __agent_active_skill_prompt(opts?.active_skills),
+  )
+  fragments = __agent_push_system_fragment(fragments, "skill_catalog", opts?.skill_catalog_prompt ?? "")
+  fragments = __agent_push_system_fragment(
+    fragments,
+    "progress_nudge",
+    opts?._progress_tool_system_prompt_nudge ?? "",
+  )
+  fragments = __agent_push_system_fragment(fragments, "loop_contract", __agent_loop_contract_prompt(opts))
+  fragments = __agent_push_system_fragment(
+    fragments,
+    "native_tool_contract",
+    __agent_native_tool_contract_prompt(opts),
+  )
+  if opts?.tools != nil && __agent_tool_format(opts) != "native" {
+    fragments = __agent_push_system_fragment(
+      fragments,
+      "text_tool_contract",
+      __agent_text_tool_contract_prompt(opts),
+    )
+  }
+  return fragments
+}
+
 /**
  * agent_build_turn_system.
  *
@@ -285,43 +358,8 @@ fn __agent_has_system_prompt_options(opts) {
  */
 pub fn agent_build_turn_system(session, opts, iteration) {
   var parts = []
-  if opts?.system != nil && opts.system != "" {
-    parts = parts.push(opts.system)
-  } else if !__agent_has_system_prompt_options(opts) {
-    let stored_system = agent_session_system_prompt(session.session_id)
-    if stored_system != nil && stored_system != "" {
-      parts = parts.push(stored_system)
-    }
-  }
-  let mcp_advisory = __agent_mcp_initialize_advisory_prompt(opts)
-  if mcp_advisory != "" {
-    parts = parts.push(mcp_advisory)
-  }
-  let active_skill_prompt = __agent_active_skill_prompt(opts?.active_skills)
-  if active_skill_prompt != "" {
-    parts = parts.push(active_skill_prompt)
-  }
-  let skill_catalog_prompt = trim(opts?.skill_catalog_prompt ?? "")
-  if skill_catalog_prompt != "" {
-    parts = parts.push(skill_catalog_prompt)
-  }
-  let progress_tool_nudge = trim(opts?._progress_tool_system_prompt_nudge ?? "")
-  if progress_tool_nudge != "" {
-    parts = parts.push(progress_tool_nudge)
-  }
-  let loop_contract = __agent_loop_contract_prompt(opts)
-  if loop_contract != "" {
-    parts = parts.push(loop_contract)
-  }
-  let native_contract = __agent_native_tool_contract_prompt(opts)
-  if native_contract != "" {
-    parts = parts.push(native_contract)
-  }
-  if opts?.tools != nil && __agent_tool_format(opts) != "native" {
-    let text_contract = __agent_text_tool_contract_prompt(opts)
-    if text_contract != "" {
-      parts = parts.push(text_contract)
-    }
+  for fragment in agent_build_turn_system_fragments(session, opts, iteration) {
+    parts = parts.push(fragment.body)
   }
   return join(parts, "\n\n")
 }

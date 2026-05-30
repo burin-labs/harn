@@ -23,6 +23,7 @@ fn __llm_call_option_keys() {
     "system_prompt_parts",
     "system_appendix",
     "system_suffix",
+    "_system_fragments",
     "previous_response_id",
     "max_tokens",
     "temperature",
