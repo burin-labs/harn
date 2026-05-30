@@ -1,9 +1,14 @@
+use std::collections::HashMap;
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::{env, fs, process};
 
+use async_trait::async_trait;
 use base64::Engine;
+use fs2::FileExt;
 use harn_vm::mcp_auth::{
     authorization_code_token_form, build_oauth_authorization_url, canonical_resource_indicator,
     determine_token_endpoint_auth_method, discover_mcp_oauth, dynamic_client_registration_body,
@@ -16,6 +21,7 @@ use harn_vm::mcp_auth::{
 use harn_vm::secrets::{KeyringSecretProvider, SecretBytes, SecretId, SecretProvider};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
 use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
@@ -27,6 +33,8 @@ pub(crate) mod serve;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
 const KEYRING_SERVICE: &str = "dev.harn.mcp";
+const OAUTH_LOCK_DIR_ENV: &str = "HARN_MCP_OAUTH_LOCK_DIR";
+const HARN_HOME_ENV: &str = "HARN_HOME";
 const TOKEN_REFRESH_SKEW_SECS: i64 = 60;
 use harn_vm::mcp_protocol::PROTOCOL_VERSION as MCP_PROTOCOL_VERSION;
 
@@ -51,6 +59,70 @@ pub(crate) struct StoredOAuthToken {
     pub issuer: String,
     pub resource: String,
     pub scopes: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct OAuthTokenStoreKey {
+    resource: String,
+    issuer: String,
+    client_id: String,
+}
+
+impl OAuthTokenStoreKey {
+    fn new(resource: &str, issuer: &str, client_id: &str) -> Self {
+        Self {
+            resource: resource.to_string(),
+            issuer: issuer.to_string(),
+            client_id: client_id.to_string(),
+        }
+    }
+
+    fn from_token(token: &StoredOAuthToken) -> Self {
+        Self::new(&token.resource, &token.issuer, &token.client_id)
+    }
+
+    fn account(&self) -> String {
+        token_store_account(&self.resource, &self.issuer, &self.client_id)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct StoredOAuthClientIndex {
+    client_id: String,
+}
+
+#[async_trait]
+trait OAuthTokenStorage: Send + Sync {
+    async fn load_token(
+        &self,
+        key: &OAuthTokenStoreKey,
+    ) -> Result<Option<StoredOAuthToken>, String>;
+    async fn save_token(&self, token: &StoredOAuthToken) -> Result<(), String>;
+    async fn delete_token(&self, key: &OAuthTokenStoreKey) -> Result<(), String>;
+    async fn load_active_client_id(
+        &self,
+        resource: &str,
+        issuer: &str,
+    ) -> Result<Option<String>, String>;
+    async fn save_active_client_id(
+        &self,
+        resource: &str,
+        issuer: &str,
+        client_id: &str,
+    ) -> Result<(), String>;
+    async fn delete_active_client_id(&self, resource: &str, issuer: &str) -> Result<(), String>;
+}
+
+struct KeyringOAuthTokenStorage {
+    provider: KeyringSecretProvider,
+}
+
+impl Default for KeyringOAuthTokenStorage {
+    fn default() -> Self {
+        Self {
+            provider: oauth_token_provider(),
+        }
+    }
 }
 
 type OAuthServerMetadata = harn_vm::mcp_auth::OAuthAuthorizationServerMetadata;
@@ -99,7 +171,7 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 eprintln!("error: {error}");
                 process::exit(1);
             });
-            delete_stored_token(&resource, &discovery.issuer)
+            delete_stored_token(&resource, &discovery.issuer, server.client_id.as_deref())
                 .await
                 .unwrap_or_else(|error| {
                     eprintln!("error: {error}");
@@ -134,7 +206,8 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 eprintln!("error: {error}");
                 process::exit(1);
             });
-            match load_stored_token(&resource, &discovery.issuer).await {
+            match load_stored_token(&resource, &discovery.issuer, server.client_id.as_deref()).await
+            {
                 Ok(Some(token)) => {
                     println!("Server: {}", server.name);
                     println!("URL: {}", server.url);
@@ -335,14 +408,21 @@ pub(crate) async fn resolve_auth_for_server(
 
     let discovery = discover_oauth_server(&server.url).await?;
     let resource = canonical_server_resource(&server.url)?;
-    let Some(mut stored) = load_stored_token(&resource, &discovery.issuer).await? else {
+    let store = KeyringOAuthTokenStorage::default();
+    let Some(mut stored) = load_stored_token_from_store(
+        &store,
+        &resource,
+        &discovery.issuer,
+        server.client_id.as_deref(),
+    )
+    .await?
+    else {
         return Ok(AuthResolution::None);
     };
     validate_issuer_binding(&stored.issuer, &discovery.issuer)?;
 
     if token_needs_refresh(&stored) {
-        stored = refresh_token_if_needed(&stored, &discovery).await?;
-        save_stored_token(&stored).await?;
+        stored = refresh_stored_token_with_store(&store, &stored, &discovery, None).await?;
     }
 
     Ok(AuthResolution::Bearer(stored.access_token))
@@ -829,51 +909,296 @@ fn current_unix_timestamp() -> i64 {
         .unwrap_or_default()
 }
 
+async fn refresh_stored_token_with_store<S: OAuthTokenStorage + ?Sized>(
+    store: &S,
+    token: &StoredOAuthToken,
+    discovery: &OAuthDiscoveryResult,
+    lock_dir_override: Option<PathBuf>,
+) -> Result<StoredOAuthToken, String> {
+    let key = OAuthTokenStoreKey::from_token(token);
+    let _guard = acquire_oauth_refresh_lock(&key, lock_dir_override.as_deref()).await?;
+    let Some(current) = store.load_token(&key).await? else {
+        return Err("Stored OAuth token disappeared before it could be refreshed".to_string());
+    };
+    validate_issuer_binding(&current.issuer, &discovery.issuer)?;
+    if !token_needs_refresh(&current) {
+        return Ok(current);
+    }
+
+    let refreshed = refresh_token_if_needed(&current, discovery).await?;
+    store.save_token(&refreshed).await?;
+    Ok(refreshed)
+}
+
+struct OAuthRefreshLockGuard {
+    _async_guard: tokio::sync::OwnedMutexGuard<()>,
+    file: fs::File,
+}
+
+impl Drop for OAuthRefreshLockGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+async fn acquire_oauth_refresh_lock(
+    key: &OAuthTokenStoreKey,
+    lock_dir_override: Option<&Path>,
+) -> Result<OAuthRefreshLockGuard, String> {
+    let mutex = oauth_refresh_mutex(key);
+    let async_guard = mutex.lock_owned().await;
+    let lock_path = oauth_refresh_lock_path(key, lock_dir_override);
+    let file = tokio::task::spawn_blocking(move || {
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Failed to create OAuth token lock directory `{}`: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|error| {
+                format!(
+                    "Failed to open OAuth token lock `{}`: {error}",
+                    lock_path.display()
+                )
+            })?;
+        file.lock_exclusive().map_err(|error| {
+            format!(
+                "Failed to acquire OAuth token lock `{}`: {error}",
+                lock_path.display()
+            )
+        })?;
+        Ok::<fs::File, String>(file)
+    })
+    .await
+    .map_err(|error| format!("OAuth token lock task failed: {error}"))??;
+    Ok(OAuthRefreshLockGuard {
+        _async_guard: async_guard,
+        file,
+    })
+}
+
+fn oauth_refresh_mutex(key: &OAuthTokenStoreKey) -> Arc<AsyncMutex<()>> {
+    static LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
+        OnceLock::new();
+    let locks = LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut locks = locks.lock().expect("OAuth refresh lock registry poisoned");
+    locks
+        .entry(key.account())
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
+}
+
+fn oauth_refresh_lock_path(key: &OAuthTokenStoreKey, lock_dir_override: Option<&Path>) -> PathBuf {
+    let dir = lock_dir_override
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_oauth_lock_dir);
+    dir.join(format!("{}.lock", key.account()))
+}
+
+fn default_oauth_lock_dir() -> PathBuf {
+    if let Some(path) = env::var_os(OAUTH_LOCK_DIR_ENV) {
+        return PathBuf::from(path);
+    }
+    harn_home_dir().join("mcp-oauth-locks")
+}
+
+fn harn_home_dir() -> PathBuf {
+    if let Some(path) = env::var_os(HARN_HOME_ENV) {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = env::var_os("HOME") {
+        return PathBuf::from(home).join(".harn");
+    }
+    if let Some(home) = env::var_os("USERPROFILE") {
+        return PathBuf::from(home).join(".harn");
+    }
+    env::temp_dir().join("harn")
+}
+
+#[async_trait]
+impl OAuthTokenStorage for KeyringOAuthTokenStorage {
+    async fn load_token(
+        &self,
+        key: &OAuthTokenStoreKey,
+    ) -> Result<Option<StoredOAuthToken>, String> {
+        let payload = match self.provider.get(&token_secret_id(key)).await {
+            Ok(secret) => secret,
+            Err(harn_vm::secrets::SecretError::NotFound { .. }) => return Ok(None),
+            Err(error) => return Err(format!("Failed to read OAuth token from keyring: {error}")),
+        };
+        let token = payload
+            .with_exposed(|bytes| serde_json::from_slice::<StoredOAuthToken>(bytes))
+            .map_err(|error| format!("Stored OAuth token was invalid JSON: {error}"))?;
+        validate_token_store_binding(&token, key)?;
+        Ok(Some(token))
+    }
+
+    async fn save_token(&self, token: &StoredOAuthToken) -> Result<(), String> {
+        let payload = serde_json::to_string(token)
+            .map_err(|error| format!("Failed to serialize OAuth token: {error}"))?;
+        self.provider
+            .put(
+                &token_secret_id(&OAuthTokenStoreKey::from_token(token)),
+                SecretBytes::from(payload.into_bytes()),
+            )
+            .await
+            .map_err(|error| format!("Failed to store OAuth token in keyring: {error}"))?;
+        self.save_active_client_id(&token.resource, &token.issuer, &token.client_id)
+            .await
+    }
+
+    async fn delete_token(&self, key: &OAuthTokenStoreKey) -> Result<(), String> {
+        self.provider
+            .delete(&token_secret_id(key))
+            .await
+            .map_err(|error| format!("Failed to delete OAuth token from keyring: {error}"))
+    }
+
+    async fn load_active_client_id(
+        &self,
+        resource: &str,
+        issuer: &str,
+    ) -> Result<Option<String>, String> {
+        let payload = match self
+            .provider
+            .get(&token_client_index_secret_id(resource, issuer))
+            .await
+        {
+            Ok(secret) => secret,
+            Err(harn_vm::secrets::SecretError::NotFound { .. }) => return Ok(None),
+            Err(error) => {
+                return Err(format!(
+                    "Failed to read OAuth client index from keyring: {error}"
+                ))
+            }
+        };
+        let index = payload
+            .with_exposed(|bytes| serde_json::from_slice::<StoredOAuthClientIndex>(bytes))
+            .map_err(|error| format!("Stored OAuth client index was invalid JSON: {error}"))?;
+        Ok(Some(index.client_id))
+    }
+
+    async fn save_active_client_id(
+        &self,
+        resource: &str,
+        issuer: &str,
+        client_id: &str,
+    ) -> Result<(), String> {
+        let payload = serde_json::to_string(&StoredOAuthClientIndex {
+            client_id: client_id.to_string(),
+        })
+        .map_err(|error| format!("Failed to serialize OAuth client index: {error}"))?;
+        self.provider
+            .put(
+                &token_client_index_secret_id(resource, issuer),
+                SecretBytes::from(payload.into_bytes()),
+            )
+            .await
+            .map_err(|error| format!("Failed to store OAuth client index in keyring: {error}"))
+    }
+
+    async fn delete_active_client_id(&self, resource: &str, issuer: &str) -> Result<(), String> {
+        self.provider
+            .delete(&token_client_index_secret_id(resource, issuer))
+            .await
+            .map_err(|error| format!("Failed to delete OAuth client index from keyring: {error}"))
+    }
+}
+
 async fn save_stored_token(token: &StoredOAuthToken) -> Result<(), String> {
-    let payload = serde_json::to_string(token)
-        .map_err(|error| format!("Failed to serialize OAuth token: {error}"))?;
-    oauth_token_provider()
-        .put(
-            &token_secret_id(&token.resource, &token.issuer),
-            SecretBytes::from(payload.into_bytes()),
-        )
-        .await
-        .map_err(|error| format!("Failed to store OAuth token in keyring: {error}"))
+    let store = KeyringOAuthTokenStorage::default();
+    let key = OAuthTokenStoreKey::from_token(token);
+    let _guard = acquire_oauth_refresh_lock(&key, None).await?;
+    store.save_token(token).await
 }
 
 async fn load_stored_token(
     resource: &str,
     issuer: &str,
+    client_id_hint: Option<&str>,
 ) -> Result<Option<StoredOAuthToken>, String> {
-    let payload = match oauth_token_provider()
-        .get(&token_secret_id(resource, issuer))
-        .await
-    {
-        Ok(secret) => secret,
-        Err(harn_vm::secrets::SecretError::NotFound { .. }) => return Ok(None),
-        Err(error) => return Err(format!("Failed to read OAuth token from keyring: {error}")),
+    let store = KeyringOAuthTokenStorage::default();
+    load_stored_token_from_store(&store, resource, issuer, client_id_hint).await
+}
+
+async fn load_stored_token_from_store<S: OAuthTokenStorage + ?Sized>(
+    store: &S,
+    resource: &str,
+    issuer: &str,
+    client_id_hint: Option<&str>,
+) -> Result<Option<StoredOAuthToken>, String> {
+    let client_id = match client_id_hint {
+        Some(client_id) => client_id.to_string(),
+        None => match store.load_active_client_id(resource, issuer).await? {
+            Some(client_id) => client_id,
+            None => return Ok(None),
+        },
     };
-    let token = payload
-        .with_exposed(|bytes| serde_json::from_slice::<StoredOAuthToken>(bytes))
-        .map_err(|error| format!("Stored OAuth token was invalid JSON: {error}"))?;
-    Ok(Some(token))
-}
-
-async fn delete_stored_token(resource: &str, issuer: &str) -> Result<(), String> {
-    oauth_token_provider()
-        .delete(&token_secret_id(resource, issuer))
+    store
+        .load_token(&OAuthTokenStoreKey::new(resource, issuer, &client_id))
         .await
-        .map_err(|error| format!("Failed to delete OAuth token from keyring: {error}"))
 }
 
-fn token_store_account(resource: &str, issuer: &str) -> String {
+async fn delete_stored_token(
+    resource: &str,
+    issuer: &str,
+    client_id_hint: Option<&str>,
+) -> Result<(), String> {
+    let store = KeyringOAuthTokenStorage::default();
+    let client_id = match client_id_hint {
+        Some(client_id) => client_id.to_string(),
+        None => match store.load_active_client_id(resource, issuer).await? {
+            Some(client_id) => client_id,
+            None => {
+                store.delete_active_client_id(resource, issuer).await?;
+                return Ok(());
+            }
+        },
+    };
+    let key = OAuthTokenStoreKey::new(resource, issuer, &client_id);
+    let _guard = acquire_oauth_refresh_lock(&key, None).await?;
+    store.delete_token(&key).await?;
+    if store
+        .load_active_client_id(resource, issuer)
+        .await?
+        .as_deref()
+        == Some(client_id.as_str())
+    {
+        store.delete_active_client_id(resource, issuer).await?;
+    }
+    Ok(())
+}
+
+fn token_store_account(resource: &str, issuer: &str, client_id: &str) -> String {
     let mut hasher = Sha256::new();
+    hasher.update(issuer.as_bytes());
+    hasher.update([0]);
     hasher.update(resource.as_bytes());
     hasher.update([0]);
-    hasher.update(issuer.as_bytes());
+    hasher.update(client_id.as_bytes());
     let digest = hasher.finalize();
     format!(
-        "mcp-{}",
+        "mcp-token-{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+    )
+}
+
+fn token_client_index_account(resource: &str, issuer: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(issuer.as_bytes());
+    hasher.update([0]);
+    hasher.update(resource.as_bytes());
+    let digest = hasher.finalize();
+    format!(
+        "mcp-client-index-{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
     )
 }
@@ -882,8 +1207,25 @@ fn oauth_token_provider() -> KeyringSecretProvider {
     KeyringSecretProvider::new(KEYRING_SERVICE)
 }
 
-fn token_secret_id(resource: &str, issuer: &str) -> SecretId {
-    SecretId::new("", token_store_account(resource, issuer))
+fn token_secret_id(key: &OAuthTokenStoreKey) -> SecretId {
+    SecretId::new("", key.account())
+}
+
+fn token_client_index_secret_id(resource: &str, issuer: &str) -> SecretId {
+    SecretId::new("", token_client_index_account(resource, issuer))
+}
+
+fn validate_token_store_binding(
+    token: &StoredOAuthToken,
+    key: &OAuthTokenStoreKey,
+) -> Result<(), String> {
+    if token.resource != key.resource
+        || token.issuer != key.issuer
+        || token.client_id != key.client_id
+    {
+        return Err("Stored OAuth token key does not match its token binding".to_string());
+    }
+    Ok(())
 }
 
 fn format_expiry(unix: i64) -> String {
@@ -959,6 +1301,7 @@ fn html_escape(text: &str) -> String {
     escaped
 }
 
+#[derive(Clone)]
 struct OAuthDiscoveryResult {
     metadata: OAuthServerMetadata,
     issuer: String,
@@ -968,9 +1311,17 @@ struct OAuthDiscoveryResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap as StdHashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::extract::State;
+    use axum::routing::post;
+    use axum::{Form, Json, Router};
     use harn_vm::mcp_auth::{
         authorization_server_metadata_candidates, protected_resource_metadata_candidates,
     };
+    use serde_json::json;
+    use tokio::sync::Mutex;
 
     #[test]
     fn protected_resource_candidate_prefers_path_specific_url() {
@@ -1006,11 +1357,189 @@ mod tests {
 
     #[test]
     fn token_store_account_is_stable() {
-        let first = token_store_account("https://mcp.notion.com", "https://auth.example");
-        let second = token_store_account("https://mcp.notion.com", "https://auth.example");
-        let other = token_store_account("https://mcp.notion.com", "https://other.example");
+        let first =
+            token_store_account("https://mcp.notion.com", "https://auth.example", "client-a");
+        let second =
+            token_store_account("https://mcp.notion.com", "https://auth.example", "client-a");
+        let other_issuer = token_store_account(
+            "https://mcp.notion.com",
+            "https://other.example",
+            "client-a",
+        );
+        let other_client =
+            token_store_account("https://mcp.notion.com", "https://auth.example", "client-b");
         assert_eq!(first, second);
-        assert_ne!(first, other);
+        assert_ne!(first, other_issuer);
+        assert_ne!(first, other_client);
+    }
+
+    #[tokio::test]
+    async fn expired_token_refresh_is_singleflight() {
+        #[derive(Clone, Default)]
+        struct MemoryOAuthTokenStorage {
+            tokens: Arc<Mutex<StdHashMap<OAuthTokenStoreKey, StoredOAuthToken>>>,
+            index: Arc<Mutex<StdHashMap<(String, String), String>>>,
+        }
+
+        #[async_trait]
+        impl OAuthTokenStorage for MemoryOAuthTokenStorage {
+            async fn load_token(
+                &self,
+                key: &OAuthTokenStoreKey,
+            ) -> Result<Option<StoredOAuthToken>, String> {
+                Ok(self.tokens.lock().await.get(key).cloned())
+            }
+
+            async fn save_token(&self, token: &StoredOAuthToken) -> Result<(), String> {
+                self.tokens
+                    .lock()
+                    .await
+                    .insert(OAuthTokenStoreKey::from_token(token), token.clone());
+                self.save_active_client_id(&token.resource, &token.issuer, &token.client_id)
+                    .await
+            }
+
+            async fn delete_token(&self, key: &OAuthTokenStoreKey) -> Result<(), String> {
+                self.tokens.lock().await.remove(key);
+                Ok(())
+            }
+
+            async fn load_active_client_id(
+                &self,
+                resource: &str,
+                issuer: &str,
+            ) -> Result<Option<String>, String> {
+                Ok(self
+                    .index
+                    .lock()
+                    .await
+                    .get(&(resource.to_string(), issuer.to_string()))
+                    .cloned())
+            }
+
+            async fn save_active_client_id(
+                &self,
+                resource: &str,
+                issuer: &str,
+                client_id: &str,
+            ) -> Result<(), String> {
+                self.index.lock().await.insert(
+                    (resource.to_string(), issuer.to_string()),
+                    client_id.to_string(),
+                );
+                Ok(())
+            }
+
+            async fn delete_active_client_id(
+                &self,
+                resource: &str,
+                issuer: &str,
+            ) -> Result<(), String> {
+                self.index
+                    .lock()
+                    .await
+                    .remove(&(resource.to_string(), issuer.to_string()));
+                Ok(())
+            }
+        }
+
+        #[derive(Clone)]
+        struct TokenEndpointState {
+            calls: Arc<AtomicUsize>,
+        }
+
+        async fn token_endpoint(
+            State(state): State<TokenEndpointState>,
+            Form(form): Form<StdHashMap<String, String>>,
+        ) -> Json<serde_json::Value> {
+            assert_eq!(
+                form.get("grant_type").map(String::as_str),
+                Some("refresh_token")
+            );
+            assert_eq!(
+                form.get("refresh_token").map(String::as_str),
+                Some("refresh-old")
+            );
+            state.calls.fetch_add(1, Ordering::SeqCst);
+            Json(json!({
+                "access_token": "access-new",
+                "refresh_token": "refresh-new",
+                "expires_in": 3600
+            }))
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let token_endpoint_url = format!("http://{}/token", listener.local_addr().unwrap());
+        let app = Router::new()
+            .route("/token", post(token_endpoint))
+            .with_state(TokenEndpointState {
+                calls: calls.clone(),
+            });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let store = Arc::new(MemoryOAuthTokenStorage::default());
+        let stale = StoredOAuthToken {
+            access_token: "access-old".to_string(),
+            refresh_token: Some("refresh-old".to_string()),
+            expires_at_unix: Some(current_unix_timestamp().saturating_sub(1)),
+            token_endpoint: token_endpoint_url.clone(),
+            client_id: "client-a".to_string(),
+            client_secret: None,
+            token_endpoint_auth_method: "none".to_string(),
+            issuer: "https://auth.example".to_string(),
+            resource: "https://mcp.example/mcp".to_string(),
+            scopes: None,
+        };
+        store.save_token(&stale).await.unwrap();
+
+        let discovery = OAuthDiscoveryResult {
+            metadata: OAuthServerMetadata {
+                issuer: stale.issuer.clone(),
+                authorization_endpoint: "https://auth.example/authorize".to_string(),
+                token_endpoint: token_endpoint_url,
+                registration_endpoint: None,
+                token_endpoint_auth_methods_supported: vec!["none".to_string()],
+                code_challenge_methods_supported: vec!["S256".to_string()],
+                scopes_supported: Vec::new(),
+                client_id_metadata_document_supported: false,
+                authorization_response_iss_parameter_supported: false,
+                extra: Default::default(),
+            },
+            issuer: stale.issuer.clone(),
+            scopes: Vec::new(),
+        };
+        let lock_dir = tempfile::tempdir().unwrap();
+
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let store = store.clone();
+            let token = stale.clone();
+            let discovery = discovery.clone();
+            let lock_dir = lock_dir.path().to_path_buf();
+            tasks.push(tokio::spawn(async move {
+                refresh_stored_token_with_store(store.as_ref(), &token, &discovery, Some(lock_dir))
+                    .await
+                    .unwrap()
+            }));
+        }
+
+        for task in tasks {
+            let refreshed = task.await.unwrap();
+            assert_eq!(refreshed.access_token, "access-new");
+            assert_eq!(refreshed.refresh_token.as_deref(), Some("refresh-new"));
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let stored = store
+            .load_token(&OAuthTokenStoreKey::from_token(&stale))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.access_token, "access-new");
+        assert_eq!(stored.refresh_token.as_deref(), Some("refresh-new"));
+        server.abort();
     }
 
     #[test]
