@@ -117,7 +117,8 @@ async fn start_acp_code_session_with_config(
         }))
         .expect("send session/set_mode");
     let _ack = recv_json(&mut response_rx).await;
-    let _notification = recv_json(&mut response_rx).await;
+    let _mode_notification = recv_json(&mut response_rx).await;
+    let _config_notification = recv_json(&mut response_rx).await;
     (request_tx, response_rx, server, session_id)
 }
 

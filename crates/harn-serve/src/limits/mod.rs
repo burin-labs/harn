@@ -179,7 +179,7 @@ impl RouteLimits {
 /// Per-call resource budget declared on the route. Enforced inside the
 /// dispatch (mid-call) so a runaway tool loop hits the ceiling before
 /// it can melt the host.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct BudgetSpec {
     pub llm_cost_usd: Option<f64>,
     pub llm_tokens: Option<u64>,
@@ -194,6 +194,31 @@ impl BudgetSpec {
             && self.pg_queries.is_none()
             && self.mcp_calls.is_none()
     }
+
+    /// Install the resource ceilings represented by this budget on the
+    /// current thread. The returned guard restores all prior ceilings when
+    /// dropped, so nested dispatches can temporarily override budget state.
+    pub(crate) fn install(&self) -> Option<BudgetGuard> {
+        if self.is_empty() {
+            return None;
+        }
+        Some(BudgetGuard {
+            _llm_cost: self.llm_cost_usd.map(harn_vm::install_llm_cost_budget),
+            _llm_tokens: self.llm_tokens.map(harn_vm::install_llm_token_budget),
+            _mcp_calls: self.mcp_calls.map(harn_vm::install_mcp_call_budget),
+            _pg_queries: self.pg_queries.map(harn_vm::install_pg_query_budget),
+        })
+    }
+}
+
+/// Aggregate of per-cap guards held for the lifetime of one dispatch.
+/// Dropping the aggregate restores every cap simultaneously, keeping nested
+/// dispatches safe even when guards land in different thread-locals.
+pub(crate) struct BudgetGuard {
+    _llm_cost: Option<harn_vm::LlmBudgetGuard>,
+    _llm_tokens: Option<harn_vm::LlmTokenBudgetGuard>,
+    _mcp_calls: Option<harn_vm::McpCallBudgetGuard>,
+    _pg_queries: Option<harn_vm::PgQueryBudgetGuard>,
 }
 
 /// Context the registry needs to evaluate a route's limits for one

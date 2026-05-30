@@ -91,38 +91,6 @@ fn budget_category_from_error(error: &harn_vm::VmError) -> Option<String> {
     }
 }
 
-/// Install per-dispatch resource ceilings from the route's
-/// `@budget(...)` declaration. Every cap routes through a `harn-vm`
-/// per-thread counter installed for the lifetime of the returned guard:
-/// `llm_cost_usd` / `llm_tokens` meter LLM spend at the provider call
-/// site, while `mcp_calls` / `pg_queries` meter outbound tool-call and
-/// query counts at the MCP host and Postgres hostlib entry points. Each
-/// fires a `BudgetExceeded`-categorised error (mapped to HTTP 429 by
-/// [`classify_vm_error`]) the moment its ceiling is crossed, so a
-/// runaway `.harn` tool loop is capped at the dispatcher boundary.
-fn install_route_budget(spec: &BudgetSpec) -> Option<RouteBudgetGuard> {
-    if spec.is_empty() {
-        return None;
-    }
-    Some(RouteBudgetGuard {
-        _llm_cost: spec.llm_cost_usd.map(harn_vm::install_llm_cost_budget),
-        _llm_tokens: spec.llm_tokens.map(harn_vm::install_llm_token_budget),
-        _mcp_calls: spec.mcp_calls.map(harn_vm::install_mcp_call_budget),
-        _pg_queries: spec.pg_queries.map(harn_vm::install_pg_query_budget),
-    })
-}
-
-/// Aggregate of per-cap guards held for the lifetime of one dispatch.
-/// Dropping the aggregate restores every cap simultaneously, keeping
-/// nested dispatches safe even when guards land in different
-/// thread-locals.
-pub(crate) struct RouteBudgetGuard {
-    _llm_cost: Option<harn_vm::LlmBudgetGuard>,
-    _llm_tokens: Option<harn_vm::LlmTokenBudgetGuard>,
-    _mcp_calls: Option<harn_vm::McpCallBudgetGuard>,
-    _pg_queries: Option<harn_vm::PgQueryBudgetGuard>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CallArguments {
     Named(BTreeMap<String, serde_json::Value>),
@@ -364,7 +332,7 @@ impl DispatchCore {
 
         // Per-dispatch resource budget caps live on `function.budget`
         // and are installed inside `invoke_function` / `invoke_pipeline`
-        // — the thread-local backing (`harn_vm::install_llm_cost_budget`)
+        // — the thread-local backing (`BudgetSpec::install`)
         // must be set on the same OS thread the VM runs on, which the
         // tokio `LocalSet` inside each invoker pins.
 
@@ -531,7 +499,7 @@ impl DispatchCore {
                     harn_vm::agent_sessions::enter_current_session(session_id.to_string())
                 });
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
-                let _budget_guard = budget.as_ref().and_then(install_route_budget);
+                let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                 let _request_id_guard = request_id.map(harn_vm::enter_request_id);
 
                 let mut vm = Vm::new();
@@ -610,7 +578,7 @@ impl DispatchCore {
                     harn_vm::agent_sessions::enter_current_session(session_id.to_string())
                 });
                 let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
-                let _budget_guard = budget.as_ref().and_then(install_route_budget);
+                let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                 let _request_id_guard = request_id.map(harn_vm::enter_request_id);
 
                 let mut vm = Vm::new();

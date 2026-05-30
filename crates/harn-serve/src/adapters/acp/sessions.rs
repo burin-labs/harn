@@ -7,6 +7,14 @@ pub(super) struct SessionInfo {
     pub(super) meta: serde_json::Map<String, serde_json::Value>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) enum SessionBudget {
+    #[default]
+    Inherit,
+    Unlimited,
+    Custom(BudgetSpec),
+}
+
 #[derive(Clone)]
 pub(super) struct SessionCancellation {
     pub(super) cancelled: Arc<AtomicBool>,
@@ -81,6 +89,8 @@ pub(super) struct Session {
     /// Active session mode id (one of [`modes::MODE_CATALOG`]). Drives
     /// the capability ceiling pushed for the next `session/prompt`.
     pub(super) current_mode_id: String,
+    /// Session-level budget override applied to subsequent prompt turns.
+    pub(super) budget: SessionBudget,
     /// Prompt executions emitted to profile output for this ACP session.
     pub(super) profile_turn: u64,
 }

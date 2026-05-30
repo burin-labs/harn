@@ -83,6 +83,7 @@ pub(super) fn config_options_state(
     current_mode_id: &str,
     pinned_model: Option<&str>,
     pinned_reasoning_policy: Option<&str>,
+    budget_value: Option<&str>,
 ) -> serde_json::Value {
     serde_json::json!([
         {
@@ -96,6 +97,7 @@ pub(super) fn config_options_state(
         },
         model_config_option(pinned_model),
         reasoning_policy_config_option(pinned_reasoning_policy),
+        budget_config_option(budget_value),
     ])
 }
 
@@ -126,6 +128,8 @@ fn mode_entries(id_key: &str) -> Vec<serde_json::Value> {
 /// clearly signals "fall through to the ambient default" instead of
 /// being mistaken for a real model id.
 pub(super) const MODEL_INHERIT_VALUE: &str = "@inherit";
+pub(super) const BUDGET_INHERIT_VALUE: &str = "@inherit";
+pub(super) const BUDGET_OFF_VALUE: &str = "off";
 
 fn model_config_option(pinned_model: Option<&str>) -> serde_json::Value {
     serde_json::json!({
@@ -198,6 +202,63 @@ fn reasoning_policy_config_option(pinned_policy: Option<&str>) -> serde_json::Va
         "currentValue": pinned_policy.unwrap_or(harn_vm::llm::reasoning_policy::INHERIT_POLICY_VALUE),
         "options": reasoning_policy_select_options(),
     })
+}
+
+fn budget_config_option(budget_value: Option<&str>) -> serde_json::Value {
+    let current_value = budget_value.unwrap_or(BUDGET_INHERIT_VALUE);
+    serde_json::json!({
+        "id": "budget",
+        "name": "Call Budget",
+        "description": "Per-prompt resource ceiling installed before Harn runs the next ACP turn. \
+                        Values are compact JSON objects such as \
+                        {\"llm_cost_usd\":0.05,\"llm_tokens\":200000}; pick `@inherit` to use \
+                        the server default or `off` to disable the session override.",
+        "category": "_harn_budget",
+        "type": "select",
+        "currentValue": current_value,
+        "options": budget_select_options(current_value),
+    })
+}
+
+fn budget_select_options(current_value: &str) -> Vec<serde_json::Value> {
+    let mut entries = vec![
+        serde_json::json!({
+            "value": BUDGET_INHERIT_VALUE,
+            "name": "Inherit server default",
+            "description": "Use the budget configured by the ACP server embedder.",
+        }),
+        serde_json::json!({
+            "value": BUDGET_OFF_VALUE,
+            "name": "No session budget",
+            "description": "Do not install an ACP session budget for subsequent prompt turns.",
+        }),
+        serde_json::json!({
+            "value": "{\"llm_cost_usd\":0.01}",
+            "name": "$0.01 per prompt",
+            "description": "Stop the prompt after roughly one cent of model spend.",
+        }),
+        serde_json::json!({
+            "value": "{\"llm_cost_usd\":0.05,\"llm_tokens\":200000}",
+            "name": "$0.05 and 200k tokens",
+            "description": "Cap both model spend and input+output tokens for the prompt.",
+        }),
+        serde_json::json!({
+            "value": "{\"llm_tokens\":50000}",
+            "name": "50k tokens",
+            "description": "Token-only ceiling for local or unknown-price providers.",
+        }),
+    ];
+    if !entries
+        .iter()
+        .any(|entry| entry["value"].as_str() == Some(current_value))
+    {
+        entries.push(serde_json::json!({
+            "value": current_value,
+            "name": "Current custom budget",
+            "description": "Session budget supplied by the client.",
+        }));
+    }
+    entries
 }
 
 fn reasoning_policy_select_options() -> Vec<serde_json::Value> {
@@ -382,9 +443,9 @@ mod tests {
 
     #[test]
     fn config_options_state_contains_mode_selector() {
-        let state = config_options_state("code", None, None);
+        let state = config_options_state("code", None, None, None);
         let options = state.as_array().expect("config options array");
-        assert_eq!(options.len(), 3);
+        assert_eq!(options.len(), 4);
         assert_eq!(options[0]["id"], "mode");
         assert_eq!(options[0]["currentValue"], "code");
         assert!(options[0]["options"]
@@ -396,7 +457,7 @@ mod tests {
 
     #[test]
     fn config_options_state_includes_model_selector_with_pin_clear_sentinel() {
-        let state = config_options_state("code", None, None);
+        let state = config_options_state("code", None, None, None);
         let options = state.as_array().expect("config options array");
         let model_option = options
             .iter()
@@ -419,7 +480,7 @@ mod tests {
 
     #[test]
     fn config_options_state_surfaces_free_form_pinned_model() {
-        let state = config_options_state("code", Some("custom-model-not-in-catalog"), None);
+        let state = config_options_state("code", Some("custom-model-not-in-catalog"), None, None);
         let model_option = state
             .as_array()
             .expect("config options array")
@@ -448,7 +509,7 @@ mod tests {
 
     #[test]
     fn config_options_state_includes_thought_level_selector() {
-        let state = config_options_state("code", None, Some("high"));
+        let state = config_options_state("code", None, Some("high"), None);
         let thought_option = state
             .as_array()
             .expect("config options array")
@@ -469,6 +530,27 @@ mod tests {
         assert!(values.contains(&"auto"));
         assert!(values.contains(&"off"));
         assert!(values.contains(&"xhigh"));
+    }
+
+    #[test]
+    fn config_options_state_includes_budget_selector_with_custom_value() {
+        let custom = "{\"llm_tokens\":123}";
+        let state = config_options_state("code", None, None, Some(custom));
+        let budget_option = state
+            .as_array()
+            .expect("config options array")
+            .iter()
+            .find(|entry| entry["id"] == "budget")
+            .cloned()
+            .expect("budget config option");
+        assert_eq!(budget_option["category"], "_harn_budget");
+        assert_eq!(budget_option["type"], "select");
+        assert_eq!(budget_option["currentValue"], custom);
+        assert!(budget_option["options"]
+            .as_array()
+            .expect("budget options")
+            .iter()
+            .any(|entry| entry["value"] == custom));
     }
 
     #[test]

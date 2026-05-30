@@ -39,7 +39,7 @@ pub use schema::{
 };
 use sessions::{
     lookup_session_cancellation, preempt_session_interruption, prepare_session_prompt, Session,
-    SessionCancellation, SessionInfo,
+    SessionBudget, SessionCancellation, SessionInfo,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -63,7 +63,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 use crate::{
     AdapterDescriptor, AuthMethodConfig, AuthPolicy, AuthRequest, AuthenticatedPrincipal,
-    AuthorizationDecision,
+    AuthorizationDecision, BudgetSpec,
 };
 use commands::{
     discover_commands, parse_slash_invocation, render_available_commands, DiscoveredCommand,
@@ -306,6 +306,109 @@ fn nonnegative_usize_param(
     Ok(None)
 }
 
+fn budget_config_value(spec: &BudgetSpec) -> String {
+    let mut value = serde_json::Map::new();
+    if let Some(cost) = spec.llm_cost_usd {
+        value.insert("llm_cost_usd".to_string(), serde_json::json!(cost));
+    }
+    if let Some(tokens) = spec.llm_tokens {
+        value.insert("llm_tokens".to_string(), serde_json::json!(tokens));
+    }
+    if let Some(calls) = spec.mcp_calls {
+        value.insert("mcp_calls".to_string(), serde_json::json!(calls));
+    }
+    if let Some(queries) = spec.pg_queries {
+        value.insert("pg_queries".to_string(), serde_json::json!(queries));
+    }
+    serde_json::to_string(&serde_json::Value::Object(value)).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn normalize_budget_spec(mut spec: BudgetSpec) -> Option<BudgetSpec> {
+    spec.llm_cost_usd = spec
+        .llm_cost_usd
+        .and_then(|value| value.is_finite().then_some(value.max(0.0)));
+    (!spec.is_empty()).then_some(spec)
+}
+
+fn budget_field<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    names: &[&str],
+) -> Option<&'a serde_json::Value> {
+    names.iter().find_map(|name| object.get(*name))
+}
+
+fn parse_budget_cost_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    names: &[&str],
+    label: &str,
+) -> Result<Option<f64>, String> {
+    let Some(value) = budget_field(object, names) else {
+        return Ok(None);
+    };
+    let Some(number) = value.as_f64() else {
+        return Err(format!(
+            "invalid_budget: {label} must be a non-negative number"
+        ));
+    };
+    if !number.is_finite() || number < 0.0 {
+        return Err(format!(
+            "invalid_budget: {label} must be a non-negative finite number"
+        ));
+    }
+    Ok(Some(number))
+}
+
+fn parse_budget_count_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    names: &[&str],
+    label: &str,
+) -> Result<Option<u64>, String> {
+    let Some(value) = budget_field(object, names) else {
+        return Ok(None);
+    };
+    value
+        .as_u64()
+        .map(Some)
+        .ok_or_else(|| format!("invalid_budget: {label} must be a non-negative integer"))
+}
+
+fn parse_budget_config_value(raw: &str) -> Result<SessionBudget, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == modes::BUDGET_INHERIT_VALUE {
+        return Ok(SessionBudget::Inherit);
+    }
+    if matches!(trimmed, modes::BUDGET_OFF_VALUE | "none" | "unlimited") {
+        return Ok(SessionBudget::Unlimited);
+    }
+    let value: serde_json::Value = serde_json::from_str(trimmed).map_err(|error| {
+        format!(
+            "invalid_budget: expected @inherit, off, or JSON object with llm_cost_usd/llm_tokens fields: {error}"
+        )
+    })?;
+    if value.is_null() {
+        return Ok(SessionBudget::Inherit);
+    }
+    let Some(object) = value.as_object() else {
+        return Err(
+            "invalid_budget: expected a JSON object with llm_cost_usd, llm_tokens, mcp_calls, or pg_queries".to_string(),
+        );
+    };
+    let spec = BudgetSpec {
+        llm_cost_usd: parse_budget_cost_field(
+            object,
+            &["llm_cost_usd", "llmCostUsd"],
+            "llm_cost_usd",
+        )?,
+        llm_tokens: parse_budget_count_field(object, &["llm_tokens", "llmTokens"], "llm_tokens")?,
+        mcp_calls: parse_budget_count_field(object, &["mcp_calls", "mcpCalls"], "mcp_calls")?,
+        pg_queries: parse_budget_count_field(object, &["pg_queries", "pgQueries"], "pg_queries")?,
+    };
+    if spec.is_empty() {
+        return Err("invalid_budget: budget object must include at least one limit".to_string());
+    }
+    Ok(SessionBudget::Custom(spec))
+}
+
 fn append_profile_json_line(
     path: &std::path::Path,
     session_id: &str,
@@ -374,6 +477,7 @@ pub struct AcpServerConfig {
     pub llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub profile: AcpProfileConfig,
+    pub budget: Option<BudgetSpec>,
 }
 
 impl AcpServerConfig {
@@ -385,6 +489,7 @@ impl AcpServerConfig {
             llm_config_overrides: None,
             llm_capability_overrides: None,
             profile: AcpProfileConfig::default(),
+            budget: None,
         }
     }
 
@@ -417,6 +522,25 @@ impl AcpServerConfig {
 
     pub fn with_profile(mut self, profile: AcpProfileConfig) -> Self {
         self.profile = profile;
+        self
+    }
+
+    pub fn with_budget(mut self, budget: BudgetSpec) -> Self {
+        self.budget = normalize_budget_spec(budget);
+        self
+    }
+
+    pub fn with_llm_cost_budget(mut self, max_cost_usd: f64) -> Self {
+        let mut budget = self.budget.unwrap_or_default();
+        budget.llm_cost_usd = Some(max_cost_usd);
+        self.budget = normalize_budget_spec(budget);
+        self
+    }
+
+    pub fn with_llm_token_budget(mut self, max_tokens: u64) -> Self {
+        let mut budget = self.budget.unwrap_or_default();
+        budget.llm_tokens = Some(max_tokens);
+        self.budget = normalize_budget_spec(budget);
         self
     }
 }
@@ -482,6 +606,8 @@ pub struct AcpServer {
     vm_baseline_cache: Option<VmBaselineCacheEntry>,
     /// Per-turn profile emission settings.
     profile: AcpProfileConfig,
+    /// Server-level budget inherited by sessions unless they override it.
+    default_budget: Option<BudgetSpec>,
 }
 
 impl AcpServer {
@@ -513,6 +639,7 @@ impl AcpServer {
             compile_cache: None,
             vm_baseline_cache: None,
             profile: config.profile,
+            default_budget: config.budget,
         }
     }
 
@@ -925,6 +1052,7 @@ impl AcpServer {
                 info,
                 advertised_commands: Vec::new(),
                 current_mode_id: modes::DEFAULT_MODE_ID.to_string(),
+                budget: SessionBudget::Inherit,
                 profile_turn: 0,
             },
         );
@@ -954,11 +1082,7 @@ impl AcpServer {
                 "sessionId": session_id,
                 "session": session,
                 "modes": modes::session_mode_state(modes::DEFAULT_MODE_ID),
-                "configOptions": modes::config_options_state(
-                    modes::DEFAULT_MODE_ID,
-                    self.pinned_model(&session_id).as_deref(),
-                    self.pinned_reasoning_policy(&session_id).as_deref(),
-                ),
+                "configOptions": self.config_options_for_session(&session_id, modes::DEFAULT_MODE_ID),
             }),
         );
 
@@ -1142,6 +1266,11 @@ impl AcpServer {
             .get(&src_id)
             .map(|session| session.current_mode_id.clone())
             .unwrap_or_else(|| modes::DEFAULT_MODE_ID.to_string());
+        let parent_budget = self
+            .sessions
+            .get(&src_id)
+            .map(|session| session.budget.clone())
+            .unwrap_or_default();
         let cancellation = self.register_session_cancellation(&new_session_id);
         self.sessions.insert(
             new_session_id.clone(),
@@ -1153,6 +1282,7 @@ impl AcpServer {
                 info: info.clone(),
                 advertised_commands: Vec::new(),
                 current_mode_id: parent_mode_id.clone(),
+                budget: parent_budget,
                 profile_turn: 0,
             },
         );
@@ -1166,11 +1296,7 @@ impl AcpServer {
                 "parent_id": src_id,
                 "branched_at": branched_at,
                 "modes": modes::session_mode_state(&parent_mode_id),
-                "configOptions": modes::config_options_state(
-                    &parent_mode_id,
-                    self.pinned_model(&new_session_id).as_deref(),
-                    self.pinned_reasoning_policy(&new_session_id).as_deref(),
-                ),
+                "configOptions": self.config_options_for_session(&new_session_id, &parent_mode_id),
             }),
         );
     }
@@ -1259,7 +1385,7 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
 
-        let (cwd, cancellation, current_mode_id, inject_state) =
+        let (cwd, cancellation, current_mode_id, inject_state, session_budget) =
             match self.sessions.get_mut(&session_id) {
                 Some(s) => {
                     s.cancellation.begin_prompt();
@@ -1269,6 +1395,7 @@ impl AcpServer {
                         s.cancellation.clone(),
                         s.current_mode_id.clone(),
                         s.inject_state.clone(),
+                        s.budget.clone(),
                     )
                 }
                 None => {
@@ -1276,6 +1403,11 @@ impl AcpServer {
                     return;
                 }
             };
+        let prompt_budget = match session_budget {
+            SessionBudget::Inherit => self.default_budget.clone(),
+            SessionBudget::Unlimited => None,
+            SessionBudget::Custom(spec) => Some(spec),
+        };
         harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
         #[cfg(feature = "hostlib")]
@@ -1454,6 +1586,7 @@ impl AcpServer {
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
+        let _budget_guard = prompt_budget.as_ref().and_then(BudgetSpec::install);
         let result = execute::execute_chunk(
             chunk,
             bridge.clone(),
@@ -2440,11 +2573,7 @@ impl AcpServer {
         Some(serde_json::json!({
             "session": session_value,
             "modes": modes::session_mode_state(&session.current_mode_id),
-            "configOptions": modes::config_options_state(
-                &session.current_mode_id,
-                self.pinned_model(session_id).as_deref(),
-                self.pinned_reasoning_policy(session_id).as_deref(),
-            ),
+            "configOptions": self.config_options_for_session(session_id, &session.current_mode_id),
         }))
     }
 
@@ -2670,6 +2799,39 @@ impl AcpServer {
         harn_vm::agent_sessions::pinned_reasoning_policy(session_id)
     }
 
+    fn session_budget_config_value(&self, session_id: &str) -> Option<String> {
+        match &self.sessions.get(session_id)?.budget {
+            SessionBudget::Inherit => None,
+            SessionBudget::Unlimited => Some(modes::BUDGET_OFF_VALUE.to_string()),
+            SessionBudget::Custom(spec) => Some(budget_config_value(spec)),
+        }
+    }
+
+    fn config_options_for_session(&self, session_id: &str, mode_id: &str) -> serde_json::Value {
+        let budget_value = self.session_budget_config_value(session_id);
+        modes::config_options_state(
+            mode_id,
+            self.pinned_model(session_id).as_deref(),
+            self.pinned_reasoning_policy(session_id).as_deref(),
+            budget_value.as_deref(),
+        )
+    }
+
+    fn set_session_budget(
+        &mut self,
+        session_id: &str,
+        budget: SessionBudget,
+    ) -> Result<bool, String> {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return Err(format!("Unknown session: {session_id}"));
+        };
+        if session.budget == budget {
+            return Ok(false);
+        }
+        session.budget = budget;
+        Ok(true)
+    }
+
     fn emit_current_mode_update(&self, session_id: &str, mode_id: &str) {
         self.send_notification(
             "session/update",
@@ -2690,11 +2852,7 @@ impl AcpServer {
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "config_option_update",
-                    "configOptions": modes::config_options_state(
-                        mode_id,
-                        self.pinned_model(session_id).as_deref(),
-                        self.pinned_reasoning_policy(session_id).as_deref(),
-                    ),
+                    "configOptions": self.config_options_for_session(session_id, mode_id),
                 },
             }),
         );
@@ -3020,10 +3178,13 @@ impl AcpServer {
             "thought_level" | "reasoning_policy" => {
                 self.apply_set_reasoning_policy_config_option(id, &session_id, value);
             }
+            "budget" => self.apply_set_budget_config_option(id, &session_id, value),
             other => self.send_error(
                 id,
                 -32602,
-                &format!("Unknown config option '{other}'. Available: mode, model, thought_level"),
+                &format!(
+                    "Unknown config option '{other}'. Available: mode, model, thought_level, budget"
+                ),
             ),
         }
     }
@@ -3039,11 +3200,7 @@ impl AcpServer {
                 self.send_response(
                     id,
                     serde_json::json!({
-                        "configOptions": modes::config_options_state(
-                            mode_id,
-                            self.pinned_model(session_id).as_deref(),
-                            self.pinned_reasoning_policy(session_id).as_deref(),
-                        ),
+                        "configOptions": self.config_options_for_session(session_id, mode_id),
                     }),
                 );
                 if changed {
@@ -3068,7 +3225,7 @@ impl AcpServer {
                 return;
             }
         };
-        match self.set_session_model(session_id, normalized.clone()) {
+        match self.set_session_model(session_id, normalized) {
             Ok(changed) => {
                 let current_mode_id = self
                     .sessions
@@ -3078,11 +3235,7 @@ impl AcpServer {
                 self.send_response(
                     id,
                     serde_json::json!({
-                        "configOptions": modes::config_options_state(
-                            &current_mode_id,
-                            normalized.as_deref(),
-                            self.pinned_reasoning_policy(session_id).as_deref(),
-                        ),
+                        "configOptions": self.config_options_for_session(session_id, &current_mode_id),
                     }),
                 );
                 if changed {
@@ -3106,7 +3259,7 @@ impl AcpServer {
                 return;
             }
         };
-        match self.set_session_reasoning_policy(session_id, normalized.clone()) {
+        match self.set_session_reasoning_policy(session_id, normalized) {
             Ok(changed) => {
                 let current_mode_id = self
                     .sessions
@@ -3116,11 +3269,41 @@ impl AcpServer {
                 self.send_response(
                     id,
                     serde_json::json!({
-                        "configOptions": modes::config_options_state(
-                            &current_mode_id,
-                            self.pinned_model(session_id).as_deref(),
-                            normalized.as_deref(),
-                        ),
+                        "configOptions": self.config_options_for_session(session_id, &current_mode_id),
+                    }),
+                );
+                if changed {
+                    self.emit_config_option_update(session_id, &current_mode_id);
+                }
+            }
+            Err(message) => self.send_error(id, -32602, &message),
+        }
+    }
+
+    fn apply_set_budget_config_option(
+        &mut self,
+        id: &serde_json::Value,
+        session_id: &str,
+        raw_value: &str,
+    ) {
+        let budget = match parse_budget_config_value(raw_value) {
+            Ok(value) => value,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        match self.set_session_budget(session_id, budget) {
+            Ok(changed) => {
+                let current_mode_id = self
+                    .sessions
+                    .get(session_id)
+                    .map(|session| session.current_mode_id.clone())
+                    .unwrap_or_else(|| modes::DEFAULT_MODE_ID.to_string());
+                self.send_response(
+                    id,
+                    serde_json::json!({
+                        "configOptions": self.config_options_for_session(session_id, &current_mode_id),
                     }),
                 );
                 if changed {
