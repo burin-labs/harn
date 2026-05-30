@@ -35,8 +35,17 @@
 //! `body_base64` is the standard-base64 encoding of the *raw* bytes, so a
 //! binary handler recovers the exact payload with `bytes_from_base64(...)`
 //! — multipart uploads survive losslessly through the JSON dispatch
-//! boundary this way. `client_ip` is taken from `X-Forwarded-For` /
-//! `X-Real-IP` when present (the common reverse-proxy shape).
+//! boundary this way.
+//!
+//! `remote_addr` is the real transport peer (`ip:port`) wired through from
+//! the listener. `client_ip` is the *originating* client IP: by default it
+//! equals the peer's IP and the spoofable `X-Forwarded-For` / `X-Real-IP`
+//! headers are ignored. Configure [`SiteServerConfig::with_trusted_proxies`]
+//! (CLI `--trusted-proxy <CIDR>`) with the CIDR ranges of your reverse
+//! proxies to opt in: the forwarded chain is then honoured only when the
+//! direct peer is itself a trusted proxy, and the client is taken as the
+//! rightmost hop that is *not* a trusted proxy — never a blind
+//! `split(',').next()`, which any direct caller could forge.
 //!
 //! ## Responses
 //!
@@ -59,19 +68,21 @@
 //! negotiation and idle-keepalive machinery the other WS routes use.
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use axum::body::{to_bytes, Bytes};
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{
-    DefaultBodyLimit, FromRequestParts, MatchedPath, Query, RawPathParams, Request, State,
+    ConnectInfo, DefaultBodyLimit, FromRequestParts, MatchedPath, Query, RawPathParams, Request,
+    State,
 };
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
 use base64::Engine;
+use ipnet::IpNet;
 use serde_json::{json, Map, Value};
 
 use crate::adapter::DispatchRuntime;
@@ -108,6 +119,12 @@ pub struct SiteServerConfig {
     /// Transport layers (compression / ETag / CORS) applied to the whole
     /// site router. Defaults to compression + ETag on, CORS off.
     pub transport: TransportConfig,
+    /// CIDR ranges of reverse proxies whose `X-Forwarded-For` /
+    /// `X-Real-IP` headers may be trusted to derive `req.client_ip`.
+    /// Empty (the default) means the headers are ignored entirely and
+    /// `client_ip` is the direct transport peer — the only spoof-proof
+    /// choice when the server is not strictly behind a known proxy.
+    pub trusted_proxies: Vec<IpNet>,
 }
 
 impl SiteServerConfig {
@@ -115,11 +132,17 @@ impl SiteServerConfig {
         Self {
             core,
             transport: TransportConfig::default_enabled(),
+            trusted_proxies: Vec::new(),
         }
     }
 
     pub fn with_transport(mut self, transport: TransportConfig) -> Self {
         self.transport = transport;
+        self
+    }
+
+    pub fn with_trusted_proxies(mut self, trusted_proxies: Vec<IpNet>) -> Self {
+        self.trusted_proxies = trusted_proxies;
         self
     }
 }
@@ -138,10 +161,14 @@ impl SiteServer {
     /// and for embedding the site surface inside a larger router.
     /// Returns an error when two routes collide on the same method+path.
     pub fn router(self) -> Result<Router, String> {
-        let SiteServerConfig { core, transport } = self.config;
+        let SiteServerConfig {
+            core,
+            transport,
+            trusted_proxies,
+        } = self.config;
         let catalog = Arc::new(core.catalog().clone());
         let runtime = Arc::new(DispatchRuntime::start("SITE", Arc::new(core)));
-        build_site_router(&catalog, runtime, &transport)
+        build_site_router(&catalog, runtime, &transport, trusted_proxies)
     }
 
     /// Bind the configured socket and serve until the process exits.
@@ -172,6 +199,9 @@ struct SiteState {
     /// `path → (method → function name)`. `method` is uppercased; `"*"`
     /// is the any-method fallback consulted when no exact method matches.
     routes: Arc<BTreeMap<String, BTreeMap<String, String>>>,
+    /// Reverse-proxy CIDR ranges trusted for forwarded-header parsing;
+    /// empty means `client_ip` is always the direct peer.
+    trusted_proxies: Arc<Vec<IpNet>>,
 }
 
 impl SiteState {
@@ -193,6 +223,7 @@ fn build_site_router(
     catalog: &ExportCatalog,
     runtime: Arc<DispatchRuntime>,
     transport: &TransportConfig,
+    trusted_proxies: Vec<IpNet>,
 ) -> Result<Router, String> {
     let mut routes: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     for function in catalog.functions.values() {
@@ -220,6 +251,7 @@ fn build_site_router(
     let state = SiteState {
         runtime,
         routes: Arc::new(routes),
+        trusted_proxies: Arc::new(trusted_proxies),
     };
 
     let mut router: Router<SiteState> = Router::new();
@@ -255,6 +287,13 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
         .await
         .map(|q| q.0)
         .unwrap_or_default();
+
+    // The connect-info make service (see `serve_router_from_tcp`) stashes
+    // the transport peer here; `oneshot`-driven tests insert it directly.
+    let peer = parts
+        .extensions
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| *addr);
 
     let method = parts.method.clone();
     let route_template = matched_path.unwrap_or_else(|| parts.uri.path().to_string());
@@ -296,6 +335,8 @@ async fn site_dispatch(State(state): State<SiteState>, request: Request) -> Resp
         &query,
         &parts.headers,
         &body_bytes,
+        peer,
+        &state.trusted_proxies,
     );
     let auth = AuthRequest::from_http(
         &method,
@@ -504,6 +545,7 @@ async fn send_ws_reply(session: &WsSession, value: Value) -> bool {
 /// in-process `http_server` shape so handlers are portable between the
 /// embedded server and a hosted site, with `body_base64` added as the
 /// binary-safe channel through the JSON dispatch boundary.
+#[allow(clippy::too_many_arguments)]
 fn build_request_value(
     method: &Method,
     uri: &axum::http::Uri,
@@ -512,6 +554,8 @@ fn build_request_value(
     query: &BTreeMap<String, String>,
     headers: &HeaderMap,
     body: &[u8],
+    peer: Option<SocketAddr>,
+    trusted_proxies: &[IpNet],
 ) -> Value {
     let mut path_params = Map::new();
     if let Some(params) = raw_params {
@@ -557,29 +601,147 @@ fn build_request_value(
         Value::String(base64::engine::general_purpose::STANDARD.encode(body)),
     );
     request.insert("content_length".into(), Value::from(body.len()));
-    request.insert("client_ip".into(), client_ip(headers));
-    // Without `ConnectInfo` wiring the peer address isn't available
-    // through `serve_router_from_tcp`; handlers behind a proxy should read
-    // `client_ip` (X-Forwarded-For / X-Real-IP) instead.
-    request.insert("remote_addr".into(), Value::Null);
+    request.insert(
+        "client_ip".into(),
+        resolve_client_ip(peer.map(|addr| addr.ip()), headers, trusted_proxies)
+            .map(|ip| Value::String(ip.to_string()))
+            .unwrap_or(Value::Null),
+    );
+    request.insert(
+        "remote_addr".into(),
+        peer.map(|addr| Value::String(addr.to_string()))
+            .unwrap_or(Value::Null),
+    );
     Value::Object(request)
 }
 
-/// Best-effort client IP from the conventional reverse-proxy headers.
-fn client_ip(headers: &HeaderMap) -> Value {
-    let forwarded = headers
+/// Resolve the originating client IP.
+///
+/// The `X-Forwarded-For` / `X-Real-IP` headers are attacker-controlled
+/// unless every hop between the client and this process is a proxy we
+/// trust to rewrite them. So the headers are honoured only when
+/// `trusted_proxies` is non-empty *and* the direct transport peer is one
+/// of those proxies; otherwise the peer IP is authoritative.
+///
+/// When trusted, the client is the rightmost `X-Forwarded-For` entry that
+/// is *not* itself a trusted proxy (walking right-to-left peels off our
+/// own proxy hops). If every entry is trusted, the leftmost is the
+/// originator. `X-Real-IP` is consulted only as a single-value fallback
+/// when `X-Forwarded-For` yields nothing usable.
+fn resolve_client_ip(
+    peer: Option<IpAddr>,
+    headers: &HeaderMap,
+    trusted_proxies: &[IpNet],
+) -> Option<IpAddr> {
+    let peer = peer?;
+    let is_trusted = |ip: &IpAddr| trusted_proxies.iter().any(|net| net.contains(ip));
+    if trusted_proxies.is_empty() || !is_trusted(&peer) {
+        return Some(peer);
+    }
+
+    let forwarded: Vec<IpAddr> = headers
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|hop| hop.trim().parse::<IpAddr>().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(client) = forwarded.iter().rev().find(|ip| !is_trusted(ip)) {
+        return Some(*client);
+    }
+    if let Some(originator) = forwarded.first() {
+        return Some(*originator);
+    }
+
     let real_ip = headers
         .get("x-real-ip")
         .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    match forwarded.or(real_ip) {
-        Some(ip) => Value::String(ip.to_string()),
-        None => Value::Null,
+        .and_then(|value| value.trim().parse::<IpAddr>().ok());
+    Some(real_ip.unwrap_or(peer))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nets(cidrs: &[&str]) -> Vec<IpNet> {
+        cidrs.iter().map(|c| c.parse().unwrap()).collect()
+    }
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        map
+    }
+
+    fn ip(value: &str) -> IpAddr {
+        value.parse().unwrap()
+    }
+
+    #[test]
+    fn no_peer_resolves_to_none() {
+        assert_eq!(
+            resolve_client_ip(None, &headers(&[]), &nets(&["10.0.0.0/8"])),
+            None
+        );
+    }
+
+    #[test]
+    fn untrusted_config_returns_peer_ignoring_headers() {
+        let got = resolve_client_ip(
+            Some(ip("203.0.113.1")),
+            &headers(&[("x-forwarded-for", "1.2.3.4"), ("x-real-ip", "5.6.7.8")]),
+            &[],
+        );
+        assert_eq!(got, Some(ip("203.0.113.1")));
+    }
+
+    #[test]
+    fn real_ip_is_the_fallback_when_no_forwarded_for() {
+        let got = resolve_client_ip(
+            Some(ip("10.0.0.5")),
+            &headers(&[("x-real-ip", "9.9.9.9")]),
+            &nets(&["10.0.0.0/8"]),
+        );
+        assert_eq!(got, Some(ip("9.9.9.9")));
+    }
+
+    #[test]
+    fn all_trusted_chain_falls_back_to_leftmost_originator() {
+        // Every hop is internal: the originator is the leftmost entry.
+        let got = resolve_client_ip(
+            Some(ip("10.0.0.5")),
+            &headers(&[("x-forwarded-for", "10.0.0.1, 10.0.0.2")]),
+            &nets(&["10.0.0.0/8"]),
+        );
+        assert_eq!(got, Some(ip("10.0.0.1")));
+    }
+
+    #[test]
+    fn ipv6_proxy_and_client_are_supported() {
+        let got = resolve_client_ip(
+            Some(ip("2001:db8::1")),
+            &headers(&[("x-forwarded-for", "2606:4700::1234")]),
+            &nets(&["2001:db8::/32"]),
+        );
+        assert_eq!(got, Some(ip("2606:4700::1234")));
+    }
+
+    #[test]
+    fn garbage_forwarded_entries_are_skipped() {
+        let got = resolve_client_ip(
+            Some(ip("10.0.0.5")),
+            &headers(&[("x-forwarded-for", "not-an-ip, 1.2.3.4, also-bad")]),
+            &nets(&["10.0.0.0/8"]),
+        );
+        assert_eq!(got, Some(ip("1.2.3.4")));
     }
 }
