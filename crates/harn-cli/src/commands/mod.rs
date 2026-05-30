@@ -5,6 +5,7 @@ pub(crate) mod config_cmd;
 pub(crate) mod connect;
 pub(crate) mod connector;
 pub(crate) mod contracts;
+pub(crate) mod counterfactual;
 pub(crate) mod crystallize;
 pub mod demo;
 pub(crate) mod dev;

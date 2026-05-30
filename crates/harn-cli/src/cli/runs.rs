@@ -44,6 +44,14 @@ pub(crate) struct ReplayArgs {
     /// `--session-id`; omit to replay the whole session.
     #[arg(long, value_name = "EVENT_ID", requires = "session_id")]
     pub at: Option<u64>,
+    /// Counterfactual: after rehydrating the session at `--at` (or its full
+    /// state), evaluate this `.harn` plan and report how the workspace
+    /// *would have* diverged — the set of files the plan's edits would
+    /// touch. The plan runs through `edit.dry_run` against a throw-away
+    /// staged-fs overlay (#1722), so the recorded session and the on-disk
+    /// tree are never mutated. Requires `--session-id`.
+    #[arg(long, value_name = "PLAN", requires = "session_id")]
+    pub counterfactual: Option<String>,
     /// Number of replay reads to compare for deterministic output.
     #[arg(long, default_value_t = 1)]
     pub runs: usize,

@@ -234,6 +234,214 @@ fn replay_human_runs_fail_when_embedded_fixture_fails() {
 }
 
 #[test]
+fn replay_counterfactual_reports_diverged_files_without_touching_disk() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let db = temp.path().join("events.sqlite");
+    let session_id = "session-counterfactual";
+    seed_session_db(&db, session_id);
+
+    // A real workspace file the counterfactual plan will (virtually) edit.
+    let target = temp.path().join("greeting.txt");
+    let original = "hello world\nsecond line\n";
+    std::fs::write(&target, original).expect("write target file");
+
+    // The alternate plan: a `.harn` program whose final value is an edit
+    // plan. The CLI runs it through `edit_dry_run` against a throw-away
+    // staged-fs overlay — disk is never mutated.
+    let plan = temp.path().join("plan.harn");
+    std::fs::write(
+        &plan,
+        format!(
+            r#"return [
+  {{
+    op: "safe_text_patch",
+    path: "{}",
+    old_text: "hello world",
+    new_text: "hello counterfactual",
+  }},
+]
+"#,
+            target.to_str().unwrap(),
+        ),
+    )
+    .expect("write counterfactual plan");
+
+    let out = Command::new(binary_path())
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--counterfactual",
+            plan.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn harn replay --counterfactual");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["ok"], true);
+    let counterfactual = &parsed["data"]["counterfactual"];
+    assert_eq!(counterfactual["result"], "ok");
+    assert_eq!(counterfactual["files_touched"], 1);
+    let diverged = counterfactual["diverged"]
+        .as_array()
+        .expect("diverged should be an array");
+    assert_eq!(diverged.len(), 1);
+    assert_eq!(
+        diverged[0]["path"].as_str().unwrap(),
+        target.to_str().unwrap()
+    );
+    assert_eq!(diverged[0]["status"], "modified");
+    assert_eq!(diverged[0]["lines_added"], 1);
+    assert_eq!(diverged[0]["lines_removed"], 1);
+
+    // The dry-run never touches disk — the file is byte-identical.
+    let on_disk = std::fs::read_to_string(&target).expect("read target after replay");
+    assert_eq!(on_disk, original);
+}
+
+#[test]
+fn replay_counterfactual_human_lists_diverged_files() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let db = temp.path().join("events.sqlite");
+    let session_id = "session-counterfactual-human";
+    seed_session_db(&db, session_id);
+
+    let target = temp.path().join("notes.txt");
+    std::fs::write(&target, "alpha\nbeta\n").expect("write target file");
+
+    let plan = temp.path().join("plan.harn");
+    std::fs::write(
+        &plan,
+        format!(
+            r#"return [
+  {{op: "safe_text_patch", path: "{}", old_text: "alpha", new_text: "alpha-prime"}},
+]
+"#,
+            target.to_str().unwrap(),
+        ),
+    )
+    .expect("write plan");
+
+    let out = Command::new(binary_path())
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--counterfactual",
+            plan.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn harn replay --counterfactual (human)");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Counterfactual:"),
+        "human output should announce the counterfactual:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("would touch 1 file(s)"),
+        "human output should summarize the divergent file set:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(target.to_str().unwrap()),
+        "human output should name the diverged file:\n{stdout}"
+    );
+}
+
+#[test]
+fn replay_counterfactual_accepts_plan_that_returns_dry_run_result() {
+    // The alternate contract: the plan calls `edit_dry_run` itself and
+    // returns its result dict. The CLI reads divergence off the same
+    // `per_file_unified_diff` shape rather than re-running the dry-run.
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let db = temp.path().join("events.sqlite");
+    let session_id = "session-counterfactual-dict";
+    seed_session_db(&db, session_id);
+
+    let target = temp.path().join("config.txt");
+    std::fs::write(&target, "mode = off\n").expect("write target file");
+
+    let plan = temp.path().join("plan.harn");
+    std::fs::write(
+        &plan,
+        format!(
+            r#"import {{ edit_dry_run }} from "std/edit"
+return edit_dry_run({{plan: [
+  {{op: "safe_text_patch", path: "{}", old_text: "mode = off", new_text: "mode = on"}},
+]}})
+"#,
+            target.to_str().unwrap(),
+        ),
+    )
+    .expect("write plan");
+
+    let out = Command::new(binary_path())
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--counterfactual",
+            plan.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn harn replay --counterfactual (dict)");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let parsed = stdout_json(&out);
+    let counterfactual = &parsed["data"]["counterfactual"];
+    assert_eq!(counterfactual["result"], "ok");
+    assert_eq!(counterfactual["files_touched"], 1);
+    let diverged = counterfactual["diverged"].as_array().unwrap();
+    assert_eq!(diverged.len(), 1);
+    assert_eq!(diverged[0]["status"], "modified");
+}
+
+#[test]
+fn replay_counterfactual_rejects_missing_plan() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let db = temp.path().join("events.sqlite");
+    let session_id = "session-counterfactual-missing";
+    seed_session_db(&db, session_id);
+
+    let out = Command::new(binary_path())
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--counterfactual",
+            temp.path().join("does-not-exist.harn").to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn harn replay --counterfactual missing");
+    assert!(!out.status.success(), "expected missing plan to fail");
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["error"]["code"], "replay_counterfactual_failed");
+}
+
+#[test]
 fn replay_fixture_runs_use_oracle_allowlist() {
     let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../conformance/replay-oracle/fixtures/simple_trigger_local_handler.valid.json");
