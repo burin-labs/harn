@@ -1092,15 +1092,21 @@ async fn acp_bridge_routes_session_request_permission_response() {
         assistant_state: Mutex::new(VisibleTextState::default()),
     });
 
+    // Canonical ACP v0.12.2 request shape (#2639): `{ sessionId, toolCall,
+    // options: [{ optionId, name, kind }] }`.
     let call = bridge.call_client(
         "session/request_permission",
         serde_json::json!({
             "sessionId": "session-1",
-            "toolCallId": "tool-1",
-            "toolName": "edit",
+            "toolCall": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-1",
+                "title": "edit",
+                "kind": "other"
+            },
             "options": [
-                {"id": "approve", "label": "Approve"},
-                {"id": "deny", "label": "Deny"}
+                {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                {"optionId": "reject", "name": "Reject", "kind": "reject_once"}
             ]
         }),
     );
@@ -1113,10 +1119,12 @@ async fn acp_bridge_routes_session_request_permission_response() {
     assert_eq!(outgoing["id"], 77);
     assert_eq!(outgoing["method"], "session/request_permission");
 
+    // Canonical ACP response shape: `{ outcome: { outcome: "selected",
+    // optionId } }`. No `{outcome: "approved"}` / `{granted}` in ACP.
     let response = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 77,
-        "result": {"outcome": "approved"},
+        "result": {"outcome": {"outcome": "selected", "optionId": "allow"}},
     });
     crate::protocol_fixture_tests::assert_fixture_documents_match(
         "conformance/protocols/fixtures/acp/session_request_permission.valid.json",
@@ -1126,7 +1134,8 @@ async fn acp_bridge_routes_session_request_permission_response() {
     let mut server = server;
     server.handle_incoming_message(response).await;
     let result = call.await.expect("permission response");
-    assert_eq!(result["outcome"], "approved");
+    assert_eq!(result["outcome"]["outcome"], "selected");
+    assert_eq!(result["outcome"]["optionId"], "allow");
 }
 
 #[test]

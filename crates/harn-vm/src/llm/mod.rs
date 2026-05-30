@@ -8,6 +8,7 @@
 //! - `helpers`: option extraction, provider/model/key resolution, and JSON conversion
 //! - `mock`, `trace`, and `stream`: process-local test doubles, tracing, and streaming support
 
+pub(crate) mod acp_permission;
 mod agent_config;
 mod agent_host_primitives;
 pub(crate) mod agent_observe;

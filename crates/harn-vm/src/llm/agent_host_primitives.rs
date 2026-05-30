@@ -673,35 +673,24 @@ async fn host_agent_dispatch_tool_call(
                 serde_json::json!({"policy_decision": decision.receipt.clone()}),
                 vec![format!("tool.{tool_name}")],
             );
+            let approval_request_json =
+                serde_json::to_value(&approval_request).unwrap_or(serde_json::Value::Null);
             let response = bridge
                 .call(
                     "session/request_permission",
-                    serde_json::json!({
-                        "sessionId": session_id,
-                        "approvalRequest": approval_request,
-                        "policyDecision": decision.receipt.clone(),
-                        "toolCall": {
-                            "toolCallId": approval_id,
-                            "toolName": tool_name,
-                            "rawInput": tool_args,
-                        },
-                    }),
+                    crate::llm::acp_permission::request_params(
+                        Some(&session_id),
+                        &approval_id,
+                        &tool_name,
+                        &tool_args,
+                        approval_request_json,
+                        &decision.receipt,
+                    ),
                 )
                 .await;
             match response {
-                Ok(response) => {
-                    let outcome = response
-                        .get("outcome")
-                        .and_then(|value| value.get("outcome"))
-                        .and_then(|value| value.as_str())
-                        .or_else(|| response.get("outcome").and_then(|value| value.as_str()))
-                        .unwrap_or("");
-                    let granted = matches!(outcome, "selected" | "allow")
-                        || response
-                            .get("granted")
-                            .and_then(|value| value.as_bool())
-                            .unwrap_or(false);
-                    if granted {
+                Ok(response) => match crate::llm::acp_permission::parse_response(&response) {
+                    crate::llm::acp_permission::WireOutcome::Allowed => {
                         if let Some(new_args) = response.get("args") {
                             tool_args = new_args.clone();
                         }
@@ -715,17 +704,14 @@ async fn host_agent_dispatch_tool_call(
                             true,
                             Some(decision.receipt.clone()),
                         );
-                    } else {
-                        let reason = response
-                            .get("reason")
-                            .and_then(|value| value.as_str())
-                            .unwrap_or("host did not grant approval");
+                    }
+                    crate::llm::acp_permission::WireOutcome::Rejected { reason } => {
                         emit_permission_event_with_policy(
                             &session_id,
                             "PermissionDeny",
                             &tool_name,
                             &tool_args,
-                            reason,
+                            &reason,
                             true,
                             Some(decision.receipt.clone()),
                         );
@@ -737,7 +723,7 @@ async fn host_agent_dispatch_tool_call(
                             crate::agent_events::ToolCallErrorCategory::PermissionDenied,
                         )));
                     }
-                }
+                },
                 Err(_) => {
                     let reason =
                         "approval request failed or host does not implement session/request_permission";
