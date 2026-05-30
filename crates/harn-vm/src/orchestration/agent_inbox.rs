@@ -207,13 +207,23 @@ pub fn clear_session(session_id: &str) {
     map.remove(session_id);
 }
 
-/// Wipe every inbox. Test-only — production callers must use
-/// [`clear_session`].
-#[cfg(any(test, feature = "vm-bench-internals"))]
+/// Wipe every inbox. Steady-state callers should prefer
+/// [`clear_session`] when a single conversation ends; this drains the
+/// entire registry and is wired into the per-test reset path so a
+/// reused worker thread does not accumulate one [`InboxState`] per
+/// session id across the suite.
 pub fn reset() {
     let reg = registry();
     let mut map = lock_map(reg);
     map.clear();
+}
+
+/// Number of sessions with a live inbox. Test-only.
+#[cfg(test)]
+pub fn session_count() -> usize {
+    let reg = registry();
+    let map = lock_map(reg);
+    map.len()
 }
 
 /// Sync wait. Parks the calling thread on a Condvar until `session_id`

@@ -422,6 +422,8 @@ pub fn reset_thread_local_state() {
     orchestration::clear_command_policies();
     orchestration::clear_pipeline_on_finish();
     orchestration::reset_lifecycle_receipt_registry();
+    orchestration::agent_inbox::reset();
+    tool_call_cancellations::reset_registry();
     redact::clear_policy_stack();
     triggers::clear_dispatcher_state();
     triggers::clear_trigger_registry();
@@ -434,4 +436,66 @@ pub fn reset_thread_local_state() {
     mcp_host::reset_for_tests();
     call_budget::reset_call_budget_state();
     clock_mock::leak_audit::reset();
+}
+
+#[cfg(test)]
+mod reset_leak_tests {
+    //! Regression coverage for harn#2660: process-/thread-global
+    //! registries that accumulated one entry per test because they were
+    //! never drained by `reset_thread_local_state`. Each case populates a
+    //! registry through its real entry point, runs the reset, and asserts
+    //! the registry is empty again.
+    use super::*;
+    use crate::value::VmValue;
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    #[test]
+    fn reset_drains_agent_inbox() {
+        orchestration::agent_inbox::reset();
+        orchestration::agent_inbox::push("sess-2660", "note", "leak", "test");
+        assert!(orchestration::agent_inbox::session_count() > 0);
+        reset_thread_local_state();
+        assert_eq!(
+            orchestration::agent_inbox::session_count(),
+            0,
+            "agent_inbox must be empty after reset"
+        );
+    }
+
+    #[test]
+    fn reset_drains_tool_call_cancellation_registry() {
+        tool_call_cancellations::reset_registry();
+        // Leak the guard so the entry survives until the reset runs —
+        // this mirrors a dispatch abandoned mid-flight.
+        let registered = tool_call_cancellations::register("sess-2660", "call-1", "tool");
+        if let Some((_handle, guard)) = registered {
+            std::mem::forget(guard);
+        }
+        assert!(tool_call_cancellations::registry_len() > 0);
+        reset_thread_local_state();
+        assert_eq!(
+            tool_call_cancellations::registry_len(),
+            0,
+            "tool-call cancellation registry must be empty after reset"
+        );
+    }
+
+    #[test]
+    fn reset_drains_routing_policy_registry() {
+        llm::routing::clear_policy_registry();
+        let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
+        config.insert(
+            "chain".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("mock:mock"))])),
+        );
+        llm::routing::build_routing_policy(&config).expect("intern a routing policy");
+        assert!(llm::routing::policy_registry_len() > 0);
+        reset_thread_local_state();
+        assert_eq!(
+            llm::routing::policy_registry_len(),
+            0,
+            "routing policy registry must be empty after reset"
+        );
+    }
 }

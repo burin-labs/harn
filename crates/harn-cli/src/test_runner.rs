@@ -921,6 +921,7 @@ async fn execute_case(
     cli_skill_dirs: &[PathBuf],
 ) -> TestResult {
     harn_vm::reset_thread_local_state();
+    crate::reset_hostlib_state();
 
     let mut phases = PhaseTimings::default();
     let total_start = Instant::now();
@@ -1020,6 +1021,7 @@ async fn execute_case(
     // sees a clean slate. Wall clock for this work lands in the
     // teardown bucket so the phase breakdown sums to wall time.
     harn_vm::reset_thread_local_state();
+    crate::reset_hostlib_state();
     phases.teardown_ms = teardown_start.elapsed().as_millis() as u64;
 
     let elapsed_ms = total_start.elapsed().as_millis() as u64;

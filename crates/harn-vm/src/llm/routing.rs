@@ -198,13 +198,20 @@ fn lookup_policy(handle: u64) -> Option<Rc<RoutingPolicyConfig>> {
     POLICY_REGISTRY.with(|registry| registry.borrow().get(&handle).cloned())
 }
 
-/// Drop every interned policy. Tests call this between cases so a
-/// handle leak in one fixture doesn't bleed pricing assumptions into
-/// the next. Production paths never need to call it — handles are
-/// cheap and the table is per-thread.
-#[cfg(test)]
+/// Drop every interned policy. Each `routing_policy(...)` call interns a
+/// fresh entry keyed by a monotonic counter and never removes it, so a
+/// reused worker thread accumulates one `RoutingPolicyConfig` per call
+/// across a test suite. The per-test reset path (via `reset_llm_state`)
+/// clears the table so a handle leak in one fixture doesn't bleed
+/// pricing assumptions — or memory — into the next.
 pub(crate) fn clear_policy_registry() {
     POLICY_REGISTRY.with(|registry| registry.borrow_mut().clear());
+}
+
+/// Number of interned routing policies on this thread. Test-only.
+#[cfg(test)]
+pub(crate) fn policy_registry_len() -> usize {
+    POLICY_REGISTRY.with(|registry| registry.borrow().len())
 }
 
 // ---------------------------------------------------------------------------
