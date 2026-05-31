@@ -7,7 +7,6 @@
 //! active, so they're always safe to call.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::testbench::overlay_fs::{self, DiffKind};
@@ -34,7 +33,7 @@ fn testbench_is_active_impl(_args: &[VmValue], _out: &mut String) -> Result<VmVa
 #[harn_builtin(sig = "testbench_fs_diff() -> list", category = "testbench")]
 fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(overlay) = overlay_fs::active_overlay() else {
-        return Ok(VmValue::List(Rc::new(Vec::new())));
+        return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
     };
     let diff = overlay.diff();
     let entries: Vec<VmValue> = diff
@@ -43,25 +42,32 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             let mut d = BTreeMap::new();
             d.insert(
                 "path".to_string(),
-                VmValue::String(Rc::from(entry.path.to_string_lossy().as_ref())),
+                VmValue::String(std::sync::Arc::from(entry.path.to_string_lossy().as_ref())),
             );
             let (kind_str, content_val) = match entry.kind {
                 DiffKind::Added { content } => (
                     "added",
-                    VmValue::String(Rc::from(String::from_utf8_lossy(&content).as_ref())),
+                    VmValue::String(std::sync::Arc::from(
+                        String::from_utf8_lossy(&content).as_ref(),
+                    )),
                 ),
                 DiffKind::Modified { content } => (
                     "modified",
-                    VmValue::String(Rc::from(String::from_utf8_lossy(&content).as_ref())),
+                    VmValue::String(std::sync::Arc::from(
+                        String::from_utf8_lossy(&content).as_ref(),
+                    )),
                 ),
                 DiffKind::Deleted => ("deleted", VmValue::Nil),
             };
-            d.insert("kind".to_string(), VmValue::String(Rc::from(kind_str)));
+            d.insert(
+                "kind".to_string(),
+                VmValue::String(std::sync::Arc::from(kind_str)),
+            );
             d.insert("content".to_string(), content_val);
-            VmValue::Dict(Rc::new(d))
+            VmValue::Dict(std::sync::Arc::new(d))
         })
         .collect();
-    Ok(VmValue::List(Rc::new(entries)))
+    Ok(VmValue::List(std::sync::Arc::new(entries)))
 }
 
 // Snapshot of the leak audit registry so a script can assert that a
@@ -79,11 +85,11 @@ fn testbench_clock_leaks_impl(_args: &[VmValue], _out: &mut String) -> Result<Vm
             let mut d = BTreeMap::new();
             d.insert(
                 "capability".to_string(),
-                VmValue::String(Rc::from(leak.capability_id)),
+                VmValue::String(std::sync::Arc::from(leak.capability_id)),
             );
             d.insert("count".to_string(), VmValue::Int(leak.count as i64));
-            VmValue::Dict(Rc::new(d))
+            VmValue::Dict(std::sync::Arc::new(d))
         })
         .collect();
-    Ok(VmValue::List(Rc::new(entries)))
+    Ok(VmValue::List(std::sync::Arc::new(entries)))
 }

@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
@@ -531,7 +530,7 @@ async fn waitpoint_wait_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             if singular {
                 return Ok(waitpoint_value(records.first().expect("single waitpoint")));
             }
-            Ok(VmValue::List(Rc::new(
+            Ok(VmValue::List(std::sync::Arc::new(
                 records
                     .into_iter()
                     .map(|record| waitpoint_value(&record))

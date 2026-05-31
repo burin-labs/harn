@@ -4,7 +4,6 @@
 //! user message and re-enters the chat path.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
@@ -31,11 +30,13 @@ async fn completion_json_response(
         let message =
             super::classify_provider_http_error(provider, status, retry_after.as_deref(), &body)
                 .message;
-        return Err(VmError::Thrown(VmValue::String(Rc::from(message))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            message,
+        ))));
     }
 
     response.json().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "{provider} completion response parse error: {e}"
         ))))
     })
@@ -120,7 +121,7 @@ async fn vm_call_completion_openai_style(
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
     let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "{} completion API error: {e}",
             opts.provider
         ))))
@@ -129,10 +130,9 @@ async fn vm_call_completion_openai_style(
     let json = completion_json_response(&opts.provider, response).await?;
 
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{} completion API error: {err}",
-            opts.provider
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{} completion API error: {err}", opts.provider),
+        ))));
     }
 
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
@@ -226,17 +226,16 @@ async fn vm_call_completion_ollama(
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
     let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "{} completion API error: {e}",
             opts.provider
         ))))
     })?;
     let json = completion_json_response(&opts.provider, response).await?;
     if let Some(err) = json["error"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{} completion API error: {err}",
-            opts.provider
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{} completion API error: {err}", opts.provider),
+        ))));
     }
 
     let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
@@ -271,11 +270,14 @@ async fn vm_call_completion_fallback(
     let mut fallback_opts = opts.clone();
     let has_suffix = suffix.is_some_and(|s| !s.is_empty());
     let mut bindings = BTreeMap::new();
-    bindings.insert("prefix".to_string(), VmValue::String(Rc::from(prefix)));
+    bindings.insert(
+        "prefix".to_string(),
+        VmValue::String(std::sync::Arc::from(prefix)),
+    );
     bindings.insert("has_suffix".to_string(), VmValue::Bool(has_suffix));
     bindings.insert(
         "suffix".to_string(),
-        VmValue::String(Rc::from(suffix.unwrap_or_default())),
+        VmValue::String(std::sync::Arc::from(suffix.unwrap_or_default())),
     );
     let instruction = crate::stdlib::template::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_system.harn.prompt",

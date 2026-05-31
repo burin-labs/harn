@@ -41,7 +41,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 
 use sqlx_core::query::query;
 use sqlx_core::row::Row;
@@ -99,7 +98,7 @@ async fn pg_introspect_tables_impl(
     rows_to_list(
         pool.as_ref(),
         sql,
-        &[VmValue::String(Rc::from(schema))],
+        &[VmValue::String(std::sync::Arc::from(schema))],
         "pg_introspect_tables",
     )
     .await
@@ -137,8 +136,8 @@ async fn pg_introspect_columns_impl(
         pool.as_ref(),
         sql,
         &[
-            VmValue::String(Rc::from(schema)),
-            VmValue::String(Rc::from(table)),
+            VmValue::String(std::sync::Arc::from(schema)),
+            VmValue::String(std::sync::Arc::from(table)),
         ],
         "pg_introspect_columns",
     )
@@ -182,8 +181,8 @@ async fn pg_introspect_indexes_impl(
         pool.as_ref(),
         sql,
         &[
-            VmValue::String(Rc::from(schema)),
-            VmValue::String(Rc::from(table)),
+            VmValue::String(std::sync::Arc::from(schema)),
+            VmValue::String(std::sync::Arc::from(table)),
         ],
         "pg_introspect_indexes",
     )
@@ -219,7 +218,7 @@ async fn pg_pool_stats_impl(
     );
     dict.insert(
         "read_routing_policy".to_string(),
-        VmValue::String(Rc::from(record.read_routing_policy.as_str())),
+        VmValue::String(std::sync::Arc::from(record.read_routing_policy.as_str())),
     );
     dict.insert(
         "replicas".to_string(),
@@ -233,18 +232,18 @@ async fn pg_pool_stats_impl(
                 let mut entry = BTreeMap::new();
                 entry.insert("size".to_string(), VmValue::Int(i64::from(pool.size())));
                 entry.insert("idle".to_string(), VmValue::Int(pool.num_idle() as i64));
-                VmValue::Dict(Rc::new(entry))
+                VmValue::Dict(std::sync::Arc::new(entry))
             })
             .collect();
         dict.insert(
             "replica_stats".to_string(),
-            VmValue::List(Rc::new(replica_stats)),
+            VmValue::List(std::sync::Arc::new(replica_stats)),
         );
     }
     let circuit_state = record.circuit.snapshot();
     dict.insert(
         "circuit_state".to_string(),
-        VmValue::String(Rc::from(circuit_state.state)),
+        VmValue::String(std::sync::Arc::from(circuit_state.state)),
     );
     dict.insert(
         "circuit_failures".to_string(),
@@ -257,7 +256,7 @@ async fn pg_pool_stats_impl(
             .map(VmValue::Int)
             .unwrap_or(VmValue::Nil),
     );
-    Ok(VmValue::Dict(Rc::new(dict)))
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 #[harn_builtin(
@@ -489,12 +488,12 @@ async fn pg_partition_create_for_window_impl(
                 .await
                 .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
         }
-        created.push(VmValue::String(Rc::from(format!(
+        created.push(VmValue::String(std::sync::Arc::from(format!(
             "{}.{}",
             parent.schema, window.name
         ))));
     }
-    Ok(VmValue::List(Rc::new(created)))
+    Ok(VmValue::List(std::sync::Arc::new(created)))
 }
 
 /// What to do with a partition node during a recursive prune.
@@ -534,7 +533,7 @@ async fn prune_partitions(
     let root_oid = resolve_regclass_oid(pool, &parent.qualified, builtin).await?;
     let mut pruned = Vec::new();
     prune_subtree(pool, root_oid, before, dry_run, builtin, &mut pruned).await?;
-    Ok(VmValue::List(Rc::new(pruned)))
+    Ok(VmValue::List(std::sync::Arc::new(pruned)))
 }
 
 const PARTITION_CHILDREN_SQL: &str = "
@@ -586,7 +585,9 @@ fn prune_subtree<'a>(
                             .await
                             .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
                     }
-                    pruned.push(VmValue::String(Rc::from(format!("{schema}.{part_name}"))));
+                    pruned.push(VmValue::String(std::sync::Arc::from(format!(
+                        "{schema}.{part_name}"
+                    ))));
                 }
                 PruneAction::Descend => {
                     prune_subtree(pool, oid, before, dry_run, builtin, pruned).await?;
@@ -605,7 +606,7 @@ async fn resolve_regclass_oid(
 ) -> Result<i64, VmError> {
     let row = bind_params(
         query("SELECT ($1::regclass)::oid::bigint AS oid"),
-        &[VmValue::String(Rc::from(qualified))],
+        &[VmValue::String(std::sync::Arc::from(qualified))],
     )
     .fetch_one(pool)
     .await
@@ -625,7 +626,7 @@ async fn existing_partition_names(
              JOIN pg_class c ON c.oid = inh.inhrelid
              WHERE inh.inhparent = ($1::regclass)::oid",
         ),
-        &[VmValue::String(Rc::from(qualified))],
+        &[VmValue::String(std::sync::Arc::from(qualified))],
     )
     .fetch_all(pool)
     .await
@@ -760,7 +761,7 @@ async fn rows_to_list(
     rows.into_iter()
         .map(row_to_value)
         .collect::<Result<Vec<_>, _>>()
-        .map(|values| VmValue::List(Rc::new(values)))
+        .map(|values| VmValue::List(std::sync::Arc::new(values)))
 }
 
 fn split_qualified(input: &str, builtin: &'static str) -> Result<(String, String), VmError> {
@@ -922,8 +923,14 @@ mod tests {
     #[test]
     fn render_bounds_clause_handles_three_shapes() {
         let from_to = BTreeMap::from([
-            ("from".to_string(), VmValue::String(Rc::from("2026-01-01"))),
-            ("to".to_string(), VmValue::String(Rc::from("2026-02-01"))),
+            (
+                "from".to_string(),
+                VmValue::String(std::sync::Arc::from("2026-01-01")),
+            ),
+            (
+                "to".to_string(),
+                VmValue::String(std::sync::Arc::from("2026-02-01")),
+            ),
         ]);
         assert_eq!(
             render_bounds_clause(&from_to).unwrap(),
@@ -931,7 +938,7 @@ mod tests {
         );
         let in_clause = BTreeMap::from([(
             "in".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::Int(1), VmValue::Int(2)])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)])),
         )]);
         assert_eq!(
             render_bounds_clause(&in_clause).unwrap(),
@@ -1058,14 +1065,14 @@ mod tests {
     #[test]
     fn parse_interval_validates() {
         assert!(matches!(
-            parse_interval(Some(&VmValue::String(Rc::from("day")))),
+            parse_interval(Some(&VmValue::String(std::sync::Arc::from("day")))),
             Ok(Interval::Day)
         ));
         assert!(matches!(
-            parse_interval(Some(&VmValue::String(Rc::from("hour")))),
+            parse_interval(Some(&VmValue::String(std::sync::Arc::from("hour")))),
             Ok(Interval::Hour)
         ));
-        assert!(parse_interval(Some(&VmValue::String(Rc::from("week")))).is_err());
+        assert!(parse_interval(Some(&VmValue::String(std::sync::Arc::from("week")))).is_err());
         assert!(parse_interval(None).is_err());
     }
 }

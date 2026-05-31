@@ -1680,7 +1680,6 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
 #[tokio::test(flavor = "current_thread")]
 async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
     use std::collections::HashMap;
-    use std::rc::Rc;
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
     use tokio::sync::Mutex as TokioMutex;
@@ -1689,7 +1688,7 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
     local
         .run_until(async {
             let (tx, mut rx) = mpsc::unbounded_channel();
-            let bridge = Rc::new(super::super::AcpBridge {
+            let bridge = Arc::new(super::super::AcpBridge {
                 session_id: "session-1".to_string(),
                 output: AcpOutput::Channel(tx),
                 pending: Arc::new(TokioMutex::new(HashMap::new())),

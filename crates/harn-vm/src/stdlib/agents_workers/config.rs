@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -503,7 +502,7 @@ pub(in super::super) fn parse_worker_config(value: &VmValue) -> Result<WorkerIni
                 .cloned()
                 .unwrap_or_default();
             raw_model_policy.insert("permissions".to_string(), permissions);
-            node.raw_model_policy = Some(VmValue::Dict(Rc::new(raw_model_policy)));
+            node.raw_model_policy = Some(VmValue::Dict(std::sync::Arc::new(raw_model_policy)));
         }
         let artifacts = parse_artifact_list(artifacts_value)?;
         WorkerConfig::Stage {

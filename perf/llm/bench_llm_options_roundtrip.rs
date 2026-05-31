@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::hint::black_box;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use harn_vm::llm::bench_internals::llm_options_roundtrip_probe;
@@ -15,11 +15,11 @@ struct Fixture {
 }
 
 fn string(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value))
+    VmValue::String(Arc::from(value))
 }
 
 fn dict(entries: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(Rc::new(entries))
+    VmValue::Dict(Arc::new(entries))
 }
 
 fn override_value(index: usize) -> VmValue {
@@ -28,7 +28,7 @@ fn override_value(index: usize) -> VmValue {
         1 => VmValue::Float(index as f64 / 10.0),
         2 => string(&format!("value-{index:03}")),
         3 => VmValue::Bool(index.is_multiple_of(2)),
-        _ => VmValue::List(Rc::new(vec![
+        _ => VmValue::List(Arc::new(vec![
             string("nested"),
             VmValue::Int(index as i64),
             VmValue::Bool(true),

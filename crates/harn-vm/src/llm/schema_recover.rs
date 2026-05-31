@@ -292,7 +292,7 @@ fn try_regex_recover(
     if !any {
         return Ok(None);
     }
-    let candidate = VmValue::Dict(Rc::new(recovered));
+    let candidate = VmValue::Dict(std::sync::Arc::new(recovered));
     let result = schema_result_value(&candidate, schema, apply_defaults);
     match extract_validation_outcome(&result) {
         Ok(data) => Ok(Some(data)),
@@ -396,7 +396,7 @@ fn coerce_scalar(raw: &str, field_type: &str, field_schema: &VmValue) -> Option<
             if unescaped.eq_ignore_ascii_case("null") && !field_allows_null(field_schema) {
                 return None;
             }
-            Some(VmValue::String(Rc::from(unescaped.as_str())))
+            Some(VmValue::String(std::sync::Arc::from(unescaped.as_str())))
         }
         "integer" => {
             let n: i64 = cleaned.parse().ok()?;
@@ -552,11 +552,11 @@ async fn run_llm_repair(
     let merged_options = merge_repair_options(base_opts.as_ref(), &repair.overrides, schema);
     let merged_dict = Some(merged_options.clone());
     let args = vec![
-        VmValue::String(Rc::from(prompt.as_str())),
+        VmValue::String(std::sync::Arc::from(prompt.as_str())),
         // System slot — the prompt carries instructions inline so the
         // repair pass works regardless of any caller-set system text.
         VmValue::Nil,
-        VmValue::Dict(Rc::new(merged_options)),
+        VmValue::Dict(std::sync::Arc::new(merged_options)),
     ];
     let opts = extract_llm_options(&args).map_err(|e| e.to_string())?;
     let outcome = execute_schema_retry_loop(None, opts.clone(), merged_dict, bridge)
@@ -585,11 +585,11 @@ fn build_repair_prompt(raw_text: &str, schema: &VmValue) -> String {
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "schema_text".to_string(),
-        VmValue::String(Rc::from(schema_text)),
+        VmValue::String(std::sync::Arc::from(schema_text)),
     );
     bindings.insert(
         "raw_text".to_string(),
-        VmValue::String(Rc::from(raw_text.to_string())),
+        VmValue::String(std::sync::Arc::from(raw_text.to_string())),
     );
     crate::stdlib::template::render_stdlib_prompt_asset(
         "llm/prompts/schema_recover_repair.harn.prompt",
@@ -626,17 +626,20 @@ fn merge_repair_options(
         .entry("output_format".to_string())
         .or_insert_with(|| {
             let mut fmt = BTreeMap::new();
-            fmt.insert("kind".to_string(), VmValue::String(Rc::from("json_schema")));
+            fmt.insert(
+                "kind".to_string(),
+                VmValue::String(std::sync::Arc::from("json_schema")),
+            );
             fmt.insert("schema".to_string(), schema.clone());
             fmt.insert("strict".to_string(), VmValue::Bool(true));
-            VmValue::Dict(Rc::new(fmt))
+            VmValue::Dict(std::sync::Arc::new(fmt))
         });
     merged
         .entry("output_validation".to_string())
-        .or_insert(VmValue::String(Rc::from("error")));
+        .or_insert(VmValue::String(std::sync::Arc::from("error")));
     merged
         .entry("response_format".to_string())
-        .or_insert(VmValue::String(Rc::from("json")));
+        .or_insert(VmValue::String(std::sync::Arc::from("json")));
     for (k, v) in overrides {
         merged.insert(k.clone(), v.clone());
     }
@@ -653,13 +656,22 @@ fn envelope_success(
     let mut env = BTreeMap::new();
     env.insert("ok".to_string(), VmValue::Bool(true));
     env.insert("data".to_string(), data);
-    env.insert("raw_text".to_string(), VmValue::String(Rc::from(raw_text)));
-    env.insert("error".to_string(), VmValue::String(Rc::from("")));
+    env.insert(
+        "raw_text".to_string(),
+        VmValue::String(std::sync::Arc::from(raw_text)),
+    );
+    env.insert(
+        "error".to_string(),
+        VmValue::String(std::sync::Arc::from("")),
+    );
     env.insert("error_category".to_string(), VmValue::Nil);
     env.insert("attempts".to_string(), VmValue::Int(attempts as i64));
-    env.insert("stage".to_string(), VmValue::String(Rc::from(stage)));
+    env.insert(
+        "stage".to_string(),
+        VmValue::String(std::sync::Arc::from(stage)),
+    );
     env.insert("repaired".to_string(), VmValue::Bool(repaired));
-    VmValue::Dict(Rc::new(env))
+    VmValue::Dict(std::sync::Arc::new(env))
 }
 
 fn envelope_failure(
@@ -672,19 +684,25 @@ fn envelope_failure(
     let mut env = BTreeMap::new();
     env.insert("ok".to_string(), VmValue::Bool(false));
     env.insert("data".to_string(), VmValue::Nil);
-    env.insert("raw_text".to_string(), VmValue::String(Rc::from(raw_text)));
+    env.insert(
+        "raw_text".to_string(),
+        VmValue::String(std::sync::Arc::from(raw_text)),
+    );
     env.insert(
         "error".to_string(),
-        VmValue::String(Rc::from(error_message)),
+        VmValue::String(std::sync::Arc::from(error_message)),
     );
     env.insert(
         "error_category".to_string(),
-        VmValue::String(Rc::from(error_category)),
+        VmValue::String(std::sync::Arc::from(error_category)),
     );
     env.insert("attempts".to_string(), VmValue::Int(attempts as i64));
-    env.insert("stage".to_string(), VmValue::String(Rc::from(stage)));
+    env.insert(
+        "stage".to_string(),
+        VmValue::String(std::sync::Arc::from(stage)),
+    );
     env.insert("repaired".to_string(), VmValue::Bool(false));
-    VmValue::Dict(Rc::new(env))
+    VmValue::Dict(std::sync::Arc::new(env))
 }
 
 #[cfg(test)]
@@ -693,24 +711,42 @@ mod tests {
 
     fn person_schema() -> VmValue {
         let mut name = BTreeMap::new();
-        name.insert("type".to_string(), VmValue::String(Rc::from("string")));
+        name.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("string")),
+        );
         let mut age = BTreeMap::new();
-        age.insert("type".to_string(), VmValue::String(Rc::from("integer")));
+        age.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("integer")),
+        );
         let mut active = BTreeMap::new();
-        active.insert("type".to_string(), VmValue::String(Rc::from("boolean")));
+        active.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("boolean")),
+        );
         let mut props = BTreeMap::new();
-        props.insert("name".to_string(), VmValue::Dict(Rc::new(name)));
-        props.insert("age".to_string(), VmValue::Dict(Rc::new(age)));
-        props.insert("active".to_string(), VmValue::Dict(Rc::new(active)));
-        let required = VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("name")),
-            VmValue::String(Rc::from("age")),
+        props.insert("name".to_string(), VmValue::Dict(std::sync::Arc::new(name)));
+        props.insert("age".to_string(), VmValue::Dict(std::sync::Arc::new(age)));
+        props.insert(
+            "active".to_string(),
+            VmValue::Dict(std::sync::Arc::new(active)),
+        );
+        let required = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("name")),
+            VmValue::String(std::sync::Arc::from("age")),
         ]));
         let mut schema = BTreeMap::new();
-        schema.insert("type".to_string(), VmValue::String(Rc::from("object")));
-        schema.insert("properties".to_string(), VmValue::Dict(Rc::new(props)));
+        schema.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("object")),
+        );
+        schema.insert(
+            "properties".to_string(),
+            VmValue::Dict(std::sync::Arc::new(props)),
+        );
         schema.insert("required".to_string(), required);
-        VmValue::Dict(Rc::new(schema))
+        VmValue::Dict(std::sync::Arc::new(schema))
     }
 
     #[test]
@@ -820,8 +856,11 @@ mod tests {
     #[test]
     fn regex_recover_skips_when_schema_is_not_object() {
         let mut scalar = BTreeMap::new();
-        scalar.insert("type".to_string(), VmValue::String(Rc::from("string")));
-        let schema = VmValue::Dict(Rc::new(scalar));
+        scalar.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("string")),
+        );
+        let schema = VmValue::Dict(std::sync::Arc::new(scalar));
         let outcome = try_regex_recover("hello", &schema, false).unwrap();
         assert!(outcome.is_none());
     }
@@ -829,19 +868,26 @@ mod tests {
     #[test]
     fn coerce_handles_unquoted_string_with_trailing_punct() {
         let mut field = BTreeMap::new();
-        field.insert("type".to_string(), VmValue::String(Rc::from("string")));
-        let v = coerce_scalar("Ada,", "string", &VmValue::Dict(Rc::new(field))).unwrap();
+        field.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("string")),
+        );
+        let v =
+            coerce_scalar("Ada,", "string", &VmValue::Dict(std::sync::Arc::new(field))).unwrap();
         assert_eq!(v.display(), "Ada");
     }
 
     #[test]
     fn coerce_handles_escaped_quotes_in_string() {
         let mut field = BTreeMap::new();
-        field.insert("type".to_string(), VmValue::String(Rc::from("string")));
+        field.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("string")),
+        );
         let v = coerce_scalar(
             "he said \\\"hi\\\"",
             "string",
-            &VmValue::Dict(Rc::new(field)),
+            &VmValue::Dict(std::sync::Arc::new(field)),
         )
         .unwrap();
         assert_eq!(v.display(), "he said \"hi\"");
@@ -850,8 +896,11 @@ mod tests {
     #[test]
     fn coerce_rejects_null_for_non_nullable_string() {
         let mut field = BTreeMap::new();
-        field.insert("type".to_string(), VmValue::String(Rc::from("string")));
-        let v = coerce_scalar("null", "string", &VmValue::Dict(Rc::new(field)));
+        field.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("string")),
+        );
+        let v = coerce_scalar("null", "string", &VmValue::Dict(std::sync::Arc::new(field)));
         assert!(v.is_none());
     }
 
@@ -872,10 +921,16 @@ mod tests {
     #[test]
     fn parse_repair_config_dict_extracts_overrides() {
         let mut repair = BTreeMap::new();
-        repair.insert("model".to_string(), VmValue::String(Rc::from("local:fix")));
+        repair.insert(
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("local:fix")),
+        );
         repair.insert("max_tokens".to_string(), VmValue::Int(400));
         let mut opts = BTreeMap::new();
-        opts.insert("llm_repair".to_string(), VmValue::Dict(Rc::new(repair)));
+        opts.insert(
+            "llm_repair".to_string(),
+            VmValue::Dict(std::sync::Arc::new(repair)),
+        );
         let cfg = parse_llm_repair_config(&Some(opts));
         assert!(cfg.enabled);
         assert_eq!(
@@ -916,11 +971,14 @@ mod tests {
     fn merge_repair_overrides_win_over_base() {
         let schema = person_schema();
         let mut base = BTreeMap::new();
-        base.insert("model".to_string(), VmValue::String(Rc::from("base:big")));
+        base.insert(
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("base:big")),
+        );
         let mut overrides = BTreeMap::new();
         overrides.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("override:small")),
+            VmValue::String(std::sync::Arc::from("override:small")),
         );
         let merged = merge_repair_options(Some(&base), &overrides, &schema);
         assert_eq!(
@@ -943,7 +1001,7 @@ mod tests {
     async fn schema_recover_stage_parsed_for_clean_json() {
         let schema = person_schema();
         let args = vec![
-            VmValue::String(Rc::from(r#"{"name": "Ada", "age": 36}"#)),
+            VmValue::String(std::sync::Arc::from(r#"{"name": "Ada", "age": 36}"#)),
             schema,
         ];
         let env = schema_recover_impl(args, None).await.unwrap();
@@ -961,7 +1019,7 @@ mod tests {
     async fn schema_recover_stage_extracted_for_fenced_json() {
         let schema = person_schema();
         let args = vec![
-            VmValue::String(Rc::from(
+            VmValue::String(std::sync::Arc::from(
                 "Sure, here you go:\n```json\n{\"name\": \"Ada\", \"age\": 36}\n```\nDone.",
             )),
             schema,
@@ -979,7 +1037,7 @@ mod tests {
     async fn schema_recover_stage_regex_for_yaml_shape() {
         let schema = person_schema();
         let args = vec![
-            VmValue::String(Rc::from("name: Ada\nage: 36\nactive: true\n")),
+            VmValue::String(std::sync::Arc::from("name: Ada\nage: 36\nactive: true\n")),
             schema,
         ];
         let env = schema_recover_impl(args, None).await.unwrap();
@@ -1003,9 +1061,9 @@ mod tests {
         let mut opts = BTreeMap::new();
         opts.insert("llm_repair".to_string(), VmValue::Bool(false));
         let args = vec![
-            VmValue::String(Rc::from("nothing useful here at all")),
+            VmValue::String(std::sync::Arc::from("nothing useful here at all")),
             schema,
-            VmValue::Dict(Rc::new(opts)),
+            VmValue::Dict(std::sync::Arc::new(opts)),
         ];
         let env = schema_recover_impl(args, None).await.unwrap();
         let dict = env.as_dict().unwrap();
@@ -1023,8 +1081,8 @@ mod tests {
     #[tokio::test]
     async fn schema_recover_rejects_non_dict_schema() {
         let args = vec![
-            VmValue::String(Rc::from("anything")),
-            VmValue::String(Rc::from("not a schema")),
+            VmValue::String(std::sync::Arc::from("anything")),
+            VmValue::String(std::sync::Arc::from("not a schema")),
         ];
         let err = schema_recover_impl(args, None).await.unwrap_err();
         let msg = err.to_string();
@@ -1033,7 +1091,7 @@ mod tests {
 
     #[tokio::test]
     async fn schema_recover_rejects_missing_schema_arg() {
-        let args = vec![VmValue::String(Rc::from("anything"))];
+        let args = vec![VmValue::String(std::sync::Arc::from("anything"))];
         let err = schema_recover_impl(args, None).await.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("expected"), "got: {msg}");

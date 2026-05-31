@@ -1,7 +1,5 @@
 //! Registration helpers for public builtins implemented by Harn stdlib modules.
 
-use std::rc::Rc;
-
 use serde::de::DeserializeOwned;
 
 use crate::value::{VmError, VmValue};
@@ -129,11 +127,11 @@ pub(crate) async fn call_agent_loop(
         "agent_loop",
         "workflow_stage_agent_loop",
         &[
-            VmValue::String(Rc::from(prompt)),
+            VmValue::String(std::sync::Arc::from(prompt)),
             system
-                .map(|value| VmValue::String(Rc::from(value)))
+                .map(|value| VmValue::String(std::sync::Arc::from(value)))
                 .unwrap_or(VmValue::Nil),
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ],
     )
     .await

@@ -23,7 +23,6 @@
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::http::execute_http_request;
 use crate::stdlib::json::vm_value_to_data_value;
@@ -80,7 +79,7 @@ pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
             return Err(jsonrpc_err("jsonrpc_batch: url is required"));
         }
         let calls = match args.get(1) {
-            Some(VmValue::List(items)) => Rc::clone(items),
+            Some(VmValue::List(items)) => items.clone(),
             Some(other) => {
                 return Err(jsonrpc_err(&format!(
                     "jsonrpc_batch: calls must be a list, got {}",
@@ -108,7 +107,7 @@ pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
                 ))
             })?;
             let method = match call_dict.get("method") {
-                Some(VmValue::String(s)) if !s.is_empty() => (**s).to_string(),
+                Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
                 _ => {
                     return Err(jsonrpc_err(&format!(
                         "jsonrpc_batch: call at index {idx} missing 'method'"
@@ -133,7 +132,7 @@ pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
                 notify,
             });
         }
-        let array = VmValue::List(Rc::new(envelopes));
+        let array = VmValue::List(std::sync::Arc::new(envelopes));
         let body = encode_envelope(&array, "jsonrpc_batch")?;
         let request_options = build_request_options(body, options);
         let response = execute_http_request("POST", &url, &request_options).await?;
@@ -142,7 +141,7 @@ pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
         // to return an empty body — JSON-RPC 2.0 §6. Yield a list of
         // Nil slots aligned with the input.
         if slots.iter().all(|s| s.notify) {
-            return Ok(VmValue::List(Rc::new(
+            return Ok(VmValue::List(std::sync::Arc::new(
                 slots.iter().map(|_| VmValue::Nil).collect(),
             )));
         }
@@ -162,11 +161,11 @@ fn build_request_options(
     let mut headers = BTreeMap::new();
     headers.insert(
         "Content-Type".to_string(),
-        VmValue::String(Rc::from("application/json")),
+        VmValue::String(std::sync::Arc::from("application/json")),
     );
     headers.insert(
         "Accept".to_string(),
-        VmValue::String(Rc::from("application/json")),
+        VmValue::String(std::sync::Arc::from("application/json")),
     );
     if let Some(extra) = options
         .and_then(|d| d.get("headers"))
@@ -181,8 +180,14 @@ fn build_request_options(
         }
     }
     let mut request_options = BTreeMap::new();
-    request_options.insert("body".to_string(), VmValue::String(Rc::from(body)));
-    request_options.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
+    request_options.insert(
+        "body".to_string(),
+        VmValue::String(std::sync::Arc::from(body)),
+    );
+    request_options.insert(
+        "headers".to_string(),
+        VmValue::Dict(std::sync::Arc::new(headers)),
+    );
     if let Some(d) = options {
         if let Some(timeout) = d.get("timeout_ms") {
             request_options.insert("timeout_ms".to_string(), timeout.clone());
@@ -197,14 +202,14 @@ fn build_request_options(
 fn encode_envelope(value: &VmValue, builtin: &str) -> Result<String, VmError> {
     let json = vm_value_to_data_value(value);
     serde_json::to_string(&json).map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "{builtin}: encode envelope: {e}"
         ))))
     })
 }
 
 fn jsonrpc_err(msg: &str) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(msg)))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(msg)))
 }
 
 fn next_id_value() -> VmValue {
@@ -217,15 +222,21 @@ fn next_id_value() -> VmValue {
 
 fn build_envelope(method: &str, params: &VmValue, id: &VmValue, notify: bool) -> VmValue {
     let mut m = BTreeMap::new();
-    m.insert("jsonrpc".to_string(), VmValue::String(Rc::from("2.0")));
-    m.insert("method".to_string(), VmValue::String(Rc::from(method)));
+    m.insert(
+        "jsonrpc".to_string(),
+        VmValue::String(std::sync::Arc::from("2.0")),
+    );
+    m.insert(
+        "method".to_string(),
+        VmValue::String(std::sync::Arc::from(method)),
+    );
     if !matches!(params, VmValue::Nil) {
         m.insert("params".to_string(), params.clone());
     }
     if !notify {
         m.insert("id".to_string(), id.clone());
     }
-    VmValue::Dict(Rc::new(m))
+    VmValue::Dict(std::sync::Arc::new(m))
 }
 
 /// Extracts `result` from a JSON-RPC response envelope or raises a
@@ -235,7 +246,9 @@ fn build_envelope(method: &str, params: &VmValue, id: &VmValue, notify: bool) ->
 fn unwrap_jsonrpc_response(response: VmValue) -> Result<VmValue, VmError> {
     let envelope = decode_response_envelope(&response, "jsonrpc_call")?;
     if let Some(err) = envelope.get("error") {
-        return Err(VmError::Thrown(VmValue::Dict(Rc::new(error_to_dict(err)))));
+        return Err(VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
+            error_to_dict(err),
+        ))));
     }
     let result = envelope
         .get("result")
@@ -295,13 +308,13 @@ fn unwrap_batch_response(response: VmValue, slots: &[BatchSlot]) -> Result<VmVal
             err_dict.insert("code".to_string(), VmValue::Int(0));
             err_dict.insert(
                 "message".to_string(),
-                VmValue::String(Rc::from("missing response for call")),
+                VmValue::String(std::sync::Arc::from("missing response for call")),
             );
-            out.push(VmValue::Dict(Rc::new(err_dict)));
+            out.push(VmValue::Dict(std::sync::Arc::new(err_dict)));
             continue;
         };
         if let Some(err) = entry.get("error") {
-            out.push(VmValue::Dict(Rc::new(error_to_dict(err))));
+            out.push(VmValue::Dict(std::sync::Arc::new(error_to_dict(err))));
             continue;
         }
         let result = entry
@@ -310,7 +323,7 @@ fn unwrap_batch_response(response: VmValue, slots: &[BatchSlot]) -> Result<VmVal
             .unwrap_or(serde_json::Value::Null);
         out.push(crate::schema::json_to_vm_value(&result));
     }
-    Ok(VmValue::List(Rc::new(out)))
+    Ok(VmValue::List(std::sync::Arc::new(out)))
 }
 
 fn decode_response_envelope(
@@ -318,7 +331,7 @@ fn decode_response_envelope(
     builtin: &str,
 ) -> Result<serde_json::Value, VmError> {
     let response_dict = match response {
-        VmValue::Dict(d) => Rc::clone(d),
+        VmValue::Dict(d) => d.clone(),
         _ => {
             return Err(jsonrpc_err(&format!(
                 "{builtin}: unexpected http response shape"
@@ -330,7 +343,7 @@ fn decode_response_envelope(
         .and_then(VmValue::as_int)
         .unwrap_or(0);
     let body_str = match response_dict.get("body") {
-        Some(VmValue::String(s)) => (**s).to_string(),
+        Some(VmValue::String(s)) => s.to_string(),
         Some(other) => other.display(),
         None => String::new(),
     };
@@ -354,7 +367,7 @@ fn error_to_dict(err: &serde_json::Value) -> BTreeMap<String, VmValue> {
     error_dict.insert("code".to_string(), VmValue::Int(code));
     error_dict.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(message.to_string())),
+        VmValue::String(std::sync::Arc::from(message.to_string())),
     );
     if let Some(data) = err.get("data") {
         error_dict.insert("data".to_string(), crate::schema::json_to_vm_value(data));
@@ -373,7 +386,7 @@ fn canonical_id_key(id: &serde_json::Value) -> String {
 fn canonical_id_key_from_vm(id: &VmValue) -> Option<String> {
     match id {
         VmValue::Nil => None,
-        VmValue::String(s) => Some(format!("s:{}", &**s)),
+        VmValue::String(s) => Some(format!("s:{s}")),
         VmValue::Int(n) => Some(format!("n:{n}")),
         VmValue::Float(n) => Some(format!("n:{n}")),
         other => Some(format!("j:{}", other.display())),
@@ -413,7 +426,7 @@ mod tests {
         params.insert("x".to_string(), VmValue::Int(42));
         let env = build_envelope(
             "echo",
-            &VmValue::Dict(Rc::new(params)),
+            &VmValue::Dict(std::sync::Arc::new(params)),
             &VmValue::Int(1),
             false,
         );
@@ -429,9 +442,9 @@ mod tests {
         response.insert("status".to_string(), VmValue::Int(200));
         response.insert(
             "body".to_string(),
-            VmValue::String(Rc::from(body.to_string())),
+            VmValue::String(std::sync::Arc::from(body.to_string())),
         );
-        let result = unwrap_jsonrpc_response(VmValue::Dict(Rc::new(response))).unwrap();
+        let result = unwrap_jsonrpc_response(VmValue::Dict(std::sync::Arc::new(response))).unwrap();
         let dict = result.as_dict().unwrap();
         match dict.get("ok") {
             Some(VmValue::Bool(true)) => {}
@@ -450,9 +463,10 @@ mod tests {
         response.insert("status".to_string(), VmValue::Int(200));
         response.insert(
             "body".to_string(),
-            VmValue::String(Rc::from(body.to_string())),
+            VmValue::String(std::sync::Arc::from(body.to_string())),
         );
-        let err = unwrap_jsonrpc_response(VmValue::Dict(Rc::new(response))).unwrap_err();
+        let err =
+            unwrap_jsonrpc_response(VmValue::Dict(std::sync::Arc::new(response))).unwrap_err();
         match err {
             VmError::Thrown(VmValue::Dict(d)) => {
                 assert_eq!(d.get("code").and_then(VmValue::as_int), Some(-32601));
@@ -470,10 +484,13 @@ mod tests {
         let mut user_headers = BTreeMap::new();
         user_headers.insert(
             "content-type".to_string(),
-            VmValue::String(Rc::from("application/x-test")),
+            VmValue::String(std::sync::Arc::from("application/x-test")),
         );
         let mut opts = BTreeMap::new();
-        opts.insert("headers".to_string(), VmValue::Dict(Rc::new(user_headers)));
+        opts.insert(
+            "headers".to_string(),
+            VmValue::Dict(std::sync::Arc::new(user_headers)),
+        );
         let request_options = build_request_options("{}".to_string(), Some(&opts));
         let headers = request_options
             .get("headers")
@@ -503,7 +520,7 @@ mod tests {
         response.insert("status".to_string(), VmValue::Int(200));
         response.insert(
             "body".to_string(),
-            VmValue::String(Rc::from(body.to_string())),
+            VmValue::String(std::sync::Arc::from(body.to_string())),
         );
         let slots = vec![
             BatchSlot {
@@ -515,8 +532,8 @@ mod tests {
                 notify: false,
             },
         ];
-        let result =
-            unwrap_batch_response(VmValue::Dict(Rc::new(response)), &slots).expect("batch unwrap");
+        let result = unwrap_batch_response(VmValue::Dict(std::sync::Arc::new(response)), &slots)
+            .expect("batch unwrap");
         let items = match result {
             VmValue::List(items) => items,
             other => panic!("expected list, got {other:?}"),
@@ -535,7 +552,7 @@ mod tests {
         response.insert("status".to_string(), VmValue::Int(200));
         response.insert(
             "body".to_string(),
-            VmValue::String(Rc::from(body.to_string())),
+            VmValue::String(std::sync::Arc::from(body.to_string())),
         );
         let slots = vec![
             BatchSlot {
@@ -547,8 +564,8 @@ mod tests {
                 notify: false,
             },
         ];
-        let result =
-            unwrap_batch_response(VmValue::Dict(Rc::new(response)), &slots).expect("batch unwrap");
+        let result = unwrap_batch_response(VmValue::Dict(std::sync::Arc::new(response)), &slots)
+            .expect("batch unwrap");
         let items = match result {
             VmValue::List(items) => items,
             other => panic!("expected list, got {other:?}"),
@@ -577,7 +594,7 @@ mod tests {
         // Simulate the call-site early-return when every slot is a
         // notification.
         let nils: Vec<VmValue> = slots.iter().map(|_| VmValue::Nil).collect();
-        let result = VmValue::List(Rc::new(nils));
+        let result = VmValue::List(std::sync::Arc::new(nils));
         let items = match result {
             VmValue::List(items) => items,
             other => panic!("expected list, got {other:?}"),

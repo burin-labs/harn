@@ -20,7 +20,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
@@ -83,7 +83,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("path", str_value(path_str.as_deref().unwrap_or(""))),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
-        ("diagnostics", VmValue::List(Rc::new(dlist))),
+        ("diagnostics", VmValue::List(Arc::new(dlist))),
     ]))
 }
 
@@ -92,7 +92,7 @@ fn unsupported_response(path: Option<&str>, language: Language) -> VmValue {
         ("path", str_value(path.unwrap_or(""))),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(false)),
-        ("diagnostics", VmValue::List(Rc::new(Vec::new()))),
+        ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
     ])
 }
 
@@ -101,7 +101,7 @@ fn empty_response(path: Option<&str>, language: Language) -> VmValue {
         ("path", str_value(path.unwrap_or(""))),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
-        ("diagnostics", VmValue::List(Rc::new(Vec::new()))),
+        ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
     ])
 }
 
@@ -1405,9 +1405,9 @@ mod tests {
 
     fn run_with(content: &str, language: &str) -> VmValue {
         let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        dict.insert("content".into(), VmValue::String(Rc::from(content)));
-        dict.insert("language".into(), VmValue::String(Rc::from(language)));
-        run(&[VmValue::Dict(Rc::new(dict))]).expect("undefined_names run")
+        dict.insert("content".into(), VmValue::String(Arc::from(content)));
+        dict.insert("language".into(), VmValue::String(Arc::from(language)));
+        run(&[VmValue::Dict(Arc::new(dict))]).expect("undefined_names run")
     }
 
     fn names(result: &VmValue) -> Vec<String> {
@@ -1516,7 +1516,7 @@ mod tests {
     #[test]
     fn missing_payload_is_rejected() {
         let dict: std::collections::BTreeMap<String, VmValue> = std::collections::BTreeMap::new();
-        let err = run(&[VmValue::Dict(Rc::new(dict))]).expect_err("must reject");
+        let err = run(&[VmValue::Dict(Arc::new(dict))]).expect_err("must reject");
         match err {
             HostlibError::MissingParameter { builtin, .. } => assert_eq!(builtin, BUILTIN),
             other => panic!("got {other:?}"),

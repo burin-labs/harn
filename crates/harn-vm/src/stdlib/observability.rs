@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
 use crate::stdlib::json_to_vm_value;
@@ -261,7 +260,7 @@ fn obs_gauge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 )]
 fn obs_request_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(crate::observability::request_id::current_request_id()
-        .map(|id| VmValue::String(Rc::from(id.as_str())))
+        .map(|id| VmValue::String(std::sync::Arc::from(id.as_str())))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -312,7 +311,7 @@ pub(crate) fn start_span_typed(
 ) -> Result<VmValue, VmError> {
     validate_vocabulary(&attrs, "span", &name)?;
     let args = vec![
-        VmValue::String(Rc::from(name.as_str())),
+        VmValue::String(std::sync::Arc::from(name.as_str())),
         json_to_vm_value(&serde_json::Value::Object(attrs)),
     ];
     obs_start_span_impl(&args, &mut String::new())
@@ -452,21 +451,21 @@ fn span_to_vm_value(span: &ObsSpan) -> VmValue {
     let mut out = BTreeMap::new();
     out.insert(
         "trace_id".to_string(),
-        VmValue::String(Rc::from(span.trace_id.as_str())),
+        VmValue::String(std::sync::Arc::from(span.trace_id.as_str())),
     );
     out.insert(
         "span_id".to_string(),
-        VmValue::String(Rc::from(span.id.as_str())),
+        VmValue::String(std::sync::Arc::from(span.id.as_str())),
     );
     out.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(span.name.as_str())),
+        VmValue::String(std::sync::Arc::from(span.name.as_str())),
     );
     out.insert(
         "attrs".to_string(),
         json_to_vm_value(&serde_json::Value::Object(span.attrs.clone())),
     );
-    VmValue::Dict(Rc::new(out))
+    VmValue::Dict(std::sync::Arc::new(out))
 }
 
 fn base_event(

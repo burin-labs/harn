@@ -1,9 +1,9 @@
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_parser::TypeExpr;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::runtime_guards::RuntimeParamGuard;
@@ -86,10 +86,7 @@ pub(crate) enum AdaptiveBinaryOp {
 /// `Copy` enum, hit/miss counters are integers), so the struct as a whole
 /// is `Copy`. This lets `execute_adaptive_binary` extract the cached state
 /// by value for the specialization check without cloning the wrapping
-/// `InlineCacheEntry` on every dispatch — the previous shape held
-/// `Clone-only` state via the outer enum and forced a 24-32B memcpy on
-/// every Add/Sub/Mul/Div/Mod/Eq/Neq/Less/Greater/LessEq/GreaterEq op,
-/// which is the hottest opcode class in the dispatch loop.
+/// `InlineCacheEntry` on every dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AdaptiveBinaryState {
     Warmup {
@@ -128,13 +125,13 @@ pub(crate) enum DirectCallState {
 
 #[derive(Debug, Clone)]
 pub(crate) enum DirectCallTarget {
-    Closure(Rc<crate::value::VmClosure>),
+    Closure(Arc<crate::value::VmClosure>),
 }
 
 impl PartialEq for DirectCallTarget {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Closure(left), Self::Closure(right)) => Rc::ptr_eq(left, right),
+            (Self::Closure(left), Self::Closure(right)) => Arc::ptr_eq(left, right),
         }
     }
 }
@@ -184,8 +181,8 @@ impl Eq for DirectCallState {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PropertyCacheTarget {
-    DictField(Rc<str>),
-    StructField { field_name: Rc<str>, index: usize },
+    DictField(Arc<str>),
+    StructField { field_name: Arc<str>, index: usize },
     ListCount,
     ListEmpty,
     ListFirst,
@@ -277,15 +274,11 @@ pub struct Chunk {
     inline_cache_index: Vec<u32>,
     /// Shared cache entries so cloned chunks in call frames warm the same side
     /// table as the compiled chunk used by tests/debugging.
-    inline_caches: Rc<RefCell<Vec<InlineCacheEntry>>>,
-    /// Lazily-materialized `Rc<str>` cache for `Constant::String` entries,
-    /// parallel to `constants`. `Op::Constant` for a string used to run
-    /// `Rc::from(s.as_str())` on every execution, allocating a fresh
-    /// `Rc<str>` per push — death by a thousand allocations for
-    /// string-interpolation-heavy hot paths. With this side table the
-    /// allocation happens once per unique constant; subsequent pushes
-    /// are an Rc refcount bump.
-    constant_strings: Rc<RefCell<Vec<Option<Rc<str>>>>>,
+    inline_caches: Arc<Mutex<Vec<InlineCacheEntry>>>,
+    /// Lazily-materialized shared string cache for `Constant::String` entries,
+    /// parallel to `constants`. String constants are materialized once per
+    /// unique constant; subsequent pushes are an `Arc` refcount bump.
+    constant_strings: Arc<Mutex<Vec<Option<Arc<str>>>>>,
     /// Source-name metadata for slot-indexed locals in this chunk.
     pub(crate) local_slots: Vec<LocalSlotInfo>,
     /// True when this chunk's bytecode emits an opcode that resolves a
@@ -323,8 +316,8 @@ pub struct Chunk {
     balance_nonlinear: u32,
 }
 
-pub type ChunkRef = Rc<Chunk>;
-pub type CompiledFunctionRef = Rc<CompiledFunction>;
+pub type ChunkRef = Arc<Chunk>;
+pub type CompiledFunctionRef = Arc<CompiledFunction>;
 
 /// Serializable snapshot of a [`Chunk`] suitable for the on-disk bytecode
 /// cache and for in-memory stdlib artifact caches. Inline-cache state is
@@ -512,7 +505,7 @@ impl CompiledFunction {
             nominal_type_names: cached.nominal_type_names.clone(),
             params: cached.params.iter().map(CachedParamSlot::thaw).collect(),
             default_start: cached.default_start,
-            chunk: Rc::new(Chunk::from_cached(&cached.chunk)),
+            chunk: Arc::new(Chunk::from_cached(&cached.chunk)),
             is_generator: cached.is_generator,
             is_stream: cached.is_stream,
             has_rest_param: cached.has_rest_param,
@@ -600,8 +593,8 @@ impl Chunk {
             functions: Vec::new(),
             inline_cache_slots: BTreeMap::new(),
             inline_cache_index: Vec::new(),
-            inline_caches: Rc::new(RefCell::new(Vec::new())),
-            constant_strings: Rc::new(RefCell::new(Vec::new())),
+            inline_caches: Arc::new(Mutex::new(Vec::new())),
+            constant_strings: Arc::new(Mutex::new(Vec::new())),
             local_slots: Vec::new(),
             references_outer_names: false,
             #[cfg(debug_assertions)]
@@ -843,7 +836,7 @@ impl Chunk {
         if self.inline_cache_slots.contains_key(&op_offset) {
             return;
         }
-        let mut entries = self.inline_caches.borrow_mut();
+        let mut entries = self.inline_caches.lock();
         let slot = entries.len();
         entries.push(InlineCacheEntry::Empty);
         self.inline_cache_slots.insert(op_offset, slot);
@@ -888,34 +881,34 @@ impl Chunk {
         self.inline_cache_slots.get(&op_offset).copied()
     }
 
-    /// Returns an `Rc<str>` for a `Constant::String` at the given pool
+    /// Returns a shared string for a `Constant::String` at the given pool
     /// index, materializing it on first access and caching for reuse.
     /// Returns `None` when the constant at `idx` is not a string (the
     /// caller should fall back to the regular `Constant` match).
-    pub(crate) fn constant_string_rc(&self, idx: usize) -> Option<Rc<str>> {
+    pub(crate) fn constant_string_rc(&self, idx: usize) -> Option<Arc<str>> {
         // Borrow the side table mutably so we can lazily extend / fill
         // entries. The borrow is scope-confined to this function; the
         // VM never re-enters constant_string_rc for the same chunk
         // during a single materialization, so no nested-borrow risk.
-        let mut entries = self.constant_strings.borrow_mut();
+        let mut entries = self.constant_strings.lock();
         if entries.len() < self.constants.len() {
             entries.resize(self.constants.len(), None);
         }
         if let Some(Some(existing)) = entries.get(idx) {
-            return Some(Rc::clone(existing));
+            return Some(Arc::clone(existing));
         }
         let materialized = match self.constants.get(idx)? {
-            Constant::String(s) => Rc::<str>::from(s.as_str()),
+            Constant::String(s) => Arc::<str>::from(s.as_str()),
             _ => return None,
         };
-        entries[idx] = Some(Rc::clone(&materialized));
+        entries[idx] = Some(Arc::clone(&materialized));
         Some(materialized)
     }
 
     #[cfg(feature = "vm-bench-internals")]
     pub(crate) fn inline_cache_entry(&self, slot: usize) -> InlineCacheEntry {
         self.inline_caches
-            .borrow()
+            .lock()
             .get(slot)
             .cloned()
             .unwrap_or(InlineCacheEntry::Empty)
@@ -937,7 +930,7 @@ impl Chunk {
         &self,
         slot: usize,
     ) -> Option<(AdaptiveBinaryOp, AdaptiveBinaryState)> {
-        match self.inline_caches.borrow().get(slot)? {
+        match self.inline_caches.lock().get(slot)? {
             &InlineCacheEntry::AdaptiveBinary { op, state } => Some((op, state)),
             _ => None,
         }
@@ -956,7 +949,7 @@ impl Chunk {
     /// typical pipeline (`xs.filter(...).map(...).count()`) issues.
     #[inline]
     pub(crate) fn peek_method_cache(&self, slot: usize) -> Option<(u16, usize, MethodCacheTarget)> {
-        match self.inline_caches.borrow().get(slot)? {
+        match self.inline_caches.lock().get(slot)? {
             &InlineCacheEntry::Method {
                 name_idx,
                 argc,
@@ -977,7 +970,7 @@ impl Chunk {
     /// dispatch, which is the dominant opcode for any field-read-heavy code.
     #[inline]
     pub(crate) fn peek_property_cache(&self, slot: usize) -> Option<(u16, PropertyCacheTarget)> {
-        match self.inline_caches.borrow().get(slot)? {
+        match self.inline_caches.lock().get(slot)? {
             InlineCacheEntry::Property { name_idx, target } => Some((*name_idx, target.clone())),
             _ => None,
         }
@@ -994,14 +987,14 @@ impl Chunk {
     /// both the read check and the write-back computation.
     #[inline]
     pub(crate) fn peek_direct_call_state(&self, slot: usize) -> Option<DirectCallState> {
-        match self.inline_caches.borrow().get(slot)? {
+        match self.inline_caches.lock().get(slot)? {
             InlineCacheEntry::DirectCall { state } => Some(state.clone()),
             _ => None,
         }
     }
 
     pub(crate) fn set_inline_cache_entry(&self, slot: usize, entry: InlineCacheEntry) {
-        if let Some(existing) = self.inline_caches.borrow_mut().get_mut(slot) {
+        if let Some(existing) = self.inline_caches.lock().get_mut(slot) {
             *existing = entry;
         }
     }
@@ -1051,15 +1044,15 @@ impl Chunk {
             functions: cached
                 .functions
                 .iter()
-                .map(|function| Rc::new(CompiledFunction::from_cached(function)))
+                .map(|function| Arc::new(CompiledFunction::from_cached(function)))
                 .collect(),
             inline_cache_slots: cached.inline_cache_slots.clone(),
             inline_cache_index,
-            inline_caches: Rc::new(RefCell::new(vec![
+            inline_caches: Arc::new(Mutex::new(vec![
                 InlineCacheEntry::Empty;
                 inline_cache_count
             ])),
-            constant_strings: Rc::new(RefCell::new(vec![None; constants_count])),
+            constant_strings: Arc::new(Mutex::new(vec![None; constants_count])),
             local_slots: cached.local_slots.clone(),
             references_outer_names: cached.references_outer_names,
             #[cfg(debug_assertions)]
@@ -1086,7 +1079,7 @@ impl Chunk {
 
     #[cfg(test)]
     pub(crate) fn inline_cache_entries(&self) -> Vec<InlineCacheEntry> {
-        self.inline_caches.borrow().clone()
+        self.inline_caches.lock().clone()
     }
 
     /// Read a u64 argument at the given position.
@@ -1267,7 +1260,7 @@ impl Default for Chunk {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     use super::{
         Chunk, DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget, Op,
@@ -1797,7 +1790,7 @@ mod tests {
     fn peek_method_cache_target_is_copy() {
         // Compile-time assertion: `MethodCacheTarget: Copy` is the whole
         // point of this peek path — if a future variant adds a non-Copy
-        // field (eg. an `Rc<str>` for a dynamic method name), the static
+        // field (eg. an `Arc<str>` for a dynamic method name), the static
         // check below will fail at compile time before the dispatcher
         // silently regresses to the heavy `InlineCacheEntry::clone` path.
         fn assert_copy<T: Copy>() {}
@@ -1834,7 +1827,7 @@ mod tests {
             slot,
             InlineCacheEntry::Property {
                 name_idx: 11,
-                target: PropertyCacheTarget::DictField(Rc::from("count")),
+                target: PropertyCacheTarget::DictField(Arc::from("count")),
             },
         );
         let (name_idx, target) = chunk
@@ -1849,7 +1842,7 @@ mod tests {
 
     #[test]
     fn peek_property_cache_returns_pair_for_unit_target() {
-        // Unit targets (eg. ListCount, ListEmpty, PairFirst) carry no Rc,
+        // Unit targets (eg. ListCount, ListEmpty, PairFirst) carry no Arc,
         // so the cloned PropertyCacheTarget is a pure scalar move at the
         // peek boundary. The hottest case in practice.
         let mut chunk = Chunk::new();
@@ -1903,7 +1896,7 @@ mod tests {
     // (`next_direct_call_entry`). Returning None for the non-DirectCall slot
     // shapes is critical: a mis-extracted Method/Property/AdaptiveBinary slot
     // would have the dispatcher attempt a closure call with the wrong argc
-    // or Rc::ptr_eq against an unrelated closure.
+    // or Arc::ptr_eq against an unrelated closure.
 
     #[test]
     fn peek_direct_call_state_returns_none_for_empty_slot() {
@@ -2015,7 +2008,7 @@ mod tests {
 
     /// Build a synthetic `DirectCallTarget::Closure` for direct-call peek
     /// tests. The closure has an empty body — the IC peek only inspects
-    /// the wrapping `Rc`, not the closure internals.
+    /// the wrapping `Arc`, not the closure internals.
     fn synthetic_direct_call_target() -> DirectCallTarget {
         use crate::value::VmClosure;
         use crate::{CompiledFunction, VmEnv};
@@ -2025,14 +2018,14 @@ mod tests {
             nominal_type_names: Vec::new(),
             params: Vec::new(),
             default_start: None,
-            chunk: Rc::new(Chunk::new()),
+            chunk: Arc::new(Chunk::new()),
             is_generator: false,
             is_stream: false,
             has_rest_param: false,
             has_runtime_type_checks: false,
         };
-        DirectCallTarget::Closure(Rc::new(VmClosure {
-            func: Rc::new(func),
+        DirectCallTarget::Closure(Arc::new(VmClosure {
+            func: Arc::new(func),
             env: VmEnv::new(),
             source_dir: None,
             module_functions: None,

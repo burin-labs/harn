@@ -19,7 +19,6 @@
 //! <https://modelcontextprotocol.io/specification/2025-11-25/client/sampling>.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use serde_json::{json, Value as JsonValue};
 
@@ -261,7 +260,10 @@ fn parse_sampling_request(params: &JsonValue) -> Result<SamplingRequest, String>
 ///   return `{provider: "mock"}` without ceremony)
 async fn ask_host_approval(server_name: &str, params: &JsonValue) -> ApprovalDecision {
     let mut bridge_params: BTreeMap<String, VmValue> = BTreeMap::new();
-    bridge_params.insert("server".to_string(), VmValue::String(Rc::from(server_name)));
+    bridge_params.insert(
+        "server".to_string(),
+        VmValue::String(std::sync::Arc::from(server_name)),
+    );
     bridge_params.insert("params".to_string(), json_to_vm_value(params));
 
     let result = dispatch_mock_host_call("mcp", "sample", &bridge_params)
@@ -398,7 +400,10 @@ fn build_llm_call_args(
     // Translate the sampling messages into the VM `messages` shape
     // `extract_llm_options` accepts (a list of `{role, content}` dicts).
     let messages_vm: Vec<VmValue> = parsed.messages.iter().map(json_to_vm_value).collect();
-    options.insert("messages".to_string(), VmValue::List(Rc::new(messages_vm)));
+    options.insert(
+        "messages".to_string(),
+        VmValue::List(std::sync::Arc::new(messages_vm)),
+    );
 
     options.insert("max_tokens".to_string(), VmValue::Int(parsed.max_tokens));
 
@@ -409,15 +414,18 @@ fn build_llm_call_args(
     if let Some(stop) = parsed.stop_sequences.as_ref() {
         let stop_vm: Vec<VmValue> = stop
             .iter()
-            .map(|s| VmValue::String(Rc::from(s.as_str())))
+            .map(|s| VmValue::String(std::sync::Arc::from(s.as_str())))
             .collect();
-        options.insert("stop".to_string(), VmValue::List(Rc::new(stop_vm)));
+        options.insert(
+            "stop".to_string(),
+            VmValue::List(std::sync::Arc::new(stop_vm)),
+        );
     }
 
     if let Some(hint) = pick_model_hint(parsed.model_preferences.as_ref()) {
         options.insert(
             "model".to_string(),
-            VmValue::String(Rc::from(hint.as_str())),
+            VmValue::String(std::sync::Arc::from(hint.as_str())),
         );
     }
 
@@ -439,7 +447,7 @@ fn build_llm_call_args(
     if let Some(include_context) = parsed.include_context.as_ref() {
         options.insert(
             "include_context".to_string(),
-            VmValue::String(Rc::from(include_context.as_str())),
+            VmValue::String(std::sync::Arc::from(include_context.as_str())),
         );
     }
 
@@ -452,13 +460,13 @@ fn build_llm_call_args(
     let system_value = parsed
         .system
         .as_ref()
-        .map(|s| VmValue::String(Rc::from(s.as_str())))
+        .map(|s| VmValue::String(std::sync::Arc::from(s.as_str())))
         .unwrap_or(VmValue::Nil);
 
     let args = vec![
-        VmValue::String(Rc::from("")),
+        VmValue::String(std::sync::Arc::from("")),
         system_value,
-        VmValue::Dict(Rc::new(options.clone())),
+        VmValue::Dict(std::sync::Arc::new(options.clone())),
     ];
 
     (args, options)
@@ -514,6 +522,7 @@ fn build_spec_response(outcome: LlmOutcome, parsed: &SamplingRequest) -> JsonVal
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
 
     fn minimal_request() -> JsonValue {
         json!({
@@ -624,11 +633,20 @@ mod tests {
     #[test]
     fn coerce_bridge_response_accept_with_options() {
         let mut dict = BTreeMap::new();
-        dict.insert("action".to_string(), VmValue::String(Rc::from("accept")));
+        dict.insert(
+            "action".to_string(),
+            VmValue::String(std::sync::Arc::from("accept")),
+        );
         let mut options = BTreeMap::new();
-        options.insert("provider".to_string(), VmValue::String(Rc::from("mock")));
-        dict.insert("options".to_string(), VmValue::Dict(Rc::new(options)));
-        match coerce_bridge_response(VmValue::Dict(Rc::new(dict))) {
+        options.insert(
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("mock")),
+        );
+        dict.insert(
+            "options".to_string(),
+            VmValue::Dict(std::sync::Arc::new(options)),
+        );
+        match coerce_bridge_response(VmValue::Dict(std::sync::Arc::new(dict))) {
             ApprovalDecision::Accept(map) => {
                 assert_eq!(
                     map.get("provider").map(|v| v.display()).as_deref(),
@@ -642,12 +660,15 @@ mod tests {
     #[test]
     fn coerce_bridge_response_decline_with_message() {
         let mut dict = BTreeMap::new();
-        dict.insert("action".to_string(), VmValue::String(Rc::from("decline")));
+        dict.insert(
+            "action".to_string(),
+            VmValue::String(std::sync::Arc::from("decline")),
+        );
         dict.insert(
             "message".to_string(),
-            VmValue::String(Rc::from("rate limit")),
+            VmValue::String(std::sync::Arc::from("rate limit")),
         );
-        match coerce_bridge_response(VmValue::Dict(Rc::new(dict))) {
+        match coerce_bridge_response(VmValue::Dict(std::sync::Arc::new(dict))) {
             ApprovalDecision::Decline(reason) => assert_eq!(reason, "rate limit"),
             other => panic!("expected decline, got {other:?}"),
         }
@@ -656,8 +677,11 @@ mod tests {
     #[test]
     fn coerce_bridge_response_bare_dict_is_overrides() {
         let mut dict = BTreeMap::new();
-        dict.insert("provider".to_string(), VmValue::String(Rc::from("mock")));
-        match coerce_bridge_response(VmValue::Dict(Rc::new(dict))) {
+        dict.insert(
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("mock")),
+        );
+        match coerce_bridge_response(VmValue::Dict(std::sync::Arc::new(dict))) {
             ApprovalDecision::Accept(map) => {
                 assert_eq!(
                     map.get("provider").map(|v| v.display()).as_deref(),
@@ -758,12 +782,15 @@ mod tests {
         ) -> Result<Option<VmValue>, VmError> {
             if capability == "mcp" && operation == "sample" {
                 let mut envelope: BTreeMap<String, VmValue> = BTreeMap::new();
-                envelope.insert("action".to_string(), VmValue::String(Rc::from("accept")));
+                envelope.insert(
+                    "action".to_string(),
+                    VmValue::String(std::sync::Arc::from("accept")),
+                );
                 envelope.insert(
                     "options".to_string(),
-                    VmValue::Dict(Rc::new(self.overrides.clone())),
+                    VmValue::Dict(std::sync::Arc::new(self.overrides.clone())),
                 );
-                Ok(Some(VmValue::Dict(Rc::new(envelope))))
+                Ok(Some(VmValue::Dict(std::sync::Arc::new(envelope))))
             } else {
                 Ok(None)
             }
@@ -801,8 +828,14 @@ mod tests {
         // Install an approving bridge that forces provider=mock so the
         // call resolves through MockProvider deterministically.
         let mut overrides: BTreeMap<String, VmValue> = BTreeMap::new();
-        overrides.insert("provider".to_string(), VmValue::String(Rc::from("mock")));
-        overrides.insert("model".to_string(), VmValue::String(Rc::from("mock-model")));
+        overrides.insert(
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("mock")),
+        );
+        overrides.insert(
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("mock-model")),
+        );
         crate::stdlib::host::set_host_call_bridge(Rc::new(ApproveSamplingBridge { overrides }));
 
         let request = json!({

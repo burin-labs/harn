@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs as stdfs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
 use harn_vm::agent_events::AgentEvent;
@@ -1586,7 +1586,7 @@ fn status_to_value(status: StagedStatus) -> VmValue {
     build_dict([
         (
             "pending_writes",
-            VmValue::List(Rc::new(
+            VmValue::List(Arc::new(
                 status
                     .pending_writes
                     .into_iter()
@@ -1609,17 +1609,17 @@ fn commit_result_to_value(result: CommitResult) -> VmValue {
     build_dict([
         (
             "committed_paths",
-            VmValue::List(Rc::new(
+            VmValue::List(Arc::new(
                 result
                     .committed_paths
                     .into_iter()
-                    .map(|path| VmValue::String(Rc::from(path)))
+                    .map(|path| VmValue::String(Arc::from(path)))
                     .collect(),
             )),
         ),
         (
             "failed_paths_with_reasons",
-            VmValue::List(Rc::new(
+            VmValue::List(Arc::new(
                 result
                     .failed_paths_with_reasons
                     .into_iter()
@@ -1635,11 +1635,11 @@ fn commit_result_to_value(result: CommitResult) -> VmValue {
 fn discard_result_to_value(result: DiscardResult) -> VmValue {
     build_dict([(
         "discarded_paths",
-        VmValue::List(Rc::new(
+        VmValue::List(Arc::new(
             result
                 .discarded_paths
                 .into_iter()
-                .map(|path| VmValue::String(Rc::from(path)))
+                .map(|path| VmValue::String(Arc::from(path)))
                 .collect(),
         )),
     )])

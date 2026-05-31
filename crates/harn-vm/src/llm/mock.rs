@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 
 use super::api::{LlmResult, ProviderTelemetry};
 use crate::orchestration::ToolCallRecord;
@@ -519,11 +518,11 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
         let mut dict = BTreeMap::new();
         dict.insert(
             "category".to_string(),
-            VmValue::String(Rc::from(err.category.as_str())),
+            VmValue::String(std::sync::Arc::from(err.category.as_str())),
         );
         dict.insert(
             "kind".to_string(),
-            VmValue::String(Rc::from(
+            VmValue::String(std::sync::Arc::from(
                 err.kind
                     .as_deref()
                     .unwrap_or_else(|| classified.kind.as_str()),
@@ -531,13 +530,16 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
         );
         dict.insert(
             "reason".to_string(),
-            VmValue::String(Rc::from(
+            VmValue::String(std::sync::Arc::from(
                 err.reason
                     .as_deref()
                     .unwrap_or_else(|| classified.reason.as_str()),
             )),
         );
-        dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
+        dict.insert(
+            "message".to_string(),
+            VmValue::String(std::sync::Arc::from(message)),
+        );
         if let Some(status) = err.status {
             dict.insert("status".to_string(), VmValue::Int(i64::from(status)));
         }
@@ -547,7 +549,7 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
                 VmValue::Int(retry_after_ms as i64),
             );
         }
-        return VmError::Thrown(VmValue::Dict(Rc::new(dict)));
+        return VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)));
     }
 
     VmError::CategorizedError {

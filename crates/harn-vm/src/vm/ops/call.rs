@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::chunk::{DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget};
 use crate::orchestration::HookEvent;
@@ -54,33 +54,39 @@ impl super::super::Vm {
         output: Option<VmValue>,
     ) -> VmValue {
         let mut step = std::collections::BTreeMap::new();
-        step.insert("name".to_string(), VmValue::String(Rc::from(step_name)));
+        step.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from(step_name)),
+        );
         step.insert(
             "function".to_string(),
-            VmValue::String(Rc::from(function_name)),
+            VmValue::String(std::sync::Arc::from(function_name)),
         );
-        step.insert("args".to_string(), VmValue::List(Rc::new(args.to_vec())));
+        step.insert(
+            "args".to_string(),
+            VmValue::List(std::sync::Arc::new(args.to_vec())),
+        );
         let mut payload = std::collections::BTreeMap::new();
         payload.insert(
             "event".to_string(),
-            VmValue::String(Rc::from(event.as_str())),
+            VmValue::String(std::sync::Arc::from(event.as_str())),
         );
         payload.insert(
             "target".to_string(),
-            VmValue::String(Rc::from(match persona {
+            VmValue::String(std::sync::Arc::from(match persona {
                 Some(persona) if !persona.is_empty() => format!("{persona}.{step_name}"),
                 _ => step_name.to_string(),
             })),
         );
         payload.insert(
             "persona".to_string(),
-            VmValue::String(Rc::from(persona.unwrap_or(""))),
+            VmValue::String(std::sync::Arc::from(persona.unwrap_or(""))),
         );
-        payload.insert("step".to_string(), VmValue::Dict(Rc::new(step)));
+        payload.insert("step".to_string(), VmValue::Dict(std::sync::Arc::new(step)));
         if let Some(output) = output {
             payload.insert("output".to_string(), output);
         }
-        VmValue::Dict(Rc::new(payload))
+        VmValue::Dict(std::sync::Arc::new(payload))
     }
 
     fn parse_step_pre_hook_result(
@@ -217,18 +223,26 @@ impl super::super::Vm {
     }
 
     fn step_hook_denied(step_name: &str, reason: String) -> VmError {
-        VmError::Thrown(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
-            (
-                "category".to_string(),
-                VmValue::String(Rc::from("hook_denied")),
-            ),
-            ("event".to_string(), VmValue::String(Rc::from("PreStep"))),
-            ("reason".to_string(), VmValue::String(Rc::from(reason))),
-            (
-                "step".to_string(),
-                VmValue::String(Rc::from(step_name.to_string())),
-            ),
-        ]))))
+        VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
+            std::collections::BTreeMap::from([
+                (
+                    "category".to_string(),
+                    VmValue::String(std::sync::Arc::from("hook_denied")),
+                ),
+                (
+                    "event".to_string(),
+                    VmValue::String(std::sync::Arc::from("PreStep")),
+                ),
+                (
+                    "reason".to_string(),
+                    VmValue::String(std::sync::Arc::from(reason)),
+                ),
+                (
+                    "step".to_string(),
+                    VmValue::String(std::sync::Arc::from(step_name.to_string())),
+                ),
+            ]),
+        )))
     }
 
     pub(crate) async fn run_step_post_hooks_for_current_frame(
@@ -312,7 +326,7 @@ impl super::super::Vm {
 
     async fn call_user_closure(
         &mut self,
-        closure: Rc<VmClosure>,
+        closure: Arc<VmClosure>,
         args: Vec<VmValue>,
     ) -> Result<(), VmError> {
         if closure.func.is_generator {
@@ -334,7 +348,7 @@ impl super::super::Vm {
     /// per-invocation heap allocation.
     fn call_lifecycle_hook<'a>(
         &'a mut self,
-        handler: &'a Rc<VmClosure>,
+        handler: &'a Arc<VmClosure>,
         payload: VmValue,
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
         Box::pin(async move {
@@ -553,14 +567,14 @@ impl super::super::Vm {
                                     self.stack.push(VmValue::enum_variant(
                                         "Result",
                                         "Err",
-                                        vec![VmValue::String(Rc::from(e.to_string()))],
+                                        vec![VmValue::String(std::sync::Arc::from(e.to_string()))],
                                     ));
                                 }
                                 Err(e) => {
                                     self.stack.push(VmValue::enum_variant(
                                         "Result",
                                         "Err",
-                                        vec![VmValue::String(Rc::from(format!("Task join error: {e}")))],
+                                        vec![VmValue::String(std::sync::Arc::from(format!("Task join error: {e}")))],
                                     ));
                                 }
                             }
@@ -570,7 +584,7 @@ impl super::super::Vm {
                             self.stack.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
-                                vec![VmValue::String(Rc::from(
+                                vec![VmValue::String(std::sync::Arc::from(
                                     "cancel_graceful: timeout, task forcefully aborted",
                                 ))],
                             ));
@@ -734,7 +748,7 @@ impl super::super::Vm {
         let closure = match self.try_cached_direct_call(cached_state.as_ref(), argc, callee_idx) {
             Some(closure) => closure,
             None => match self.stack.get(callee_idx)? {
-                VmValue::Closure(c) => Rc::clone(c),
+                VmValue::Closure(c) => Arc::clone(c),
                 _ => return None,
             },
         };
@@ -746,7 +760,7 @@ impl super::super::Vm {
             let next_entry = Self::next_direct_call_entry(
                 cached_state,
                 argc,
-                DirectCallTarget::Closure(Rc::clone(&closure)),
+                DirectCallTarget::Closure(Arc::clone(&closure)),
             );
             let frame = self.frames.last().unwrap();
             frame.chunk.set_inline_cache_entry(slot, next_entry);
@@ -768,7 +782,7 @@ impl super::super::Vm {
         cached_state: Option<&DirectCallState>,
         argc: usize,
         callee_idx: usize,
-    ) -> Option<Rc<VmClosure>> {
+    ) -> Option<Arc<VmClosure>> {
         let DirectCallState::Specialized {
             argc: cached_argc,
             target: DirectCallTarget::Closure(cached_closure),
@@ -783,10 +797,10 @@ impl super::super::Vm {
         let VmValue::Closure(callee) = self.stack.get(callee_idx)? else {
             return None;
         };
-        if !Rc::ptr_eq(cached_closure, callee) {
+        if !Arc::ptr_eq(cached_closure, callee) {
             return None;
         }
-        Some(Rc::clone(cached_closure))
+        Some(Arc::clone(cached_closure))
     }
 
     fn next_direct_call_entry(
@@ -977,7 +991,7 @@ impl super::super::Vm {
             let next_entry = Self::next_direct_call_entry(
                 cached_state,
                 argc,
-                DirectCallTarget::Closure(Rc::clone(&closure)),
+                DirectCallTarget::Closure(Arc::clone(&closure)),
             );
             let frame = self.frames.last().unwrap();
             frame.chunk.set_inline_cache_entry(slot, next_entry);
@@ -994,7 +1008,7 @@ impl super::super::Vm {
         cached_state: Option<&DirectCallState>,
         name: &str,
         argc: usize,
-    ) -> Option<Rc<VmClosure>> {
+    ) -> Option<Arc<VmClosure>> {
         let DirectCallState::Specialized {
             argc: cached_argc,
             target: DirectCallTarget::Closure(cached_closure),
@@ -1007,10 +1021,10 @@ impl super::super::Vm {
             return None;
         }
         let resolved = self.resolve_named_closure(name)?;
-        if !Rc::ptr_eq(cached_closure, &resolved) {
+        if !Arc::ptr_eq(cached_closure, &resolved) {
             return None;
         }
-        Some(Rc::clone(cached_closure))
+        Some(Arc::clone(cached_closure))
     }
 
     /// Async path for `Op::CallBuiltin`. Arguments stay on the VM stack
@@ -1024,7 +1038,7 @@ impl super::super::Vm {
             frame.ip += 2;
             let argc = frame.chunk.code[frame.ip] as usize;
             frame.ip += 1;
-            (Rc::clone(&frame.chunk), id, name_idx, argc)
+            (Arc::clone(&frame.chunk), id, name_idx, argc)
         };
         let name = Self::const_str(&chunk.constants[name_idx])?;
         let args_start = self.stack_arg_start(argc)?;
@@ -1039,7 +1053,7 @@ impl super::super::Vm {
             frame.ip += 8;
             let name_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), id, name_idx)
+            (Arc::clone(&frame.chunk), id, name_idx)
         };
         let name = Self::const_str(&chunk.constants[name_idx])?;
         let args_val = self.pop()?;
@@ -1060,7 +1074,7 @@ impl super::super::Vm {
     /// non-TCO path so lifecycle hooks still observe explicit boundaries.
     fn perform_tail_call_tco_from_stack_args(
         &mut self,
-        closure: Rc<VmClosure>,
+        closure: Arc<VmClosure>,
         args_start: usize,
         stack_truncate_to: usize,
     ) -> Result<(), VmError> {
@@ -1128,7 +1142,7 @@ impl super::super::Vm {
         self.iterators.truncate(saved_iterator_depth);
         self.stack.truncate(stack_base);
         self.frames.push(CallFrame {
-            chunk: Rc::clone(&closure.func.chunk),
+            chunk: Arc::clone(&closure.func.chunk),
             ip: 0,
             stack_base,
             saved_env: parent_env,
@@ -1176,8 +1190,8 @@ impl super::super::Vm {
         let argc = frame.chunk.code[frame.ip] as usize;
         let callee_idx = self.stack.len().checked_sub(argc + 1)?;
         let resolved = match self.stack.get(callee_idx)? {
-            VmValue::Closure(c) => Ok(Rc::clone(c)),
-            VmValue::String(name) => Err(Rc::clone(name)),
+            VmValue::Closure(c) => Ok(Arc::clone(c)),
+            VmValue::String(name) => Err(Arc::clone(name)),
             _ => return None,
         };
         let closure = match resolved {
@@ -1215,7 +1229,7 @@ impl super::super::Vm {
             .ok_or_else(|| VmError::Runtime("call callee stack underflow".to_string()))?;
 
         let resolved_closure = match &callee {
-            VmValue::Closure(cl) => Some(Rc::clone(cl)),
+            VmValue::Closure(cl) => Some(Arc::clone(cl)),
             VmValue::String(name) => self.resolve_named_closure(name),
             _ => None,
         };
@@ -1281,7 +1295,7 @@ impl super::super::Vm {
                 .last()
                 .and_then(|frame| frame.module_state.clone()),
         };
-        self.stack.push(VmValue::Closure(Rc::new(closure)));
+        self.stack.push(VmValue::Closure(Arc::new(closure)));
     }
 
     pub(super) async fn execute_method_call(&mut self, optional: bool) -> Result<(), VmError> {
@@ -1320,7 +1334,7 @@ impl super::super::Vm {
         } else {
             let chunk = {
                 let frame = self.frames.last().unwrap();
-                Rc::clone(&frame.chunk)
+                Arc::clone(&frame.chunk)
             };
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
             let cache_target = Self::method_cache_target(&obj, method, argc);
@@ -1474,7 +1488,7 @@ impl super::super::Vm {
         } else {
             let chunk = {
                 let frame = self.frames.last().unwrap();
-                Rc::clone(&frame.chunk)
+                Arc::clone(&frame.chunk)
             };
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
             let cache_target = Self::method_cache_target(&obj, method, args.len());

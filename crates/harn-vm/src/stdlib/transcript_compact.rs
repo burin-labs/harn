@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::llm::helpers::{
     extract_llm_options, is_transcript_value, new_transcript_with_events, transcript_asset_list,
@@ -68,7 +67,7 @@ async fn compact_transcript_impl(
         config.token_threshold = 0;
     }
 
-    let original_transcript = VmValue::Dict(Rc::new(transcript.clone()));
+    let original_transcript = VmValue::Dict(std::sync::Arc::new(transcript.clone()));
     let mut messages: Vec<serde_json::Value> = transcript_message_list(transcript)?
         .iter()
         .map(vm_value_to_json)
@@ -81,7 +80,7 @@ async fn compact_transcript_impl(
 
     let llm_opts = if config.compact_strategy == CompactStrategy::Llm {
         Some(extract_llm_options(&[
-            VmValue::String(Rc::from("")),
+            VmValue::String(std::sync::Arc::from("")),
             VmValue::Nil,
             raw_options.unwrap_or(VmValue::Nil),
         ])?)

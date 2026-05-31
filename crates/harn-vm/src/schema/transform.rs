@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::VmValue;
 
@@ -23,24 +22,29 @@ pub(crate) fn schema_partial_dict(schema: &BTreeMap<String, VmValue>) -> BTreeMa
             if let Some(child) = value.as_dict() {
                 next_props.insert(
                     key.clone(),
-                    VmValue::Dict(Rc::new(schema_partial_dict(child))),
+                    VmValue::Dict(std::sync::Arc::new(schema_partial_dict(child))),
                 );
             } else {
                 next_props.insert(key.clone(), value.clone());
             }
         }
-        partial.insert("properties".to_string(), VmValue::Dict(Rc::new(next_props)));
+        partial.insert(
+            "properties".to_string(),
+            VmValue::Dict(std::sync::Arc::new(next_props)),
+        );
     }
     if let Some(VmValue::List(branches)) = schema.get("union") {
         partial.insert(
             "union".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 branches
                     .iter()
                     .map(|branch| {
                         branch
                             .as_dict()
-                            .map(|dict| VmValue::Dict(Rc::new(schema_partial_dict(dict))))
+                            .map(|dict| {
+                                VmValue::Dict(std::sync::Arc::new(schema_partial_dict(dict)))
+                            })
                             .unwrap_or_else(|| branch.clone())
                     })
                     .collect(),
@@ -50,13 +54,15 @@ pub(crate) fn schema_partial_dict(schema: &BTreeMap<String, VmValue>) -> BTreeMa
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
         partial.insert(
             "all_of".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 branches
                     .iter()
                     .map(|branch| {
                         branch
                             .as_dict()
-                            .map(|dict| VmValue::Dict(Rc::new(schema_partial_dict(dict))))
+                            .map(|dict| {
+                                VmValue::Dict(std::sync::Arc::new(schema_partial_dict(dict)))
+                            })
                             .unwrap_or_else(|| branch.clone())
                     })
                     .collect(),
@@ -66,13 +72,13 @@ pub(crate) fn schema_partial_dict(schema: &BTreeMap<String, VmValue>) -> BTreeMa
     if let Some(VmValue::Dict(item_schema)) = schema.get("items") {
         partial.insert(
             "items".to_string(),
-            VmValue::Dict(Rc::new(schema_partial_dict(item_schema))),
+            VmValue::Dict(std::sync::Arc::new(schema_partial_dict(item_schema))),
         );
     }
     if let Some(VmValue::Dict(extra_schema)) = schema.get("additional_properties") {
         partial.insert(
             "additional_properties".to_string(),
-            VmValue::Dict(Rc::new(schema_partial_dict(extra_schema))),
+            VmValue::Dict(std::sync::Arc::new(schema_partial_dict(extra_schema))),
         );
     }
     partial
@@ -89,12 +95,15 @@ pub(crate) fn schema_pick_dict(
             .filter(|(key, _)| keys.contains(*key))
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
-        picked.insert("properties".to_string(), VmValue::Dict(Rc::new(filtered)));
+        picked.insert(
+            "properties".to_string(),
+            VmValue::Dict(std::sync::Arc::new(filtered)),
+        );
     }
     if let Some(VmValue::List(required)) = schema.get("required") {
         picked.insert(
             "required".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 required
                     .iter()
                     .filter(|value| keys.contains(&value.display()))
@@ -117,12 +126,15 @@ pub(crate) fn schema_omit_dict(
             .filter(|(key, _)| !keys.contains(*key))
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
-        kept.insert("properties".to_string(), VmValue::Dict(Rc::new(filtered)));
+        kept.insert(
+            "properties".to_string(),
+            VmValue::Dict(std::sync::Arc::new(filtered)),
+        );
     }
     if let Some(VmValue::List(required)) = schema.get("required") {
         kept.insert(
             "required".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 required
                     .iter()
                     .filter(|value| !keys.contains(&value.display()))

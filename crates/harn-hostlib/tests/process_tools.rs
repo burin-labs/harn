@@ -20,7 +20,6 @@
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use harn_hostlib::process::{
@@ -47,7 +46,7 @@ fn call(builtin: &str, request: BTreeMap<String, VmValue>) -> Result<VmValue, Ho
     let entry = registry
         .find(builtin)
         .unwrap_or_else(|| panic!("builtin {builtin} not registered"));
-    let arg = VmValue::Dict(Rc::new(request));
+    let arg = VmValue::Dict(Arc::new(request));
     (entry.handler)(&[arg])
 }
 
@@ -56,11 +55,11 @@ fn dict() -> BTreeMap<String, VmValue> {
 }
 
 fn vstr(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value))
+    VmValue::String(Arc::from(value))
 }
 
 fn vlist_str(values: &[&str]) -> VmValue {
-    VmValue::List(Rc::new(values.iter().map(|s| vstr(s)).collect()))
+    VmValue::List(Arc::new(values.iter().map(|s| vstr(s)).collect()))
 }
 
 fn require_dict(value: VmValue) -> BTreeMap<String, VmValue> {
@@ -253,7 +252,7 @@ fn run_command_supports_explicit_shell_mode() {
     let mut req = dict();
     req.insert("mode".into(), vstr("shell"));
     req.insert("command".into(), vstr("echo shell-ok"));
-    req.insert("shell".into(), VmValue::Dict(Rc::new(shell)));
+    req.insert("shell".into(), VmValue::Dict(Arc::new(shell)));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "stdout").trim(), "shell-ok");
 
@@ -304,7 +303,7 @@ fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
         "argv".into(),
         vlist_str(&["bash", "-c", "for i in $(seq 1 2000); do printf x; done"]),
     );
-    req.insert("capture".into(), VmValue::Dict(Rc::new(capture)));
+    req.insert("capture".into(), VmValue::Dict(Arc::new(capture)));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "stdout").len(), 8);
@@ -341,7 +340,7 @@ fn run_command_passes_env_when_supplied() {
         "argv".into(),
         vlist_str(&["bash", "-c", "echo $HOSTLIB_TEST_VAR"]),
     );
-    req.insert("env".into(), VmValue::Dict(Rc::new(env_dict)));
+    req.insert("env".into(), VmValue::Dict(Arc::new(env_dict)));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "stdout").trim(), "value-42");
 
@@ -365,7 +364,7 @@ fn run_command_missing_argv_returns_missing_parameter() {
 #[test]
 fn run_command_empty_argv_returns_invalid_parameter() {
     let mut req = dict();
-    req.insert("argv".into(), VmValue::List(Rc::new(Vec::new())));
+    req.insert("argv".into(), VmValue::List(Arc::new(Vec::new())));
     let err = call("hostlib_tools_run_command", req).unwrap_err();
     assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "argv"));
 }
@@ -382,7 +381,10 @@ fn run_command_rejects_nonexistent_cwd() {
 #[test]
 fn run_command_argv_must_be_strings() {
     let mut req = dict();
-    req.insert("argv".into(), VmValue::List(Rc::new(vec![VmValue::Int(1)])));
+    req.insert(
+        "argv".into(),
+        VmValue::List(Arc::new(vec![VmValue::Int(1)])),
+    );
     let err = call("hostlib_tools_run_command", req).unwrap_err();
     assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "argv"));
 }

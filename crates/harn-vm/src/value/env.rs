@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
-use std::{cell::RefCell, path::PathBuf};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::chunk::CompiledFunctionRef;
 
-use super::{VmError, VmValue};
+use super::{VmError, VmMutex, VmValue};
 
 /// A compiled closure value.
 #[derive(Debug, Clone)]
@@ -22,7 +22,7 @@ pub struct VmClosure {
     /// Shared, mutable module-level env: holds top-level `var` / `let`
     /// bindings declared at the module root (caches, counters, lazily
     /// initialized registries). All closures created from the same
-    /// module import point at the same `Rc<RefCell<VmEnv>>`, so a
+    /// module import point at the same shared mutable env, so a
     /// mutation inside one function is visible to every other function
     /// in that module on subsequent calls. `closure.env` still holds
     /// the per-closure lexical snapshot (captured function args from
@@ -34,18 +34,18 @@ pub struct VmClosure {
     pub module_state: Option<ModuleState>,
 }
 
-pub type ModuleFunctionRegistry = Rc<RefCell<BTreeMap<String, Rc<VmClosure>>>>;
-pub type ModuleState = Rc<RefCell<VmEnv>>;
+pub type ModuleFunctionRegistry = Arc<VmMutex<BTreeMap<String, Arc<VmClosure>>>>;
+pub type ModuleState = Arc<VmMutex<VmEnv>>;
 
 /// VM environment for variable storage.
 ///
-/// `Scope::vars` is wrapped in `Rc` so that `VmEnv::clone()` is cheap
-/// (Rc bump per scope) instead of a deep walk of every BTreeMap. The
+/// `Scope::vars` is wrapped in `Arc` so that `VmEnv::clone()` is cheap
+/// (Arc bump per scope) instead of a deep walk of every BTreeMap. The
 /// VM saves and restores `env` snapshots on every function call, and
 /// the call hot path dominates orchestration-heavy workloads (e.g.
-/// burin-code's PreToolUse hooks). With `Rc<BTreeMap<..>>` the
-/// per-scope clone collapses to an atomic-less refcount bump, and
-/// `Rc::make_mut` only does a deep copy when the scope is still shared
+/// burin-code's PreToolUse hooks). With `Arc<BTreeMap<..>>` the
+/// per-scope clone collapses to a refcount bump, and `Arc::make_mut`
+/// only does a deep copy when the scope is still shared
 /// with a saved snapshot — which is exactly the case where the caller
 /// would have needed an isolated copy anyway. Reads still go through
 /// the `BTreeMap` directly via `Deref`.
@@ -56,14 +56,14 @@ pub struct VmEnv {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Scope {
-    pub(crate) vars: Rc<BTreeMap<String, (VmValue, bool)>>, // (value, mutable)
+    pub(crate) vars: Arc<BTreeMap<String, (VmValue, bool)>>, // (value, mutable)
 }
 
 impl Scope {
     #[inline]
     fn empty() -> Self {
         Self {
-            vars: Rc::new(BTreeMap::new()),
+            vars: Arc::new(BTreeMap::new()),
         }
     }
 }
@@ -127,7 +127,7 @@ impl VmEnv {
                     )));
                 }
             }
-            Rc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable));
+            Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable));
         }
         Ok(())
     }
@@ -148,7 +148,7 @@ impl VmEnv {
                 if !mutable {
                     return Err(VmError::ImmutableAssignment(name.to_string()));
                 }
-                Rc::make_mut(&mut scope.vars).insert(name.to_string(), (value, true));
+                Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, true));
                 return Ok(());
             }
         }
@@ -166,7 +166,7 @@ impl VmEnv {
         for scope in self.scopes.iter_mut().rev() {
             if let Some((_, mutable)) = scope.vars.get(name) {
                 let mutable = *mutable;
-                Rc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable));
+                Arc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable));
                 return Ok(());
             }
         }

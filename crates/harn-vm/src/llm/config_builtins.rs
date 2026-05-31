@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
@@ -95,9 +94,9 @@ fn provider_capabilities_clear_builtin(
 )]
 fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(Rc::from(llm_config::infer_provider(
-        &model_id,
-    ))))
+    Ok(VmValue::String(std::sync::Arc::from(
+        llm_config::infer_provider(&model_id),
+    )))
 }
 
 /// Return the configured capability tier for a model identifier.
@@ -107,7 +106,9 @@ fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 )]
 fn llm_model_tier_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(Rc::from(llm_config::model_tier(&model_id))))
+    Ok(VmValue::String(std::sync::Arc::from(
+        llm_config::model_tier(&model_id),
+    )))
 }
 
 /// Resolve a model alias or selector to full model metadata.
@@ -163,7 +164,7 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         ));
     }
     Ok(llm_config::qc_default_model(&provider)
-        .map(|model| VmValue::String(Rc::from(model)))
+        .map(|model| VmValue::String(std::sync::Arc::from(model)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -184,7 +185,7 @@ fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     for (k, v) in &params {
         dict.insert(k.clone(), toml_value_to_vm_value(v));
     }
-    Ok(VmValue::Dict(Rc::new(dict)))
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 /// Return the fully-merged llm_call options for `opts`. Requires opts.model.
@@ -226,10 +227,13 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
     }
     out.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(final_provider)),
+        VmValue::String(std::sync::Arc::from(final_provider)),
     );
-    out.insert("model".to_string(), VmValue::String(Rc::from(resolved_id)));
-    Ok(VmValue::Dict(Rc::new(out)))
+    out.insert(
+        "model".to_string(),
+        VmValue::String(std::sync::Arc::from(resolved_id)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 /// Apply Harn's provider-aware reasoning_policy/thinking_policy defaults to an llm_call option dict.
@@ -245,26 +249,26 @@ fn llm_apply_reasoning_policy_builtin(
         VmError::Runtime("llm_apply_reasoning_policy: opts must be a dict".to_string())
     })?;
     let out = super::reasoning_policy::apply_policy_to_vm_options(opts)?;
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
     match value {
-        toml::Value::String(s) => VmValue::String(Rc::from(s.as_str())),
+        toml::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
         toml::Value::Integer(i) => VmValue::Int(*i),
         toml::Value::Float(f) => VmValue::Float(*f),
         toml::Value::Boolean(b) => VmValue::Bool(*b),
-        toml::Value::Datetime(dt) => VmValue::String(Rc::from(dt.to_string())),
+        toml::Value::Datetime(dt) => VmValue::String(std::sync::Arc::from(dt.to_string())),
         toml::Value::Array(items) => {
             let list: Vec<VmValue> = items.iter().map(toml_value_to_vm_value).collect();
-            VmValue::List(Rc::new(list))
+            VmValue::List(std::sync::Arc::new(list))
         }
         toml::Value::Table(table) => {
             let mut dict = BTreeMap::new();
             for (k, v) in table {
                 dict.insert(k.clone(), toml_value_to_vm_value(v));
             }
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         }
     }
 }
@@ -298,13 +302,19 @@ fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     };
 
     let mut dict = BTreeMap::new();
-    dict.insert("id".to_string(), VmValue::String(Rc::from(id.clone())));
-    dict.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
+    dict.insert(
+        "id".to_string(),
+        VmValue::String(std::sync::Arc::from(id.clone())),
+    );
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(std::sync::Arc::from(provider)),
+    );
     dict.insert(
         "tier".to_string(),
-        VmValue::String(Rc::from(llm_config::model_tier(&id))),
+        VmValue::String(std::sync::Arc::from(llm_config::model_tier(&id))),
     );
-    Ok(VmValue::Dict(Rc::new(dict)))
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 /// List all configured and runtime-registered LLM provider names.
@@ -316,9 +326,9 @@ fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     all.extend(registry_names);
     let list: Vec<VmValue> = all
         .into_iter()
-        .map(|n| VmValue::String(Rc::from(n)))
+        .map(|n| VmValue::String(std::sync::Arc::from(n)))
         .collect();
-    Ok(VmValue::List(Rc::new(list)))
+    Ok(VmValue::List(std::sync::Arc::new(list)))
 }
 
 /// Register a custom OpenAI-compatible provider name for runtime dispatch.
@@ -342,7 +352,7 @@ pub(crate) fn llm_catalog_value() -> VmValue {
         .into_iter()
         .map(|(id, model)| model_def_to_vm_value(&id, &model))
         .collect();
-    VmValue::List(Rc::new(entries))
+    VmValue::List(std::sync::Arc::new(entries))
 }
 
 /// Return the full configured model catalog as a list of dicts:
@@ -389,7 +399,10 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
     let mut entries = Vec::with_capacity(names.len());
     for name in names {
         let mut entry = BTreeMap::new();
-        entry.insert("name".to_string(), VmValue::String(Rc::from(name.clone())));
+        entry.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from(name.clone())),
+        );
 
         // Providers with `auth_style = "none"` (e.g. local Ollama) and
         // the multi-step auth providers (Bedrock/Vertex) report
@@ -421,11 +434,11 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
         entry.insert("available".to_string(), VmValue::Bool(available));
         entry.insert(
             "credential_status".to_string(),
-            VmValue::String(Rc::from(credential_status)),
+            VmValue::String(std::sync::Arc::from(credential_status)),
         );
-        entries.push(VmValue::Dict(Rc::new(entry)));
+        entries.push(VmValue::Dict(std::sync::Arc::new(entry)));
     }
-    VmValue::List(Rc::new(entries))
+    VmValue::List(std::sync::Arc::new(entries))
 }
 
 pub(crate) fn parse_catalog_refresh_options(
@@ -486,7 +499,7 @@ fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
                     dict.insert(name.clone(), provider_def_to_vm_value(Some(&name), &pdef));
                 }
             }
-            Ok(VmValue::Dict(Rc::new(dict)))
+            Ok(VmValue::Dict(std::sync::Arc::new(dict)))
         }
     }
 }
@@ -666,31 +679,34 @@ fn provider_def_to_vm_value(
     if let Some(display_name) = &pdef.display_name {
         dict.insert(
             "display_name".to_string(),
-            VmValue::String(Rc::from(display_name.as_str())),
+            VmValue::String(std::sync::Arc::from(display_name.as_str())),
         );
     }
     if let Some(icon) = &pdef.icon {
-        dict.insert("icon".to_string(), VmValue::String(Rc::from(icon.as_str())));
+        dict.insert(
+            "icon".to_string(),
+            VmValue::String(std::sync::Arc::from(icon.as_str())),
+        );
     }
     if let Some(protocol) = &pdef.protocol {
         dict.insert(
             "protocol".to_string(),
-            VmValue::String(Rc::from(protocol.as_str())),
+            VmValue::String(std::sync::Arc::from(protocol.as_str())),
         );
     }
     dict.insert(
         "base_url".to_string(),
-        VmValue::String(Rc::from(pdef.base_url.as_str())),
+        VmValue::String(std::sync::Arc::from(pdef.base_url.as_str())),
     );
     if let Some(base_url_env) = &pdef.base_url_env {
         dict.insert(
             "base_url_env".to_string(),
-            VmValue::String(Rc::from(base_url_env.as_str())),
+            VmValue::String(std::sync::Arc::from(base_url_env.as_str())),
         );
     }
     dict.insert(
         "auth_style".to_string(),
-        VmValue::String(Rc::from(pdef.auth_style.as_str())),
+        VmValue::String(std::sync::Arc::from(pdef.auth_style.as_str())),
     );
     dict.insert(
         "auth_envs".to_string(),
@@ -706,18 +722,18 @@ fn provider_def_to_vm_value(
     );
     dict.insert(
         "chat_endpoint".to_string(),
-        VmValue::String(Rc::from(pdef.chat_endpoint.as_str())),
+        VmValue::String(std::sync::Arc::from(pdef.chat_endpoint.as_str())),
     );
     if let Some(endpoint) = &pdef.completion_endpoint {
         dict.insert(
             "completion_endpoint".to_string(),
-            VmValue::String(Rc::from(endpoint.as_str())),
+            VmValue::String(std::sync::Arc::from(endpoint.as_str())),
         );
     }
     if let Some(command) = &pdef.command {
         dict.insert(
             "command".to_string(),
-            VmValue::String(Rc::from(command.as_str())),
+            VmValue::String(std::sync::Arc::from(command.as_str())),
         );
     }
     if !pdef.args.is_empty() {
@@ -733,7 +749,10 @@ fn provider_def_to_vm_value(
         );
     }
     if let Some(cwd) = &pdef.cwd {
-        dict.insert("cwd".to_string(), VmValue::String(Rc::from(cwd.as_str())));
+        dict.insert(
+            "cwd".to_string(),
+            VmValue::String(std::sync::Arc::from(cwd.as_str())),
+        );
     }
     if !pdef.mcp_servers.is_empty() {
         dict.insert(
@@ -744,23 +763,29 @@ fn provider_def_to_vm_value(
     if let Some(header) = &pdef.auth_header {
         dict.insert(
             "auth_header".to_string(),
-            VmValue::String(Rc::from(header.as_str())),
+            VmValue::String(std::sync::Arc::from(header.as_str())),
         );
     }
     if !pdef.extra_headers.is_empty() {
         let mut headers = BTreeMap::new();
         for (k, v) in &pdef.extra_headers {
-            headers.insert(k.clone(), VmValue::String(Rc::from(v.as_str())));
+            headers.insert(k.clone(), VmValue::String(std::sync::Arc::from(v.as_str())));
         }
-        dict.insert("extra_headers".to_string(), VmValue::Dict(Rc::new(headers)));
+        dict.insert(
+            "extra_headers".to_string(),
+            VmValue::Dict(std::sync::Arc::new(headers)),
+        );
     }
     if !pdef.features.is_empty() {
         let features: Vec<VmValue> = pdef
             .features
             .iter()
-            .map(|f| VmValue::String(Rc::from(f.as_str())))
+            .map(|f| VmValue::String(std::sync::Arc::from(f.as_str())))
             .collect();
-        dict.insert("features".to_string(), VmValue::List(Rc::new(features)));
+        dict.insert(
+            "features".to_string(),
+            VmValue::List(std::sync::Arc::new(features)),
+        );
     }
     if let Some(rpm) = pdef.rpm {
         dict.insert("rpm".to_string(), VmValue::Int(rpm as i64));
@@ -774,14 +799,14 @@ fn provider_def_to_vm_value(
     if let Some(latency) = pdef.latency_p50_ms {
         dict.insert("latency_p50_ms".to_string(), VmValue::Int(latency as i64));
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn string_list_to_vm_value(items: Vec<String>) -> VmValue {
-    VmValue::List(Rc::new(
+    VmValue::List(std::sync::Arc::new(
         items
             .into_iter()
-            .map(|item| VmValue::String(Rc::from(item)))
+            .map(|item| VmValue::String(std::sync::Arc::from(item)))
             .collect(),
     ))
 }
@@ -790,29 +815,29 @@ fn resolved_model_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert(
         "id".to_string(),
-        VmValue::String(Rc::from(resolved.id.as_str())),
+        VmValue::String(std::sync::Arc::from(resolved.id.as_str())),
     );
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(resolved.provider.as_str())),
+        VmValue::String(std::sync::Arc::from(resolved.provider.as_str())),
     );
     dict.insert(
         "alias".to_string(),
         resolved
             .alias
             .as_deref()
-            .map(|alias| VmValue::String(Rc::from(alias)))
+            .map(|alias| VmValue::String(std::sync::Arc::from(alias)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "tool_format".to_string(),
-        VmValue::String(Rc::from(resolved.tool_format.as_str())),
+        VmValue::String(std::sync::Arc::from(resolved.tool_format.as_str())),
     );
     dict.insert(
         "tier".to_string(),
-        VmValue::String(Rc::from(resolved.tier.as_str())),
+        VmValue::String(std::sync::Arc::from(resolved.tier.as_str())),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
@@ -834,14 +859,14 @@ fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     dict.insert(
         "qc_default_model".to_string(),
         llm_config::qc_default_model(&resolved.provider)
-            .map(|model| VmValue::String(Rc::from(model)))
+            .map(|model| VmValue::String(std::sync::Arc::from(model)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "auth_available".to_string(),
         VmValue::Bool(llm_config::provider_key_available(&resolved.provider)),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 pub(crate) fn capabilities_to_vm_value(
@@ -852,20 +877,20 @@ pub(crate) fn capabilities_to_vm_value(
     let mut dict = BTreeMap::new();
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(provider.to_string())),
+        VmValue::String(std::sync::Arc::from(provider.to_string())),
     );
     dict.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(model.to_string())),
+        VmValue::String(std::sync::Arc::from(model.to_string())),
     );
     dict.insert("native_tools".to_string(), VmValue::Bool(caps.native_tools));
     dict.insert(
         "message_wire_format".to_string(),
-        VmValue::String(Rc::from(caps.message_wire_format.clone())),
+        VmValue::String(std::sync::Arc::from(caps.message_wire_format.clone())),
     );
     dict.insert(
         "native_tool_wire_format".to_string(),
-        VmValue::String(Rc::from(caps.native_tool_wire_format.clone())),
+        VmValue::String(std::sync::Arc::from(caps.native_tool_wire_format.clone())),
     );
     dict.insert(
         "text_tool_wire_format_supported".to_string(),
@@ -875,21 +900,21 @@ pub(crate) fn capabilities_to_vm_value(
         "preferred_tool_format".to_string(),
         caps.preferred_tool_format
             .as_deref()
-            .map(|format| VmValue::String(Rc::from(format)))
+            .map(|format| VmValue::String(std::sync::Arc::from(format)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "tool_mode_parity".to_string(),
         caps.tool_mode_parity
             .as_deref()
-            .map(|status| VmValue::String(Rc::from(status)))
+            .map(|status| VmValue::String(std::sync::Arc::from(status)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "tool_mode_parity_notes".to_string(),
         caps.tool_mode_parity_notes
             .as_deref()
-            .map(|notes| VmValue::String(Rc::from(notes)))
+            .map(|notes| VmValue::String(std::sync::Arc::from(notes)))
             .unwrap_or(VmValue::Nil),
     );
     // Mirrors the VM's tool-capability gate at llm_config::effective_model_capability_tags:
@@ -928,7 +953,7 @@ pub(crate) fn capabilities_to_vm_value(
         "tool_approval_policy".to_string(),
         caps.tool_approval_policy
             .as_deref()
-            .map(|value| VmValue::String(Rc::from(value)))
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -951,7 +976,7 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.insert(
         "structured_output_mode".to_string(),
-        VmValue::String(Rc::from(caps.structured_output_mode.as_str())),
+        VmValue::String(std::sync::Arc::from(caps.structured_output_mode.as_str())),
     );
     dict.insert(
         "supports_assistant_prefill".to_string(),
@@ -971,7 +996,7 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.insert(
         "thinking_block_style".to_string(),
-        VmValue::String(Rc::from(caps.thinking_block_style.as_str())),
+        VmValue::String(std::sync::Arc::from(caps.thinking_block_style.as_str())),
     );
     dict.insert(
         "thinking_modes".to_string(),
@@ -999,21 +1024,21 @@ pub(crate) fn capabilities_to_vm_value(
         "file_upload_wire_format".to_string(),
         caps.file_upload_wire_format
             .as_ref()
-            .map(|value| VmValue::String(Rc::from(value.clone())))
+            .map(|value| VmValue::String(std::sync::Arc::from(value.clone())))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "structured_output".to_string(),
         caps.structured_output
             .as_deref()
-            .map(|value| VmValue::String(Rc::from(value)))
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "json_schema".to_string(),
         caps.json_schema
             .as_deref()
-            .map(|value| VmValue::String(Rc::from(value)))
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1026,7 +1051,7 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.insert(
         "structured_output_mode".to_string(),
-        VmValue::String(Rc::from(caps.structured_output_mode.as_str())),
+        VmValue::String(std::sync::Arc::from(caps.structured_output_mode.as_str())),
     );
     dict.insert(
         "supports_assistant_prefill".to_string(),
@@ -1042,7 +1067,7 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.insert(
         "thinking_block_style".to_string(),
-        VmValue::String(Rc::from(caps.thinking_block_style.as_str())),
+        VmValue::String(std::sync::Arc::from(caps.thinking_block_style.as_str())),
     );
     dict.insert(
         "preserve_thinking".to_string(),
@@ -1064,7 +1089,7 @@ pub(crate) fn capabilities_to_vm_value(
         "reasoning_wire_format".to_string(),
         caps.reasoning_wire_format
             .as_ref()
-            .map(|value| VmValue::String(Rc::from(value.clone())))
+            .map(|value| VmValue::String(std::sync::Arc::from(value.clone())))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1102,18 +1127,18 @@ pub(crate) fn capabilities_to_vm_value(
         let mut fast = BTreeMap::new();
         fast.insert(
             "param".to_string(),
-            VmValue::String(Rc::from(fast_mode.param.as_str())),
+            VmValue::String(std::sync::Arc::from(fast_mode.param.as_str())),
         );
         fast.insert(
             "value".to_string(),
-            VmValue::String(Rc::from(fast_mode.value.as_str())),
+            VmValue::String(std::sync::Arc::from(fast_mode.value.as_str())),
         );
         fast.insert(
             "status".to_string(),
             fast_mode
                 .status
                 .as_deref()
-                .map(|s| VmValue::String(Rc::from(s)))
+                .map(|s| VmValue::String(std::sync::Arc::from(s)))
                 .unwrap_or(VmValue::Nil),
         );
         fast.insert(
@@ -1121,7 +1146,7 @@ pub(crate) fn capabilities_to_vm_value(
             fast_mode
                 .beta_header
                 .as_deref()
-                .map(|s| VmValue::String(Rc::from(s)))
+                .map(|s| VmValue::String(std::sync::Arc::from(s)))
                 .unwrap_or(VmValue::Nil),
         );
         fast.insert(
@@ -1131,21 +1156,27 @@ pub(crate) fn capabilities_to_vm_value(
                 .map(VmValue::Float)
                 .unwrap_or(VmValue::Nil),
         );
-        dict.insert("fast_mode".to_string(), VmValue::Dict(Rc::new(fast)));
+        dict.insert(
+            "fast_mode".to_string(),
+            VmValue::Dict(std::sync::Arc::new(fast)),
+        );
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("id".to_string(), VmValue::String(Rc::from(id.to_string())));
+    dict.insert(
+        "id".to_string(),
+        VmValue::String(std::sync::Arc::from(id.to_string())),
+    );
     dict.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(model.name.as_str())),
+        VmValue::String(std::sync::Arc::from(model.name.as_str())),
     );
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(model.provider.as_str())),
+        VmValue::String(std::sync::Arc::from(model.provider.as_str())),
     );
     dict.insert(
         "context_window".to_string(),
@@ -1183,7 +1214,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .deprecation_note
             .as_deref()
-            .map(|note| VmValue::String(Rc::from(note)))
+            .map(|note| VmValue::String(std::sync::Arc::from(note)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1191,7 +1222,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .superseded_by
             .as_deref()
-            .map(|target| VmValue::String(Rc::from(target)))
+            .map(|target| VmValue::String(std::sync::Arc::from(target)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1200,11 +1231,11 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
     );
     dict.insert(
         "availability".to_string(),
-        VmValue::String(Rc::from(model.availability.as_str())),
+        VmValue::String(std::sync::Arc::from(model.availability.as_str())),
     );
     dict.insert(
         "tier".to_string(),
-        VmValue::String(Rc::from(llm_config::model_tier(id))),
+        VmValue::String(std::sync::Arc::from(llm_config::model_tier(id))),
     );
     dict.insert(
         "open_weight".to_string(),
@@ -1219,7 +1250,10 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         .iter()
         .map(|(key, value)| (key.clone(), VmValue::Float(*value)))
         .collect();
-    dict.insert("benchmarks".to_string(), VmValue::Dict(Rc::new(benchmarks)));
+    dict.insert(
+        "benchmarks".to_string(),
+        VmValue::Dict(std::sync::Arc::new(benchmarks)),
+    );
     dict.insert(
         "fast_mode".to_string(),
         model
@@ -1228,7 +1262,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .map(fast_mode_to_vm_value)
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
@@ -1255,24 +1289,24 @@ fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
             .map(VmValue::Float)
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert(
         "param".to_string(),
-        VmValue::String(Rc::from(fast.param.as_str())),
+        VmValue::String(std::sync::Arc::from(fast.param.as_str())),
     );
     dict.insert(
         "value".to_string(),
-        VmValue::String(Rc::from(fast.value.as_str())),
+        VmValue::String(std::sync::Arc::from(fast.value.as_str())),
     );
     dict.insert(
         "beta_header".to_string(),
         fast.beta_header
             .as_deref()
-            .map(|header| VmValue::String(Rc::from(header)))
+            .map(|header| VmValue::String(std::sync::Arc::from(header)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1285,7 +1319,7 @@ fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
         "status".to_string(),
         fast.status
             .as_deref()
-            .map(|status| VmValue::String(Rc::from(status)))
+            .map(|status| VmValue::String(std::sync::Arc::from(status)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1299,10 +1333,10 @@ fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
         "note".to_string(),
         fast.note
             .as_deref()
-            .map(|note| VmValue::String(Rc::from(note)))
+            .map(|note| VmValue::String(std::sync::Arc::from(note)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn provider_catalog_to_vm_value() -> VmValue {
@@ -1315,11 +1349,17 @@ fn provider_catalog_to_vm_value() -> VmValue {
                 VmValue::Dict(provider) => provider.as_ref().clone(),
                 _ => unreachable!("provider_def_to_vm_value returns a dict"),
             };
-            provider.insert("name".to_string(), VmValue::String(Rc::from(name.clone())));
-            providers.push(VmValue::Dict(Rc::new(provider)));
+            provider.insert(
+                "name".to_string(),
+                VmValue::String(std::sync::Arc::from(name.clone())),
+            );
+            providers.push(VmValue::Dict(std::sync::Arc::new(provider)));
         }
     }
-    dict.insert("providers".to_string(), VmValue::List(Rc::new(providers)));
+    dict.insert(
+        "providers".to_string(),
+        VmValue::List(std::sync::Arc::new(providers)),
+    );
     dict.insert(
         "known_model_names".to_string(),
         string_list_to_vm_value(llm_config::known_model_names()),
@@ -1332,47 +1372,53 @@ fn provider_catalog_to_vm_value() -> VmValue {
         .into_iter()
         .map(|(name, alias)| alias_def_to_vm_value(&name, &alias))
         .collect();
-    dict.insert("aliases".to_string(), VmValue::List(Rc::new(aliases)));
+    dict.insert(
+        "aliases".to_string(),
+        VmValue::List(std::sync::Arc::new(aliases)),
+    );
     let models = llm_config::model_catalog_entries()
         .into_iter()
         .map(|(id, model)| model_def_to_vm_value(&id, &model))
         .collect();
-    dict.insert("models".to_string(), VmValue::List(Rc::new(models)));
+    dict.insert(
+        "models".to_string(),
+        VmValue::List(std::sync::Arc::new(models)),
+    );
     let qc_defaults = llm_config::qc_defaults()
         .into_iter()
-        .map(|(provider, model)| (provider, VmValue::String(Rc::from(model))))
+        .map(|(provider, model)| (provider, VmValue::String(std::sync::Arc::from(model))))
         .collect();
     dict.insert(
         "qc_defaults".to_string(),
-        VmValue::Dict(Rc::new(qc_defaults)),
+        VmValue::Dict(std::sync::Arc::new(qc_defaults)),
     );
 
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn alias_def_to_vm_value(name: &str, alias: &llm_config::AliasDef) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(name.to_string())),
+        VmValue::String(std::sync::Arc::from(name.to_string())),
     );
     dict.insert(
         "id".to_string(),
-        VmValue::String(Rc::from(alias.id.as_str())),
+        VmValue::String(std::sync::Arc::from(alias.id.as_str())),
     );
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(alias.provider.as_str())),
+        VmValue::String(std::sync::Arc::from(alias.provider.as_str())),
     );
     dict.insert(
         "tool_format".to_string(),
         alias
             .tool_format
             .as_deref()
-            .map(|format| VmValue::String(Rc::from(format)))
+            .map(|format| VmValue::String(std::sync::Arc::from(format)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn healthcheck_model_arg(args: &[VmValue]) -> Option<String> {
@@ -1401,22 +1447,22 @@ fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
     let mut meta = BTreeMap::new();
     meta.insert(
         "category".to_string(),
-        VmValue::String(Rc::from(readiness.category.as_str())),
+        VmValue::String(std::sync::Arc::from(readiness.category.as_str())),
     );
     meta.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(readiness.provider.as_str())),
+        VmValue::String(std::sync::Arc::from(readiness.provider.as_str())),
     );
     meta.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(readiness.model.as_str())),
+        VmValue::String(std::sync::Arc::from(readiness.model.as_str())),
     );
     meta.insert(
         "url".to_string(),
         readiness
             .url
             .as_ref()
-            .map(|url| VmValue::String(Rc::from(url.as_str())))
+            .map(|url| VmValue::String(std::sync::Arc::from(url.as_str())))
             .unwrap_or(VmValue::Nil),
     );
     meta.insert(
@@ -1428,11 +1474,11 @@ fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
     );
     meta.insert(
         "available_models".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             readiness
                 .available_models
                 .iter()
-                .map(|model| VmValue::String(Rc::from(model.as_str())))
+                .map(|model| VmValue::String(std::sync::Arc::from(model.as_str())))
                 .collect(),
         )),
     );
@@ -1447,9 +1493,15 @@ fn healthcheck_result_with_meta(
 ) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert("valid".to_string(), VmValue::Bool(valid));
-    dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
-    dict.insert("metadata".to_string(), VmValue::Dict(Rc::new(meta)));
-    VmValue::Dict(Rc::new(dict))
+    dict.insert(
+        "message".to_string(),
+        VmValue::String(std::sync::Arc::from(message)),
+    );
+    dict.insert(
+        "metadata".to_string(),
+        VmValue::Dict(std::sync::Arc::new(meta)),
+    );
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 #[cfg(test)]
@@ -1461,14 +1513,14 @@ mod tests {
         for (k, v) in entries {
             map.insert(k.to_string(), v);
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(std::sync::Arc::new(map))
     }
 
     #[test]
     fn test_llm_model_defaults_returns_empty_for_unknown_model() {
         llm_config::clear_user_overrides();
         let mut out = String::new();
-        let args = vec![VmValue::String(Rc::from(
+        let args = vec![VmValue::String(std::sync::Arc::from(
             "definitely-not-a-real-model-id-zzzzz",
         ))];
         let result = llm_model_defaults_builtin(&args, &mut out).expect("builtin returned error");
@@ -1516,7 +1568,7 @@ mod tests {
         let args = vec![build_dict(vec![
             (
                 "model",
-                VmValue::String(Rc::from("fake-resolved-options-model")),
+                VmValue::String(std::sync::Arc::from("fake-resolved-options-model")),
             ),
             ("temperature", VmValue::Float(0.9)),
         ])];
@@ -1549,7 +1601,7 @@ mod tests {
         let mut out = String::new();
         let args = vec![build_dict(vec![(
             "model",
-            VmValue::String(Rc::from("fake-fill-defaults-model")),
+            VmValue::String(std::sync::Arc::from("fake-fill-defaults-model")),
         )])];
         let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
         let dict = result.as_dict().expect("expected dict");
@@ -1573,7 +1625,7 @@ mod tests {
         let mut out = String::new();
         let args = vec![build_dict(vec![(
             "model",
-            VmValue::String(Rc::from("claude-sonnet-4-20250514")),
+            VmValue::String(std::sync::Arc::from("claude-sonnet-4-20250514")),
         )])];
         let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
         let dict = result.as_dict().expect("expected dict");
@@ -1597,8 +1649,8 @@ mod tests {
         super::super::capabilities::clear_user_overrides();
         let mut out = String::new();
         let args = vec![
-            VmValue::String(Rc::from("ollama")),
-            VmValue::String(Rc::from("qwen3.6:35b-a3b-coding-nvfp4")),
+            VmValue::String(std::sync::Arc::from("ollama")),
+            VmValue::String(std::sync::Arc::from("qwen3.6:35b-a3b-coding-nvfp4")),
         ];
         let result =
             provider_capabilities_builtin(&args, &mut out).expect("builtin returned error");
@@ -1632,8 +1684,8 @@ mod tests {
         // Opus 4.8 advertises a usable (research-preview) fast tier.
         let opus = provider_capabilities_builtin(
             &[
-                VmValue::String(Rc::from("anthropic")),
-                VmValue::String(Rc::from("claude-opus-4-8")),
+                VmValue::String(std::sync::Arc::from("anthropic")),
+                VmValue::String(std::sync::Arc::from("claude-opus-4-8")),
             ],
             &mut out,
         )
@@ -1658,8 +1710,8 @@ mod tests {
         // A model with no fast tier reports false and omits the dict.
         let gpt4o = provider_capabilities_builtin(
             &[
-                VmValue::String(Rc::from("openai")),
-                VmValue::String(Rc::from("gpt-4o")),
+                VmValue::String(std::sync::Arc::from("openai")),
+                VmValue::String(std::sync::Arc::from("gpt-4o")),
             ],
             &mut out,
         )
@@ -1677,8 +1729,8 @@ mod tests {
         super::super::capabilities::clear_user_overrides();
         let mut out = String::new();
         let args = vec![
-            VmValue::String(Rc::from("anthropic")),
-            VmValue::String(Rc::from("claude-opus-4-7")),
+            VmValue::String(std::sync::Arc::from("anthropic")),
+            VmValue::String(std::sync::Arc::from("claude-opus-4-7")),
         ];
         let result =
             provider_capabilities_builtin(&args, &mut out).expect("builtin returned error");

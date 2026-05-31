@@ -27,7 +27,6 @@
 //!     `session_id`.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use serde_json::Value as JsonValue;
 
@@ -870,7 +869,7 @@ fn build_snapshot_asset(
     let mut asset_metadata = BTreeMap::from([
         (
             "strategy".to_string(),
-            VmValue::String(Rc::from(compact_strategy_name(engine_strategy))),
+            VmValue::String(std::sync::Arc::from(compact_strategy_name(engine_strategy))),
         ),
         (
             "archived_messages".to_string(),
@@ -886,7 +885,7 @@ fn build_snapshot_asset(
         ),
         (
             "instruction_mode".to_string(),
-            VmValue::String(Rc::from(config.policy.instruction_mode())),
+            VmValue::String(std::sync::Arc::from(config.policy.instruction_mode())),
         ),
     ]);
     if let Some(policy_json) = config.policy.metadata_json() {
@@ -898,33 +897,33 @@ fn build_snapshot_asset(
     if let Some(source) = config.policy.instruction_source() {
         asset_metadata.insert(
             "instruction_source".to_string(),
-            VmValue::String(Rc::from(source)),
+            VmValue::String(std::sync::Arc::from(source)),
         );
     }
-    let asset = VmValue::Dict(Rc::new(BTreeMap::from([
+    let asset = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         (
             "id".to_string(),
-            VmValue::String(Rc::from(format!(
+            VmValue::String(std::sync::Arc::from(format!(
                 "compaction-source-{}",
                 uuid::Uuid::now_v7()
             ))),
         ),
         (
             "kind".to_string(),
-            VmValue::String(Rc::from("compaction_source_transcript")),
+            VmValue::String(std::sync::Arc::from("compaction_source_transcript")),
         ),
         (
             "title".to_string(),
-            VmValue::String(Rc::from("Pre-compaction transcript")),
+            VmValue::String(std::sync::Arc::from("Pre-compaction transcript")),
         ),
         (
             "visibility".to_string(),
-            VmValue::String(Rc::from("internal")),
+            VmValue::String(std::sync::Arc::from("internal")),
         ),
         ("data".to_string(), transcript.clone()),
         (
             "metadata".to_string(),
-            VmValue::Dict(Rc::new(asset_metadata)),
+            VmValue::Dict(std::sync::Arc::new(asset_metadata)),
         ),
     ])));
     normalize_transcript_asset(&asset)
@@ -988,14 +987,14 @@ mod tests {
         let mut event = BTreeMap::new();
         event.insert(
             "kind".to_string(),
-            VmValue::String(std::rc::Rc::from("system_reminder")),
+            VmValue::String(std::sync::Arc::from("system_reminder")),
         );
         event.insert(
             "role".to_string(),
-            VmValue::String(std::rc::Rc::from("system")),
+            VmValue::String(std::sync::Arc::from("system")),
         );
         event.insert("reminder".to_string(), reminder_value);
-        VmValue::Dict(std::rc::Rc::new(event))
+        VmValue::Dict(std::sync::Arc::new(event))
     }
 
     #[test]

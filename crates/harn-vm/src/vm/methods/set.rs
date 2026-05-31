@@ -1,10 +1,10 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::value::{values_equal, VmError, VmValue};
 
 impl crate::vm::Vm {
     pub(super) fn call_set_method_sync(
-        items: &Rc<Vec<VmValue>>,
+        items: &Arc<Vec<VmValue>>,
         method: &str,
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
@@ -21,7 +21,7 @@ impl crate::vm::Vm {
                 if !new_items.iter().any(|x| values_equal(x, &val)) {
                     new_items.push(val);
                 }
-                Ok(VmValue::Set(Rc::new(new_items)))
+                Ok(VmValue::Set(std::sync::Arc::new(new_items)))
             }
             "remove" | "delete" => {
                 let val = args.first().unwrap_or(&VmValue::Nil);
@@ -30,7 +30,7 @@ impl crate::vm::Vm {
                     .filter(|x| !values_equal(x, val))
                     .cloned()
                     .collect();
-                Ok(VmValue::Set(Rc::new(new_items)))
+                Ok(VmValue::Set(std::sync::Arc::new(new_items)))
             }
             "union" => {
                 if let Some(VmValue::Set(other)) = args.first() {
@@ -40,9 +40,9 @@ impl crate::vm::Vm {
                             result.push(v.clone());
                         }
                     }
-                    Ok(VmValue::Set(Rc::new(result)))
+                    Ok(VmValue::Set(std::sync::Arc::new(result)))
                 } else {
-                    Ok(VmValue::Set(Rc::clone(items)))
+                    Ok(VmValue::Set(Arc::clone(items)))
                 }
             }
             "intersect" | "intersection" => {
@@ -52,9 +52,9 @@ impl crate::vm::Vm {
                         .filter(|x| other.iter().any(|y| values_equal(x, y)))
                         .cloned()
                         .collect();
-                    Ok(VmValue::Set(Rc::new(result)))
+                    Ok(VmValue::Set(std::sync::Arc::new(result)))
                 } else {
-                    Ok(VmValue::Set(Rc::new(Vec::new())))
+                    Ok(VmValue::Set(std::sync::Arc::new(Vec::new())))
                 }
             }
             "difference" => {
@@ -64,9 +64,9 @@ impl crate::vm::Vm {
                         .filter(|x| !other.iter().any(|y| values_equal(x, y)))
                         .cloned()
                         .collect();
-                    Ok(VmValue::Set(Rc::new(result)))
+                    Ok(VmValue::Set(std::sync::Arc::new(result)))
                 } else {
-                    Ok(VmValue::Set(Rc::clone(items)))
+                    Ok(VmValue::Set(Arc::clone(items)))
                 }
             }
             "symmetric_difference" => {
@@ -81,9 +81,9 @@ impl crate::vm::Vm {
                             result.push(v.clone());
                         }
                     }
-                    Ok(VmValue::Set(Rc::new(result)))
+                    Ok(VmValue::Set(std::sync::Arc::new(result)))
                 } else {
-                    Ok(VmValue::Set(Rc::clone(items)))
+                    Ok(VmValue::Set(Arc::clone(items)))
                 }
             }
             "is_subset" => {
@@ -119,8 +119,8 @@ impl crate::vm::Vm {
                     Ok(VmValue::Bool(true))
                 }
             }
-            "to_list" => Ok(VmValue::List(Rc::new(items.to_vec()))),
-            "to_set" => Ok(VmValue::Set(Rc::clone(items))),
+            "to_list" => Ok(VmValue::List(std::sync::Arc::new(items.to_vec()))),
+            "to_set" => Ok(VmValue::Set(Arc::clone(items))),
             "map" | "filter" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
@@ -146,7 +146,7 @@ impl crate::vm::Vm {
 
     pub(super) async fn call_set_method(
         &mut self,
-        items: &Rc<Vec<VmValue>>,
+        items: &Arc<Vec<VmValue>>,
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
@@ -166,7 +166,7 @@ impl crate::vm::Vm {
                         result.push(mapped);
                     }
                 }
-                Ok(VmValue::Set(Rc::new(result)))
+                Ok(VmValue::Set(std::sync::Arc::new(result)))
             }
             "filter" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
@@ -179,7 +179,7 @@ impl crate::vm::Vm {
                         result.push(item.clone());
                     }
                 }
-                Ok(VmValue::Set(Rc::new(result)))
+                Ok(VmValue::Set(std::sync::Arc::new(result)))
             }
             "any" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {

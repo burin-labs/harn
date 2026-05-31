@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_hostlib::{
     code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
@@ -30,7 +30,7 @@ fn dict(entries: &[(&str, VmValue)]) -> VmValue {
     for (k, v) in entries {
         map.insert((*k).to_string(), v.clone());
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
@@ -40,14 +40,14 @@ fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
     (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
 }
 
-fn extract_dict(value: &VmValue) -> Rc<BTreeMap<String, VmValue>> {
+fn extract_dict(value: &VmValue) -> Arc<BTreeMap<String, VmValue>> {
     match value {
         VmValue::Dict(d) => d.clone(),
         other => panic!("expected dict, got {other:?}"),
     }
 }
 
-fn extract_list(value: &VmValue) -> Rc<Vec<VmValue>> {
+fn extract_list(value: &VmValue) -> Arc<Vec<VmValue>> {
     match value {
         VmValue::List(l) => l.clone(),
         other => panic!("expected list, got {other:?}"),
@@ -81,7 +81,7 @@ fn rebuild(registry: &BuiltinRegistry, root: &Path) -> i64 {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(Rc::from(root.to_string_lossy().to_string())),
+            VmValue::String(Arc::from(root.to_string_lossy().to_string())),
         )]),
     );
     let dict = extract_dict(&response);
@@ -93,7 +93,7 @@ fn assert_substring_query_finds(registry: &BuiltinRegistry, needle: &str, expect
         registry,
         "hostlib_code_index_query",
         dict(&[
-            ("needle", VmValue::String(Rc::from(needle.to_string()))),
+            ("needle", VmValue::String(Arc::from(needle.to_string()))),
             ("max_results", VmValue::Int(100)),
         ]),
     );
@@ -136,7 +136,7 @@ fn fixture_reproduces_code_index_invariants() {
     let imports = call(
         &registry,
         "hostlib_code_index_imports_for",
-        dict(&[("path", VmValue::String(Rc::from("CodeIndex.swift")))]),
+        dict(&[("path", VmValue::String(Arc::from("CodeIndex.swift")))]),
     );
     let imports = extract_dict(&imports);
     let modules: Vec<String> = extract_list(imports.get("imports").unwrap())

@@ -24,37 +24,42 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
 #[harn_builtin(sig = "keys(dict: dict) -> list", category = "shapes")]
 fn keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
-        VmValue::Dict(map) => Ok(VmValue::List(Rc::new(
+        VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
             map.keys()
-                .map(|k| VmValue::String(Rc::from(k.as_str())))
+                .map(|k| VmValue::String(std::sync::Arc::from(k.as_str())))
                 .collect(),
         ))),
-        _ => Ok(VmValue::List(Rc::new(Vec::new()))),
+        _ => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
     }
 }
 
 #[harn_builtin(sig = "values(...args: any) -> list", category = "shapes")]
 fn values_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
-        VmValue::Dict(map) => Ok(VmValue::List(Rc::new(map.values().cloned().collect()))),
-        _ => Ok(VmValue::List(Rc::new(Vec::new()))),
+        VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
+            map.values().cloned().collect(),
+        ))),
+        _ => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
     }
 }
 
 #[harn_builtin(sig = "entries(dict: dict) -> list", category = "shapes")]
 fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().cloned().unwrap_or(VmValue::Nil) {
-        VmValue::Dict(map) => Ok(VmValue::List(Rc::new(
+        VmValue::Dict(map) => Ok(VmValue::List(std::sync::Arc::new(
             map.iter()
                 .map(|(k, v)| {
-                    VmValue::Dict(Rc::new(BTreeMap::from([
-                        ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
+                    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                        (
+                            "key".to_string(),
+                            VmValue::String(std::sync::Arc::from(k.as_str())),
+                        ),
                         ("value".to_string(), v.clone()),
                     ])))
                 })
                 .collect(),
         ))),
-        _ => Ok(VmValue::List(Rc::new(Vec::new()))),
+        _ => Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
     }
 }
 
@@ -182,7 +187,7 @@ fn __dict_rest(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
             .filter(|(k, _)| !exclude.contains(k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        Ok(VmValue::Dict(Rc::new(rest)))
+        Ok(VmValue::Dict(std::sync::Arc::new(rest)))
     } else {
         Ok(VmValue::Nil)
     }
@@ -544,9 +549,9 @@ mod tests {
     #[test]
     fn parsed_shape_spec_validates_nested_and_union_fields() {
         let spec = cached_shape_spec("user: {name: string}, mode: string|nil");
-        let user = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let user = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "name".to_string(),
-            VmValue::String(Rc::from("Ada")),
+            VmValue::String(std::sync::Arc::from("Ada")),
         )])));
         let fields = BTreeMap::from([
             ("user".to_string(), user),
@@ -567,7 +572,10 @@ mod tests {
     fn nested_fields(depth: usize) -> BTreeMap<String, VmValue> {
         let mut fields = BTreeMap::from([("leaf".to_string(), VmValue::Int(1))]);
         for _ in 0..depth {
-            fields = BTreeMap::from([("child".to_string(), VmValue::Dict(Rc::new(fields)))]);
+            fields = BTreeMap::from([(
+                "child".to_string(),
+                VmValue::Dict(std::sync::Arc::new(fields)),
+            )]);
         }
         fields
     }

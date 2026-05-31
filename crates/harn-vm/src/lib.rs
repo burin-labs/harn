@@ -456,7 +456,6 @@ mod reset_leak_tests {
     use super::*;
     use crate::value::VmValue;
     use std::collections::BTreeMap;
-    use std::rc::Rc;
 
     #[test]
     fn reset_drains_agent_inbox() {
@@ -495,7 +494,9 @@ mod reset_leak_tests {
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
         config.insert(
             "chain".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("mock:mock"))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("mock:mock"),
+            )])),
         );
         llm::routing::build_routing_policy(&config).expect("intern a routing policy");
         assert!(llm::routing::policy_registry_len() > 0);

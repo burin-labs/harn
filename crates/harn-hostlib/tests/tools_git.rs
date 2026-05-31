@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use harn_hostlib::tools::permissions;
@@ -35,11 +35,11 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
     for (k, v) in entries {
         map.insert(k.to_string(), v.clone());
     }
-    vec![VmValue::Dict(Rc::new(map))]
+    vec![VmValue::Dict(Arc::new(map))]
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Rc::from(s))
+    VmValue::String(Arc::from(s))
 }
 
 fn ensure_git() -> bool {
@@ -155,7 +155,7 @@ fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
     }
 }
 
-fn list_of(value: &VmValue) -> &Rc<Vec<VmValue>> {
+fn list_of(value: &VmValue) -> &Arc<Vec<VmValue>> {
     match value {
         VmValue::List(l) => l,
         other => panic!("expected list, got {other:?}"),

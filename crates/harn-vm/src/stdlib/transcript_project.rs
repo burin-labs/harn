@@ -15,7 +15,6 @@
 //! flag and pass the original message through.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
@@ -461,7 +460,9 @@ async fn project_custom(
     let mut vm = ctx.map(AsyncBuiltinCtx::child_vm).ok_or_else(|| {
         VmError::Runtime("transcript_project: custom projector requires an async VM context".into())
     })?;
-    let raw_vm = VmValue::List(Rc::new(raw.iter().map(json_to_vm_value).collect()));
+    let raw_vm = VmValue::List(std::sync::Arc::new(
+        raw.iter().map(json_to_vm_value).collect(),
+    ));
     let result = vm.call_closure_pub(&closure, &[raw_vm]).await?;
     parse_custom_projector_result(raw, &result)
 }
@@ -793,25 +794,25 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
     let mut dict = BTreeMap::new();
     dict.insert(
         "policy".to_string(),
-        VmValue::String(Rc::from(policy.kind.as_str())),
+        VmValue::String(std::sync::Arc::from(policy.kind.as_str())),
     );
     dict.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from(result.reason.clone())),
+        VmValue::String(std::sync::Arc::from(result.reason.clone())),
     );
     dict.insert(
         "prefix_hash".to_string(),
-        VmValue::String(Rc::from(result.prefix_hash.clone())),
+        VmValue::String(std::sync::Arc::from(result.prefix_hash.clone())),
     );
     dict.insert(
         "messages".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             result.messages.iter().map(json_to_vm_value).collect(),
         )),
     );
     dict.insert(
         "kept_indices".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             result
                 .kept_indices
                 .iter()
@@ -821,7 +822,7 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
     );
     dict.insert(
         "dropped_indices".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             result
                 .dropped_indices
                 .iter()
@@ -842,7 +843,7 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
         VmValue::Bool(result.provider_safety_blocked),
     );
     dict.insert("event".to_string(), projection_event_value(result, policy));
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 pub(crate) fn projection_event_value(
@@ -1188,13 +1189,15 @@ mod tests {
     #[test]
     fn parse_policy_accepts_string_shorthand() {
         let policy =
-            parse_projection_options(&VmValue::String(Rc::from("clean_tool_repair"))).unwrap();
+            parse_projection_options(&VmValue::String(std::sync::Arc::from("clean_tool_repair")))
+                .unwrap();
         assert_eq!(policy.kind, PolicyKind::CleanToolRepair);
     }
 
     #[test]
     fn parse_policy_rejects_unknown_kind() {
-        let err = parse_projection_options(&VmValue::String(Rc::from("bogus"))).unwrap_err();
+        let err =
+            parse_projection_options(&VmValue::String(std::sync::Arc::from("bogus"))).unwrap_err();
         match err {
             VmError::Runtime(msg) => assert!(msg.contains("bogus")),
             _ => panic!("expected runtime error"),

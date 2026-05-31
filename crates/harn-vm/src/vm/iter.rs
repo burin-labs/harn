@@ -4,11 +4,14 @@
 //! iterator; once `next` returns `None` the variant is replaced with
 //! `Exhausted`.
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
-use std::rc::Rc;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::value::{VmChannelHandle, VmError, VmGenerator, VmStream, VmValue};
+
+pub type VmIterHandle = Arc<Mutex<VmIter>>;
 
 fn range_initial_done(start: i64, end: i64, inclusive: bool) -> bool {
     if inclusive {
@@ -40,7 +43,7 @@ fn range_next(next: &mut i64, end: i64, inclusive: bool, done: &mut bool) -> Opt
 
 #[derive(Debug)]
 pub struct VmBroadcastState {
-    source: Rc<RefCell<VmIter>>,
+    source: VmIterHandle,
     buffer: Vec<VmValue>,
     exhausted: bool,
 }
@@ -56,136 +59,118 @@ pub enum VmIter {
         done: bool,
     },
     /// Snapshot over a shared list / set backing store.
-    Vec { items: Rc<Vec<VmValue>>, idx: usize },
+    Vec {
+        items: Arc<Vec<VmValue>>,
+        idx: usize,
+    },
     /// Snapshot over a dict; yields `Pair(key, value)` items.
     Dict {
-        entries: Rc<BTreeMap<String, VmValue>>,
+        entries: Arc<BTreeMap<String, VmValue>>,
         keys: Vec<String>,
         idx: usize,
     },
     /// Unicode scalar iteration over a string.
-    Chars { s: Rc<str>, byte_idx: usize },
+    Chars { s: Arc<str>, byte_idx: usize },
     /// Drains a generator's yield channel.
-    Gen { gen: Rc<VmGenerator> },
+    Gen { gen: Arc<VmGenerator> },
     /// Drains a stream's emit channel.
-    Stream { stream: Rc<VmStream> },
+    Stream { stream: Arc<VmStream> },
     /// Reads from a channel handle.
-    Chan { handle: Rc<VmChannelHandle> },
+    Chan { handle: Arc<VmChannelHandle> },
     /// Maps each item through a closure.
-    Map {
-        inner: Rc<RefCell<VmIter>>,
-        f: VmValue,
-    },
+    Map { inner: VmIterHandle, f: VmValue },
     /// Runs a callback for side effects, then yields the original item.
-    Tap {
-        inner: Rc<RefCell<VmIter>>,
-        f: VmValue,
-    },
+    Tap { inner: VmIterHandle, f: VmValue },
     /// Keeps only items for which the predicate is truthy.
-    Filter {
-        inner: Rc<RefCell<VmIter>>,
-        p: VmValue,
-    },
+    Filter { inner: VmIterHandle, p: VmValue },
     /// Running fold that yields each accumulator.
     Scan {
-        inner: Rc<RefCell<VmIter>>,
+        inner: VmIterHandle,
         acc: VmValue,
         f: VmValue,
     },
     /// Maps each item to an iterable and flattens one level.
     FlatMap {
-        inner: Rc<RefCell<VmIter>>,
+        inner: VmIterHandle,
         f: VmValue,
-        cur: Option<Rc<RefCell<VmIter>>>,
+        cur: Option<VmIterHandle>,
     },
     /// Yields up to `remaining` items from `inner`, then becomes Exhausted.
     Take {
-        inner: Rc<RefCell<VmIter>>,
+        inner: VmIterHandle,
         remaining: usize,
     },
     /// Skips the first `remaining` items from `inner` on the first call, then
     /// forwards. `remaining == 0` is the sentinel for "already primed".
     Skip {
-        inner: Rc<RefCell<VmIter>>,
+        inner: VmIterHandle,
         remaining: usize,
     },
     /// Yields items from `inner` while the predicate is truthy; after the
     /// first falsy predicate or inner exhaustion, becomes Exhausted.
     TakeWhile {
-        inner: Rc<RefCell<VmIter>>,
+        inner: VmIterHandle,
         p: VmValue,
         done: bool,
     },
     /// Yields items until the predicate is truthy. The matching sentinel item
     /// is consumed but not yielded.
-    TakeUntil {
-        inner: Rc<RefCell<VmIter>>,
-        p: VmValue,
-    },
+    TakeUntil { inner: VmIterHandle, p: VmValue },
     /// Discards items while the predicate is truthy; after the first falsy
     /// item, forwards that item and all subsequent items from `inner`.
     SkipWhile {
-        inner: Rc<RefCell<VmIter>>,
+        inner: VmIterHandle,
         p: VmValue,
         primed: bool,
     },
     /// Advances two inner iters in lockstep; yields `Pair(a, b)` until either
     /// side is exhausted.
-    Zip {
-        a: Rc<RefCell<VmIter>>,
-        b: Rc<RefCell<VmIter>>,
-    },
+    Zip { a: VmIterHandle, b: VmIterHandle },
     /// Yields `Pair(i, item)` starting at `i = 0`.
-    Enumerate { inner: Rc<RefCell<VmIter>>, i: i64 },
+    Enumerate { inner: VmIterHandle, i: i64 },
     /// Concatenates two iters: drains `a` first, then `b`.
     Chain {
-        a: Rc<RefCell<VmIter>>,
-        b: Rc<RefCell<VmIter>>,
+        a: VmIterHandle,
+        b: VmIterHandle,
         on_a: bool,
     },
     /// Drains any non-exhausted source in rotating order.
     Merge {
-        sources: Vec<Option<Rc<RefCell<VmIter>>>>,
+        sources: Vec<Option<VmIterHandle>>,
         cursor: usize,
     },
     /// Strict round-robin over non-exhausted sources.
     Interleave {
-        sources: Vec<Option<Rc<RefCell<VmIter>>>>,
+        sources: Vec<Option<VmIterHandle>>,
         cursor: usize,
     },
     /// First source to yield wins; subsequent pulls only read that source.
     Race {
-        sources: Vec<Option<Rc<RefCell<VmIter>>>>,
-        winner: Option<Rc<RefCell<VmIter>>>,
+        sources: Vec<Option<VmIterHandle>>,
+        winner: Option<VmIterHandle>,
     },
     /// One source fanned out into several single-pass branches.
     Broadcast {
-        shared: Rc<RefCell<VmBroadcastState>>,
+        shared: Arc<Mutex<VmBroadcastState>>,
         branch: usize,
         index: usize,
     },
     /// Sleeps between emissions after the first item.
     Throttle {
-        inner: Rc<RefCell<VmIter>>,
+        inner: VmIterHandle,
         interval_ms: u64,
         next_ready: Option<tokio::time::Instant>,
     },
     /// Coalesces immediately available bursts and emits the last item seen
     /// after the quiet window.
-    Debounce {
-        inner: Rc<RefCell<VmIter>>,
-        window_ms: u64,
-    },
+    Debounce { inner: VmIterHandle, window_ms: u64 },
     /// Yields `VmValue::List` batches of up to `n` items from `inner`.
     /// The final batch may be shorter; empty input yields no batches.
-    Chunks {
-        inner: Rc<RefCell<VmIter>>,
-        n: usize,
-    },
+    Chunks { inner: VmIterHandle, n: usize },
     /// Yields sliding windows of exactly `n` items from `inner` as `VmValue::List`.
     /// If the input has fewer than `n` items total, no windows are yielded.
     Windows {
-        inner: Rc<RefCell<VmIter>>,
+        inner: VmIterHandle,
         n: usize,
         buf: VecDeque<VmValue>,
     },
@@ -237,8 +222,8 @@ impl VmIter {
                     let k = &keys[*idx];
                     let v = entries.get(k).cloned().unwrap_or(VmValue::Nil);
                     *idx += 1;
-                    Ok(Some(VmValue::Pair(Rc::new((
-                        VmValue::String(Rc::from(k.as_str())),
+                    Ok(Some(VmValue::Pair(std::sync::Arc::new((
+                        VmValue::String(std::sync::Arc::from(k.as_str())),
                         v,
                     )))))
                 } else {
@@ -256,14 +241,14 @@ impl VmIter {
                     *byte_idx += c.len_utf8();
                     let mut buf = [0u8; 4];
                     let encoded = c.encode_utf8(&mut buf);
-                    Ok(Some(VmValue::String(Rc::from(&*encoded))))
+                    Ok(Some(VmValue::String(std::sync::Arc::from(&*encoded))))
                 } else {
                     *self = VmIter::Exhausted;
                     Ok(None)
                 }
             }
             VmIter::Gen { gen } => {
-                if gen.done.get() {
+                if gen.is_done() {
                     *self = VmIter::Exhausted;
                     return Ok(None);
                 }
@@ -272,13 +257,13 @@ impl VmIter {
                 match guard.recv().await {
                     Some(Ok(v)) => Ok(Some(v)),
                     Some(Err(error)) => {
-                        gen.done.set(true);
+                        gen.mark_done();
                         drop(guard);
                         *self = VmIter::Exhausted;
                         Err(error)
                     }
                     None => {
-                        gen.done.set(true);
+                        gen.mark_done();
                         drop(guard);
                         *self = VmIter::Exhausted;
                         Ok(None)
@@ -286,7 +271,7 @@ impl VmIter {
                 }
             }
             VmIter::Stream { stream } => {
-                if stream.done.get() {
+                if stream.is_done() {
                     *self = VmIter::Exhausted;
                     return Ok(None);
                 }
@@ -295,13 +280,13 @@ impl VmIter {
                 match guard.recv().await {
                     Some(Ok(v)) => Ok(Some(v)),
                     Some(Err(error)) => {
-                        stream.done.set(true);
+                        stream.mark_done();
                         drop(guard);
                         *self = VmIter::Exhausted;
                         Err(error)
                     }
                     None => {
-                        stream.done.set(true);
+                        stream.mark_done();
                         drop(guard);
                         *self = VmIter::Exhausted;
                         Ok(None)
@@ -528,7 +513,7 @@ impl VmIter {
                     }
                     Some(v) => v,
                 };
-                Ok(Some(VmValue::Pair(Rc::new((x, y)))))
+                Ok(Some(VmValue::Pair(std::sync::Arc::new((x, y)))))
             }
             VmIter::Enumerate { inner, i } => {
                 let item = next_handle(inner, vm).await?;
@@ -540,7 +525,10 @@ impl VmIter {
                     Some(v) => {
                         let idx = *i;
                         *i += 1;
-                        Ok(Some(VmValue::Pair(Rc::new((VmValue::Int(idx), v)))))
+                        Ok(Some(VmValue::Pair(std::sync::Arc::new((
+                            VmValue::Int(idx),
+                            v,
+                        )))))
                     }
                 }
             }
@@ -663,32 +651,31 @@ impl VmIter {
             } => {
                 let _ = branch;
                 loop {
-                    let mut state =
-                        std::mem::replace(&mut *shared.borrow_mut(), empty_broadcast_state());
+                    let mut state = std::mem::replace(&mut *shared.lock(), empty_broadcast_state());
                     if *index < state.buffer.len() {
                         let item = state.buffer[*index].clone();
                         *index += 1;
-                        *shared.borrow_mut() = state;
+                        *shared.lock() = state;
                         return Ok(Some(item));
                     }
                     if state.exhausted {
-                        *shared.borrow_mut() = state;
+                        *shared.lock() = state;
                         *self = VmIter::Exhausted;
                         return Ok(None);
                     }
                     let next = next_handle(&state.source, vm).await;
                     match next {
                         Err(err) => {
-                            *shared.borrow_mut() = state;
+                            *shared.lock() = state;
                             return Err(err);
                         }
                         Ok(Some(v)) => {
                             state.buffer.push(v);
-                            *shared.borrow_mut() = state;
+                            *shared.lock() = state;
                         }
                         Ok(None) => {
                             state.exhausted = true;
-                            *shared.borrow_mut() = state;
+                            *shared.lock() = state;
                         }
                     }
                 }
@@ -751,7 +738,7 @@ impl VmIter {
                     *self = VmIter::Exhausted;
                     Ok(None)
                 } else {
-                    Ok(Some(VmValue::List(Rc::new(batch))))
+                    Ok(Some(VmValue::List(std::sync::Arc::new(batch))))
                 }
             }
             VmIter::Windows { inner, n, buf } => {
@@ -781,7 +768,7 @@ impl VmIter {
                     }
                 }
                 let snapshot: Vec<VmValue> = buf.iter().cloned().collect();
-                Ok(Some(VmValue::List(Rc::new(snapshot))))
+                Ok(Some(VmValue::List(std::sync::Arc::new(snapshot))))
             }
             VmIter::Chan { handle } => {
                 let is_closed = handle.closed.load(std::sync::atomic::Ordering::Relaxed);
@@ -805,30 +792,27 @@ impl VmIter {
     }
 }
 
-/// Advance a handle without holding a `RefCell` borrow across the await.
+/// Advance a handle without holding the iterator-state lock across the await.
 ///
 /// Swaps the iter state out into a local owned value (replacing it with
 /// `Exhausted`), runs `next` on the owned state, then swaps it back. This
-/// avoids `clippy::await_holding_refcell_ref` while preserving single-pass
+/// avoids blocking re-entrant iterator access while preserving single-pass
 /// semantics: a nested `next` call on the same handle during the await would
 /// see `Exhausted` (the iter protocol doesn't permit re-entrant stepping of
 /// the same handle anyway).
 pub async fn next_handle(
-    handle: &Rc<RefCell<VmIter>>,
+    handle: &VmIterHandle,
     vm: &mut crate::vm::Vm,
 ) -> Result<Option<VmValue>, VmError> {
-    let mut state = std::mem::replace(&mut *handle.borrow_mut(), VmIter::Exhausted);
+    let mut state = std::mem::replace(&mut *handle.lock(), VmIter::Exhausted);
     let result = state.next(vm).await;
     // Restore state unless the inner call replaced it with Exhausted.
-    *handle.borrow_mut() = state;
+    *handle.lock() = state;
     result
 }
 
 /// Fully consume an iter handle into a Vec of values.
-pub async fn drain(
-    handle: &Rc<RefCell<VmIter>>,
-    vm: &mut crate::vm::Vm,
-) -> Result<Vec<VmValue>, VmError> {
+pub async fn drain(handle: &VmIterHandle, vm: &mut crate::vm::Vm) -> Result<Vec<VmValue>, VmError> {
     let mut out = Vec::new();
     loop {
         let v = next_handle(handle, vm).await?;
@@ -843,7 +827,7 @@ pub async fn drain(
 /// Fully consume an iter handle into a Vec, failing before pushing item
 /// `max + 1`.
 pub async fn drain_capped(
-    handle: &Rc<RefCell<VmIter>>,
+    handle: &VmIterHandle,
     vm: &mut crate::vm::Vm,
     max: usize,
 ) -> Result<Vec<VmValue>, VmError> {
@@ -865,23 +849,23 @@ pub async fn drain_capped(
     Ok(out)
 }
 
-pub fn iter_handle_from_value(v: VmValue) -> Result<Rc<RefCell<VmIter>>, VmError> {
+pub fn iter_handle_from_value(v: VmValue) -> Result<VmIterHandle, VmError> {
     match iter_from_value(v)? {
         VmValue::Iter(handle) => Ok(handle),
         _ => unreachable!("iter_from_value returns Iter"),
     }
 }
 
-pub fn broadcast_branches(source: Rc<RefCell<VmIter>>, n: usize) -> Vec<VmValue> {
-    let shared = Rc::new(RefCell::new(VmBroadcastState {
+pub fn broadcast_branches(source: VmIterHandle, n: usize) -> Vec<VmValue> {
+    let shared = Arc::new(Mutex::new(VmBroadcastState {
         source,
         buffer: Vec::new(),
         exhausted: false,
     }));
     (0..n)
         .map(|branch| {
-            VmValue::Iter(Rc::new(RefCell::new(VmIter::Broadcast {
-                shared: Rc::clone(&shared),
+            VmValue::Iter(Arc::new(Mutex::new(VmIter::Broadcast {
+                shared: Arc::clone(&shared),
                 branch,
                 index: 0,
             })))
@@ -891,26 +875,26 @@ pub fn broadcast_branches(source: Rc<RefCell<VmIter>>, n: usize) -> Vec<VmValue>
 
 fn empty_broadcast_state() -> VmBroadcastState {
     VmBroadcastState {
-        source: Rc::new(RefCell::new(VmIter::Exhausted)),
+        source: Arc::new(Mutex::new(VmIter::Exhausted)),
         buffer: Vec::new(),
         exhausted: true,
     }
 }
 
 fn try_next_ready<'a>(
-    handle: &'a Rc<RefCell<VmIter>>,
+    handle: &'a VmIterHandle,
     vm: &'a mut crate::vm::Vm,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<VmValue>, VmError>> + 'a>> {
     Box::pin(async move {
-        let mut state = std::mem::replace(&mut *handle.borrow_mut(), VmIter::Exhausted);
+        let mut state = std::mem::replace(&mut *handle.lock(), VmIter::Exhausted);
         let result = state.try_next_ready_impl(vm).await;
-        *handle.borrow_mut() = state;
+        *handle.lock() = state;
         result
     })
 }
 
-fn is_exhausted_handle(handle: &Rc<RefCell<VmIter>>) -> bool {
-    matches!(&*handle.borrow(), VmIter::Exhausted)
+fn is_exhausted_handle(handle: &VmIterHandle) -> bool {
+    matches!(&*handle.lock(), VmIter::Exhausted)
 }
 
 impl VmIter {
@@ -1095,7 +1079,7 @@ impl VmIter {
             | VmIter::Chunks { .. }
             | VmIter::Windows { .. } => self.next(vm).await,
             VmIter::Gen { gen } => {
-                if gen.done.get() {
+                if gen.is_done() {
                     *self = VmIter::Exhausted;
                     return Ok(None);
                 }
@@ -1104,13 +1088,13 @@ impl VmIter {
                     Ok(mut guard) => match guard.try_recv() {
                         Ok(Ok(v)) => Ok(Some(v)),
                         Ok(Err(error)) => {
-                            gen.done.set(true);
+                            gen.mark_done();
                             *self = VmIter::Exhausted;
                             Err(error)
                         }
                         Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
                         Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                            gen.done.set(true);
+                            gen.mark_done();
                             *self = VmIter::Exhausted;
                             Ok(None)
                         }
@@ -1120,7 +1104,7 @@ impl VmIter {
                 result
             }
             VmIter::Stream { stream } => {
-                if stream.done.get() {
+                if stream.is_done() {
                     *self = VmIter::Exhausted;
                     return Ok(None);
                 }
@@ -1129,13 +1113,13 @@ impl VmIter {
                     Ok(mut guard) => match guard.try_recv() {
                         Ok(Ok(v)) => Ok(Some(v)),
                         Ok(Err(error)) => {
-                            stream.done.set(true);
+                            stream.mark_done();
                             *self = VmIter::Exhausted;
                             Err(error)
                         }
                         Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
                         Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                            stream.done.set(true);
+                            stream.mark_done();
                             *self = VmIter::Exhausted;
                             Ok(None)
                         }
@@ -1195,7 +1179,7 @@ pub fn iter_from_value(v: VmValue) -> Result<VmValue, VmError> {
             )))
         }
     };
-    Ok(VmValue::Iter(Rc::new(RefCell::new(inner))))
+    Ok(VmValue::Iter(Arc::new(Mutex::new(inner))))
 }
 
 #[cfg(test)]

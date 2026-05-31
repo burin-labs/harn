@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::llm::tools::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_OPEN};
 use crate::schema::json_to_vm_value;
@@ -103,14 +103,16 @@ fn vm_current_registry_dict(builtin: &str) -> Result<VmValue, VmError> {
                 vm_validate_registry(builtin, map)?;
                 Ok(value)
             }
-            _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{builtin}: bound tool registry is not a dict"
-            ))))),
+            _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("{builtin}: bound tool registry is not a dict"),
+            )))),
         },
-        None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{builtin}: no tool registry bound to this scope. \
+        None => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!(
+                "{builtin}: no tool registry bound to this scope. \
              Call tool_bind(registry) first, or invoke inside an agent_loop."
-        ))))),
+            ),
+        )))),
     }
 }
 
@@ -142,7 +144,7 @@ async fn tool_synth_invoke_impl(
     let id = match args.first() {
         Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_synth_invoke: synthesis id is required",
             ))));
         }
@@ -160,7 +162,7 @@ fn tool_synthesis_cache_impl(_args: &[VmValue], _out: &mut String) -> Result<VmV
             .map(synthesized_tool_spec_value)
             .collect::<Vec<_>>()
     });
-    Ok(VmValue::List(Rc::new(specs)))
+    Ok(VmValue::List(std::sync::Arc::new(specs)))
 }
 
 #[harn_builtin(sig = "tool_synthesis_clear() -> nil", category = "tools")]
@@ -203,10 +205,13 @@ fn tool_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let mut registry = BTreeMap::new();
     registry.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from("tool_registry")),
+        VmValue::String(std::sync::Arc::from("tool_registry")),
     );
-    registry.insert("tools".to_string(), VmValue::List(Rc::new(Vec::new())));
-    Ok(VmValue::Dict(Rc::new(registry)))
+    registry.insert(
+        "tools".to_string(),
+        VmValue::List(std::sync::Arc::new(Vec::new())),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(registry)))
 }
 
 #[harn_builtin(
@@ -217,7 +222,7 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_list: requires a tool registry",
             ))));
         }
@@ -235,10 +240,10 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                 }
                 desc.insert(key.clone(), value.clone());
             }
-            result.push(VmValue::Dict(Rc::new(desc)));
+            result.push(VmValue::Dict(std::sync::Arc::new(desc)));
         }
     }
-    Ok(VmValue::List(Rc::new(result)))
+    Ok(VmValue::List(std::sync::Arc::new(result)))
 }
 
 #[harn_builtin(
@@ -247,14 +252,14 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 )]
 fn tool_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "tool_find: requires registry and name",
         ))));
     }
     let registry = match &args[0] {
         VmValue::Dict(map) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_find: first argument must be a tool registry",
             ))));
         }
@@ -282,14 +287,14 @@ fn tool_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 )]
 fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "tool_select: requires registry and names list",
         ))));
     }
     let registry = match &args[0] {
         VmValue::Dict(map) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_select: first argument must be a tool registry",
             ))));
         }
@@ -301,7 +306,7 @@ fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             .map(|value| value.display())
             .collect::<std::collections::BTreeSet<_>>(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_select: second argument must be a list of tool names",
             ))));
         }
@@ -319,8 +324,11 @@ fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .collect();
 
     let mut new_registry = (**registry).clone();
-    new_registry.insert("tools".to_string(), VmValue::List(Rc::new(selected)));
-    Ok(VmValue::Dict(Rc::new(new_registry)))
+    new_registry.insert(
+        "tools".to_string(),
+        VmValue::List(std::sync::Arc::new(selected)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
 }
 
 #[harn_builtin(
@@ -331,7 +339,7 @@ fn tool_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_describe: requires a tool registry",
             ))));
         }
@@ -341,7 +349,9 @@ fn tool_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let tools = vm_get_tools(registry);
 
     if tools.is_empty() {
-        return Ok(VmValue::String(Rc::from("Available tools:\n(none)")));
+        return Ok(VmValue::String(std::sync::Arc::from(
+            "Available tools:\n(none)",
+        )));
     }
 
     let mut tool_infos: Vec<(String, String, String, String)> = Vec::new();
@@ -368,7 +378,7 @@ fn tool_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         }
     }
 
-    Ok(VmValue::String(Rc::from(lines.join("\n"))))
+    Ok(VmValue::String(std::sync::Arc::from(lines.join("\n"))))
 }
 
 #[harn_builtin(
@@ -377,7 +387,7 @@ fn tool_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 )]
 fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "tool_remove: requires registry and name",
         ))));
     }
@@ -385,7 +395,7 @@ fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let registry = match &args[0] {
         VmValue::Dict(map) => (**map).clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_remove: first argument must be a tool registry",
             ))));
         }
@@ -412,8 +422,11 @@ fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .collect();
 
     let mut new_registry = registry;
-    new_registry.insert("tools".to_string(), VmValue::List(Rc::new(filtered)));
-    Ok(VmValue::Dict(Rc::new(new_registry)))
+    new_registry.insert(
+        "tools".to_string(),
+        VmValue::List(std::sync::Arc::new(filtered)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
 }
 
 #[harn_builtin(
@@ -424,7 +437,7 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let registry = match args.first() {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_count: requires a tool registry",
             ))));
         }
@@ -445,7 +458,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             map
         }
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_schema: requires a tool registry",
             ))));
         }
@@ -455,7 +468,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
     let tools = match registry.get("tools") {
         Some(VmValue::List(list)) => list,
-        _ => return Ok(VmValue::Dict(Rc::new(vm_build_empty_schema()))),
+        _ => return Ok(VmValue::Dict(std::sync::Arc::new(vm_build_empty_schema()))),
     };
 
     let mut tool_schemas = Vec::new();
@@ -472,36 +485,45 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
                 vm_build_output_schema(entry.get("outputSchema"), components.as_ref());
 
             let mut tool_def = BTreeMap::new();
-            tool_def.insert("name".to_string(), VmValue::String(Rc::from(name)));
+            tool_def.insert(
+                "name".to_string(),
+                VmValue::String(std::sync::Arc::from(name)),
+            );
             tool_def.insert(
                 "description".to_string(),
-                VmValue::String(Rc::from(description)),
+                VmValue::String(std::sync::Arc::from(description)),
             );
             tool_def.insert("inputSchema".to_string(), input_schema);
             if let Some(output_schema) = output_schema {
                 tool_def.insert("outputSchema".to_string(), output_schema);
             }
-            tool_schemas.push(VmValue::Dict(Rc::new(tool_def)));
+            tool_schemas.push(VmValue::Dict(std::sync::Arc::new(tool_def)));
         }
     }
 
     let mut schema = BTreeMap::new();
     schema.insert(
         "schema_version".to_string(),
-        VmValue::String(Rc::from("harn-tools/1.0")),
+        VmValue::String(std::sync::Arc::from("harn-tools/1.0")),
     );
 
     if let Some(comps) = &components {
         let mut comp_wrapper = BTreeMap::new();
-        comp_wrapper.insert("schemas".to_string(), VmValue::Dict(Rc::new(comps.clone())));
+        comp_wrapper.insert(
+            "schemas".to_string(),
+            VmValue::Dict(std::sync::Arc::new(comps.clone())),
+        );
         schema.insert(
             "components".to_string(),
-            VmValue::Dict(Rc::new(comp_wrapper)),
+            VmValue::Dict(std::sync::Arc::new(comp_wrapper)),
         );
     }
 
-    schema.insert("tools".to_string(), VmValue::List(Rc::new(tool_schemas)));
-    Ok(VmValue::Dict(Rc::new(schema)))
+    schema.insert(
+        "tools".to_string(),
+        VmValue::List(std::sync::Arc::new(tool_schemas)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(schema)))
 }
 
 // Unknown config keys (beyond parameters/handler/returns/annotations) are
@@ -516,7 +538,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 )]
 fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 4 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "tool_define: requires registry, name, description, and config dict",
         ))));
     }
@@ -524,7 +546,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let registry = match &args[0] {
         VmValue::Dict(map) => (**map).clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_define: first argument must be a tool registry",
             ))));
         }
@@ -537,7 +559,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let config = match &args[3] {
         VmValue::Dict(map) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_define: config must be a dict with parameters and handler",
             ))));
         }
@@ -547,7 +569,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let has_handler = !matches!(handler, VmValue::Nil);
 
     if config.contains_key("params") && !config.contains_key("parameters") {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "tool_define: use 'parameters', not 'params'",
         ))));
     }
@@ -560,7 +582,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         Some(VmValue::String(s)) => Some(s.to_string()),
         Some(VmValue::Nil) | None => None,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_define: `executor` must be a string \
                  (\"harn\", \"host_bridge\", \"mcp_server\", or \"provider_native\")",
             ))));
@@ -572,18 +594,21 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         Some("mcp_server") => "mcp_server",
         Some("provider_native") => "provider_native",
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "tool_define: unknown executor {other:?} for tool {name:?}. \
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!(
+                    "tool_define: unknown executor {other:?} for tool {name:?}. \
                  Expected one of: \"harn\", \"host_bridge\", \"mcp_server\", \
                  \"provider_native\""
-            )))));
+                ),
+            ))));
         }
         None => {
             if has_handler {
                 "harn"
             } else {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "tool_define: tool {name:?} has no `handler` and no `executor`. \
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!(
+                        "tool_define: tool {name:?} has no `handler` and no `executor`. \
                      Either attach a `handler` fn (executor: \"harn\") or \
                      declare an alternate backend, e.g. \
                      executor: \"host_bridge\" + host_capability: \"cap.op\", \
@@ -591,7 +616,8 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
                      executor: \"provider_native\". \
                      Defining a handlerless tool would surface as \
                      `[builtin_call] unhandled: {name}` at the first model call."
-                )))));
+                    ),
+                ))));
             }
         }
     };
@@ -611,75 +637,91 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     match resolved_executor {
         "harn" => {
             if !has_handler && !crate::llm::tools::is_vm_stdlib_short_circuit(name.as_str()) {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "tool_define: tool {name:?} declares executor: \"harn\" \
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!(
+                        "tool_define: tool {name:?} declares executor: \"harn\" \
                      but has no `handler`. Attach the handler fn or change \
                      the executor."
-                )))));
+                    ),
+                ))));
             }
             if host_capability.is_some_and(|v| !matches!(v, VmValue::Nil)) {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "tool_define: tool {name:?} declares executor: \"harn\" \
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!(
+                        "tool_define: tool {name:?} declares executor: \"harn\" \
                      but also sets `host_capability`. Drop one — the harn \
                      executor runs the handler in-VM and never reaches \
                      the host bridge."
-                )))));
+                    ),
+                ))));
             }
             if mcp_server.is_some_and(|v| !matches!(v, VmValue::Nil)) {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "tool_define: tool {name:?} declares executor: \"harn\" \
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!(
+                        "tool_define: tool {name:?} declares executor: \"harn\" \
                      but also sets `mcp_server`. Drop one — MCP-served \
                      tools must declare executor: \"mcp_server\"."
-                )))));
+                    ),
+                ))));
             }
         }
         "host_bridge" => {
             if has_handler {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "tool_define: tool {name:?} declares executor: \"host_bridge\" \
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!(
+                        "tool_define: tool {name:?} declares executor: \"host_bridge\" \
                      but also has a `handler`. Drop the handler — host-bridge \
                      tools are dispatched by the host shell, not the VM."
-                )))));
+                    ),
+                ))));
             }
             match host_capability {
                 Some(VmValue::String(s)) if !s.is_empty() => {}
                 _ => {
-                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "tool_define: tool {name:?} declares executor: \"host_bridge\" \
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        format!(
+                            "tool_define: tool {name:?} declares executor: \"host_bridge\" \
                          but is missing `host_capability`. Set it to the \
                          canonical bridge identifier (e.g. \"interaction.ask\") \
                          so `harn check` can validate the binding against the \
                          host capability manifest."
-                    )))));
+                        ),
+                    ))));
                 }
             }
         }
         "mcp_server" => {
             if has_handler {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "tool_define: tool {name:?} declares executor: \"mcp_server\" \
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!(
+                        "tool_define: tool {name:?} declares executor: \"mcp_server\" \
                      but also has a `handler`. Drop the handler — MCP-served \
                      tools route through the MCP transport."
-                )))));
+                    ),
+                ))));
             }
             match mcp_server {
                 Some(VmValue::String(s)) if !s.is_empty() => {}
                 _ => {
-                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "tool_define: tool {name:?} declares executor: \"mcp_server\" \
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                        format!(
+                            "tool_define: tool {name:?} declares executor: \"mcp_server\" \
                          but is missing `mcp_server` (the configured server name)."
-                    )))));
+                        ),
+                    ))));
                 }
             }
         }
         "provider_native" => {
             if has_handler {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "tool_define: tool {name:?} declares executor: \"provider_native\" \
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!(
+                        "tool_define: tool {name:?} declares executor: \"provider_native\" \
                      but also has a `handler`. Provider-side tools are \
                      executed by the model server; the runtime never \
                      dispatches them locally."
-                )))));
+                    ),
+                ))));
             }
         }
         _ => unreachable!("resolved_executor is matched above"),
@@ -691,7 +733,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     // "no defer" default.
     if let Some(v) = config.get("defer_loading") {
         if !matches!(v, VmValue::Bool(_)) {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_define: `defer_loading` must be a bool \
                  (true → hold schema back until a tool_search call \
                  surfaces it; false or absent → ship eagerly)",
@@ -707,7 +749,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             VmValue::String(s) if !s.is_empty() => {}
             VmValue::Nil => {}
             _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "tool_define: `namespace` must be a non-empty string \
                      (groups deferred tools for OpenAI tool_search; \
                      Anthropic ignores it)",
@@ -719,14 +761,17 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let parameters = config
         .get("parameters")
         .cloned()
-        .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+        .unwrap_or(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
     let output_schema = config.get("returns").cloned().unwrap_or(VmValue::Nil);
 
     let mut tool_entry = BTreeMap::new();
-    tool_entry.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+    tool_entry.insert(
+        "name".to_string(),
+        VmValue::String(std::sync::Arc::from(name.as_str())),
+    );
     tool_entry.insert(
         "description".to_string(),
-        VmValue::String(Rc::from(description)),
+        VmValue::String(std::sync::Arc::from(description)),
     );
     tool_entry.insert("handler".to_string(), handler);
     tool_entry.insert("parameters".to_string(), parameters);
@@ -734,7 +779,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     // serialization is handled by the ACP adapter.
     tool_entry.insert(
         "executor".to_string(),
-        VmValue::String(Rc::from(resolved_executor)),
+        VmValue::String(std::sync::Arc::from(resolved_executor)),
     );
     if !matches!(output_schema, VmValue::Nil) {
         tool_entry.insert("outputSchema".to_string(), output_schema);
@@ -768,11 +813,14 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             .collect(),
         _ => Vec::new(),
     };
-    tools.push(VmValue::Dict(Rc::new(tool_entry)));
+    tools.push(VmValue::Dict(std::sync::Arc::new(tool_entry)));
 
     let mut new_registry = registry;
-    new_registry.insert("tools".to_string(), VmValue::List(Rc::new(tools)));
-    Ok(VmValue::Dict(Rc::new(new_registry)))
+    new_registry.insert(
+        "tools".to_string(),
+        VmValue::List(std::sync::Arc::new(tools)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(new_registry)))
 }
 
 #[harn_builtin(sig = "tool_parse_call(text: string?) -> list", category = "tools")]
@@ -795,7 +843,7 @@ fn tool_parse_call_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         }
     }
 
-    Ok(VmValue::List(Rc::new(results)))
+    Ok(VmValue::List(std::sync::Arc::new(results)))
 }
 
 #[harn_builtin(
@@ -804,7 +852,7 @@ fn tool_parse_call_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn tool_format_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "tool_format_result: requires name and result",
         ))));
     }
@@ -813,7 +861,7 @@ fn tool_format_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
     let json_name = super::logging::vm_escape_json_str(&name);
     let json_result = super::logging::vm_escape_json_str(&result);
-    Ok(VmValue::String(Rc::from(
+    Ok(VmValue::String(std::sync::Arc::from(
         format!(
             "<tool_result>{{\"name\": \"{json_name}\", \"result\": \"{json_result}\"}}</tool_result>"
         )
@@ -832,7 +880,7 @@ fn tool_prompt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             map
         }
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_prompt: requires a tool registry",
             ))));
         }
@@ -841,12 +889,16 @@ fn tool_prompt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let tools = match registry.get("tools") {
         Some(VmValue::List(list)) => list,
         _ => {
-            return Ok(VmValue::String(Rc::from("No tools are available.")));
+            return Ok(VmValue::String(std::sync::Arc::from(
+                "No tools are available.",
+            )));
         }
     };
 
     if tools.is_empty() {
-        return Ok(VmValue::String(Rc::from("No tools are available.")));
+        return Ok(VmValue::String(std::sync::Arc::from(
+            "No tools are available.",
+        )));
     }
 
     let mut prompt = String::from("# Available Tools\n\n");
@@ -885,7 +937,7 @@ fn tool_prompt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         prompt.push('\n');
     }
 
-    Ok(VmValue::String(Rc::from(prompt.trim_end())))
+    Ok(VmValue::String(std::sync::Arc::from(prompt.trim_end())))
 }
 
 #[harn_builtin(
@@ -919,7 +971,7 @@ fn tool_bind_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
             return Ok(VmValue::Nil);
         }
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_bind: argument must be a tool registry or nil",
             ))));
         }
@@ -933,7 +985,7 @@ fn tool_ref_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let name = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_ref: name must be a string literal",
             ))));
         }
@@ -945,7 +997,7 @@ fn tool_ref_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     };
 
     if vm_find_tool_entry(registry, &name).is_some() {
-        return Ok(VmValue::String(Rc::from(name.as_str())));
+        return Ok(VmValue::String(std::sync::Arc::from(name.as_str())));
     }
 
     let registered = vm_registered_names(registry);
@@ -954,9 +1006,9 @@ fn tool_ref_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     } else {
         registered.join(", ")
     };
-    Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-        "tool_ref: unknown tool {name:?}. Registered tools: {listed}"
-    )))))
+    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        format!("tool_ref: unknown tool {name:?}. Registered tools: {listed}"),
+    ))))
 }
 
 #[harn_builtin(sig = "tool_def(name: string) -> dict", category = "tools")]
@@ -964,7 +1016,7 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let name = match args.first() {
         Some(VmValue::String(s)) => s.to_string(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_def: name must be a string literal",
             ))));
         }
@@ -983,7 +1035,7 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
             }
             desc.insert(key.clone(), value.clone());
         }
-        return Ok(VmValue::Dict(Rc::new(desc)));
+        return Ok(VmValue::Dict(std::sync::Arc::new(desc)));
     }
 
     let registered = vm_registered_names(registry);
@@ -992,9 +1044,9 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     } else {
         registered.join(", ")
     };
-    Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-        "tool_def: unknown tool {name:?}. Registered tools: {listed}"
-    )))))
+    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        format!("tool_def: unknown tool {name:?}. Registered tools: {listed}"),
+    ))))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -1027,13 +1079,13 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
     let config = match input {
         Some(VmValue::Dict(map)) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_synthesize: requires a config dict",
             ))));
         }
     };
     if config.contains_key("handler") || config.contains_key("body") {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "tool_synthesize: executable handlers must be supplied with tool_define; \
              synthesized tools are dry-run, host_bridge, or mcp_server only",
         ))));
@@ -1049,7 +1101,7 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
         .get("parameters")
         .or_else(|| config.get("params"))
         .cloned()
-        .unwrap_or_else(|| VmValue::Dict(Rc::new(BTreeMap::new())));
+        .unwrap_or_else(|| VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
     let return_type = config
         .get("return_type")
         .or_else(|| config.get("returns"))
@@ -1066,7 +1118,7 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
         "host_bridge" => {
             let host_tool = optional_string(config, "host_tool").unwrap_or_else(|| name.clone());
             if host_tool.trim().is_empty() {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "tool_synthesize: host_bridge executor requires a non-empty host_tool",
                 ))));
             }
@@ -1075,7 +1127,7 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
         "mcp_server" => {
             let tool_name = optional_string(config, "mcp_tool").unwrap_or_else(|| name.clone());
             if tool_name.trim().is_empty() {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "tool_synthesize: mcp_server executor requires a non-empty mcp_tool",
                 ))));
             }
@@ -1083,7 +1135,7 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
                 Some(VmValue::McpClient(client)) => Some(client.as_ref().clone()),
                 Some(VmValue::Nil) | None => None,
                 _ => {
-                    return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         "tool_synthesize: mcp_client must be an MCP client handle",
                     ))));
                 }
@@ -1095,10 +1147,12 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
             }
         }
         other => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "tool_synthesize: unknown executor {other:?}; expected \
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!(
+                    "tool_synthesize: unknown executor {other:?}; expected \
                  \"dry_run\", \"host_bridge\", or \"mcp_server\""
-            )))));
+                ),
+            ))));
         }
     };
 
@@ -1144,8 +1198,8 @@ fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
             Some("<tool_synthesize>".to_string()),
         )
         .map_err(|error| VmError::Runtime(format!("tool_synthesize: {error}")))?;
-    Ok(VmValue::Closure(Rc::new(VmClosure {
-        func: Rc::new(func),
+    Ok(VmValue::Closure(Arc::new(VmClosure {
+        func: Arc::new(func),
         env: VmEnv::new(),
         source_dir: None,
         module_functions: None,
@@ -1156,9 +1210,11 @@ fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
 async fn invoke_synthesized_tool(id: &str, call_args: VmValue) -> Result<VmValue, VmError> {
     let spec = TOOL_SYNTHESIS_CACHE.with(|cache| cache.borrow().get(id).cloned());
     let Some(spec) = spec else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!(
             "tool_synth_invoke: unknown synthesis id {id:?}; synthesize the tool in this run first"
-        )))));
+        ),
+        ))));
     };
 
     validate_synthesized_tool_args(&spec, &call_args)?;
@@ -1170,7 +1226,7 @@ async fn invoke_synthesized_tool(id: &str, call_args: VmValue) -> Result<VmValue
             crate::orchestration::enforce_current_policy_for_builtin(
                 "host_tool_call",
                 &[
-                    VmValue::String(Rc::from(host_tool.as_str())),
+                    VmValue::String(std::sync::Arc::from(host_tool.as_str())),
                     call_args.clone(),
                 ],
             )?;
@@ -1184,10 +1240,13 @@ async fn invoke_synthesized_tool(id: &str, call_args: VmValue) -> Result<VmValue
             crate::orchestration::enforce_current_policy_for_tool(&spec.name)?;
             crate::orchestration::enforce_current_policy_for_builtin(
                 "mcp_call",
-                &[VmValue::Nil, VmValue::String(Rc::from(tool_name.as_str()))],
+                &[
+                    VmValue::Nil,
+                    VmValue::String(std::sync::Arc::from(tool_name.as_str())),
+                ],
             )?;
             let Some(client) = client else {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "tool_synth_invoke: mcp_server synthesized tools require mcp_client in the synthesis config",
                 ))));
             };
@@ -1199,7 +1258,7 @@ async fn invoke_synthesized_tool(id: &str, call_args: VmValue) -> Result<VmValue
                 ),
                 VmValue::Nil => serde_json::json!({}),
                 _ => {
-                    return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         "tool_synth_invoke: mcp_server tool arguments must be a dict",
                     ))));
                 }
@@ -1224,10 +1283,9 @@ fn validate_synthesized_tool_args(
     let args = match call_args {
         VmValue::Dict(map) => map,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{}: arguments must be a dict",
-                spec.name
-            )))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("{}: arguments must be a dict", spec.name),
+            ))));
         }
     };
     for (param, schema) in params.iter() {
@@ -1235,10 +1293,9 @@ fn validate_synthesized_tool_args(
             continue;
         }
         if !args.contains_key(param) {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{}: missing required argument {param:?}",
-                spec.name
-            )))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("{}: missing required argument {param:?}", spec.name),
+            ))));
         }
     }
     Ok(())
@@ -1255,86 +1312,92 @@ fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValu
     let mut result = BTreeMap::new();
     result.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from("synthesized_tool_result")),
+        VmValue::String(std::sync::Arc::from("synthesized_tool_result")),
     );
-    result.insert("status".to_string(), VmValue::String(Rc::from("dry_run")));
+    result.insert(
+        "status".to_string(),
+        VmValue::String(std::sync::Arc::from("dry_run")),
+    );
     result.insert(
         "tool_id".to_string(),
-        VmValue::String(Rc::from(spec.id.as_str())),
+        VmValue::String(std::sync::Arc::from(spec.id.as_str())),
     );
     result.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(spec.name.as_str())),
+        VmValue::String(std::sync::Arc::from(spec.name.as_str())),
     );
     result.insert(
         "description".to_string(),
-        VmValue::String(Rc::from(spec.description.as_str())),
+        VmValue::String(std::sync::Arc::from(spec.description.as_str())),
     );
     result.insert("args".to_string(), call_args);
     result.insert(
         "capabilities".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             spec.capabilities
                 .iter()
-                .map(|capability| VmValue::String(Rc::from(capability.as_str())))
+                .map(|capability| VmValue::String(std::sync::Arc::from(capability.as_str())))
                 .collect(),
         )),
     );
     result.insert(
         "side_effect_level".to_string(),
-        VmValue::String(Rc::from(spec.side_effect_level.as_str())),
+        VmValue::String(std::sync::Arc::from(spec.side_effect_level.as_str())),
     );
     result.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(
+        VmValue::String(std::sync::Arc::from(
             "synthesized tool is pinned and validated, but executor is dry_run; \
              set executor: \"host_bridge\" or \"mcp_server\" to dispatch",
         )),
     );
-    VmValue::Dict(Rc::new(result))
+    VmValue::Dict(std::sync::Arc::new(result))
 }
 
 fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
     let mut value = BTreeMap::new();
     value.insert(
         "id".to_string(),
-        VmValue::String(Rc::from(spec.id.as_str())),
+        VmValue::String(std::sync::Arc::from(spec.id.as_str())),
     );
     value.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(spec.name.as_str())),
+        VmValue::String(std::sync::Arc::from(spec.name.as_str())),
     );
     value.insert(
         "description".to_string(),
-        VmValue::String(Rc::from(spec.description.as_str())),
+        VmValue::String(std::sync::Arc::from(spec.description.as_str())),
     );
     value.insert("parameters".to_string(), spec.parameters.clone());
     value.insert("return_type".to_string(), spec.return_type.clone());
     value.insert(
         "capabilities".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             spec.capabilities
                 .iter()
-                .map(|capability| VmValue::String(Rc::from(capability.as_str())))
+                .map(|capability| VmValue::String(std::sync::Arc::from(capability.as_str())))
                 .collect(),
         )),
     );
     value.insert(
         "side_effect_level".to_string(),
-        VmValue::String(Rc::from(spec.side_effect_level.as_str())),
+        VmValue::String(std::sync::Arc::from(spec.side_effect_level.as_str())),
     );
     match &spec.executor {
         SynthesizedToolExecutor::DryRun => {
-            value.insert("executor".to_string(), VmValue::String(Rc::from("dry_run")));
+            value.insert(
+                "executor".to_string(),
+                VmValue::String(std::sync::Arc::from("dry_run")),
+            );
         }
         SynthesizedToolExecutor::HostBridge { host_tool } => {
             value.insert(
                 "executor".to_string(),
-                VmValue::String(Rc::from("host_bridge")),
+                VmValue::String(std::sync::Arc::from("host_bridge")),
             );
             value.insert(
                 "host_tool".to_string(),
-                VmValue::String(Rc::from(host_tool.as_str())),
+                VmValue::String(std::sync::Arc::from(host_tool.as_str())),
             );
         }
         SynthesizedToolExecutor::McpServer {
@@ -1344,21 +1407,21 @@ fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
         } => {
             value.insert(
                 "executor".to_string(),
-                VmValue::String(Rc::from("mcp_server")),
+                VmValue::String(std::sync::Arc::from("mcp_server")),
             );
             value.insert(
                 "mcp_tool".to_string(),
-                VmValue::String(Rc::from(tool_name.as_str())),
+                VmValue::String(std::sync::Arc::from(tool_name.as_str())),
             );
             if let Some(server_name) = server_name {
                 value.insert(
                     "mcp_server".to_string(),
-                    VmValue::String(Rc::from(server_name.as_str())),
+                    VmValue::String(std::sync::Arc::from(server_name.as_str())),
                 );
             }
         }
     }
-    VmValue::Dict(Rc::new(value))
+    VmValue::Dict(std::sync::Arc::new(value))
 }
 
 fn synthesized_tool_hash(spec: &SynthesizedToolSpec) -> String {
@@ -1402,9 +1465,9 @@ fn required_string(
 ) -> Result<String, VmError> {
     match config.get(key) {
         Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
-        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{builtin}: {key} must be a non-empty string"
-        ))))),
+        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{builtin}: {key} must be a non-empty string"),
+        )))),
     }
 }
 
@@ -1423,18 +1486,18 @@ fn optional_string_list(
         return Ok(Vec::new());
     };
     let VmValue::List(items) = value else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "tool_synthesize: {key} must be a list of strings"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("tool_synthesize: {key} must be a list of strings"),
+        ))));
     };
     let mut out = Vec::with_capacity(items.len());
     for item in items.iter() {
         match item {
             VmValue::String(value) if !value.trim().is_empty() => out.push(value.to_string()),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "tool_synthesize: {key} must be a list of non-empty strings"
-                )))));
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!("tool_synthesize: {key} must be a list of non-empty strings"),
+                ))));
             }
         }
     }
@@ -1478,9 +1541,11 @@ fn validate_tool_name(name: &str) -> Result<(), VmError> {
     if valid_start && valid_rest {
         return Ok(());
     }
-    Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        format!(
         "tool_synthesize: invalid tool name {name:?}; use ASCII letters, digits, and underscores"
-    )))))
+    ),
+    ))))
 }
 
 fn infer_side_effect_level(capabilities: &[String]) -> String {
@@ -1514,9 +1579,9 @@ fn infer_side_effect_level(capabilities: &[String]) -> String {
 fn vm_validate_registry(name: &str, dict: &BTreeMap<String, VmValue>) -> Result<(), VmError> {
     match dict.get("_type") {
         Some(VmValue::String(t)) if &**t == "tool_registry" => Ok(()),
-        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{name}: argument must be a tool registry (created with tool_registry())"
-        ))))),
+        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{name}: argument must be a tool registry (created with tool_registry())"),
+        )))),
     }
 }
 
@@ -1567,9 +1632,12 @@ fn vm_build_empty_schema() -> BTreeMap<String, VmValue> {
     let mut schema = BTreeMap::new();
     schema.insert(
         "schema_version".to_string(),
-        VmValue::String(Rc::from("harn-tools/1.0")),
+        VmValue::String(std::sync::Arc::from("harn-tools/1.0")),
     );
-    schema.insert("tools".to_string(), VmValue::List(Rc::new(Vec::new())));
+    schema.insert(
+        "tools".to_string(),
+        VmValue::List(std::sync::Arc::new(Vec::new())),
+    );
     schema
 }
 
@@ -1578,16 +1646,19 @@ fn vm_build_input_schema(
     components: Option<&BTreeMap<String, VmValue>>,
 ) -> VmValue {
     let mut schema = BTreeMap::new();
-    schema.insert("type".to_string(), VmValue::String(Rc::from("object")));
+    schema.insert(
+        "type".to_string(),
+        VmValue::String(std::sync::Arc::from("object")),
+    );
 
     let params_map = match params {
         Some(VmValue::Dict(map)) if !map.is_empty() => map,
         _ => {
             schema.insert(
                 "properties".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::new())),
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
             );
-            return VmValue::Dict(Rc::new(schema));
+            return VmValue::Dict(std::sync::Arc::new(schema));
         }
     };
 
@@ -1597,16 +1668,22 @@ fn vm_build_input_schema(
     for (key, val) in params_map.iter() {
         let prop = vm_resolve_param_type(val, components);
         properties.insert(key.clone(), prop);
-        required.push(VmValue::String(Rc::from(key.as_str())));
+        required.push(VmValue::String(std::sync::Arc::from(key.as_str())));
     }
 
-    schema.insert("properties".to_string(), VmValue::Dict(Rc::new(properties)));
+    schema.insert(
+        "properties".to_string(),
+        VmValue::Dict(std::sync::Arc::new(properties)),
+    );
     if !required.is_empty() {
         required.sort_by_key(|a| a.display());
-        schema.insert("required".to_string(), VmValue::List(Rc::new(required)));
+        schema.insert(
+            "required".to_string(),
+            VmValue::List(std::sync::Arc::new(required)),
+        );
     }
 
-    VmValue::Dict(Rc::new(schema))
+    VmValue::Dict(std::sync::Arc::new(schema))
 }
 
 fn vm_build_output_schema(
@@ -1621,8 +1698,11 @@ fn vm_resolve_param_type(val: &VmValue, components: Option<&BTreeMap<String, VmV
         VmValue::String(type_name) => {
             let json_type = vm_harn_type_to_json_schema(type_name);
             let mut prop = BTreeMap::new();
-            prop.insert("type".to_string(), VmValue::String(Rc::from(json_type)));
-            VmValue::Dict(Rc::new(prop))
+            prop.insert(
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from(json_type)),
+            );
+            VmValue::Dict(std::sync::Arc::new(prop))
         }
         VmValue::Dict(map) => {
             if let Some(VmValue::String(ref_name)) = map.get("$ref") {
@@ -1634,19 +1714,22 @@ fn vm_resolve_param_type(val: &VmValue, components: Option<&BTreeMap<String, VmV
                 let mut prop = BTreeMap::new();
                 prop.insert(
                     "$ref".to_string(),
-                    VmValue::String(Rc::from(
+                    VmValue::String(std::sync::Arc::from(
                         format!("#/components/schemas/{ref_name}").as_str(),
                     )),
                 );
-                VmValue::Dict(Rc::new(prop))
+                VmValue::Dict(std::sync::Arc::new(prop))
             } else {
-                VmValue::Dict(Rc::new((**map).clone()))
+                VmValue::Dict(std::sync::Arc::new((**map).clone()))
             }
         }
         _ => {
             let mut prop = BTreeMap::new();
-            prop.insert("type".to_string(), VmValue::String(Rc::from("string")));
-            VmValue::Dict(Rc::new(prop))
+            prop.insert(
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("string")),
+            );
+            VmValue::Dict(std::sync::Arc::new(prop))
         }
     }
 }

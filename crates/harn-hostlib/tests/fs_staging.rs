@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use harn_hostlib::tools::permissions;
 use harn_hostlib::{fs::FsCapability, tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
@@ -25,11 +25,11 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
     for (k, v) in entries {
         map.insert(k.to_string(), v.clone());
     }
-    vec![VmValue::Dict(Rc::new(map))]
+    vec![VmValue::Dict(Arc::new(map))]
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Rc::from(s))
+    VmValue::String(Arc::from(s))
 }
 
 fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

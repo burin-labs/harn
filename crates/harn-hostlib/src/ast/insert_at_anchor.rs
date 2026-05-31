@@ -38,7 +38,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -633,7 +633,7 @@ fn ambiguous_response(anchors: &[AnchorSpan]) -> VmValue {
         ("match_count", VmValue::Int(anchors.len() as i64)),
         (
             "anchors",
-            VmValue::List(Rc::new(anchors.iter().map(anchor_to_value).collect())),
+            VmValue::List(Arc::new(anchors.iter().map(anchor_to_value).collect())),
         ),
         (
             "details",
@@ -719,7 +719,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(Rc::from(s))
+        VmValue::String(Arc::from(s))
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
@@ -727,7 +727,7 @@ mod tests {
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(Arc::new(map))
     }
 
     fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

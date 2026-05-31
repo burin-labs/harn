@@ -9,7 +9,6 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -133,7 +132,7 @@ pub(super) fn run_query(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue
     Ok(build_dict([
         (
             "results",
-            VmValue::List(Rc::new(hits.into_iter().map(hit_to_value).collect())),
+            VmValue::List(Arc::new(hits.into_iter().map(hit_to_value).collect())),
         ),
         ("truncated", VmValue::Bool(truncated)),
     ]))
@@ -224,7 +223,7 @@ pub(super) fn run_imports_for(
     }
     Ok(build_dict([
         ("path", str_value(&file.relative_path)),
-        ("imports", VmValue::List(Rc::new(entries))),
+        ("imports", VmValue::List(Arc::new(entries))),
     ]))
 }
 
@@ -271,7 +270,7 @@ pub(super) fn run_importers_of(
         ("module", str_value(&module)),
         (
             "importers",
-            VmValue::List(Rc::new(importers.into_iter().map(str_value).collect())),
+            VmValue::List(Arc::new(importers.into_iter().map(str_value).collect())),
         ),
     ]))
 }
@@ -319,7 +318,7 @@ pub(super) fn run_file_ids(
         .map(|s| s.files.keys().copied().collect())
         .unwrap_or_default();
     ids.sort_unstable();
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(Arc::new(
         ids.into_iter().map(|id| VmValue::Int(id as i64)).collect(),
     )))
 }
@@ -514,7 +513,7 @@ pub(super) fn run_trigram_query(
     if let Some(limit) = max_files {
         ids.truncate(limit);
     }
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(Arc::new(
         ids.into_iter().map(|id| VmValue::Int(id as i64)).collect(),
     )))
 }
@@ -527,7 +526,7 @@ pub(super) fn run_extract_trigrams(
     let query = require_string(BUILTIN_EXTRACT_TRIGRAMS, raw.as_ref(), "query")?;
     let mut tgs = trigram::query_trigrams(&query);
     tgs.sort_unstable();
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(Arc::new(
         tgs.into_iter().map(|n| VmValue::Int(n as i64)).collect(),
     )))
 }
@@ -550,7 +549,7 @@ pub(super) fn run_word_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmVa
             .collect(),
         None => Vec::new(),
     };
-    Ok(VmValue::List(Rc::new(hits)))
+    Ok(VmValue::List(Arc::new(hits)))
 }
 
 pub(super) fn run_deps_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -575,7 +574,7 @@ pub(super) fn run_deps_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmVa
         None => Vec::new(),
     };
     neighbors.sort_unstable();
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(Arc::new(
         neighbors
             .into_iter()
             .map(|id| VmValue::Int(id as i64))
@@ -606,7 +605,7 @@ pub(super) fn run_outline_get(
             .collect(),
         None => Vec::new(),
     };
-    Ok(VmValue::List(Rc::new(symbols)))
+    Ok(VmValue::List(Arc::new(symbols)))
 }
 
 // === Change log ===
@@ -633,7 +632,7 @@ pub(super) fn run_changes_since(
         Some(state) => state.versions.changes_since(seq, limit),
         None => Vec::new(),
     };
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(Arc::new(
         records
             .into_iter()
             .map(|r| {
@@ -783,7 +782,7 @@ pub(super) fn run_status(index: &SharedIndex, _args: &[VmValue]) -> Result<VmVal
             ),
             (
                 "agents",
-                VmValue::List(Rc::new(
+                VmValue::List(Arc::new(
                     state
                         .agents
                         .agents()
@@ -813,7 +812,7 @@ pub(super) fn run_status(index: &SharedIndex, _args: &[VmValue]) -> Result<VmVal
             ("current_seq", VmValue::Int(0)),
             ("last_indexed_at_ms", VmValue::Int(0)),
             ("git_head", VmValue::Nil),
-            ("agents", VmValue::List(Rc::new(Vec::new()))),
+            ("agents", VmValue::List(Arc::new(Vec::new()))),
         ])),
     }
 }
@@ -839,7 +838,7 @@ pub(super) fn run_cypher(index: &SharedIndex, args: &[VmValue]) -> Result<VmValu
     let guard = index.lock().expect("code_index mutex poisoned");
     let Some(state) = guard.as_ref() else {
         return Ok(build_dict([
-            ("rows", VmValue::List(Rc::new(Vec::new()))),
+            ("rows", VmValue::List(Arc::new(Vec::new()))),
             ("overlay", VmValue::Nil),
         ]));
     };
@@ -857,12 +856,12 @@ pub(super) fn run_cypher(index: &SharedIndex, args: &[VmValue]) -> Result<VmValu
             for (k, v) in row {
                 map.insert(k, v.to_vm());
             }
-            VmValue::Dict(Rc::new(map))
+            VmValue::Dict(Arc::new(map))
         })
         .collect();
 
     Ok(build_dict([
-        ("rows", VmValue::List(Rc::new(rows_vm))),
+        ("rows", VmValue::List(Arc::new(rows_vm))),
         (
             "overlay",
             match state.overlays.active() {
@@ -986,13 +985,13 @@ pub(super) fn run_freshness(
         ("stale", VmValue::Bool(stale)),
         (
             "indexed_hash",
-            VmValue::String(Rc::from(format!("{:016x}", file.content_hash).as_str())),
+            VmValue::String(Arc::from(format!("{:016x}", file.content_hash).as_str())),
         ),
         ("indexed_mtime_ms", VmValue::Int(file.mtime_ms)),
         (
             "disk_hash",
             match disk_hash {
-                Some(h) => VmValue::String(Rc::from(format!("{h:016x}").as_str())),
+                Some(h) => VmValue::String(Arc::from(format!("{h:016x}").as_str())),
                 None => VmValue::Nil,
             },
         ),
@@ -1257,12 +1256,12 @@ fn import_entry(module: &str, resolved: Option<&str>, kind: &str) -> VmValue {
         },
     );
     map.insert("kind".into(), str_value(kind));
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 fn empty_query_response() -> VmValue {
     build_dict([
-        ("results", VmValue::List(Rc::new(Vec::new()))),
+        ("results", VmValue::List(Arc::new(Vec::new()))),
         ("truncated", VmValue::Bool(false)),
     ])
 }
@@ -1280,14 +1279,14 @@ fn empty_stats_response() -> VmValue {
 fn empty_imports_response(path: &str) -> VmValue {
     build_dict([
         ("path", str_value(path)),
-        ("imports", VmValue::List(Rc::new(Vec::new()))),
+        ("imports", VmValue::List(Arc::new(Vec::new()))),
     ])
 }
 
 fn empty_importers_response(module: &str) -> VmValue {
     build_dict([
         ("module", str_value(module)),
-        ("importers", VmValue::List(Rc::new(Vec::new()))),
+        ("importers", VmValue::List(Arc::new(Vec::new()))),
     ])
 }
 

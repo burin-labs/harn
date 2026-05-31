@@ -7,7 +7,6 @@ mod types;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::thread_local;
 
 use serde::{Deserialize, Serialize};
@@ -490,10 +489,13 @@ pub fn redact_transcript_visibility(
     let mut redacted = dict.clone();
     redacted.insert(
         "messages".to_string(),
-        VmValue::List(Rc::new(public_messages)),
+        VmValue::List(std::sync::Arc::new(public_messages)),
     );
-    redacted.insert("events".to_string(), VmValue::List(Rc::new(public_events)));
-    Some(VmValue::Dict(Rc::new(redacted)))
+    redacted.insert(
+        "events".to_string(),
+        VmValue::List(std::sync::Arc::new(public_events)),
+    );
+    Some(VmValue::Dict(std::sync::Arc::new(redacted)))
 }
 
 fn redact_public_message(message: &VmValue) -> Option<VmValue> {
@@ -524,7 +526,10 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
             if key == "blocks" || public_text.is_empty() {
                 public_text = text_fragments_from_blocks(&public_blocks);
             }
-            redacted.insert(key.to_string(), VmValue::List(Rc::new(public_blocks)));
+            redacted.insert(
+                key.to_string(),
+                VmValue::List(std::sync::Arc::new(public_blocks)),
+            );
         }
     }
     if saw_structured_blocks {
@@ -533,11 +538,11 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
         } else {
             redacted.insert(
                 "text".to_string(),
-                VmValue::String(Rc::from(public_text.join("\n"))),
+                VmValue::String(std::sync::Arc::from(public_text.join("\n"))),
             );
         }
     }
-    Some(VmValue::Dict(Rc::new(redacted)))
+    Some(VmValue::Dict(std::sync::Arc::new(redacted)))
 }
 
 fn redact_public_block(block: &VmValue) -> Option<VmValue> {

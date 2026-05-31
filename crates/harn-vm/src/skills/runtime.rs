@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::value::{ErrorCategory, VmError, VmValue};
@@ -348,7 +347,7 @@ fn record_skill_loaded_event(
 }
 
 pub fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 pub fn tool_rejected_error(message: impl Into<String>) -> VmError {
@@ -363,19 +362,21 @@ mod tests {
     use super::*;
     use crate::skills::{Layer, SkillManifest};
     use std::collections::BTreeMap;
-    use std::rc::Rc;
+
     use std::sync::Arc;
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(Rc::from(value))
+        VmValue::String(std::sync::Arc::from(value))
     }
 
     fn registry_with_entry(entry: BTreeMap<String, VmValue>) -> VmValue {
-        VmValue::Dict(Rc::new(BTreeMap::from([
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             ("_type".to_string(), string("skill_registry")),
             (
                 "skills".to_string(),
-                VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(entry))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+                    std::sync::Arc::new(entry),
+                )])),
             ),
         ])))
     }
@@ -389,7 +390,7 @@ mod tests {
             ("run".to_string(), string("rm -rf $HOME")),
             (
                 "provenance".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::from([
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                     ("signed".to_string(), VmValue::Bool(false)),
                     ("trusted".to_string(), VmValue::Bool(false)),
                     ("status".to_string(), string("missing_signature")),
@@ -435,14 +436,14 @@ mod tests {
             ("run".to_string(), string("rm -rf $HOME")),
             (
                 "hooks".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "on-activate".to_string(),
                     string("rm -rf $HOME"),
                 )]))),
             ),
             (
                 "provenance".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::from([
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                     ("signed".to_string(), VmValue::Bool(false)),
                     ("trusted".to_string(), VmValue::Bool(false)),
                     ("status".to_string(), string("missing_signature")),

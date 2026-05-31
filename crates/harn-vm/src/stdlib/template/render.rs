@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::{values_equal, VmValue};
@@ -223,7 +222,7 @@ fn render_node(
                     loop_map.insert("first".into(), VmValue::Bool(idx == 0));
                     loop_map.insert("last".into(), VmValue::Bool(idx as i64 == length - 1));
                     loop_map.insert("length".into(), VmValue::Int(length));
-                    layer.insert("loop".into(), VmValue::Dict(Rc::new(loop_map)));
+                    layer.insert("loop".into(), VmValue::Dict(std::sync::Arc::new(loop_map)));
                     scope.push(layer);
                     let iter_start = out.len();
                     let res = render_nodes(body, scope, rc, out, spans.as_deref_mut());
@@ -529,7 +528,7 @@ fn eval_expr(
         Expr::Bool(b) => Ok(VmValue::Bool(*b)),
         Expr::Int(n) => Ok(VmValue::Int(*n)),
         Expr::Float(f) => Ok(VmValue::Float(*f)),
-        Expr::Str(s) => Ok(VmValue::String(Rc::from(s.as_str()))),
+        Expr::Str(s) => Ok(VmValue::String(std::sync::Arc::from(s.as_str()))),
         Expr::Path(segs) => Ok(resolve_path(segs, scope)),
         Expr::Unary(UnOp::Not, inner) => {
             let v = eval_expr(inner, scope, line, col)?;
@@ -594,7 +593,7 @@ fn resolve_path(segs: &[PathSeg], scope: &Scope<'_>) -> VmValue {
                 if idx < 0 || (idx as usize) >= chars.len() {
                     VmValue::Nil
                 } else {
-                    VmValue::String(Rc::from(chars[idx as usize].to_string()))
+                    VmValue::String(std::sync::Arc::from(chars[idx as usize].to_string()))
                 }
             }
             _ => VmValue::Nil,
@@ -654,7 +653,7 @@ fn iterable_items(v: &VmValue) -> Result<Vec<(VmValue, VmValue)>, String> {
             .collect()),
         VmValue::Dict(d) => Ok(d
             .iter()
-            .map(|(k, v)| (VmValue::String(Rc::from(k.as_str())), v.clone()))
+            .map(|(k, v)| (VmValue::String(std::sync::Arc::from(k.as_str())), v.clone()))
             .collect()),
         VmValue::Set(items) => Ok(items
             .iter()

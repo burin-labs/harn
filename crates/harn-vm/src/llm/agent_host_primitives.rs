@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -96,7 +95,7 @@ async fn host_agent_capture_events_impl(
         "events".to_string(),
         json_to_vm_value(&serde_json::Value::Array(events)),
     );
-    Ok(VmValue::Dict(Rc::new(envelope)))
+    Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
 }
 
 fn agent_primitive_tools_arg(
@@ -134,7 +133,7 @@ fn agent_primitive_options_value_arg(
 ) -> Result<std::collections::BTreeMap<String, VmValue>, VmError> {
     match value {
         Some(VmValue::Dict(options)) => {
-            Ok(Rc::try_unwrap(options).unwrap_or_else(|options| options.as_ref().clone()))
+            Ok(Arc::try_unwrap(options).unwrap_or_else(|options| options.as_ref().clone()))
         }
         Some(VmValue::Nil) | None => Ok(std::collections::BTreeMap::new()),
         Some(other) => Err(VmError::Runtime(format!(
@@ -428,7 +427,7 @@ async fn host_agent_dispatch_tool_batch_impl(
     let mut args = args.into_iter();
     let calls = match args.next() {
         Some(VmValue::List(calls)) => {
-            Rc::try_unwrap(calls).unwrap_or_else(|calls| calls.as_ref().clone())
+            Arc::try_unwrap(calls).unwrap_or_else(|calls| calls.as_ref().clone())
         }
         Some(other) => {
             return Err(VmError::Runtime(format!(
@@ -459,7 +458,7 @@ async fn host_agent_dispatch_tool_batch_impl(
         host_agent_dispatch_tool_batch_capped(ctx, calls, tools.as_ref(), &options, cap).await?
     };
 
-    Ok(VmValue::List(Rc::new(results)))
+    Ok(VmValue::List(std::sync::Arc::new(results)))
 }
 
 /// Dispatch one normalized agent tool call through the host tool runtime.

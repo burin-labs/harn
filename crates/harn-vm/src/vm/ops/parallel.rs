@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -182,7 +181,7 @@ impl super::super::Vm {
                 self.output.push_str(&task_output);
                 results.push(val);
             }
-            self.stack.push(VmValue::List(Rc::new(results)));
+            self.stack.push(VmValue::List(std::sync::Arc::new(results)));
         } else {
             self.stack.push(VmValue::Nil);
         }
@@ -229,7 +228,7 @@ impl super::super::Vm {
                     self.output.push_str(&task_output);
                     results.push(val);
                 }
-                self.stack.push(VmValue::List(Rc::new(results)));
+                self.stack.push(VmValue::List(std::sync::Arc::new(results)));
             }
             _ => self.stack.push(VmValue::Nil),
         }
@@ -276,8 +275,8 @@ impl super::super::Vm {
                     "Parallel map stream error",
                 ));
                 self.stack.push(VmValue::stream(VmStream {
-                    done: Rc::new(std::cell::Cell::new(false)),
-                    receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+                    done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    receiver: Arc::new(tokio::sync::Mutex::new(rx)),
                     cancel: Some(cancel),
                 }));
             }
@@ -333,16 +332,19 @@ impl super::super::Vm {
                             results.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
-                                vec![VmValue::String(Rc::from(e.to_string()))],
+                                vec![VmValue::String(std::sync::Arc::from(e.to_string()))],
                             ));
                         }
                     }
                 }
                 let mut dict = BTreeMap::new();
-                dict.insert("results".to_string(), VmValue::List(Rc::new(results)));
+                dict.insert(
+                    "results".to_string(),
+                    VmValue::List(std::sync::Arc::new(results)),
+                );
                 dict.insert("succeeded".to_string(), VmValue::Int(succeeded));
                 dict.insert("failed".to_string(), VmValue::Int(failed));
-                self.stack.push(VmValue::Dict(Rc::new(dict)));
+                self.stack.push(VmValue::Dict(std::sync::Arc::new(dict)));
             }
             _ => self.stack.push(VmValue::Nil),
         }
@@ -390,7 +392,7 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), idx)
+            (Arc::clone(&frame.chunk), idx)
         };
         let key = Self::const_str(&chunk.constants[idx])?;
         let permit = self

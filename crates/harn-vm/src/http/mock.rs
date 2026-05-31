@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::VmValue;
 
@@ -41,7 +40,7 @@ impl From<HttpMockResponse> for MockResponse {
             headers: value
                 .headers
                 .into_iter()
-                .map(|(key, value)| (key, VmValue::String(Rc::from(value))))
+                .map(|(key, value)| (key, VmValue::String(std::sync::Arc::from(value))))
                 .collect(),
         }
     }
@@ -148,15 +147,18 @@ pub(super) fn http_mock_calls_value(redact_sensitive: bool) -> Vec<VmValue> {
                 let mut dict = BTreeMap::new();
                 dict.insert(
                     "method".to_string(),
-                    VmValue::String(Rc::from(call.method.as_str())),
+                    VmValue::String(std::sync::Arc::from(call.method.as_str())),
                 );
                 dict.insert(
                     "url".to_string(),
-                    VmValue::String(Rc::from(redact_mock_call_url(&call.url, redact_sensitive))),
+                    VmValue::String(std::sync::Arc::from(redact_mock_call_url(
+                        &call.url,
+                        redact_sensitive,
+                    ))),
                 );
                 dict.insert(
                     "headers".to_string(),
-                    VmValue::Dict(Rc::new(mock_call_headers_value(
+                    VmValue::Dict(std::sync::Arc::new(mock_call_headers_value(
                         &call.headers,
                         redact_sensitive,
                     ))),
@@ -164,11 +166,11 @@ pub(super) fn http_mock_calls_value(redact_sensitive: bool) -> Vec<VmValue> {
                 dict.insert(
                     "body".to_string(),
                     match &call.body {
-                        Some(body) => VmValue::String(Rc::from(body.as_str())),
+                        Some(body) => VmValue::String(std::sync::Arc::from(body.as_str())),
                         None => VmValue::Nil,
                     },
                 );
-                VmValue::Dict(Rc::new(dict))
+                VmValue::Dict(std::sync::Arc::new(dict))
             })
             .collect()
     })
@@ -308,7 +310,7 @@ pub(super) fn mock_call_headers_value(
         .iter()
         .map(|(key, value)| {
             let value = if policy.header_is_sensitive(key) {
-                VmValue::String(Rc::from(crate::redact::REDACTED_PLACEHOLDER))
+                VmValue::String(std::sync::Arc::from(crate::redact::REDACTED_PLACEHOLDER))
             } else {
                 value.clone()
             };

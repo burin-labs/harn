@@ -6,7 +6,6 @@
 //! into the canonical [`ThinkingConfig`] that providers already understand.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::llm::api::{ReasoningEffort, ThinkingConfig};
 use crate::llm::capabilities::Capabilities;
@@ -352,60 +351,65 @@ fn resolved_route_from_options(opts: &BTreeMap<String, VmValue>) -> Option<(Stri
 
 fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
     match thinking {
-        ThinkingConfig::Disabled => VmValue::Dict(Rc::new(BTreeMap::from([(
+        ThinkingConfig::Disabled => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "mode".to_string(),
-            VmValue::String(Rc::from("disabled")),
+            VmValue::String(std::sync::Arc::from("disabled")),
         )]))),
         ThinkingConfig::Enabled { budget_tokens } => {
-            let mut dict =
-                BTreeMap::from([("mode".to_string(), VmValue::String(Rc::from("enabled")))]);
+            let mut dict = BTreeMap::from([(
+                "mode".to_string(),
+                VmValue::String(std::sync::Arc::from("enabled")),
+            )]);
             if let Some(budget_tokens) = budget_tokens {
                 dict.insert(
                     "budget_tokens".to_string(),
                     VmValue::Int(*budget_tokens as i64),
                 );
             }
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         }
-        ThinkingConfig::Adaptive => VmValue::Dict(Rc::new(BTreeMap::from([(
+        ThinkingConfig::Adaptive => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "mode".to_string(),
-            VmValue::String(Rc::from("adaptive")),
+            VmValue::String(std::sync::Arc::from("adaptive")),
         )]))),
-        ThinkingConfig::Effort { level } => VmValue::Dict(Rc::new(BTreeMap::from([
-            ("mode".to_string(), VmValue::String(Rc::from("effort"))),
+        ThinkingConfig::Effort { level } => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "mode".to_string(),
+                VmValue::String(std::sync::Arc::from("effort")),
+            ),
             (
                 "level".to_string(),
-                VmValue::String(Rc::from(level.as_str())),
+                VmValue::String(std::sync::Arc::from(level.as_str())),
             ),
         ]))),
     }
 }
 
 fn application_metadata_to_vm_value(application: &ReasoningPolicyApplication) -> VmValue {
-    VmValue::Dict(Rc::new(BTreeMap::from([
+    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         (
             "policy".to_string(),
-            VmValue::String(Rc::from(application.policy.clone())),
+            VmValue::String(std::sync::Arc::from(application.policy.clone())),
         ),
         (
             "task".to_string(),
-            VmValue::String(Rc::from(application.task.clone())),
+            VmValue::String(std::sync::Arc::from(application.task.clone())),
         ),
         (
             "scale".to_string(),
-            VmValue::String(Rc::from(application.scale.clone())),
+            VmValue::String(std::sync::Arc::from(application.scale.clone())),
         ),
         (
             "level".to_string(),
-            VmValue::String(Rc::from(application.level.clone())),
+            VmValue::String(std::sync::Arc::from(application.level.clone())),
         ),
         (
             "provider".to_string(),
-            VmValue::String(Rc::from(application.provider.clone())),
+            VmValue::String(std::sync::Arc::from(application.provider.clone())),
         ),
         (
             "model".to_string(),
-            VmValue::String(Rc::from(application.model.clone())),
+            VmValue::String(std::sync::Arc::from(application.model.clone())),
         ),
     ])))
 }
@@ -421,11 +425,17 @@ mod tests {
     #[test]
     fn high_policy_maps_to_effort_for_openai_reasoning_models() {
         let opts = BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("openai"))),
-            ("model".to_string(), VmValue::String(Rc::from("gpt-5"))),
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("openai")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from("gpt-5")),
+            ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(Rc::from("high")),
+                VmValue::String(std::sync::Arc::from("high")),
             ),
         ]);
         let out = apply(opts);
@@ -451,18 +461,21 @@ mod tests {
         // data layer. Previously this lived as a hard-coded
         // `local_qwen_route` branch in resolve_policy.
         let opts = BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("ollama"))),
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("ollama")),
+            ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("qwen3.6:35b-a3b-coding-nvfp4")),
+                VmValue::String(std::sync::Arc::from("qwen3.6:35b-a3b-coding-nvfp4")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(Rc::from("auto")),
+                VmValue::String(std::sync::Arc::from("auto")),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(Rc::from("agent")),
+                VmValue::String(std::sync::Arc::from("agent")),
             ),
         ]);
         let out = apply(opts);
@@ -495,19 +508,19 @@ mod tests {
         let opts = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("openrouter")),
+                VmValue::String(std::sync::Arc::from("openrouter")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("qwen/qwen3.6-35b-a3b")),
+                VmValue::String(std::sync::Arc::from("qwen/qwen3.6-35b-a3b")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(Rc::from("auto")),
+                VmValue::String(std::sync::Arc::from("auto")),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(Rc::from("agent")),
+                VmValue::String(std::sync::Arc::from("agent")),
             ),
         ]);
         let out = apply(opts);
@@ -530,19 +543,19 @@ mod tests {
         let opts = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("openrouter")),
+                VmValue::String(std::sync::Arc::from("openrouter")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("qwen/qwen3.6-35b-a3b")),
+                VmValue::String(std::sync::Arc::from("qwen/qwen3.6-35b-a3b")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(Rc::from("high")),
+                VmValue::String(std::sync::Arc::from("high")),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(Rc::from("agent")),
+                VmValue::String(std::sync::Arc::from("agent")),
             ),
         ]);
         let out = apply(opts);
@@ -575,18 +588,21 @@ auto_reasoning_overrides = { agent = "off" }
         )
         .expect("override toml");
         let opts = BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("acme"))),
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("acme")),
+            ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("custom-thinker")),
+                VmValue::String(std::sync::Arc::from("custom-thinker")),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(Rc::from("auto")),
+                VmValue::String(std::sync::Arc::from("auto")),
             ),
             (
                 "reasoning_task".to_string(),
-                VmValue::String(Rc::from("agent")),
+                VmValue::String(std::sync::Arc::from("agent")),
             ),
         ]);
         let out = apply(opts);
@@ -604,11 +620,17 @@ auto_reasoning_overrides = { agent = "off" }
     #[test]
     fn explicit_thinking_wins_over_policy() {
         let opts = BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("openai"))),
-            ("model".to_string(), VmValue::String(Rc::from("gpt-5"))),
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("openai")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from("gpt-5")),
+            ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(Rc::from("high")),
+                VmValue::String(std::sync::Arc::from("high")),
             ),
             ("thinking".to_string(), VmValue::Bool(true)),
         ]);

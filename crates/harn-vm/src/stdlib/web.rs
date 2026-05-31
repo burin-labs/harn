@@ -1,7 +1,6 @@
 //! Pure web-source helpers backing `std/web`.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use regex::Regex;
 use scraper::{ElementRef, Html, Selector};
@@ -13,15 +12,15 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 fn vm_str(value: impl AsRef<str>) -> VmValue {
-    VmValue::String(Rc::from(value.as_ref()))
+    VmValue::String(std::sync::Arc::from(value.as_ref()))
 }
 
 fn vm_list(values: Vec<VmValue>) -> VmValue {
-    VmValue::List(Rc::new(values))
+    VmValue::List(std::sync::Arc::new(values))
 }
 
 fn vm_dict(values: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(Rc::new(values))
+    VmValue::Dict(std::sync::Arc::new(values))
 }
 
 fn selector(pattern: &str) -> Selector {

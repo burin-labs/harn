@@ -10,7 +10,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use harn_vm::skills::{
@@ -159,7 +158,7 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
             },
         );
         included_winners.push(winner.clone());
-        entries.push(VmValue::Dict(Rc::new(entry)));
+        entries.push(VmValue::Dict(std::sync::Arc::new(entry)));
     }
 
     let included_ids: std::collections::BTreeSet<String> = included_winners
@@ -181,10 +180,13 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
     let mut registry: BTreeMap<String, VmValue> = BTreeMap::new();
     registry.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from("skill_registry")),
+        VmValue::String(std::sync::Arc::from("skill_registry")),
     );
-    registry.insert("skills".to_string(), VmValue::List(Rc::new(entries)));
-    let registry_value = VmValue::Dict(Rc::new(registry));
+    registry.insert(
+        "skills".to_string(),
+        VmValue::List(std::sync::Arc::new(entries)),
+    );
+    let registry_value = VmValue::Dict(std::sync::Arc::new(registry));
     let fetcher = build_policy_fetcher(discovery.clone(), registry_url, fetch_policies);
 
     LoadedSkills {
@@ -369,22 +371,24 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert(
         "skill_sha256".to_string(),
-        VmValue::String(Rc::from(report.skill_sha256.as_str())),
+        VmValue::String(std::sync::Arc::from(report.skill_sha256.as_str())),
     );
     dict.insert("signed".to_string(), VmValue::Bool(report.signed));
     dict.insert("trusted".to_string(), VmValue::Bool(report.trusted));
     dict.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(status_label(report.status))),
+        VmValue::String(std::sync::Arc::from(status_label(report.status))),
     );
     dict.insert(
         "signature_path".to_string(),
-        VmValue::String(Rc::from(report.signature_path.display().to_string())),
+        VmValue::String(std::sync::Arc::from(
+            report.signature_path.display().to_string(),
+        )),
     );
     if let Some(fingerprint) = report.signer_fingerprint.as_deref() {
         dict.insert(
             "signer_fingerprint".to_string(),
-            VmValue::String(Rc::from(fingerprint)),
+            VmValue::String(std::sync::Arc::from(fingerprint)),
         );
         dict.insert(
             "author".to_string(),
@@ -405,72 +409,80 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
             item.insert("trusted".to_string(), VmValue::Bool(endorsement.trusted));
             item.insert(
                 "status".to_string(),
-                VmValue::String(Rc::from(status_label(endorsement.status))),
+                VmValue::String(std::sync::Arc::from(status_label(endorsement.status))),
             );
             if let Some(error) = endorsement.error.as_deref() {
-                item.insert("error".to_string(), VmValue::String(Rc::from(error)));
+                item.insert(
+                    "error".to_string(),
+                    VmValue::String(std::sync::Arc::from(error)),
+                );
             }
-            VmValue::Dict(Rc::new(item))
+            VmValue::Dict(std::sync::Arc::new(item))
         })
         .collect();
     dict.insert(
         "endorsements".to_string(),
-        VmValue::List(Rc::new(endorsements)),
+        VmValue::List(std::sync::Arc::new(endorsements)),
     );
     let mut policy_input = BTreeMap::new();
     policy_input.insert(
         "action".to_string(),
-        VmValue::String(Rc::from("skill.provenance")),
+        VmValue::String(std::sync::Arc::from("skill.provenance")),
     );
     if let Some(fingerprint) = report.signer_fingerprint.as_deref() {
         policy_input.insert(
             "author_actor_id".to_string(),
-            VmValue::String(Rc::from(fingerprint)),
+            VmValue::String(std::sync::Arc::from(fingerprint)),
         );
     }
     policy_input.insert(
         "endorser_actor_ids".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             report
                 .endorsements
                 .iter()
                 .map(|endorsement| {
-                    VmValue::String(Rc::from(endorsement.endorser_fingerprint.as_str()))
+                    VmValue::String(std::sync::Arc::from(
+                        endorsement.endorser_fingerprint.as_str(),
+                    ))
                 })
                 .collect(),
         )),
     );
     dict.insert(
         "trust_policy_input".to_string(),
-        VmValue::Dict(Rc::new(policy_input)),
+        VmValue::Dict(std::sync::Arc::new(policy_input)),
     );
     if let Some(error) = report.error.as_deref() {
-        dict.insert("error".to_string(), VmValue::String(Rc::from(error)));
+        dict.insert(
+            "error".to_string(),
+            VmValue::String(std::sync::Arc::from(error)),
+        );
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn signer_policy_input(fingerprint: &str, signed_at: Option<&str>) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert(
         "fingerprint".to_string(),
-        VmValue::String(Rc::from(fingerprint)),
+        VmValue::String(std::sync::Arc::from(fingerprint)),
     );
     dict.insert(
         "trust_actor_id".to_string(),
-        VmValue::String(Rc::from(fingerprint)),
+        VmValue::String(std::sync::Arc::from(fingerprint)),
     );
     dict.insert(
         "trust_action".to_string(),
-        VmValue::String(Rc::from("skill.provenance")),
+        VmValue::String(std::sync::Arc::from("skill.provenance")),
     );
     if let Some(signed_at) = signed_at {
         dict.insert(
             "signed_at".to_string(),
-            VmValue::String(Rc::from(signed_at)),
+            VmValue::String(std::sync::Arc::from(signed_at)),
         );
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn status_label(status: VerificationStatus) -> &'static str {

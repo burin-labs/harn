@@ -84,9 +84,9 @@ fn ensure_worker_stage_session_id(
         .unwrap_or_default();
     raw_model_policy.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.clone())),
+        VmValue::String(std::sync::Arc::from(session_id.clone())),
     );
-    node.raw_model_policy = Some(VmValue::Dict(Rc::new(raw_model_policy)));
+    node.raw_model_policy = Some(VmValue::Dict(std::sync::Arc::new(raw_model_policy)));
     session_id
 }
 
@@ -177,7 +177,7 @@ async fn execute_worker_config(
                 if let Some(parent_run_id) = parent_run_id.clone() {
                     options.insert(
                         "parent_run_id".to_string(),
-                        VmValue::String(Rc::from(parent_run_id)),
+                        VmValue::String(std::sync::Arc::from(parent_run_id)),
                     );
                 }
             }
@@ -213,12 +213,12 @@ async fn execute_worker_config(
                 "std/workflow/execute",
                 "workflow_execute",
                 &[
-                    VmValue::String(Rc::from(task)),
+                    VmValue::String(std::sync::Arc::from(task)),
                     super::super::workflow::workflow_graph_to_vm(&graph)?,
                     crate::stdlib::json_to_vm_value(
                         &serde_json::to_value(&artifacts).unwrap_or_default(),
                     ),
-                    VmValue::Dict(Rc::new(options)),
+                    VmValue::Dict(std::sync::Arc::new(options)),
                 ],
             )
             .await;
@@ -231,7 +231,9 @@ async fn execute_worker_config(
             let transcript = dict.get("transcript").cloned();
             let artifacts = super::super::parse_artifact_list(dict.get("artifacts"))?;
             Ok(WorkerExecutionResult {
-                payload: crate::llm::vm_value_to_json(&VmValue::Dict(Rc::new(dict.clone()))),
+                payload: crate::llm::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(
+                    dict.clone(),
+                ))),
                 transcript,
                 artifacts,
                 execution,

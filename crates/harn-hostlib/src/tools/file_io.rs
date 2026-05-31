@@ -6,7 +6,7 @@
 use std::fs as stdfs;
 use std::io::{Read, Seek};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use base64::Engine;
 use harn_vm::process_sandbox::FsAccess;
@@ -348,7 +348,7 @@ pub(super) fn list_directory(args: &[VmValue]) -> Result<VmValue, HostlibError> 
     let entries_list: Vec<VmValue> = entries.into_iter().map(|(_, v)| v).collect();
     Ok(build_dict([
         ("path", str_value(&path_str)),
-        ("entries", VmValue::List(Rc::new(entries_list))),
+        ("entries", VmValue::List(Arc::new(entries_list))),
         ("truncated", VmValue::Bool(truncated)),
     ]))
 }

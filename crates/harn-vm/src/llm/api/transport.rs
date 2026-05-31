@@ -3,7 +3,6 @@
 //! request-body construction lives in `crate::llm::providers`; this file is
 //! the wire-format layer below that.
 
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::agent_events::{AgentEvent, ToolCallStatus};
@@ -393,7 +392,7 @@ async fn vm_call_llm_api_with_body_inner(
                     is_anthropic_style,
                     is_ollama,
                 );
-                return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
             }
             let is_sse = response
                 .headers()
@@ -447,7 +446,7 @@ async fn vm_call_llm_api_with_body_inner(
     }
 
     let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "{provider} API error: {e}"
         ))))
     })?;
@@ -471,11 +470,11 @@ async fn vm_call_llm_api_with_body_inner(
             is_anthropic_style,
             is_ollama,
         );
-        return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
     }
 
     let json: serde_json::Value = response.json().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "{provider} response parse error: {e}"
         ))))
     })?;
@@ -602,7 +601,7 @@ fn stream_send_error(provider: &str, error: reqwest::Error) -> VmError {
     } else {
         format!("{provider} stream error ({kind}): {error}")
     };
-    VmError::Thrown(VmValue::String(Rc::from(detail)))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(detail)))
 }
 
 /// Map an Anthropic `tool_use` block id (or, as a fallback, an
@@ -1126,7 +1125,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         && tool_calls.is_empty()
         && !has_tool_search_block
     {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
         )))));
     }
@@ -1242,7 +1241,7 @@ where
         let line = next_ollama_ndjson_line(&mut lines, model, unload_grace, warmup_gate)
             .await
             .map_err(|error| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                     "ollama stream error: unexpected EOF or read failure before done=true: {error}"
                 ))))
             })?;
@@ -1258,7 +1257,7 @@ where
             break;
         }
         let json: serde_json::Value = serde_json::from_str(data).map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "ollama stream parse error: partial or invalid NDJSON frame before done=true: {error}; line={}",
                 &data[..data.len().min(200)]
             ))))
@@ -1313,9 +1312,9 @@ where
         } else {
             " before any chunks"
         };
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "ollama stream error: unexpected EOF before done=true{suffix}"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("ollama stream error: unexpected EOF before done=true{suffix}"),
+        ))));
     }
 
     let thinking = if thinking_text.is_empty() {
@@ -1334,7 +1333,7 @@ where
     // Silently returning empty text would make the agent loop burn
     // iterations on a no-op.
     if text.is_empty() && tool_calls.is_empty() && output_tokens > 0 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking [ollama_empty_content_parser_bug]"
         )))));
     }

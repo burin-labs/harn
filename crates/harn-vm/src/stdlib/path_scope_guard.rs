@@ -321,7 +321,7 @@ mod tests {
     fn parse_on_violation_rejects_unknown_value() {
         let opts = BTreeMap::from([(
             "on_violation".to_string(),
-            VmValue::String(Rc::from("warn")),
+            VmValue::String(std::sync::Arc::from("warn")),
         )]);
         let err = parse_on_violation(&opts).expect_err("unknown should fail");
         assert!(err.to_string().contains("on_violation"));

@@ -3,7 +3,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -104,11 +103,11 @@ fn cache_envelope_base(options: &CacheOptions) -> BTreeMap<String, VmValue> {
     let mut envelope = BTreeMap::new();
     envelope.insert(
         "backend".to_string(),
-        VmValue::String(Rc::from(options.backend.name())),
+        VmValue::String(std::sync::Arc::from(options.backend.name())),
     );
     envelope.insert(
         "namespace".to_string(),
-        VmValue::String(Rc::from(options.namespace.clone())),
+        VmValue::String(std::sync::Arc::from(options.namespace.clone())),
     );
     envelope
 }
@@ -129,7 +128,7 @@ fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     if let Some(value) = hit {
         envelope.insert("value".to_string(), crate::stdlib::json_to_vm_value(&value));
     }
-    Ok(VmValue::Dict(Rc::new(envelope)))
+    Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
 }
 
 /// Persist a cache value with TTL and LRU eviction.
@@ -152,8 +151,11 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
     let mut envelope = cache_envelope_base(&options);
     envelope.insert("stored".to_string(), VmValue::Bool(true));
-    envelope.insert("key".to_string(), VmValue::String(Rc::from(key)));
-    Ok(VmValue::Dict(Rc::new(envelope)))
+    envelope.insert(
+        "key".to_string(),
+        VmValue::String(std::sync::Arc::from(key)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
 }
 
 /// Clear one persistent cache namespace.
@@ -194,7 +196,7 @@ fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         snapshot.hits as f64 / total as f64
     };
     dict.insert("hit_rate".to_string(), VmValue::Float(hit_rate));
-    Ok(VmValue::Dict(Rc::new(dict)))
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 fn saturating_u64_to_i64(value: u64) -> i64 {
@@ -265,7 +267,7 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         ))
     })?)?;
     let digest = Sha256::digest(&canonical);
-    Ok(VmValue::String(Rc::from(format!(
+    Ok(VmValue::String(std::sync::Arc::from(format!(
         "sha256:{}",
         hex::encode(digest)
     ))))

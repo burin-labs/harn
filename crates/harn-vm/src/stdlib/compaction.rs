@@ -13,7 +13,6 @@
 //! the same trigger semantics and telemetry shape.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::agent_sessions;
 use crate::llm::helpers::{extract_llm_options, transcript_event};
@@ -42,15 +41,15 @@ fn register_compaction_namespace(vm: &mut Vm) {
     let names = ["policy", "check", "run"];
     vm.set_global(
         "compaction",
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(Rc::from("compaction")),
+                VmValue::String(std::sync::Arc::from("compaction")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(Rc::from(format!("compaction.{name}"))),
+                    VmValue::BuiltinRef(std::sync::Arc::from(format!("compaction.{name}"))),
                 )
             }))
             .collect::<std::collections::BTreeMap<_, _>>(),
@@ -156,10 +155,10 @@ async fn compaction_run_impl(
         let raw = if plan.is_empty() {
             VmValue::Nil
         } else {
-            VmValue::Dict(Rc::new(plan.clone()))
+            VmValue::Dict(std::sync::Arc::new(plan.clone()))
         };
         Some(extract_llm_options(&[
-            VmValue::String(Rc::from("")),
+            VmValue::String(std::sync::Arc::from("")),
             VmValue::Nil,
             raw,
         ])?)
@@ -404,11 +403,11 @@ fn decision_value(
     let mut map = BTreeMap::new();
     map.insert(
         "action".to_string(),
-        VmValue::String(Rc::from(action.as_str())),
+        VmValue::String(std::sync::Arc::from(action.as_str())),
     );
     map.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.to_string())),
+        VmValue::String(std::sync::Arc::from(session_id.to_string())),
     );
     map.insert(
         "estimated_tokens".to_string(),
@@ -420,15 +419,15 @@ fn decision_value(
     );
     map.insert(
         "trigger".to_string(),
-        VmValue::String(Rc::from(ctx.trigger_label())),
+        VmValue::String(std::sync::Arc::from(ctx.trigger_label())),
     );
     map.insert(
         "strategy".to_string(),
-        VmValue::String(Rc::from(ctx.strategy.as_str())),
+        VmValue::String(std::sync::Arc::from(ctx.strategy.as_str())),
     );
     map.insert(
         "engine_strategy".to_string(),
-        VmValue::String(Rc::from(compact_strategy_name(
+        VmValue::String(std::sync::Arc::from(compact_strategy_name(
             &ctx.strategy.engine_strategy(),
         ))),
     );
@@ -439,7 +438,7 @@ fn decision_value(
         map.insert("turn_threshold".to_string(), VmValue::Int(value as i64));
     }
     map.insert("policy_inherited".to_string(), VmValue::Bool(inherited));
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn policy_snapshot_value(
@@ -451,14 +450,17 @@ fn policy_snapshot_value(
     if let Some(id) = session_id {
         map.insert(
             "session_id".to_string(),
-            VmValue::String(Rc::from(id.to_string())),
+            VmValue::String(std::sync::Arc::from(id.to_string())),
         );
     } else {
-        map.insert("session_id".to_string(), VmValue::String(Rc::from("")));
+        map.insert(
+            "session_id".to_string(),
+            VmValue::String(std::sync::Arc::from("")),
+        );
     }
     map.insert(
         "strategy".to_string(),
-        VmValue::String(Rc::from(policy.strategy.as_str())),
+        VmValue::String(std::sync::Arc::from(policy.strategy.as_str())),
     );
     if let Some(value) = policy.max_tokens {
         map.insert("max_tokens".to_string(), VmValue::Int(value as i64));
@@ -499,7 +501,7 @@ fn policy_snapshot_value(
         );
     }
     map.insert("policy_inherited".to_string(), VmValue::Bool(inherited));
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn run_result_value(
@@ -515,7 +517,7 @@ fn run_result_value(
     let mut map = BTreeMap::new();
     map.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.to_string())),
+        VmValue::String(std::sync::Arc::from(session_id.to_string())),
     );
     let compacted = strategy.is_some();
     map.insert("compacted".to_string(), VmValue::Bool(compacted));
@@ -533,13 +535,13 @@ fn run_result_value(
     );
     map.insert(
         "engine_strategy".to_string(),
-        VmValue::String(Rc::from(
+        VmValue::String(std::sync::Arc::from(
             strategy.map(compact_strategy_name).unwrap_or("none"),
         )),
     );
     map.insert(
         "strategy".to_string(),
-        VmValue::String(Rc::from(policy.strategy.as_str())),
+        VmValue::String(std::sync::Arc::from(policy.strategy.as_str())),
     );
     map.insert("latency_ms".to_string(), VmValue::Int(latency_ms as i64));
     if let Some(threshold) = policy.token_threshold() {
@@ -549,7 +551,7 @@ fn run_result_value(
         );
     }
     map.insert("transcript".to_string(), transcript);
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[

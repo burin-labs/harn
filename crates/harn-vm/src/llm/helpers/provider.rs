@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 
 use crate::events::{emit_log, EventLevel};
@@ -458,7 +457,7 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
         match &pdef.auth_env {
             llm_config::AuthEnv::Single(env) => {
                 return std::env::var(env).map_err(|_| {
-                    VmError::Thrown(VmValue::String(Rc::from(format!(
+                    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                         "Missing API key: set {env} environment variable{selection_hint}\n{aggregate_hint}"
                     ))))
                 });
@@ -471,7 +470,7 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
                         }
                     }
                 }
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                     "Missing API key: set one of {} environment variables{selection_hint}\n{aggregate_hint}",
                     envs.join(", ")
                 )))));
@@ -481,7 +480,7 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
     }
     let aggregate_hint = no_credentials_message();
     std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "Missing API key: set ANTHROPIC_API_KEY environment variable{selection_hint}\n{aggregate_hint}"
         ))))
     })

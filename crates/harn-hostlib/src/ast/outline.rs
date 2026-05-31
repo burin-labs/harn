@@ -7,7 +7,7 @@
 //! through [`crate::ast::types::SymbolKind::is_container`].
 
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -63,7 +63,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     Ok(build_dict([
         ("path", str_value(&path_str)),
         ("language", str_value(language.name())),
-        ("items", VmValue::List(Rc::new(items_list))),
+        ("items", VmValue::List(Arc::new(items_list))),
     ]))
 }
 

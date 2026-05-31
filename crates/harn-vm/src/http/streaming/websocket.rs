@@ -133,14 +133,20 @@ fn ws_message_data(message: &MockWsMessage) -> String {
 
 fn closed_event_with(code: Option<u16>, reason: Option<String>) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("type".to_string(), VmValue::String(Rc::from("close")));
+    dict.insert(
+        "type".to_string(),
+        VmValue::String(std::sync::Arc::from("close")),
+    );
     if let Some(code) = code {
         dict.insert("code".to_string(), VmValue::Int(i64::from(code)));
     }
     if let Some(reason) = reason {
-        dict.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
+        dict.insert(
+            "reason".to_string(),
+            VmValue::String(std::sync::Arc::from(reason)),
+        );
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn ws_event_value(message: MockWsMessage) -> VmValue {
@@ -150,20 +156,22 @@ fn ws_event_value(message: MockWsMessage) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert(
         "type".to_string(),
-        VmValue::String(Rc::from(message.message_type.as_str())),
+        VmValue::String(std::sync::Arc::from(message.message_type.as_str())),
     );
     match message.message_type.as_str() {
         "text" => {
             dict.insert(
                 "data".to_string(),
-                VmValue::String(Rc::from(String::from_utf8_lossy(&message.data).as_ref())),
+                VmValue::String(std::sync::Arc::from(
+                    String::from_utf8_lossy(&message.data).as_ref(),
+                )),
             );
         }
         _ => {
             use base64::Engine;
             dict.insert(
                 "data_base64".to_string(),
-                VmValue::String(Rc::from(
+                VmValue::String(std::sync::Arc::from(
                     base64::engine::general_purpose::STANDARD
                         .encode(&message.data)
                         .as_str(),
@@ -171,7 +179,7 @@ fn ws_event_value(message: MockWsMessage) -> VmValue {
             );
         }
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn real_ws_event_value(message: WsMessage) -> VmValue {
@@ -297,10 +305,16 @@ pub(super) fn vm_websocket_server(
         Ok(())
     })?;
     let mut dict = BTreeMap::new();
-    dict.insert("id".to_string(), VmValue::String(Rc::from(id)));
-    dict.insert("addr".to_string(), VmValue::String(Rc::from(addr)));
-    dict.insert("url".to_string(), VmValue::String(Rc::from(url)));
-    Ok(VmValue::Dict(Rc::new(dict)))
+    dict.insert("id".to_string(), VmValue::String(std::sync::Arc::from(id)));
+    dict.insert(
+        "addr".to_string(),
+        VmValue::String(std::sync::Arc::from(addr)),
+    );
+    dict.insert(
+        "url".to_string(),
+        VmValue::String(std::sync::Arc::from(url)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 pub(super) fn vm_websocket_route(
@@ -390,19 +404,25 @@ fn register_accepted_websocket(event: WebSocketServerEvent) -> Result<VmValue, V
         Ok(())
     })?;
     let mut metadata = BTreeMap::new();
-    metadata.insert("id".to_string(), VmValue::String(Rc::from(id)));
-    metadata.insert("path".to_string(), VmValue::String(Rc::from(path)));
-    metadata.insert("peer".to_string(), VmValue::String(Rc::from(peer)));
+    metadata.insert("id".to_string(), VmValue::String(std::sync::Arc::from(id)));
+    metadata.insert(
+        "path".to_string(),
+        VmValue::String(std::sync::Arc::from(path)),
+    );
+    metadata.insert(
+        "peer".to_string(),
+        VmValue::String(std::sync::Arc::from(peer)),
+    );
     metadata.insert(
         "headers".to_string(),
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             headers
                 .into_iter()
-                .map(|(name, value)| (name, VmValue::String(Rc::from(value))))
+                .map(|(name, value)| (name, VmValue::String(std::sync::Arc::from(value))))
                 .collect(),
         )),
     );
-    Ok(VmValue::Dict(Rc::new(metadata)))
+    Ok(VmValue::Dict(std::sync::Arc::new(metadata)))
 }
 
 pub(super) fn vm_websocket_server_close(server_id: &str) -> Result<VmValue, VmError> {
@@ -651,7 +671,7 @@ pub(super) async fn vm_websocket_connect(
             message_type: None,
             data: None,
         });
-        return Ok(VmValue::String(Rc::from(id)));
+        return Ok(VmValue::String(std::sync::Arc::from(id)));
     }
 
     if !url.starts_with("ws://") && !url.starts_with("wss://") {
@@ -685,7 +705,7 @@ pub(super) async fn vm_websocket_connect(
         handles.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(Rc::from(id)))
+    Ok(VmValue::String(std::sync::Arc::from(id)))
 }
 
 /// Connect with bounded retries on transient TCP-level failures.

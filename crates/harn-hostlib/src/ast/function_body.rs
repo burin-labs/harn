@@ -21,7 +21,7 @@
 //! names for hosts that build API contract summaries.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
@@ -58,9 +58,9 @@ impl ExtractedBody {
         let fields: Vec<VmValue> = self.return_object_fields.iter().map(str_value).collect();
         dict.insert(
             "return_object_fields".into(),
-            VmValue::List(Rc::new(fields)),
+            VmValue::List(Arc::new(fields)),
         );
-        VmValue::Dict(Rc::new(dict))
+        VmValue::Dict(Arc::new(dict))
     }
 }
 
@@ -101,7 +101,7 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         let fields: Vec<VmValue> = body.return_object_fields.iter().map(str_value).collect();
         response.insert(
             "return_object_fields".into(),
-            VmValue::List(Rc::new(fields)),
+            VmValue::List(Arc::new(fields)),
         );
     } else {
         response.insert("found".into(), VmValue::Bool(false));
@@ -110,10 +110,10 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         response.insert("end_line".into(), VmValue::Int(0));
         response.insert(
             "return_object_fields".into(),
-            VmValue::List(Rc::new(Vec::new())),
+            VmValue::List(Arc::new(Vec::new())),
         );
     }
-    Ok(VmValue::Dict(Rc::new(response)))
+    Ok(VmValue::Dict(Arc::new(response)))
 }
 
 pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -152,9 +152,9 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     );
     response.insert("language".into(), str_value(language.name()));
     response.insert("brace_based".into(), VmValue::Bool(brace_based));
-    response.insert("bodies".into(), VmValue::Dict(Rc::new(bodies_dict)));
-    response.insert("missing".into(), VmValue::List(Rc::new(missing)));
-    Ok(VmValue::Dict(Rc::new(response)))
+    response.insert("bodies".into(), VmValue::Dict(Arc::new(bodies_dict)));
+    response.insert("missing".into(), VmValue::List(Arc::new(missing)));
+    Ok(VmValue::Dict(Arc::new(response)))
 }
 
 fn require_string_list(

@@ -1,25 +1,25 @@
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use super::VmValue;
 
 /// Reference / identity equality. For heap-allocated refcounted values
 /// (List/Dict/Set/Closure) returns true only when both operands share the
-/// same underlying `Rc` allocation. For primitive scalars, falls back to
+/// same underlying shared allocation. For primitive scalars, falls back to
 /// structural equality (since primitives have no distinct identity).
 pub fn values_identical(a: &VmValue, b: &VmValue) -> bool {
     match (a, b) {
-        (VmValue::List(x), VmValue::List(y)) => Rc::ptr_eq(x, y),
-        (VmValue::Dict(x), VmValue::Dict(y)) => Rc::ptr_eq(x, y),
-        (VmValue::Set(x), VmValue::Set(y)) => Rc::ptr_eq(x, y),
-        (VmValue::Closure(x), VmValue::Closure(y)) => Rc::ptr_eq(x, y),
-        (VmValue::String(x), VmValue::String(y)) => Rc::ptr_eq(x, y) || x == y,
-        (VmValue::Bytes(x), VmValue::Bytes(y)) => Rc::ptr_eq(x, y) || x == y,
+        (VmValue::List(x), VmValue::List(y)) => Arc::ptr_eq(x, y),
+        (VmValue::Dict(x), VmValue::Dict(y)) => Arc::ptr_eq(x, y),
+        (VmValue::Set(x), VmValue::Set(y)) => Arc::ptr_eq(x, y),
+        (VmValue::Closure(x), VmValue::Closure(y)) => Arc::ptr_eq(x, y),
+        (VmValue::String(x), VmValue::String(y)) => Arc::ptr_eq(x, y) || x == y,
+        (VmValue::Bytes(x), VmValue::Bytes(y)) => Arc::ptr_eq(x, y) || x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
         (VmValue::BuiltinRefId { name: x, .. }, VmValue::BuiltinRefId { name: y, .. }) => x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRefId { name: y, .. })
         | (VmValue::BuiltinRefId { name: y, .. }, VmValue::BuiltinRef(x)) => x == y,
-        (VmValue::Pair(x), VmValue::Pair(y)) => Rc::ptr_eq(x, y),
+        (VmValue::Pair(x), VmValue::Pair(y)) => Arc::ptr_eq(x, y),
         // Primitives: identity collapses to structural equality.
         _ => values_equal(a, b),
     }
@@ -31,12 +31,12 @@ pub fn values_identical(a: &VmValue, b: &VmValue) -> bool {
 /// logically-equal primitives always compare equal.
 pub fn value_identity_key(v: &VmValue) -> String {
     match v {
-        VmValue::List(x) => format!("list@{:p}", Rc::as_ptr(x)),
-        VmValue::Dict(x) => format!("dict@{:p}", Rc::as_ptr(x)),
-        VmValue::Set(x) => format!("set@{:p}", Rc::as_ptr(x)),
-        VmValue::Closure(x) => format!("closure@{:p}", Rc::as_ptr(x)),
+        VmValue::List(x) => format!("list@{:p}", Arc::as_ptr(x)),
+        VmValue::Dict(x) => format!("dict@{:p}", Arc::as_ptr(x)),
+        VmValue::Set(x) => format!("set@{:p}", Arc::as_ptr(x)),
+        VmValue::Closure(x) => format!("closure@{:p}", Arc::as_ptr(x)),
         VmValue::String(x) => format!("string@{:p}", x.as_ptr()),
-        VmValue::Bytes(x) => format!("bytes@{:p}", Rc::as_ptr(x)),
+        VmValue::Bytes(x) => format!("bytes@{:p}", Arc::as_ptr(x)),
         VmValue::BuiltinRef(name) => format!("builtin@{name}"),
         VmValue::BuiltinRefId { name, .. } => format!("builtin@{name}"),
         other => format!("{}@{}", other.type_name(), other.display()),
@@ -206,7 +206,7 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Range(a), VmValue::Range(b)) => {
             a.start == b.start && a.end == b.end && a.inclusive == b.inclusive
         }
-        (VmValue::Iter(a), VmValue::Iter(b)) => Rc::ptr_eq(a, b),
+        (VmValue::Iter(a), VmValue::Iter(b)) => Arc::ptr_eq(a, b),
         (VmValue::Pair(a), VmValue::Pair(b)) => {
             values_equal(&a.0, &b.0) && values_equal(&a.1, &b.1)
         }

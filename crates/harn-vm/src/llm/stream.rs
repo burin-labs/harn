@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::value::{VmError, VmValue};
 
 use super::api::LlmCallOptions;
@@ -58,7 +56,7 @@ pub(crate) async fn vm_stream_llm(
     let request = resolved.apply_headers(req, &opts.api_key);
 
     let mut es = EventSource::new(request).map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "LLM stream setup error: {e}"
         ))))
     })?;
@@ -81,7 +79,7 @@ pub(crate) async fn vm_stream_llm(
     loop {
         if stream_start.elapsed() >= overall_dur {
             es.close();
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "stream overall deadline exceeded: {overall_budget_secs}s budget reached before stream completed"
             )))));
         }
@@ -93,9 +91,9 @@ pub(crate) async fn vm_stream_llm(
             Err(_) => {
                 es.close();
                 // Report as idle-timeout; overall-deadline is caught at loop top.
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "stream idle timeout: no data received for {idle_timeout_secs}s"
-                )))));
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!("stream idle timeout: no data received for {idle_timeout_secs}s"),
+                ))));
             }
         };
         match event {
@@ -109,7 +107,12 @@ pub(crate) async fn vm_stream_llm(
                     parse_openai_sse_chunk(&msg.data)
                 };
                 if let Some(text) = chunk_text {
-                    if !text.is_empty() && tx.send(VmValue::String(Rc::from(text))).await.is_err() {
+                    if !text.is_empty()
+                        && tx
+                            .send(VmValue::String(std::sync::Arc::from(text)))
+                            .await
+                            .is_err()
+                    {
                         break;
                     }
                 }

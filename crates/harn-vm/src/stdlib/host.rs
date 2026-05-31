@@ -174,7 +174,9 @@ fn ensure_mocked_capability(
         })
         .unwrap_or_default();
     if !ops.iter().any(|value| value.display() == operation_name) {
-        ops.push(VmValue::String(Rc::from(operation_name.to_string())));
+        ops.push(VmValue::String(std::sync::Arc::from(
+            operation_name.to_string(),
+        )));
     }
 
     let mut operations = entry
@@ -186,9 +188,15 @@ fn ensure_mocked_capability(
         .entry(operation_name.to_string())
         .or_insert_with(mocked_operation_entry);
 
-    entry.insert("ops".to_string(), VmValue::List(Rc::new(ops)));
-    entry.insert("operations".to_string(), VmValue::Dict(Rc::new(operations)));
-    root.insert(capability_name.to_string(), VmValue::Dict(Rc::new(entry)));
+    entry.insert("ops".to_string(), VmValue::List(std::sync::Arc::new(ops)));
+    entry.insert(
+        "operations".to_string(),
+        VmValue::Dict(std::sync::Arc::new(operations)),
+    );
+    root.insert(
+        capability_name.to_string(),
+        VmValue::Dict(std::sync::Arc::new(entry)),
+    );
 }
 
 fn capability_manifest_with_mocks() -> VmValue {
@@ -198,29 +206,29 @@ fn capability_manifest_with_mocks() -> VmValue {
             ensure_mocked_capability(&mut root, &host_mock.capability, &host_mock.operation);
         }
     });
-    VmValue::Dict(Rc::new(root))
+    VmValue::Dict(std::sync::Arc::new(root))
 }
 
 fn op(name: &str, description: &str) -> (String, VmValue) {
     let mut entry = BTreeMap::new();
     entry.insert(
         "description".to_string(),
-        VmValue::String(Rc::from(description)),
+        VmValue::String(std::sync::Arc::from(description)),
     );
-    (name.to_string(), VmValue::Dict(Rc::new(entry)))
+    (name.to_string(), VmValue::Dict(std::sync::Arc::new(entry)))
 }
 
 fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
     let mut entry = BTreeMap::new();
     entry.insert(
         "description".to_string(),
-        VmValue::String(Rc::from(description)),
+        VmValue::String(std::sync::Arc::from(description)),
     );
     entry.insert(
         "ops".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             ops.iter()
-                .map(|(name, _)| VmValue::String(Rc::from(name.as_str())))
+                .map(|(name, _)| VmValue::String(std::sync::Arc::from(name.as_str())))
                 .collect(),
         )),
     );
@@ -228,8 +236,11 @@ fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
     for (name, op) in ops {
         op_dict.insert(name.clone(), op.clone());
     }
-    entry.insert("operations".to_string(), VmValue::Dict(Rc::new(op_dict)));
-    VmValue::Dict(Rc::new(entry))
+    entry.insert(
+        "operations".to_string(),
+        VmValue::Dict(std::sync::Arc::new(op_dict)),
+    );
+    VmValue::Dict(std::sync::Arc::new(entry))
 }
 
 fn require_param(params: &BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
@@ -238,7 +249,7 @@ fn require_param(params: &BTreeMap<String, VmValue>, key: &str) -> Result<String
         .map(|v| v.display())
         .filter(|v| !v.is_empty())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "host_call: missing required parameter '{key}'"
             ))))
         })
@@ -249,7 +260,7 @@ fn render_template(
     bindings: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<String, VmError> {
     let asset = crate::stdlib::template::TemplateAsset::render_target(path).map_err(|msg| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "host_call template.render: {msg}"
         ))))
     })?;
@@ -277,7 +288,7 @@ fn parse_host_mock(args: &[VmValue]) -> Result<HostMock, VmError> {
         .unwrap_or_default();
     let operation = args.get(1).map(|value| value.display()).unwrap_or_default();
     if capability.is_empty() || operation.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "host_mock: capability and operation are required",
         ))));
     }
@@ -323,17 +334,17 @@ fn mock_call_value(call: &HostMockCall) -> VmValue {
     let mut item = BTreeMap::new();
     item.insert(
         "capability".to_string(),
-        VmValue::String(Rc::from(call.capability.clone())),
+        VmValue::String(std::sync::Arc::from(call.capability.clone())),
     );
     item.insert(
         "operation".to_string(),
-        VmValue::String(Rc::from(call.operation.clone())),
+        VmValue::String(std::sync::Arc::from(call.operation.clone())),
     );
     item.insert(
         "params".to_string(),
-        VmValue::Dict(Rc::new(call.params.clone())),
+        VmValue::Dict(std::sync::Arc::new(call.params.clone())),
     );
-    VmValue::Dict(Rc::new(item))
+    VmValue::Dict(std::sync::Arc::new(item))
 }
 
 fn record_mock_call(capability: &str, operation: &str, params: &BTreeMap<String, VmValue>) {
@@ -366,7 +377,9 @@ pub(crate) fn dispatch_mock_host_call(
 
     record_mock_call(capability, operation, params);
     if let Some(error) = matched.error {
-        return Some(Err(VmError::Thrown(VmValue::String(Rc::from(error)))));
+        return Some(Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            error,
+        )))));
     }
     Some(Ok(matched.result.unwrap_or(VmValue::Nil)))
 }
@@ -442,7 +455,7 @@ pub fn dispatch_host_call_bridge(
 }
 
 fn empty_tool_list_value() -> VmValue {
-    VmValue::List(Rc::new(Vec::new()))
+    VmValue::List(std::sync::Arc::new(Vec::new()))
 }
 
 fn current_vm_host_bridge(ctx: Option<&AsyncBuiltinCtx>) -> Option<Rc<crate::bridge::HostBridge>> {
@@ -493,7 +506,7 @@ pub(crate) async fn dispatch_host_tool_call_with_ctx(
     }
 
     let Some(bridge) = current_vm_host_bridge(ctx) else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "host_tool_call: no host bridge is attached",
         ))));
     };
@@ -561,7 +574,9 @@ async fn dispatch_builtin_host_operation(
         ("template", "render") => {
             let path = require_param(params, "path")?;
             let bindings = params.get("bindings").and_then(|v| v.as_dict());
-            Ok(VmValue::String(Rc::from(render_template(&path, bindings)?)))
+            Ok(VmValue::String(std::sync::Arc::from(render_template(
+                &path, bindings,
+            )?)))
         }
         ("interaction", "ask") => {
             let question = require_param(params, "question")?;
@@ -570,7 +585,7 @@ async fn dispatch_builtin_host_operation(
             let _ = std::io::Write::flush(&mut std::io::stdout());
             let mut input = String::new();
             if std::io::stdin().lock().read_line(&mut input).is_ok() {
-                Ok(VmValue::String(Rc::from(input.trim_end())))
+                Ok(VmValue::String(std::sync::Arc::from(input.trim_end())))
             } else {
                 Ok(VmValue::Nil)
             }
@@ -579,7 +594,7 @@ async fn dispatch_builtin_host_operation(
         // an embedder's JSON-RPC bridge. `runtime.task` lets a debugger or
         // CLI invocation read the pipeline input from `HARN_TASK` without
         // the host explicitly wiring a callback for every op.
-        ("runtime", "task") => Ok(VmValue::String(Rc::from(
+        ("runtime", "task") => Ok(VmValue::String(std::sync::Arc::from(
             std::env::var("HARN_TASK").unwrap_or_default(),
         ))),
         ("runtime", "set_result") => {
@@ -596,17 +611,17 @@ async fn dispatch_builtin_host_operation(
                     .map(|p| p.display().to_string())
                     .unwrap_or_default()
             });
-            Ok(VmValue::String(Rc::from(path)))
+            Ok(VmValue::String(std::sync::Arc::from(path)))
         }
         ("workspace", "cwd") => {
             let path = std::env::current_dir()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            Ok(VmValue::String(Rc::from(path)))
+            Ok(VmValue::String(std::sync::Arc::from(path)))
         }
-        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "host_call: unsupported operation {capability}.{operation}"
-        ))))),
+        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("host_call: unsupported operation {capability}.{operation}"),
+        )))),
     }
 }
 
@@ -804,7 +819,7 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert(
         "command_id".to_string(),
-        VmValue::String(Rc::from(format!(
+        VmValue::String(std::sync::Arc::from(format!(
             "cmd_{}_{}",
             std::process::id(),
             response.started.elapsed().as_nanos()
@@ -812,7 +827,7 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     );
     result.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(response.status)),
+        VmValue::String(std::sync::Arc::from(response.status)),
     );
     result.insert(
         "pid".to_string(),
@@ -831,11 +846,11 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     result.insert("handle_id".to_string(), VmValue::Nil);
     result.insert(
         "started_at".to_string(),
-        VmValue::String(Rc::from(response.started_at)),
+        VmValue::String(std::sync::Arc::from(response.started_at)),
     );
     result.insert(
         "ended_at".to_string(),
-        VmValue::String(Rc::from(audited_utc_now_rfc3339(
+        VmValue::String(std::sync::Arc::from(audited_utc_now_rfc3339(
             "host_call/process.exec.ended_at",
         ))),
     );
@@ -851,13 +866,16 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     result.insert("timed_out".to_string(), VmValue::Bool(response.timed_out));
     result.insert(
         "stdout".to_string(),
-        VmValue::String(Rc::from(response.stdout.to_string())),
+        VmValue::String(std::sync::Arc::from(response.stdout.to_string())),
     );
     result.insert(
         "stderr".to_string(),
-        VmValue::String(Rc::from(response.stderr.to_string())),
+        VmValue::String(std::sync::Arc::from(response.stderr.to_string())),
     );
-    result.insert("combined".to_string(), VmValue::String(Rc::from(combined)));
+    result.insert(
+        "combined".to_string(),
+        VmValue::String(std::sync::Arc::from(combined)),
+    );
     result.insert(
         "exit_status".to_string(),
         VmValue::Int(response.exit_code as i64),
@@ -867,7 +885,7 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
         VmValue::Int(response.exit_code as i64),
     );
     result.insert("success".to_string(), VmValue::Bool(response.success));
-    VmValue::Dict(Rc::new(result))
+    VmValue::Dict(std::sync::Arc::new(result))
 }
 
 fn resolve_process_exec_cwd(cwd: &str) -> std::path::PathBuf {
@@ -888,7 +906,10 @@ fn process_exec_argv(params: &BTreeMap<String, VmValue>) -> Result<(String, Vec<
         "shell" => {
             let command = require_param(params, "command")?;
             let mut invocation_params = params.clone();
-            invocation_params.insert("command".to_string(), VmValue::String(Rc::from(command)));
+            invocation_params.insert(
+                "command".to_string(),
+                VmValue::String(std::sync::Arc::from(command)),
+            );
             let invocation =
                 crate::shells::resolve_invocation_from_vm_params(&invocation_params)
                     .map_err(|err| VmError::Runtime(format!("host_call process.exec: {err}")))?;
@@ -922,7 +943,7 @@ fn split_argv(mut argv: Vec<String>) -> Result<(String, Vec<String>), VmError> {
 /// orchestration policy.
 fn push_sandbox_profile_override(value: &str) -> Result<SandboxProfileGuard, VmError> {
     let profile = crate::orchestration::SandboxProfile::parse(value).ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "host_call process.exec: unknown sandbox_profile {value:?}; expected one of \"unrestricted\", \"worktree\", \"os_hardened\", \"wasi\""
         ))))
     })?;
@@ -1028,7 +1049,7 @@ fn host_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmVal
             .map(mock_call_value)
             .collect::<Vec<_>>()
     });
-    Ok(VmValue::List(Rc::new(calls)))
+    Ok(VmValue::List(std::sync::Arc::new(calls)))
 }
 
 #[harn_builtin(sig = "host_mock_push_scope() -> nil", category = "host")]
@@ -1040,7 +1061,7 @@ fn host_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<
 #[harn_builtin(sig = "host_mock_pop_scope() -> nil", category = "host")]
 fn host_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !pop_host_mock_scope() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "host_mock_pop_scope: no scope to pop",
         ))));
     }
@@ -1097,9 +1118,9 @@ async fn host_call_builtin(
         .cloned()
         .unwrap_or_default();
     let Some((capability, operation)) = name.split_once('.') else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "host_call: unsupported operation name '{name}'"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("host_call: unsupported operation name '{name}'"),
+        ))));
     };
     dispatch_host_operation_with_ctx(Some(&ctx), capability, operation, &params).await
 }
@@ -1123,7 +1144,7 @@ async fn host_tool_call_builtin(
 ) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if name.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "host_tool_call: tool name is required",
         ))));
     }
@@ -1192,7 +1213,7 @@ mod tests {
             capability: "project".to_string(),
             operation: "metadata_get".to_string(),
             params: None,
-            result: Some(VmValue::Dict(Rc::new(BTreeMap::new()))),
+            result: Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::new()))),
             error: None,
         });
         let manifest = capability_manifest_with_mocks();
@@ -1213,25 +1234,34 @@ mod tests {
     fn mock_host_call_matches_partial_params_and_overrides_order() {
         reset_host_state();
         let mut exact_params = BTreeMap::new();
-        exact_params.insert("namespace".to_string(), VmValue::String(Rc::from("facts")));
+        exact_params.insert(
+            "namespace".to_string(),
+            VmValue::String(std::sync::Arc::from("facts")),
+        );
         push_host_mock(HostMock {
             capability: "project".to_string(),
             operation: "metadata_get".to_string(),
             params: None,
-            result: Some(VmValue::String(Rc::from("fallback"))),
+            result: Some(VmValue::String(std::sync::Arc::from("fallback"))),
             error: None,
         });
         push_host_mock(HostMock {
             capability: "project".to_string(),
             operation: "metadata_get".to_string(),
             params: Some(exact_params),
-            result: Some(VmValue::String(Rc::from("facts"))),
+            result: Some(VmValue::String(std::sync::Arc::from("facts"))),
             error: None,
         });
 
         let mut call_params = BTreeMap::new();
-        call_params.insert("dir".to_string(), VmValue::String(Rc::from("pkg")));
-        call_params.insert("namespace".to_string(), VmValue::String(Rc::from("facts")));
+        call_params.insert(
+            "dir".to_string(),
+            VmValue::String(std::sync::Arc::from("pkg")),
+        );
+        call_params.insert(
+            "namespace".to_string(),
+            VmValue::String(std::sync::Arc::from("facts")),
+        );
         let exact = dispatch_mock_host_call("project", "metadata_get", &call_params)
             .expect("expected exact mock")
             .expect("exact mock should succeed");
@@ -1239,7 +1269,7 @@ mod tests {
 
         call_params.insert(
             "namespace".to_string(),
-            VmValue::String(Rc::from("classification")),
+            VmValue::String(std::sync::Arc::from("classification")),
         );
         let fallback = dispatch_mock_host_call("project", "metadata_get", &call_params)
             .expect("expected fallback mock")
@@ -1282,25 +1312,27 @@ mod tests {
         }
 
         fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
-            let tool = VmValue::Dict(Rc::new(BTreeMap::from([
+            let tool = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "name".to_string(),
-                    VmValue::String(Rc::from("Read".to_string())),
+                    VmValue::String(std::sync::Arc::from("Read".to_string())),
                 ),
                 (
                     "description".to_string(),
-                    VmValue::String(Rc::from("Read a file from the host".to_string())),
+                    VmValue::String(std::sync::Arc::from(
+                        "Read a file from the host".to_string(),
+                    )),
                 ),
                 (
                     "schema".to_string(),
-                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                         "type".to_string(),
-                        VmValue::String(Rc::from("object".to_string())),
+                        VmValue::String(std::sync::Arc::from("object".to_string())),
                     )]))),
                 ),
                 ("deprecated".to_string(), VmValue::Bool(false)),
             ])));
-            Ok(Some(VmValue::List(Rc::new(vec![tool]))))
+            Ok(Some(VmValue::List(std::sync::Arc::new(vec![tool]))))
         }
 
         fn call_tool(&self, name: &str, args: &VmValue) -> Result<Option<VmValue>, VmError> {
@@ -1312,7 +1344,9 @@ mod tests {
                 .and_then(|dict| dict.get("path"))
                 .map(|value| value.display())
                 .unwrap_or_default();
-            Ok(Some(VmValue::String(Rc::from(format!("read:{path}")))))
+            Ok(Some(VmValue::String(std::sync::Arc::from(format!(
+                "read:{path}"
+            )))))
         }
     }
 
@@ -1331,10 +1365,10 @@ mod tests {
                 return Ok(None);
             }
             self.calls.set(self.calls.get() + 1);
-            Ok(Some(VmValue::Dict(Rc::new(BTreeMap::from([
+            Ok(Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "status".to_string(),
-                    VmValue::String(Rc::from("completed".to_string())),
+                    VmValue::String(std::sync::Arc::from("completed".to_string())),
                 ),
                 ("exit_code".to_string(), VmValue::Int(0)),
                 ("success".to_string(), VmValue::Bool(true)),
@@ -1379,9 +1413,9 @@ mod tests {
     fn host_tool_call_uses_installed_host_call_bridge() {
         run_host_async_test(|| async {
             set_host_call_bridge(Rc::new(TestHostToolBridge));
-            let args = VmValue::Dict(Rc::new(BTreeMap::from([(
+            let args = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "path".to_string(),
-                VmValue::String(Rc::from("README.md".to_string())),
+                VmValue::String(std::sync::Arc::from("README.md".to_string())),
             )])));
             let value = dispatch_host_tool_call("Read", &args)
                 .await
@@ -1414,10 +1448,13 @@ mod tests {
                 "process",
                 "exec",
                 &BTreeMap::from([
-                    ("mode".to_string(), VmValue::String(Rc::from("shell"))),
+                    (
+                        "mode".to_string(),
+                        VmValue::String(std::sync::Arc::from("shell")),
+                    ),
                     (
                         "command".to_string(),
-                        VmValue::String(Rc::from("cat Cargo.toml")),
+                        VmValue::String(std::sync::Arc::from("cat Cargo.toml")),
                     ),
                 ]),
             )

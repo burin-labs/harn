@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use super::agents_workers;
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
@@ -266,7 +265,7 @@ fn prepare_sub_agent_options(
     inject_sub_agent_skill_context(&mut options);
     options.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.to_string())),
+        VmValue::String(std::sync::Arc::from(session_id.to_string())),
     );
     match requested_policy {
         Some(policy) => {
@@ -303,16 +302,19 @@ fn sub_agent_error_dict(
     let mut error = BTreeMap::new();
     error.insert(
         "category".to_string(),
-        VmValue::String(Rc::from(category.to_string())),
+        VmValue::String(std::sync::Arc::from(category.to_string())),
     );
     error.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(message.into())),
+        VmValue::String(std::sync::Arc::from(message.into())),
     );
     if let Some(tool) = tool {
-        error.insert("tool".to_string(), VmValue::String(Rc::from(tool)));
+        error.insert(
+            "tool".to_string(),
+            VmValue::String(std::sync::Arc::from(tool)),
+        );
     }
-    VmValue::Dict(Rc::new(error))
+    VmValue::Dict(std::sync::Arc::new(error))
 }
 
 fn sub_agent_base_envelope(
@@ -325,7 +327,10 @@ fn sub_agent_base_envelope(
 ) -> BTreeMap<String, VmValue> {
     let mut envelope = BTreeMap::new();
     envelope.insert("ok".to_string(), VmValue::Bool(true));
-    envelope.insert("summary".to_string(), VmValue::String(Rc::from(summary)));
+    envelope.insert(
+        "summary".to_string(),
+        VmValue::String(std::sync::Arc::from(summary)),
+    );
     envelope.insert("artifacts".to_string(), artifacts);
     envelope.insert("evidence_added".to_string(), VmValue::Int(evidence_added));
     envelope.insert("tokens_used".to_string(), VmValue::Int(tokens_used));
@@ -337,7 +342,7 @@ fn sub_agent_base_envelope(
     envelope.insert("error".to_string(), VmValue::Nil);
     envelope.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.to_string())),
+        VmValue::String(std::sync::Arc::from(session_id.to_string())),
     );
     envelope
 }
@@ -365,7 +370,7 @@ fn wrap_sub_agent_error(
     if let Some(transcript) = transcript {
         envelope.insert("transcript".to_string(), transcript);
     }
-    VmValue::Dict(Rc::new(envelope))
+    VmValue::Dict(std::sync::Arc::new(envelope))
 }
 
 fn append_parent_sub_agent_event(parent_session_id: Option<&str>, event: VmValue) {
@@ -749,15 +754,15 @@ pub(super) async fn execute_sub_agent(
     let mut loop_options = spec.options.clone();
     loop_options.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(spec.session_id.clone())),
+        VmValue::String(std::sync::Arc::from(spec.session_id.clone())),
     );
     let args = vec![
-        VmValue::String(Rc::from(spec.task.clone())),
+        VmValue::String(std::sync::Arc::from(spec.task.clone())),
         spec.system
             .as_ref()
-            .map(|system| VmValue::String(Rc::from(system.clone())))
+            .map(|system| VmValue::String(std::sync::Arc::from(system.clone())))
             .unwrap_or(VmValue::Nil),
-        VmValue::Dict(Rc::new(loop_options)),
+        VmValue::Dict(std::sync::Arc::new(loop_options)),
     ];
     let result = crate::stdlib::harn_entry::call_harn_export_by_name(
         ctx,
@@ -793,7 +798,7 @@ pub(super) async fn execute_sub_agent(
             let tokens_used = transcript_tokens_used(&transcript);
             let envelope = wrap_sub_agent_error(
                 String::new(),
-                VmValue::List(Rc::new(Vec::new())),
+                VmValue::List(std::sync::Arc::new(Vec::new())),
                 0,
                 tokens_used,
                 false,
@@ -835,7 +840,7 @@ pub(super) async fn execute_sub_agent(
         .as_dict()
         .and_then(|dict| dict.get("assets"))
         .cloned()
-        .unwrap_or_else(|| VmValue::List(Rc::new(Vec::new())));
+        .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     let evidence_added = match &artifacts {
         VmValue::List(list) => list.len() as i64,
         _ => 0,
@@ -982,7 +987,7 @@ pub(super) async fn execute_sub_agent(
     );
 
     Ok(SubAgentExecutionResult {
-        payload: crate::llm::vm_value_to_json(&VmValue::Dict(Rc::new(envelope))),
+        payload: crate::llm::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(envelope))),
         transcript,
     })
 }
@@ -1010,9 +1015,15 @@ mod tests {
     }
 
     fn assistant_message(text: &str) -> VmValue {
-        VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("assistant"))),
-            ("content".to_string(), VmValue::String(Rc::from(text))),
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("assistant")),
+            ),
+            (
+                "content".to_string(),
+                VmValue::String(std::sync::Arc::from(text)),
+            ),
         ])))
     }
 
@@ -1020,14 +1031,17 @@ mod tests {
         let mut request = BTreeMap::from([
             (
                 "_type".to_string(),
-                VmValue::String(Rc::from("sub_agent_request")),
+                VmValue::String(std::sync::Arc::from("sub_agent_request")),
             ),
-            ("task".to_string(), VmValue::String(Rc::from("summarize"))),
+            (
+                "task".to_string(),
+                VmValue::String(std::sync::Arc::from("summarize")),
+            ),
         ]);
         for (key, value) in extra {
             request.insert(key.to_string(), value);
         }
-        VmValue::Dict(Rc::new(request))
+        VmValue::Dict(std::sync::Arc::new(request))
     }
 
     #[test]
@@ -1049,7 +1063,7 @@ mod tests {
     fn parse_sub_agent_request_preserves_session_id_whitespace() {
         let request = normalized_request(vec![(
             "session_id",
-            VmValue::String(Rc::from("  child-session  ")),
+            VmValue::String(std::sync::Arc::from("  child-session  ")),
         )]);
 
         let parsed = parse_sub_agent_request(&[request]).unwrap();
@@ -1060,32 +1074,38 @@ mod tests {
     fn anchor_dict(primary: &str, additional: Vec<(&str, &str)>) -> VmValue {
         let mut roots = Vec::new();
         for (path, mount_mode) in additional {
-            roots.push(VmValue::Dict(Rc::new(BTreeMap::from([
-                ("path".to_string(), VmValue::String(Rc::from(path))),
+            roots.push(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                (
+                    "path".to_string(),
+                    VmValue::String(std::sync::Arc::from(path)),
+                ),
                 (
                     "mount_mode".to_string(),
-                    VmValue::String(Rc::from(mount_mode)),
+                    VmValue::String(std::sync::Arc::from(mount_mode)),
                 ),
                 (
                     "mounted_at".to_string(),
-                    VmValue::String(Rc::from("2026-05-24T00:00:00Z")),
+                    VmValue::String(std::sync::Arc::from("2026-05-24T00:00:00Z")),
                 ),
             ]))));
         }
         let mut anchor = BTreeMap::from([
-            ("primary".to_string(), VmValue::String(Rc::from(primary))),
+            (
+                "primary".to_string(),
+                VmValue::String(std::sync::Arc::from(primary)),
+            ),
             (
                 "anchored_at".to_string(),
-                VmValue::String(Rc::from("2026-05-24T00:00:00Z")),
+                VmValue::String(std::sync::Arc::from("2026-05-24T00:00:00Z")),
             ),
         ]);
         if !roots.is_empty() {
             anchor.insert(
                 "additional_roots".to_string(),
-                VmValue::List(Rc::new(roots)),
+                VmValue::List(std::sync::Arc::new(roots)),
             );
         }
-        VmValue::Dict(Rc::new(anchor))
+        VmValue::Dict(std::sync::Arc::new(anchor))
     }
 
     fn path_string(path: &std::path::Path) -> String {
@@ -1274,8 +1294,14 @@ mod tests {
             task: "inspect the repo".to_string(),
             system: None,
             options: BTreeMap::from([
-                ("provider".to_string(), VmValue::String(Rc::from("mock"))),
-                ("model".to_string(), VmValue::String(Rc::from("mock"))),
+                (
+                    "provider".to_string(),
+                    VmValue::String(std::sync::Arc::from("mock")),
+                ),
+                (
+                    "model".to_string(),
+                    VmValue::String(std::sync::Arc::from("mock")),
+                ),
                 ("max_iterations".to_string(), VmValue::Int(1)),
             ]),
             returns_schema: None,
@@ -1327,8 +1353,14 @@ mod tests {
         let _policy = push_recursion_policy(0);
         let parent = crate::agent_sessions::open_or_create(Some("parent-budget".into()));
         let mut options = BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
-            ("model".to_string(), VmValue::String(Rc::from("mock"))),
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("mock")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from("mock")),
+            ),
             ("max_iterations".to_string(), VmValue::Int(1)),
         ]);
         annotate_nested_execution_options(

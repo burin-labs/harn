@@ -20,8 +20,6 @@ mod telemetry;
 mod thinking;
 mod transport;
 
-use std::rc::Rc;
-
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::mock::{
@@ -109,7 +107,7 @@ impl OffthreadLlmError {
                 message: self.message,
                 category,
             },
-            None => VmError::Thrown(VmValue::String(Rc::from(self.message))),
+            None => VmError::Thrown(VmValue::String(std::sync::Arc::from(self.message))),
         }
     }
 }
@@ -169,9 +167,9 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
     if !cached && !intercepted && replay_mode == LlmReplayMode::Replay {
         let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
         if load_fixture(&hash).is_none() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "No fixture found for LLM call (hash: {hash}). Run with --record first."
-            )))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
+            ))));
         }
     }
     if !cached && !intercepted && replay_mode != LlmReplayMode::Replay {
@@ -183,7 +181,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
     })
     .await
     .map_err(|join_err| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "llm_call background task failed: {join_err}"
         ))))
     })?
@@ -255,9 +253,9 @@ async fn vm_call_llm_full_inner_request(
             super::trigger_predicate::note_result(request, &result);
             return Ok(result);
         }
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "No fixture found for LLM call (hash: {hash}). Run with --record first."
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
+        ))));
     }
 
     super::ensure_real_llm_allowed(&request.provider)?;

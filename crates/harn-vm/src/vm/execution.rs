@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::chunk::{Chunk, ChunkRef, Op};
@@ -170,7 +170,7 @@ impl Vm {
     pub(crate) fn handle_error(&mut self, error: VmError) -> Result<Option<VmValue>, VmError> {
         let thrown_value = match &error {
             VmError::Thrown(v) => v.clone(),
-            other => VmValue::String(Rc::from(other.to_string())),
+            other => VmValue::String(std::sync::Arc::from(other.to_string())),
         };
 
         if let Some(handler) = self.exception_handlers.pop() {
@@ -236,7 +236,7 @@ impl Vm {
         local_slots: Option<Vec<LocalSlot>>,
     ) -> Result<VmValue, VmError> {
         self.run_chunk_ref(
-            Rc::new(chunk.clone()),
+            Arc::new(chunk.clone()),
             argc,
             saved_source_dir,
             module_functions,
@@ -769,11 +769,11 @@ impl crate::vm::Vm {
     }
 
     pub(crate) fn deadline_exceeded_error() -> VmError {
-        VmError::Thrown(VmValue::String(Rc::from("Deadline exceeded")))
+        VmError::Thrown(VmValue::String(std::sync::Arc::from("Deadline exceeded")))
     }
 
     pub(crate) fn cancelled_error() -> VmError {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "kind:cancelled:VM cancelled by host",
         )))
     }

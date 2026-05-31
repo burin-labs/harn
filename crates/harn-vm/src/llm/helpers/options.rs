@@ -85,7 +85,7 @@ fn quality_rank(tier: &str) -> i32 {
 fn route_target_from_short(target: &str) -> Result<(String, String), crate::value::VmError> {
     let target = target.trim();
     if target.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "route_policy: target must not be empty",
         ))));
     }
@@ -125,7 +125,7 @@ fn parse_route_policy_text(text: &str) -> Result<crate::llm::api::LlmRoutePolicy
     if let Some(target) = arg("fastest_over_quality") {
         return Ok(LlmRoutePolicy::FastestOverQuality(target));
     }
-    Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
         "route_policy: expected manual, always(id), cheapest_over_quality(t), or fastest_over_quality(t), got {text:?}"
     )))))
 }
@@ -198,7 +198,7 @@ fn parse_route_policy_option(
                         .map(vm_string_list)
                         .unwrap_or_default();
                     if targets.is_empty() {
-                        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                             "route_policy.prefer: expected at least one model/provider target",
                         ))));
                     }
@@ -209,12 +209,12 @@ fn parse_route_policy_option(
                         .unwrap_or_else(|| "prefer_order".to_string());
                     Ok(LlmRoutePolicy::PreferenceList { targets, strategy })
                 }
-                other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     format!("route_policy.mode: unsupported value {other:?}"),
                 )))),
             }
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "route_policy: expected string or dict",
         )))),
     }
@@ -475,14 +475,14 @@ fn parse_api_mode_option(
                     Ok(crate::llm::api::LlmApiMode::ChatCompletions)
                 }
                 "responses" | "response" => Ok(crate::llm::api::LlmApiMode::Responses),
-                other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     format!(
                         "api_mode: expected \"chat_completions\" or \"responses\", got \"{other}\""
                     ),
                 )))),
             }
         }
-        other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             format!("api_mode: expected a string, got {}", other.type_name()),
         )))),
     }
@@ -507,7 +507,7 @@ fn parse_provider_tools_option(
             .map(|value| match value {
                 VmValue::String(kind) => Ok(serde_json::json!({"type": kind.as_ref()})),
                 VmValue::Dict(_) => Ok(vm_value_to_json(value)),
-                other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     format!(
                         "provider_tools: expected each entry to be a dict or string, got {}",
                         other.type_name()
@@ -515,7 +515,7 @@ fn parse_provider_tools_option(
                 )))),
             })
             .collect(),
-        other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             format!(
                 "provider_tools: expected a list or dict, got {}",
                 other.type_name()
@@ -531,7 +531,7 @@ fn opt_bool_field(
     match options.and_then(|o| o.get(key)) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Bool(value)) => Ok(Some(*value)),
-        Some(other) => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        Some(other) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             format!("{key}: expected a bool, got {}", other.type_name()),
         )))),
     }
@@ -563,7 +563,7 @@ fn parse_schema_value(
             .map(vm_value_dict_to_json)
             .map(Some)
             .ok_or_else(|| {
-                VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                     "{field}: expected a JSON Schema object"
                 ))))
             }),
@@ -571,11 +571,11 @@ fn parse_schema_value(
 }
 
 fn output_format_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 fn unsupported_option_error(option: &str, provider: &str, model: &str) -> VmError {
-    VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
         "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn providers matrix` for compatibility."
     ))))
 }
@@ -723,7 +723,7 @@ fn apply_active_step_defaults(options: &mut Option<BTreeMap<String, VmValue>>) {
     if let Some(model_name) = step_default {
         opts.insert(
             "model".to_string(),
-            VmValue::String(std::rc::Rc::from(model_name)),
+            VmValue::String(std::sync::Arc::from(model_name)),
         );
     }
     if let Some((max_tokens, max_usd)) = step_budget {
@@ -748,7 +748,7 @@ fn apply_active_step_defaults(options: &mut Option<BTreeMap<String, VmValue>>) {
             }
             opts.insert(
                 "budget".to_string(),
-                VmValue::Dict(std::rc::Rc::new(step_budget_dict)),
+                VmValue::Dict(std::sync::Arc::new(step_budget_dict)),
             );
         }
     }
@@ -761,7 +761,7 @@ enum SystemPromptPosition {
 }
 
 fn system_prompt_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 fn system_prompt_position(
@@ -1494,7 +1494,7 @@ pub(crate) fn extract_llm_options(
     let caps = crate::llm::capabilities::lookup(&provider, &model);
     let api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {
-        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "api_mode: \"responses\" is only supported by provider \"openai\"; got provider \"{provider}\""
         )))));
     }
@@ -1655,7 +1655,7 @@ pub(crate) fn extract_llm_options(
         Some(VmValue::Bool(value)) => *value,
         Some(VmValue::Nil) | None => output_schema.is_some(),
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 format!(
                     "llm_call: `schema_stream_abort` must be a bool, got {}",
                     other.type_name()
@@ -1669,7 +1669,7 @@ pub(crate) fn extract_llm_options(
     // `agent_session_*` builtins; there is no opaque transcript dict to
     // pass around anymore.
     if options.as_ref().and_then(|o| o.get("transcript")).is_some() {
-        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "llm_call / agent_loop: the `transcript` option was removed. \
                  Open or open-and-resume a session with agent_session_open(id) \
                  and pass `session_id: id` instead.",
@@ -1716,7 +1716,7 @@ pub(crate) fn extract_llm_options(
         && !crate::llm::provider::provider_supports_image_urls(&provider, &model)
         && crate::llm::content::messages_contain_url_images(&messages)?
     {
-        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "llm_call: this provider/model route requires image base64; url image content is not supported",
         ))));
     }
@@ -1746,7 +1746,7 @@ pub(crate) fn extract_llm_options(
     };
     let provider_tools = parse_provider_tools_option(options.as_ref())?;
     if enforce_capability_gates && !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
-        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "provider_tools requires api_mode: \"responses\"",
         ))));
     }
@@ -1778,7 +1778,7 @@ pub(crate) fn extract_llm_options(
         let forced = provider_overrides_force_native(options.as_ref(), &provider);
         let provider_has_native = model_based_native || forced;
         if cfg.variant == ToolSearchVariant::Hybrid && cfg.mode == ToolSearchMode::Native {
-            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tool_search: variant \"hybrid\" is client-only; set mode: \"client\" or use \"bm25\"/\"regex\" for native provider tool search",
             ))));
         }
@@ -1793,7 +1793,7 @@ pub(crate) fn extract_llm_options(
         let resolution = match cfg.mode {
             ToolSearchMode::Native => {
                 if !provider_has_native {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         format!(
                             "tool_search: provider \"{provider}\" does not expose native \
                          tool-search for model \"{model}\". Set \
@@ -1824,7 +1824,7 @@ pub(crate) fn extract_llm_options(
             let deferred = extract_deferred_tool_names(tools);
             let total_user_tools = tools.len();
             if total_user_tools > 0 && deferred.len() == total_user_tools {
-                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "tool_search: all tools have defer_loading set. At least \
                      one tool must be non-deferred so the model has somewhere \
                      to start. (Matches Anthropic's 400 on the same condition.)",
@@ -1941,7 +1941,7 @@ pub(crate) fn extract_llm_options(
             || include.is_some()
             || max_tool_calls.is_some())
     {
-        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "Responses-only options require api_mode: \"responses\"",
         ))));
     }
@@ -1978,7 +1978,7 @@ pub(crate) fn extract_llm_options(
         match crate::llm::fast_mode::gate(&model) {
             crate::llm::fast_mode::FastModeGate::Usable => {}
             crate::llm::fast_mode::FastModeGate::Unsupported => {
-                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     format!(
                     "fast: model \"{model}\" (provider \"{provider}\") has no accelerated-serving \
                      tier in the catalog; remove `fast` or pick a model that advertises `fast_mode`"
@@ -1987,7 +1987,7 @@ pub(crate) fn extract_llm_options(
             }
             crate::llm::fast_mode::FastModeGate::Deprecated { note } => {
                 let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
-                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     format!(
                     "fast: the accelerated-serving tier for model \"{model}\" is deprecated{detail}"
                 ),
@@ -2060,7 +2060,7 @@ pub(crate) fn extract_llm_options(
 }
 
 fn thinking_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::rc::Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 fn parse_reasoning_effort_field(
@@ -2261,7 +2261,7 @@ fn parse_anthropic_beta_features_option(
                             }
                         }
                         other => {
-                            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                                 format!(
                                     "anthropic_beta_features: expected list<string>, got {}",
                                     other.type_name()
@@ -2272,7 +2272,7 @@ fn parse_anthropic_beta_features_option(
                 }
             }
             other => {
-                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     format!(
                         "anthropic_beta_features: expected string or list<string>, got {}",
                         other.type_name()
@@ -2321,7 +2321,7 @@ fn validate_anthropic_beta_feature_name(feature: &str) -> Result<(), VmError> {
     {
         return Ok(());
     }
-    Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
         "anthropic_beta_features: invalid beta feature name `{feature}`; expected ASCII letters, digits, '-' or '_'"
     )))))
 }
@@ -2350,7 +2350,7 @@ fn parse_tool_search_option(
             "bm25" => Ok(ToolSearchVariant::Bm25),
             "regex" => Ok(ToolSearchVariant::Regex),
             "hybrid" => Ok(ToolSearchVariant::Hybrid),
-            other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 format!(
                     "tool_search.variant: expected \"bm25\", \"regex\", or \"hybrid\", got \"{other}\""
                 ),
@@ -2362,7 +2362,7 @@ fn parse_tool_search_option(
             "auto" => Ok(ToolSearchMode::Auto),
             "native" => Ok(ToolSearchMode::Native),
             "client" => Ok(ToolSearchMode::Client),
-            other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 format!(
                 "tool_search.mode: expected \"auto\" | \"native\" | \"client\", got \"{other}\""
             ),
@@ -2372,7 +2372,7 @@ fn parse_tool_search_option(
     let validate_strategy = |s: &str| -> Result<(), VmError> {
         match s {
             "bm25" | "regex" | "hybrid" => Ok(()),
-            other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 format!(
                     "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", got \"{other}\""
                 ),
@@ -2392,7 +2392,7 @@ fn parse_tool_search_option(
             let variant = match d.get("variant") {
                 Some(VmValue::String(s)) => variant_from_short(s.as_ref())?,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         "tool_search.variant: expected a string",
                     ))));
                 }
@@ -2401,7 +2401,7 @@ fn parse_tool_search_option(
             let mode = match d.get("mode") {
                 Some(VmValue::String(s)) => mode_from_short(s.as_ref())?,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         "tool_search.mode: expected a string",
                     ))));
                 }
@@ -2410,7 +2410,7 @@ fn parse_tool_search_option(
             match d.get("always_loaded") {
                 Some(VmValue::List(_)) | None => {}
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         "tool_search.always_loaded: expected a list of tool names",
                     ))));
                 }
@@ -2425,20 +2425,20 @@ fn parse_tool_search_option(
                     if matches!(strategy.get("handler"), Some(VmValue::Closure(_))) {
                         true
                     } else {
-                        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                             "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}",
                         ))));
                     }
                 }
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}",
                     ))));
                 }
                 None => false,
             };
             if custom_strategy && matches!(mode, ToolSearchMode::Native) {
-                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "tool_search.strategy: custom scorers are client-only; set mode: \"client\" or \"auto\"",
                 ))));
             }
@@ -2453,7 +2453,7 @@ fn parse_tool_search_option(
                 }
                 Some(VmValue::Nil) | None => None,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         "tool_search.name: expected a string",
                     ))));
                 }
@@ -2467,7 +2467,7 @@ fn parse_tool_search_option(
                 mode,
             }))
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "tool_search: expected bool, string (\"bm25\"/\"regex\"/\"hybrid\"), or dict \
              ({variant, mode, strategy, always_loaded, name})",
         )))),
@@ -2525,21 +2525,26 @@ fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
 #[cfg(test)]
 mod output_format_tests {
     use super::*;
-    use std::rc::Rc;
 
     #[test]
     fn parses_explicit_json_schema_output_format() {
         let mut fmt = BTreeMap::new();
-        fmt.insert("kind".to_string(), VmValue::String(Rc::from("json_schema")));
+        fmt.insert(
+            "kind".to_string(),
+            VmValue::String(std::sync::Arc::from("json_schema")),
+        );
         fmt.insert(
             "schema".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "type".to_string(),
-                VmValue::String(Rc::from("object")),
+                VmValue::String(std::sync::Arc::from("object")),
             )]))),
         );
         fmt.insert("strict".to_string(), VmValue::Bool(false));
-        let options = BTreeMap::from([("output_format".to_string(), VmValue::Dict(Rc::new(fmt)))]);
+        let options = BTreeMap::from([(
+            "output_format".to_string(),
+            VmValue::Dict(std::sync::Arc::new(fmt)),
+        )]);
 
         let parsed = parse_output_format_option(Some(&options), None, None).expect("output_format");
 
@@ -2714,11 +2719,11 @@ mod reminder_render_tests {
         let options = BTreeMap::from([
             (
                 "system_prompt_parts".to_string(),
-                VmValue::String(std::rc::Rc::from("parts")),
+                VmValue::String(std::sync::Arc::from("parts")),
             ),
             (
                 "system_appendix".to_string(),
-                VmValue::String(std::rc::Rc::from("appendix")),
+                VmValue::String(std::sync::Arc::from("appendix")),
             ),
         ]);
         let prompt = compose_system_prompt_with_reminders(
@@ -2733,11 +2738,11 @@ mod reminder_render_tests {
     }
 
     fn s(text: &str) -> VmValue {
-        VmValue::String(std::rc::Rc::from(text))
+        VmValue::String(std::sync::Arc::from(text))
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        VmValue::Dict(std::rc::Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             pairs
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
@@ -2746,7 +2751,7 @@ mod reminder_render_tests {
     }
 
     fn list(items: Vec<VmValue>) -> VmValue {
-        VmValue::List(std::rc::Rc::new(items))
+        VmValue::List(std::sync::Arc::new(items))
     }
 
     #[test]
@@ -2982,7 +2987,6 @@ mod reminder_render_tests {
 mod routing_tests {
     use super::*;
     use crate::llm_config::{AliasDef, AuthEnv, ProviderDef, ProvidersConfig, TierRule};
-    use std::rc::Rc;
 
     fn install_test_routes() {
         let mut overlay = ProvidersConfig::default();
@@ -3048,16 +3052,18 @@ mod routing_tests {
         let mut options = BTreeMap::new();
         options.insert(
             "route_policy".to_string(),
-            VmValue::String(Rc::from(policy.to_string())),
+            VmValue::String(std::sync::Arc::from(policy.to_string())),
         );
         options.insert(
             "fallback_chain".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("fast".to_string()))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("fast".to_string()),
+            )])),
         );
         extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("options")
     }
@@ -3083,9 +3089,9 @@ mod routing_tests {
         opts: BTreeMap<String, VmValue>,
     ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
         extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(opts)),
+            VmValue::Dict(std::sync::Arc::new(opts)),
         ])
     }
 
@@ -3093,7 +3099,7 @@ mod routing_tests {
         let mut options = BTreeMap::new();
         options.insert(
             "model".to_string(),
-            VmValue::String(Rc::from(model.to_string())),
+            VmValue::String(std::sync::Arc::from(model.to_string())),
         );
         options.insert("fast".to_string(), VmValue::Bool(true));
         options
@@ -3153,25 +3159,28 @@ mod routing_tests {
         let mut policy = BTreeMap::new();
         policy.insert(
             "mode".to_string(),
-            VmValue::String(Rc::from("preference_list".to_string())),
+            VmValue::String(std::sync::Arc::from("preference_list".to_string())),
         );
         policy.insert(
             "strategy".to_string(),
-            VmValue::String(Rc::from("cheapest_first".to_string())),
+            VmValue::String(std::sync::Arc::from("cheapest_first".to_string())),
         );
         policy.insert(
             "prefer".to_string(),
-            VmValue::List(Rc::new(vec![
-                VmValue::String(Rc::from("fast-mid")),
-                VmValue::String(Rc::from("cheap-mid")),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from("fast-mid")),
+                VmValue::String(std::sync::Arc::from("cheap-mid")),
             ])),
         );
         let mut options = BTreeMap::new();
-        options.insert("route_policy".to_string(), VmValue::Dict(Rc::new(policy)));
+        options.insert(
+            "route_policy".to_string(),
+            VmValue::Dict(std::sync::Arc::new(policy)),
+        );
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("options");
 
@@ -3199,23 +3208,23 @@ mod routing_tests {
         let mut options = BTreeMap::new();
         options.insert(
             "provider".to_string(),
-            VmValue::String(Rc::from("mock".to_string())),
+            VmValue::String(std::sync::Arc::from("mock".to_string())),
         );
         options.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("gpt-5.4".to_string())),
+            VmValue::String(std::sync::Arc::from("gpt-5.4".to_string())),
         );
         options.insert(
             "thinking".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "enabled".to_string(),
                 VmValue::Bool(false),
             )]))),
         );
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("options");
         assert!(opts.thinking.is_disabled());
@@ -3226,26 +3235,26 @@ mod routing_tests {
         let mut options = BTreeMap::new();
         options.insert(
             "provider".to_string(),
-            VmValue::String(Rc::from("mock".to_string())),
+            VmValue::String(std::sync::Arc::from("mock".to_string())),
         );
         options.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("claude-opus-4-6".to_string())),
+            VmValue::String(std::sync::Arc::from("claude-opus-4-6".to_string())),
         );
         options.insert(
             "thinking".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "mode".to_string(),
-                    VmValue::String(Rc::from("enabled".to_string())),
+                    VmValue::String(std::sync::Arc::from("enabled".to_string())),
                 ),
                 ("budget_tokens".to_string(), VmValue::Int(8000)),
             ]))),
         );
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("options");
         assert_eq!(
@@ -3265,17 +3274,19 @@ mod routing_tests {
         let mut options = BTreeMap::new();
         options.insert(
             "provider".to_string(),
-            VmValue::String(Rc::from("mock".to_string())),
+            VmValue::String(std::sync::Arc::from("mock".to_string())),
         );
         options.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("claude-opus-4-6".to_string())),
+            VmValue::String(std::sync::Arc::from("claude-opus-4-6".to_string())),
         );
         options.insert(
             "anthropic_beta_features".to_string(),
-            VmValue::List(Rc::new(vec![
-                VmValue::String(Rc::from("fine-grained-tool-streaming-2025-05-14")),
-                VmValue::String(Rc::from(
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from(
+                    "fine-grained-tool-streaming-2025-05-14",
+                )),
+                VmValue::String(std::sync::Arc::from(
                     crate::llm::providers::anthropic::ANTHROPIC_INTERLEAVED_THINKING_BETA,
                 )),
             ])),
@@ -3283,9 +3294,9 @@ mod routing_tests {
         options.insert("interleaved_thinking".to_string(), VmValue::Bool(true));
 
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("options");
         assert_eq!(
@@ -3302,22 +3313,22 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("mock".to_string())),
+                VmValue::String(std::sync::Arc::from("mock".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("claude-opus-4-6".to_string())),
+                VmValue::String(std::sync::Arc::from("claude-opus-4-6".to_string())),
             ),
             (
                 "anthropic_beta_features".to_string(),
-                VmValue::String(Rc::from("bad\r\nheader".to_string())),
+                VmValue::String(std::sync::Arc::from("bad\r\nheader".to_string())),
             ),
         ]);
 
         let err = match extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ]) {
             Ok(_) => panic!("invalid beta feature should fail before transport"),
             Err(err) => err,
@@ -3330,29 +3341,29 @@ mod routing_tests {
         let mut options = BTreeMap::new();
         options.insert(
             "provider".to_string(),
-            VmValue::String(Rc::from("mock".to_string())),
+            VmValue::String(std::sync::Arc::from("mock".to_string())),
         );
         options.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("o3".to_string())),
+            VmValue::String(std::sync::Arc::from("o3".to_string())),
         );
         options.insert(
             "thinking".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "mode".to_string(),
-                    VmValue::String(Rc::from("effort".to_string())),
+                    VmValue::String(std::sync::Arc::from("effort".to_string())),
                 ),
                 (
                     "level".to_string(),
-                    VmValue::String(Rc::from("high".to_string())),
+                    VmValue::String(std::sync::Arc::from("high".to_string())),
                 ),
             ]))),
         );
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("options");
         assert_eq!(
@@ -3367,20 +3378,20 @@ mod routing_tests {
         let mut options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("local".to_string())),
+                VmValue::String(std::sync::Arc::from("local".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("unsupported-model".to_string())),
+                VmValue::String(std::sync::Arc::from("unsupported-model".to_string())),
             ),
         ]);
         for (key, value) in extra {
             options.insert(key.to_string(), value);
         }
         match extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ]) {
             Ok(_) => panic!("unsupported option should fail"),
             Err(err) => err,
@@ -3403,17 +3414,22 @@ mod routing_tests {
     }
 
     fn one_tool_list() -> VmValue {
-        VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(BTreeMap::from([
-            ("name".to_string(), VmValue::String(Rc::from("lookup"))),
-            (
-                "description".to_string(),
-                VmValue::String(Rc::from("Look something up")),
-            ),
-            (
-                "parameters".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::new())),
-            ),
-        ])))]))
+        VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+            std::sync::Arc::new(BTreeMap::from([
+                (
+                    "name".to_string(),
+                    VmValue::String(std::sync::Arc::from("lookup")),
+                ),
+                (
+                    "description".to_string(),
+                    VmValue::String(std::sync::Arc::from("Look something up")),
+                ),
+                (
+                    "parameters".to_string(),
+                    VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+                ),
+            ])),
+        )]))
     }
 
     #[test]
@@ -3423,7 +3439,7 @@ mod routing_tests {
             "output_format",
             vec![(
                 "output_format",
-                VmValue::String(Rc::from("json_object".to_string())),
+                VmValue::String(std::sync::Arc::from("json_object".to_string())),
             )],
         );
         assert_unsupported_local_option(
@@ -3431,7 +3447,7 @@ mod routing_tests {
             vec![
                 (
                     "tool_format",
-                    VmValue::String(Rc::from("native".to_string())),
+                    VmValue::String(std::sync::Arc::from("native".to_string())),
                 ),
                 ("tools", one_tool_list()),
             ],
@@ -3444,7 +3460,7 @@ mod routing_tests {
             "reasoning_effort",
             vec![(
                 "reasoning_effort",
-                VmValue::String(Rc::from("high".to_string())),
+                VmValue::String(std::sync::Arc::from("high".to_string())),
             )],
         );
         assert_unsupported_local_option(
@@ -3466,21 +3482,23 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("ollama".to_string())),
+                VmValue::String(std::sync::Arc::from("ollama".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("qwen3.6:35b-a3b-coding-nvfp4".to_string())),
+                VmValue::String(std::sync::Arc::from(
+                    "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
+                )),
             ),
             (
                 "tool_choice".to_string(),
-                VmValue::String(Rc::from("none".to_string())),
+                VmValue::String(std::sync::Arc::from("none".to_string())),
             ),
         ]);
         extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("tool_choice accepted on text-format routes");
     }
@@ -3494,22 +3512,22 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("ollama".to_string())),
+                VmValue::String(std::sync::Arc::from("ollama".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("devstral-small-2:24b".to_string())),
+                VmValue::String(std::sync::Arc::from("devstral-small-2:24b".to_string())),
             ),
             (
                 "tool_format".to_string(),
-                VmValue::String(Rc::from("text".to_string())),
+                VmValue::String(std::sync::Arc::from("text".to_string())),
             ),
             ("tools".to_string(), one_tool_list()),
         ]);
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("text-format tools accepted");
 
@@ -3522,22 +3540,22 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("mock".to_string())),
+                VmValue::String(std::sync::Arc::from("mock".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("o3".to_string())),
+                VmValue::String(std::sync::Arc::from("o3".to_string())),
             ),
             (
                 "reasoning_effort".to_string(),
-                VmValue::String(Rc::from("high".to_string())),
+                VmValue::String(std::sync::Arc::from("high".to_string())),
             ),
         ]);
 
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("supported reasoning_effort");
 
@@ -3554,22 +3572,22 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("mock".to_string())),
+                VmValue::String(std::sync::Arc::from("mock".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("o3".to_string())),
+                VmValue::String(std::sync::Arc::from("o3".to_string())),
             ),
             (
                 "reasoning_effort".to_string(),
-                VmValue::String(Rc::from("minimal".to_string())),
+                VmValue::String(std::sync::Arc::from("minimal".to_string())),
             ),
         ]);
 
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("minimal reasoning_effort");
 
@@ -3586,22 +3604,22 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("mock".to_string())),
+                VmValue::String(std::sync::Arc::from("mock".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("gpt-5.5".to_string())),
+                VmValue::String(std::sync::Arc::from("gpt-5.5".to_string())),
             ),
             (
                 "reasoning_policy".to_string(),
-                VmValue::String(Rc::from("off".to_string())),
+                VmValue::String(std::sync::Arc::from("off".to_string())),
             ),
         ]);
 
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("reasoning_policy");
 
@@ -3625,18 +3643,18 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("mock".to_string())),
+                VmValue::String(std::sync::Arc::from("mock".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("o3".to_string())),
+                VmValue::String(std::sync::Arc::from("o3".to_string())),
             ),
         ]);
 
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("session reasoning_policy");
 
@@ -3663,19 +3681,19 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("mock".to_string())),
+                VmValue::String(std::sync::Arc::from("mock".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("o3".to_string())),
+                VmValue::String(std::sync::Arc::from("o3".to_string())),
             ),
             ("thinking".to_string(), VmValue::Bool(false)),
         ]);
 
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("explicit thinking");
 
@@ -3694,22 +3712,22 @@ mod routing_tests {
             let options = BTreeMap::from([
                 (
                     "provider".to_string(),
-                    VmValue::String(Rc::from("mock".to_string())),
+                    VmValue::String(std::sync::Arc::from("mock".to_string())),
                 ),
                 (
                     "model".to_string(),
-                    VmValue::String(Rc::from("gpt-5.5".to_string())),
+                    VmValue::String(std::sync::Arc::from("gpt-5.5".to_string())),
                 ),
                 (
                     "reasoning_effort".to_string(),
-                    VmValue::String(Rc::from(raw.to_string())),
+                    VmValue::String(std::sync::Arc::from(raw.to_string())),
                 ),
             ]);
 
             let opts = extract_llm_options(&[
-                VmValue::String(Rc::from("hello".to_string())),
+                VmValue::String(std::sync::Arc::from("hello".to_string())),
                 VmValue::Nil,
-                VmValue::Dict(Rc::new(options)),
+                VmValue::Dict(std::sync::Arc::new(options)),
             ])
             .expect("reasoning_effort");
 
@@ -3725,22 +3743,22 @@ mod routing_tests {
         let options = BTreeMap::from([
             (
                 "provider".to_string(),
-                VmValue::String(Rc::from("local".to_string())),
+                VmValue::String(std::sync::Arc::from("local".to_string())),
             ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("no-effort-model".to_string())),
+                VmValue::String(std::sync::Arc::from("no-effort-model".to_string())),
             ),
             (
                 "reasoning_effort".to_string(),
-                VmValue::String(Rc::from("none".to_string())),
+                VmValue::String(std::sync::Arc::from("none".to_string())),
             ),
         ]);
 
         let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::String(std::sync::Arc::from("hello".to_string())),
             VmValue::Nil,
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ])
         .expect("reasoning_effort none should be universally accepted");
 
@@ -3767,11 +3785,11 @@ thinking_modes = ["effort"]
         let err = unsupported_local_options(vec![
             (
                 "model",
-                VmValue::String(Rc::from("thinking-effort-only".to_string())),
+                VmValue::String(std::sync::Arc::from("thinking-effort-only".to_string())),
             ),
             (
                 "reasoning_effort",
-                VmValue::String(Rc::from("high".to_string())),
+                VmValue::String(std::sync::Arc::from("high".to_string())),
             ),
         ]);
 
@@ -3785,140 +3803,204 @@ thinking_modes = ["effort"]
 
     #[test]
     fn image_content_sets_vision_and_requires_capability() {
-        let image_block = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("type".to_string(), VmValue::String(Rc::from("image"))),
+        let image_block = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("image")),
+            ),
             (
                 "base64".to_string(),
-                VmValue::String(Rc::from("iVBORw0KGgo=")),
+                VmValue::String(std::sync::Arc::from("iVBORw0KGgo=")),
             ),
             (
                 "media_type".to_string(),
-                VmValue::String(Rc::from("image/png")),
+                VmValue::String(std::sync::Arc::from("image/png")),
             ),
         ])));
-        let message = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("user"))),
+        let message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("user")),
+            ),
             (
                 "content".to_string(),
-                VmValue::List(Rc::new(vec![image_block])),
+                VmValue::List(std::sync::Arc::new(vec![image_block])),
             ),
         ])));
-        let options = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
-            ("model".to_string(), VmValue::String(Rc::from("gpt-4o"))),
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("mock")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(std::sync::Arc::from("gpt-4o")),
+            ),
             (
                 "messages".to_string(),
-                VmValue::List(Rc::new(vec![message.clone()])),
+                VmValue::List(std::sync::Arc::new(vec![message.clone()])),
             ),
         ])));
-        let opts =
-            extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, options]).unwrap();
+        let opts = extract_llm_options(&[
+            VmValue::String(std::sync::Arc::from("")),
+            VmValue::Nil,
+            options,
+        ])
+        .unwrap();
         assert!(opts.vision);
 
-        let bad_options = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+        let bad_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("mock")),
+            ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("gpt-3.5-turbo")),
+                VmValue::String(std::sync::Arc::from("gpt-3.5-turbo")),
             ),
             (
                 "messages".to_string(),
-                VmValue::List(Rc::new(vec![message])),
+                VmValue::List(std::sync::Arc::new(vec![message])),
             ),
         ])));
-        let err = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, bad_options])
-            .err()
-            .expect("non-vision model should reject image content");
+        let err = extract_llm_options(&[
+            VmValue::String(std::sync::Arc::from("")),
+            VmValue::Nil,
+            bad_options,
+        ])
+        .err()
+        .expect("non-vision model should reject image content");
         assert!(err.to_string().contains("option `vision` is not supported"));
 
-        let url_image = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("type".to_string(), VmValue::String(Rc::from("image"))),
+        let url_image = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("image")),
+            ),
             (
                 "url".to_string(),
-                VmValue::String(Rc::from("https://example.com/image.png")),
+                VmValue::String(std::sync::Arc::from("https://example.com/image.png")),
             ),
             (
                 "media_type".to_string(),
-                VmValue::String(Rc::from("image/png")),
+                VmValue::String(std::sync::Arc::from("image/png")),
             ),
         ])));
-        let url_message = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("user"))),
+        let url_message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("user")),
+            ),
             (
                 "content".to_string(),
-                VmValue::List(Rc::new(vec![url_image])),
+                VmValue::List(std::sync::Arc::new(vec![url_image])),
             ),
         ])));
-        let ollama_options = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("ollama"))),
+        let ollama_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("ollama")),
+            ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("llava:latest")),
+                VmValue::String(std::sync::Arc::from("llava:latest")),
             ),
             (
                 "messages".to_string(),
-                VmValue::List(Rc::new(vec![url_message])),
+                VmValue::List(std::sync::Arc::new(vec![url_message])),
             ),
         ])));
-        let err =
-            extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, ollama_options])
-                .err()
-                .expect("ollama should reject url image content");
+        let err = extract_llm_options(&[
+            VmValue::String(std::sync::Arc::from("")),
+            VmValue::Nil,
+            ollama_options,
+        ])
+        .err()
+        .expect("ollama should reject url image content");
         assert!(err.to_string().contains("requires image base64"));
     }
 
     #[test]
     fn pdf_and_audio_content_require_capabilities() {
-        let pdf_block = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("type".to_string(), VmValue::String(Rc::from("pdf"))),
-            ("file_id".to_string(), VmValue::String(Rc::from("file_123"))),
+        let pdf_block = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("pdf")),
+            ),
+            (
+                "file_id".to_string(),
+                VmValue::String(std::sync::Arc::from("file_123")),
+            ),
         ])));
-        let audio_block = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("type".to_string(), VmValue::String(Rc::from("audio"))),
-            ("base64".to_string(), VmValue::String(Rc::from("UklGRg=="))),
+        let audio_block = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("audio")),
+            ),
+            (
+                "base64".to_string(),
+                VmValue::String(std::sync::Arc::from("UklGRg==")),
+            ),
             (
                 "media_type".to_string(),
-                VmValue::String(Rc::from("audio/wav")),
+                VmValue::String(std::sync::Arc::from("audio/wav")),
             ),
         ])));
-        let message = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("user"))),
+        let message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("user")),
+            ),
             (
                 "content".to_string(),
-                VmValue::List(Rc::new(vec![pdf_block, audio_block])),
+                VmValue::List(std::sync::Arc::new(vec![pdf_block, audio_block])),
             ),
         ])));
-        let options = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("mock")),
+            ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("claude-sonnet-4-7")),
+                VmValue::String(std::sync::Arc::from("claude-sonnet-4-7")),
             ),
             (
                 "messages".to_string(),
-                VmValue::List(Rc::new(vec![message.clone()])),
+                VmValue::List(std::sync::Arc::new(vec![message.clone()])),
             ),
         ])));
-        let opts =
-            extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, options]).unwrap();
+        let opts = extract_llm_options(&[
+            VmValue::String(std::sync::Arc::from("")),
+            VmValue::Nil,
+            options,
+        ])
+        .unwrap();
         assert!(opts
             .anthropic_beta_features
             .contains(&crate::stdlib::files::ANTHROPIC_FILES_API_BETA.to_string()));
 
-        let bad_options = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("mock"))),
+        let bad_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("mock")),
+            ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("gpt-3.5-turbo")),
+                VmValue::String(std::sync::Arc::from("gpt-3.5-turbo")),
             ),
             (
                 "messages".to_string(),
-                VmValue::List(Rc::new(vec![message])),
+                VmValue::List(std::sync::Arc::new(vec![message])),
             ),
         ])));
-        let err = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, bad_options])
-            .err()
-            .expect("non-multimodal model should reject pdf/audio content");
+        let err = extract_llm_options(&[
+            VmValue::String(std::sync::Arc::from("")),
+            VmValue::Nil,
+            bad_options,
+        ])
+        .err()
+        .expect("non-multimodal model should reject pdf/audio content");
         assert!(err.to_string().contains("option `audio` is not supported"));
     }
 }

@@ -46,7 +46,7 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
@@ -683,13 +683,13 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
         ("symbol", symbol_descriptor(env)),
         (
             "touched_files",
-            VmValue::List(Rc::new(extras.touched_files)),
+            VmValue::List(Arc::new(extras.touched_files)),
         ),
-        ("conflicts", VmValue::List(Rc::new(extras.conflicts))),
-        ("warnings", VmValue::List(Rc::new(extras.warnings))),
+        ("conflicts", VmValue::List(Arc::new(extras.conflicts))),
+        ("warnings", VmValue::List(Arc::new(extras.warnings))),
         (
             "failed_paths_with_reasons",
-            VmValue::List(Rc::new(extras.failed_paths)),
+            VmValue::List(Arc::new(extras.failed_paths)),
         ),
         ("match_count", VmValue::Int(extras.match_count as i64)),
         ("details", str_value(&extras.details)),
@@ -897,7 +897,7 @@ fn file_plan_to_value(plan: &FilePlan) -> VmValue {
             "after_sha256",
             str_value(sha256_hex(plan.patched.as_bytes())),
         ),
-        ("edits", VmValue::List(Rc::new(edits))),
+        ("edits", VmValue::List(Arc::new(edits))),
     ])
 }
 
@@ -926,7 +926,7 @@ mod tests {
     use crate::code_index::CodeIndexCapability;
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(Rc::from(s))
+        VmValue::String(Arc::from(s))
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
@@ -934,7 +934,7 @@ mod tests {
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(Arc::new(map))
     }
 
     fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

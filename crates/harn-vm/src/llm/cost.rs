@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
@@ -145,15 +144,15 @@ fn numeric_value(value: &VmValue, key: &str) -> Result<f64, VmError> {
         VmValue::Float(f) => *f,
         VmValue::Int(n) => *n as f64,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "budget.{key}: expected a non-negative number"
-            )))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("budget.{key}: expected a non-negative number"),
+            ))));
         }
     };
     if !value.is_finite() || value < 0.0 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "budget.{key}: expected a non-negative finite number"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("budget.{key}: expected a non-negative finite number"),
+        ))));
     }
     Ok(value)
 }
@@ -163,15 +162,15 @@ fn integer_value(value: &VmValue, key: &str) -> Result<i64, VmError> {
         VmValue::Int(n) => *n,
         VmValue::Float(f) if f.is_finite() && f.fract() == 0.0 => *f as i64,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "budget.{key}: expected a non-negative integer"
-            )))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("budget.{key}: expected a non-negative integer"),
+            ))));
         }
     };
     if value < 0 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "budget.{key}: expected a non-negative integer"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("budget.{key}: expected a non-negative integer"),
+        ))));
     }
     Ok(value)
 }
@@ -207,7 +206,7 @@ pub(crate) fn parse_budget_envelope(
             VmValue::Nil => {}
             VmValue::Dict(fields) => parse_budget_fields(fields, &mut envelope)?,
             _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "budget: expected a dict {max_cost_usd?, total_budget_usd?, max_input_tokens?, max_output_tokens?}",
                 ))));
             }
@@ -295,16 +294,19 @@ pub(crate) fn budget_exceeded_error(
     let mut dict = BTreeMap::new();
     dict.insert(
         "category".to_string(),
-        VmValue::String(Rc::from("budget_exceeded")),
+        VmValue::String(std::sync::Arc::from("budget_exceeded")),
     );
-    dict.insert("kind".to_string(), VmValue::String(Rc::from("terminal")));
+    dict.insert(
+        "kind".to_string(),
+        VmValue::String(std::sync::Arc::from("terminal")),
+    );
     dict.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from("budget_exceeded")),
+        VmValue::String(std::sync::Arc::from("budget_exceeded")),
     );
     dict.insert(
         "limit".to_string(),
-        VmValue::String(Rc::from(limit_kind.as_str())),
+        VmValue::String(std::sync::Arc::from(limit_kind.as_str())),
     );
     dict.insert("limit_value".to_string(), VmValue::Float(limit_value));
     dict.insert(
@@ -325,15 +327,15 @@ pub(crate) fn budget_exceeded_error(
     );
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(projection.provider.clone())),
+        VmValue::String(std::sync::Arc::from(projection.provider.clone())),
     );
     dict.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(projection.model.clone())),
+        VmValue::String(std::sync::Arc::from(projection.model.clone())),
     );
     dict.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(format!(
+        VmValue::String(std::sync::Arc::from(format!(
             "LLM budget exceeded before provider call: {} would exceed {}",
             match limit_kind {
                 BudgetLimitKind::PerCallCost =>
@@ -354,7 +356,7 @@ pub(crate) fn budget_exceeded_error(
             limit_kind.as_str(),
         ))),
     );
-    VmError::Thrown(VmValue::Dict(Rc::new(dict)))
+    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 pub(crate) fn budget_exceeded_limit(
@@ -702,7 +704,7 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
         result.insert("input_tokens".to_string(), VmValue::Int(total_input));
         result.insert("output_tokens".to_string(), VmValue::Int(total_output));
         result.insert("call_count".to_string(), VmValue::Int(call_count));
-        Ok(VmValue::Dict(Rc::new(result)))
+        Ok(VmValue::Dict(std::sync::Arc::new(result)))
     });
 
     vm.register_builtin("llm_budget", |args, _out| {
@@ -710,7 +712,7 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
             Some(VmValue::Float(f)) => *f,
             Some(VmValue::Int(n)) => *n as f64,
             _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "llm_budget: requires a numeric argument",
                 ))));
             }
@@ -774,11 +776,11 @@ fn pricing_detail_to_vm_value(provider: &str, model: &str, detail: &PricingDetai
     let mut dict = BTreeMap::new();
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(provider.to_string())),
+        VmValue::String(std::sync::Arc::from(provider.to_string())),
     );
     dict.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(model.to_string())),
+        VmValue::String(std::sync::Arc::from(model.to_string())),
     );
     dict.insert(
         "input_per_mtok".to_string(),
@@ -804,9 +806,9 @@ fn pricing_detail_to_vm_value(provider: &str, model: &str, detail: &PricingDetai
     );
     dict.insert(
         "source".to_string(),
-        VmValue::String(Rc::from(detail.source.as_str())),
+        VmValue::String(std::sync::Arc::from(detail.source.as_str())),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn resolve_pricing_args(args: &[VmValue]) -> (String, String) {
@@ -879,7 +881,7 @@ fn llm_format_usd_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
         })
         .unwrap_or(false);
     let formatted = format_usd_amount(amount, explicit_precision, sign_always);
-    Ok(VmValue::String(Rc::from(formatted)))
+    Ok(VmValue::String(std::sync::Arc::from(formatted)))
 }
 
 fn format_usd_amount(amount: f64, precision: Option<usize>, sign_always: bool) -> String {
@@ -1012,11 +1014,11 @@ fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
         let mut row = BTreeMap::new();
         row.insert(
             "provider".to_string(),
-            VmValue::String(Rc::from(provider.clone())),
+            VmValue::String(std::sync::Arc::from(provider.clone())),
         );
         row.insert(
             "model".to_string(),
-            VmValue::String(Rc::from(model.clone())),
+            VmValue::String(std::sync::Arc::from(model.clone())),
         );
         row.insert(
             "pricing".to_string(),
@@ -1031,7 +1033,7 @@ fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
         );
         row.insert("calls".to_string(), VmValue::Int(calls));
         row.insert("pricing_known".to_string(), VmValue::Bool(detail.is_some()));
-        rows.push((projection, VmValue::Dict(Rc::new(row))));
+        rows.push((projection, VmValue::Dict(std::sync::Arc::new(row))));
     }
 
     rows.sort_by(|left, right| match (left.0, right.0) {
@@ -1040,7 +1042,7 @@ fn llm_compare_costs_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
     });
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         rows.into_iter().map(|(_, value)| value).collect(),
     )))
 }
@@ -1064,14 +1066,17 @@ pub(crate) fn project_call_cost(
 
 fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerInfo) -> VmValue {
     let mut result = BTreeMap::new();
-    result.insert("model".to_string(), VmValue::String(Rc::from(model)));
+    result.insert(
+        "model".to_string(),
+        VmValue::String(std::sync::Arc::from(model)),
+    );
     result.insert(
         "model_family".to_string(),
-        VmValue::String(Rc::from(info.model_family)),
+        VmValue::String(std::sync::Arc::from(info.model_family)),
     );
     result.insert(
         "source".to_string(),
-        VmValue::String(Rc::from(info.source.as_str())),
+        VmValue::String(std::sync::Arc::from(info.source.as_str())),
     );
     result.insert("exact".to_string(), VmValue::Bool(info.exact));
     result.insert(
@@ -1081,10 +1086,10 @@ fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerIn
     result.insert(
         "encoder".to_string(),
         info.encoder
-            .map(|encoder| VmValue::String(Rc::from(encoder)))
+            .map(|encoder| VmValue::String(std::sync::Arc::from(encoder)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(result))
+    VmValue::Dict(std::sync::Arc::new(result))
 }
 
 #[cfg(test)]

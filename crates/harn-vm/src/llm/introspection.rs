@@ -24,7 +24,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use serde_json::json;
 
@@ -106,11 +105,11 @@ pub fn snapshot_to_vm_value(snapshot: Option<&RuntimeIntrospectionSnapshot>) -> 
     let mut dict = BTreeMap::new();
     dict.insert(
         "harn_version".to_string(),
-        VmValue::String(Rc::from(crate::bytecode_cache::HARN_VERSION)),
+        VmValue::String(std::sync::Arc::from(crate::bytecode_cache::HARN_VERSION)),
     );
     dict.insert(
         "harness".to_string(),
-        VmValue::String(Rc::from(harness_identifier())),
+        VmValue::String(std::sync::Arc::from(harness_identifier())),
     );
     let Some(snap) = snapshot else {
         for key in [
@@ -126,34 +125,34 @@ pub fn snapshot_to_vm_value(snapshot: Option<&RuntimeIntrospectionSnapshot>) -> 
         dict.insert("context_window".to_string(), VmValue::Nil);
         dict.insert("runtime_context_window".to_string(), VmValue::Nil);
         dict.insert("capabilities".to_string(), VmValue::Nil);
-        return VmValue::Dict(Rc::new(dict));
+        return VmValue::Dict(std::sync::Arc::new(dict));
     };
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(snap.provider.as_str())),
+        VmValue::String(std::sync::Arc::from(snap.provider.as_str())),
     );
     dict.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(snap.model.as_str())),
+        VmValue::String(std::sync::Arc::from(snap.model.as_str())),
     );
     dict.insert(
         "model_alias".to_string(),
         snap.model_alias
             .as_deref()
-            .map(|alias| VmValue::String(Rc::from(alias)))
+            .map(|alias| VmValue::String(std::sync::Arc::from(alias)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "family".to_string(),
-        VmValue::String(Rc::from(snap.family.as_str())),
+        VmValue::String(std::sync::Arc::from(snap.family.as_str())),
     );
     dict.insert(
         "tool_format".to_string(),
-        VmValue::String(Rc::from(snap.tool_format.as_str())),
+        VmValue::String(std::sync::Arc::from(snap.tool_format.as_str())),
     );
     dict.insert(
         "tier".to_string(),
-        VmValue::String(Rc::from(snap.tier.as_str())),
+        VmValue::String(std::sync::Arc::from(snap.tier.as_str())),
     );
     dict.insert(
         "context_window".to_string(),
@@ -168,7 +167,7 @@ pub fn snapshot_to_vm_value(snapshot: Option<&RuntimeIntrospectionSnapshot>) -> 
             .unwrap_or(VmValue::Nil),
     );
     dict.insert("capabilities".to_string(), snap.capabilities.clone());
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 /// Tool names registered by `runtime_introspection_tools`. Kept in

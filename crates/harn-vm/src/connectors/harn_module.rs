@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
@@ -100,7 +99,7 @@ enum WorkerCommand {
 
 struct LocalHarnConnectorRuntime {
     base_vm: Vm,
-    exports: BTreeMap<String, Rc<VmClosure>>,
+    exports: BTreeMap<String, Arc<VmClosure>>,
     ctx: ConnectorCtx,
 }
 
@@ -868,7 +867,7 @@ fn default_ok_status() -> u16 {
 
 async fn load_module_runtime(
     module_path: &Path,
-) -> Result<(Vm, BTreeMap<String, Rc<VmClosure>>), ConnectorError> {
+) -> Result<(Vm, BTreeMap<String, Arc<VmClosure>>), ConnectorError> {
     let mut base_vm = Vm::new();
     register_vm_stdlib(&mut base_vm);
     let store_base = module_path.parent().unwrap_or_else(|| Path::new("."));
@@ -898,7 +897,7 @@ async fn load_runtime_with_ctx(
 
 async fn required_export_call(
     base_vm: &Vm,
-    exports: &BTreeMap<String, Rc<VmClosure>>,
+    exports: &BTreeMap<String, Arc<VmClosure>>,
     name: &str,
     args: &[VmValue],
 ) -> Result<VmValue, ConnectorError> {

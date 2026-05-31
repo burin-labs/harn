@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use sha2::{Digest, Sha256};
@@ -30,8 +30,8 @@ pub struct CommandPolicy {
     pub default_shell_mode: String,
     pub deny_patterns: Vec<String>,
     pub require_approval: BTreeSet<String>,
-    pub pre: Option<Rc<VmClosure>>,
-    pub post: Option<Rc<VmClosure>>,
+    pub pre: Option<Arc<VmClosure>>,
+    pub post: Option<Arc<VmClosure>>,
     pub allow_recursive: bool,
 }
 
@@ -134,24 +134,24 @@ pub fn normalize_command_policy_value(config: &VmValue) -> Result<VmValue, VmErr
     let mut normalized = (*map).clone();
     normalized
         .entry("_type".to_string())
-        .or_insert_with(|| VmValue::String(Rc::from("command_policy")));
+        .or_insert_with(|| VmValue::String(std::sync::Arc::from("command_policy")));
     normalized
         .entry("default_shell_mode".to_string())
-        .or_insert_with(|| VmValue::String(Rc::from(DEFAULT_SHELL_MODE)));
+        .or_insert_with(|| VmValue::String(std::sync::Arc::from(DEFAULT_SHELL_MODE)));
     normalized
         .entry("workspace_roots".to_string())
-        .or_insert_with(|| VmValue::List(Rc::new(Vec::new())));
+        .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     normalized
         .entry("deny_patterns".to_string())
-        .or_insert_with(|| VmValue::List(Rc::new(Vec::new())));
+        .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     normalized
         .entry("require_approval".to_string())
-        .or_insert_with(|| VmValue::List(Rc::new(Vec::new())));
+        .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     parse_command_policy_value(
-        Some(&VmValue::Dict(Rc::new(normalized.clone()))),
+        Some(&VmValue::Dict(std::sync::Arc::new(normalized.clone()))),
         "command_policy",
     )?;
-    Ok(VmValue::Dict(Rc::new(normalized)))
+    Ok(VmValue::Dict(std::sync::Arc::new(normalized)))
 }
 
 pub fn command_risk_scan_value(ctx: &VmValue) -> Result<VmValue, VmError> {
@@ -499,53 +499,64 @@ pub fn blocked_command_response(
     let mut result = BTreeMap::new();
     result.insert(
         "command_id".to_string(),
-        VmValue::String(Rc::from(command_id.clone())),
+        VmValue::String(std::sync::Arc::from(command_id.clone())),
     );
     result.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(status.to_string())),
+        VmValue::String(std::sync::Arc::from(status.to_string())),
     );
     result.insert("pid".to_string(), VmValue::Nil);
     result.insert("process_group_id".to_string(), VmValue::Nil);
     result.insert("handle_id".to_string(), VmValue::Nil);
     result.insert(
         "started_at".to_string(),
-        VmValue::String(Rc::from(now.clone())),
+        VmValue::String(std::sync::Arc::from(now.clone())),
     );
-    result.insert("ended_at".to_string(), VmValue::String(Rc::from(now)));
+    result.insert(
+        "ended_at".to_string(),
+        VmValue::String(std::sync::Arc::from(now)),
+    );
     result.insert("duration_ms".to_string(), VmValue::Int(0));
     result.insert("exit_code".to_string(), VmValue::Int(-1));
     result.insert("signal".to_string(), VmValue::Nil);
     result.insert("timed_out".to_string(), VmValue::Bool(false));
-    result.insert("stdout".to_string(), VmValue::String(Rc::from("")));
+    result.insert(
+        "stdout".to_string(),
+        VmValue::String(std::sync::Arc::from("")),
+    );
     result.insert(
         "stderr".to_string(),
-        VmValue::String(Rc::from(message.to_string())),
+        VmValue::String(std::sync::Arc::from(message.to_string())),
     );
     result.insert(
         "combined".to_string(),
-        VmValue::String(Rc::from(message.to_string())),
+        VmValue::String(std::sync::Arc::from(message.to_string())),
     );
     result.insert("exit_status".to_string(), VmValue::Int(-1));
     result.insert("legacy_status".to_string(), VmValue::Int(-1));
     result.insert("success".to_string(), VmValue::Bool(false));
     result.insert(
         "error".to_string(),
-        VmValue::String(Rc::from("permission_denied")),
+        VmValue::String(std::sync::Arc::from("permission_denied")),
     );
     result.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from(message.to_string())),
+        VmValue::String(std::sync::Arc::from(message.to_string())),
     );
     result.insert(
         "audit_id".to_string(),
-        VmValue::String(Rc::from(format!("audit_{command_id}"))),
+        VmValue::String(std::sync::Arc::from(format!("audit_{command_id}"))),
     );
     result.insert(
         "request".to_string(),
-        VmValue::Dict(Rc::new(redacted_vm_request(params))),
+        VmValue::Dict(std::sync::Arc::new(redacted_vm_request(params))),
     );
-    attach_policy_audit(VmValue::Dict(Rc::new(result)), context, decisions, None)
+    attach_policy_audit(
+        VmValue::Dict(std::sync::Arc::new(result)),
+        context,
+        decisions,
+        None,
+    )
 }
 
 fn attach_policy_audit(
@@ -569,7 +580,7 @@ fn attach_policy_audit(
         "command_policy".to_string(),
         crate::stdlib::json_to_vm_value(&audit),
     );
-    VmValue::Dict(Rc::new(out))
+    VmValue::Dict(std::sync::Arc::new(out))
 }
 
 fn decision(
@@ -602,7 +613,7 @@ fn decision_json(decision: &CommandPolicyDecision) -> JsonValue {
 
 async fn invoke_command_hook(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    closure: &Rc<VmClosure>,
+    closure: &Arc<VmClosure>,
     payload: &JsonValue,
 ) -> Result<VmValue, VmError> {
     let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
@@ -720,7 +731,7 @@ fn parse_post_hook_action(
                             .get("content")
                             .map(|v| v.display())
                             .unwrap_or_else(|| {
-                                crate::llm::vm_value_to_json(&VmValue::Dict(Rc::new(
+                                crate::llm::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(
                                     feedback.clone(),
                                 )))
                                 .to_string()
@@ -1190,7 +1201,10 @@ fn redacted_vm_request(params: &BTreeMap<String, VmValue>) -> BTreeMap<String, V
         .iter()
         .map(|(key, value)| {
             if key == "env" || key == "stdin" {
-                (key.clone(), VmValue::String(Rc::from("<redacted>")))
+                (
+                    key.clone(),
+                    VmValue::String(std::sync::Arc::from("<redacted>")),
+                )
             } else {
                 (key.clone(), value.clone())
             }
@@ -1254,7 +1268,7 @@ fn bool_field(map: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<bool>
 fn closure_field(
     map: &BTreeMap<String, VmValue>,
     key: &str,
-) -> Result<Option<Rc<VmClosure>>, VmError> {
+) -> Result<Option<Arc<VmClosure>>, VmError> {
     match map.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Closure(closure)) => Ok(Some(closure.clone())),

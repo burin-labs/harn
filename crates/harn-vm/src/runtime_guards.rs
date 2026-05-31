@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_parser::TypeExpr;
 
@@ -7,7 +7,7 @@ use crate::schema::CanonicalParamSchema;
 #[derive(Debug, Clone)]
 pub(crate) enum RuntimeParamGuard {
     CanonicalSchema(CanonicalParamSchema),
-    InvalidSchema(Rc<str>),
+    InvalidSchema(Arc<str>),
     TypeExpr(TypeExpr),
 }
 
@@ -16,7 +16,7 @@ impl RuntimeParamGuard {
         if let Some(schema) = crate::compiler::Compiler::type_expr_to_schema_value(type_expr) {
             return match crate::schema::canonical_param_schema(&schema) {
                 Ok(schema) => Self::CanonicalSchema(schema),
-                Err(error) => Self::InvalidSchema(Rc::from(error)),
+                Err(error) => Self::InvalidSchema(Arc::from(error)),
             };
         }
 

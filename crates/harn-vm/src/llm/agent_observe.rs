@@ -1164,10 +1164,9 @@ pub(crate) async fn observed_llm_call(
 mod retry_tests {
     use super::*;
     use crate::value::{ErrorCategory, VmError, VmValue};
-    use std::rc::Rc;
 
     fn thrown(s: &str) -> VmError {
-        VmError::Thrown(VmValue::String(Rc::from(s)))
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(s)))
     }
 
     fn categorized(msg: &str, category: ErrorCategory) -> VmError {
@@ -1341,23 +1340,32 @@ mod retry_tests {
 
     #[test]
     fn llm_error_kind_dict_gates_retry() {
-        let transient =
-            VmError::Thrown(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
-                ("kind".to_string(), VmValue::String(Rc::from("transient"))),
+        let transient = VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
+            std::collections::BTreeMap::from([
+                (
+                    "kind".to_string(),
+                    VmValue::String(std::sync::Arc::from("transient")),
+                ),
                 (
                     "reason".to_string(),
-                    VmValue::String(Rc::from("network_error")),
+                    VmValue::String(std::sync::Arc::from("network_error")),
                 ),
-            ]))));
+            ]),
+        )));
         assert!(is_retryable_llm_error(&transient));
 
-        let terminal = VmError::Thrown(VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
-            ("kind".to_string(), VmValue::String(Rc::from("terminal"))),
-            (
-                "reason".to_string(),
-                VmValue::String(Rc::from("context_overflow")),
-            ),
-        ]))));
+        let terminal = VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
+            std::collections::BTreeMap::from([
+                (
+                    "kind".to_string(),
+                    VmValue::String(std::sync::Arc::from("terminal")),
+                ),
+                (
+                    "reason".to_string(),
+                    VmValue::String(std::sync::Arc::from("context_overflow")),
+                ),
+            ]),
+        )));
         assert!(!is_retryable_llm_error(&terminal));
     }
 

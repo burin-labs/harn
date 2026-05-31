@@ -360,23 +360,23 @@ async fn daemon_resume_builtin(
         &BTreeMap::from([
             (
                 "name".to_string(),
-                VmValue::String(Rc::from(meta.name.clone())),
+                VmValue::String(std::sync::Arc::from(meta.name.clone())),
             ),
             (
                 "task".to_string(),
-                VmValue::String(Rc::from(meta.prompt.clone())),
+                VmValue::String(std::sync::Arc::from(meta.prompt.clone())),
             ),
             (
                 "persist_path".to_string(),
-                VmValue::String(Rc::from(persist_root.clone())),
+                VmValue::String(std::sync::Arc::from(persist_root.clone())),
             ),
             (
                 "session_id".to_string(),
-                VmValue::String(Rc::from(meta.session_id.clone())),
+                VmValue::String(std::sync::Arc::from(meta.session_id.clone())),
             ),
             (
                 "options".to_string(),
-                VmValue::Dict(Rc::new(options.clone())),
+                VmValue::Dict(std::sync::Arc::new(options.clone())),
             ),
         ]),
         Some(meta.id.clone()),
@@ -408,15 +408,15 @@ async fn daemon_resume_builtin(
                 .insert("loop_until_done".to_string(), VmValue::Bool(false));
             daemon.options.insert(
                 "session_id".to_string(),
-                VmValue::String(Rc::from(spec.session_id.clone())),
+                VmValue::String(std::sync::Arc::from(spec.session_id.clone())),
             );
             daemon.options.insert(
                 "persist_path".to_string(),
-                VmValue::String(Rc::from(spec.snapshot_path.clone())),
+                VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
             );
             daemon.options.insert(
                 "resume_path".to_string(),
-                VmValue::String(Rc::from(spec.snapshot_path.clone())),
+                VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
             );
             daemon.status = "running".to_string();
             daemon.last_error = None;
@@ -456,15 +456,15 @@ async fn daemon_resume_builtin(
     resume_options.insert("loop_until_done".to_string(), VmValue::Bool(false));
     resume_options.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(spec.session_id.clone())),
+        VmValue::String(std::sync::Arc::from(spec.session_id.clone())),
     );
     resume_options.insert(
         "persist_path".to_string(),
-        VmValue::String(Rc::from(spec.snapshot_path.clone())),
+        VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
     );
     resume_options.insert(
         "resume_path".to_string(),
-        VmValue::String(Rc::from(spec.snapshot_path.clone())),
+        VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
     );
 
     let state = Rc::new(RefCell::new(DaemonState {
@@ -581,11 +581,11 @@ fn parse_spawn_spec(
     options.insert("loop_until_done".to_string(), VmValue::Bool(false));
     options.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.clone())),
+        VmValue::String(std::sync::Arc::from(session_id.clone())),
     );
     options.insert(
         "persist_path".to_string(),
-        VmValue::String(Rc::from(paths.snapshot_path.clone())),
+        VmValue::String(std::sync::Arc::from(paths.snapshot_path.clone())),
     );
     options.remove("resume_path");
 
@@ -799,7 +799,9 @@ fn persist_daemon_meta(daemon: &DaemonState) -> Result<(), VmError> {
         prompt: daemon.prompt.clone(),
         system: daemon.system.clone(),
         session_id: daemon.session_id.clone(),
-        options: crate::llm::vm_value_to_json(&VmValue::Dict(Rc::new(daemon.options.clone()))),
+        options: crate::llm::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(
+            daemon.options.clone(),
+        ))),
         event_queue_capacity: daemon.event_queue_capacity.max(1),
         next_event_seq: daemon.next_event_seq,
         pending_events: daemon.pending_events.iter().cloned().collect(),
@@ -829,12 +831,12 @@ fn spawn_daemon_task(state: Rc<RefCell<DaemonState>>, mut vm: crate::vm::Vm) {
     let task_state = state.clone();
     let handle = tokio::task::spawn_local(async move {
         let args = vec![
-            VmValue::String(Rc::from(prompt)),
+            VmValue::String(std::sync::Arc::from(prompt)),
             match system {
-                Some(text) => VmValue::String(Rc::from(text)),
+                Some(text) => VmValue::String(std::sync::Arc::from(text)),
                 None => VmValue::Nil,
             },
-            VmValue::Dict(Rc::new(options)),
+            VmValue::Dict(std::sync::Arc::new(options)),
         ];
 
         crate::llm::install_current_host_bridge(bridge);

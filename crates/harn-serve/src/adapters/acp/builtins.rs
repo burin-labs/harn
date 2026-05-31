@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use super::AcpBridge;
 
@@ -22,7 +23,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
         .map(|result| {
             normalize_host_capability_manifest(harn_vm::bridge::json_result_to_vm_value(&result))
         })
-        .unwrap_or_else(|_| harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::new())));
+        .unwrap_or_else(|_| harn_vm::VmValue::Dict(Arc::new(std::collections::BTreeMap::new())));
     let selected_shell =
         if manifest_has_operation(&host_capability_manifest, "process", "get_default_shell") {
             bridge
@@ -220,7 +221,7 @@ pub(super) async fn acp_terminal_exec(
     let cmd = args.first().map(|a| a.display()).unwrap_or_default();
     if cmd.is_empty() {
         return Err(harn_vm::VmError::Thrown(harn_vm::VmValue::String(
-            Rc::from("exec: command is required"),
+            Arc::from("exec: command is required"),
         )));
     }
 
@@ -251,7 +252,7 @@ pub(super) async fn acp_terminal_exec(
     if terminal_id.is_empty() {
         // Client doesn't support terminal — fall back to local exec.
         let output = local_shell_exec(&cmd, shell).map_err(|e| {
-            harn_vm::VmError::Thrown(harn_vm::VmValue::String(Rc::from(format!(
+            harn_vm::VmError::Thrown(harn_vm::VmValue::String(Arc::from(format!(
                 "exec failed: {e}"
             ))))
         })?;
@@ -261,15 +262,15 @@ pub(super) async fn acp_terminal_exec(
         let mut map = std::collections::BTreeMap::new();
         map.insert(
             "stdout".to_string(),
-            harn_vm::VmValue::String(Rc::from(stdout)),
+            harn_vm::VmValue::String(Arc::from(stdout)),
         );
         map.insert(
             "stderr".to_string(),
-            harn_vm::VmValue::String(Rc::from(stderr)),
+            harn_vm::VmValue::String(Arc::from(stderr)),
         );
         map.insert(
             "combined".to_string(),
-            harn_vm::VmValue::String(Rc::from(format!(
+            harn_vm::VmValue::String(Arc::from(format!(
                 "{}{}",
                 map.get("stdout").map(|v| v.display()).unwrap_or_default(),
                 map.get("stderr").map(|v| v.display()).unwrap_or_default()
@@ -283,7 +284,7 @@ pub(super) async fn acp_terminal_exec(
             "success".to_string(),
             harn_vm::VmValue::Bool(output.status.success()),
         );
-        return Ok(harn_vm::VmValue::Dict(Rc::new(map)));
+        return Ok(harn_vm::VmValue::Dict(Arc::new(map)));
     }
 
     // wait_for_exit returns the stdout/stderr/combined/exitCode payload.
@@ -334,7 +335,7 @@ pub(super) async fn acp_terminal_exec(
         if !normalized.contains_key("combined") {
             normalized.insert(
                 "combined".to_string(),
-                harn_vm::VmValue::String(Rc::from(format!("{stdout}{stderr}"))),
+                harn_vm::VmValue::String(Arc::from(format!("{stdout}{stderr}"))),
             );
         }
         if !normalized.contains_key("status") {
@@ -352,7 +353,7 @@ pub(super) async fn acp_terminal_exec(
                 .is_some_and(|code| code == 0);
             normalized.insert("success".to_string(), harn_vm::VmValue::Bool(success));
         }
-        return Ok(harn_vm::VmValue::Dict(Rc::new(normalized)));
+        return Ok(harn_vm::VmValue::Dict(Arc::new(normalized)));
     }
     Ok(output)
 }
@@ -379,7 +380,7 @@ async fn kill_and_release_terminal(bridge: &AcpBridge, terminal_id: &str) {
 
 pub(super) fn normalize_host_capability_manifest(value: harn_vm::VmValue) -> harn_vm::VmValue {
     let Some(root) = value.as_dict() else {
-        return harn_vm::VmValue::Dict(Rc::new(BTreeMap::new()));
+        return harn_vm::VmValue::Dict(Arc::new(BTreeMap::new()));
     };
 
     let mut normalized = BTreeMap::new();
@@ -396,30 +397,30 @@ pub(super) fn normalize_host_capability_manifest(value: harn_vm::VmValue) -> har
                 }
                 normalized.insert(
                     capability.clone(),
-                    harn_vm::VmValue::Dict(Rc::new(normalized_entry)),
+                    harn_vm::VmValue::Dict(Arc::new(normalized_entry)),
                 );
             }
             harn_vm::VmValue::List(list) => {
                 let mut dict = BTreeMap::new();
                 dict.insert("ops".to_string(), harn_vm::VmValue::List(list.clone()));
-                normalized.insert(capability.clone(), harn_vm::VmValue::Dict(Rc::new(dict)));
+                normalized.insert(capability.clone(), harn_vm::VmValue::Dict(Arc::new(dict)));
             }
             _ => {}
         }
     }
 
-    harn_vm::VmValue::Dict(Rc::new(normalized))
+    harn_vm::VmValue::Dict(Arc::new(normalized))
 }
 
 fn operation_names_from_value(
     value: Option<&harn_vm::VmValue>,
-) -> Option<Rc<Vec<harn_vm::VmValue>>> {
+) -> Option<Arc<Vec<harn_vm::VmValue>>> {
     let value = value?;
     match value {
         harn_vm::VmValue::List(list) => Some(list.clone()),
-        harn_vm::VmValue::Dict(dict) => Some(Rc::new(
+        harn_vm::VmValue::Dict(dict) => Some(Arc::new(
             dict.keys()
-                .map(|name| harn_vm::VmValue::String(Rc::from(name.clone())))
+                .map(|name| harn_vm::VmValue::String(Arc::from(name.clone())))
                 .collect(),
         )),
         _ => None,
@@ -446,7 +447,7 @@ fn local_shell_exec(cmd: &str, shell: &harn_vm::VmValue) -> std::io::Result<std:
     let mut params = BTreeMap::new();
     params.insert(
         "command".to_string(),
-        harn_vm::VmValue::String(Rc::from(cmd.to_string())),
+        harn_vm::VmValue::String(Arc::from(cmd.to_string())),
     );
     params.insert("shell".to_string(), shell.clone());
     let invocation =

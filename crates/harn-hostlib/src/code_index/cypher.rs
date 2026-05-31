@@ -41,7 +41,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -113,7 +113,7 @@ impl CypherValue {
     pub fn to_vm(&self) -> VmValue {
         match self {
             CypherValue::Null => VmValue::Nil,
-            CypherValue::String(s) => VmValue::String(Rc::from(s.as_str())),
+            CypherValue::String(s) => VmValue::String(Arc::from(s.as_str())),
             CypherValue::Int(n) => VmValue::Int(*n),
             CypherValue::Bool(b) => VmValue::Bool(*b),
         }

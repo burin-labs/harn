@@ -2,7 +2,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::orchestration::{
     compute_handoff_effects, diff_run_records, evaluate_context_pack_suggestion_expectations,
@@ -320,7 +319,9 @@ fn handoff_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let handoff = handoff_from_json_value(&json)
         .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
         .ok_or_else(|| VmError::Runtime("handoff_context: invalid handoff payload".to_string()))?;
-    Ok(VmValue::String(Rc::from(handoff_context_text(&handoff))))
+    Ok(VmValue::String(std::sync::Arc::from(handoff_context_text(
+        &handoff,
+    ))))
 }
 
 #[harn_builtin(sig = "handoff_routes() -> list", category = "records")]
@@ -406,10 +407,9 @@ fn artifact_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 fn artifact_context_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let artifacts = parse_artifact_list(args.first())?;
     let policy = parse_context_policy(args.get(1))?;
-    Ok(VmValue::String(Rc::from(render_artifacts_context(
-        &select_artifacts(artifacts, &policy),
-        &policy,
-    ))))
+    Ok(VmValue::String(std::sync::Arc::from(
+        render_artifacts_context(&select_artifacts(artifacts, &policy), &policy),
+    )))
 }
 
 #[harn_builtin(
@@ -1150,7 +1150,7 @@ fn eval_metrics_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             let mut dict = BTreeMap::new();
             dict.insert(
                 "name".to_string(),
-                VmValue::String(Rc::from(metric.name.as_str())),
+                VmValue::String(std::sync::Arc::from(metric.name.as_str())),
             );
             dict.insert(
                 "value".to_string(),
@@ -1162,10 +1162,10 @@ fn eval_metrics_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
                     crate::stdlib::json_to_vm_value(meta),
                 );
             }
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         })
         .collect();
-    Ok(VmValue::List(Rc::from(list)))
+    Ok(VmValue::List(std::sync::Arc::from(list)))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[

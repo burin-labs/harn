@@ -3,7 +3,6 @@
 //! across stage transitions.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::VmValue;
 use crate::vm::Vm;
@@ -33,7 +32,7 @@ pub(crate) fn register_transcript_builtins(vm: &mut Vm) {
                 _ => false,
             })
             .collect();
-        Ok(VmValue::List(Rc::new(filtered)))
+        Ok(VmValue::List(std::sync::Arc::new(filtered)))
     });
 }
 
@@ -147,7 +146,7 @@ fn stats_to_vm(stats: &TranscriptStats) -> VmValue {
         "visible_event_count".to_string(),
         VmValue::Int(stats.visible_event_count),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 #[cfg(test)]

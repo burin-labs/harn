@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 use std::thread_local;
 
 use serde::{Deserialize, Serialize};
@@ -1099,37 +1098,37 @@ fn permission_request_value(
     let mut request = BTreeMap::new();
     request.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from("PermissionRequest")),
+        VmValue::String(std::sync::Arc::from("PermissionRequest")),
     );
     request.insert(
         "tool".to_string(),
-        VmValue::String(Rc::from(tool_name.to_string())),
+        VmValue::String(std::sync::Arc::from(tool_name.to_string())),
     );
     request.insert("args".to_string(), crate::stdlib::json_to_vm_value(args));
     request.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.to_string())),
+        VmValue::String(std::sync::Arc::from(session_id.to_string())),
     );
     request.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from(reason.to_string())),
+        VmValue::String(std::sync::Arc::from(reason.to_string())),
     );
     if let Some(context) = crate::triggers::dispatcher::current_dispatch_context() {
         request.insert(
             "agent".to_string(),
-            VmValue::String(Rc::from(context.agent_id)),
+            VmValue::String(std::sync::Arc::from(context.agent_id)),
         );
         request.insert(
             "action".to_string(),
-            VmValue::String(Rc::from(context.action)),
+            VmValue::String(std::sync::Arc::from(context.action)),
         );
         request.insert(
             "trace_id".to_string(),
-            VmValue::String(Rc::from(context.trigger_event.trace_id.0)),
+            VmValue::String(std::sync::Arc::from(context.trigger_event.trace_id.0)),
         );
         request.insert(
             "autonomy_tier".to_string(),
-            VmValue::String(Rc::from(context.autonomy_tier.as_str())),
+            VmValue::String(std::sync::Arc::from(context.autonomy_tier.as_str())),
         );
         if matches!(
             context.autonomy_tier,
@@ -1137,19 +1136,19 @@ fn permission_request_value(
         ) {
             request.insert(
                 "requested_tier".to_string(),
-                VmValue::String(Rc::from(AutonomyTier::ActWithApproval.as_str())),
+                VmValue::String(std::sync::Arc::from(AutonomyTier::ActWithApproval.as_str())),
             );
         }
     }
     request.insert(
         "grant_options".to_string(),
-        VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("once")),
-            VmValue::String(Rc::from("session")),
+        VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("once")),
+            VmValue::String(std::sync::Arc::from("session")),
             VmValue::Bool(false),
         ])),
     );
-    VmValue::Dict(Rc::new(request))
+    VmValue::Dict(std::sync::Arc::new(request))
 }
 
 async fn emit_tier_promotion_if_needed(

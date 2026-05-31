@@ -1,8 +1,9 @@
 //! Iterator and stream builtins.
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
-use std::rc::Rc;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_LIST};
 use crate::value::{VmError, VmValue};
@@ -135,15 +136,15 @@ fn register_stream_namespace(vm: &mut Vm) {
     ];
     vm.set_global(
         "stream",
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(Rc::from("stream")),
+                VmValue::String(std::sync::Arc::from("stream")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(Rc::from(format!("stream.{name}"))),
+                    VmValue::BuiltinRef(std::sync::Arc::from(format!("stream.{name}"))),
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
@@ -181,7 +182,10 @@ fn pair_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             args.len()
         )));
     }
-    Ok(VmValue::Pair(Rc::new((args[0].clone(), args[1].clone()))))
+    Ok(VmValue::Pair(std::sync::Arc::new((
+        args[0].clone(),
+        args[1].clone(),
+    ))))
 }
 
 // stream.* builtins use dotted names that the sig-string grammar can't tokenize,
@@ -194,7 +198,7 @@ fn pair_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 fn stream_map_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.map")?)?;
     let f = require_callable(args, 1, "stream.map")?;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Map {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Map {
         inner,
         f,
     }))))
@@ -207,7 +211,7 @@ fn stream_map_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 fn stream_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.filter")?)?;
     let p = require_callable(args, 1, "stream.filter")?;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Filter {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Filter {
         inner,
         p,
     }))))
@@ -220,7 +224,7 @@ fn stream_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 fn stream_tap_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.tap")?)?;
     let f = require_callable(args, 1, "stream.tap")?;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Tap {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Tap {
         inner,
         f,
     }))))
@@ -234,7 +238,7 @@ fn stream_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.scan")?)?;
     let acc = require_arg(args, 1, "stream.scan")?;
     let f = require_callable(args, 2, "stream.scan")?;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Scan {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Scan {
         inner,
         acc,
         f,
@@ -248,7 +252,7 @@ fn stream_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 fn stream_take_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.take")?)?;
     let remaining = require_non_negative_usize(args, 1, "stream.take")?;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Take {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Take {
         inner,
         remaining,
     }))))
@@ -261,7 +265,7 @@ fn stream_take_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 fn stream_take_until_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.take_until")?)?;
     let p = require_callable(args, 1, "stream.take_until")?;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::TakeUntil {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::TakeUntil {
         inner,
         p,
     }))))
@@ -283,7 +287,7 @@ fn stream_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         .into_iter()
         .map(Some)
         .collect();
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Merge {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Merge {
         sources,
         cursor: 0,
     }))))
@@ -307,7 +311,7 @@ fn stream_interleave_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
         .into_iter()
         .map(Some)
         .collect();
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Interleave {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Interleave {
         sources,
         cursor: 0,
     }))))
@@ -326,7 +330,7 @@ fn stream_zip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     }
     let a = iter_handle_from_value(args[0].clone())?;
     let b = iter_handle_from_value(args[1].clone())?;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Zip { a, b }))))
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Zip { a, b }))))
 }
 
 #[harn_builtin(
@@ -336,7 +340,9 @@ fn stream_zip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 fn stream_broadcast_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let source = iter_handle_from_value(require_arg(args, 0, "stream.broadcast")?)?;
     let n = require_positive_usize(args, 1, "stream.broadcast")?;
-    Ok(VmValue::List(Rc::new(broadcast_branches(source, n))))
+    Ok(VmValue::List(std::sync::Arc::new(broadcast_branches(
+        source, n,
+    ))))
 }
 
 #[harn_builtin(
@@ -355,7 +361,7 @@ fn stream_race_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .into_iter()
         .map(Some)
         .collect();
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Race {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Race {
         sources,
         winner: None,
     }))))
@@ -369,7 +375,7 @@ fn stream_throttle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.throttle")?)?;
     let per_sec = require_positive_f64(args, 1, "stream.throttle")?;
     let interval_ms = (1000.0 / per_sec).ceil().max(1.0) as u64;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Throttle {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Throttle {
         inner,
         interval_ms,
         next_ready: None,
@@ -383,7 +389,7 @@ fn stream_throttle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 fn stream_debounce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.debounce")?)?;
     let window_ms = require_non_negative_usize(args, 1, "stream.debounce")? as u64;
-    Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Debounce {
+    Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Debounce {
         inner,
         window_ms,
     }))))
@@ -401,7 +407,7 @@ async fn stream_collect_impl(
     let inner = iter_handle_from_value(require_arg(&args, 0, "stream.collect")?)?;
     let max = collect_max_arg(&args)?;
     let mut vm = ctx.child_vm();
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         drain_capped(&inner, &mut vm, max).await?,
     )))
 }

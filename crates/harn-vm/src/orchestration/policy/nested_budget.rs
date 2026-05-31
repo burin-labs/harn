@@ -16,7 +16,6 @@
 //! uniform.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use super::CapabilityPolicy;
 use crate::events::log_info_meta;
@@ -180,11 +179,11 @@ pub fn annotate_nested_execution_options(
 ) {
     options.insert(
         NESTED_KIND_OPTION_KEY.to_string(),
-        VmValue::String(Rc::from(kind.as_str().to_string())),
+        VmValue::String(std::sync::Arc::from(kind.as_str().to_string())),
     );
     options.insert(
         NESTED_LABEL_OPTION_KEY.to_string(),
-        VmValue::String(Rc::from(label.to_string())),
+        VmValue::String(std::sync::Arc::from(label.to_string())),
     );
 }
 

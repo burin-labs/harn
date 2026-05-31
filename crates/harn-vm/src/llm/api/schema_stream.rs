@@ -14,8 +14,6 @@
 //! (`consume_ollama_ndjson_lines`), and the in-process `FakeLlmProvider`
 //! all route through the same helper so behavior — and tests — line up.
 
-use std::rc::Rc;
-
 use crate::llm::trace::{emit_agent_event, AgentTraceEvent};
 use crate::stdlib::json_stream::{JsonStreamStatus, StreamSchemaValidator};
 use crate::value::{ErrorCategory, VmError, VmValue};
@@ -188,11 +186,11 @@ pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
     let mut meta = std::collections::BTreeMap::new();
     meta.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from(abort.reason.as_str())),
+        VmValue::String(std::sync::Arc::from(abort.reason.as_str())),
     );
     meta.insert(
         "path".to_string(),
-        VmValue::String(Rc::from(abort.path.as_str())),
+        VmValue::String(std::sync::Arc::from(abort.path.as_str())),
     );
     meta.insert(
         "chunks_consumed".to_string(),
@@ -200,30 +198,33 @@ pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
     );
     meta.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(abort.provider.as_str())),
+        VmValue::String(std::sync::Arc::from(abort.provider.as_str())),
     );
     meta.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(abort.model.as_str())),
+        VmValue::String(std::sync::Arc::from(abort.model.as_str())),
     );
     let mut dict = std::collections::BTreeMap::new();
-    dict.insert("text".to_string(), VmValue::String(Rc::from("")));
+    dict.insert(
+        "text".to_string(),
+        VmValue::String(std::sync::Arc::from("")),
+    );
     dict.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(abort.model.as_str())),
+        VmValue::String(std::sync::Arc::from(abort.model.as_str())),
     );
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(abort.provider.as_str())),
+        VmValue::String(std::sync::Arc::from(abort.provider.as_str())),
     );
     dict.insert("input_tokens".to_string(), VmValue::Int(0));
     dict.insert("output_tokens".to_string(), VmValue::Int(0));
     dict.insert("data".to_string(), VmValue::Nil);
     dict.insert(
         "schema_stream_aborted".to_string(),
-        VmValue::Dict(Rc::new(meta)),
+        VmValue::Dict(std::sync::Arc::new(meta)),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 #[cfg(test)]

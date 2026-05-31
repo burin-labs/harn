@@ -1294,26 +1294,26 @@ mod tests {
         policy
             .tool_annotations
             .insert("run".into(), execute_annotations());
-        let tools = VmValue::Dict(std::rc::Rc::new(BTreeMap::from([
+        let tools = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             (
                 "_type".into(),
-                VmValue::String(std::rc::Rc::from("tool_registry")),
+                VmValue::String(std::sync::Arc::from("tool_registry")),
             ),
             (
                 "tools".into(),
-                VmValue::List(std::rc::Rc::new(vec![VmValue::Dict(std::rc::Rc::new(
-                    BTreeMap::from([
-                        ("name".into(), VmValue::String(std::rc::Rc::from("run"))),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+                    std::sync::Arc::new(BTreeMap::from([
+                        ("name".into(), VmValue::String(std::sync::Arc::from("run"))),
                         (
                             "parameters".into(),
-                            VmValue::Dict(std::rc::Rc::new(BTreeMap::new())),
+                            VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
                         ),
                         (
                             "executor".into(),
-                            VmValue::String(std::rc::Rc::from("host_bridge")),
+                            VmValue::String(std::sync::Arc::from("host_bridge")),
                         ),
-                    ]),
-                ))])),
+                    ])),
+                )])),
             ),
         ])));
         let report = validate_tool_surface(&ToolSurfaceInput {

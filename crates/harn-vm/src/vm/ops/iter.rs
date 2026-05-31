@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::value::{VmError, VmValue};
 
@@ -79,7 +79,7 @@ impl super::super::Vm {
             }
             _ => {
                 self.iterators.push(super::super::IterState::Vec {
-                    items: Rc::new(Vec::new()),
+                    items: Arc::new(Vec::new()),
                     idx: 0,
                 });
             }
@@ -131,12 +131,13 @@ impl super::super::Vm {
                 if *idx < keys.len() {
                     let key = &keys[*idx];
                     let value = entries.get(key).cloned().unwrap_or(VmValue::Nil);
-                    let entry_key = VmValue::String(Rc::from(key.as_str()));
+                    let entry_key = VmValue::String(std::sync::Arc::from(key.as_str()));
                     *idx += 1;
-                    self.stack.push(VmValue::Dict(Rc::new(BTreeMap::from([
-                        ("key".to_string(), entry_key),
-                        ("value".to_string(), value),
-                    ]))));
+                    self.stack
+                        .push(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                            ("key".to_string(), entry_key),
+                            ("value".to_string(), value),
+                        ]))));
                 } else {
                     self.iterators.pop();
                     let frame = self.frames.last_mut().unwrap();
@@ -222,7 +223,7 @@ impl super::super::Vm {
                 }
             }
             Some(super::super::IterState::Generator { gen }) => {
-                if gen.done.get() {
+                if gen.is_done() {
                     self.iterators.pop();
                     let frame = self.frames.last_mut().unwrap();
                     frame.ip = target;
@@ -234,13 +235,13 @@ impl super::super::Vm {
                             self.stack.push(val);
                         }
                         Some(Err(error)) => {
-                            gen.done.set(true);
+                            gen.mark_done();
                             drop(guard);
                             self.iterators.pop();
                             return Err(error);
                         }
                         None => {
-                            gen.done.set(true);
+                            gen.mark_done();
                             drop(guard);
                             self.iterators.pop();
                             let frame = self.frames.last_mut().unwrap();
@@ -250,7 +251,7 @@ impl super::super::Vm {
                 }
             }
             Some(super::super::IterState::Stream { stream }) => {
-                if stream.done.get() {
+                if stream.is_done() {
                     self.iterators.pop();
                     let frame = self.frames.last_mut().unwrap();
                     frame.ip = target;
@@ -262,13 +263,13 @@ impl super::super::Vm {
                             self.stack.push(val);
                         }
                         Some(Err(error)) => {
-                            stream.done.set(true);
+                            stream.mark_done();
                             drop(guard);
                             self.iterators.pop();
                             return Err(error);
                         }
                         None => {
-                            stream.done.set(true);
+                            stream.mark_done();
                             drop(guard);
                             self.iterators.pop();
                             let frame = self.frames.last_mut().unwrap();
@@ -322,7 +323,7 @@ mod tests {
     #[test]
     fn iter_init_list_keeps_shared_backing_store() {
         run_iter_init_test(async {
-            let items = Rc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
+            let items = Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
             let mut vm = Vm::new();
             vm.stack.push(VmValue::List(items.clone()));
 
@@ -333,7 +334,7 @@ mod tests {
                     items: iter_items,
                     idx,
                 } => {
-                    assert!(Rc::ptr_eq(&items, iter_items));
+                    assert!(Arc::ptr_eq(&items, iter_items));
                     assert_eq!(*idx, 0);
                 }
                 _ => panic!("expected vec iterator state"),
@@ -344,7 +345,7 @@ mod tests {
     #[test]
     fn iter_init_set_keeps_shared_backing_store() {
         run_iter_init_test(async {
-            let items = Rc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
+            let items = Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
             let mut vm = Vm::new();
             vm.stack.push(VmValue::Set(items.clone()));
 
@@ -355,7 +356,7 @@ mod tests {
                     items: iter_items,
                     idx,
                 } => {
-                    assert!(Rc::ptr_eq(&items, iter_items));
+                    assert!(Arc::ptr_eq(&items, iter_items));
                     assert_eq!(*idx, 0);
                 }
                 _ => panic!("expected vec iterator state"),
@@ -366,7 +367,7 @@ mod tests {
     #[test]
     fn iter_init_dict_keeps_shared_entries_and_snapshots_keys() {
         run_iter_init_test(async {
-            let entries = Rc::new(BTreeMap::from([
+            let entries = Arc::new(BTreeMap::from([
                 ("a".to_string(), VmValue::Int(1)),
                 ("b".to_string(), VmValue::Int(2)),
             ]));
@@ -381,7 +382,7 @@ mod tests {
                     keys,
                     idx,
                 } => {
-                    assert!(Rc::ptr_eq(&entries, iter_entries));
+                    assert!(Arc::ptr_eq(&entries, iter_entries));
                     assert_eq!(keys.as_slice(), ["a".to_string(), "b".to_string()]);
                     assert_eq!(*idx, 0);
                 }

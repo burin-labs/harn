@@ -1352,7 +1352,7 @@ async fn lifecycle_hook_patterns_match_payload_shapes() {
             HookEvent::PreAgentTurn,
             pattern,
             format!("test::{pattern}"),
-            Rc::clone(&closure),
+            std::sync::Arc::clone(&closure),
         );
     }
 

@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -76,9 +74,9 @@ async fn self_certainty_builtin(
 
     let prompt = format!("{SELF_CERTAINTY_PROMPT_PREFIX}{text}{SELF_CERTAINTY_PROMPT_SUFFIX}");
     let opts = super::helpers::extract_llm_options(&[
-        VmValue::String(Rc::from(prompt)),
+        VmValue::String(std::sync::Arc::from(prompt)),
         VmValue::Nil,
-        VmValue::Dict(Rc::new(call_options)),
+        VmValue::Dict(std::sync::Arc::new(call_options)),
     ])?;
     let result = super::api::vm_call_llm_full(&opts).await?;
     if result.logprobs.is_empty() {

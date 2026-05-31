@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
@@ -23,7 +23,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
     for (k, v) in pairs {
         map.insert((*k).into(), v.clone());
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 fn invoke(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
@@ -54,7 +54,7 @@ fn dict_string(value: &VmValue, key: &str) -> String {
     string_value(&dict_field(value, key))
 }
 
-fn list_value(value: &VmValue) -> Rc<Vec<VmValue>> {
+fn list_value(value: &VmValue) -> Arc<Vec<VmValue>> {
     match value {
         VmValue::List(l) => l.clone(),
         other => panic!("expected list, got {other:?}"),
@@ -82,7 +82,7 @@ fn fixture_path(rel: &str) -> PathBuf {
 }
 
 fn vstring(s: &str) -> VmValue {
-    VmValue::String(Rc::from(s))
+    VmValue::String(Arc::from(s))
 }
 
 // -----------------------------------------------------------------------------
@@ -264,7 +264,7 @@ fn function_body_requires_input_source_or_path() {
 
 fn name_list(names: &[&str]) -> VmValue {
     let entries: Vec<VmValue> = names.iter().map(|s| vstring(s)).collect();
-    VmValue::List(Rc::new(entries))
+    VmValue::List(Arc::new(entries))
 }
 
 #[test]
@@ -343,7 +343,7 @@ fn function_bodies_rejects_empty_names() {
     let payload = dict(&[
         ("source", vstring("function a() {}")),
         ("language", vstring("typescript")),
-        ("names", VmValue::List(Rc::new(vec![]))),
+        ("names", VmValue::List(Arc::new(vec![]))),
     ]);
     let err = (entry.handler)(&[payload]).expect_err("must reject empty names");
     assert!(

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -10,11 +9,11 @@ use crate::orchestration::{
 use super::*;
 
 fn vm_string(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value))
+    VmValue::String(std::sync::Arc::from(value))
 }
 
 fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
-    VmValue::Dict(Rc::new(
+    VmValue::Dict(std::sync::Arc::new(
         pairs
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
@@ -47,9 +46,9 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
                 ..Default::default()
             }),
             artifacts: Vec::new(),
-            transcript: Some(VmValue::Dict(Rc::new(BTreeMap::from([(
+            transcript: Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "_type".to_string(),
-                VmValue::String(Rc::from("transcript")),
+                VmValue::String(std::sync::Arc::from("transcript")),
             )])))),
         },
         handle: None,
@@ -75,9 +74,9 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         },
         latest_payload: Some(serde_json::json!({"status": "completed"})),
         latest_error: None,
-        transcript: Some(VmValue::Dict(Rc::new(BTreeMap::from([(
+        transcript: Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "_type".to_string(),
-            VmValue::String(Rc::from("transcript")),
+            VmValue::String(std::sync::Arc::from("transcript")),
         )])))),
         artifacts: vec![ArtifactRecord {
             type_name: "artifact".to_string(),
@@ -366,21 +365,45 @@ fn transcript_carry_policy_can_reset_or_fork_transcripts() {
 #[tokio::test(flavor = "current_thread")]
 async fn compact_transcript_mode_reduces_carried_messages() {
     let messages = vec![
-        VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("user"))),
-            ("content".to_string(), VmValue::String(Rc::from("one"))),
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("user")),
+            ),
+            (
+                "content".to_string(),
+                VmValue::String(std::sync::Arc::from("one")),
+            ),
         ]))),
-        VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("assistant"))),
-            ("content".to_string(), VmValue::String(Rc::from("two"))),
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("assistant")),
+            ),
+            (
+                "content".to_string(),
+                VmValue::String(std::sync::Arc::from("two")),
+            ),
         ]))),
-        VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("user"))),
-            ("content".to_string(), VmValue::String(Rc::from("three"))),
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("user")),
+            ),
+            (
+                "content".to_string(),
+                VmValue::String(std::sync::Arc::from("three")),
+            ),
         ]))),
-        VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("assistant"))),
-            ("content".to_string(), VmValue::String(Rc::from("four"))),
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("assistant")),
+            ),
+            (
+                "content".to_string(),
+                VmValue::String(std::sync::Arc::from("four")),
+            ),
         ]))),
     ];
     let transcript = crate::llm::helpers::new_transcript_with_events(
@@ -426,7 +449,10 @@ fn worker_policy_inherits_parent_ceiling_when_unspecified() {
         ..Default::default()
     });
 
-    let dict = BTreeMap::from([("task".to_string(), VmValue::String(Rc::from("draft note")))]);
+    let dict = BTreeMap::from([(
+        "task".to_string(),
+        VmValue::String(std::sync::Arc::from("draft note")),
+    )]);
     let resolved = super::policy::resolve_worker_policy(&dict).unwrap();
 
     crate::orchestration::pop_execution_policy();
@@ -450,20 +476,25 @@ fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
     });
 
     let dict = BTreeMap::from([
-        ("task".to_string(), VmValue::String(Rc::from("draft note"))),
+        (
+            "task".to_string(),
+            VmValue::String(std::sync::Arc::from("draft note")),
+        ),
         (
             "policy".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "tools".to_string(),
-                VmValue::List(Rc::new(vec![
-                    VmValue::String(Rc::from("read")),
-                    VmValue::String(Rc::from("write")),
+                VmValue::List(std::sync::Arc::new(vec![
+                    VmValue::String(std::sync::Arc::from("read")),
+                    VmValue::String(std::sync::Arc::from("write")),
                 ])),
             )]))),
         ),
         (
             "tools".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("read"))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("read"),
+            )])),
         ),
     ]);
     let resolved = super::policy::resolve_worker_policy(&dict).unwrap();

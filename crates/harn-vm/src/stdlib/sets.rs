@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::rc::Rc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{value_structural_hash_key, VmError, VmValue};
@@ -45,7 +44,7 @@ fn set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             }
         }
     }
-    Ok(VmValue::Set(Rc::new(items)))
+    Ok(VmValue::Set(std::sync::Arc::new(items)))
 }
 
 #[harn_builtin(sig = "set_add(s: any, value: any) -> any", category = "sets")]
@@ -53,7 +52,7 @@ fn set_add_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let s = match args.first() {
         Some(VmValue::Set(s)) => s.clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_add: first argument must be a set",
             ))));
         }
@@ -65,7 +64,7 @@ fn set_add_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     if seen.insert(val_key) {
         items.push(val);
     }
-    Ok(VmValue::Set(Rc::new(items)))
+    Ok(VmValue::Set(std::sync::Arc::new(items)))
 }
 
 #[harn_builtin(sig = "set_remove(s: any, value: any) -> any", category = "sets")]
@@ -73,7 +72,7 @@ fn set_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let s = match args.first() {
         Some(VmValue::Set(s)) => s.clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_remove: first argument must be a set",
             ))));
         }
@@ -85,7 +84,7 @@ fn set_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         .filter(|x| value_structural_hash_key(x) != val_key)
         .cloned()
         .collect();
-    Ok(VmValue::Set(Rc::new(items)))
+    Ok(VmValue::Set(std::sync::Arc::new(items)))
 }
 
 #[harn_builtin(sig = "set_contains(s: any, value: any) -> bool", category = "sets")]
@@ -105,7 +104,7 @@ fn set_union_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let a = match args.first() {
         Some(VmValue::Set(s)) => s,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_union: arguments must be sets",
             ))));
         }
@@ -113,7 +112,7 @@ fn set_union_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let b = match args.get(1) {
         Some(VmValue::Set(s)) => s,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_union: arguments must be sets",
             ))));
         }
@@ -123,7 +122,7 @@ fn set_union_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     for v in b.iter() {
         dedup_insert(&mut items, &mut seen, v);
     }
-    Ok(VmValue::Set(Rc::new(items)))
+    Ok(VmValue::Set(std::sync::Arc::new(items)))
 }
 
 #[harn_builtin(sig = "set_intersect(a: any, b: any) -> any", category = "sets")]
@@ -131,7 +130,7 @@ fn set_intersect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let a = match args.first() {
         Some(VmValue::Set(s)) => s,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_intersect: arguments must be sets",
             ))));
         }
@@ -139,7 +138,7 @@ fn set_intersect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let b = match args.get(1) {
         Some(VmValue::Set(s)) => s,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_intersect: arguments must be sets",
             ))));
         }
@@ -150,7 +149,7 @@ fn set_intersect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         .filter(|x| b_keys.contains(&value_structural_hash_key(x)))
         .cloned()
         .collect();
-    Ok(VmValue::Set(Rc::new(items)))
+    Ok(VmValue::Set(std::sync::Arc::new(items)))
 }
 
 #[harn_builtin(sig = "set_difference(a: any, b: any) -> any", category = "sets")]
@@ -158,7 +157,7 @@ fn set_difference_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let a = match args.first() {
         Some(VmValue::Set(s)) => s,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_difference: arguments must be sets",
             ))));
         }
@@ -166,7 +165,7 @@ fn set_difference_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let b = match args.get(1) {
         Some(VmValue::Set(s)) => s,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_difference: arguments must be sets",
             ))));
         }
@@ -177,7 +176,7 @@ fn set_difference_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         .filter(|x| !b_keys.contains(&value_structural_hash_key(x)))
         .cloned()
         .collect();
-    Ok(VmValue::Set(Rc::new(items)))
+    Ok(VmValue::Set(std::sync::Arc::new(items)))
 }
 
 #[harn_builtin(
@@ -188,7 +187,7 @@ fn set_symmetric_difference_impl(args: &[VmValue], _out: &mut String) -> Result<
     let a = match args.first() {
         Some(VmValue::Set(s)) => s,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_symmetric_difference: arguments must be sets",
             ))));
         }
@@ -196,7 +195,7 @@ fn set_symmetric_difference_impl(args: &[VmValue], _out: &mut String) -> Result<
     let b = match args.get(1) {
         Some(VmValue::Set(s)) => s,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "set_symmetric_difference: arguments must be sets",
             ))));
         }
@@ -213,7 +212,7 @@ fn set_symmetric_difference_impl(args: &[VmValue], _out: &mut String) -> Result<
             items.push(v.clone());
         }
     }
-    Ok(VmValue::Set(Rc::new(items)))
+    Ok(VmValue::Set(std::sync::Arc::new(items)))
 }
 
 #[harn_builtin(sig = "set_is_subset(a: any, b: any) -> bool", category = "sets")]

@@ -61,7 +61,7 @@ const DEFAULT_STALE_AFTER_MS: i64 = 30_000;
 #[derive(Clone)]
 struct PendingTask {
     task_id: String,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
     state: Rc<RefCell<TaskState>>,
     priority: i64,
     key: Option<String>,
@@ -832,14 +832,17 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
         }
     }
     let mut snapshot = BTreeMap::new();
-    snapshot.insert("_type".to_string(), VmValue::String(Rc::from(POOL_TYPE)));
+    snapshot.insert(
+        "_type".to_string(),
+        VmValue::String(std::sync::Arc::from(POOL_TYPE)),
+    );
     snapshot.insert(
         "id".to_string(),
-        VmValue::String(Rc::from(pool.id.as_str())),
+        VmValue::String(std::sync::Arc::from(pool.id.as_str())),
     );
     snapshot.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(pool.name.as_str())),
+        VmValue::String(std::sync::Arc::from(pool.name.as_str())),
     );
     snapshot.insert(
         "max_concurrent".to_string(),
@@ -847,7 +850,7 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     );
     snapshot.insert(
         "created_at".to_string(),
-        VmValue::String(Rc::from(pool.created_at.as_str())),
+        VmValue::String(std::sync::Arc::from(pool.created_at.as_str())),
     );
     snapshot.insert("active".to_string(), VmValue::Int(active));
     snapshot.insert("queued".to_string(), VmValue::Int(queued));
@@ -857,7 +860,7 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     snapshot.insert("total".to_string(), VmValue::Int(pool.tasks.len() as i64));
     snapshot.insert(
         "queue_strategy".to_string(),
-        VmValue::String(Rc::from(pool.queue_strategy.name())),
+        VmValue::String(std::sync::Arc::from(pool.queue_strategy.name())),
     );
     snapshot.insert(
         "backpressure".to_string(),
@@ -867,15 +870,18 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
         "blocked_submitters".to_string(),
         VmValue::Int(pool.space_waiters.len() as i64),
     );
-    snapshot.insert("tasks".to_string(), VmValue::List(Rc::new(tasks)));
+    snapshot.insert(
+        "tasks".to_string(),
+        VmValue::List(std::sync::Arc::new(tasks)),
+    );
     snapshot.insert(
         "scope".to_string(),
-        VmValue::String(Rc::from(pool.scope.as_str())),
+        VmValue::String(std::sync::Arc::from(pool.scope.as_str())),
     );
     if !pool.scope_id.is_empty() {
         snapshot.insert(
             "scope_id".to_string(),
-            VmValue::String(Rc::from(pool.scope_id.as_str())),
+            VmValue::String(std::sync::Arc::from(pool.scope_id.as_str())),
         );
     }
     snapshot.insert("durable".to_string(), VmValue::Bool(pool.store.is_some()));
@@ -886,21 +892,21 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     if !pool.config.is_empty() {
         snapshot.insert(
             "config".to_string(),
-            VmValue::Dict(Rc::new(pool.config.clone())),
+            VmValue::Dict(std::sync::Arc::new(pool.config.clone())),
         );
     }
-    VmValue::Dict(Rc::new(snapshot))
+    VmValue::Dict(std::sync::Arc::new(snapshot))
 }
 
 fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
     let mut value = BTreeMap::new();
     value.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from("backpressure")),
+        VmValue::String(std::sync::Arc::from("backpressure")),
     );
     value.insert(
         "kind".to_string(),
-        VmValue::String(Rc::from(backpressure.name())),
+        VmValue::String(std::sync::Arc::from(backpressure.name())),
     );
     if let Some(max_depth) = backpressure.max_depth() {
         value.insert("max_depth".to_string(), VmValue::Int(max_depth as i64));
@@ -908,10 +914,10 @@ fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
     if let BackpressureStrategy::Queue { on_full, .. } = backpressure {
         value.insert(
             "on_full".to_string(),
-            VmValue::String(Rc::from(on_full.as_str())),
+            VmValue::String(std::sync::Arc::from(on_full.as_str())),
         );
     }
-    VmValue::Dict(Rc::new(value))
+    VmValue::Dict(std::sync::Arc::new(value))
 }
 
 fn task_sort_key(task: &VmValue) -> String {
@@ -928,42 +934,45 @@ fn task_snapshot_value(task: &TaskState) -> VmValue {
     let mut entry = BTreeMap::new();
     entry.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from(POOL_TASK_TYPE)),
+        VmValue::String(std::sync::Arc::from(POOL_TASK_TYPE)),
     );
     entry.insert(
         "id".to_string(),
-        VmValue::String(Rc::from(task.id.as_str())),
+        VmValue::String(std::sync::Arc::from(task.id.as_str())),
     );
     entry.insert(
         "pool_id".to_string(),
-        VmValue::String(Rc::from(task.pool_id.as_str())),
+        VmValue::String(std::sync::Arc::from(task.pool_id.as_str())),
     );
     entry.insert(
         "pool".to_string(),
-        VmValue::String(Rc::from(task.pool_name.as_str())),
+        VmValue::String(std::sync::Arc::from(task.pool_name.as_str())),
     );
     entry.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(task.status.as_str())),
+        VmValue::String(std::sync::Arc::from(task.status.as_str())),
     );
     entry.insert("priority".to_string(), VmValue::Int(task.priority));
     entry.insert(
         "submitted_at".to_string(),
-        VmValue::String(Rc::from(task.submitted_at.as_str())),
+        VmValue::String(std::sync::Arc::from(task.submitted_at.as_str())),
     );
     if let Some(key) = &task.key {
-        entry.insert("key".to_string(), VmValue::String(Rc::from(key.as_str())));
+        entry.insert(
+            "key".to_string(),
+            VmValue::String(std::sync::Arc::from(key.as_str())),
+        );
     }
     if let Some(started_at) = &task.started_at {
         entry.insert(
             "started_at".to_string(),
-            VmValue::String(Rc::from(started_at.as_str())),
+            VmValue::String(std::sync::Arc::from(started_at.as_str())),
         );
     }
     if let Some(finished_at) = &task.finished_at {
         entry.insert(
             "finished_at".to_string(),
-            VmValue::String(Rc::from(finished_at.as_str())),
+            VmValue::String(std::sync::Arc::from(finished_at.as_str())),
         );
     }
     if let Some(result) = &task.result {
@@ -972,72 +981,75 @@ fn task_snapshot_value(task: &TaskState) -> VmValue {
     if let Some(error) = &task.error {
         entry.insert(
             "error".to_string(),
-            VmValue::String(Rc::from(error.as_str())),
+            VmValue::String(std::sync::Arc::from(error.as_str())),
         );
     }
     if let Some(reason) = &task.rejection_reason {
         entry.insert(
             "rejection_reason".to_string(),
-            VmValue::String(Rc::from(reason.as_str())),
+            VmValue::String(std::sync::Arc::from(reason.as_str())),
         );
     }
     if let Some(policy) = &task.rejection_policy {
         entry.insert(
             "rejection_policy".to_string(),
-            VmValue::String(Rc::from(policy.as_str())),
+            VmValue::String(std::sync::Arc::from(policy.as_str())),
         );
     }
-    VmValue::Dict(Rc::new(entry))
+    VmValue::Dict(std::sync::Arc::new(entry))
 }
 
 fn task_handle_value(task: &TaskState) -> VmValue {
     let mut handle = BTreeMap::new();
     handle.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from(POOL_TASK_TYPE)),
+        VmValue::String(std::sync::Arc::from(POOL_TASK_TYPE)),
     );
     handle.insert(
         "id".to_string(),
-        VmValue::String(Rc::from(task.id.as_str())),
+        VmValue::String(std::sync::Arc::from(task.id.as_str())),
     );
     handle.insert(
         "pool_id".to_string(),
-        VmValue::String(Rc::from(task.pool_id.as_str())),
+        VmValue::String(std::sync::Arc::from(task.pool_id.as_str())),
     );
     handle.insert(
         "pool".to_string(),
-        VmValue::String(Rc::from(task.pool_name.as_str())),
+        VmValue::String(std::sync::Arc::from(task.pool_name.as_str())),
     );
     handle.insert(
         "submitted_at".to_string(),
-        VmValue::String(Rc::from(task.submitted_at.as_str())),
+        VmValue::String(std::sync::Arc::from(task.submitted_at.as_str())),
     );
     handle.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(task.status.as_str())),
+        VmValue::String(std::sync::Arc::from(task.status.as_str())),
     );
     if let Some(key) = &task.key {
-        handle.insert("key".to_string(), VmValue::String(Rc::from(key.as_str())));
+        handle.insert(
+            "key".to_string(),
+            VmValue::String(std::sync::Arc::from(key.as_str())),
+        );
     }
     if let Some(error) = &task.error {
         handle.insert(
             "error".to_string(),
-            VmValue::String(Rc::from(error.as_str())),
+            VmValue::String(std::sync::Arc::from(error.as_str())),
         );
     }
     if let Some(reason) = &task.rejection_reason {
         handle.insert(
             "rejection_reason".to_string(),
-            VmValue::String(Rc::from(reason.as_str())),
+            VmValue::String(std::sync::Arc::from(reason.as_str())),
         );
     }
     if let Some(policy) = &task.rejection_policy {
         handle.insert(
             "rejection_policy".to_string(),
-            VmValue::String(Rc::from(policy.as_str())),
+            VmValue::String(std::sync::Arc::from(policy.as_str())),
         );
     }
-    VmValue::Dict(Rc::new(handle))
+    VmValue::Dict(std::sync::Arc::new(handle))
 }
 
 fn ordered_pool_config(opts: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
@@ -1214,7 +1226,7 @@ fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let mut entries: Vec<Rc<RefCell<PoolEntry>>> =
         POOLS.with(|pools| pools.borrow().values().cloned().collect());
     entries.sort_by(|a, b| a.borrow().created_at.cmp(&b.borrow().created_at));
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         entries
             .iter()
             .map(|entry| pool_snapshot_value(&entry.borrow()))
@@ -1368,7 +1380,7 @@ pub struct PoolSubmitOutcome {
 pub async fn submit_closure_to_named_pool(
     ctx: Option<&AsyncBuiltinCtx>,
     pool_name: &str,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
     priority: i64,
     key: Option<String>,
 ) -> Result<PoolSubmitOutcome, VmError> {
@@ -1397,7 +1409,7 @@ pub async fn submit_closure_to_named_pool(
 async fn submit_to_pool_entry(
     ctx: Option<&AsyncBuiltinCtx>,
     entry: &Rc<RefCell<PoolEntry>>,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
@@ -1533,7 +1545,7 @@ enum SubmitAttempt {
 fn submit_or_wait(
     ctx: Option<&AsyncBuiltinCtx>,
     pool: &mut PoolEntry,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
@@ -1665,7 +1677,7 @@ fn can_accept_now(pool: &PoolEntry) -> bool {
 fn submit_with_oldest_drop(
     ctx: Option<&AsyncBuiltinCtx>,
     pool: &mut PoolEntry,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
@@ -1710,7 +1722,7 @@ fn submit_with_oldest_drop(
 fn submit_with_newest_drop(
     ctx: Option<&AsyncBuiltinCtx>,
     pool: &mut PoolEntry,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
@@ -1745,7 +1757,7 @@ fn submit_with_newest_drop(
 fn create_pending_task(
     ctx: Option<&AsyncBuiltinCtx>,
     pool: &mut PoolEntry,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
@@ -1945,7 +1957,7 @@ fn task_state_from_persisted(
     let result = persisted
         .result_display
         .as_ref()
-        .map(|text| VmValue::String(Rc::from(text.as_str())));
+        .map(|text| VmValue::String(std::sync::Arc::from(text.as_str())));
 
     Rc::new(RefCell::new(TaskState {
         id: persisted.id.clone(),
@@ -2391,7 +2403,7 @@ async fn pool_wait_builtin(
             for item in items.iter() {
                 results.push(wait_single_task(item).await?);
             }
-            Ok(VmValue::List(Rc::new(results)))
+            Ok(VmValue::List(std::sync::Arc::new(results)))
         }
         _ => wait_single_task(target).await,
     }

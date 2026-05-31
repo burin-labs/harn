@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use super::json_schema::vm_build_json_schema;
 use crate::value::{VmError, VmValue};
 
@@ -16,7 +14,7 @@ pub(crate) fn vm_tools_to_native(
         },
         VmValue::List(list) => list.as_ref().clone(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "tools must be a tool_registry or a list of tool definition dicts",
             ))));
         }
@@ -108,12 +106,12 @@ pub(crate) fn vm_tools_to_native(
                 }
             }
             VmValue::String(_) => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "tools must be declared as tool definition dicts or a tool_registry",
                 ))));
             }
             _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "tools must contain only tool definition dicts",
                 ))));
             }

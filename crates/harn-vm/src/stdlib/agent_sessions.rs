@@ -7,7 +7,6 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use crate::agent_sessions;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -288,7 +287,7 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         agent_sessions::set_workspace_anchor(&resolved, Some(anchor))
             .map_err(|message| err(format!("agent_session_open: {message}")))?;
     }
-    Ok(VmValue::String(Rc::from(resolved)))
+    Ok(VmValue::String(std::sync::Arc::from(resolved)))
 }
 
 #[harn_builtin(
@@ -498,27 +497,27 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
     let Some(ancestry) = agent_sessions::ancestry(&id) else {
         return Ok(VmValue::Nil);
     };
-    Ok(VmValue::Dict(Rc::new(BTreeMap::from([
+    Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         (
             "parent_id".to_string(),
             ancestry
                 .parent_id
-                .map(|value| VmValue::String(Rc::from(value)))
+                .map(|value| VmValue::String(std::sync::Arc::from(value)))
                 .unwrap_or(VmValue::Nil),
         ),
         (
             "child_ids".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 ancestry
                     .child_ids
                     .into_iter()
-                    .map(|value| VmValue::String(Rc::from(value)))
+                    .map(|value| VmValue::String(std::sync::Arc::from(value)))
                     .collect(),
             )),
         ),
         (
             "root_id".to_string(),
-            VmValue::String(Rc::from(ancestry.root_id)),
+            VmValue::String(std::sync::Arc::from(ancestry.root_id)),
         ),
     ]))))
 }
@@ -533,7 +532,7 @@ fn agent_session_current_id_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     Ok(agent_sessions::current_session_id()
-        .map(|id| VmValue::String(Rc::from(id)))
+        .map(|id| VmValue::String(std::sync::Arc::from(id)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -553,7 +552,7 @@ fn agent_session_tool_format_builtin(
         )));
     }
     Ok(agent_sessions::tool_format(&id)
-        .map(|value| VmValue::String(Rc::from(value)))
+        .map(|value| VmValue::String(std::sync::Arc::from(value)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -573,7 +572,7 @@ fn agent_session_system_prompt_builtin(
         )));
     }
     Ok(agent_sessions::system_prompt(&id)
-        .map(|value| VmValue::String(Rc::from(value)))
+        .map(|value| VmValue::String(std::sync::Arc::from(value)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -623,7 +622,7 @@ fn agent_session_fork_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         )));
     }
     match agent_sessions::fork(&src, dst) {
-        Some(new_id) => Ok(VmValue::String(Rc::from(new_id))),
+        Some(new_id) => Ok(VmValue::String(std::sync::Arc::from(new_id))),
         None => Err(err(format!(
             "agent_session_fork: failed to fork session '{src}'"
         ))),
@@ -648,7 +647,7 @@ fn agent_session_fork_at_builtin(args: &[VmValue], _out: &mut String) -> Result<
         )));
     }
     match agent_sessions::fork_at(&src, keep_first as usize, dst) {
-        Some(new_id) => Ok(VmValue::String(Rc::from(new_id))),
+        Some(new_id) => Ok(VmValue::String(std::sync::Arc::from(new_id))),
         None => Err(err(format!(
             "agent_session_fork_at: failed to fork session '{src}'"
         ))),
@@ -757,20 +756,23 @@ fn agent_session_drain_inbox_builtin(
         .map(|entry| {
             let mut dict = BTreeMap::new();
             dict.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
-            dict.insert("kind".to_string(), VmValue::String(Rc::from(entry.kind)));
+            dict.insert(
+                "kind".to_string(),
+                VmValue::String(std::sync::Arc::from(entry.kind)),
+            );
             dict.insert(
                 "content".to_string(),
-                VmValue::String(Rc::from(entry.content)),
+                VmValue::String(std::sync::Arc::from(entry.content)),
             );
             dict.insert(
                 "source".to_string(),
-                VmValue::String(Rc::from(entry.source)),
+                VmValue::String(std::sync::Arc::from(entry.source)),
             );
             dict.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         })
         .collect::<Vec<_>>();
-    Ok(VmValue::List(Rc::new(entries)))
+    Ok(VmValue::List(std::sync::Arc::new(entries)))
 }
 
 const SEED_FROM_JSONL_OPT_KEYS: &[&str] = &[
@@ -935,7 +937,7 @@ async fn agent_session_reanchor_builtin(
     if compact {
         let _ = agent_session_compact_builtin(
             ctx.clone(),
-            vec![VmValue::String(Rc::from(target_id.clone()))],
+            vec![VmValue::String(std::sync::Arc::from(target_id.clone()))],
         )
         .await?;
         compacted = true;
@@ -1202,18 +1204,24 @@ async fn cancel_in_flight_tool_call_builtin(
     let mut result = BTreeMap::new();
     result.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(final_status)),
+        VmValue::String(std::sync::Arc::from(final_status)),
     );
-    result.insert("call_id".to_string(), VmValue::String(Rc::from(call_id)));
+    result.insert(
+        "call_id".to_string(),
+        VmValue::String(std::sync::Arc::from(call_id)),
+    );
     result.insert(
         "tool".to_string(),
         outcome
             .tool_name
-            .map(|name| VmValue::String(Rc::from(name)))
+            .map(|name| VmValue::String(std::sync::Arc::from(name)))
             .unwrap_or(VmValue::Nil),
     );
-    result.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
-    Ok(VmValue::Dict(Rc::new(result)))
+    result.insert(
+        "reason".to_string(),
+        VmValue::String(std::sync::Arc::from(reason)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(result)))
 }
 
 async fn push_cancellation_reminder(

@@ -9,7 +9,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::time::Instant;
 
 use sqlx_core::row::Row;
@@ -80,28 +79,28 @@ pub(super) async fn run(args: &[VmValue]) -> Result<VmValue, VmError> {
     let mut response = BTreeMap::new();
     response.insert(
         "applied".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             applied_now
                 .into_iter()
-                .map(|name| VmValue::String(Rc::from(name)))
+                .map(|name| VmValue::String(std::sync::Arc::from(name)))
                 .collect(),
         )),
     );
     response.insert(
         "skipped".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             skipped
                 .into_iter()
-                .map(|name| VmValue::String(Rc::from(name)))
+                .map(|name| VmValue::String(std::sync::Arc::from(name)))
                 .collect(),
         )),
     );
     response.insert(
         "available".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             entries
                 .iter()
-                .map(|entry| VmValue::String(Rc::from(entry.name.clone())))
+                .map(|entry| VmValue::String(std::sync::Arc::from(entry.name.clone())))
                 .collect(),
         )),
     );
@@ -112,9 +111,9 @@ pub(super) async fn run(args: &[VmValue]) -> Result<VmValue, VmError> {
     );
     response.insert(
         "table".to_string(),
-        VmValue::String(Rc::from(table_name.as_str())),
+        VmValue::String(std::sync::Arc::from(table_name.as_str())),
     );
-    Ok(VmValue::Dict(Rc::new(response)))
+    Ok(VmValue::Dict(std::sync::Arc::new(response)))
 }
 
 fn dir_arg(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<PathBuf, VmError> {

@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
@@ -626,29 +625,29 @@ pub(crate) async fn request_approval_for_side_effect(
     );
     options.insert(
         "principal".to_string(),
-        VmValue::String(Rc::from(principal)),
+        VmValue::String(std::sync::Arc::from(principal)),
     );
     options.insert(
         "reviewers".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             reviewers
                 .into_iter()
-                .map(|reviewer| VmValue::String(Rc::from(reviewer)))
+                .map(|reviewer| VmValue::String(std::sync::Arc::from(reviewer)))
                 .collect(),
         )),
     );
     options.insert(
         "capabilities_requested".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             capabilities_requested
                 .into_iter()
-                .map(|capability| VmValue::String(Rc::from(capability)))
+                .map(|capability| VmValue::String(std::sync::Arc::from(capability)))
                 .collect(),
         )),
     );
     let args = vec![
-        VmValue::String(Rc::from(action.to_string())),
-        VmValue::Dict(Rc::new(options)),
+        VmValue::String(std::sync::Arc::from(action.to_string())),
+        VmValue::Dict(std::sync::Arc::new(options)),
     ];
     request_approval_impl(None, &args).await
 }
@@ -1402,7 +1401,7 @@ async fn maybe_apply_mock_response(
         .collect::<BTreeMap<_, _>>();
     params.insert(
         "request_id".to_string(),
-        VmValue::String(Rc::from(request_id.to_string())),
+        VmValue::String(std::sync::Arc::from(request_id.to_string())),
     );
     let Some(result) = dispatch_mock_host_call("hitl", kind.as_str(), &params) else {
         return Ok(());
@@ -1817,7 +1816,7 @@ fn coerce_like_default(value: &VmValue, default: &VmValue) -> VmValue {
             VmValue::String(text) if text.eq_ignore_ascii_case("false") => VmValue::Bool(false),
             _ => default.clone(),
         },
-        VmValue::String(_) => VmValue::String(Rc::from(value.display())),
+        VmValue::String(_) => VmValue::String(std::sync::Arc::from(value.display())),
         VmValue::Duration(_) => match value {
             VmValue::Duration(_) => value.clone(),
             VmValue::Int(ms) => VmValue::Duration(*ms),

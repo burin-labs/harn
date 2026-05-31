@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
@@ -19,7 +18,7 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
             let content = d
                 .get("content")
                 .cloned()
-                .unwrap_or_else(|| VmValue::String(Rc::from("")));
+                .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("")));
             let content_json = match &content {
                 VmValue::String(text) => serde_json::Value::String(text.to_string()),
                 other => vm_value_to_json(other),
@@ -70,14 +69,17 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
 }
 
 pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
-    vm_message_value(role, VmValue::String(Rc::from(content)))
+    vm_message_value(role, VmValue::String(std::sync::Arc::from(content)))
 }
 
 pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
     let mut msg = BTreeMap::new();
-    msg.insert("role".to_string(), VmValue::String(Rc::from(role)));
+    msg.insert(
+        "role".to_string(),
+        VmValue::String(std::sync::Arc::from(role)),
+    );
     msg.insert("content".to_string(), content);
-    VmValue::Dict(Rc::new(msg))
+    VmValue::Dict(std::sync::Arc::new(msg))
 }
 
 pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
@@ -112,15 +114,17 @@ pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue
                             let mut result = BTreeMap::new();
                             result.insert(
                                 "role".to_string(),
-                                VmValue::String(Rc::from("tool_result")),
+                                VmValue::String(std::sync::Arc::from("tool_result")),
                             );
                             result.insert(
                                 "tool_use_id".to_string(),
-                                VmValue::String(Rc::from(tool_use_id)),
+                                VmValue::String(std::sync::Arc::from(tool_use_id)),
                             );
-                            result
-                                .insert("content".to_string(), VmValue::String(Rc::from(content)));
-                            return Some(VmValue::Dict(Rc::new(result)));
+                            result.insert(
+                                "content".to_string(),
+                                VmValue::String(std::sync::Arc::from(content)),
+                            );
+                            return Some(VmValue::Dict(std::sync::Arc::new(result)));
                         }
                     }
                 }
@@ -144,9 +148,9 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 role,
                 args.get(1)
                     .cloned()
-                    .unwrap_or_else(|| VmValue::String(Rc::from(""))),
+                    .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
             ));
-            Ok(VmValue::List(Rc::new(new_messages)))
+            Ok(VmValue::List(std::sync::Arc::new(new_messages)))
         }
         Some(VmValue::Dict(d))
             if d.get("_type").map(|v| v.display()).as_deref() == Some(TRANSCRIPT_TYPE) =>
@@ -156,7 +160,7 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 role,
                 args.get(1)
                     .cloned()
-                    .unwrap_or_else(|| VmValue::String(Rc::from(""))),
+                    .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
             ));
             Ok(new_transcript_with_events(
                 transcript_id(d),
@@ -171,8 +175,8 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 }),
             ))
         }
-        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "add_{role}: first argument must be a message list or transcript"
-        ))))),
+        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("add_{role}: first argument must be a message list or transcript"),
+        )))),
     }
 }

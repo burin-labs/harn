@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -445,7 +446,7 @@ enum RuntimeHookHandler {
     NativePostTool(PostToolHookFn),
     Vm {
         handler_name: String,
-        closure: Rc<VmClosure>,
+        closure: Arc<VmClosure>,
     },
 }
 
@@ -471,14 +472,14 @@ struct RuntimeHook {
 
 #[derive(Clone, Debug)]
 pub struct VmLifecycleHookInvocation {
-    pub closure: Rc<VmClosure>,
+    pub closure: Arc<VmClosure>,
     pub handler_name: String,
 }
 
 #[derive(Clone, Debug)]
 struct VmLifecycleHookRegistration {
     handler_name: String,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
 }
 
 thread_local! {
@@ -578,7 +579,7 @@ pub fn register_vm_hook(
     event: HookEvent,
     pattern: impl Into<String>,
     handler_name: impl Into<String>,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
 ) {
     RUNTIME_HOOKS.with(|hooks| {
         hooks.borrow_mut().push(RuntimeHook {
@@ -762,7 +763,7 @@ fn runtime_hooks_for_event(event: HookEvent) -> Vec<RuntimeHook> {
 
 async fn invoke_vm_hook(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    closure: &Rc<VmClosure>,
+    closure: &Arc<VmClosure>,
     payload: &serde_json::Value,
 ) -> Result<VmValue, VmError> {
     let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
@@ -1142,7 +1143,7 @@ fn action_value_after_effects(value: VmValue, default_action: VmValue) -> VmValu
             "deny" | "args" | "result" | "output" | "modify" | "block" | "decision" | "action"
         )
     }) {
-        VmValue::Dict(Rc::new(action))
+        VmValue::Dict(std::sync::Arc::new(action))
     } else {
         default_action
     }
@@ -1767,7 +1768,7 @@ fn matching_vm_lifecycle_registrations(
                     handler_name,
                 } => Some(VmLifecycleHookRegistration {
                     handler_name: handler_name.clone(),
-                    closure: Rc::clone(closure),
+                    closure: Arc::clone(closure),
                 }),
                 RuntimeHookHandler::NativePreTool(_) | RuntimeHookHandler::NativePostTool(_) => {
                     None
@@ -1782,11 +1783,11 @@ mod tests {
     use super::*;
 
     fn vm_string(value: &str) -> VmValue {
-        VmValue::String(Rc::from(value))
+        VmValue::String(std::sync::Arc::from(value))
     }
 
     fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             entries
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))

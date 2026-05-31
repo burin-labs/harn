@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
@@ -390,7 +389,10 @@ fn register_git_namespace(vm: &mut Vm) {
         ("remove", "git.worktree.remove"),
     ]);
     let mut root = BTreeMap::new();
-    root.insert("_namespace".to_string(), VmValue::String(Rc::from("git")));
+    root.insert(
+        "_namespace".to_string(),
+        VmValue::String(std::sync::Arc::from("git")),
+    );
     root.insert("repo".to_string(), repo);
     root.insert("worktree".to_string(), worktree);
     for (name, builtin) in [
@@ -405,16 +407,24 @@ fn register_git_namespace(vm: &mut Vm) {
         ("worktree_create", "git.worktree.create"),
         ("worktree_remove", "git.worktree.remove"),
     ] {
-        root.insert(name.to_string(), VmValue::BuiltinRef(Rc::from(builtin)));
+        root.insert(
+            name.to_string(),
+            VmValue::BuiltinRef(std::sync::Arc::from(builtin)),
+        );
     }
-    vm.set_global("git", VmValue::Dict(Rc::new(root)));
+    vm.set_global("git", VmValue::Dict(std::sync::Arc::new(root)));
 }
 
 fn namespace(entries: &[(&str, &str)]) -> VmValue {
-    VmValue::Dict(Rc::new(
+    VmValue::Dict(std::sync::Arc::new(
         entries
             .iter()
-            .map(|(name, builtin)| (name.to_string(), VmValue::BuiltinRef(Rc::from(*builtin))))
+            .map(|(name, builtin)| {
+                (
+                    name.to_string(),
+                    VmValue::BuiltinRef(std::sync::Arc::from(*builtin)),
+                )
+            })
             .collect(),
     ))
 }
@@ -545,28 +555,31 @@ const GIT_ENV_OVERRIDES: &[&str] = &[
 
 async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     let mut params = BTreeMap::new();
-    params.insert("mode".to_string(), VmValue::String(Rc::from("argv")));
+    params.insert(
+        "mode".to_string(),
+        VmValue::String(std::sync::Arc::from("argv")),
+    );
     params.insert(
         "argv".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             command
                 .argv
                 .iter()
-                .map(|arg| VmValue::String(Rc::from(arg.as_str())))
+                .map(|arg| VmValue::String(std::sync::Arc::from(arg.as_str())))
                 .collect(),
         )),
     );
     params.insert(
         "cwd".to_string(),
-        VmValue::String(Rc::from(display_path(&command.cwd))),
+        VmValue::String(std::sync::Arc::from(display_path(&command.cwd))),
     );
     params.insert("timeout_ms".to_string(), VmValue::Int(120_000));
     params.insert(
         "env_remove".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             GIT_ENV_OVERRIDES
                 .iter()
-                .map(|name| VmValue::String(Rc::from(*name)))
+                .map(|name| VmValue::String(std::sync::Arc::from(*name)))
                 .collect(),
         )),
     );

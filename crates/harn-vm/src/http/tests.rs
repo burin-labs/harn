@@ -21,7 +21,6 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::rc::Rc;
 use std::sync::{Arc, Once};
 use std::time::{Duration, UNIX_EPOCH};
 use tempfile::TempDir;
@@ -101,18 +100,24 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
     let options = BTreeMap::from([
         (
             "headers".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "Authorization".to_string(),
-                    VmValue::String(Rc::from("Bearer secret")),
+                    VmValue::String(std::sync::Arc::from("Bearer secret")),
                 ),
-                ("X-Trace".to_string(), VmValue::String(Rc::from("trace-1"))),
+                (
+                    "X-Trace".to_string(),
+                    VmValue::String(std::sync::Arc::from("trace-1")),
+                ),
             ]))),
         ),
         (
             "query".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
-                ("api_key".to_string(), VmValue::String(Rc::from("secret"))),
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                (
+                    "api_key".to_string(),
+                    VmValue::String(std::sync::Arc::from("secret")),
+                ),
                 ("limit".to_string(), VmValue::Int(2)),
             ]))),
         ),
@@ -146,13 +151,16 @@ fn mock_call_headers_redact_sensitive_values() {
     let headers = BTreeMap::from([
         (
             "authorization".to_string(),
-            VmValue::String(Rc::from("Bearer secret")),
+            VmValue::String(std::sync::Arc::from("Bearer secret")),
         ),
         (
             "accept".to_string(),
-            VmValue::String(Rc::from("application/json")),
+            VmValue::String(std::sync::Arc::from("application/json")),
         ),
-        ("x-api-key".to_string(), VmValue::String(Rc::from("secret"))),
+        (
+            "x-api-key".to_string(),
+            VmValue::String(std::sync::Arc::from("secret")),
+        ),
     ]);
     let redacted = mock_call_headers_value(&headers, true);
     assert_eq!(redacted["authorization"].display(), "[redacted]");
@@ -192,24 +200,33 @@ async fn multipart_requests_are_mock_visible() {
     );
     let options = BTreeMap::from([(
         "multipart".to_string(),
-        VmValue::List(Rc::new(vec![
-            VmValue::Dict(Rc::new(BTreeMap::from([
-                ("name".to_string(), VmValue::String(Rc::from("meta"))),
-                ("value".to_string(), VmValue::String(Rc::from("hello"))),
-            ]))),
-            VmValue::Dict(Rc::new(BTreeMap::from([
-                ("name".to_string(), VmValue::String(Rc::from("blob"))),
+        VmValue::List(std::sync::Arc::new(vec![
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
-                    "filename".to_string(),
-                    VmValue::String(Rc::from("blob.bin")),
-                ),
-                (
-                    "content_type".to_string(),
-                    VmValue::String(Rc::from("application/octet-stream")),
+                    "name".to_string(),
+                    VmValue::String(std::sync::Arc::from("meta")),
                 ),
                 (
                     "value".to_string(),
-                    VmValue::Bytes(Rc::new(vec![0, 1, 2, 3])),
+                    VmValue::String(std::sync::Arc::from("hello")),
+                ),
+            ]))),
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                (
+                    "name".to_string(),
+                    VmValue::String(std::sync::Arc::from("blob")),
+                ),
+                (
+                    "filename".to_string(),
+                    VmValue::String(std::sync::Arc::from("blob.bin")),
+                ),
+                (
+                    "content_type".to_string(),
+                    VmValue::String(std::sync::Arc::from("application/octet-stream")),
+                ),
+                (
+                    "value".to_string(),
+                    VmValue::Bytes(std::sync::Arc::new(vec![0, 1, 2, 3])),
                 ),
             ]))),
         ])),
@@ -313,7 +330,7 @@ async fn http_download_mock_retries_retryable_status() {
         &path.display().to_string(),
         &BTreeMap::from([(
             "retry".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 ("max".to_string(), VmValue::Int(1)),
                 ("backoff_ms".to_string(), VmValue::Int(0)),
             ]))),
@@ -422,13 +439,19 @@ async fn http_proxy_routes_requests_through_configured_proxy() {
     let options = BTreeMap::from([
         (
             "proxy".to_string(),
-            VmValue::String(Rc::from(proxy.base_url().to_string())),
+            VmValue::String(std::sync::Arc::from(proxy.base_url().to_string())),
         ),
         (
             "proxy_auth".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
-                ("user".to_string(), VmValue::String(Rc::from("user"))),
-                ("pass".to_string(), VmValue::String(Rc::from("pass"))),
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                (
+                    "user".to_string(),
+                    VmValue::String(std::sync::Arc::from("user")),
+                ),
+                (
+                    "pass".to_string(),
+                    VmValue::String(std::sync::Arc::from("pass")),
+                ),
             ]))),
         ),
         ("timeout_ms".to_string(), VmValue::Int(1_000)),
@@ -483,14 +506,16 @@ async fn custom_tls_ca_bundle_and_pin_allow_request() {
 
     let options = BTreeMap::from([(
         "tls".to_string(),
-        VmValue::Dict(Rc::new(BTreeMap::from([
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             (
                 "ca_bundle_path".to_string(),
-                VmValue::String(Rc::from(cert_path.display().to_string())),
+                VmValue::String(std::sync::Arc::from(cert_path.display().to_string())),
             ),
             (
                 "pinned_sha256".to_string(),
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from(pin))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from(pin),
+                )])),
             ),
         ]))),
     )]);
@@ -541,14 +566,16 @@ async fn custom_tls_pin_mismatch_is_rejected() {
 
     let options = BTreeMap::from([(
         "tls".to_string(),
-        VmValue::Dict(Rc::new(BTreeMap::from([
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             (
                 "ca_bundle_path".to_string(),
-                VmValue::String(Rc::from(cert_path.display().to_string())),
+                VmValue::String(std::sync::Arc::from(cert_path.display().to_string())),
             ),
             (
                 "pinned_sha256".to_string(),
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("deadbeef"))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from("deadbeef"),
+                )])),
             ),
         ]))),
     )]);
@@ -615,10 +642,19 @@ fn write_http_response_generic<T: Write>(
 #[test]
 fn formats_sse_event_fields_and_multiline_data() {
     let frame = vm_sse_event_frame(
-        &VmValue::Dict(Rc::new(BTreeMap::from([
-            ("event".to_string(), VmValue::String(Rc::from("progress"))),
-            ("data".to_string(), VmValue::String(Rc::from("one\ntwo"))),
-            ("id".to_string(), VmValue::String(Rc::from("evt-1"))),
+        &VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "event".to_string(),
+                VmValue::String(std::sync::Arc::from("progress")),
+            ),
+            (
+                "data".to_string(),
+                VmValue::String(std::sync::Arc::from("one\ntwo")),
+            ),
+            (
+                "id".to_string(),
+                VmValue::String(std::sync::Arc::from("evt-1")),
+            ),
             ("retry_ms".to_string(), VmValue::Int(2500)),
         ]))),
         &BTreeMap::new(),
@@ -633,9 +669,9 @@ fn formats_sse_event_fields_and_multiline_data() {
 #[test]
 fn rejects_sse_event_control_fields_with_newlines() {
     let err = vm_sse_event_frame(
-        &VmValue::Dict(Rc::new(BTreeMap::from([(
+        &VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "event".to_string(),
-            VmValue::String(Rc::from("bad\nname")),
+            VmValue::String(std::sync::Arc::from("bad\nname")),
         )]))),
         &BTreeMap::new(),
     )
@@ -656,17 +692,26 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
     assert!(expect_bool(
         vm_sse_server_send(
             &stream_id,
-            &VmValue::Dict(Rc::new(BTreeMap::from([
-                ("event".to_string(), VmValue::String(Rc::from("progress")),),
-                ("data".to_string(), VmValue::String(Rc::from("50"))),
+            &VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                (
+                    "event".to_string(),
+                    VmValue::String(std::sync::Arc::from("progress")),
+                ),
+                (
+                    "data".to_string(),
+                    VmValue::String(std::sync::Arc::from("50"))
+                ),
             ]))),
             &BTreeMap::new(),
         )
         .expect("send")
     ));
     assert!(expect_bool(
-        vm_sse_server_heartbeat(&stream_id, Some(&VmValue::String(Rc::from("tick"))))
-            .expect("heartbeat")
+        vm_sse_server_heartbeat(
+            &stream_id,
+            Some(&VmValue::String(std::sync::Arc::from("tick")))
+        )
+        .expect("heartbeat")
     ));
 
     let first = vm_sse_server_mock_receive(&stream_id).expect("first");
@@ -688,7 +733,7 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
     assert!(!expect_bool(
         vm_sse_server_send(
             &stream_id,
-            &VmValue::String(Rc::from("late")),
+            &VmValue::String(std::sync::Arc::from("late")),
             &BTreeMap::new()
         )
         .expect("late send")
@@ -697,8 +742,11 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
     let cancelled = vm_sse_server_response(&BTreeMap::new()).expect("cancelled response");
     let cancelled_id = handle_from_value(&cancelled, "test").expect("cancelled handle");
     assert!(expect_bool(
-        vm_sse_server_cancel(&cancelled_id, Some(&VmValue::String(Rc::from("stop"))))
-            .expect("cancel")
+        vm_sse_server_cancel(
+            &cancelled_id,
+            Some(&VmValue::String(std::sync::Arc::from("stop")))
+        )
+        .expect("cancel")
     ));
     assert!(expect_bool(
         vm_sse_server_observed_bool(&cancelled_id, "test", |handle| handle.cancelled)
@@ -718,7 +766,7 @@ fn server_sse_rejects_oversized_events() {
     let stream_id = handle_from_value(&response, "test").expect("handle");
     let err = vm_sse_server_send(
         &stream_id,
-        &VmValue::String(Rc::from("this is too large")),
+        &VmValue::String(std::sync::Arc::from("this is too large")),
         &BTreeMap::new(),
     )
     .expect_err("oversized event should reject");

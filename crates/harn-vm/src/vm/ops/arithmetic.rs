@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::chunk::{AdaptiveBinaryOp, AdaptiveBinaryState, BinaryShape, InlineCacheEntry};
 use crate::value::{compare_values, values_equal, VmError, VmValue};
@@ -410,7 +410,7 @@ impl super::super::Vm {
                 let mut s = String::with_capacity(x.len() + y.len());
                 s.push_str(&x);
                 s.push_str(&y);
-                Ok(VmValue::String(Rc::from(s)))
+                Ok(VmValue::String(std::sync::Arc::from(s)))
             }
             (VmValue::List(x), VmValue::List(y)) => {
                 if x.is_empty() {
@@ -420,13 +420,13 @@ impl super::super::Vm {
                     return Ok(VmValue::List(x));
                 }
                 let y_len = y.len();
-                let mut result = Rc::try_unwrap(x).unwrap_or_else(|items| items.as_ref().clone());
+                let mut result = Arc::try_unwrap(x).unwrap_or_else(|items| items.as_ref().clone());
                 result.reserve(y_len);
-                match Rc::try_unwrap(y) {
+                match Arc::try_unwrap(y) {
                     Ok(items) => result.extend(items),
                     Err(items) => result.extend(items.iter().cloned()),
                 }
-                Ok(VmValue::List(Rc::new(result)))
+                Ok(VmValue::List(std::sync::Arc::new(result)))
             }
             (VmValue::Dict(x), VmValue::Dict(y)) => {
                 if x.is_empty() {
@@ -436,14 +436,14 @@ impl super::super::Vm {
                     return Ok(VmValue::Dict(x));
                 }
                 let mut result =
-                    Rc::try_unwrap(x).unwrap_or_else(|entries| entries.as_ref().clone());
-                match Rc::try_unwrap(y) {
+                    Arc::try_unwrap(x).unwrap_or_else(|entries| entries.as_ref().clone());
+                match Arc::try_unwrap(y) {
                     Ok(entries) => result.extend(entries),
                     Err(entries) => {
                         result.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone())));
                     }
                 }
-                Ok(VmValue::Dict(Rc::new(result)))
+                Ok(VmValue::Dict(std::sync::Arc::new(result)))
             }
             (a, b) => Err(VmError::TypeError(format!(
                 "Cannot add {} and {}",

@@ -20,7 +20,6 @@
 //! differs.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use sha2::{Digest, Sha256};
 
@@ -57,7 +56,10 @@ fn http_created_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let body = args.first().cloned().unwrap_or(VmValue::Nil);
     let mut headers = BTreeMap::new();
     if let Some(location) = args.get(1).and_then(string_or_nil) {
-        headers.insert("Location".to_string(), VmValue::String(Rc::from(location)));
+        headers.insert(
+            "Location".to_string(),
+            VmValue::String(std::sync::Arc::from(location)),
+        );
     }
     Ok(envelope(201, body, BODY_KIND_JSON, headers))
 }
@@ -83,19 +85,25 @@ fn http_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let details = args.get(3).cloned().unwrap_or(VmValue::Nil);
 
     let mut body = BTreeMap::new();
-    body.insert("code".to_string(), VmValue::String(Rc::from(code)));
-    body.insert("message".to_string(), VmValue::String(Rc::from(message)));
+    body.insert(
+        "code".to_string(),
+        VmValue::String(std::sync::Arc::from(code)),
+    );
+    body.insert(
+        "message".to_string(),
+        VmValue::String(std::sync::Arc::from(message)),
+    );
     if !matches!(details, VmValue::Nil) {
         body.insert("details".to_string(), details);
     }
     let mut env = envelope_map(
         status,
-        VmValue::Dict(Rc::new(body)),
+        VmValue::Dict(std::sync::Arc::new(body)),
         BODY_KIND_JSON,
         BTreeMap::new(),
     );
     env.insert("is_error".to_string(), VmValue::Bool(true));
-    Ok(VmValue::Dict(Rc::new(env)))
+    Ok(VmValue::Dict(std::sync::Arc::new(env)))
 }
 
 #[harn_builtin(
@@ -141,11 +149,11 @@ async fn http_stream_impl(
     let mut headers = BTreeMap::new();
     headers.insert(
         "Content-Type".to_string(),
-        VmValue::String(Rc::from(content_type)),
+        VmValue::String(std::sync::Arc::from(content_type)),
     );
     Ok(envelope(
         200,
-        VmValue::List(Rc::new(chunks)),
+        VmValue::List(std::sync::Arc::new(chunks)),
         BODY_KIND_STREAM,
         headers,
     ))
@@ -186,17 +194,22 @@ async fn http_sse_impl(
     let mut headers = BTreeMap::new();
     headers.insert(
         "Content-Type".to_string(),
-        VmValue::String(Rc::from("text/event-stream")),
+        VmValue::String(std::sync::Arc::from("text/event-stream")),
     );
     headers.insert(
         "Cache-Control".to_string(),
-        VmValue::String(Rc::from("no-cache")),
+        VmValue::String(std::sync::Arc::from("no-cache")),
     );
-    let mut env = envelope_map(200, VmValue::List(Rc::new(events)), BODY_KIND_SSE, headers);
+    let mut env = envelope_map(
+        200,
+        VmValue::List(std::sync::Arc::new(events)),
+        BODY_KIND_SSE,
+        headers,
+    );
     if let Some(retry_ms) = retry_ms {
         env.insert("retry_ms".to_string(), VmValue::Int(retry_ms));
     }
-    Ok(VmValue::Dict(Rc::new(env)))
+    Ok(VmValue::Dict(std::sync::Arc::new(env)))
 }
 
 fn envelope(
@@ -205,7 +218,9 @@ fn envelope(
     body_kind: &str,
     headers: BTreeMap<String, VmValue>,
 ) -> VmValue {
-    VmValue::Dict(Rc::new(envelope_map(status, body, body_kind, headers)))
+    VmValue::Dict(std::sync::Arc::new(envelope_map(
+        status, body, body_kind, headers,
+    )))
 }
 
 fn envelope_map(
@@ -217,14 +232,17 @@ fn envelope_map(
     let mut map = BTreeMap::new();
     map.insert(
         HTTP_RESPONSE_TAG_KEY.to_string(),
-        VmValue::String(Rc::from(HTTP_RESPONSE_TAG_VERSION)),
+        VmValue::String(std::sync::Arc::from(HTTP_RESPONSE_TAG_VERSION)),
     );
     map.insert("status".to_string(), VmValue::Int(status));
     map.insert(
         "body_kind".to_string(),
-        VmValue::String(Rc::from(body_kind)),
+        VmValue::String(std::sync::Arc::from(body_kind)),
     );
-    map.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
+    map.insert(
+        "headers".to_string(),
+        VmValue::Dict(std::sync::Arc::new(headers)),
+    );
     if !matches!(body, VmValue::Nil) {
         map.insert("body".to_string(), body);
     }
@@ -341,7 +359,7 @@ async fn drain_to_list(value: VmValue, fn_name: &str) -> Result<Vec<VmValue>, Vm
 }
 
 fn thrown_err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 /// Return `Some(envelope)` if the JSON value is a tagged HTTP response.
@@ -486,7 +504,7 @@ fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     let digest = hasher.finalize();
-    Ok(VmValue::String(Rc::from(format!(
+    Ok(VmValue::String(std::sync::Arc::from(format!(
         "\"{}\"",
         hex::encode(digest)
     ))))
@@ -512,7 +530,7 @@ fn http_choose_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         None | Some("") | Some("*/*") => default,
         Some(header) => negotiate_accept(header, &offers).unwrap_or(default),
     };
-    Ok(VmValue::String(Rc::from(chosen)))
+    Ok(VmValue::String(std::sync::Arc::from(chosen)))
 }
 
 fn optional_string_arg(
@@ -563,7 +581,10 @@ fn expect_string_list(
 fn http_not_modified_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut headers = parse_headers(args.get(1), "http_not_modified")?;
     if let Some(etag) = args.first().and_then(string_or_nil) {
-        headers.insert("ETag".to_string(), VmValue::String(Rc::from(etag)));
+        headers.insert(
+            "ETag".to_string(),
+            VmValue::String(std::sync::Arc::from(etag)),
+        );
     }
     Ok(envelope(304, VmValue::Nil, BODY_KIND_NONE, headers))
 }
@@ -642,12 +663,18 @@ fn http_push_hints_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     combined.extend(
         new_links
             .into_iter()
-            .map(|link| VmValue::String(Rc::from(link))),
+            .map(|link| VmValue::String(std::sync::Arc::from(link))),
     );
 
-    headers.insert("Link".to_string(), VmValue::List(Rc::new(combined)));
-    envelope_map.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
-    Ok(VmValue::Dict(Rc::new(envelope_map)))
+    headers.insert(
+        "Link".to_string(),
+        VmValue::List(std::sync::Arc::new(combined)),
+    );
+    envelope_map.insert(
+        "headers".to_string(),
+        VmValue::Dict(std::sync::Arc::new(headers)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(envelope_map)))
 }
 
 fn is_http_response_envelope(map: &BTreeMap<String, VmValue>) -> bool {
@@ -737,16 +764,16 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let mut headers = BTreeMap::new();
     headers.insert(
         "Upgrade".to_string(),
-        VmValue::String(Rc::from("websocket")),
+        VmValue::String(std::sync::Arc::from("websocket")),
     );
     headers.insert(
         "Connection".to_string(),
-        VmValue::String(Rc::from("Upgrade")),
+        VmValue::String(std::sync::Arc::from("Upgrade")),
     );
     if let Some(name) = &negotiated {
         headers.insert(
             "Sec-WebSocket-Protocol".to_string(),
-            VmValue::String(Rc::from(name.clone())),
+            VmValue::String(std::sync::Arc::from(name.clone())),
         );
     }
 
@@ -766,21 +793,21 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let mut env_map = envelope_map(101, VmValue::Nil, BODY_KIND_NONE, headers);
     env_map.insert(
         "ws_upgrade".to_string(),
-        VmValue::Dict(Rc::new({
+        VmValue::Dict(std::sync::Arc::new({
             let mut map = BTreeMap::new();
             map.insert(
                 "subprotocol".to_string(),
                 match &negotiated {
-                    Some(name) => VmValue::String(Rc::from(name.clone())),
+                    Some(name) => VmValue::String(std::sync::Arc::from(name.clone())),
                     None => VmValue::Nil,
                 },
             );
             map.insert(
                 "offered".to_string(),
-                VmValue::List(Rc::new(
+                VmValue::List(std::sync::Arc::new(
                     offered_subprotocols
                         .iter()
-                        .map(|s| VmValue::String(Rc::from(s.clone())))
+                        .map(|s| VmValue::String(std::sync::Arc::from(s.clone())))
                         .collect(),
                 )),
             );
@@ -793,13 +820,13 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             if let Some(handler) = &on_message {
                 map.insert(
                     "on_message".to_string(),
-                    VmValue::String(Rc::from(handler.clone())),
+                    VmValue::String(std::sync::Arc::from(handler.clone())),
                 );
             }
             map
         })),
     );
-    Ok(VmValue::Dict(Rc::new(env_map)))
+    Ok(VmValue::Dict(std::sync::Arc::new(env_map)))
 }
 
 fn header_lookup(headers: &BTreeMap<String, VmValue>, name: &str) -> Option<String> {
@@ -964,7 +991,7 @@ mod tests {
 
     #[test]
     fn http_ok_produces_tagged_envelope() {
-        let body = VmValue::String(Rc::from("hello"));
+        let body = VmValue::String(std::sync::Arc::from("hello"));
         let response = http_ok_impl(&[body], &mut String::new()).expect("ok");
         let map = dict(&response);
         assert_eq!(
@@ -983,11 +1010,11 @@ mod tests {
 
     #[test]
     fn http_created_sets_location_header() {
-        let body = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let body = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "id".to_string(),
-            VmValue::String(Rc::from("sess_1")),
+            VmValue::String(std::sync::Arc::from("sess_1")),
         )])));
-        let location = VmValue::String(Rc::from("/v1/sessions/sess_1"));
+        let location = VmValue::String(std::sync::Arc::from("/v1/sessions/sess_1"));
         let response = http_created_impl(&[body, location], &mut String::new()).expect("created");
         let map = dict(&response);
         assert!(matches!(map.get("status"), Some(VmValue::Int(201))));
@@ -1021,8 +1048,8 @@ mod tests {
         let response = http_error_impl(
             &[
                 VmValue::Int(422),
-                VmValue::String(Rc::from("invalid_input")),
-                VmValue::String(Rc::from("bad payload")),
+                VmValue::String(std::sync::Arc::from("invalid_input")),
+                VmValue::String(std::sync::Arc::from("bad payload")),
                 VmValue::Nil,
             ],
             &mut String::new(),
@@ -1050,8 +1077,8 @@ mod tests {
         let err = http_error_impl(
             &[
                 VmValue::Int(200),
-                VmValue::String(Rc::from("x")),
-                VmValue::String(Rc::from("y")),
+                VmValue::String(std::sync::Arc::from("x")),
+                VmValue::String(std::sync::Arc::from("y")),
             ],
             &mut String::new(),
         )
@@ -1079,15 +1106,15 @@ mod tests {
     #[test]
     fn http_stream_buffers_list_source() {
         let items = vec![
-            VmValue::String(Rc::from("a")),
-            VmValue::String(Rc::from("b")),
+            VmValue::String(std::sync::Arc::from("a")),
+            VmValue::String(std::sync::Arc::from("b")),
         ];
         let response = run_sync(|| {
             http_stream_impl(
                 crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
                 vec![
-                    VmValue::List(Rc::new(items.clone())),
-                    VmValue::String(Rc::from("text/plain")),
+                    VmValue::List(std::sync::Arc::new(items.clone())),
+                    VmValue::String(std::sync::Arc::from("text/plain")),
                 ],
             )
         })
@@ -1119,14 +1146,17 @@ mod tests {
 
     #[test]
     fn http_sse_sets_event_stream_headers_and_optional_retry() {
-        let events = vec![VmValue::Dict(Rc::new(BTreeMap::from([(
+        let events = vec![VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "data".to_string(),
-            VmValue::String(Rc::from("ping")),
+            VmValue::String(std::sync::Arc::from("ping")),
         )])))];
         let response = run_sync(|| {
             http_sse_impl(
                 crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-                vec![VmValue::List(Rc::new(events.clone())), VmValue::Int(2500)],
+                vec![
+                    VmValue::List(std::sync::Arc::new(events.clone())),
+                    VmValue::Int(2500),
+                ],
             )
         })
         .expect("sse");
@@ -1151,11 +1181,11 @@ mod tests {
         let response = http_error_impl(
             &[
                 VmValue::Int(404),
-                VmValue::String(Rc::from("not_found")),
-                VmValue::String(Rc::from("missing")),
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::String(std::sync::Arc::from("not_found")),
+                VmValue::String(std::sync::Arc::from("missing")),
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "id".to_string(),
-                    VmValue::String(Rc::from("sess_404")),
+                    VmValue::String(std::sync::Arc::from("sess_404")),
                 )]))),
             ],
             &mut String::new(),
@@ -1178,7 +1208,7 @@ mod tests {
 
     #[test]
     fn http_etag_is_quoted_hex_sha256_of_payload() {
-        let value = VmValue::String(Rc::from("hello"));
+        let value = VmValue::String(std::sync::Arc::from("hello"));
         let etag = http_etag_impl(&[value], &mut String::new()).expect("etag");
         match etag {
             VmValue::String(text) => {
@@ -1193,10 +1223,13 @@ mod tests {
 
     #[test]
     fn http_etag_stable_across_string_and_bytes_for_same_payload() {
-        let from_string =
-            http_etag_impl(&[VmValue::String(Rc::from("hello"))], &mut String::new()).unwrap();
+        let from_string = http_etag_impl(
+            &[VmValue::String(std::sync::Arc::from("hello"))],
+            &mut String::new(),
+        )
+        .unwrap();
         let from_bytes = http_etag_impl(
-            &[VmValue::Bytes(Rc::new(b"hello".to_vec()))],
+            &[VmValue::Bytes(std::sync::Arc::new(b"hello".to_vec()))],
             &mut String::new(),
         )
         .unwrap();
@@ -1205,10 +1238,12 @@ mod tests {
 
     #[test]
     fn http_choose_returns_best_q_match() {
-        let accept = VmValue::String(Rc::from("application/xml;q=0.5, application/json;q=0.9"));
-        let offers = VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("application/xml")),
-            VmValue::String(Rc::from("application/json")),
+        let accept = VmValue::String(std::sync::Arc::from(
+            "application/xml;q=0.5, application/json;q=0.9",
+        ));
+        let offers = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("application/xml")),
+            VmValue::String(std::sync::Arc::from("application/json")),
         ]));
         let chosen = http_choose_impl(&[accept, offers], &mut String::new()).unwrap();
         assert_eq!(chosen.display(), "application/json");
@@ -1216,10 +1251,10 @@ mod tests {
 
     #[test]
     fn http_choose_prefers_specific_over_wildcard() {
-        let accept = VmValue::String(Rc::from("text/*;q=0.5, application/json"));
-        let offers = VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("text/plain")),
-            VmValue::String(Rc::from("application/json")),
+        let accept = VmValue::String(std::sync::Arc::from("text/*;q=0.5, application/json"));
+        let offers = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("text/plain")),
+            VmValue::String(std::sync::Arc::from("application/json")),
         ]));
         let chosen = http_choose_impl(&[accept, offers], &mut String::new()).unwrap();
         assert_eq!(chosen.display(), "application/json");
@@ -1227,9 +1262,9 @@ mod tests {
 
     #[test]
     fn http_choose_returns_default_for_no_accept() {
-        let offers = VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("text/plain")),
-            VmValue::String(Rc::from("application/json")),
+        let offers = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("text/plain")),
+            VmValue::String(std::sync::Arc::from("application/json")),
         ]));
         let chosen = http_choose_impl(&[VmValue::Nil, offers], &mut String::new()).unwrap();
         assert_eq!(chosen.display(), "text/plain");
@@ -1237,15 +1272,15 @@ mod tests {
 
     #[test]
     fn http_choose_overrides_default_with_explicit() {
-        let offers = VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("text/plain")),
-            VmValue::String(Rc::from("application/json")),
+        let offers = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("text/plain")),
+            VmValue::String(std::sync::Arc::from("application/json")),
         ]));
         let chosen = http_choose_impl(
             &[
                 VmValue::Nil,
                 offers,
-                VmValue::String(Rc::from("application/json")),
+                VmValue::String(std::sync::Arc::from("application/json")),
             ],
             &mut String::new(),
         )
@@ -1255,9 +1290,11 @@ mod tests {
 
     #[test]
     fn http_choose_wildcard_accept_yields_default() {
-        let offers = VmValue::List(Rc::new(vec![VmValue::String(Rc::from("application/json"))]));
+        let offers = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+            std::sync::Arc::from("application/json"),
+        )]));
         let chosen = http_choose_impl(
-            &[VmValue::String(Rc::from("*/*")), offers],
+            &[VmValue::String(std::sync::Arc::from("*/*")), offers],
             &mut String::new(),
         )
         .unwrap();
@@ -1266,7 +1303,7 @@ mod tests {
 
     #[test]
     fn http_not_modified_envelope_carries_etag() {
-        let etag = VmValue::String(Rc::from("\"abc\""));
+        let etag = VmValue::String(std::sync::Arc::from("\"abc\""));
         let response = http_not_modified_impl(&[etag, VmValue::Nil], &mut String::new()).unwrap();
         let map = dict(&response);
         assert!(matches!(map.get("status"), Some(VmValue::Int(304))));
@@ -1283,17 +1320,17 @@ mod tests {
     #[test]
     fn http_push_hints_appends_link_headers_with_inferred_as() {
         let envelope = http_ok_impl(
-            &[VmValue::Dict(Rc::new(BTreeMap::new()))],
+            &[VmValue::Dict(std::sync::Arc::new(BTreeMap::new()))],
             &mut String::new(),
         )
         .unwrap();
-        let paths = VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("/main.css")),
-            VmValue::String(Rc::from("/app.js")),
-            VmValue::String(Rc::from("/hero.webp")),
-            VmValue::String(Rc::from("/inter.woff2")),
-            VmValue::String(Rc::from("/manifest.json")),
-            VmValue::String(Rc::from("/unknown.xyz")),
+        let paths = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("/main.css")),
+            VmValue::String(std::sync::Arc::from("/app.js")),
+            VmValue::String(std::sync::Arc::from("/hero.webp")),
+            VmValue::String(std::sync::Arc::from("/inter.woff2")),
+            VmValue::String(std::sync::Arc::from("/manifest.json")),
+            VmValue::String(std::sync::Arc::from("/unknown.xyz")),
         ]));
         let response =
             http_push_hints_impl(&[envelope, paths], &mut String::new()).expect("push_hints");
@@ -1329,9 +1366,9 @@ mod tests {
     #[test]
     fn http_push_hints_handles_querystring_in_path() {
         let envelope = http_ok_impl(&[VmValue::Nil], &mut String::new()).unwrap();
-        let paths = VmValue::List(Rc::new(vec![VmValue::String(Rc::from(
-            "/static/app.js?v=42",
-        ))]));
+        let paths = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+            std::sync::Arc::from("/static/app.js?v=42"),
+        )]));
         let response =
             http_push_hints_impl(&[envelope, paths], &mut String::new()).expect("push_hints");
         let map = dict(&response);
@@ -1351,11 +1388,13 @@ mod tests {
 
     #[test]
     fn http_push_hints_rejects_untagged_envelope() {
-        let plain = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let plain = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "status".to_string(),
             VmValue::Int(200),
         )])));
-        let paths = VmValue::List(Rc::new(vec![VmValue::String(Rc::from("/main.css"))]));
+        let paths = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+            std::sync::Arc::from("/main.css"),
+        )]));
         let result = http_push_hints_impl(&[plain, paths], &mut String::new());
         assert!(
             matches!(result, Err(VmError::Thrown(_))),
@@ -1368,16 +1407,18 @@ mod tests {
         let envelope = http_reply_impl(
             &[
                 VmValue::Int(200),
-                VmValue::Dict(Rc::new(BTreeMap::new())),
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "Link".to_string(),
-                    VmValue::String(Rc::from("</legacy.css>; rel=preload; as=style")),
+                    VmValue::String(std::sync::Arc::from("</legacy.css>; rel=preload; as=style")),
                 )]))),
             ],
             &mut String::new(),
         )
         .unwrap();
-        let paths = VmValue::List(Rc::new(vec![VmValue::String(Rc::from("/app.js"))]));
+        let paths = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+            std::sync::Arc::from("/app.js"),
+        )]));
         let response = http_push_hints_impl(&[envelope, paths], &mut String::new()).unwrap();
         let map = dict(&response);
         let headers = map
@@ -1395,18 +1436,18 @@ mod tests {
 
     #[test]
     fn http_upgrade_ws_envelope_negotiates_subprotocol() {
-        let req = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let req = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "headers".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "Sec-WebSocket-Protocol".to_string(),
-                VmValue::String(Rc::from("v0.harn, v1.harn")),
+                VmValue::String(std::sync::Arc::from("v0.harn, v1.harn")),
             )]))),
         )])));
-        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "subprotocols".to_string(),
-            VmValue::List(Rc::new(vec![
-                VmValue::String(Rc::from("v1.harn")),
-                VmValue::String(Rc::from("v2.harn")),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from("v1.harn")),
+                VmValue::String(std::sync::Arc::from("v2.harn")),
             ])),
         )])));
         let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
@@ -1447,18 +1488,18 @@ mod tests {
         // disagree (server-order picked v1; client-order picks v2).
         // The envelope MUST match what the upgrade handshake echoes
         // back, so we honour client preference everywhere.
-        let req = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let req = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "headers".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "Sec-WebSocket-Protocol".to_string(),
-                VmValue::String(Rc::from("v2.harn, v1.harn")),
+                VmValue::String(std::sync::Arc::from("v2.harn, v1.harn")),
             )]))),
         )])));
-        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "subprotocols".to_string(),
-            VmValue::List(Rc::new(vec![
-                VmValue::String(Rc::from("v1.harn")),
-                VmValue::String(Rc::from("v2.harn")),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from("v1.harn")),
+                VmValue::String(std::sync::Arc::from("v2.harn")),
             ])),
         )])));
         let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
@@ -1474,17 +1515,19 @@ mod tests {
 
     #[test]
     fn parse_envelope_round_trips_ws_upgrade_marker() {
-        let req = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let req = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "headers".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "Sec-WebSocket-Protocol".to_string(),
-                VmValue::String(Rc::from("v1.harn")),
+                VmValue::String(std::sync::Arc::from("v1.harn")),
             )]))),
         )])));
-        let options = VmValue::Dict(Rc::new(BTreeMap::from([
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             (
                 "subprotocols".to_string(),
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("v1.harn"))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from("v1.harn"),
+                )])),
             ),
             ("idle_ping_ms".to_string(), VmValue::Int(15_000)),
         ])));
@@ -1500,7 +1543,7 @@ mod tests {
 
     #[test]
     fn http_upgrade_ws_falls_through_when_no_subprotocols_offered() {
-        let req = VmValue::Dict(Rc::new(BTreeMap::new()));
+        let req = VmValue::Dict(std::sync::Arc::new(BTreeMap::new()));
         let response = http_upgrade_ws_impl(&[req], &mut String::new()).unwrap();
         let map = dict(&response);
         let upgrade = map

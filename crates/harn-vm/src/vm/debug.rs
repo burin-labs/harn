@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::chunk::{Chunk, Constant};
 use crate::value::{VmError, VmValue};
@@ -613,7 +613,7 @@ impl Vm {
 
         let local_slots = Self::fresh_local_slots(&chunk);
         self.frames.push(CallFrame {
-            chunk: Rc::new(chunk),
+            chunk: Arc::new(chunk),
             ip: 0,
             stack_base: saved_stack_len,
             saved_env,

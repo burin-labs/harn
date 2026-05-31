@@ -12,6 +12,7 @@ use harn_vm::VmValue;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
 
@@ -1070,17 +1071,17 @@ async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
     let mut args = BTreeMap::new();
     args.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.as_str())),
+        VmValue::String(Arc::from(session_id.as_str())),
     );
     args.insert(
         "path".to_string(),
-        VmValue::String(Rc::from(file.to_string_lossy().as_ref())),
+        VmValue::String(Arc::from(file.to_string_lossy().as_ref())),
     );
-    args.insert("content".to_string(), VmValue::String(Rc::from("draft")));
+    args.insert("content".to_string(), VmValue::String(Arc::from("draft")));
     (registry
         .find("hostlib_tools_write_file")
         .expect("write_file builtin")
-        .handler)(&[VmValue::Dict(Rc::new(args))])
+        .handler)(&[VmValue::Dict(Arc::new(args))])
     .expect("stage write");
     assert!(!file.exists(), "ACP staged mode should defer disk writes");
 
@@ -1204,12 +1205,12 @@ fn normalize_host_capabilities_wraps_array_entries_in_ops_dicts() {
     let mut root = BTreeMap::new();
     root.insert(
         "project".to_string(),
-        VmValue::List(Rc::new(vec![VmValue::String(Rc::from(
+        VmValue::List(Arc::new(vec![VmValue::String(Arc::from(
             "scope_test_command",
         ))])),
     );
 
-    let normalized = normalize_host_capability_manifest(VmValue::Dict(Rc::new(root)));
+    let normalized = normalize_host_capability_manifest(VmValue::Dict(Arc::new(root)));
     let manifest = normalized.as_dict().expect("dict manifest");
     let project = manifest
         .get("project")
@@ -1233,14 +1234,17 @@ fn normalize_host_capabilities_derives_ops_from_operation_metadata() {
     let mut operations = BTreeMap::new();
     operations.insert(
         "get_default_shell".to_string(),
-        VmValue::Dict(Rc::new(BTreeMap::new())),
+        VmValue::Dict(Arc::new(BTreeMap::new())),
     );
     let mut process = BTreeMap::new();
-    process.insert("operations".to_string(), VmValue::Dict(Rc::new(operations)));
+    process.insert(
+        "operations".to_string(),
+        VmValue::Dict(Arc::new(operations)),
+    );
     let mut root = BTreeMap::new();
-    root.insert("process".to_string(), VmValue::Dict(Rc::new(process)));
+    root.insert("process".to_string(), VmValue::Dict(Arc::new(process)));
 
-    let normalized = normalize_host_capability_manifest(VmValue::Dict(Rc::new(root)));
+    let normalized = normalize_host_capability_manifest(VmValue::Dict(Arc::new(root)));
     let manifest = normalized.as_dict().expect("dict manifest");
     let process = manifest
         .get("process")

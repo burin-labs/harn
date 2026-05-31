@@ -2,7 +2,6 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::rc::Rc;
 
 use crate::orchestration::{
     builtin_ceiling, install_current_mutation_session, install_workflow_skill_context,
@@ -105,10 +104,10 @@ pub(super) fn parse_options_arg(args: &[VmValue], index: usize) -> BTreeMap<Stri
 }
 
 pub(super) fn string_list_to_vm(values: &[String]) -> VmValue {
-    VmValue::List(Rc::new(
+    VmValue::List(std::sync::Arc::new(
         values
             .iter()
-            .map(|value| VmValue::String(Rc::from(value.as_str())))
+            .map(|value| VmValue::String(std::sync::Arc::from(value.as_str())))
             .collect(),
     ))
 }
@@ -167,11 +166,11 @@ pub(super) fn workflow_control_to_vm(
     let mut dict = BTreeMap::new();
     dict.insert(
         "state_id".to_string(),
-        VmValue::String(Rc::from(state.state_id.as_str())),
+        VmValue::String(std::sync::Arc::from(state.state_id.as_str())),
     );
     dict.insert(
         "run_id".to_string(),
-        VmValue::String(Rc::from(state.run.id.as_str())),
+        VmValue::String(std::sync::Arc::from(state.run.id.as_str())),
     );
     dict.insert(
         "ready_nodes".to_string(),
@@ -188,7 +187,7 @@ pub(super) fn workflow_control_to_vm(
     if include_graph {
         dict.insert("graph".to_string(), workflow_graph_to_vm(&state.graph)?);
     }
-    Ok(VmValue::Dict(Rc::new(dict)))
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 pub(super) fn insert_workflow_state(state: WorkflowRunState) {
@@ -269,10 +268,10 @@ fn validate_workflow_skill_registry(value: VmValue) -> Option<VmValue> {
             let mut dict = BTreeMap::new();
             dict.insert(
                 "_type".to_string(),
-                VmValue::String(Rc::from("skill_registry")),
+                VmValue::String(std::sync::Arc::from("skill_registry")),
             );
             dict.insert("skills".to_string(), VmValue::List(list.clone()));
-            Some(VmValue::Dict(Rc::new(dict)))
+            Some(VmValue::Dict(std::sync::Arc::new(dict)))
         }
         _ => None,
     }
@@ -418,7 +417,7 @@ pub(super) fn prepare_workflow_state(
     let audit_input = options
         .get("audit")
         .cloned()
-        .unwrap_or_else(|| VmValue::Dict(Rc::new(BTreeMap::new())));
+        .unwrap_or_else(|| VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
     let mut mutation_session: MutationSessionRecord =
         serde_json::from_value(crate::llm::vm_value_to_json(&audit_input))
             .map_err(|e| VmError::Runtime(format!("workflow_execute: audit parse error: {e}")))?;
@@ -669,7 +668,7 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
     let mut dict = BTreeMap::new();
     dict.insert(
         "kind".to_string(),
-        VmValue::String(Rc::from(scope.node.kind.as_str())),
+        VmValue::String(std::sync::Arc::from(scope.node.kind.as_str())),
     );
     match &scope.execution {
         StageExecution::Precomputed(executed) => {
@@ -687,14 +686,14 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
             } else {
                 dict.insert(
                     "prompt".to_string(),
-                    VmValue::String(Rc::from(prepared.prompt.as_str())),
+                    VmValue::String(std::sync::Arc::from(prepared.prompt.as_str())),
                 );
                 dict.insert(
                     "system".to_string(),
                     prepared
                         .system
                         .as_ref()
-                        .map(|system| VmValue::String(Rc::from(system.as_str())))
+                        .map(|system| VmValue::String(std::sync::Arc::from(system.as_str())))
                         .unwrap_or(VmValue::Nil),
                 );
                 dict.insert(
@@ -703,11 +702,11 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
                 );
                 dict.insert(
                     "llm_options".to_string(),
-                    VmValue::Dict(Rc::new(prepared.llm_options.clone())),
+                    VmValue::Dict(std::sync::Arc::new(prepared.llm_options.clone())),
                 );
                 dict.insert(
                     "agent_loop_options".to_string(),
-                    VmValue::Dict(Rc::new(prepared.agent_loop_options.clone())),
+                    VmValue::Dict(std::sync::Arc::new(prepared.agent_loop_options.clone())),
                 );
             }
         }
@@ -721,11 +720,11 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
             dict.insert("artifacts".to_string(), to_vm(artifacts)?);
             dict.insert(
                 "map_options".to_string(),
-                VmValue::Dict(Rc::new(map_options.clone())),
+                VmValue::Dict(std::sync::Arc::new(map_options.clone())),
             );
         }
     }
-    Ok(VmValue::Dict(Rc::new(dict)))
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 fn workflow_stage_error_result(error: &VmError) -> serde_json::Value {
@@ -1063,7 +1062,7 @@ pub(super) async fn prepare_workflow_stage_state(
         let mut map_options = BTreeMap::new();
         map_options.insert(
             "task".to_string(),
-            VmValue::String(Rc::from(state.run.task.clone())),
+            VmValue::String(std::sync::Arc::from(state.run.task.clone())),
         );
         if let Some(transcript) = transcript.clone() {
             map_options.insert("transcript".to_string(), transcript);

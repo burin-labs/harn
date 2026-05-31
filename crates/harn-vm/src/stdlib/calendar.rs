@@ -1,7 +1,6 @@
 //! Civil calendar helpers backing the `std/calendar` Harn module.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 
 use chrono::{
     DateTime, Datelike, Duration as ChronoDuration, LocalResult, Months, NaiveDate, NaiveDateTime,
@@ -282,7 +281,7 @@ fn calendar_parts_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
         "timezone",
     )?;
     let dt = datetime_like_arg(args.first(), timezone, "__calendar_parts")?;
-    Ok(VmValue::Dict(Rc::new(parts_dict(
+    Ok(VmValue::Dict(std::sync::Arc::new(parts_dict(
         dt.with_timezone(&timezone),
     ))))
 }
@@ -395,7 +394,7 @@ fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
         current = add_calendar_units(current, 1, unit, disambiguation, "__calendar_date_range")?
             .with_timezone(&timezone);
     }
-    Ok(VmValue::List(Rc::new(out)))
+    Ok(VmValue::List(std::sync::Arc::new(out)))
 }
 
 #[harn_builtin(
@@ -437,7 +436,7 @@ fn calendar_next_weekday_builtin(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(sig = "__calendar_countries() -> list", category = "calendar")]
 fn calendar_countries_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         COUNTRIES.iter().map(country_value).collect(),
     )))
 }
@@ -461,9 +460,9 @@ fn calendar_supported_holiday_calendars_builtin(
     _args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(Rc::new(vec![holiday_calendar_info(
-        DEFAULT_HOLIDAY_CALENDAR,
-    )])))
+    Ok(VmValue::List(std::sync::Arc::new(vec![
+        holiday_calendar_info(DEFAULT_HOLIDAY_CALENDAR),
+    ])))
 }
 
 #[harn_builtin(
@@ -476,7 +475,7 @@ fn calendar_holidays_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
         .map_err(|_| vm_error("__calendar_holidays: year out of range"))?;
     let mut holidays = supported_holidays_for_year(calendar, year)?;
     holidays.sort_by_key(|holiday| holiday.date);
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         holidays.iter().map(holiday_value).collect(),
     )))
 }
@@ -694,7 +693,7 @@ fn calendar_business_window_builtin(
     } else {
         "after_window"
     };
-    Ok(VmValue::Dict(Rc::new(BTreeMap::from([
+    Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         ("inside".to_string(), VmValue::Bool(inside)),
         ("business_day".to_string(), VmValue::Bool(business_day)),
         ("reason".to_string(), string_value(reason)),
@@ -1006,7 +1005,7 @@ fn country_value(country: &CountryMeta) -> VmValue {
     } else {
         VmValue::Nil
     };
-    VmValue::Dict(Rc::new(BTreeMap::from([
+    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         ("code".to_string(), string_value(country.code)),
         ("name".to_string(), string_value(country.name)),
         (
@@ -1034,7 +1033,7 @@ fn country_value(country: &CountryMeta) -> VmValue {
 }
 
 fn holiday_calendar_info(name: &'static str) -> VmValue {
-    VmValue::Dict(Rc::new(BTreeMap::from([
+    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         ("name".to_string(), string_value(name)),
         ("country".to_string(), string_value("US")),
         (
@@ -1212,7 +1211,7 @@ fn last_weekday_of_month(year: i32, month: u32, weekday: Weekday) -> NaiveDate {
 }
 
 fn holiday_value(holiday: &Holiday) -> VmValue {
-    VmValue::Dict(Rc::new(BTreeMap::from([
+    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         (
             "date".to_string(),
             string_value(&holiday.date.format("%Y-%m-%d").to_string()),
@@ -1598,9 +1597,11 @@ fn bool_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<Optio
 }
 
 fn string_value(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value))
+    VmValue::String(std::sync::Arc::from(value))
 }
 
 fn string_list_value<'a>(items: impl IntoIterator<Item = &'a str>) -> VmValue {
-    VmValue::List(Rc::new(items.into_iter().map(string_value).collect()))
+    VmValue::List(std::sync::Arc::new(
+        items.into_iter().map(string_value).collect(),
+    ))
 }

@@ -24,7 +24,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::VmValue;
 
@@ -62,18 +61,18 @@ impl LlmRenderContext {
         let mut dict = BTreeMap::new();
         dict.insert(
             "provider".to_string(),
-            VmValue::String(Rc::from(self.provider.as_str())),
+            VmValue::String(std::sync::Arc::from(self.provider.as_str())),
         );
         dict.insert(
             "model".to_string(),
-            VmValue::String(Rc::from(self.model.as_str())),
+            VmValue::String(std::sync::Arc::from(self.model.as_str())),
         );
         dict.insert(
             "family".to_string(),
-            VmValue::String(Rc::from(self.family.as_str())),
+            VmValue::String(std::sync::Arc::from(self.family.as_str())),
         );
         dict.insert("capabilities".to_string(), self.capabilities.clone());
-        VmValue::Dict(Rc::new(dict))
+        VmValue::Dict(std::sync::Arc::new(dict))
     }
 }
 

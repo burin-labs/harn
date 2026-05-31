@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use futures::StreamExt;
@@ -45,7 +45,7 @@ struct DispatchKeys {
 }
 
 struct MonitorWaitOptions {
-    condition: Rc<VmClosure>,
+    condition: Arc<VmClosure>,
     source: MonitorSource,
     timeout: StdDuration,
     poll_interval: StdDuration,
@@ -53,8 +53,8 @@ struct MonitorWaitOptions {
 }
 
 struct MonitorSource {
-    poll: Rc<VmClosure>,
-    push_filter: Option<Rc<VmClosure>>,
+    poll: Arc<VmClosure>,
+    push_filter: Option<Arc<VmClosure>>,
     prefers_push: bool,
     label: Option<String>,
 }
@@ -292,7 +292,7 @@ async fn wait_for_wakeup(
     push_stream: &mut Option<
         futures::stream::BoxStream<'static, Result<(u64, LogEvent), crate::event_log::LogError>>,
     >,
-    push_filter: Option<&Rc<VmClosure>>,
+    push_filter: Option<&Arc<VmClosure>>,
     delay: StdDuration,
 ) -> Result<Option<JsonValue>, VmError> {
     let sleep = tokio::time::sleep(delay);
@@ -422,7 +422,7 @@ fn required_closure(
     map: &BTreeMap<String, VmValue>,
     field: &str,
     builtin: &str,
-) -> Result<Rc<VmClosure>, VmError> {
+) -> Result<Arc<VmClosure>, VmError> {
     optional_closure(map, field, builtin)?
         .ok_or_else(|| VmError::Runtime(format!("{builtin}: {field} must be a closure")))
 }
@@ -431,7 +431,7 @@ fn optional_closure(
     map: &BTreeMap<String, VmValue>,
     field: &str,
     builtin: &str,
-) -> Result<Option<Rc<VmClosure>>, VmError> {
+) -> Result<Option<Arc<VmClosure>>, VmError> {
     let Some(value) = map.get(field) else {
         return Ok(None);
     };
@@ -498,7 +498,7 @@ fn bool_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<boo
 async fn call_closure(
     ctx: &AsyncBuiltinCtx,
     vm: &mut Vm,
-    closure: &Rc<VmClosure>,
+    closure: &Arc<VmClosure>,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
     let result = vm.call_closure_pub(closure, args).await;
@@ -589,7 +589,7 @@ fn monitor_headers(wait_id: &str, source_label: Option<&str>) -> BTreeMap<String
 
 fn monitor_record_to_value(record: MonitorWaitRecord) -> Result<VmValue, VmError> {
     if record.status == MonitorWaitStatus::Interrupted {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "kind:cancelled:VM cancelled by host",
         ))));
     }

@@ -1,7 +1,6 @@
 //! Buffered multipart/form-data helpers for inbound request bodies.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use sha2::{Digest, Sha256};
 
@@ -34,19 +33,19 @@ fn builtin_error(builtin: &str, message: impl std::fmt::Display) -> VmError {
 }
 
 fn string_value(value: impl Into<String>) -> VmValue {
-    VmValue::String(Rc::from(value.into()))
+    VmValue::String(std::sync::Arc::from(value.into()))
 }
 
 fn bytes_value(bytes: Vec<u8>) -> VmValue {
-    VmValue::Bytes(Rc::new(bytes))
+    VmValue::Bytes(std::sync::Arc::new(bytes))
 }
 
 fn dict_value(fields: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(Rc::new(fields))
+    VmValue::Dict(std::sync::Arc::new(fields))
 }
 
 fn list_value(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(Rc::new(items))
+    VmValue::List(std::sync::Arc::new(items))
 }
 
 fn nil_or_string(value: Option<String>) -> VmValue {

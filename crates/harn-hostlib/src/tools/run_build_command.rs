@@ -15,7 +15,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -96,13 +96,13 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
             entry.insert(
                 "severity".to_string(),
-                VmValue::String(Rc::from(d.severity.as_str())),
+                VmValue::String(Arc::from(d.severity.as_str())),
             );
-            entry.insert("message".to_string(), VmValue::String(Rc::from(d.message)));
+            entry.insert("message".to_string(), VmValue::String(Arc::from(d.message)));
             entry.insert(
                 "path".to_string(),
                 d.path
-                    .map(|p| VmValue::String(Rc::from(p)))
+                    .map(|p| VmValue::String(Arc::from(p)))
                     .unwrap_or(VmValue::Nil),
             );
             entry.insert(
@@ -113,7 +113,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 "column".to_string(),
                 d.column.map(VmValue::Int).unwrap_or(VmValue::Nil),
             );
-            VmValue::Dict(Rc::new(entry))
+            VmValue::Dict(Arc::new(entry))
         })
         .collect();
 

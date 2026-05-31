@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -62,7 +60,9 @@ pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
 #[harn_builtin(sig = "bytes_from_string(text: string?) -> bytes", category = "bytes")]
 fn bytes_from_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = expect_string(args, 0, "bytes_from_string")?;
-    Ok(VmValue::Bytes(Rc::new(text.as_bytes().to_vec())))
+    Ok(VmValue::Bytes(std::sync::Arc::new(
+        text.as_bytes().to_vec(),
+    )))
 }
 
 #[harn_builtin(sig = "bytes_to_string(input: bytes) -> string", category = "bytes")]
@@ -70,7 +70,7 @@ fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let bytes = expect_bytes(args, 0, "bytes_to_string")?;
     let text = std::str::from_utf8(bytes)
         .map_err(|error| runtime_error(format!("bytes_to_string: {error}")))?;
-    Ok(VmValue::String(Rc::from(text)))
+    Ok(VmValue::String(std::sync::Arc::from(text)))
 }
 
 #[harn_builtin(
@@ -79,7 +79,7 @@ fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = expect_bytes(args, 0, "bytes_to_string_lossy")?;
-    Ok(VmValue::String(Rc::from(
+    Ok(VmValue::String(std::sync::Arc::from(
         String::from_utf8_lossy(bytes).into_owned(),
     )))
 }
@@ -87,7 +87,7 @@ fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 #[harn_builtin(sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
 fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = expect_bytes(args, 0, "bytes_to_hex")?;
-    Ok(VmValue::String(Rc::from(hex::encode(bytes))))
+    Ok(VmValue::String(std::sync::Arc::from(hex::encode(bytes))))
 }
 
 #[harn_builtin(sig = "bytes_from_hex(text: string?) -> bytes", category = "bytes")]
@@ -95,7 +95,7 @@ fn bytes_from_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let text = expect_string(args, 0, "bytes_from_hex")?;
     let bytes =
         hex::decode(text).map_err(|error| runtime_error(format!("bytes_from_hex: {error}")))?;
-    Ok(VmValue::Bytes(Rc::new(bytes)))
+    Ok(VmValue::Bytes(std::sync::Arc::new(bytes)))
 }
 
 #[harn_builtin(sig = "bytes_to_base64(input: bytes) -> string", category = "bytes")]
@@ -103,7 +103,7 @@ fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     use base64::Engine;
 
     let bytes = expect_bytes(args, 0, "bytes_to_base64")?;
-    Ok(VmValue::String(Rc::from(
+    Ok(VmValue::String(std::sync::Arc::from(
         base64::engine::general_purpose::STANDARD.encode(bytes),
     )))
 }
@@ -116,7 +116,7 @@ fn bytes_from_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(text.as_bytes())
         .map_err(|error| runtime_error(format!("bytes_from_base64: {error}")))?;
-    Ok(VmValue::Bytes(Rc::new(bytes)))
+    Ok(VmValue::Bytes(std::sync::Arc::new(bytes)))
 }
 
 #[harn_builtin(sig = "bytes_len(input: bytes) -> int", category = "bytes")]
@@ -135,7 +135,7 @@ fn bytes_concat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let mut out = Vec::with_capacity(left.len() + right.len());
     out.extend_from_slice(left);
     out.extend_from_slice(right);
-    Ok(VmValue::Bytes(Rc::new(out)))
+    Ok(VmValue::Bytes(std::sync::Arc::new(out)))
 }
 
 #[harn_builtin(
@@ -152,7 +152,7 @@ fn bytes_slice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     } else {
         bytes[start..end].to_vec()
     };
-    Ok(VmValue::Bytes(Rc::new(slice)))
+    Ok(VmValue::Bytes(std::sync::Arc::new(slice)))
 }
 
 #[harn_builtin(
@@ -198,11 +198,11 @@ mod tests {
     }
 
     fn s(v: &str) -> VmValue {
-        VmValue::String(Rc::from(v))
+        VmValue::String(std::sync::Arc::from(v))
     }
 
     fn b(v: &[u8]) -> VmValue {
-        VmValue::Bytes(Rc::new(v.to_vec()))
+        VmValue::Bytes(std::sync::Arc::new(v.to_vec()))
     }
 
     #[test]

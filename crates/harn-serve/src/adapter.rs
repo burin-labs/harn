@@ -15,7 +15,7 @@ struct DispatchJob {
 /// Dedicated single-threaded executor that runs [`DispatchCore::dispatch`]
 /// off the axum worker pool.
 ///
-/// `.harn` execution is `!Send` (the VM holds `Rc`-backed values), so it
+/// `.harn` execution is `!Send` (the VM holds `Arc`-backed values), so it
 /// cannot run on tokio's multi-threaded runtime directly. Each
 /// non-blocking HTTP transport (A2A, MCP) owns one of these: a thread
 /// running a current-thread runtime with a [`LocalSet`], fed by an

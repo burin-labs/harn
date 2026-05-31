@@ -10,9 +10,15 @@ use std::sync::{Arc, Mutex};
 
 fn make_msg(role: &str, content: &str) -> VmValue {
     let mut m: BTreeMap<String, VmValue> = BTreeMap::new();
-    m.insert("role".to_string(), VmValue::String(Rc::from(role)));
-    m.insert("content".to_string(), VmValue::String(Rc::from(content)));
-    VmValue::Dict(Rc::new(m))
+    m.insert(
+        "role".to_string(),
+        VmValue::String(std::sync::Arc::from(role)),
+    );
+    m.insert(
+        "content".to_string(),
+        VmValue::String(std::sync::Arc::from(content)),
+    );
+    VmValue::Dict(std::sync::Arc::new(m))
 }
 
 fn message_count(id: &str) -> usize {
@@ -505,16 +511,19 @@ fn inject_identified_user_message_emits_replayable_user_event() {
     register_sink(&id, Arc::new(CapturingSink(captured.clone())));
 
     let mut message = BTreeMap::new();
-    message.insert("role".to_string(), VmValue::String(Rc::from("user")));
+    message.insert(
+        "role".to_string(),
+        VmValue::String(std::sync::Arc::from("user")),
+    );
     message.insert(
         "content".to_string(),
-        VmValue::String(Rc::from("queued follow-up")),
+        VmValue::String(std::sync::Arc::from("queued follow-up")),
     );
     message.insert(
         "messageId".to_string(),
-        VmValue::String(Rc::from("msg_inj_test")),
+        VmValue::String(std::sync::Arc::from("msg_inj_test")),
     );
-    inject_message(&id, VmValue::Dict(Rc::new(message))).unwrap();
+    inject_message(&id, VmValue::Dict(std::sync::Arc::new(message))).unwrap();
 
     let events = captured.lock().expect("capture sink poisoned");
     assert_eq!(events.len(), 1);
@@ -738,29 +747,32 @@ fn child_sessions_record_parent_lineage() {
 fn branch_event_index_counts_non_message_events() {
     reset_session_store();
     let src = open_or_create(Some("branch-event-index".into()));
-    let transcript = VmValue::Dict(Rc::new(BTreeMap::from([
-        ("id".to_string(), VmValue::String(Rc::from(src.clone()))),
+    let transcript = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        (
+            "id".to_string(),
+            VmValue::String(std::sync::Arc::from(src.clone())),
+        ),
         (
             "messages".to_string(),
-            VmValue::List(Rc::new(vec![
+            VmValue::List(std::sync::Arc::new(vec![
                 make_msg("user", "a"),
                 make_msg("assistant", "b"),
             ])),
         ),
         (
             "events".to_string(),
-            VmValue::List(Rc::new(vec![
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "kind".to_string(),
-                    VmValue::String(Rc::from("message")),
+                    VmValue::String(std::sync::Arc::from("message")),
                 )]))),
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "kind".to_string(),
-                    VmValue::String(Rc::from("sub_agent_start")),
+                    VmValue::String(std::sync::Arc::from("sub_agent_start")),
                 )]))),
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "kind".to_string(),
-                    VmValue::String(Rc::from("message")),
+                    VmValue::String(std::sync::Arc::from("message")),
                 )]))),
             ])),
         ),

@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
@@ -789,11 +788,11 @@ fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
             .map(VmValue::Int)
             .or_else(|| value.as_f64().map(VmValue::Float))
             .unwrap_or(VmValue::Nil),
-        serde_json::Value::String(value) => VmValue::String(Rc::from(value.as_str())),
-        serde_json::Value::Array(items) => VmValue::List(Rc::new(
+        serde_json::Value::String(value) => VmValue::String(Arc::from(value.as_str())),
+        serde_json::Value::Array(items) => VmValue::List(Arc::new(
             items.iter().map(json_to_vm_value).collect::<Vec<_>>(),
         )),
-        serde_json::Value::Object(map) => VmValue::Dict(Rc::new(
+        serde_json::Value::Object(map) => VmValue::Dict(Arc::new(
             map.iter()
                 .map(|(key, value)| (key.clone(), json_to_vm_value(value)))
                 .collect(),
@@ -1266,15 +1265,15 @@ pub fn whoami(harness: Harness) -> string {
         // Structured guards (mcp/pg call counts, LLM preflight) carry the
         // dimension on the `limit` field.
         let structured = |limit: &str| {
-            harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(std::rc::Rc::new(
+            harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(std::sync::Arc::new(
                 std::collections::BTreeMap::from([
                     (
                         "category".to_string(),
-                        harn_vm::VmValue::String(std::rc::Rc::from("budget_exceeded")),
+                        harn_vm::VmValue::String(std::sync::Arc::from("budget_exceeded")),
                     ),
                     (
                         "limit".to_string(),
-                        harn_vm::VmValue::String(std::rc::Rc::from(limit)),
+                        harn_vm::VmValue::String(std::sync::Arc::from(limit)),
                     ),
                 ]),
             )))

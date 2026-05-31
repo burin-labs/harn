@@ -17,9 +17,9 @@
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -289,7 +289,7 @@ pub(crate) fn build_response(
     let mut sandbox = BTreeMap::new();
     sandbox.insert(
         "kind".to_string(),
-        VmValue::String(Rc::from(sandbox_kind())),
+        VmValue::String(Arc::from(sandbox_kind())),
     );
     sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
     builder = builder.dict("sandbox", sandbox);
@@ -311,7 +311,7 @@ pub(crate) fn running_response(
     let mut sandbox = BTreeMap::new();
     sandbox.insert(
         "kind".to_string(),
-        VmValue::String(Rc::from(sandbox_kind())),
+        VmValue::String(Arc::from(sandbox_kind())),
     );
     sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
     ResponseBuilder::new()

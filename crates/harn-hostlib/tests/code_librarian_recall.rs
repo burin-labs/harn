@@ -43,14 +43,14 @@ fn run_harn(source: &str) -> VmValue {
     })
 }
 
-fn extract_list(value: &VmValue) -> std::rc::Rc<Vec<VmValue>> {
+fn extract_list(value: &VmValue) -> std::sync::Arc<Vec<VmValue>> {
     match value {
         VmValue::List(l) => l.clone(),
         other => panic!("expected list, got {other:?}"),
     }
 }
 
-fn extract_dict(value: &VmValue) -> std::rc::Rc<BTreeMap<String, VmValue>> {
+fn extract_dict(value: &VmValue) -> std::sync::Arc<BTreeMap<String, VmValue>> {
     match value {
         VmValue::Dict(d) => d.clone(),
         other => panic!("expected dict, got {other:?}"),

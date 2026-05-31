@@ -466,14 +466,14 @@ fn arity_expect_for(func: &CompiledFunction) -> ArityExpect {
 mod tests {
     use super::*;
     use crate::chunk::Chunk;
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     fn vm_int(n: i64) -> VmValue {
         VmValue::Int(n)
     }
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(Rc::from(s))
+        VmValue::String(std::sync::Arc::from(s))
     }
 
     fn ty_int() -> TypeExpr {
@@ -501,7 +501,7 @@ mod tests {
             nominal_type_names: Vec::new(),
             params,
             default_start: None,
-            chunk: Rc::new(Chunk::new()),
+            chunk: Arc::new(Chunk::new()),
             is_generator: false,
             is_stream: false,
             has_rest_param: false,
@@ -550,8 +550,8 @@ mod tests {
     #[test]
     fn list_validates_elements() {
         let list_int = TypeExpr::List(Box::new(ty_int()));
-        let good = VmValue::List(Rc::new(vec![vm_int(1), vm_int(2)]));
-        let bad = VmValue::List(Rc::new(vec![vm_int(1), vm_string("x")]));
+        let good = VmValue::List(std::sync::Arc::new(vec![vm_int(1), vm_int(2)]));
+        let bad = VmValue::List(std::sync::Arc::new(vec![vm_int(1), vm_string("x")]));
         assert!(matches_type(&good, &list_int));
         assert!(!matches_type(&bad, &list_int));
     }
@@ -565,9 +565,12 @@ mod tests {
         }]);
         let mut good = std::collections::BTreeMap::new();
         good.insert("x".to_string(), vm_int(7));
-        assert!(matches_type(&VmValue::Dict(Rc::new(good)), &shape));
+        assert!(matches_type(
+            &VmValue::Dict(std::sync::Arc::new(good)),
+            &shape
+        ));
         assert!(!matches_type(
-            &VmValue::Dict(Rc::new(std::collections::BTreeMap::new())),
+            &VmValue::Dict(std::sync::Arc::new(std::collections::BTreeMap::new())),
             &shape
         ));
     }
@@ -633,10 +636,11 @@ mod tests {
 
     #[test]
     fn validate_user_call_uses_cached_runtime_guard_metadata() {
-        let string_schema = VmValue::Dict(Rc::new(std::collections::BTreeMap::from([(
-            "type".to_string(),
-            VmValue::String(Rc::from("string")),
-        )])));
+        let string_schema =
+            VmValue::Dict(std::sync::Arc::new(std::collections::BTreeMap::from([(
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("string")),
+            )])));
         let guard = RuntimeParamGuard::CanonicalSchema(
             crate::schema::canonical_param_schema(&string_schema).unwrap(),
         );

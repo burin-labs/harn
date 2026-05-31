@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::value_structural_hash_key;
@@ -23,7 +24,7 @@ thread_local! {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CanonicalParamSchema {
-    schema: Rc<std::collections::BTreeMap<String, VmValue>>,
+    schema: Arc<std::collections::BTreeMap<String, VmValue>>,
     object_like: bool,
 }
 
@@ -82,7 +83,7 @@ pub(crate) fn schema_result_value(
 
 pub(crate) fn schema_is_value(data: &VmValue, schema: &VmValue) -> Result<bool, VmError> {
     let normalized = canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     Ok(validate_schema_value(
         data,
         &normalized,
@@ -101,7 +102,7 @@ pub(crate) fn schema_expect_value(
     apply_defaults: bool,
 ) -> Result<VmValue, VmError> {
     let normalized = canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     let result = validate_schema_value(
         data,
         &normalized,
@@ -113,7 +114,7 @@ pub(crate) fn schema_expect_value(
     if result.errors.is_empty() {
         Ok(result.value)
     } else {
-        Err(VmError::Thrown(VmValue::String(Rc::from(
+        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             result.errors.join("; "),
         ))))
     }
@@ -153,46 +154,46 @@ pub(crate) fn schema_assert_canonical_param(
 
 pub(crate) fn schema_to_json_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     let normalized = canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     let json_schema = canonical_to_json_schema(&normalized, false)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     Ok(super::json_to_vm_value(&json_schema))
 }
 
 pub(crate) fn schema_to_openapi_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     let normalized = canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     let json_schema = canonical_to_json_schema(&normalized, true)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     Ok(super::json_to_vm_value(&json_schema))
 }
 
 pub(crate) fn schema_from_json_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))
 }
 
 pub(crate) fn schema_from_openapi_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))
 }
 
 pub(crate) fn schema_extend_value(base: &VmValue, overrides: &VmValue) -> Result<VmValue, VmError> {
     let base = canonicalize_schema_value(base)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     let overrides = canonicalize_schema_value(overrides)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     let base_dict = base.as_dict().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "schema_extend: schema must be a dict",
         )))
     })?;
     let overrides_dict = overrides.as_dict().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "schema_extend: schema must be a dict",
         )))
     })?;
-    Ok(VmValue::Dict(Rc::new(merge_schema_dicts(
+    Ok(VmValue::Dict(std::sync::Arc::new(merge_schema_dicts(
         base_dict,
         overrides_dict,
     ))))
@@ -200,33 +201,41 @@ pub(crate) fn schema_extend_value(base: &VmValue, overrides: &VmValue) -> Result
 
 pub(crate) fn schema_partial_value(schema: &VmValue) -> Result<VmValue, VmError> {
     let schema = canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     let schema_dict = schema.as_dict().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "schema_partial: schema must be a dict",
         )))
     })?;
-    Ok(VmValue::Dict(Rc::new(schema_partial_dict(schema_dict))))
+    Ok(VmValue::Dict(std::sync::Arc::new(schema_partial_dict(
+        schema_dict,
+    ))))
 }
 
 pub(crate) fn schema_pick_value(schema: &VmValue, keys: &[String]) -> Result<VmValue, VmError> {
     let schema = canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     let schema_dict = schema.as_dict().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "schema_pick: schema must be a dict",
         )))
     })?;
-    Ok(VmValue::Dict(Rc::new(schema_pick_dict(schema_dict, keys))))
+    Ok(VmValue::Dict(std::sync::Arc::new(schema_pick_dict(
+        schema_dict,
+        keys,
+    ))))
 }
 
 pub(crate) fn schema_omit_value(schema: &VmValue, keys: &[String]) -> Result<VmValue, VmError> {
     let schema = canonicalize_schema_value(schema)
-        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))?;
     let schema_dict = schema.as_dict().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "schema_omit: schema must be a dict",
         )))
     })?;
-    Ok(VmValue::Dict(Rc::new(schema_omit_dict(schema_dict, keys))))
+    Ok(VmValue::Dict(std::sync::Arc::new(schema_omit_dict(
+        schema_dict,
+        keys,
+    ))))
 }

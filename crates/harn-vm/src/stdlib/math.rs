@@ -1,9 +1,9 @@
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmRange, VmRngHandle, VmValue};
 use crate::vm::Vm;
+use parking_lot::Mutex;
 
 pub(crate) fn register_math_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
@@ -138,7 +138,7 @@ fn rng_seed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 fn random_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::RngExt;
     let val: f64 = if let Some(VmValue::Rng(handle)) = args.first() {
-        handle.rng.lock().expect("rng mutex poisoned").random()
+        handle.rng.lock().random()
     } else {
         rand::rng().random()
     };
@@ -163,11 +163,7 @@ fn random_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             return Ok(VmValue::Nil);
         }
         let val = if let Some(handle) = rng {
-            handle
-                .rng
-                .lock()
-                .expect("rng mutex poisoned")
-                .random_range(min..=max)
+            handle.rng.lock().random_range(min..=max)
         } else {
             rand::rng().random_range(min..=max)
         };
@@ -190,11 +186,7 @@ fn random_choice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         return Ok(VmValue::Nil);
     }
     let idx = if let Some(handle) = rng {
-        handle
-            .rng
-            .lock()
-            .expect("rng mutex poisoned")
-            .random_range(0..items.len())
+        handle.rng.lock().random_range(0..items.len())
     } else {
         rand::rng().random_range(0..items.len())
     };
@@ -213,11 +205,11 @@ fn random_shuffle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     };
     let mut shuffled = items.as_ref().clone();
     if let Some(handle) = rng {
-        shuffled.shuffle(&mut *handle.rng.lock().expect("rng mutex poisoned"));
+        shuffled.shuffle(&mut *handle.rng.lock());
     } else {
         shuffled.shuffle(&mut rand::rng());
     }
-    Ok(VmValue::List(Rc::new(shuffled)))
+    Ok(VmValue::List(std::sync::Arc::new(shuffled)))
 }
 
 #[harn_builtin(sig = "mean(...args: any) -> float", category = "math")]
@@ -591,7 +583,7 @@ mod tests {
     #[test]
     fn stddev_sample_error_names_stddev() {
         let mut vm = vm();
-        let values = VmValue::List(Rc::new(vec![VmValue::Int(1)]));
+        let values = VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1)]));
         let error = call(&mut vm, "stddev", vec![values, VmValue::Bool(true)])
             .expect_err("sample stddev needs at least two values");
         assert!(error.to_string().contains("sample stddev"));

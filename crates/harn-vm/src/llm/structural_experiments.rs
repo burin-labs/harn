@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
@@ -49,7 +48,7 @@ pub(crate) fn parse_structural_experiment_option(
             args: serde_json::json!({}),
             handler: StructuralExperimentHandler::Closure(VmValue::Closure(closure.clone())),
         })),
-        Some(other) => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        Some(other) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             format!(
                 "structural_experiment: expected string, dict, closure, nil, or false; got {}",
                 other.type_name()
@@ -107,7 +106,7 @@ fn parse_structural_experiment_dict(
     }
 
     let Some(name) = name else {
-        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "structural_experiment: dict form requires `name` or `transform`",
         ))));
     };
@@ -123,12 +122,12 @@ fn parse_structural_experiment_spec(
     }
     let (name, args) = if let Some(open_idx) = spec.find('(') {
         let close_idx = spec.rfind(')').ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "structural_experiment: missing closing `)`",
             )))
         })?;
         if close_idx < open_idx {
-            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "structural_experiment: invalid argument list",
             ))));
         }
@@ -170,7 +169,7 @@ fn build_builtin_experiment(
             StructuralExperimentHandler::BuiltIn(BuiltInStructuralExperiment::InvertedSystem)
         }
         other => {
-            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 format!("unknown structural experiment `{other}`"),
             ))))
         }
@@ -191,13 +190,13 @@ fn parse_named_args(input: &str) -> Result<serde_json::Map<String, serde_json::V
             continue;
         }
         let Some(colon_idx) = item.find(':') else {
-            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 format!("structural_experiment: expected `name: value`, got `{item}`"),
             ))));
         };
         let key = item[..colon_idx].trim();
         if key.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "structural_experiment: empty argument name",
             ))));
         }
@@ -256,12 +255,12 @@ fn parse_scalar_value(input: &str) -> Result<serde_json::Value, VmError> {
     }
     if input.starts_with('"') && input.ends_with('"') && input.len() >= 2 {
         return serde_json::from_str(input).map_err(|error| {
-            VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "structural_experiment: invalid string literal `{input}`: {error}"
             ))))
         });
     }
-    Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+    Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
         format!("structural_experiment: unsupported argument value `{input}`"),
     ))))
 }
@@ -299,15 +298,15 @@ pub(crate) async fn apply_structural_experiment(
             let mut ctx = BTreeMap::new();
             ctx.insert(
                 "messages".to_string(),
-                VmValue::List(std::rc::Rc::new(crate::llm::helpers::json_messages_to_vm(
-                    &current_messages,
-                ))),
+                VmValue::List(std::sync::Arc::new(
+                    crate::llm::helpers::json_messages_to_vm(&current_messages),
+                )),
             );
             ctx.insert(
                 "system".to_string(),
                 current_system
                     .as_ref()
-                    .map(|value| VmValue::String(std::rc::Rc::from(value.as_str())))
+                    .map(|value| VmValue::String(std::sync::Arc::from(value.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
             ctx.insert(
@@ -318,11 +317,11 @@ pub(crate) async fn apply_structural_experiment(
             );
             ctx.insert(
                 "label".to_string(),
-                VmValue::String(std::rc::Rc::from(config.label.as_str())),
+                VmValue::String(std::sync::Arc::from(config.label.as_str())),
             );
             ctx.insert(
                 "name".to_string(),
-                VmValue::String(std::rc::Rc::from(config.name.as_str())),
+                VmValue::String(std::sync::Arc::from(config.name.as_str())),
             );
             ctx.insert(
                 "args".to_string(),
@@ -331,7 +330,7 @@ pub(crate) async fn apply_structural_experiment(
             interpret_closure_result(
                 &current_messages,
                 current_system.as_deref(),
-                &vm.call_closure_pub(closure, &[VmValue::Dict(std::rc::Rc::new(ctx))])
+                &vm.call_closure_pub(closure, &[VmValue::Dict(std::sync::Arc::new(ctx))])
                     .await?,
                 &config,
             )?
@@ -371,7 +370,7 @@ fn interpret_closure_result(
                 Some(VmValue::List(list)) => crate::llm::helpers::vm_messages_to_json(list)?,
                 Some(VmValue::Nil) | None => current_messages.to_vec(),
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                         "structural_experiment transform: `messages` must be a list",
                     ))))
                 }
@@ -402,7 +401,7 @@ fn interpret_closure_result(
             }
             Ok((messages, system, serde_json::Value::Object(metadata)))
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "structural_experiment transform must return nil, a message list, or a dict",
         )))),
     }
@@ -447,7 +446,10 @@ fn apply_builtin_experiment(
             if let Some(index) = latest_string_user_message_index(&messages) {
                 if let Some(content) = message_text(&messages[index]).map(str::to_string) {
                     let mut bindings = BTreeMap::new();
-                    bindings.insert("content".to_string(), VmValue::String(Rc::from(content)));
+                    bindings.insert(
+                        "content".to_string(),
+                        VmValue::String(std::sync::Arc::from(content)),
+                    );
                     let rendered = crate::stdlib::template::render_stdlib_prompt_asset(
                         "llm/prompts/structural_chain_of_draft.harn.prompt",
                         Some(&bindings),

@@ -10,10 +10,10 @@ use harn_vm::bench_internals::{DirectCallStateReadFixture, DIRECT_CALL_STATE_REA
 ///
 /// `direct_call_state_read/copy_peek` exercises `peek_direct_call_state`,
 /// returning just the inner `DirectCallState` (still clones because it
-/// holds the `Rc<VmClosure>` cached target, but skips the wrapping
+/// holds the `Arc<VmClosure>` cached target, but skips the wrapping
 /// `InlineCacheEntry` discriminant init and padding-to-largest-variant
 /// memcpy). `direct_call_state_read/clone_control` exercises the
-/// pre-optimization `inline_cache_entry` path that cloned the full
+/// full `inline_cache_entry` path that clones the complete
 /// `InlineCacheEntry` enum on every dispatch.
 fn bench_direct_call_state_read(c: &mut Criterion) {
     let fixtures = DIRECT_CALL_STATE_READ_COUNTS

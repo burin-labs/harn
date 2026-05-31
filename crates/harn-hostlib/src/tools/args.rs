@@ -7,7 +7,7 @@
 //! structured exception.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -19,10 +19,10 @@ use crate::error::HostlibError;
 pub fn dict_arg(
     builtin: &'static str,
     args: &[VmValue],
-) -> Result<Rc<BTreeMap<String, VmValue>>, HostlibError> {
+) -> Result<Arc<BTreeMap<String, VmValue>>, HostlibError> {
     match args.first() {
         Some(VmValue::Dict(dict)) => Ok(dict.clone()),
-        Some(VmValue::Nil) | None => Ok(Rc::new(BTreeMap::new())),
+        Some(VmValue::Nil) | None => Ok(Arc::new(BTreeMap::new())),
         Some(other) => Err(HostlibError::InvalidParameter {
             builtin,
             param: "params",
@@ -194,10 +194,10 @@ where
     for (k, v) in entries {
         map.insert(k.into(), v);
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 /// Convenience constructor for `VmValue::String` from a `&str`.
 pub fn str_value(s: impl AsRef<str>) -> VmValue {
-    VmValue::String(Rc::from(s.as_ref()))
+    VmValue::String(Arc::from(s.as_ref()))
 }

@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
@@ -36,6 +35,6 @@ impl TemplateError {
 
 impl From<TemplateError> for VmError {
     fn from(e: TemplateError) -> Self {
-        VmError::Thrown(VmValue::String(Rc::from(e.message())))
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(e.message())))
     }
 }

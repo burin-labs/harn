@@ -9,7 +9,6 @@ use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -93,7 +92,7 @@ pub struct HostBridge {
 
 struct InProcessHost {
     module_path: PathBuf,
-    exported_functions: BTreeMap<String, Rc<VmClosure>>,
+    exported_functions: BTreeMap<String, Arc<VmClosure>>,
     vm: Vm,
 }
 
@@ -191,12 +190,15 @@ impl InProcessHost {
         let arg_count = closure.func.params.len();
         let args = if arg_count >= 3 {
             vec![
-                VmValue::String(Rc::from(tool_name.to_string())),
+                VmValue::String(std::sync::Arc::from(tool_name.to_string())),
                 tool_args,
                 full_payload,
             ]
         } else if arg_count == 2 {
-            vec![VmValue::String(Rc::from(tool_name.to_string())), tool_args]
+            vec![
+                VmValue::String(std::sync::Arc::from(tool_name.to_string())),
+                tool_args,
+            ]
         } else if arg_count == 1 {
             vec![full_payload]
         } else {

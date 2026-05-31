@@ -1477,11 +1477,11 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     // Always set so scripts can rely on `len(argv)`.
     let argv_values: Vec<harn_vm::VmValue> = script_argv
         .iter()
-        .map(|s| harn_vm::VmValue::String(std::rc::Rc::from(s.as_str())))
+        .map(|s| harn_vm::VmValue::String(std::sync::Arc::from(s.as_str())))
         .collect();
     vm.set_global(
         "argv",
-        harn_vm::VmValue::List(std::rc::Rc::new(argv_values)),
+        harn_vm::VmValue::List(std::sync::Arc::new(argv_values)),
     );
 
     // Install the script's `Harness` capability handle so the auto-call
@@ -2274,7 +2274,6 @@ pub(crate) async fn connect_mcp_servers(
     vm: &mut harn_vm::Vm,
 ) {
     use std::collections::BTreeMap;
-    use std::rc::Rc;
     use std::time::Duration;
 
     let mut mcp_dict: BTreeMap<String, harn_vm::VmValue> = BTreeMap::new();
@@ -2345,7 +2344,7 @@ pub(crate) async fn connect_mcp_servers(
     harn_vm::mcp_register_servers(registrations);
 
     if !mcp_dict.is_empty() {
-        vm.set_global("mcp", harn_vm::VmValue::Dict(Rc::new(mcp_dict)));
+        vm.set_global("mcp", harn_vm::VmValue::Dict(std::sync::Arc::new(mcp_dict)));
     }
 }
 

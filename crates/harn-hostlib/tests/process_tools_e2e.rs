@@ -16,7 +16,7 @@
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_hostlib::tools::ToolsCapability;
 use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
@@ -34,7 +34,7 @@ fn call(builtin: &str, request: BTreeMap<String, VmValue>) -> Result<VmValue, Ho
     let entry = registry
         .find(builtin)
         .unwrap_or_else(|| panic!("builtin {builtin} not registered"));
-    let arg = VmValue::Dict(Rc::new(request));
+    let arg = VmValue::Dict(Arc::new(request));
     (entry.handler)(&[arg])
 }
 
@@ -43,11 +43,11 @@ fn dict() -> BTreeMap<String, VmValue> {
 }
 
 fn vstr(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value))
+    VmValue::String(Arc::from(value))
 }
 
 fn vlist_str(values: &[&str]) -> VmValue {
-    VmValue::List(Rc::new(values.iter().map(|s| vstr(s)).collect()))
+    VmValue::List(Arc::new(values.iter().map(|s| vstr(s)).collect()))
 }
 
 fn require_dict(value: VmValue) -> BTreeMap<String, VmValue> {

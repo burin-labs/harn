@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::VmValue;
 
@@ -24,15 +23,18 @@ pub(super) fn normalize_message_blocks(content: Option<&VmValue>, role: &str) ->
             )]
         }
         Some(VmValue::Nil) | None => Vec::new(),
-        Some(other) => vec![VmValue::Dict(Rc::new(BTreeMap::from([
-            ("type".to_string(), VmValue::String(Rc::from("text"))),
+        Some(other) => vec![VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "type".to_string(),
+                VmValue::String(std::sync::Arc::from("text")),
+            ),
             (
                 "text".to_string(),
-                VmValue::String(Rc::from(other.display())),
+                VmValue::String(std::sync::Arc::from(other.display())),
             ),
             (
                 "visibility".to_string(),
-                VmValue::String(Rc::from(default_visibility)),
+                VmValue::String(std::sync::Arc::from(default_visibility)),
             ),
         ])))],
     }
@@ -42,19 +44,22 @@ fn normalize_transcript_block(block: &VmValue, default_visibility: &str) -> VmVa
     let mut normalized = block.as_dict().cloned().unwrap_or_else(|| {
         BTreeMap::from([(
             "text".to_string(),
-            VmValue::String(Rc::from(block.display())),
+            VmValue::String(std::sync::Arc::from(block.display())),
         )])
     });
     if !normalized.contains_key("type") {
-        normalized.insert("type".to_string(), VmValue::String(Rc::from("text")));
+        normalized.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("text")),
+        );
     }
     if !normalized.contains_key("visibility") {
         normalized.insert(
             "visibility".to_string(),
-            VmValue::String(Rc::from(default_visibility)),
+            VmValue::String(std::sync::Arc::from(default_visibility)),
         );
     }
-    VmValue::Dict(Rc::new(normalized))
+    VmValue::Dict(std::sync::Arc::new(normalized))
 }
 
 pub(super) fn overall_visibility(blocks: &[VmValue], default_visibility: &str) -> String {

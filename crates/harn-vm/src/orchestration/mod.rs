@@ -129,10 +129,9 @@ thread_local! {
 }
 
 /// Skill wiring threaded from `workflow_execute` into the per-stage
-/// agent loops via thread-local context. `VmValue` wraps `Rc` and is
-/// not `Send`, so we store it in a thread-local rather than a mutex —
-/// the workflow runner pins itself to one task via `LocalSet`, so
-/// every stage observes the same context.
+/// agent loops via thread-local context. The workflow runner pins itself
+/// to one task via `LocalSet`, so every stage observes the same context
+/// without cross-task synchronization.
 #[derive(Clone, Default)]
 pub struct WorkflowSkillContext {
     pub registry: Option<VmValue>,

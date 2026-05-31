@@ -92,17 +92,17 @@ pub(crate) struct ExceptionHandler {
     pub(crate) frame_depth: usize,
     pub(crate) env_scope_depth: usize,
     /// When present, this catch only handles errors whose enum_name matches.
-    pub(crate) error_type: Option<Rc<str>>,
+    pub(crate) error_type: Option<Arc<str>>,
 }
 
 /// Iterator state for for-in loops.
 pub(crate) enum IterState {
     Vec {
-        items: Rc<Vec<VmValue>>,
+        items: Arc<Vec<VmValue>>,
         idx: usize,
     },
     Dict {
-        entries: Rc<BTreeMap<String, VmValue>>,
+        entries: Arc<BTreeMap<String, VmValue>>,
         keys: Vec<String>,
         idx: usize,
     },
@@ -111,10 +111,10 @@ pub(crate) enum IterState {
         closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     },
     Generator {
-        gen: std::rc::Rc<crate::value::VmGenerator>,
+        gen: Arc<crate::value::VmGenerator>,
     },
     Stream {
-        stream: std::rc::Rc<crate::value::VmStream>,
+        stream: Arc<crate::value::VmStream>,
     },
     /// Step through a lazy range without materializing a Vec.
     /// Inclusive ranges keep `end` as an actual value so `i64::MAX to i64::MAX`
@@ -126,7 +126,7 @@ pub(crate) enum IterState {
         done: bool,
     },
     VmIter {
-        handle: std::rc::Rc<std::cell::RefCell<crate::vm::iter::VmIter>>,
+        handle: crate::vm::iter::VmIterHandle,
     },
 }
 
@@ -138,7 +138,7 @@ pub(crate) enum VmBuiltinDispatch {
 
 #[derive(Clone)]
 pub(crate) struct VmBuiltinEntry {
-    pub(crate) name: Rc<str>,
+    pub(crate) name: Arc<str>,
     pub(crate) dispatch: VmBuiltinDispatch,
 }
 
@@ -392,7 +392,7 @@ impl Vm {
             }
             if func.has_rest_param && i == param_count - 1 {
                 let rest_args = args.to_vec_from(i);
-                slots[i].value = VmValue::List(Rc::new(rest_args));
+                slots[i].value = VmValue::List(std::sync::Arc::new(rest_args));
                 slots[i].initialized = true;
                 slots[i].synced = synced;
             } else if let Some(arg) = args.get(i) {
@@ -435,7 +435,7 @@ impl Vm {
                 while env.scopes.len() <= scope_idx {
                     env.push_scope();
                 }
-                Rc::make_mut(&mut env.scopes[scope_idx].vars)
+                Arc::make_mut(&mut env.scopes[scope_idx].vars)
                     .insert(info.name.clone(), (slot.value.clone(), info.mutable));
             }
         }
@@ -649,7 +649,7 @@ impl Vm {
             None
         };
         self.frames.push(CallFrame {
-            chunk: Rc::new(chunk.clone()),
+            chunk: Arc::new(chunk.clone()),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
@@ -874,7 +874,6 @@ impl Default for Vm {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
 
     use super::*;
 
@@ -882,7 +881,10 @@ mod tests {
         let mut vm = Vm::new();
         crate::register_vm_stdlib(&mut vm);
         vm.set_source_info("baseline_test.harn", source);
-        vm.set_global("stable_global", VmValue::String(Rc::from("baseline")));
+        vm.set_global(
+            "stable_global",
+            VmValue::String(std::sync::Arc::from("baseline")),
+        );
         vm.baseline()
     }
 

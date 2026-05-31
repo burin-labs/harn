@@ -165,7 +165,7 @@ mod tests {
         // pre-fix code would have returned "local".
         let opts = Some(BTreeMap::from([(
             "model".to_string(),
-            VmValue::String(Rc::from("anthropic/claude-sonnet-4-6")),
+            VmValue::String(std::sync::Arc::from("anthropic/claude-sonnet-4-6")),
         )]));
         assert_eq!(vm_resolve_provider(&opts), "openrouter");
 
@@ -173,7 +173,7 @@ mod tests {
         // so users with a custom local server keep working.
         let opts_unknown = Some(BTreeMap::from([(
             "model".to_string(),
-            VmValue::String(Rc::from("my-custom-local-tag")),
+            VmValue::String(std::sync::Arc::from("my-custom-local-tag")),
         )]));
         assert_eq!(vm_resolve_provider(&opts_unknown), "local");
 
@@ -200,13 +200,19 @@ mod tests {
 
     #[test]
     fn vm_messages_to_json_preserves_tool_message_fields() {
-        let message = VmValue::Dict(Rc::new(BTreeMap::from([
-            ("role".to_string(), VmValue::String(Rc::from("tool"))),
+        let message = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(std::sync::Arc::from("tool")),
+            ),
             (
                 "tool_call_id".to_string(),
-                VmValue::String(Rc::from("call_123")),
+                VmValue::String(std::sync::Arc::from("call_123")),
             ),
-            ("content".to_string(), VmValue::String(Rc::from("ok"))),
+            (
+                "content".to_string(),
+                VmValue::String(std::sync::Arc::from("ok")),
+            ),
         ])));
 
         let json = vm_messages_to_json(&[message]).expect("message json");
@@ -226,13 +232,17 @@ mod tests {
         }
 
         let transcript = new_transcript_with(None, Vec::new(), None, None);
-        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "transcript".to_string(),
             transcript,
         )])));
-        let err = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, options])
-            .err()
-            .expect("transcript option is rejected");
+        let err = extract_llm_options(&[
+            VmValue::String(std::sync::Arc::from("")),
+            VmValue::Nil,
+            options,
+        ])
+        .err()
+        .expect("transcript option is rejected");
         let msg = match err {
             crate::value::VmError::Thrown(VmValue::String(s)) => s.to_string(),
             other => panic!("unexpected error: {other:?}"),
@@ -272,7 +282,7 @@ mod tests {
 
         let options = Some(BTreeMap::from([(
             "model_tier".to_string(),
-            VmValue::String(Rc::from("small")),
+            VmValue::String(std::sync::Arc::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
         let resolved = vm_resolve_model(&options, &provider);
@@ -317,7 +327,7 @@ mod tests {
 
         let options = Some(BTreeMap::from([(
             "model_tier".to_string(),
-            VmValue::String(Rc::from("small")),
+            VmValue::String(std::sync::Arc::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
         let resolved = vm_resolve_model(&options, &provider);
@@ -389,19 +399,25 @@ mod tests {
         reset_provider_key_cache();
 
         let mut opts: BTreeMap<String, VmValue> = BTreeMap::new();
-        opts.insert("provider".to_string(), VmValue::String(Rc::from("auto")));
+        opts.insert(
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("auto")),
+        );
         opts.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("local:gemma-4-e4b-it")),
+            VmValue::String(std::sync::Arc::from("local:gemma-4-e4b-it")),
         );
         assert_eq!(vm_resolve_provider(&Some(opts)), "ollama");
 
         // Case-insensitive: "AUTO" should behave the same.
         let mut opts2: BTreeMap<String, VmValue> = BTreeMap::new();
-        opts2.insert("provider".to_string(), VmValue::String(Rc::from("AUTO")));
+        opts2.insert(
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("AUTO")),
+        );
         opts2.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("local:foo/bar")),
+            VmValue::String(std::sync::Arc::from("local:foo/bar")),
         );
         assert_eq!(vm_resolve_provider(&Some(opts2)), "ollama");
 
@@ -409,9 +425,12 @@ mod tests {
         let mut opts3: BTreeMap<String, VmValue> = BTreeMap::new();
         opts3.insert(
             "provider".to_string(),
-            VmValue::String(Rc::from("anthropic")),
+            VmValue::String(std::sync::Arc::from("anthropic")),
         );
-        opts3.insert("model".to_string(), VmValue::String(Rc::from("local:foo")));
+        opts3.insert(
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("local:foo")),
+        );
         assert_eq!(vm_resolve_provider(&Some(opts3)), "anthropic");
 
         unsafe {
@@ -451,10 +470,13 @@ mod tests {
         crate::events::add_event_sink(sink.clone());
 
         let opts = BTreeMap::from([
-            ("provider".to_string(), VmValue::String(Rc::from("auto"))),
+            (
+                "provider".to_string(),
+                VmValue::String(std::sync::Arc::from("auto")),
+            ),
             (
                 "model".to_string(),
-                VmValue::String(Rc::from("unclassified-provider-model-for-test")),
+                VmValue::String(std::sync::Arc::from("unclassified-provider-model-for-test")),
             ),
         ]);
 
@@ -600,9 +622,12 @@ mod tests {
         let mut explicit_opts: BTreeMap<String, VmValue> = BTreeMap::new();
         explicit_opts.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("gpt-4o-mini")),
+            VmValue::String(std::sync::Arc::from("gpt-4o-mini")),
         );
-        explicit_opts.insert("provider".to_string(), VmValue::String(Rc::from("openai")));
+        explicit_opts.insert(
+            "provider".to_string(),
+            VmValue::String(std::sync::Arc::from("openai")),
+        );
         let opts = Some(explicit_opts);
         let provider = vm_resolve_provider(&opts);
         let model = vm_resolve_model(&opts, &provider);

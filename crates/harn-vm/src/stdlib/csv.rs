@@ -7,7 +7,6 @@
 //! becomes the header row (sorted for determinism).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -31,15 +30,15 @@ fn opt_delimiter(
         return Ok(default);
     };
     let VmValue::String(raw) = value else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{builtin}: {key} must be a string"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{builtin}: {key} must be a string"),
+        ))));
     };
     let bytes = raw.as_bytes();
     if bytes.len() != 1 || !bytes[0].is_ascii() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{builtin}: {key} must be exactly one ASCII character"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{builtin}: {key} must be exactly one ASCII character"),
+        ))));
     }
     Ok(bytes[0])
 }
@@ -75,34 +74,42 @@ fn csv_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     if has_headers {
         let headers = reader
             .headers()
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("csv_parse: {e}")))))?
+            .map_err(|e| {
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                    "csv_parse: {e}"
+                ))))
+            })?
             .clone();
         let mut rows: Vec<VmValue> = Vec::new();
         for record in reader.records() {
             let record = record.map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!("csv_parse: {e}"))))
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                    "csv_parse: {e}"
+                ))))
             })?;
             let mut row = BTreeMap::new();
             for (i, h) in headers.iter().enumerate() {
                 let cell = record.get(i).unwrap_or("");
-                row.insert(h.to_string(), VmValue::String(Rc::from(cell)));
+                row.insert(h.to_string(), VmValue::String(std::sync::Arc::from(cell)));
             }
-            rows.push(VmValue::Dict(Rc::new(row)));
+            rows.push(VmValue::Dict(std::sync::Arc::new(row)));
         }
-        Ok(VmValue::List(Rc::new(rows)))
+        Ok(VmValue::List(std::sync::Arc::new(rows)))
     } else {
         let mut rows: Vec<VmValue> = Vec::new();
         for record in reader.records() {
             let record = record.map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!("csv_parse: {e}"))))
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                    "csv_parse: {e}"
+                ))))
             })?;
             let cells: Vec<VmValue> = record
                 .iter()
-                .map(|c| VmValue::String(Rc::from(c)))
+                .map(|c| VmValue::String(std::sync::Arc::from(c)))
                 .collect();
-            rows.push(VmValue::List(Rc::new(cells)));
+            rows.push(VmValue::List(std::sync::Arc::new(cells)));
         }
-        Ok(VmValue::List(Rc::new(rows)))
+        Ok(VmValue::List(std::sync::Arc::new(rows)))
     }
 }
 
@@ -112,7 +119,7 @@ fn csv_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 )]
 fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::List(rows)) = args.first() else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "csv_stringify: expected a list of rows",
         ))));
     };
@@ -143,12 +150,14 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         let header: Vec<String> = keys.into_iter().collect();
         if want_headers {
             wtr.write_record(&header).map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!("csv_stringify: {e}"))))
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                    "csv_stringify: {e}"
+                ))))
             })?;
         }
         for row in rows.iter() {
             let VmValue::Dict(d) = row else {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "csv_stringify: mixed list/dict rows are not supported",
                 ))));
             };
@@ -157,30 +166,38 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
                 .map(|k| d.get(k).map(|v| v.display()).unwrap_or_default())
                 .collect();
             wtr.write_record(&cells).map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!("csv_stringify: {e}"))))
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                    "csv_stringify: {e}"
+                ))))
             })?;
         }
     } else {
         for row in rows.iter() {
             let VmValue::List(cells) = row else {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "csv_stringify: each row must be a list of cells (or use dict rows)",
                 ))));
             };
             let cells: Vec<String> = cells.iter().map(|v| v.display()).collect();
             wtr.write_record(&cells).map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!("csv_stringify: {e}"))))
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                    "csv_stringify: {e}"
+                ))))
             })?;
         }
     }
 
-    let bytes = wtr
-        .into_inner()
-        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("csv_stringify: {e}")))))?;
+    let bytes = wtr.into_inner().map_err(|e| {
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            "csv_stringify: {e}"
+        ))))
+    })?;
     String::from_utf8(bytes)
-        .map(|text| VmValue::String(Rc::from(text)))
+        .map(|text| VmValue::String(std::sync::Arc::from(text)))
         .map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!("csv_stringify: {error}"))))
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                "csv_stringify: {error}"
+            ))))
         })
 }
 
@@ -201,15 +218,15 @@ mod tests {
     }
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(Rc::from(value))
+        VmValue::String(std::sync::Arc::from(value))
     }
 
     fn list(items: Vec<VmValue>) -> VmValue {
-        VmValue::List(Rc::new(items))
+        VmValue::List(std::sync::Arc::new(items))
     }
 
     fn dict(items: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             items
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))

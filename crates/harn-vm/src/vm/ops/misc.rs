@@ -8,7 +8,7 @@ impl super::super::Vm {
             frame.ip += 2;
             let type_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (std::rc::Rc::clone(&frame.chunk), var_idx, type_idx)
+            (std::sync::Arc::clone(&frame.chunk), var_idx, type_idx)
         };
         let var_name = Self::const_str(&chunk.constants[var_idx])?;
         let expected_type = Self::const_str(&chunk.constants[type_idx])?;

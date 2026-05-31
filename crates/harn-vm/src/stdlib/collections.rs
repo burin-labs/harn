@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{value_structural_hash_key, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
-fn dict_arg(value: &VmValue, builtin: &str) -> Result<Rc<BTreeMap<String, VmValue>>, VmError> {
+fn dict_arg(value: &VmValue, builtin: &str) -> Result<Arc<BTreeMap<String, VmValue>>, VmError> {
     match value {
-        VmValue::Dict(d) => Ok(Rc::clone(d)),
-        VmValue::Nil => Ok(Rc::new(BTreeMap::new())),
+        VmValue::Dict(d) => Ok(Arc::clone(d)),
+        VmValue::Nil => Ok(Arc::new(BTreeMap::new())),
         other => Err(VmError::TypeError(format!(
             "{builtin}: expected dict, got {}",
             other.type_name()
@@ -38,7 +38,7 @@ fn current_async_vm(ctx: &AsyncBuiltinCtx, _builtin: &str) -> Vm {
     ctx.child_vm()
 }
 
-fn list_arg<'a>(args: &'a [VmValue], builtin: &str) -> Result<&'a Rc<Vec<VmValue>>, VmError> {
+fn list_arg<'a>(args: &'a [VmValue], builtin: &str) -> Result<&'a Arc<Vec<VmValue>>, VmError> {
     match args.first() {
         Some(VmValue::List(items)) => Ok(items),
         Some(other) => Err(VmError::TypeError(format!(
@@ -86,10 +86,10 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
     vm.register_async_builtin("chunk", |_ctx, args| async move {
         let items = list_arg(&args, "chunk")?;
         let size = positive_usize_arg(&args, 1, 1, "chunk");
-        Ok(VmValue::List(Rc::new(
+        Ok(VmValue::List(std::sync::Arc::new(
             items
                 .chunks(size)
-                .map(|chunk| VmValue::List(Rc::new(chunk.to_vec())))
+                .map(|chunk| VmValue::List(std::sync::Arc::new(chunk.to_vec())))
                 .collect(),
         )))
     });
@@ -99,15 +99,17 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         let size = positive_usize_arg(&args, 1, 2, "window");
         let step = positive_usize_arg(&args, 2, 1, "window");
         if size > items.len() {
-            return Ok(VmValue::List(Rc::new(Vec::new())));
+            return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
         }
         let mut windows = Vec::new();
         let mut start = 0;
         while start + size <= items.len() {
-            windows.push(VmValue::List(Rc::new(items[start..start + size].to_vec())));
+            windows.push(VmValue::List(std::sync::Arc::new(
+                items[start..start + size].to_vec(),
+            )));
             start += step;
         }
-        Ok(VmValue::List(Rc::new(windows)))
+        Ok(VmValue::List(std::sync::Arc::new(windows)))
     });
 
     vm.register_async_builtin("group_by", |ctx, args| async move {
@@ -128,10 +130,10 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
             let bucket = string_discriminator(&key, "group_by")?;
             groups.entry(bucket).or_default().push(item.clone());
         }
-        Ok(VmValue::Dict(Rc::new(
+        Ok(VmValue::Dict(std::sync::Arc::new(
             groups
                 .into_iter()
-                .map(|(key, values)| (key, VmValue::List(Rc::new(values))))
+                .map(|(key, values)| (key, VmValue::List(std::sync::Arc::new(values))))
                 .collect(),
         )))
     });
@@ -158,9 +160,15 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 no_match.push(item.clone());
             }
         }
-        Ok(VmValue::Dict(Rc::new(BTreeMap::from([
-            ("match".to_string(), VmValue::List(Rc::new(matched))),
-            ("no_match".to_string(), VmValue::List(Rc::new(no_match))),
+        Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "match".to_string(),
+                VmValue::List(std::sync::Arc::new(matched)),
+            ),
+            (
+                "no_match".to_string(),
+                VmValue::List(std::sync::Arc::new(no_match)),
+            ),
         ]))))
     });
 
@@ -184,7 +192,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 out.push(item.clone());
             }
         }
-        Ok(VmValue::List(Rc::new(out)))
+        Ok(VmValue::List(std::sync::Arc::new(out)))
     });
 
     vm.register_async_builtin("flat_map", |ctx, args| async move {
@@ -206,7 +214,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 other => out.push(other),
             }
         }
-        Ok(VmValue::List(Rc::new(out)))
+        Ok(VmValue::List(std::sync::Arc::new(out)))
     });
 
     vm.register_async_builtin("take_while", |ctx, args| async move {
@@ -229,7 +237,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
             }
             out.push(item.clone());
         }
-        Ok(VmValue::List(Rc::new(out)))
+        Ok(VmValue::List(std::sync::Arc::new(out)))
     });
 
     vm.register_async_builtin("drop_while", |ctx, args| async move {
@@ -256,7 +264,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
             }
             out.push(item.clone());
         }
-        Ok(VmValue::List(Rc::new(out)))
+        Ok(VmValue::List(std::sync::Arc::new(out)))
     });
 
     vm.register_async_builtin("count_by", |ctx, args| async move {
@@ -277,7 +285,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
             let bucket = string_discriminator(&key, "count_by")?;
             *counts.entry(bucket).or_insert(0) += 1;
         }
-        Ok(VmValue::Dict(Rc::new(
+        Ok(VmValue::Dict(std::sync::Arc::new(
             counts
                 .into_iter()
                 .map(|(key, count)| (key, VmValue::Int(count)))
@@ -416,12 +424,12 @@ const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
 /// allocations independent of the source; primitives are returned by value.
 /// Opaque handles (closures, channels, atomics, MCP clients, etc.) are
 /// returned unchanged because copying them would either be a no-op
-/// (Rc-cloned handle) or violate identity invariants.
+/// (Arc-cloned handle) or violate identity invariants.
 fn shallow_clone(value: &VmValue) -> VmValue {
     match value {
-        VmValue::Dict(d) => VmValue::Dict(Rc::new((**d).clone())),
-        VmValue::List(items) => VmValue::List(Rc::new((**items).clone())),
-        VmValue::Set(items) => VmValue::Set(Rc::new((**items).clone())),
+        VmValue::Dict(d) => VmValue::Dict(std::sync::Arc::new((**d).clone())),
+        VmValue::List(items) => VmValue::List(std::sync::Arc::new((**items).clone())),
+        VmValue::Set(items) => VmValue::Set(std::sync::Arc::new((**items).clone())),
         other => other.clone(),
     }
 }
@@ -437,15 +445,18 @@ fn deep_clone_value(value: &VmValue) -> VmValue {
             for (key, val) in d.iter() {
                 out.insert(key.clone(), deep_clone_value(val));
             }
-            VmValue::Dict(Rc::new(out))
+            VmValue::Dict(std::sync::Arc::new(out))
         }
-        VmValue::List(items) => {
-            VmValue::List(Rc::new(items.iter().map(deep_clone_value).collect()))
-        }
-        VmValue::Set(items) => VmValue::Set(Rc::new(items.iter().map(deep_clone_value).collect())),
-        VmValue::Pair(p) => {
-            VmValue::Pair(Rc::new((deep_clone_value(&p.0), deep_clone_value(&p.1))))
-        }
+        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
+            items.iter().map(deep_clone_value).collect(),
+        )),
+        VmValue::Set(items) => VmValue::Set(std::sync::Arc::new(
+            items.iter().map(deep_clone_value).collect(),
+        )),
+        VmValue::Pair(p) => VmValue::Pair(std::sync::Arc::new((
+            deep_clone_value(&p.0),
+            deep_clone_value(&p.1),
+        ))),
         other => other.clone(),
     }
 }
@@ -464,8 +475,8 @@ fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
     if left.is_empty() {
         return Ok(VmValue::Dict(right));
     }
-    let mut merged = Rc::try_unwrap(left).unwrap_or_else(|d| (*d).clone());
-    let right_entries: Vec<(String, VmValue)> = match Rc::try_unwrap(right) {
+    let mut merged = Arc::try_unwrap(left).unwrap_or_else(|d| (*d).clone());
+    let right_entries: Vec<(String, VmValue)> = match Arc::try_unwrap(right) {
         Ok(map) => map.into_iter().collect(),
         Err(rc) => rc.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
     };
@@ -485,7 +496,7 @@ fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
             }
         }
     }
-    Ok(VmValue::Dict(Rc::new(merged)))
+    Ok(VmValue::Dict(std::sync::Arc::new(merged)))
 }
 
 /// Returns a list with duplicate entries removed while preserving the
@@ -494,8 +505,8 @@ fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
 /// dicts collapse to a single entry.
 fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
     let items = match value {
-        VmValue::List(items) | VmValue::Set(items) => Rc::clone(items),
-        VmValue::Nil => return Ok(VmValue::List(Rc::new(Vec::new()))),
+        VmValue::List(items) | VmValue::Set(items) => Arc::clone(items),
+        VmValue::Nil => return Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
         other => {
             return Err(VmError::TypeError(format!(
                 "unique: expected a list, got {}",
@@ -511,7 +522,7 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
             out.push(item.clone());
         }
     }
-    Ok(VmValue::List(Rc::new(out)))
+    Ok(VmValue::List(std::sync::Arc::new(out)))
 }
 
 /// Converts a list of `[key, value]` pairs (or `pair(key, value)` values)
@@ -520,8 +531,8 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
 /// right-wins convention.
 fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
     let pairs = match value {
-        VmValue::List(items) | VmValue::Set(items) => Rc::clone(items),
-        VmValue::Nil => return Ok(VmValue::Dict(Rc::new(BTreeMap::new()))),
+        VmValue::List(items) | VmValue::Set(items) => Arc::clone(items),
+        VmValue::Nil => return Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::new()))),
         other => {
             return Err(VmError::TypeError(format!(
                 "dict_from_pairs: expected a list of [key, value] pairs, got {}",
@@ -549,7 +560,7 @@ fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
         };
         out.insert(key_string, val);
     }
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 fn dict_filter_nil(value: &VmValue) -> Result<VmValue, VmError> {
@@ -557,9 +568,9 @@ fn dict_filter_nil(value: &VmValue) -> Result<VmValue, VmError> {
     if dict.is_empty() || dict.values().all(keep_filter_nil) {
         return Ok(VmValue::Dict(dict));
     }
-    let mut out = Rc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
+    let mut out = Arc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
     out.retain(|_, value| keep_filter_nil(value));
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 fn dict_merge(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
@@ -571,12 +582,12 @@ fn dict_merge(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
     if left.is_empty() {
         return Ok(VmValue::Dict(right));
     }
-    let mut merged = Rc::try_unwrap(left).unwrap_or_else(|d| (*d).clone());
-    match Rc::try_unwrap(right) {
+    let mut merged = Arc::try_unwrap(left).unwrap_or_else(|d| (*d).clone());
+    match Arc::try_unwrap(right) {
         Ok(entries) => merged.extend(entries),
         Err(entries) => merged.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone()))),
     }
-    Ok(VmValue::Dict(Rc::new(merged)))
+    Ok(VmValue::Dict(std::sync::Arc::new(merged)))
 }
 
 fn dict_pick(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
@@ -591,7 +602,7 @@ fn dict_pick(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
             }
         }
     }
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 fn dict_pick_keys(data: &VmValue, keys: &VmValue, drop_nil: bool) -> Result<VmValue, VmError> {
@@ -607,7 +618,7 @@ fn dict_pick_keys(data: &VmValue, keys: &VmValue, drop_nil: bool) -> Result<VmVa
             out.insert(key, value.clone());
         }
     }
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 fn dict_omit(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
@@ -619,9 +630,9 @@ fn dict_omit(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
     if exclude.is_empty() || dict.keys().all(|k| !exclude.contains(k)) {
         return Ok(VmValue::Dict(dict));
     }
-    let mut out = Rc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
+    let mut out = Arc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
     out.retain(|key, _| !exclude.contains(key));
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 #[cfg(test)]
@@ -633,14 +644,14 @@ mod tests {
         for (k, v) in entries {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(std::sync::Arc::new(map))
     }
 
     fn keys(items: &[&str]) -> VmValue {
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             items
                 .iter()
-                .map(|k| VmValue::String(Rc::from(*k)))
+                .map(|k| VmValue::String(std::sync::Arc::from(*k)))
                 .collect(),
         ))
     }
@@ -650,8 +661,8 @@ mod tests {
         let input = dict(&[
             ("keep", VmValue::Int(1)),
             ("nil_value", VmValue::Nil),
-            ("empty", VmValue::String(Rc::from(""))),
-            ("null_string", VmValue::String(Rc::from("null"))),
+            ("empty", VmValue::String(std::sync::Arc::from(""))),
+            ("null_string", VmValue::String(std::sync::Arc::from("null"))),
             ("kept_zero", VmValue::Int(0)),
         ]);
         let result = dict_filter_nil(&input).unwrap();
@@ -725,11 +736,11 @@ mod tests {
 
     #[test]
     fn shallow_clone_decouples_dict_from_source() {
-        let inner = VmValue::Dict(Rc::new(BTreeMap::new()));
+        let inner = VmValue::Dict(std::sync::Arc::new(BTreeMap::new()));
         let source = dict(&[("inner", inner)]);
         let copy = shallow_clone(&source);
         match (&source, &copy) {
-            (VmValue::Dict(a), VmValue::Dict(b)) => assert!(!Rc::ptr_eq(a, b)),
+            (VmValue::Dict(a), VmValue::Dict(b)) => assert!(!Arc::ptr_eq(a, b)),
             _ => panic!("expected dicts"),
         }
         match (
@@ -737,7 +748,7 @@ mod tests {
             copy.as_dict().unwrap().get("inner").unwrap(),
         ) {
             (VmValue::Dict(a), VmValue::Dict(b)) => {
-                assert!(Rc::ptr_eq(a, b), "shallow clone shares inner Rc");
+                assert!(Arc::ptr_eq(a, b), "shallow clone shares inner Arc");
             }
             _ => panic!("expected nested dicts"),
         }
@@ -746,7 +757,7 @@ mod tests {
     #[test]
     fn deep_clone_duplicates_nested_dicts_and_lists() {
         let inner_dict = dict(&[("k", VmValue::Int(1))]);
-        let inner_list = VmValue::List(Rc::new(vec![VmValue::Int(1), VmValue::Int(2)]));
+        let inner_list = VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]));
         let source = dict(&[("d", inner_dict), ("l", inner_list)]);
         let copy = deep_clone_value(&source);
 
@@ -757,7 +768,7 @@ mod tests {
                 let VmValue::Dict(orig_rc) = original_inner else {
                     panic!()
                 };
-                assert!(!Rc::ptr_eq(rc, orig_rc));
+                assert!(!Arc::ptr_eq(rc, orig_rc));
             }
             _ => panic!("expected dict at d"),
         }
@@ -766,7 +777,7 @@ mod tests {
                 let VmValue::List(orig_items) = source.as_dict().unwrap().get("l").unwrap() else {
                     panic!()
                 };
-                assert!(!Rc::ptr_eq(items, orig_items));
+                assert!(!Arc::ptr_eq(items, orig_items));
             }
             _ => panic!("expected list at l"),
         }
@@ -815,7 +826,7 @@ mod tests {
 
     #[test]
     fn list_unique_preserves_first_seen_order() {
-        let input = VmValue::List(Rc::new(vec![
+        let input = VmValue::List(std::sync::Arc::new(vec![
             VmValue::Int(1),
             VmValue::Int(2),
             VmValue::Int(1),
@@ -833,13 +844,13 @@ mod tests {
 
     #[test]
     fn dict_from_pairs_accepts_two_element_lists() {
-        let pairs = VmValue::List(Rc::new(vec![
-            VmValue::List(Rc::new(vec![
-                VmValue::String(Rc::from("a")),
+        let pairs = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from("a")),
                 VmValue::Int(1),
             ])),
-            VmValue::List(Rc::new(vec![
-                VmValue::String(Rc::from("b")),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from("b")),
                 VmValue::Int(2),
             ])),
         ]));

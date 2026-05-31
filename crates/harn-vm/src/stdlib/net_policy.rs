@@ -14,7 +14,6 @@
 //! `harness.net.*` call.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::harness_net::parse::{POLICY_TAG_KEY, RULE_TAG_KEY};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -35,7 +34,7 @@ fn net_policy_domain_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let host = require_string(args, 0, "NetPolicy.domain")?;
     Ok(rule_dict(
         "domain",
-        &[("host", VmValue::String(Rc::from(host)))],
+        &[("host", VmValue::String(std::sync::Arc::from(host)))],
     ))
 }
 
@@ -55,7 +54,7 @@ fn net_policy_domain_wildcard_impl(
     }
     Ok(rule_dict(
         "domain_wildcard",
-        &[("pattern", VmValue::String(Rc::from(pattern)))],
+        &[("pattern", VmValue::String(std::sync::Arc::from(pattern)))],
     ))
 }
 
@@ -70,7 +69,7 @@ fn net_policy_cidr_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     crate::harness_net::NetPolicyRule::parse_cidr(&range)?;
     Ok(rule_dict(
         "cidr",
-        &[("range", VmValue::String(Rc::from(range)))],
+        &[("range", VmValue::String(std::sync::Arc::from(range)))],
     ))
 }
 
@@ -103,7 +102,7 @@ fn net_policy_host_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     Ok(rule_dict(
         "host",
         &[
-            ("host", VmValue::String(Rc::from(host))),
+            ("host", VmValue::String(std::sync::Arc::from(host))),
             ("ports", ports_value),
         ],
     ))
@@ -127,24 +126,30 @@ fn net_policy_create_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     if let Some(allow) = config.get("allow") {
         policy.insert("allow".to_string(), allow.clone());
     } else {
-        policy.insert("allow".to_string(), VmValue::List(Rc::new(Vec::new())));
+        policy.insert(
+            "allow".to_string(),
+            VmValue::List(std::sync::Arc::new(Vec::new())),
+        );
     }
     if let Some(deny) = config.get("deny") {
         policy.insert("deny".to_string(), deny.clone());
     } else {
-        policy.insert("deny".to_string(), VmValue::List(Rc::new(Vec::new())));
+        policy.insert(
+            "deny".to_string(),
+            VmValue::List(std::sync::Arc::new(Vec::new())),
+        );
     }
     let default = config
         .get("default")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(Rc::from("deny")));
+        .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("deny")));
     policy.insert("default".to_string(), default);
     let on_violation = config
         .get("on_violation")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(Rc::from("error")));
+        .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("error")));
     policy.insert("on_violation".to_string(), on_violation);
-    Ok(VmValue::Dict(Rc::new(policy)))
+    Ok(VmValue::Dict(std::sync::Arc::new(policy)))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -157,11 +162,14 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 
 fn rule_dict(kind: &'static str, fields: &[(&str, VmValue)]) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert(RULE_TAG_KEY.to_string(), VmValue::String(Rc::from(kind)));
+    dict.insert(
+        RULE_TAG_KEY.to_string(),
+        VmValue::String(std::sync::Arc::from(kind)),
+    );
     for (key, value) in fields {
         dict.insert((*key).to_string(), value.clone());
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn require_string(args: &[VmValue], index: usize, callee: &str) -> Result<String, VmError> {
@@ -176,5 +184,5 @@ fn require_string(args: &[VmValue], index: usize, callee: &str) -> Result<String
 }
 
 fn thrown(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }

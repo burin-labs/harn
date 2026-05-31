@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use super::components::ComponentRegistry;
 use super::json_schema::json_schema_to_type_expr;
@@ -66,7 +65,7 @@ pub(super) fn extract_params_from_vm_dict(
 /// at the top of this file). We wrap the dict contents in `VmValue::Dict` so
 /// the single shared conversion path handles every field uniformly.
 fn vm_dict_to_json(dict: &BTreeMap<String, VmValue>) -> serde_json::Value {
-    super::super::vm_value_to_json(&VmValue::Dict(Rc::new(dict.clone())))
+    super::super::vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(dict.clone())))
 }
 
 #[derive(Clone, Debug, serde::Serialize)]

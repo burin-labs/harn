@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::hash::{Hash, Hasher};
@@ -38,7 +37,7 @@ fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize>
 
 #[derive(Clone)]
 pub(crate) struct LoadedModule {
-    pub(crate) functions: BTreeMap<String, Rc<VmClosure>>,
+    pub(crate) functions: BTreeMap<String, Arc<VmClosure>>,
     pub(crate) public_names: HashSet<String>,
 }
 
@@ -200,31 +199,30 @@ impl Vm {
                 self.deadlines = saved_deadlines;
                 init_result?;
             }
-            Rc::new(RefCell::new(init_env))
+            Arc::new(crate::value::VmMutex::new(init_env))
         };
 
         let module_env = self.env.clone();
-        let registry: ModuleFunctionRegistry = Rc::new(RefCell::new(BTreeMap::new()));
-        let mut functions: BTreeMap<String, Rc<VmClosure>> = BTreeMap::new();
+        let registry: ModuleFunctionRegistry =
+            Arc::new(crate::value::VmMutex::new(BTreeMap::new()));
+        let mut functions: BTreeMap<String, Arc<VmClosure>> = BTreeMap::new();
         let mut public_names = artifact.public_names.clone();
 
         for (name, compiled) in &artifact.functions {
-            let closure = Rc::new(VmClosure {
-                func: Rc::new(CompiledFunction::from_cached(compiled)),
+            let closure = Arc::new(VmClosure {
+                func: Arc::new(CompiledFunction::from_cached(compiled)),
                 env: module_env.clone(),
                 source_dir: module_source_dir.clone(),
-                module_functions: Some(Rc::clone(&registry)),
-                module_state: Some(Rc::clone(&module_state)),
+                module_functions: Some(Arc::clone(&registry)),
+                module_state: Some(Arc::clone(&module_state)),
             });
-            registry
-                .borrow_mut()
-                .insert(name.clone(), Rc::clone(&closure));
+            registry.lock().insert(name.clone(), Arc::clone(&closure));
             self.env
-                .define(name, VmValue::Closure(Rc::clone(&closure)), false)?;
+                .define(name, VmValue::Closure(Arc::clone(&closure)), false)?;
             module_state
-                .borrow_mut()
-                .define(name, VmValue::Closure(Rc::clone(&closure)), false)?;
-            functions.insert(name.clone(), Rc::clone(&closure));
+                .lock()
+                .define(name, VmValue::Closure(Arc::clone(&closure)), false)?;
+            functions.insert(name.clone(), Arc::clone(&closure));
         }
 
         for import in artifact.imports.iter().filter(|import| import.is_pub) {
@@ -253,7 +251,7 @@ impl Vm {
                     )));
                 };
                 if let Some(existing) = functions.get(&name) {
-                    if !Rc::ptr_eq(existing, closure) {
+                    if !Arc::ptr_eq(existing, closure) {
                         return Err(VmError::Runtime(format!(
                             "Re-export collision: '{name}' is defined here and also \
                              re-exported from '{}'",
@@ -261,7 +259,7 @@ impl Vm {
                         )));
                     }
                 }
-                functions.insert(name.clone(), Rc::clone(closure));
+                functions.insert(name.clone(), Arc::clone(closure));
                 public_names.insert(name);
             }
         }
@@ -303,7 +301,7 @@ impl Vm {
                 )));
             }
             self.env
-                .define(&name, VmValue::Closure(Rc::clone(closure)), false)?;
+                .define(&name, VmValue::Closure(Arc::clone(closure)), false)?;
         }
         Ok(())
     }
@@ -417,7 +415,7 @@ impl Vm {
     pub async fn load_module_exports(
         &mut self,
         path: &Path,
-    ) -> Result<BTreeMap<String, Rc<VmClosure>>, VmError> {
+    ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
         let path_str = path.to_string_lossy().into_owned();
         self.execute_import(&path_str, None).await?;
 
@@ -457,7 +455,7 @@ impl Vm {
                     canonical.display()
                 )));
             };
-            exports.insert(name, Rc::clone(closure));
+            exports.insert(name, Arc::clone(closure));
         }
 
         Ok(exports)
@@ -469,7 +467,7 @@ impl Vm {
         &mut self,
         source_key: impl Into<PathBuf>,
         source: &str,
-    ) -> Result<BTreeMap<String, Rc<VmClosure>>, VmError> {
+    ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
         let synthetic = source_key.into();
         let loaded = self
             .load_module_from_source(synthetic.clone(), source)
@@ -488,7 +486,7 @@ impl Vm {
                     synthetic.display()
                 )));
             };
-            exports.insert(name, Rc::clone(closure));
+            exports.insert(name, Arc::clone(closure));
         }
 
         Ok(exports)
@@ -500,7 +498,7 @@ impl Vm {
     pub async fn load_module_exports_from_import(
         &mut self,
         import_path: &str,
-    ) -> Result<BTreeMap<String, Rc<VmClosure>>, VmError> {
+    ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
         self.execute_import(import_path, None).await?;
 
         if let Some(module) = import_path
@@ -527,7 +525,7 @@ impl Vm {
                         synthetic.display()
                     )));
                 };
-                exports.insert(name, Rc::clone(closure));
+                exports.insert(name, Arc::clone(closure));
             }
             return Ok(exports);
         }
@@ -543,7 +541,7 @@ impl Vm {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use super::*;
@@ -600,10 +598,10 @@ mod tests {
             .get("render_agent_prompt")
             .expect("second export exists");
 
-        assert!(!Rc::ptr_eq(first, second));
-        assert!(!Rc::ptr_eq(&first.func, &second.func));
-        assert!(!Rc::ptr_eq(&first.func.chunk, &second.func.chunk));
-        assert!(!Rc::ptr_eq(
+        assert!(!Arc::ptr_eq(first, second));
+        assert!(!Arc::ptr_eq(&first.func, &second.func));
+        assert!(!Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
+        assert!(!Arc::ptr_eq(
             first.module_state.as_ref().expect("first module state"),
             second.module_state.as_ref().expect("second module state")
         ));

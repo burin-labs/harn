@@ -6,11 +6,9 @@
 //! 2. Closure subscribers that fire on agent-loop events for this session.
 //! 3. Its own lifecycle (open, reset, fork, trim, compact, close).
 //!
-//! Storage is thread-local because `VmValue` contains `Rc`, which is
-//! neither `Send` nor `Sync`. The agent loop runs on a tokio
-//! current-thread worker, so all session reads and writes happen on the
-//! same thread. The closure-subscribers register, fire, and unregister
-//! on that same thread.
+//! Storage is thread-local because session lifecycle and subscriber dispatch
+//! are owned by the current-thread agent-loop worker. The subscribers register,
+//! fire, and unregister on that same thread, keeping ordering deterministic.
 //!
 //! Lifecycle is explicit. Builtins (`agent_session_open`,
 //! `_reset`, `_fork`, `_fork_at`, `_close`, `_trim`, `_compact`,
@@ -22,7 +20,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::time::Instant;
 
 use crate::runtime_limits::RuntimeLimits;
@@ -759,11 +756,15 @@ fn truncate_state(state: &mut SessionState, keep_first: usize) -> Option<Session
         let mut next = dict;
         next.insert(
             "events".to_string(),
-            VmValue::List(Rc::new(retained_events)),
+            VmValue::List(std::sync::Arc::new(retained_events)),
         );
-        next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
+        next.insert(
+            "messages".to_string(),
+            VmValue::List(std::sync::Arc::new(retained)),
+        );
         next.remove("summary");
-        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "truncate").ok()?;
+        apply_transcript_with_budget(state, VmValue::Dict(std::sync::Arc::new(next)), "truncate")
+            .ok()?;
     }
     state.last_accessed = Instant::now();
     Some(SessionTruncateResult {
@@ -829,12 +830,16 @@ pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
         let mut next = dict;
         next.insert(
             "events".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 crate::llm::helpers::transcript_events_from_messages(&retained),
             )),
         );
-        next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
-        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "trim").ok()?;
+        next.insert(
+            "messages".to_string(),
+            VmValue::List(std::sync::Arc::new(retained)),
+        );
+        apply_transcript_with_budget(state, VmValue::Dict(std::sync::Arc::new(next)), "trim")
+            .ok()?;
         state.last_accessed = Instant::now();
         Some(kept)
     })
@@ -871,15 +876,21 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
             Some(VmValue::List(list)) => list.iter().cloned().collect(),
             _ => crate::llm::helpers::transcript_events_from_messages(&messages),
         };
-        let new_message = VmValue::Dict(Rc::new(msg_dict));
+        let new_message = VmValue::Dict(std::sync::Arc::new(msg_dict));
         let message_index = messages.len();
         events.push(crate::llm::helpers::transcript_event_from_message(
             &new_message,
         ));
         messages.push(new_message);
         let mut next = dict;
-        next.insert("events".to_string(), VmValue::List(Rc::new(events)));
-        next.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
+        next.insert(
+            "events".to_string(),
+            VmValue::List(std::sync::Arc::new(events)),
+        );
+        next.insert(
+            "messages".to_string(),
+            VmValue::List(std::sync::Arc::new(messages)),
+        );
         let persisted_message = next
             .get("messages")
             .and_then(|value| match value {
@@ -887,7 +898,11 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
                 _ => None,
             })
             .unwrap_or(VmValue::Nil);
-        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "inject_message")?;
+        apply_transcript_with_budget(
+            state,
+            VmValue::Dict(std::sync::Arc::new(next)),
+            "inject_message",
+        )?;
         emit_identified_user_message_event(id, &persisted_message);
         emit_llm_message_event(id, message_index, &persisted_message);
         state.last_accessed = Instant::now();
@@ -1098,8 +1113,11 @@ fn append_event_to_transcript(transcript: VmValue, event: VmValue) -> VmValue {
     let mut next = dict.clone();
     let mut events = transcript_events_from_dict(&next);
     events.push(event);
-    next.insert("events".to_string(), VmValue::List(Rc::new(events)));
-    VmValue::Dict(Rc::new(next))
+    next.insert(
+        "events".to_string(),
+        VmValue::List(std::sync::Arc::new(events)),
+    );
+    VmValue::Dict(std::sync::Arc::new(next))
 }
 
 fn tail_message_capacity(
@@ -1127,13 +1145,16 @@ fn trim_transcript_for_budget(
     let mut next = dict;
     next.insert(
         "events".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             crate::llm::helpers::transcript_events_from_messages(&retained),
         )),
     );
-    next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
+    next.insert(
+        "messages".to_string(),
+        VmValue::List(std::sync::Arc::new(retained)),
+    );
     next.remove("summary");
-    VmValue::Dict(Rc::new(next))
+    VmValue::Dict(std::sync::Arc::new(next))
 }
 
 struct BudgetCompactionLiveEvent {
@@ -1183,7 +1204,7 @@ fn compact_transcript_for_budget(
             .with_hook_dispatch(false)
             .with_evaluate_providers(false);
     let llm_opts = crate::llm::extract_llm_options(&[
-        VmValue::String(Rc::from("")),
+        VmValue::String(std::sync::Arc::from("")),
         VmValue::Nil,
         VmValue::Nil,
     ])
@@ -1225,15 +1246,24 @@ fn compact_transcript_for_budget(
     }
 
     let mut next = dict;
-    next.insert("events".to_string(), VmValue::List(Rc::new(events)));
-    next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
+    next.insert(
+        "events".to_string(),
+        VmValue::List(std::sync::Arc::new(events)),
+    );
+    next.insert(
+        "messages".to_string(),
+        VmValue::List(std::sync::Arc::new(retained)),
+    );
     if let Some(summary) = summary {
-        next.insert("summary".to_string(), VmValue::String(Rc::from(summary)));
+        next.insert(
+            "summary".to_string(),
+            VmValue::String(std::sync::Arc::from(summary)),
+        );
     } else {
         next.remove("summary");
     }
     BudgetCompactionResult {
-        transcript: VmValue::Dict(Rc::new(next)),
+        transcript: VmValue::Dict(std::sync::Arc::new(next)),
         live_event,
     }
 }
@@ -1609,10 +1639,13 @@ pub fn prune_invalid_reminder_events(id: &str) -> usize {
         }
         if pruned > 0 {
             let mut next = dict;
-            next.insert("events".to_string(), VmValue::List(Rc::new(kept)));
+            next.insert(
+                "events".to_string(),
+                VmValue::List(std::sync::Arc::new(kept)),
+            );
             let _ = apply_transcript_with_budget(
                 state,
-                VmValue::Dict(Rc::new(next)),
+                VmValue::Dict(std::sync::Arc::new(next)),
                 "prune_invalid_reminder_events",
             );
             state.last_accessed = Instant::now();
@@ -1722,8 +1755,15 @@ pub fn inject_reminder(
         }
         events.push(crate::llm::helpers::transcript_reminder_event(&reminder));
         let mut next = dict;
-        next.insert("events".to_string(), VmValue::List(Rc::new(events)));
-        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "inject_reminder")?;
+        next.insert(
+            "events".to_string(),
+            VmValue::List(std::sync::Arc::new(events)),
+        );
+        apply_transcript_with_budget(
+            state,
+            VmValue::Dict(std::sync::Arc::new(next)),
+            "inject_reminder",
+        )?;
         state.last_accessed = Instant::now();
         Ok(())
     })?;
@@ -1806,8 +1846,11 @@ fn append_event_to_state(
     };
     events.push(event);
     let mut next = dict;
-    next.insert("events".to_string(), VmValue::List(Rc::new(events)));
-    apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), action)
+    next.insert(
+        "events".to_string(),
+        VmValue::List(std::sync::Arc::new(events)),
+    );
+    apply_transcript_with_budget(state, VmValue::Dict(std::sync::Arc::new(next)), action)
 }
 
 /// Replace the transcript's message list wholesale. Used by the
@@ -1844,20 +1887,27 @@ pub fn replace_messages_with_summary(
         let mut next = dict;
         next.insert(
             "events".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 crate::llm::helpers::transcript_events_from_messages(&vm_messages),
             )),
         );
-        next.insert("messages".to_string(), VmValue::List(Rc::new(vm_messages)));
+        next.insert(
+            "messages".to_string(),
+            VmValue::List(std::sync::Arc::new(vm_messages)),
+        );
         if let Some(summary) = summary {
             next.insert(
                 "summary".to_string(),
-                VmValue::String(Rc::from(summary.to_string())),
+                VmValue::String(std::sync::Arc::from(summary.to_string())),
             );
         } else {
             next.remove("summary");
         }
-        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "replace_messages")?;
+        apply_transcript_with_budget(
+            state,
+            VmValue::Dict(std::sync::Arc::new(next)),
+            "replace_messages",
+        )?;
         state.last_accessed = Instant::now();
         Ok(())
     })
@@ -1989,9 +2039,16 @@ pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String>
                     system_prompt,
                 )),
             ));
-            next.insert("events".to_string(), VmValue::List(Rc::new(events)));
+            next.insert(
+                "events".to_string(),
+                VmValue::List(std::sync::Arc::new(events)),
+            );
         }
-        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "record_system_prompt")?;
+        apply_transcript_with_budget(
+            state,
+            VmValue::Dict(std::sync::Arc::new(next)),
+            "record_system_prompt",
+        )?;
         state.last_accessed = Instant::now();
         Ok(())
     })
@@ -2336,9 +2393,9 @@ fn clone_transcript_with_id(transcript: &VmValue, new_id: &str) -> VmValue {
     let mut next = dict.clone();
     next.insert(
         "id".to_string(),
-        VmValue::String(Rc::from(new_id.to_string())),
+        VmValue::String(std::sync::Arc::from(new_id.to_string())),
     );
-    VmValue::Dict(Rc::new(next))
+    VmValue::Dict(std::sync::Arc::new(next))
 }
 
 fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValue {
@@ -2351,17 +2408,17 @@ fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValu
             let mut metadata = metadata.as_ref().clone();
             metadata.insert(
                 "parent_session_id".to_string(),
-                VmValue::String(Rc::from(parent_id.to_string())),
+                VmValue::String(std::sync::Arc::from(parent_id.to_string())),
             );
-            VmValue::Dict(Rc::new(metadata))
+            VmValue::Dict(std::sync::Arc::new(metadata))
         }
-        _ => VmValue::Dict(Rc::new(BTreeMap::from([(
+        _ => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "parent_session_id".to_string(),
-            VmValue::String(Rc::from(parent_id.to_string())),
+            VmValue::String(std::sync::Arc::from(parent_id.to_string())),
         )]))),
     };
     next.insert("metadata".to_string(), metadata);
-    VmValue::Dict(Rc::new(next))
+    VmValue::Dict(std::sync::Arc::new(next))
 }
 
 fn apply_system_prompt_metadata(next: &mut BTreeMap<String, VmValue>, system_prompt: &str) {
@@ -2375,7 +2432,10 @@ fn apply_system_prompt_metadata(next: &mut BTreeMap<String, VmValue>, system_pro
             system_prompt,
         )),
     );
-    next.insert("metadata".to_string(), VmValue::Dict(Rc::new(metadata)));
+    next.insert(
+        "metadata".to_string(),
+        VmValue::Dict(std::sync::Arc::new(metadata)),
+    );
 }
 
 fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -> VmValue {
@@ -2390,7 +2450,7 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
     if let Some(tool_format) = state.tool_format.as_ref() {
         metadata.insert(
             "tool_format".to_string(),
-            VmValue::String(Rc::from(tool_format.clone())),
+            VmValue::String(std::sync::Arc::from(tool_format.clone())),
         );
         metadata.insert("tool_mode_locked".to_string(), VmValue::Bool(true));
     }
@@ -2412,7 +2472,7 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
     }
     if let Some(last_action) = state.last_transcript_budget_action.as_ref() {
         let usage = transcript_usage(
-            &VmValue::Dict(Rc::new(next.clone())),
+            &VmValue::Dict(std::sync::Arc::new(next.clone())),
             state.transcript_budget_policy.max_approx_bytes.is_some(),
         );
         metadata.insert(
@@ -2425,9 +2485,12 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
         );
     }
     if !metadata.is_empty() {
-        next.insert("metadata".to_string(), VmValue::Dict(Rc::new(metadata)));
+        next.insert(
+            "metadata".to_string(),
+            VmValue::Dict(std::sync::Arc::new(metadata)),
+        );
     }
-    VmValue::Dict(Rc::new(next))
+    VmValue::Dict(std::sync::Arc::new(next))
 }
 
 fn session_snapshot(state: &SessionState) -> VmValue {
@@ -2446,24 +2509,24 @@ fn session_snapshot(state: &SessionState) -> VmValue {
     next.insert("length".to_string(), VmValue::Int(length));
     next.insert(
         "created_at".to_string(),
-        VmValue::String(Rc::from(state.created_at.clone())),
+        VmValue::String(std::sync::Arc::from(state.created_at.clone())),
     );
     next.insert(
         "parent_id".to_string(),
         state
             .parent_id
             .as_ref()
-            .map(|id| VmValue::String(Rc::from(id.clone())))
+            .map(|id| VmValue::String(std::sync::Arc::from(id.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
         "child_ids".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             state
                 .child_ids
                 .iter()
                 .cloned()
-                .map(|id| VmValue::String(Rc::from(id)))
+                .map(|id| VmValue::String(std::sync::Arc::from(id)))
                 .collect(),
         )),
     );
@@ -2479,7 +2542,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .system_prompt
             .as_ref()
-            .map(|prompt| VmValue::String(Rc::from(prompt.clone())))
+            .map(|prompt| VmValue::String(std::sync::Arc::from(prompt.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -2487,7 +2550,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .tool_format
             .as_ref()
-            .map(|format| VmValue::String(Rc::from(format.clone())))
+            .map(|format| VmValue::String(std::sync::Arc::from(format.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -2495,7 +2558,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .pinned_model
             .as_ref()
-            .map(|model| VmValue::String(Rc::from(model.clone())))
+            .map(|model| VmValue::String(std::sync::Arc::from(model.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -2503,7 +2566,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .pinned_reasoning_policy
             .as_ref()
-            .map(|policy| VmValue::String(Rc::from(policy.clone())))
+            .map(|policy| VmValue::String(std::sync::Arc::from(policy.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -2518,7 +2581,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         "workspace_policy".to_string(),
         state.workspace_policy.to_vm_value(),
     );
-    VmValue::Dict(Rc::new(next))
+    VmValue::Dict(std::sync::Arc::new(next))
 }
 
 fn update_lineage(

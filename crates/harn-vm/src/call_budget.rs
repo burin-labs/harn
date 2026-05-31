@@ -16,7 +16,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::thread::LocalKey;
 
 use crate::value::{VmError, VmValue};
@@ -99,22 +98,25 @@ fn budget_exceeded_error(kind: CallBudgetKind, spent: u64, max: u64) -> VmError 
     let mut dict = BTreeMap::new();
     dict.insert(
         "category".to_string(),
-        VmValue::String(Rc::from("budget_exceeded")),
+        VmValue::String(std::sync::Arc::from("budget_exceeded")),
     );
-    dict.insert("kind".to_string(), VmValue::String(Rc::from("terminal")));
+    dict.insert(
+        "kind".to_string(),
+        VmValue::String(std::sync::Arc::from("terminal")),
+    );
     dict.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from("budget_exceeded")),
+        VmValue::String(std::sync::Arc::from("budget_exceeded")),
     );
     dict.insert(
         "limit".to_string(),
-        VmValue::String(Rc::from(kind.limit_label())),
+        VmValue::String(std::sync::Arc::from(kind.limit_label())),
     );
     dict.insert("limit_value".to_string(), VmValue::Int(max as i64));
     dict.insert("spent".to_string(), VmValue::Int(spent as i64));
     dict.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(format!(
+        VmValue::String(std::sync::Arc::from(format!(
             "{} budget exceeded: this dispatch attempted {} of {} permitted {}",
             kind.limit_label(),
             spent,
@@ -122,7 +124,7 @@ fn budget_exceeded_error(kind: CallBudgetKind, spent: u64, max: u64) -> VmError 
             kind.noun(max != 1),
         ))),
     );
-    VmError::Thrown(VmValue::Dict(Rc::new(dict)))
+    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 /// RAII guard for [`install_mcp_call_budget`]. Restores the prior MCP

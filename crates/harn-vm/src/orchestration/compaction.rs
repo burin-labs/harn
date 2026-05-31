@@ -1,7 +1,6 @@
 //! Auto-compaction — transcript size management strategies.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 
@@ -199,35 +198,38 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
     if let Some(instructions) = policy.instructions.as_ref() {
         map.insert(
             "instructions".to_string(),
-            VmValue::String(Rc::from(instructions.clone())),
+            VmValue::String(std::sync::Arc::from(instructions.clone())),
         );
     }
     if let Some(mode) = policy.mode.as_ref() {
-        map.insert("mode".to_string(), VmValue::String(Rc::from(mode.clone())));
+        map.insert(
+            "mode".to_string(),
+            VmValue::String(std::sync::Arc::from(mode.clone())),
+        );
     }
     if let Some(scope) = policy.scope.as_ref() {
         map.insert(
             "scope".to_string(),
-            VmValue::String(Rc::from(scope.clone())),
+            VmValue::String(std::sync::Arc::from(scope.clone())),
         );
     }
     map.insert(
         "preserve".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             policy
                 .preserve
                 .iter()
-                .map(|item| VmValue::String(Rc::from(item.clone())))
+                .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
                 .collect(),
         )),
     );
     map.insert(
         "drop".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             policy
                 .drop_items
                 .iter()
-                .map(|item| VmValue::String(Rc::from(item.clone())))
+                .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
                 .collect(),
         )),
     );
@@ -240,10 +242,10 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
     if let Some(author) = policy.author.as_ref() {
         map.insert(
             "author".to_string(),
-            VmValue::String(Rc::from(author.clone())),
+            VmValue::String(std::sync::Arc::from(author.clone())),
         );
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 pub fn parse_compaction_policy_options(
@@ -789,7 +791,7 @@ fn render_llm_compaction_prompt(
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "formatted_messages".to_string(),
-        VmValue::String(Rc::from(formatted.to_string())),
+        VmValue::String(std::sync::Arc::from(formatted.to_string())),
     );
     bindings.insert(
         "archived_count".to_string(),
@@ -819,11 +821,11 @@ fn render_replacement_compaction_prompt(
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "directives".to_string(),
-        VmValue::String(Rc::from(directives)),
+        VmValue::String(std::sync::Arc::from(directives)),
     );
     bindings.insert(
         "formatted_messages".to_string(),
-        VmValue::String(Rc::from(formatted.to_string())),
+        VmValue::String(std::sync::Arc::from(formatted.to_string())),
     );
     bindings.insert(
         "archived_count".to_string(),
@@ -865,7 +867,7 @@ async fn custom_compaction_summary(
         ));
     };
     let mut vm = ctx.child_vm();
-    let messages_vm = VmValue::List(Rc::new(
+    let messages_vm = VmValue::List(std::sync::Arc::new(
         old_messages
             .iter()
             .map(crate::stdlib::json_to_vm_value)
@@ -874,12 +876,12 @@ async fn custom_compaction_summary(
     let result = if policy.has_metadata()
         && (closure.func.params.len() >= 3 || closure.func.has_rest_param)
     {
-        let reminders_vm = VmValue::List(Rc::new(reminders.to_vec()));
+        let reminders_vm = VmValue::List(std::sync::Arc::new(reminders.to_vec()));
         let policy_vm = compaction_policy_to_vm_value(policy);
         vm.call_closure_pub(&closure, &[messages_vm, reminders_vm, policy_vm])
             .await
     } else if closure.func.params.len() >= 2 || closure.func.has_rest_param {
-        let reminders_vm = VmValue::List(Rc::new(reminders.to_vec()));
+        let reminders_vm = VmValue::List(std::sync::Arc::new(reminders.to_vec()));
         vm.call_closure_pub(&closure, &[messages_vm, reminders_vm])
             .await
     } else {
@@ -977,7 +979,7 @@ async fn invoke_mask_callback(
         ));
     };
     let mut vm = ctx.child_vm();
-    let messages_vm = VmValue::List(Rc::new(
+    let messages_vm = VmValue::List(std::sync::Arc::new(
         old_messages
             .iter()
             .map(crate::stdlib::json_to_vm_value)

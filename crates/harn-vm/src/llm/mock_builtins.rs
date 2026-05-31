@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -208,14 +206,17 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             let mut dict = std::collections::BTreeMap::new();
             dict.insert(
                 "api_mode".to_string(),
-                VmValue::String(Rc::from(c.api_mode.as_str())),
+                VmValue::String(std::sync::Arc::from(c.api_mode.as_str())),
             );
             let messages: Vec<VmValue> = c.messages.iter().map(json_to_vm_value).collect();
-            dict.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
+            dict.insert(
+                "messages".to_string(),
+                VmValue::List(std::sync::Arc::new(messages)),
+            );
             dict.insert(
                 "system".to_string(),
                 match &c.system {
-                    Some(s) => VmValue::String(Rc::from(s.as_str())),
+                    Some(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
                     None => VmValue::Nil,
                 },
             );
@@ -224,7 +225,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 match &c.tools {
                     Some(t) => {
                         let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
-                        VmValue::List(Rc::new(tools))
+                        VmValue::List(std::sync::Arc::new(tools))
                     }
                     None => VmValue::Nil,
                 },
@@ -234,7 +235,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 match &c.provider_tools {
                     Some(t) => {
                         let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
-                        VmValue::List(Rc::new(tools))
+                        VmValue::List(std::sync::Arc::new(tools))
                     }
                     None => VmValue::Nil,
                 },
@@ -255,7 +256,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 "previous_response_id".to_string(),
                 c.previous_response_id
                     .as_deref()
-                    .map(|value| VmValue::String(Rc::from(value)))
+                    .map(|value| VmValue::String(std::sync::Arc::from(value)))
                     .unwrap_or(VmValue::Nil),
             );
             dict.insert(
@@ -270,7 +271,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 "truncation".to_string(),
                 c.truncation
                     .as_deref()
-                    .map(|value| VmValue::String(Rc::from(value)))
+                    .map(|value| VmValue::String(std::sync::Arc::from(value)))
                     .unwrap_or(VmValue::Nil),
             );
             dict.insert(
@@ -282,10 +283,10 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 c.include
                     .as_ref()
                     .map(|items| {
-                        VmValue::List(Rc::new(
+                        VmValue::List(std::sync::Arc::new(
                             items
                                 .iter()
-                                .map(|item| VmValue::String(Rc::from(item.as_str())))
+                                .map(|item| VmValue::String(std::sync::Arc::from(item.as_str())))
                                 .collect(),
                         ))
                     })
@@ -295,10 +296,10 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 "max_tool_calls".to_string(),
                 c.max_tool_calls.map(VmValue::Int).unwrap_or(VmValue::Nil),
             );
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         })
         .collect();
-    Ok(VmValue::List(Rc::new(result)))
+    Ok(VmValue::List(std::sync::Arc::new(result)))
 }
 
 /// Clear deterministic LLM mocks and recorded calls.
@@ -319,7 +320,7 @@ fn llm_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
 #[harn_builtin(sig = "llm_mock_pop_scope() -> nil", category = "llm.mock")]
 fn llm_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !mock::pop_llm_mock_scope() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "llm_mock_pop_scope: no scope to pop",
         ))));
     }

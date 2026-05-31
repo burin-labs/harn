@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use base64::Engine;
@@ -13,14 +13,14 @@ fn cookie_error(message: impl Into<String>) -> VmError {
 }
 
 fn dict(fields: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(Rc::new(fields))
+    VmValue::Dict(std::sync::Arc::new(fields))
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(Rc::new(items))
+    VmValue::List(std::sync::Arc::new(items))
 }
 
-fn string(value: impl Into<Rc<str>>) -> VmValue {
+fn string(value: impl Into<Arc<str>>) -> VmValue {
     VmValue::String(value.into())
 }
 

@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 
 use crate::value::VmValue;
 
@@ -19,7 +18,7 @@ pub(super) fn resolve_canonical_ref_with_path(
         return Some(("#".to_string(), root_schema.clone()));
     }
 
-    let mut current = VmValue::Dict(Rc::new(root_schema.clone()));
+    let mut current = VmValue::Dict(std::sync::Arc::new(root_schema.clone()));
     let mut normalized_segments = Vec::new();
     for segment in stripped.split('/') {
         let decoded = segment.replace("~1", "/").replace("~0", "~");
@@ -63,10 +62,9 @@ fn canonicalize_schema_value_with(
         let schema_dict = schema
             .as_dict()
             .ok_or_else(|| "schema must be a dict".to_string())?;
-        Ok(VmValue::Dict(Rc::new(canonicalize_schema_dict(
-            schema_dict,
-            traversal,
-        )?)))
+        Ok(VmValue::Dict(std::sync::Arc::new(
+            canonicalize_schema_dict(schema_dict, traversal)?,
+        )))
     })
 }
 
@@ -105,7 +103,10 @@ fn canonicalize_schema_dict(
                 canonicalize_schema_value_with(value, traversal)?,
             );
         }
-        out.insert("properties".to_string(), VmValue::Dict(Rc::new(next)));
+        out.insert(
+            "properties".to_string(),
+            VmValue::Dict(std::sync::Arc::new(next)),
+        );
     }
 
     if let Some(items) = schema.get("items") {
@@ -176,7 +177,10 @@ fn canonicalize_schema_dict(
     if let Some(definitions) = schema.get("definitions").and_then(VmValue::as_dict) {
         out.insert(
             "definitions".to_string(),
-            VmValue::Dict(Rc::new(canonicalize_schema_map(definitions, traversal)?)),
+            VmValue::Dict(std::sync::Arc::new(canonicalize_schema_map(
+                definitions,
+                traversal,
+            )?)),
         );
     }
 
@@ -185,12 +189,14 @@ fn canonicalize_schema_dict(
         if let Some(schemas) = components.get("schemas").and_then(VmValue::as_dict) {
             next_components.insert(
                 "schemas".to_string(),
-                VmValue::Dict(Rc::new(canonicalize_schema_map(schemas, traversal)?)),
+                VmValue::Dict(std::sync::Arc::new(canonicalize_schema_map(
+                    schemas, traversal,
+                )?)),
             );
         }
         out.insert(
             "components".to_string(),
-            VmValue::Dict(Rc::new(next_components)),
+            VmValue::Dict(std::sync::Arc::new(next_components)),
         );
     }
 
@@ -217,7 +223,7 @@ fn canonicalize_schema_dict(
             let normalized_type = normalize_type_name(type_name);
             out.insert(
                 "type".to_string(),
-                VmValue::String(Rc::from(normalized_type.as_str())),
+                VmValue::String(std::sync::Arc::from(normalized_type.as_str())),
             );
         }
         Some(VmValue::List(type_names)) => {
@@ -228,12 +234,15 @@ fn canonicalize_schema_dict(
                     let mut branch = BTreeMap::new();
                     branch.insert(
                         "type".to_string(),
-                        VmValue::String(Rc::from(type_name.as_str())),
+                        VmValue::String(std::sync::Arc::from(type_name.as_str())),
                     );
-                    VmValue::Dict(Rc::new(branch))
+                    VmValue::Dict(std::sync::Arc::new(branch))
                 })
                 .collect::<Vec<_>>();
-            out.insert("union".to_string(), VmValue::List(Rc::new(union)));
+            out.insert(
+                "union".to_string(),
+                VmValue::List(std::sync::Arc::new(union)),
+            );
         }
         _ => {}
     }
@@ -242,11 +251,17 @@ fn canonicalize_schema_dict(
         && schema_type_name(&out) == Some("list")
         && !out.contains_key("x-harn-type")
     {
-        out.insert("x-harn-type".to_string(), VmValue::String(Rc::from("set")));
+        out.insert(
+            "x-harn-type".to_string(),
+            VmValue::String(std::sync::Arc::from("set")),
+        );
     }
 
     if out.get("x-harn-type").map(|v| v.display()) == Some("set".to_string()) {
-        out.insert("type".to_string(), VmValue::String(Rc::from("set")));
+        out.insert(
+            "type".to_string(),
+            VmValue::String(std::sync::Arc::from("set")),
+        );
     }
 
     Ok(out)
@@ -274,7 +289,7 @@ fn canonicalize_schema_list(
         VmValue::List(list) => list,
         _ => return Err("schema union/all_of must be a list".to_string()),
     };
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         list.iter()
             .map(|value| canonicalize_schema_value_with(value, traversal))
             .collect::<Result<Vec<_>, _>>()?,
@@ -450,13 +465,13 @@ fn validate_ref_graph_value(
 
 fn normalize_string_list(value: &VmValue) -> VmValue {
     match value {
-        VmValue::List(items) => VmValue::List(Rc::new(
+        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
             items
                 .iter()
-                .map(|item| VmValue::String(Rc::from(item.display())))
+                .map(|item| VmValue::String(std::sync::Arc::from(item.display())))
                 .collect(),
         )),
-        _ => VmValue::List(Rc::new(Vec::new())),
+        _ => VmValue::List(std::sync::Arc::new(Vec::new())),
     }
 }
 
@@ -735,16 +750,16 @@ pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(Rc::from(s.as_str())),
-        serde_json::Value::Array(arr) => {
-            VmValue::List(Rc::new(arr.iter().map(json_to_vm_value).collect()))
-        }
+        serde_json::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
+        serde_json::Value::Array(arr) => VmValue::List(std::sync::Arc::new(
+            arr.iter().map(json_to_vm_value).collect(),
+        )),
         serde_json::Value::Object(map) => {
             let mut m = BTreeMap::new();
             for (k, v) in map {
                 m.insert(k.clone(), json_to_vm_value(v));
             }
-            VmValue::Dict(Rc::new(m))
+            VmValue::Dict(std::sync::Arc::new(m))
         }
     }
 }

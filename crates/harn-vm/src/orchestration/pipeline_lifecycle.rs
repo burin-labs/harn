@@ -18,7 +18,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde_json::Value;
 
@@ -28,7 +28,7 @@ use crate::value::VmClosure;
 pub const LIFECYCLE_AUDIT_TOPIC: &str = "pipeline.lifecycle.audit";
 
 thread_local! {
-    static PIPELINE_ON_FINISH: RefCell<Option<Rc<VmClosure>>> = const { RefCell::new(None) };
+    static PIPELINE_ON_FINISH: RefCell<Option<Arc<VmClosure>>> = const { RefCell::new(None) };
     static LIFECYCLE_AUDIT_LOG: RefCell<Vec<LifecycleAuditEntry>> = const { RefCell::new(Vec::new()) };
     static PARTIAL_HANDOFF_REGISTRY: RefCell<Vec<PartialHandoffEnvelope>> = const { RefCell::new(Vec::new()) };
     static PIPELINE_DISPOSITION: RefCell<Option<Value>> = const { RefCell::new(None) };
@@ -37,13 +37,13 @@ thread_local! {
 
 /// Register the callback `Vm::execute` will invoke after the pipeline's
 /// declared steps complete. Last-write-wins.
-pub fn set_pipeline_on_finish(callback: Rc<VmClosure>) {
+pub fn set_pipeline_on_finish(callback: Arc<VmClosure>) {
     PIPELINE_ON_FINISH.with(|slot| *slot.borrow_mut() = Some(callback));
 }
 
 /// Consume the pending callback, leaving the slot empty. Returns `None` when
 /// no callback was registered.
-pub fn take_pipeline_on_finish() -> Option<Rc<VmClosure>> {
+pub fn take_pipeline_on_finish() -> Option<Arc<VmClosure>> {
     PIPELINE_ON_FINISH.with(|slot| slot.borrow_mut().take())
 }
 

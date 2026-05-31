@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
-use std::rc::Rc;
 
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -255,11 +254,11 @@ fn expect_entries<'a>(args: &'a [VmValue], builtin: &str) -> Result<&'a [VmValue
 }
 
 fn bytes_value(bytes: Vec<u8>) -> VmValue {
-    VmValue::Bytes(Rc::new(bytes))
+    VmValue::Bytes(std::sync::Arc::new(bytes))
 }
 
 fn entry_value(fields: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(Rc::new(fields))
+    VmValue::Dict(std::sync::Arc::new(fields))
 }
 
 #[harn_builtin(
@@ -449,11 +448,14 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         let mut fields = BTreeMap::new();
         fields.insert("content".to_string(), bytes_value(content));
         fields.insert("mode".to_string(), VmValue::Int(mode));
-        fields.insert("path".to_string(), VmValue::String(Rc::from(path)));
+        fields.insert(
+            "path".to_string(),
+            VmValue::String(std::sync::Arc::from(path)),
+        );
         output.push(entry_value(fields));
     }
 
-    Ok(VmValue::List(Rc::new(output)))
+    Ok(VmValue::List(std::sync::Arc::new(output)))
 }
 
 #[harn_builtin(sig = "zip_create(entries: list) -> bytes", category = "compression")]
@@ -521,11 +523,14 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
         let mut fields = BTreeMap::new();
         fields.insert("content".to_string(), bytes_value(content));
-        fields.insert("path".to_string(), VmValue::String(Rc::from(path)));
+        fields.insert(
+            "path".to_string(),
+            VmValue::String(std::sync::Arc::from(path)),
+        );
         output.push(entry_value(fields));
     }
 
-    Ok(VmValue::List(Rc::new(output)))
+    Ok(VmValue::List(std::sync::Arc::new(output)))
 }
 
 pub(crate) fn register_compression_builtins(vm: &mut Vm) {
@@ -564,7 +569,7 @@ mod tests {
     }
 
     fn text(value: &str) -> VmValue {
-        VmValue::String(Rc::from(value))
+        VmValue::String(std::sync::Arc::from(value))
     }
 
     #[test]
@@ -585,7 +590,10 @@ mod tests {
         let encoded = call(
             &mut vm,
             "gzip_encode",
-            vec![VmValue::Bytes(Rc::new(payload)), VmValue::Int(6)],
+            vec![
+                VmValue::Bytes(std::sync::Arc::new(payload)),
+                VmValue::Int(6),
+            ],
         )
         .unwrap();
         let mut options = BTreeMap::new();
@@ -593,7 +601,7 @@ mod tests {
         let result = call(
             &mut vm,
             "gzip_decode",
-            vec![encoded, VmValue::Dict(Rc::new(options))],
+            vec![encoded, VmValue::Dict(std::sync::Arc::new(options))],
         );
         let err = result.expect_err("gzip_decode should reject output past cap");
         let message = match err {
@@ -613,7 +621,10 @@ mod tests {
         let encoded = call(
             &mut vm,
             "zstd_encode",
-            vec![VmValue::Bytes(Rc::new(payload)), VmValue::Int(3)],
+            vec![
+                VmValue::Bytes(std::sync::Arc::new(payload)),
+                VmValue::Int(3),
+            ],
         )
         .unwrap();
         let mut options = BTreeMap::new();
@@ -621,7 +632,7 @@ mod tests {
         let result = call(
             &mut vm,
             "zstd_decode",
-            vec![encoded, VmValue::Dict(Rc::new(options))],
+            vec![encoded, VmValue::Dict(std::sync::Arc::new(options))],
         );
         assert!(result.is_err(), "zstd_decode should reject output past cap");
     }
@@ -637,7 +648,9 @@ mod tests {
         let archive = call(
             &mut vm,
             "tar_create",
-            vec![VmValue::List(Rc::new(vec![entry_value(fields)]))],
+            vec![VmValue::List(std::sync::Arc::new(vec![entry_value(
+                fields,
+            )]))],
         )
         .unwrap();
         let extracted = call(&mut vm, "tar_extract", vec![archive]).unwrap();

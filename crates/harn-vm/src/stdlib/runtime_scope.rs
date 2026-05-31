@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
@@ -20,7 +20,7 @@ impl Drop for ScopeGuard {
     }
 }
 
-fn closure_arg(args: &[VmValue], index: usize, label: &str) -> Result<Rc<VmClosure>, VmError> {
+fn closure_arg(args: &[VmValue], index: usize, label: &str) -> Result<Arc<VmClosure>, VmError> {
     match args.get(index) {
         Some(VmValue::Closure(closure)) => Ok(closure.clone()),
         _ => Err(VmError::Runtime(format!(
@@ -31,7 +31,7 @@ fn closure_arg(args: &[VmValue], index: usize, label: &str) -> Result<Rc<VmClosu
 
 async fn call_scoped_closure(
     ctx: &AsyncBuiltinCtx,
-    closure: Rc<VmClosure>,
+    closure: Arc<VmClosure>,
     _label: &str,
 ) -> Result<VmValue, VmError> {
     let mut child_vm = ctx.child_vm();

@@ -19,7 +19,7 @@
 
 use harn_vm::VmValue;
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::error::HostlibError;
@@ -179,20 +179,20 @@ fn initial_background_snapshot(
     };
     response.insert(
         "feedback_kind".to_string(),
-        VmValue::String(Rc::from("tool_progress")),
+        VmValue::String(Arc::from("tool_progress")),
     );
     response.insert("duration_ms".to_string(), VmValue::Int(wait_ms as i64));
     response.insert(
         "stdout".to_string(),
-        VmValue::String(Rc::from(inline_stdout)),
+        VmValue::String(Arc::from(inline_stdout)),
     );
     response.insert(
         "stderr".to_string(),
-        VmValue::String(Rc::from(inline_stderr)),
+        VmValue::String(Arc::from(inline_stderr)),
     );
     response.insert("byte_count".to_string(), VmValue::Int(byte_count as i64));
     response.insert("line_count".to_string(), VmValue::Int(line_count as i64));
-    VmValue::Dict(Rc::new(response))
+    VmValue::Dict(Arc::new(response))
 }
 
 fn payload_str(map: &std::collections::BTreeMap<String, VmValue>, key: &str) -> Option<String> {
@@ -227,12 +227,12 @@ fn parse_command(
             let mut invocation = BTreeMap::new();
             invocation.insert(
                 "command".to_string(),
-                VmValue::String(std::rc::Rc::from(command)),
+                VmValue::String(std::sync::Arc::from(command)),
             );
             if let Some(shell_id) = optional_string(NAME, map, "shell_id")? {
                 invocation.insert(
                     "shell_id".to_string(),
-                    VmValue::String(std::rc::Rc::from(shell_id)),
+                    VmValue::String(std::sync::Arc::from(shell_id)),
                 );
             }
             if let Some(shell) = map.get("shell") {
