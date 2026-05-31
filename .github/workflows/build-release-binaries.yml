@@ -263,6 +263,11 @@ jobs:
       # workflow_dispatch restore) keeps the per-repo 10 GB cache budget
       # focused on the entries we can actually read back.
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        # Cache restore/save is a release latency optimization, not a release
+        # precondition. The Windows cache backend has had transient misses and
+        # auth/setup failures before the build step; fall back to a cold build
+        # instead of fail-fast cancelling every artifact leg.
+        continue-on-error: true
         with:
           shared-key: release-${{ matrix.target }}
           cache-on-failure: true
