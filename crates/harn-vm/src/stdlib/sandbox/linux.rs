@@ -444,6 +444,9 @@ fn landlock_handled_access(abi: u32) -> u64 {
     if abi >= 3 {
         access |= LANDLOCK_ACCESS_FS_TRUNCATE;
     }
+    if abi >= 5 {
+        access |= LANDLOCK_ACCESS_FS_IOCTL_DEV;
+    }
     access
 }
 
@@ -475,6 +478,7 @@ const LANDLOCK_ACCESS_FS_MAKE_BLOCK: u64 = 1 << 11;
 const LANDLOCK_ACCESS_FS_MAKE_SYM: u64 = 1 << 12;
 const LANDLOCK_ACCESS_FS_REFER: u64 = 1 << 13;
 const LANDLOCK_ACCESS_FS_TRUNCATE: u64 = 1 << 14;
+const LANDLOCK_ACCESS_FS_IOCTL_DEV: u64 = 1 << 15;
 
 #[cfg(test)]
 mod tests {
@@ -548,7 +552,8 @@ mod tests {
         assert!(rules.iter().any(|(path, access)| path.as_path()
             == std::path::Path::new("/dev/null")
             && access & LANDLOCK_ACCESS_FS_READ_FILE != 0
-            && access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0));
+            && access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0
+            && access & LANDLOCK_ACCESS_FS_IOCTL_DEV == 0));
         for device in ["/dev/zero", "/dev/random", "/dev/urandom"] {
             let Some((_, access)) = rules
                 .iter()
@@ -566,6 +571,25 @@ mod tests {
                 0,
                 "{device} must not be writable"
             );
+            assert_eq!(
+                *access & LANDLOCK_ACCESS_FS_IOCTL_DEV,
+                0,
+                "{device} must not receive device ioctl access"
+            );
         }
+    }
+
+    #[test]
+    fn landlock_handled_access_tracks_device_ioctl_abi() {
+        assert_eq!(
+            landlock_handled_access(4) & LANDLOCK_ACCESS_FS_IOCTL_DEV,
+            0,
+            "ABI 4 kernels do not support device ioctl mediation",
+        );
+        assert_ne!(
+            landlock_handled_access(5) & LANDLOCK_ACCESS_FS_IOCTL_DEV,
+            0,
+            "ABI 5+ kernels should explicitly mediate device ioctls",
+        );
     }
 }

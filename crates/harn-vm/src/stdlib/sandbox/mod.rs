@@ -58,10 +58,9 @@ thread_local! {
     static WARNED_KEYS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
 }
 
-/// The kind of filesystem access a path-scope check is guarding. Drives
-/// only the verb rendered in a rejection message — the scope decision
-/// itself is identical for reads, writes, and deletes (a path is either
-/// inside the workspace roots or it is not).
+/// The kind of filesystem access a path-scope check is guarding. This drives
+/// the verb rendered in rejection messages and the narrow standard-device
+/// exception; ordinary files are otherwise scoped by the same workspace roots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FsAccess {
     Read,
@@ -358,7 +357,7 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     // rewrites /dev/stdout to a per-process /dev/fd/<…>.output alias that no
     // longer looks like a standard device. Kept deliberately narrow — only
     // the well-known device files, no broader /dev access.
-    if is_standard_io_device(&normalize_io_device_path(path)) {
+    if is_standard_io_device_for_access(&normalize_io_device_path(path), access) {
         return Ok(());
     }
     let candidate = normalize_for_policy(path);
@@ -793,14 +792,25 @@ fn normalize_io_device_path(path: &Path) -> PathBuf {
 }
 
 /// Whether `path` is one of the standard process I/O device files that the
-/// sandbox treats as a stream rather than a workspace mutation: `/dev/stdout`,
-/// `/dev/stderr`, `/dev/null`, or a numeric file-descriptor `/dev/fd/<N>`.
-/// `path` must already be absolute and lexically normalized.
-fn is_standard_io_device(path: &Path) -> bool {
-    matches!(
-        path.to_str(),
-        Some("/dev/stdout" | "/dev/stderr" | "/dev/null")
-    ) || is_dev_fd_descriptor(path)
+/// sandbox treats as a stream rather than a workspace mutation for this access:
+/// stdin is read-only, stdout/stderr/null are read/write, and delete is never a
+/// stream operation. `path` must already be absolute and lexically normalized.
+fn is_standard_io_device_for_access(path: &Path, access: FsAccess) -> bool {
+    match access {
+        FsAccess::Read => {
+            matches!(
+                path.to_str(),
+                Some("/dev/stdin" | "/dev/stdout" | "/dev/stderr" | "/dev/null")
+            ) || is_dev_fd_descriptor(path)
+        }
+        FsAccess::Write => {
+            matches!(
+                path.to_str(),
+                Some("/dev/stdout" | "/dev/stderr" | "/dev/null")
+            ) || is_dev_fd_descriptor(path)
+        }
+        FsAccess::Delete => false,
+    }
 }
 
 /// Whether `path` is exactly `/dev/fd/<N>` for a non-empty run of ASCII
@@ -1028,6 +1038,18 @@ mod tests {
                 "read of standard device {device} must be allowed"
             );
         }
+        assert!(
+            check_fs_path_scope(Path::new("/dev/stdin"), FsAccess::Read).is_ok(),
+            "read of standard device /dev/stdin must be allowed"
+        );
+        assert!(
+            check_fs_path_scope(Path::new("/dev/stdin"), FsAccess::Write).is_err(),
+            "write to /dev/stdin is not a standard output stream"
+        );
+        assert!(
+            check_fs_path_scope(Path::new("/dev/null"), FsAccess::Delete).is_err(),
+            "standard devices must not bypass delete scoping"
+        );
         // Numeric /dev/fd/<N> descriptors are allowed.
         assert!(check_fs_path_scope(Path::new("/dev/fd/1"), FsAccess::Write).is_ok());
         assert!(check_fs_path_scope(Path::new("/dev/fd/2"), FsAccess::Write).is_ok());
@@ -1053,16 +1075,58 @@ mod tests {
 
     #[test]
     fn is_standard_io_device_matches_only_known_streams() {
-        assert!(is_standard_io_device(Path::new("/dev/stdout")));
-        assert!(is_standard_io_device(Path::new("/dev/stderr")));
-        assert!(is_standard_io_device(Path::new("/dev/null")));
-        assert!(is_standard_io_device(Path::new("/dev/fd/0")));
-        assert!(is_standard_io_device(Path::new("/dev/fd/12")));
-        assert!(!is_standard_io_device(Path::new("/dev/fd/")));
-        assert!(!is_standard_io_device(Path::new("/dev/fd/1a")));
-        assert!(!is_standard_io_device(Path::new("/dev/stdoutx")));
-        assert!(!is_standard_io_device(Path::new("/dev/random")));
-        assert!(!is_standard_io_device(Path::new("/tmp/dev/null")));
+        assert!(is_standard_io_device_for_access(
+            Path::new("/dev/stdin"),
+            FsAccess::Read
+        ));
+        assert!(!is_standard_io_device_for_access(
+            Path::new("/dev/stdin"),
+            FsAccess::Write
+        ));
+        assert!(is_standard_io_device_for_access(
+            Path::new("/dev/stdout"),
+            FsAccess::Write
+        ));
+        assert!(is_standard_io_device_for_access(
+            Path::new("/dev/stderr"),
+            FsAccess::Write
+        ));
+        assert!(is_standard_io_device_for_access(
+            Path::new("/dev/null"),
+            FsAccess::Write
+        ));
+        assert!(is_standard_io_device_for_access(
+            Path::new("/dev/fd/0"),
+            FsAccess::Read
+        ));
+        assert!(is_standard_io_device_for_access(
+            Path::new("/dev/fd/12"),
+            FsAccess::Write
+        ));
+        assert!(!is_standard_io_device_for_access(
+            Path::new("/dev/null"),
+            FsAccess::Delete
+        ));
+        assert!(!is_standard_io_device_for_access(
+            Path::new("/dev/fd/"),
+            FsAccess::Write
+        ));
+        assert!(!is_standard_io_device_for_access(
+            Path::new("/dev/fd/1a"),
+            FsAccess::Write
+        ));
+        assert!(!is_standard_io_device_for_access(
+            Path::new("/dev/stdoutx"),
+            FsAccess::Write
+        ));
+        assert!(!is_standard_io_device_for_access(
+            Path::new("/dev/random"),
+            FsAccess::Read
+        ));
+        assert!(!is_standard_io_device_for_access(
+            Path::new("/tmp/dev/null"),
+            FsAccess::Write
+        ));
     }
 
     #[test]
