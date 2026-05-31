@@ -109,9 +109,9 @@ pub(super) fn scan_re_export_conflicts(
     file_path: &Path,
     source: &str,
     program: &[SNode],
+    graph: &harn_modules::ModuleGraph,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
-    let graph = harn_modules::build(std::slice::from_ref(&file_path.to_path_buf()));
     let conflicts = graph.re_export_conflicts(file_path);
     if conflicts.is_empty() {
         return;
