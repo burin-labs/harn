@@ -49,6 +49,18 @@ pub struct ModuleGraph {
     modules: HashMap<PathBuf, ModuleInfo>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ParsedModuleSource {
+    pub source: String,
+    pub program: Vec<SNode>,
+}
+
+#[derive(Debug, Default)]
+pub struct ModuleGraphBuild {
+    pub graph: ModuleGraph,
+    pub parsed_sources: HashMap<PathBuf, ParsedModuleSource>,
+}
+
 #[derive(Debug, Default)]
 struct ModuleInfo {
     /// All declarations visible in this module (for local symbol lookup and
@@ -139,7 +151,25 @@ pub fn read_module_source(path: &Path) -> Option<String> {
 /// graph contains every module reachable from the seed set. Cycles and
 /// already-loaded files are skipped via a visited set.
 pub fn build(files: &[PathBuf]) -> ModuleGraph {
+    build_inner(files, None).graph
+}
+
+/// Build a module graph while retaining parsed sources for the seed files.
+///
+/// Imported-only modules still participate in the graph, but their ASTs are
+/// dropped after graph extraction so callers do not pay extra peak memory for
+/// parsed sources they will not reuse.
+pub fn build_with_parsed_sources(files: &[PathBuf]) -> ModuleGraphBuild {
+    let parsed_source_targets = files.iter().map(|file| normalize_path(file)).collect();
+    build_inner(files, Some(&parsed_source_targets))
+}
+
+fn build_inner(
+    files: &[PathBuf],
+    parsed_source_targets: Option<&HashSet<PathBuf>>,
+) -> ModuleGraphBuild {
     let mut modules: HashMap<PathBuf, ModuleInfo> = HashMap::new();
+    let mut parsed_sources: HashMap<PathBuf, ParsedModuleSource> = HashMap::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut queue: VecDeque<PathBuf> = VecDeque::new();
     for file in files {
@@ -152,7 +182,14 @@ pub fn build(files: &[PathBuf]) -> ModuleGraph {
         if modules.contains_key(&path) {
             continue;
         }
-        let module = load_module(&path);
+        let retain_parsed_source =
+            parsed_source_targets.is_some_and(|targets| targets.contains(&path));
+        let (module, parsed) = load_module(&path);
+        if retain_parsed_source {
+            if let Some(parsed) = parsed {
+                parsed_sources.insert(path.clone(), parsed);
+            }
+        }
         // Enqueue resolved import targets so the whole reachable graph is
         // discovered without the caller having to pre-walk imports.
         //
@@ -180,7 +217,10 @@ pub fn build(files: &[PathBuf]) -> ModuleGraph {
         modules.insert(path, module);
     }
     resolve_re_exports(&mut modules);
-    ModuleGraph { modules }
+    ModuleGraphBuild {
+        graph: ModuleGraph { modules },
+        parsed_sources,
+    }
 }
 
 /// Iteratively expand each module's `exports` set to include the transitive
@@ -858,19 +898,19 @@ pub struct ReExportConflict {
     pub sources: Vec<PathBuf>,
 }
 
-fn load_module(path: &Path) -> ModuleInfo {
+fn load_module(path: &Path) -> (ModuleInfo, Option<ParsedModuleSource>) {
     let Some(source) = read_module_source(path) else {
-        return ModuleInfo::default();
+        return (ModuleInfo::default(), None);
     };
     let mut lexer = harn_lexer::Lexer::new(&source);
     let tokens = match lexer.tokenize() {
         Ok(tokens) => tokens,
-        Err(_) => return ModuleInfo::default(),
+        Err(_) => return (ModuleInfo::default(), None),
     };
     let mut parser = Parser::new(tokens);
     let program = match parser.parse() {
         Ok(program) => program,
-        Err(_) => return ModuleInfo::default(),
+        Err(_) => return (ModuleInfo::default(), None),
     };
 
     let mut module = ModuleInfo::default();
@@ -893,7 +933,8 @@ fn load_module(path: &Path) -> ModuleInfo {
     module
         .exports
         .extend(module.selective_re_exports.keys().cloned());
-    module
+    let parsed = ParsedModuleSource { source, program };
+    (module, Some(parsed))
 }
 
 /// Extract the stdlib module name when `path` is a `<std>/<name>`
