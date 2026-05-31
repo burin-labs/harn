@@ -1,11 +1,10 @@
 name: Release smoke
 
-# Cross-platform release smoke matrix. Builds a release `harn` binary on
-# macOS, Linux, and Windows runners and runs `scripts/release_smoke.sh`
-# against it so a release tag can never publish a binary that breaks the
-# user-visible CLI surface (`--help`, `check`, `run`, package check,
-# generated artifacts, process tool, file watcher, no-credentials
-# workflow) on any supported platform.
+# Cross-platform release smoke matrix. For tag pushes, waits on the official
+# GitHub release artifacts and smokes those exact binaries; for scheduled/manual
+# source-health runs, builds a native release `harn` binary first. That keeps the
+# release gate tied to the bytes users download without paying a second compile
+# on every release tag.
 #
 # The per-PR `windows` job in `ci.yml` covers Windows-specific compile
 # breaks and the curated unit slice. This job is the explicit
@@ -32,10 +31,83 @@ env:
   SCCACHE_GHA_ENABLED: "true"
   RUSTFLAGS: "-D warnings"
   HARN_LLM_CALLS_DISABLED: "1"
+  HARN_RELEASE_ASSET_WAIT_SECONDS: "7200"
 
 jobs:
+  resolve:
+    name: Resolve release smoke input
+    runs-on: ubuntu-latest
+    timeout-minutes: 125
+    outputs:
+      mode: ${{ steps.resolve.outputs.mode }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve smoke mode
+        id: resolve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WAIT_SECONDS: ${{ env.HARN_RELEASE_ASSET_WAIT_SECONDS }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "mode=source" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "::notice::Non-tag run; release smoke will build from source."
+            exit 0
+          fi
+
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected release tag vX.Y.Z, got '${GITHUB_REF_NAME}'"
+            exit 1
+          fi
+
+          if [[ ! "${WAIT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::HARN_RELEASE_ASSET_WAIT_SECONDS must be a positive integer, got '${WAIT_SECONDS}'"
+            exit 1
+          fi
+
+          tag="${GITHUB_REF_NAME}"
+          expected_assets=(
+            harn-aarch64-apple-darwin.tar.gz
+            harn-aarch64-unknown-linux-gnu.tar.gz
+            harn-x86_64-apple-darwin.tar.gz
+            harn-x86_64-pc-windows-msvc.zip
+            harn-x86_64-unknown-linux-gnu.tar.gz
+            release-assets.json
+          )
+
+          deadline=$((SECONDS + WAIT_SECONDS))
+          while true; do
+            assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+            missing=()
+            for asset in "${expected_assets[@]}"; do
+              if ! grep -Fxq "$asset" <<<"$assets"; then
+                missing+=("$asset")
+              fi
+            done
+
+            if (( ${#missing[@]} == 0 )); then
+              echo "mode=artifact" >> "$GITHUB_OUTPUT"
+              echo "tag=$tag" >> "$GITHUB_OUTPUT"
+              echo "::notice::All release assets for $tag are available; smoke jobs will download official artifacts."
+              exit 0
+            fi
+
+            if (( SECONDS >= deadline )); then
+              printf '::error::Timed out waiting for release assets for %s: %s\n' "$tag" "${missing[*]}"
+              exit 1
+            fi
+
+            printf '::notice::Waiting for release assets for %s: %s\n' "$tag" "${missing[*]}"
+            sleep 30
+          done
+
   smoke:
     name: Release smoke (${{ matrix.platform }})
+    needs: resolve
+    if: always()
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -51,10 +123,112 @@ jobs:
             runner: windows-latest
             harn_binary: target/release/harn.exe
     steps:
+      - name: Fail when release assets are unavailable
+        if: needs.resolve.result != 'success'
+        shell: bash
+        run: |
+          echo "::error::release smoke input resolution failed; official artifacts were unavailable or invalid"
+          exit 1
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Resolve harn binary
+        id: runtime
+        shell: bash
+        env:
+          MODE: ${{ needs.resolve.outputs.mode }}
+          SOURCE_HARN_BINARY: ${{ matrix.harn_binary }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$MODE" == "source" ]]; then
+            echo "harn_binary=$SOURCE_HARN_BINARY" >> "$GITHUB_OUTPUT"
+            echo "asset=" >> "$GITHUB_OUTPUT"
+            echo "::notice::Source smoke will use $SOURCE_HARN_BINARY."
+            exit 0
+          fi
+
+          if [[ "$MODE" != "artifact" ]]; then
+            echo "::error::Unexpected release smoke mode '$MODE'"
+            exit 1
+          fi
+
+          case "${RUNNER_OS}-${RUNNER_ARCH}" in
+            Linux-X64)
+              asset="harn-x86_64-unknown-linux-gnu.tar.gz"
+              binary="harn"
+              ;;
+            Linux-ARM64)
+              asset="harn-aarch64-unknown-linux-gnu.tar.gz"
+              binary="harn"
+              ;;
+            macOS-X64)
+              asset="harn-x86_64-apple-darwin.tar.gz"
+              binary="harn"
+              ;;
+            macOS-ARM64)
+              asset="harn-aarch64-apple-darwin.tar.gz"
+              binary="harn"
+              ;;
+            Windows-X64)
+              asset="harn-x86_64-pc-windows-msvc.zip"
+              binary="harn.exe"
+              ;;
+            *)
+              echo "::error::Unsupported runner for artifact smoke: ${RUNNER_OS}-${RUNNER_ARCH}"
+              exit 1
+              ;;
+          esac
+
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "harn_binary=${RUNNER_TEMP}/harn-release/${binary}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Artifact smoke will use $asset for ${RUNNER_OS}-${RUNNER_ARCH}."
+
+      - name: Download release artifact
+        if: needs.resolve.outputs.mode == 'artifact'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          ASSET: ${{ steps.runtime.outputs.asset }}
+          HARN_BINARY: ${{ steps.runtime.outputs.harn_binary }}
+        run: |
+          set -euo pipefail
+
+          out_dir="${RUNNER_TEMP}/harn-release"
+          rm -rf "$out_dir"
+          mkdir -p "$out_dir"
+
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ASSET" \
+            --dir "$out_dir"
+
+          case "$ASSET" in
+            *.zip)
+              if command -v unzip >/dev/null 2>&1; then
+                unzip -q "$out_dir/$ASSET" -d "$out_dir"
+              elif command -v 7z >/dev/null 2>&1; then
+                7z x -y "$out_dir/$ASSET" "-o$out_dir"
+              else
+                echo "::error::Neither unzip nor 7z is available to extract $ASSET"
+                exit 1
+              fi
+              ;;
+            *.tar.gz) tar -xzf "$out_dir/$ASSET" -C "$out_dir" ;;
+            *)
+              echo "::error::Unsupported release asset extension: $ASSET"
+              exit 1
+              ;;
+          esac
+
+          chmod +x "$out_dir"/harn*
+          "$HARN_BINARY" --version
+
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: needs.resolve.outputs.mode == 'source'
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-        if: matrix.platform != 'windows'
+        if: needs.resolve.outputs.mode == 'source' && matrix.platform != 'windows'
         # sccache is a build-cache optimization, not a build requirement. The
         # upstream action sometimes fails on merge_group / restricted-token
         # events with "Bad credentials" when api.github.com gates the release
@@ -66,10 +240,11 @@ jobs:
       # can drop that connection (`os error 10054`). Local rustc plus
       # Swatinem/rust-cache is slower but reliable for this gate.
       - name: Configure Cargo to use sccache
-        if: matrix.platform != 'windows' && env.SCCACHE_PATH != ''
+        if: needs.resolve.outputs.mode == 'source' && matrix.platform != 'windows' && env.SCCACHE_PATH != ''
         shell: bash
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: needs.resolve.outputs.mode == 'source'
         continue-on-error: true
         with:
           # Piggy-back on the per-platform release cache key from
@@ -82,7 +257,7 @@ jobs:
           # Stale cached binaries can shadow it on macOS tag runners.
           cache-bin: false
       - name: Verify macOS Rust toolchain
-        if: runner.os == 'macOS'
+        if: needs.resolve.outputs.mode == 'source' && runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
@@ -94,6 +269,7 @@ jobs:
           cargo --version
           rustc --version
       - name: Build release harn binary
+        if: needs.resolve.outputs.mode == 'source'
         shell: bash
         env:
           # Match build-release-binaries.yml. Fat LTO makes this smoke gate
@@ -105,6 +281,6 @@ jobs:
         shell: bash
         timeout-minutes: 10
         env:
-          HARN_BINARY: ${{ matrix.harn_binary }}
+          HARN_BINARY: ${{ steps.runtime.outputs.harn_binary }}
           HARN_RELEASE_SMOKE_STEP_TIMEOUT_SECONDS: "120"
         run: ./scripts/release_smoke.sh
