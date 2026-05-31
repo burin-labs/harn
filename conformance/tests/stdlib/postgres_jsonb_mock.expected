@@ -1,0 +1,5 @@
+1
+2
+2
+true
+SELECT jsonb_path_query($1::jsonb, $2::jsonpath) AS value

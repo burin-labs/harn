@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::ops::Bound;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -41,6 +42,7 @@ pub(super) struct PoolRecord {
     pub(super) replica_cursor: AtomicUsize,
     pub(super) max_connections: u32,
     pub(super) statement_cache_capacity: usize,
+    pub(super) read_routing_policy: ReadRoutingPolicy,
     pub(super) circuit: Arc<CircuitBreakerState>,
 }
 
@@ -80,6 +82,41 @@ pub(crate) fn register_postgres_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
+    register_postgres_namespace(vm);
+}
+
+fn register_postgres_namespace(vm: &mut Vm) {
+    let jsonb = namespace(
+        "pg.jsonb",
+        &[
+            ("path", "pg.jsonb.path"),
+            ("merge", "pg.jsonb.merge"),
+            ("contains", "pg.jsonb.contains"),
+        ],
+    );
+    vm.set_global(
+        "pg",
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            ("_namespace".to_string(), VmValue::String(Rc::from("pg"))),
+            ("jsonb".to_string(), jsonb),
+        ]))),
+    );
+}
+
+fn namespace(name: &str, entries: &[(&str, &str)]) -> VmValue {
+    VmValue::Dict(Rc::new(
+        std::iter::once((
+            "_namespace".to_string(),
+            VmValue::String(Rc::from(name.to_string())),
+        ))
+        .chain(entries.iter().map(|(field, builtin)| {
+            (
+                (*field).to_string(),
+                VmValue::BuiltinRef(Rc::from(*builtin)),
+            )
+        }))
+        .collect::<BTreeMap<_, _>>(),
+    ))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -107,6 +144,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &listen::PG_LISTENER_RECV_IMPL_DEF,
     &listen::PG_LISTENER_CLOSE_IMPL_DEF,
     &listen::PG_NOTIFY_IMPL_DEF,
+    // JSONB helpers (v2 — issue #2512)
+    &jsonb::PG_JSONB_PATH_IMPL_DEF,
+    &jsonb::PG_JSONB_MERGE_IMPL_DEF,
+    &jsonb::PG_JSONB_CONTAINS_IMPL_DEF,
     // Schema introspection + pool observability + partitions (v2)
     &introspect::PG_INTROSPECT_TABLES_IMPL_DEF,
     &introspect::PG_INTROSPECT_COLUMNS_IMPL_DEF,
@@ -122,6 +163,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 mod advisory;
 mod circuit;
 mod introspect;
+mod jsonb;
 mod listen;
 mod migrate;
 
@@ -266,7 +308,7 @@ async fn pg_query_impl(
     let sql = required_string_arg(&args, 1, "pg_query", "sql")?;
     let params = params_arg(args.get(2), "pg_query")?;
     let options = args.get(3).and_then(VmValue::as_dict);
-    let routing = routing_from_options(options);
+    let routing = routing_from_options(options)?;
     query_many(target, &sql, &params, routing).await
 }
 
@@ -285,7 +327,7 @@ async fn pg_query_one_impl(
     let sql = required_string_arg(&args, 1, "pg_query_one", "sql")?;
     let params = params_arg(args.get(2), "pg_query_one")?;
     let options = args.get(3).and_then(VmValue::as_dict);
-    let routing = routing_from_options(options);
+    let routing = routing_from_options(options)?;
     let rows = query_rows(target, &sql, &params, routing).await?;
     Ok(rows.into_iter().next().unwrap_or(VmValue::Nil))
 }
@@ -504,6 +546,7 @@ async fn open_pool(
     let stmt_cache_capacity = option_int(options, "statement_cache_capacity")
         .map(|n| n.max(0) as usize)
         .unwrap_or(DEFAULT_STATEMENT_CACHE_CAPACITY);
+    let read_routing_policy = read_routing_policy_from_options(options)?;
     let max_connections = if single_connection {
         1
     } else {
@@ -555,6 +598,10 @@ async fn open_pool(
         "statement_cache_capacity".to_string(),
         VmValue::Int(stmt_cache_capacity as i64),
     );
+    meta.insert(
+        "read_routing_policy".to_string(),
+        VmValue::String(Rc::from(read_routing_policy.as_str())),
+    );
     if let Some(application_name) = option_string(options, "application_name") {
         meta.insert(
             "application_name".to_string(),
@@ -570,6 +617,7 @@ async fn open_pool(
                 replica_cursor: AtomicUsize::new(0),
                 max_connections,
                 statement_cache_capacity: stmt_cache_capacity,
+                read_routing_policy,
                 circuit,
             }),
         );
@@ -707,7 +755,7 @@ pub(super) async fn query_rows(
     }
 
     let record = pool_record_from_handle(target, "pg_query")?;
-    let pool = pool_for_routing(&record, routing);
+    let pool = pool_for_routing(&record, routing, "pg_query")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_query")?;
     let query = bind_params(query(sql), params);
     let result = query.fetch_all(pool.as_ref()).await;
@@ -1005,6 +1053,36 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 values.iter().map(crate::stdlib::json_to_vm_value).collect(),
             ))
         }
+        "INT4RANGE" => range_value(
+            row.try_get::<sqlx_postgres::types::PgRange<i32>, _>(index)
+                .map_err(decode_error)?,
+            |v| VmValue::Int(i64::from(v)),
+        ),
+        "INT8RANGE" => range_value(
+            row.try_get::<sqlx_postgres::types::PgRange<i64>, _>(index)
+                .map_err(decode_error)?,
+            VmValue::Int,
+        ),
+        "NUMRANGE" => range_value(
+            row.try_get::<sqlx_postgres::types::PgRange<rust_decimal::Decimal>, _>(index)
+                .map_err(decode_error)?,
+            |v| VmValue::String(Rc::from(v.to_string())),
+        ),
+        "DATERANGE" => range_value(
+            row.try_get::<sqlx_postgres::types::PgRange<time::Date>, _>(index)
+                .map_err(decode_error)?,
+            |v| VmValue::String(Rc::from(v.to_string())),
+        ),
+        "TSRANGE" => range_value(
+            row.try_get::<sqlx_postgres::types::PgRange<time::PrimitiveDateTime>, _>(index)
+                .map_err(decode_error)?,
+            |v| VmValue::String(Rc::from(v.to_string())),
+        ),
+        "TSTZRANGE" => range_value(
+            row.try_get::<sqlx_postgres::types::PgRange<time::OffsetDateTime>, _>(index)
+                .map_err(decode_error)?,
+            |v| VmValue::String(Rc::from(v.to_string())),
+        ),
         // HSTORE decodes as a Harn dict<string, string|nil>. sqlx surfaces
         // it as `BTreeMap<String, Option<String>>` already.
         "HSTORE" => {
@@ -1020,17 +1098,59 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
             }
             VmValue::Dict(Rc::new(dict))
         }
-        // PG geometric POINT decodes as `{x, y}`. Other geometric types
-        // (LINE, LSEG, BOX, PATH, POLYGON, CIRCLE) fall back to their
-        // textual representation below — Harn callers can parse if
-        // needed, but a structured decode for every geometric type is
-        // niche enough to defer.
+        // Postgres geometric types decode into dictionaries that preserve
+        // the native shape while staying idiomatic to Harn callers.
         "POINT" => {
             let point: sqlx_postgres::types::PgPoint = row.try_get(index).map_err(decode_error)?;
-            let mut dict = BTreeMap::new();
-            dict.insert("x".to_string(), VmValue::Float(point.x));
-            dict.insert("y".to_string(), VmValue::Float(point.y));
-            VmValue::Dict(Rc::new(dict))
+            point_value(point.x, point.y)
+        }
+        "LINE" => {
+            let line: sqlx_postgres::types::PgLine = row.try_get(index).map_err(decode_error)?;
+            dict_value([
+                ("a", VmValue::Float(line.a)),
+                ("b", VmValue::Float(line.b)),
+                ("c", VmValue::Float(line.c)),
+            ])
+        }
+        "LSEG" => {
+            let segment: sqlx_postgres::types::PgLSeg = row.try_get(index).map_err(decode_error)?;
+            dict_value([
+                ("start", point_value(segment.start_x, segment.start_y)),
+                ("end", point_value(segment.end_x, segment.end_y)),
+            ])
+        }
+        "BOX" => {
+            let pg_box: sqlx_postgres::types::PgBox = row.try_get(index).map_err(decode_error)?;
+            dict_value([
+                (
+                    "upper_right",
+                    point_value(pg_box.upper_right_x, pg_box.upper_right_y),
+                ),
+                (
+                    "lower_left",
+                    point_value(pg_box.lower_left_x, pg_box.lower_left_y),
+                ),
+            ])
+        }
+        "PATH" => {
+            let path: sqlx_postgres::types::PgPath = row.try_get(index).map_err(decode_error)?;
+            dict_value([
+                ("closed", VmValue::Bool(path.closed)),
+                ("points", points_value(path.points)),
+            ])
+        }
+        "POLYGON" => {
+            let polygon: sqlx_postgres::types::PgPolygon =
+                row.try_get(index).map_err(decode_error)?;
+            dict_value([("points", points_value(polygon.points))])
+        }
+        "CIRCLE" => {
+            let circle: sqlx_postgres::types::PgCircle =
+                row.try_get(index).map_err(decode_error)?;
+            dict_value([
+                ("center", point_value(circle.x, circle.y)),
+                ("radius", VmValue::Float(circle.radius)),
+            ])
         }
         _ => VmValue::String(Rc::from(row.try_get::<String, _>(index).map_err(
             |error| {
@@ -1060,6 +1180,47 @@ where
     Ok(VmValue::List(Rc::new(
         values.into_iter().map(map).collect(),
     )))
+}
+
+fn range_value<T>(range: sqlx_postgres::types::PgRange<T>, map: impl Fn(T) -> VmValue) -> VmValue {
+    let (start, start_inclusive) = range_bound_value(range.start, &map);
+    let (end, end_inclusive) = range_bound_value(range.end, &map);
+    dict_value([
+        ("start", start),
+        ("end", end),
+        ("start_inclusive", VmValue::Bool(start_inclusive)),
+        ("end_inclusive", VmValue::Bool(end_inclusive)),
+    ])
+}
+
+fn range_bound_value<T>(bound: Bound<T>, map: &impl Fn(T) -> VmValue) -> (VmValue, bool) {
+    match bound {
+        Bound::Included(value) => (map(value), true),
+        Bound::Excluded(value) => (map(value), false),
+        Bound::Unbounded => (VmValue::Nil, false),
+    }
+}
+
+fn points_value(points: Vec<sqlx_postgres::types::PgPoint>) -> VmValue {
+    VmValue::List(Rc::new(
+        points
+            .into_iter()
+            .map(|point| point_value(point.x, point.y))
+            .collect(),
+    ))
+}
+
+fn point_value(x: f64, y: f64) -> VmValue {
+    dict_value([("x", VmValue::Float(x)), ("y", VmValue::Float(y))])
+}
+
+fn dict_value<const N: usize>(pairs: [(&'static str, VmValue); N]) -> VmValue {
+    VmValue::Dict(Rc::new(
+        pairs
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    ))
 }
 
 fn decode_error(error: sqlx_core::error::Error) -> VmError {
@@ -1285,35 +1446,135 @@ pub(super) fn current_tenant_namespace() -> String {
         .unwrap_or_default()
 }
 
-/// Round-robin replica picker. Returns the primary pool when no replicas
-/// are configured or routing is `Primary`.
-pub(super) fn pool_for_routing(record: &Arc<PoolRecord>, routing: QueryRouting) -> Arc<PgPool> {
-    match routing {
-        QueryRouting::Primary => Arc::clone(&record.pool),
-        QueryRouting::ReadOnly => {
-            if record.replicas.is_empty() {
-                Arc::clone(&record.pool)
-            } else {
-                let idx =
-                    record.replica_cursor.fetch_add(1, Ordering::Relaxed) % record.replicas.len();
-                Arc::clone(&record.replicas[idx])
-            }
+/// Selects the primary or a replica for a query according to the explicit
+/// query route or the pool's read-only routing policy.
+pub(super) fn pool_for_routing(
+    record: &Arc<PoolRecord>,
+    routing: QueryRouting,
+    builtin: &'static str,
+) -> Result<Arc<PgPool>, VmError> {
+    let policy = match routing {
+        QueryRouting::Primary => return Ok(Arc::clone(&record.pool)),
+        QueryRouting::ReadOnly => record.read_routing_policy,
+        QueryRouting::Policy(policy) => policy,
+    };
+    let pool = match policy {
+        ReadRoutingPolicy::Primary => Arc::clone(&record.pool),
+        ReadRoutingPolicy::Replica => record
+            .replicas
+            .first()
+            .cloned()
+            .ok_or_else(|| no_replica_error(builtin, policy))?,
+        ReadRoutingPolicy::ReplicaOrPrimary => {
+            next_replica(record).unwrap_or_else(|| Arc::clone(&record.pool))
+        }
+        ReadRoutingPolicy::RoundRobinReplica => {
+            next_replica(record).ok_or_else(|| no_replica_error(builtin, policy))?
+        }
+    };
+    Ok(pool)
+}
+
+fn next_replica(record: &Arc<PoolRecord>) -> Option<Arc<PgPool>> {
+    if record.replicas.is_empty() {
+        None
+    } else {
+        let idx = record.replica_cursor.fetch_add(1, Ordering::Relaxed) % record.replicas.len();
+        Some(Arc::clone(&record.replicas[idx]))
+    }
+}
+
+fn no_replica_error(builtin: &'static str, policy: ReadRoutingPolicy) -> VmError {
+    runtime_error(format!(
+        "{builtin}: read routing policy `{}` requires at least one replica",
+        policy.as_str()
+    ))
+}
+
+/// Per-query routing policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum QueryRouting {
+    Primary,
+    ReadOnly,
+    Policy(ReadRoutingPolicy),
+}
+
+/// Pool-level policy used when a query opts into read-only routing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ReadRoutingPolicy {
+    Primary,
+    Replica,
+    ReplicaOrPrimary,
+    RoundRobinReplica,
+}
+
+impl ReadRoutingPolicy {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            ReadRoutingPolicy::Primary => "primary",
+            ReadRoutingPolicy::Replica => "replica",
+            ReadRoutingPolicy::ReplicaOrPrimary => "replica_or_primary",
+            ReadRoutingPolicy::RoundRobinReplica => "round_robin_replica",
         }
     }
 }
 
-/// Per-query routing policy.
-#[derive(Clone, Copy)]
-pub(super) enum QueryRouting {
-    Primary,
-    ReadOnly,
+fn read_routing_policy_from_options(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<ReadRoutingPolicy, VmError> {
+    Ok(parse_read_routing_policy(
+        options
+            .and_then(|opts| opts.get("read_routing_policy"))
+            .or_else(|| options.and_then(|opts| opts.get("routing_policy"))),
+        "pg_pool",
+    )?
+    .unwrap_or(ReadRoutingPolicy::ReplicaOrPrimary))
 }
 
-pub(super) fn routing_from_options(options: Option<&BTreeMap<String, VmValue>>) -> QueryRouting {
-    if option_bool(options.and_then(|opts| opts.get("read_only"))) == Some(true) {
-        QueryRouting::ReadOnly
+fn query_routing_policy_from_options(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Option<ReadRoutingPolicy>, VmError> {
+    parse_read_routing_policy(
+        options
+            .and_then(|opts| opts.get("read_routing_policy"))
+            .or_else(|| options.and_then(|opts| opts.get("routing_policy")))
+            .or_else(|| options.and_then(|opts| opts.get("route"))),
+        "pg_query",
+    )
+}
+
+fn parse_read_routing_policy(
+    value: Option<&VmValue>,
+    builtin: &'static str,
+) -> Result<Option<ReadRoutingPolicy>, VmError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let text = value.display();
+    let policy = match text.trim() {
+        "" => return Ok(None),
+        "primary" => ReadRoutingPolicy::Primary,
+        "replica" => ReadRoutingPolicy::Replica,
+        "replica_or_primary" => ReadRoutingPolicy::ReplicaOrPrimary,
+        "round_robin_replica" => ReadRoutingPolicy::RoundRobinReplica,
+        other => {
+            return Err(runtime_error(format!(
+                "{builtin}: unsupported read routing policy `{other}`"
+            )))
+        }
+    };
+    Ok(Some(policy))
+}
+
+pub(super) fn routing_from_options(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<QueryRouting, VmError> {
+    if let Some(policy) = query_routing_policy_from_options(options)? {
+        Ok(QueryRouting::Policy(policy))
+    } else if option_bool(options.and_then(|opts| opts.get("read_only"))) == Some(true) {
+        Ok(QueryRouting::ReadOnly)
     } else {
-        QueryRouting::Primary
+        Ok(QueryRouting::Primary)
     }
 }
 
@@ -1488,6 +1749,106 @@ mod tests {
                 .map(|(key, value)| ((*key).to_string(), value.clone()))
                 .collect(),
         ))
+    }
+
+    fn lazy_pool_for_test() -> Arc<PgPool> {
+        let options = PgConnectOptions::from_str("postgres://postgres@localhost/postgres").unwrap();
+        Arc::new(
+            PgPoolOptions::new()
+                .max_connections(1)
+                .connect_lazy_with(options),
+        )
+    }
+
+    fn routing_record(replicas: usize, policy: ReadRoutingPolicy) -> Arc<PoolRecord> {
+        Arc::new(PoolRecord {
+            pool: lazy_pool_for_test(),
+            replicas: (0..replicas).map(|_| lazy_pool_for_test()).collect(),
+            replica_cursor: AtomicUsize::new(0),
+            max_connections: 1,
+            statement_cache_capacity: DEFAULT_STATEMENT_CACHE_CAPACITY,
+            read_routing_policy: policy,
+            circuit: Arc::new(CircuitBreakerState::disabled()),
+        })
+    }
+
+    #[test]
+    fn read_routing_policy_options_parse_named_modes() {
+        let pool_options =
+            BTreeMap::from([("read_routing_policy".to_string(), s("round_robin_replica"))]);
+        assert_eq!(
+            read_routing_policy_from_options(Some(&pool_options)).unwrap(),
+            ReadRoutingPolicy::RoundRobinReplica
+        );
+
+        let query_options = BTreeMap::from([("route".to_string(), s("replica"))]);
+        assert_eq!(
+            routing_from_options(Some(&query_options)).unwrap(),
+            QueryRouting::Policy(ReadRoutingPolicy::Replica)
+        );
+
+        let read_only_options = BTreeMap::from([("read_only".to_string(), VmValue::Bool(true))]);
+        assert_eq!(
+            routing_from_options(Some(&read_only_options)).unwrap(),
+            QueryRouting::ReadOnly
+        );
+
+        let bad_options = BTreeMap::from([("routing_policy".to_string(), s("nearby"))]);
+        assert!(routing_from_options(Some(&bad_options)).is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_routing_policy_selects_replicas_or_errors_deterministically() {
+        let record = routing_record(2, ReadRoutingPolicy::RoundRobinReplica);
+        let first = pool_for_routing(&record, QueryRouting::ReadOnly, "pg_query").unwrap();
+        let second = pool_for_routing(&record, QueryRouting::ReadOnly, "pg_query").unwrap();
+        assert!(Arc::ptr_eq(&first, &record.replicas[0]));
+        assert!(Arc::ptr_eq(&second, &record.replicas[1]));
+
+        let fallback = routing_record(0, ReadRoutingPolicy::ReplicaOrPrimary);
+        let pool = pool_for_routing(&fallback, QueryRouting::ReadOnly, "pg_query").unwrap();
+        assert!(Arc::ptr_eq(&pool, &fallback.pool));
+
+        let strict = routing_record(0, ReadRoutingPolicy::RoundRobinReplica);
+        assert!(pool_for_routing(&strict, QueryRouting::ReadOnly, "pg_query").is_err());
+    }
+
+    #[test]
+    fn range_value_preserves_bounds_and_inclusivity() {
+        let value = range_value(
+            sqlx_postgres::types::PgRange {
+                start: Bound::Included(10_i64),
+                end: Bound::Excluded(20_i64),
+            },
+            VmValue::Int,
+        );
+        let dict = value.as_dict().expect("range dict");
+        assert_eq!(dict.get("start").and_then(VmValue::as_int), Some(10));
+        assert_eq!(dict.get("end").and_then(VmValue::as_int), Some(20));
+        assert!(matches!(
+            dict.get("start_inclusive"),
+            Some(VmValue::Bool(true))
+        ));
+        assert!(matches!(
+            dict.get("end_inclusive"),
+            Some(VmValue::Bool(false))
+        ));
+    }
+
+    #[test]
+    fn geometry_helpers_return_structured_dicts() {
+        let point = point_value(1.5, 2.5);
+        let point = point.as_dict().expect("point dict");
+        assert!(matches!(point.get("x"), Some(VmValue::Float(1.5))));
+        assert!(matches!(point.get("y"), Some(VmValue::Float(2.5))));
+
+        let points = points_value(vec![sqlx_postgres::types::PgPoint { x: 3.0, y: 4.0 }]);
+        let VmValue::List(items) = points else {
+            panic!("points should be a list");
+        };
+        let first = items[0].as_dict().expect("nested point");
+        assert!(matches!(first.get("x"), Some(VmValue::Float(3.0))));
+        assert!(matches!(first.get("y"), Some(VmValue::Float(4.0))));
     }
 
     #[test]
@@ -1960,6 +2321,7 @@ let db = pg_pool("env:HARN_TEST_POSTGRES_URL", {{max_connections: 2}})
 let stats = pg_pool_stats(db)
 __io_println(stats.circuit_state)
 __io_println(stats.max_connections)
+__io_println(stats.read_routing_policy)
 __io_println(stats.replicas)
 
 let clear_result = pg_stmt_cache_clear(db)
@@ -2036,6 +2398,7 @@ pg_close(db)
                     // Expected (in order):
                     //   disabled            // circuit_state
                     //   2                   // max_connections
+                    //   replica_or_primary  // read_routing_policy
                     //   0                   // replicas
                     //   1                   // primary pool cache clear
                     //   true                // at least one idle connection cleared
@@ -2053,26 +2416,27 @@ pg_close(db)
                     //   harn_v2_test:hello  // notification
                     assert_eq!(lines[0], "disabled");
                     assert_eq!(lines[1], "2");
-                    assert_eq!(lines[2], "0");
-                    assert_eq!(lines[3], "1");
-                    assert_eq!(lines[4], "true");
-                    assert_eq!(lines[5], "0");
-                    assert_eq!(lines[6], "locked");
-                    assert_eq!(lines[7], "raii");
-                    assert_eq!(lines[8], "1");
-                    assert_eq!(lines[9], "table");
-                    assert_eq!(lines[10], "2");
-                    assert_eq!(lines[11], "id:int4");
+                    assert_eq!(lines[2], "replica_or_primary");
+                    assert_eq!(lines[3], "0");
+                    assert_eq!(lines[4], "1");
+                    assert_eq!(lines[5], "true");
+                    assert_eq!(lines[6], "0");
+                    assert_eq!(lines[7], "locked");
+                    assert_eq!(lines[8], "raii");
+                    assert_eq!(lines[9], "1");
+                    assert_eq!(lines[10], "table");
+                    assert_eq!(lines[11], "2");
+                    assert_eq!(lines[12], "id:int4");
                     assert!(
-                        lines[12] == "tags:_text" || lines[12] == "tags:text[]",
+                        lines[13] == "tags:_text" || lines[13] == "tags:text[]",
                         "tags column type unexpected: {}",
-                        lines[12]
+                        lines[13]
                     );
                     // PK index + the explicit UNIQUE = 2 indexes
-                    assert_eq!(lines[13], "2");
-                    assert_eq!(lines[14], "alpha,beta");
-                    assert_eq!(lines[15], "0");
-                    assert_eq!(lines[16], "harn_v2_test:hello");
+                    assert_eq!(lines[14], "2");
+                    assert_eq!(lines[15], "alpha,beta");
+                    assert_eq!(lines[16], "0");
+                    assert_eq!(lines[17], "harn_v2_test:hello");
                 })
                 .await;
         });

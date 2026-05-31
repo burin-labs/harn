@@ -56,6 +56,7 @@ fn harn_type_for(sql_type: &SqlType, not_null: bool) -> String {
 /// (user-defined enums, composites, …) fall back to `string`, matching the
 /// runtime decode's textual fallback.
 fn base_harn_type(base: &str) -> String {
+    const POINT: &str = "{x: float, y: float}";
     match base {
         "bool" | "boolean" => "bool",
         "smallint" | "int2" | "smallserial" | "serial2" | "integer" | "int" | "int4" | "serial"
@@ -64,10 +65,22 @@ fn base_harn_type(base: &str) -> String {
         "json" | "jsonb" => "any",
         "bytea" => "bytes",
         "hstore" => return "dict<string, string?>".to_string(),
-        "point" => return "{x: float, y: float}".to_string(),
+        "int4range" | "int8range" => return range_type("int"),
+        "numrange" | "daterange" | "tsrange" | "tstzrange" => return range_type("string"),
+        "point" => return POINT.to_string(),
+        "line" => return "{a: float, b: float, c: float}".to_string(),
+        "lseg" => return format!("{{start: {POINT}, end: {POINT}}}"),
+        "box" => return format!("{{upper_right: {POINT}, lower_left: {POINT}}}"),
+        "path" => return format!("{{closed: bool, points: list<{POINT}>}}"),
+        "polygon" => return format!("{{points: list<{POINT}>}}"),
+        "circle" => return format!("{{center: {POINT}, radius: float}}"),
         // numeric/money, all text-ish, temporal, network, and bit types decode
         // to strings; so does anything we do not recognize.
         _ => "string",
     }
     .to_string()
+}
+
+fn range_type(inner: &str) -> String {
+    format!("{{start: {inner}?, end: {inner}?, start_inclusive: bool, end_inclusive: bool}}")
 }

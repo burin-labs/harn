@@ -1350,6 +1350,9 @@ http_stream_close(stream)
 | `pg_transaction(pool, callback, options?)` | pool: dict, callback: closure, options: dict | any | Run a closure with a transaction handle, commit on success, rollback on throw |
 | `pg_close(pool)` | pool: dict | bool | Close and unregister a pool |
 | `pg_stmt_cache_clear(pool)` | pool: dict | dict | Clear prepared-statement caches on idle primary and replica connections |
+| `pg.jsonb.path(pool, document, jsonpath)` | pool: dict, document: any, jsonpath: string | list | Run `jsonb_path_query` with bound operands |
+| `pg.jsonb.merge(pool, left, right)` | pool: dict, left: any, right: any | any | Merge two JSONB values with Postgres `\|\|` semantics |
+| `pg.jsonb.contains(pool, left, right)` | pool: dict, left: any, right: any | bool | Test JSONB containment with Postgres `@>` semantics |
 | `pg_mock_pool(fixtures)` | fixtures: list | dict | Create a fixture-backed Postgres handle for tests |
 | `pg_mock_calls(mock)` | mock: dict | list | Return recorded mock SQL calls |
 
@@ -1357,7 +1360,8 @@ Connection sources may be raw Postgres URLs, `env:NAME`, `secret:namespace/name`
 or `{url}`, `{env}`, or `{secret}` dictionaries. Pool options include
 `max_connections`, `min_connections`, `acquire_timeout_ms`, `idle_timeout_ms`,
 `max_lifetime_ms`, `ssl_mode`, `application_name`, and
-`statement_cache_capacity`.
+`statement_cache_capacity`. Pool options also accept `replicas` and
+`read_routing_policy`.
 
 `pg_stmt_cache_clear(pool)` returns `{pools, connections_cleared,
 connections_skipped}`. It does not close or recreate the pool; checked-out
@@ -1374,7 +1378,8 @@ let rows = pg_query(
 ```
 
 Rows decode into dictionaries. JSON/JSONB becomes Harn values; UUID, date,
-time, timestamp, and timestamptz decode as strings. Transaction `options` may
+time, timestamp, and timestamptz decode as strings; hstore, ranges, and
+geometric types decode as structured dictionaries. Transaction `options` may
 include `settings`, which are applied with transaction-local `set_config` for
 RLS policies:
 

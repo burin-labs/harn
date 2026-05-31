@@ -1,0 +1,31 @@
+import "std/postgres"
+
+pipeline default() {
+  let db = pg_mock_pool(
+    [
+      {
+        sql: "SELECT jsonb_path_query($1::jsonb, $2::jsonpath) AS value",
+        params: [{items: [{id: 1}, {id: 2}]}, "$.items[*].id"],
+        rows: [{value: 1}, {value: 2}],
+      },
+      {
+        sql: "SELECT ($1::jsonb || $2::jsonb) AS value",
+        params: [{a: 1}, {b: 2}],
+        rows: [{value: {a: 1, b: 2}}],
+      },
+      {
+        sql: "SELECT ($1::jsonb @> $2::jsonb) AS contains",
+        params: [{a: 1, b: 2}, {b: 2}],
+        rows: [{contains: true}],
+      },
+    ],
+  )
+  let ids = pg.jsonb.path(db, {items: [{id: 1}, {id: 2}]}, "$.items[*].id")
+  __io_println(ids[0])
+  __io_println(ids[1])
+  let merged = pg.jsonb.merge(db, {a: 1}, {b: 2})
+  __io_println(merged.b)
+  __io_println(pg.jsonb.contains(db, {a: 1, b: 2}, {b: 2}))
+  let calls = pg_mock_calls(db)
+  __io_println(calls[0].sql)
+}

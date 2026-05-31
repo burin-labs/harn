@@ -49,7 +49,16 @@ fn type_coverage_maps_each_family() {
             k jsonb NOT NULL,
             l bytea NOT NULL,
             m date NOT NULL,
-            n timestamp with time zone NOT NULL
+            n timestamp with time zone NOT NULL,
+            o int4range NOT NULL,
+            p numrange NOT NULL,
+            q point NOT NULL,
+            r line NOT NULL,
+            s lseg NOT NULL,
+            t box NOT NULL,
+            u path NOT NULL,
+            v polygon NOT NULL,
+            w circle NOT NULL
         );
     "]);
     for expected in [
@@ -67,6 +76,15 @@ fn type_coverage_maps_each_family() {
         "l: bytes,",
         "m: string,",
         "n: string,",
+        "o: {start: int?, end: int?, start_inclusive: bool, end_inclusive: bool},",
+        "p: {start: string?, end: string?, start_inclusive: bool, end_inclusive: bool},",
+        "q: {x: float, y: float},",
+        "r: {a: float, b: float, c: float},",
+        "s: {start: {x: float, y: float}, end: {x: float, y: float}},",
+        "t: {upper_right: {x: float, y: float}, lower_left: {x: float, y: float}},",
+        "u: {closed: bool, points: list<{x: float, y: float}>},",
+        "v: {points: list<{x: float, y: float}>},",
+        "w: {center: {x: float, y: float}, radius: float},",
     ] {
         assert!(out.contains(expected), "missing {expected:?} in:\n{out}");
     }
@@ -204,6 +222,8 @@ fn generated_types_parse_and_typecheck() {
             id BIGSERIAL PRIMARY KEY,
             kind TEXT NOT NULL,
             tags TEXT[] NOT NULL,
+            active_window INT8RANGE NOT NULL,
+            centroid POINT NOT NULL,
             meta JSONB,
             note TEXT
         );

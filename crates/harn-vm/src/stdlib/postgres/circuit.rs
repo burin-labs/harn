@@ -156,6 +156,13 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
 
+    fn elapse_cooldown(cb: &CircuitBreakerState) {
+        cb.opened_at_ms.store(
+            now_ms().saturating_sub(cb.reset_after_ms + 1),
+            std::sync::atomic::Ordering::Release,
+        );
+    }
+
     #[test]
     fn disabled_breaker_always_allows() {
         let cb = CircuitBreakerState::disabled();
@@ -175,7 +182,7 @@ mod tests {
         cb.record_failure(false);
         // After the third failure, circuit is open.
         assert!(matches!(cb.admit(), Allow::Open));
-        std::thread::sleep(std::time::Duration::from_millis(60));
+        elapse_cooldown(&cb);
         // After cooldown, one probe is admitted.
         let first = cb.admit();
         assert!(matches!(first, Allow::Probe));
@@ -191,7 +198,7 @@ mod tests {
         let cb = CircuitBreakerState::new(1, 30);
         cb.record_failure(false);
         assert!(matches!(cb.admit(), Allow::Open));
-        std::thread::sleep(std::time::Duration::from_millis(40));
+        elapse_cooldown(&cb);
         let probe = cb.admit();
         assert!(matches!(probe, Allow::Probe));
         cb.record_failure(true);
@@ -209,7 +216,7 @@ mod tests {
         let s = cb.snapshot();
         assert_eq!(s.state, "open");
         assert_eq!(s.failures, 2);
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        elapse_cooldown(&cb);
         let s = cb.snapshot();
         assert_eq!(s.state, "half_open");
     }

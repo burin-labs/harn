@@ -42,6 +42,9 @@ pipeline default() {
 | `pg_migrate(pool, {dir, table?, dry_run?})` | `PgMigrateResult` | Apply `.sql` files from a directory; track the applied set in `harn_migrations` (override via `table`). |
 | `pg_close(pool)` | `bool` | Close and unregister a pool handle. |
 | `pg_stmt_cache_clear(pool)` | `PgStmtCacheClearResult` | Clear prepared-statement caches on idle primary and replica connections without closing the pool. |
+| `pg.jsonb.path(pool, document, jsonpath)` | `list<any>` | Run `jsonb_path_query($1::jsonb, $2::jsonpath)` with bound operands. |
+| `pg.jsonb.merge(pool, left, right)` | `any` | Run Postgres JSONB merge (`$1::jsonb \|\| $2::jsonb`). |
+| `pg.jsonb.contains(pool, left, right)` | `bool` | Run Postgres JSONB containment (`$1::jsonb @> $2::jsonb`). |
 | `pg_mock_pool(fixtures)` | `PgMockPool` | Create an in-process fixture-backed pool for tests. |
 | `pg_mock_calls(mock)` | `list<dict>` | Inspect SQL, params, and execute/query mode recorded by a mock pool. |
 
@@ -53,13 +56,15 @@ Harn-backed connector export.
 Pool options include `max_connections`, `min_connections`,
 `acquire_timeout_ms`, `timeout_ms`, `idle_timeout_ms`, `max_lifetime_ms`,
 `ssl_mode` or `tls_mode`, `application_name`, and
-`statement_cache_capacity`. Prepared statement caching is driver-managed by
-SQLx; tune it with `statement_cache_capacity` when needed. After a migration
-changes result column types, call `pg_stmt_cache_clear(pool)` to evict cached
-prepared statements from currently idle primary and replica connections.
-Connections checked out by in-flight queries are left alone and counted in
-`connections_skipped`, so callers that need a full sweep can retry once work
-has drained.
+`statement_cache_capacity`. Pool options also accept `replicas` and
+`read_routing_policy` (`primary`, `replica`, `replica_or_primary`,
+`round_robin_replica`). Prepared statement caching is driver-managed by SQLx;
+tune it with `statement_cache_capacity` when needed. After a migration changes
+result column types, call `pg_stmt_cache_clear(pool)` to evict cached prepared
+statements from currently idle primary and replica connections. Connections
+checked out by in-flight queries are left alone and counted in
+`connections_skipped`, so callers that need a full sweep can retry once work has
+drained.
 
 ## Parameters and decoding
 
@@ -79,8 +84,9 @@ Lists, dicts, structs, sets, and other compound values bind as JSON.
 
 Rows decode into dictionaries keyed by column name. Built-in decoding covers
 nulls, booleans, integer and float types, text, `uuid`, `json`/`jsonb`, `bytea`,
-`date`, `time`, `timestamp`, and `timestamptz`. Unknown types are decoded as
-text when the Postgres driver can expose them that way.
+`date`, `time`, `timestamp`, `timestamptz`, common arrays, `hstore`, range
+types, and Postgres geometric types. Unknown types are decoded as text when the
+Postgres driver can expose them that way.
 
 ## Transactions and tenant settings
 
@@ -188,8 +194,10 @@ log(receipt.kind)   // type-checked against the column set
 SQL types map to the same Harn types the row decoder produces at
 runtime: integer families → `int`, `real`/`double precision` → `float`,
 `numeric`/temporal/`uuid`/text families → `string`, `json`/`jsonb` →
-`any`, `bytea` → `bytes`, `T[]` → `list<T>`. Columns that are not
-`NOT NULL` (and not a primary key) become optional (`field: T?`).
+`any`, `bytea` → `bytes`, `hstore` → `dict<string, string?>`, ranges →
+`{start, end, start_inclusive, end_inclusive}`, geometric types → structured
+point/line/path dictionaries, and `T[]` → `list<T>`. Columns that are not `NOT
+NULL` (and not a primary key) become optional (`field: T?`).
 
 Pass `--check` (with `--out`) to verify the generated file is current
 without writing it — wire it into CI so a migration that changes a
@@ -264,12 +272,27 @@ Pass `{bridge_to_channel: true}` to `pg_listen` to republish every
 received notification onto the in-process channel bus as
 `pg:<channel-name>` — useful for composing with the trigger DSL.
 
+## JSONB helpers
+
+The `pg.jsonb.*` helpers execute Postgres' native JSONB functions/operators with
+bound operands, which keeps quick JSON manipulation out of string-built SQL:
+
+```harn
+let ids = pg.jsonb.path(db, {items: [{id: 1}, {id: 2}]}, "$.items[*].id")
+let merged = pg.jsonb.merge(db, {a: 1}, {b: 2})
+let has_b = pg.jsonb.contains(db, merged, {b: 2})
+```
+
+Use ordinary `pg_query` for predicates over table columns; these helpers are for
+JSON values already available to the Harn program.
+
 ## Pool observability
 
 ```harn
 let stats = pg_pool_stats(db)
 // → {size, idle, in_use, max_connections, statement_cache_capacity,
-//    replicas, circuit_state, circuit_failures, circuit_opened_at_ms}
+//    read_routing_policy, replicas, circuit_state, circuit_failures,
+//    circuit_opened_at_ms}
 ```
 
 `circuit_state` is `"disabled"` unless `circuit_breaker` was passed to
@@ -302,17 +325,22 @@ string concatenation hits the wire.
 let db = pg_pool("env:DATABASE_URL", {
   max_connections: 10,
   replicas: ["env:DATABASE_REPLICA_URL", "env:DATABASE_REPLICA2_URL"],
+  read_routing_policy: "round_robin_replica",
 })
-// Per-query opt-in routes through the round-robin replica cursor.
+// Per-query opt-in uses the pool's read_routing_policy.
 pg_query(db, "select * from receipts where id = $1", [id], {read_only: true})
+// Or override the route for one query.
+pg_query(db, "select count(*) from receipts", [], {route: "primary"})
 // Writes always go to the primary.
 pg_execute(db, "insert into receipts (id, payload) values ($1, $2)", [id, payload])
 ```
 
 `replicas` accepts URL strings, `env:…`/`secret:…` references, or
-`{url|env|secret}` dicts — the same shapes the primary URL accepts. The
-round-robin cursor is shared across the pool; if replicas is empty the
-read-only flag is a no-op.
+`{url|env|secret}` dicts — the same shapes the primary URL accepts. The default
+`read_routing_policy` is `replica_or_primary`, which round-robins across
+replicas when present and falls back to primary when none are configured.
+`replica` and `round_robin_replica` require at least one replica and fail fast
+otherwise.
 
 ## Partition helpers
 
