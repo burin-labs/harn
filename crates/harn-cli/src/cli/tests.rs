@@ -436,6 +436,35 @@ fn test_parses_eval_context_args() {
 }
 
 #[test]
+fn test_parses_eval_skill_gate_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "skill-gate",
+        "examples/evals/skill-gate/smoke/manifest.json",
+        "--output",
+        ".harn-runs/skill-gate/smoke",
+        "--json",
+    ]);
+
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::SkillGate(skill_gate)) = args.command else {
+        panic!("expected skill-gate command");
+    };
+    assert_eq!(
+        skill_gate.manifest,
+        PathBuf::from("examples/evals/skill-gate/smoke/manifest.json")
+    );
+    assert_eq!(
+        skill_gate.output,
+        Some(PathBuf::from(".harn-runs/skill-gate/smoke"))
+    );
+    assert!(skill_gate.json);
+}
+
+#[test]
 fn test_parses_eval_scope_triage_args() {
     let cli = Cli::parse_from([
         "harn",

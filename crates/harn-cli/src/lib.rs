@@ -1194,6 +1194,12 @@ async fn async_main() {
                     process::exit(code);
                 }
             }
+            Some(EvalCommand::SkillGate(skill_gate_args)) => {
+                let code = commands::eval_skill_gate::run(skill_gate_args).await;
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
             Some(EvalCommand::ScopeTriage(scope_args)) => {
                 process::exit(commands::eval_scope_triage::run(scope_args).await)
             }

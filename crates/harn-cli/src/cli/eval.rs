@@ -53,6 +53,9 @@ pub enum EvalCommand {
     Context(EvalContextArgs),
     /// Render and optionally run a `.harn.prompt` across a fleet of models.
     Prompt(EvalPromptArgs),
+    /// Gate skill/guidance variants on contamination-safe held-out eval results.
+    #[command(name = "skill-gate", visible_alias = "skill_gate")]
+    SkillGate(EvalSkillGateArgs),
     /// Measure pre-turn scope-triage savings and false-positive rates.
     #[command(name = "scope_triage", visible_alias = "scope-triage")]
     ScopeTriage(EvalScopeTriageArgs),
@@ -68,6 +71,18 @@ pub struct EvalContextArgs {
     #[arg(long)]
     pub output: Option<PathBuf>,
     /// Print the aggregate summary JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct EvalSkillGateArgs {
+    /// Skill gate manifest JSON or TOML.
+    pub manifest: PathBuf,
+    /// Output directory for summary.json, per_case.jsonl, receipt.json, and summary.md.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+    /// Print the aggregate report JSON to stdout.
     #[arg(long)]
     pub json: bool,
 }

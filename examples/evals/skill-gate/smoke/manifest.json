@@ -1,0 +1,125 @@
+{
+  "_type": "harn.skill_gate.manifest.v1",
+  "version": 1,
+  "id": "skill-gate-smoke",
+  "name": "Skill gate smoke fixture",
+  "description": "Deterministic held-out gate fixture with accepted, bloat-rejected, contaminated, and regression-check coverage.",
+  "target_model": {
+    "id": "mock-cheap-2026-05",
+    "provider": "mock",
+    "knowledge_cutoff": "2026-05-01",
+    "context_budget_tokens": 256
+  },
+  "policy": {
+    "min_included_tasks": 2,
+    "min_score_lift": 0.08,
+    "min_gap_recovery": 0.25,
+    "max_regression_rate": 0.0,
+    "min_win_rate": 0.5,
+    "max_context_delta_tokens": 160,
+    "require_no_tamper": true
+  },
+  "grader": {
+    "id": "skill-gate-smoke-grader",
+    "immutable_paths": [
+      {
+        "path": "grader/check.txt",
+        "label": "deterministic grader fixture",
+        "sha256": "cdc65e7b8a6e76dcf1b20491fff5d20bdb329b4ed9cc326874b631ebe6058671"
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "id": "post-cutoff-api-drift",
+      "name": "LedgerAuth v2 held-out repair",
+      "cluster": "api-drift",
+      "heldout": {
+        "kind": "post_cutoff",
+        "created_at": "2026-05-20",
+        "suite": "private-rolling-smoke"
+      },
+      "baseline_score": 0.2,
+      "frontier_score": 1.0,
+      "baseline_passed": false
+    },
+    {
+      "id": "private-regression-check",
+      "name": "Previously passing private regression check",
+      "cluster": "regression",
+      "heldout": {
+        "kind": "private",
+        "private": true,
+        "suite": "tenant-private-smoke"
+      },
+      "baseline_score": 0.9,
+      "frontier_score": 1.0,
+      "baseline_passed": true
+    },
+    {
+      "id": "old-public-static",
+      "name": "Contaminated public static benchmark",
+      "cluster": "contaminated",
+      "heldout": {
+        "kind": "public_static",
+        "created_at": "2024-01-01",
+        "suite": "legacy-public"
+      },
+      "baseline_score": 0.0,
+      "frontier_score": 1.0,
+      "baseline_passed": false
+    }
+  ],
+  "variants": [
+    {
+      "id": "known-good",
+      "name": "Compact post-cutoff skill",
+      "candidate": {
+        "kind": "skill",
+        "paths": ["skills/good/SKILL.md"]
+      },
+      "case_results": [
+        {
+          "task_id": "post-cutoff-api-drift",
+          "score": 0.8,
+          "passed": true
+        },
+        {
+          "task_id": "private-regression-check",
+          "score": 0.92,
+          "passed": true
+        },
+        {
+          "task_id": "old-public-static",
+          "score": 1.0,
+          "passed": true,
+          "notes": "Excluded because this task is static and public."
+        }
+      ]
+    },
+    {
+      "id": "bloated-overfit",
+      "name": "Bloat/overfit rejection fixture",
+      "candidate": {
+        "kind": "skill",
+        "paths": ["skills/bloat/SKILL.md"]
+      },
+      "case_results": [
+        {
+          "task_id": "post-cutoff-api-drift",
+          "score": 0.85,
+          "passed": true
+        },
+        {
+          "task_id": "private-regression-check",
+          "score": 0.91,
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "issue": "2717",
+    "consumer_schema": "harn.skill_gate.receipt.v1"
+  }
+}
