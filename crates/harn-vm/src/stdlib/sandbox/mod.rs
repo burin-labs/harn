@@ -1003,6 +1003,7 @@ mod tests {
         pop_execution_policy();
     }
 
+    #[cfg(unix)]
     #[test]
     fn standard_io_device_files_allowed_under_restricted_profile() {
         // Writing to the standard process I/O streams is not a workspace
