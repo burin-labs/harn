@@ -1,0 +1,81 @@
+import { agent_capture_events } from "std/agent/events"
+
+pipeline main() {
+  let session = agent_session_open("artifact-emit-conformance")
+  agent_session_reset(session)
+  let captured = agent_capture_events(
+    session,
+    fn() {
+      let mermaid = artifact_emit(
+        "mermaid",
+        "flowchart TD\n  A --> B",
+        {session_id: session, artifact_id: "artifact-mermaid", title: "Flow"},
+      )
+      let vega = artifact_emit(
+        "vega-lite",
+        {
+          mark: "bar",
+          data: {values: [{name: "a", count: 2}]},
+          encoding: {x: {field: "name", type: "nominal"}, y: {field: "count", type: "quantitative"}},
+        },
+        {
+          session_id: session,
+          artifact_id: "artifact-vega",
+          metadata: {unit: "builds"},
+          provenance: {source: "fixture"},
+        },
+      )
+      let table = artifact_emit(
+        "table",
+        {columns: ["name", "count"], rows: [{name: "a", count: 2}]},
+        {session_id: session, artifact_id: "artifact-table"},
+      )
+      return [mermaid, vega, table]
+    },
+  )
+  __io_println(len(captured.events))
+  __io_println(captured.events[0].type)
+  __io_println(captured.events[0].artifact_id)
+  __io_println(captured.events[0].spec.code.contains("A --> B"))
+  __io_println(captured.events[1].kind)
+  __io_println(captured.events[1].metadata.unit)
+  __io_println(captured.events[2].mime_type)
+  __io_println(captured.result[2].ok)
+  let snapshot_events = transcript_events_by_kind(agent_session_snapshot(session), "artifact")
+  __io_println(len(snapshot_events))
+  __io_println(snapshot_events[0].metadata.artifactId)
+  __io_println(snapshot_events[1].metadata.metadata.unit)
+  let imported = transcript_import(transcript_export(agent_session_snapshot(session)))
+  let imported_events = transcript_events_by_kind(imported, "artifact")
+  __io_println(len(imported_events))
+  __io_println(imported_events[2].metadata.kind)
+  let svg_rejected = try {
+    artifact_emit("mermaid", "flowchart TD\n  A[<svg onload=alert(1)>]", {session_id: session})
+    false
+  } catch (e) {
+    contains(json_stringify(e), "unsafe payload marker")
+  }
+  let external_rejected = try {
+    artifact_emit(
+      "vega-lite",
+      {
+        mark: "line",
+        data: {url: "https://example.invalid/data.csv"},
+        encoding: {x: {field: "x"}, y: {field: "y"}},
+      },
+      {session_id: session},
+    )
+    false
+  } catch (e) {
+    contains(json_stringify(e), "external reference")
+  }
+  let raw_svg_kind_rejected = try {
+    artifact_emit("svg", "<svg></svg>", {session_id: session})
+    false
+  } catch (e) {
+    contains(json_stringify(e), "unsupported artifact kind")
+  }
+  __io_println(svg_rejected)
+  __io_println(external_rejected)
+  __io_println(raw_svg_kind_rejected)
+}

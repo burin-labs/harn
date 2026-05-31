@@ -133,6 +133,25 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
 
 fn extension_fixture_events() -> Vec<AgentEvent> {
     vec![
+        AgentEvent::Artifact {
+            session_id: "session-1".to_string(),
+            artifact_id: "artifact-chart-1".to_string(),
+            kind: "vega-lite".to_string(),
+            title: Some("Build throughput".to_string()),
+            mime_type: "application/vnd.vegalite.v5+json".to_string(),
+            spec: serde_json::json!({
+                "mark": "bar",
+                "data": {"values": [{"name": "a", "count": 2}]},
+                "encoding": {
+                    "x": {"field": "name", "type": "nominal"},
+                    "y": {"field": "count", "type": "quantitative"}
+                }
+            }),
+            fallback: "Build throughput (bar chart)".to_string(),
+            size_bytes: 153,
+            provenance: serde_json::json!({"source": "agent"}),
+            metadata: serde_json::json!({"unit": "builds"}),
+        },
         AgentEvent::SkillActivated {
             session_id: "session-1".to_string(),
             skill_name: "rust".to_string(),
@@ -797,6 +816,46 @@ async fn harn_extension_session_update_fixtures_are_pinned() {
             "{session_update} is not advertised as a Harn ACP extension"
         );
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn artifact_session_update_keeps_payload_under_harn_meta() {
+    let actual = collect_notifications(vec![AgentEvent::Artifact {
+        session_id: "session-1".to_string(),
+        artifact_id: "artifact-table-1".to_string(),
+        kind: "table".to_string(),
+        title: None,
+        mime_type: "application/vnd.harn.table+json".to_string(),
+        spec: serde_json::json!({
+            "columns": ["name", "count"],
+            "rows": [{"name": "a", "count": 2}]
+        }),
+        fallback: "name | count\na | 2".to_string(),
+        size_bytes: 66,
+        provenance: serde_json::json!({"fixture": true}),
+        metadata: serde_json::json!({"scope": "test"}),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], "session/update");
+    assert_eq!(notification["params"]["sessionId"], "session-1");
+    let update = &notification["params"]["update"];
+    assert_eq!(update["sessionUpdate"], "artifact");
+    assert!(
+        update.get("spec").is_none(),
+        "artifact extension fields must not leak onto the ACP update root"
+    );
+    let harn_meta = update_harn_meta(notification);
+    assert_eq!(harn_meta["artifactId"], "artifact-table-1");
+    assert_eq!(harn_meta["kind"], "table");
+    assert!(harn_meta["title"].is_null());
+    assert_eq!(harn_meta["mimeType"], "application/vnd.harn.table+json");
+    assert_eq!(harn_meta["spec"]["columns"][0], "name");
+    assert_eq!(harn_meta["fallback"], "name | count\na | 2");
+    assert_eq!(harn_meta["sizeBytes"], 66);
+    assert_eq!(harn_meta["provenance"]["fixture"], true);
+    assert_eq!(harn_meta["metadata"]["scope"], "test");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1572,6 +1631,20 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
     let actual = collect_notifications(extension_fixture_events()).await;
 
     let expectations: &[(&str, &[&str])] = &[
+        (
+            "artifact",
+            &[
+                "artifactId",
+                "kind",
+                "title",
+                "mimeType",
+                "spec",
+                "fallback",
+                "sizeBytes",
+                "provenance",
+                "metadata",
+            ],
+        ),
         ("skill_activated", &["skillName", "iteration", "reason"]),
         ("skill_deactivated", &["skillName", "iteration"]),
         ("skill_scope_tools", &["skillName", "allowedTools"]),

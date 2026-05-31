@@ -106,6 +106,7 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"config_option_update",
 	"session_info_update",
 	"session_truncated",
+	"artifact",
 	"fs_watch",
 	"handoff",
 	"hitl_request",
@@ -129,6 +130,7 @@ type HarnACPSessionUpdateExtension = string
 
 // HarnACPSessionUpdateExtensions enumerates every wire value Harn currently emits for HarnACPSessionUpdateExtension.
 var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
+	"artifact",
 	"available_commands_update",
 	"fs_watch",
 	"handoff",

@@ -7,6 +7,53 @@
       "update": {
         "_meta": {
           "harn": {
+            "artifactId": "artifact-chart-1",
+            "fallback": "Build throughput (bar chart)",
+            "kind": "vega-lite",
+            "metadata": {
+              "unit": "builds"
+            },
+            "mimeType": "application/vnd.vegalite.v5+json",
+            "provenance": {
+              "source": "agent"
+            },
+            "sizeBytes": 153,
+            "spec": {
+              "data": {
+                "values": [
+                  {
+                    "count": 2,
+                    "name": "a"
+                  }
+                ]
+              },
+              "encoding": {
+                "x": {
+                  "field": "name",
+                  "type": "nominal"
+                },
+                "y": {
+                  "field": "count",
+                  "type": "quantitative"
+                }
+              },
+              "mark": "bar"
+            },
+            "title": "Build throughput"
+          }
+        },
+        "sessionUpdate": "artifact"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
             "iteration": 1,
             "reason": "matched",
             "skillName": "rust"

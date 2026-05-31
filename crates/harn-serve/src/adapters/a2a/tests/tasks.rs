@@ -1182,6 +1182,74 @@ fn tool_call_completed_emits_artifact_update_event() {
 }
 
 #[test]
+fn agent_artifact_event_emits_artifact_update() {
+    let task_id = "task-agent-artifact".to_string();
+    let task = TaskState {
+        id: task_id.clone(),
+        context_id: Some("ctx-artifacts".into()),
+        status: TaskStatus::Working,
+        history: Vec::new(),
+        artifacts: Vec::new(),
+        metadata: BTreeMap::new(),
+        events: Vec::new(),
+        subscribers: Vec::new(),
+        cancel_token: None,
+    };
+    let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+    let sink = super::A2aWorkerSink {
+        task_id: task_id.clone(),
+        tasks: tasks.clone(),
+    };
+
+    sink.handle_event(&harn_vm::agent_events::AgentEvent::Artifact {
+        session_id: super::a2a_worker_session_id(&task_id),
+        artifact_id: "artifact-chart-1".into(),
+        kind: "vega-lite".into(),
+        title: Some("Build throughput".into()),
+        mime_type: "application/vnd.vegalite.v5+json".into(),
+        spec: json!({
+            "mark": "bar",
+            "data": {"values": [{"name": "a", "count": 2}]},
+            "encoding": {"x": {"field": "name"}, "y": {"field": "count"}}
+        }),
+        fallback: "Build throughput (bar chart)".into(),
+        size_bytes: 128,
+        provenance: json!({"source": "agent"}),
+        metadata: json!({"unit": "builds"}),
+    });
+
+    let tasks = tasks.lock().expect("tasks");
+    let task = tasks.get(&task_id).expect("task");
+    assert_eq!(task.artifacts.len(), 1, "artifact event not stored");
+    let stored = &task.artifacts[0];
+    assert_eq!(stored["artifactId"], "artifact-chart-1");
+    assert_eq!(stored["name"], "Build throughput");
+    assert_eq!(stored["parts"][0]["type"], "data");
+    assert_eq!(stored["parts"][0]["data"]["kind"], "vega-lite");
+    assert_eq!(
+        stored["parts"][0]["data"]["mimeType"],
+        "application/vnd.vegalite.v5+json"
+    );
+    assert_eq!(stored["parts"][0]["data"]["spec"]["mark"], "bar");
+    assert_eq!(stored["parts"][1]["type"], "text");
+    assert_eq!(stored["parts"][1]["text"], "Build throughput (bar chart)");
+    assert_eq!(stored["metadata"]["artifact_kind"], "vega-lite");
+    assert_eq!(stored["metadata"]["size_bytes"], 128);
+    assert_eq!(stored["metadata"]["provenance"]["source"], "agent");
+    assert_eq!(stored["metadata"]["harn_metadata"]["unit"], "builds");
+    assert!(stored["metadata"]["timestamp"].is_string());
+
+    let event = task
+        .events
+        .iter()
+        .find(|event| event.get("kind").and_then(JsonValue::as_str) == Some("artifact-update"))
+        .expect("artifact-update event");
+    assert_eq!(event["taskId"], task_id);
+    assert_eq!(event["contextId"], "ctx-artifacts");
+    assert_eq!(event["artifact"]["artifactId"], "artifact-chart-1");
+}
+
+#[test]
 fn tool_call_pending_does_not_emit_artifact_update() {
     // Only terminal `Completed` updates with a `raw_output` payload
     // map to artifacts; intermediate streaming chunks (Pending /

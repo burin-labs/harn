@@ -1,0 +1,16 @@
+3
+artifact
+artifact-mermaid
+true
+vega-lite
+builds
+application/vnd.harn.table+json
+true
+3
+artifact-mermaid
+builds
+3
+table
+true
+true
+true

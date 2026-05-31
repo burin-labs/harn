@@ -20,6 +20,7 @@ mod agent_sessions;
 pub mod agent_state;
 pub(crate) mod agents;
 mod agents_daemon;
+mod artifact_emit;
 pub(crate) mod assemble;
 pub mod asset_paths;
 mod bytes;
@@ -204,6 +205,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     oauth_dynreg::register_oauth_dynreg_builtins(vm);
     token_redaction::register_token_redaction_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
+    artifact_emit::register_artifact_emit_builtins(vm);
     path_scope_guard::register_path_scope_guard_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);

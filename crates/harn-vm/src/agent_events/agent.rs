@@ -130,6 +130,22 @@ pub enum AgentEvent {
         replace: bool,
         metadata: serde_json::Value,
     },
+    /// A renderable, declarative artifact spec emitted by an agent. Harn
+    /// validates the payload and transports it; host surfaces own rendering
+    /// and may fall back to the plain-text representation.
+    Artifact {
+        session_id: String,
+        artifact_id: String,
+        kind: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        mime_type: String,
+        spec: serde_json::Value,
+        fallback: String,
+        size_bytes: u64,
+        provenance: serde_json::Value,
+        metadata: serde_json::Value,
+    },
     /// Fires at the top of every model round-trip inside an
     /// `agent_loop` invocation. Maps to the `iteration_start` steering
     /// seam. Not the same as ACP's outer `prompt_turn` boundary; an
@@ -725,6 +741,7 @@ impl AgentEvent {
             | Self::ToolCallUpdate { session_id, .. }
             | Self::Plan { session_id, .. }
             | Self::ProgressReported { session_id, .. }
+            | Self::Artifact { session_id, .. }
             | Self::IterationStart { session_id, .. }
             | Self::IterationEnd { session_id, .. }
             | Self::SessionClosed { session_id, .. }
