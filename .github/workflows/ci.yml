@@ -278,6 +278,11 @@ jobs:
     # so the dev-debug override is not applied here.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # PR Windows runs use the same merge-base affected-crate selection as
+          # Linux fast feedback. Merge-queue and main pushes keep the shallow
+          # checkout because they run the full workspace unconditionally.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
@@ -292,16 +297,18 @@ jobs:
           tool: nextest@0.9.133
       # Don't gate the whole pipeline on the full Windows test surface yet —
       # this job exists to catch hard regressions (compile breaks, missing
-      # cfg-gates, hardcoded `/bin/sh`, etc.). It compiles the whole workspace
-      # test graph, then runs harn-lexer/parser/vm and adjacent core crate unit
-      # tests plus a smoke `harn run`. Sandbox + signal-handler tests are
-      # skipped automatically via existing `#![cfg(unix)]` gates.
+      # cfg-gates, hardcoded `/bin/sh`, etc.). PRs compile the changed crates
+      # plus their reverse-dependency closure, matching the Linux affected
+      # test lane. Merge-queue and main pushes still compile the whole
+      # workspace, and windows-nightly.yml remains the full Windows test
+      # safety net.
       #
       # Keep the Rust work in one test-profile build. Mixing `cargo check`,
       # `cargo build`, and nextest made Windows recompile the same local crates
-      # three times in separate artifact sets; `--workspace` preserves compile
-      # coverage while the filter limits the tests that actually execute.
-      - name: Compile workspace tests and run Windows unit slice
+      # three times in separate artifact sets; nextest package selection keeps
+      # compile coverage focused while the filter limits the tests that
+      # actually execute.
+      - name: Compile Windows tests and run unit slice
         shell: bash
         env:
           # Hosted Windows runners can return transient misses from the live
@@ -309,13 +316,39 @@ jobs:
           # secret-store behavior; this lane is for compile plus core unit
           # coverage.
           HARN_SECRET_STORE_BACKEND: file
+          HARN_LLM_CALLS_DISABLED: "1"
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
         run: |
           windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-fmt) or package(harn-lint) or package(harn-modules)'
+          package_args=(--workspace)
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            git fetch --no-tags origin "$BASE_REF"
+            args="$(python3 scripts/affected-crates.py --base "$AFFECTED_BASE" --output args)"
+            if [[ -z "$args" ]]; then
+              echo "windows: no workspace crate selected; falling back to full workspace."
+            elif [[ "$args" == "--workspace" ]]; then
+              echo "windows: global change selected the full workspace."
+            else
+              read -r -a package_args <<< "$args"
+              # The smoke test below executes target/debug/harn.exe. Keep that
+              # binary warm even for PRs that only touch a leaf crate.
+              if [[ " ${package_args[*]} " != *" -p harn-cli "* ]]; then
+                package_args+=(-p harn-cli)
+              fi
+            fi
+          fi
+
+          echo "windows: cargo package args: ${package_args[*]}"
           if command -v cargo-nextest >/dev/null 2>&1; then
-            cargo nextest run --workspace -E "$windows_filter"
+            cargo nextest run "${package_args[@]}" -E "$windows_filter"
           else
-            cargo test --workspace --no-run
+            cargo test "${package_args[@]}" --no-run
             cargo test -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-fmt -p harn-lint -p harn-modules
+          fi
+          if [[ ! -f target/debug/harn.exe ]]; then
+            cargo build -p harn-cli --bin harn
           fi
       - name: Smoke test harn run
         shell: bash
