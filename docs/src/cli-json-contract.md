@@ -173,12 +173,14 @@ allowlist-stripped replay comparison. `ok: false` with `error.code:
 material diverged after applying the replay allowlist.
 
 `harn replay --session-id <id> --counterfactual <plan.harn>` evaluates an
-alternate edit plan through `edit.dry_run` against the workspace state at
-the `--at` cutoff and attaches the divergence to the single `ReplayReport`
-under `data.counterfactual`: `{ plan_path, result, diverged: [{ path,
-status, lines_added, lines_removed }], files_touched, lines_added,
-lines_removed, ops_applied, ops_rejected }`. The field is omitted for a
-plain replay. A plan that fails to load or evaluate exits non-zero with
+alternate edit plan after the replay source has been rehydrated at the
+`--at` cutoff and attaches the divergence to the single `ReplayReport`
+under `data.counterfactual`: `{ plan_path, plan_paths, step_count, result,
+diverged: [{ path, status, lines_added, lines_removed }], files_touched,
+lines_added, lines_removed, ops_applied, ops_rejected }`. Repeat
+`--counterfactual` to chain plans; the returned edit-op lists are
+concatenated into one cumulative `edit.dry_run`. The field is omitted for
+a plain replay. A plan that fails to load or evaluate exits non-zero with
 `error.code: "replay_counterfactual_failed"`.
 
 ### `harn run --emit-summary-json`

@@ -59,9 +59,9 @@ against the full run.
 Rewinding shows you the state the agent saw. The next question is
 *"what if it had edited differently?"* — answer it without mutating the
 recorded session or the workspace. `--counterfactual <plan.harn>`
-evaluates an alternate edit plan against the workspace as it stood at the
-`--at` cutoff and reports the **divergent file set**: the files the plan's
-edits would touch.
+evaluates an alternate edit plan after the session has been rehydrated at
+the `--at` cutoff and reports the **divergent file set**: the files the
+plan's edits would touch.
 
 ```bash
 harn replay --session-id sess_42 --events-db ./.harn/agent-events.db \
@@ -92,13 +92,16 @@ return [
 ]
 ```
 
-(A plan that prefers to call `edit_dry_run` itself works too —
+(A single plan that prefers to call `edit_dry_run` itself works too —
 `return edit_dry_run({plan: [...]})` — the divergence is read off the same
-`per_file_unified_diff` / `summary` shape either way.)
+`per_file_unified_diff` / `summary` shape.)
 
-The plan runs through `edit.dry_run`, which opens and immediately discards
-a throw-away **staged-fs** overlay, so the on-disk tree is byte-identical
-before and after. The human output lists the divergent files:
+The plan runner installs a copy-on-write filesystem overlay while it
+evaluates the `.harn` file, then runs the returned ops through
+`edit.dry_run`, which opens and immediately discards a throw-away
+**staged-fs** overlay. Accidental `write_file(...)` / hostlib writes in the
+plan program do not touch the working tree. The human output lists the
+divergent files:
 
 ```text
 Time-travelled to event 7: replaying the session as it stood at that point.
@@ -117,6 +120,8 @@ In `--json` mode the divergence rides on the replay report under
   "data": {
     "counterfactual": {
       "plan_path": "./what-if.harn",
+      "plan_paths": ["./what-if.harn"],
+      "step_count": 1,
       "result": "ok",
       "diverged": [
         { "path": "src/lib.rs", "status": "modified", "lines_added": 2, "lines_removed": 2 }
@@ -132,10 +137,20 @@ In `--json` mode the divergence rides on the replay report under
 ```
 
 Each file's `status` is `created`, `modified`, or `deleted`, classified
-from its line deltas. **Counterfactual chains** are just a longer plan:
-list every op across the steps you want to compare, and the shared staged
-overlay collapses their cumulative effect into one diff per file — so the
-divergence already reflects the chained edits, not each step in isolation.
+from its line deltas.
+
+**Counterfactual chains** can be one longer plan or repeated
+`--counterfactual` flags. Repeated flags are evaluated in order and their
+returned edit-op lists are concatenated into one `edit_dry_run`, so the
+shared staged overlay collapses the cumulative effect into one diff per
+file:
+
+```bash
+harn replay --session-id sess_42 --events-db ./.harn/agent-events.db \
+  --at 7 \
+  --counterfactual ./rename.harn \
+  --counterfactual ./follow-up.harn
+```
 
 ## Audit a past run, ask what-if, ship the fix
 

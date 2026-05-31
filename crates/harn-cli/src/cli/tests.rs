@@ -1005,6 +1005,27 @@ fn test_parses_replay_sources_and_runs() {
     assert_eq!(replay.session_id.as_deref(), Some("session-123"));
     assert_eq!(replay.events_db.as_deref(), Some(".harn/events.sqlite"));
     assert_eq!(replay.runs, 2);
+    assert!(replay.counterfactual.is_empty());
+
+    let cli = Cli::parse_from([
+        "harn",
+        "replay",
+        "--session-id",
+        "session-123",
+        "--events-db",
+        ".harn/events.sqlite",
+        "--at",
+        "7",
+        "--counterfactual",
+        "first.harn",
+        "--counterfactual",
+        "second.harn",
+    ]);
+    let Command::Replay(replay) = cli.command.unwrap() else {
+        panic!("expected replay command");
+    };
+    assert_eq!(replay.at, Some(7));
+    assert_eq!(replay.counterfactual, vec!["first.harn", "second.harn"]);
 }
 
 #[test]

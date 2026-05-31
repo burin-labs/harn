@@ -416,6 +416,142 @@ return edit_dry_run({{plan: [
 }
 
 #[test]
+fn replay_counterfactual_chains_plans_cumulatively() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let db = temp.path().join("events.sqlite");
+    let session_id = "session-counterfactual-chain";
+    seed_session_db(&db, session_id);
+
+    let target = temp.path().join("chain.txt");
+    let original = "alpha\n";
+    std::fs::write(&target, original).expect("write target file");
+
+    let first = temp.path().join("first.harn");
+    std::fs::write(
+        &first,
+        format!(
+            r#"return [
+  {{op: "safe_text_patch", path: "{}", old_text: "alpha", new_text: "beta"}},
+]
+"#,
+            target.to_str().unwrap(),
+        ),
+    )
+    .expect("write first plan");
+    let second = temp.path().join("second.harn");
+    std::fs::write(
+        &second,
+        format!(
+            r#"return [
+  {{op: "safe_text_patch", path: "{}", old_text: "beta", new_text: "gamma"}},
+]
+"#,
+            target.to_str().unwrap(),
+        ),
+    )
+    .expect("write second plan");
+
+    let out = Command::new(binary_path())
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--counterfactual",
+            first.to_str().unwrap(),
+            "--counterfactual",
+            second.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn harn replay --counterfactual chain");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let parsed = stdout_json(&out);
+    let counterfactual = &parsed["data"]["counterfactual"];
+    assert_eq!(counterfactual["result"], "ok");
+    assert_eq!(counterfactual["step_count"], 2);
+    assert_eq!(counterfactual["ops_applied"], 2);
+    assert_eq!(counterfactual["files_touched"], 1);
+    assert_eq!(
+        counterfactual["plan_paths"].as_array().unwrap().len(),
+        2,
+        "plan paths should preserve chain order"
+    );
+    let diverged = counterfactual["diverged"].as_array().unwrap();
+    assert_eq!(diverged.len(), 1);
+    assert_eq!(diverged[0]["status"], "modified");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), original);
+}
+
+#[test]
+fn replay_counterfactual_plan_side_effects_are_isolated() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let db = temp.path().join("events.sqlite");
+    let session_id = "session-counterfactual-isolated";
+    seed_session_db(&db, session_id);
+
+    let target = temp.path().join("isolated.txt");
+    let original = "safe\n";
+    std::fs::write(&target, original).expect("write target file");
+
+    let plan = temp.path().join("plan.harn");
+    std::fs::write(
+        &plan,
+        format!(
+            r#"write_file("{}", "mutated before return\n")
+return [
+  {{op: "safe_text_patch", path: "{}", old_text: "safe", new_text: "preview"}},
+]
+"#,
+            target.to_str().unwrap(),
+            target.to_str().unwrap(),
+        ),
+    )
+    .expect("write plan");
+
+    let out = Command::new(binary_path())
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--counterfactual",
+            plan.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn harn replay --counterfactual isolated");
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["data"]["counterfactual"]["result"], "ok");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), original);
+    let state_dir = temp.path().join(".harn").join("state").join("staged");
+    if state_dir.exists() {
+        let leaked_counterfactual_sessions = std::fs::read_dir(&state_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("harn-counterfactual-")
+            })
+            .count();
+        assert_eq!(leaked_counterfactual_sessions, 0);
+    }
+}
+
+#[test]
 fn replay_counterfactual_rejects_missing_plan() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let db = temp.path().join("events.sqlite");
@@ -439,6 +575,37 @@ fn replay_counterfactual_rejects_missing_plan() {
     let parsed = stdout_json(&out);
     assert_eq!(parsed["ok"], false);
     assert_eq!(parsed["error"]["code"], "replay_counterfactual_failed");
+}
+
+#[test]
+fn replay_counterfactual_does_not_evaluate_when_cutoff_is_invalid() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let db = temp.path().join("events.sqlite");
+    let session_id = "session-counterfactual-bad-cutoff";
+    seed_session_db(&db, session_id);
+
+    let out = Command::new(binary_path())
+        .args([
+            "replay",
+            "--session-id",
+            session_id,
+            "--events-db",
+            db.to_str().unwrap(),
+            "--at",
+            "0",
+            "--counterfactual",
+            temp.path().join("does-not-exist.harn").to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn harn replay --counterfactual invalid cutoff");
+    assert!(!out.status.success(), "expected invalid cutoff to fail");
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["error"]["code"], "replay_load_failed");
+    assert!(parsed["error"]["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains("event id 0"));
 }
 
 #[test]

@@ -131,8 +131,10 @@ pub(super) fn run_with_code_index(
         });
     }
 
-    // Always discard the transient session so nothing leaks to disk.
+    // Always discard and remove the transient session so no staged-fs metadata
+    // remains after a preview.
     let _ = crate::fs::discard_staged(&session_id, &[]);
+    let _ = crate::fs::remove_session_state(&session_id, None);
 
     let result_kind = if applied_count == 0 {
         "no_ops_applied"
