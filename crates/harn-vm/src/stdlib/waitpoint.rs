@@ -21,7 +21,7 @@ use crate::triggers::dispatcher::{
 };
 use crate::triggers::registry::{resolve_live_or_as_of, RecordedTriggerBinding};
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
-use crate::vm::{clone_async_builtin_child_vm, Vm};
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 const WAITPOINT_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const WAITPOINT_WAITS_TOPIC: &str = "waitpoint.waits";
@@ -204,10 +204,10 @@ async fn waitpoint_wait_builtin_macro(
     category = "waitpoint"
 )]
 async fn waitpoint_complete_builtin_macro(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    waitpoint_complete_builtin(&args).await
+    waitpoint_complete_builtin(Some(&ctx), &args).await
 }
 
 #[harn_builtin(
@@ -216,10 +216,10 @@ async fn waitpoint_complete_builtin_macro(
     category = "waitpoint"
 )]
 async fn waitpoint_cancel_builtin_macro(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    waitpoint_cancel_builtin(&args).await
+    waitpoint_cancel_builtin(Some(&ctx), &args).await
 }
 
 pub(crate) fn reset_waitpoint_state() {
@@ -344,18 +344,19 @@ pub(crate) async fn wait_on_waitpoints(
     Err(WaitpointWaitFailure::Vm(waitpoint_suspend_error(&wait_id)))
 }
 
-pub(crate) async fn complete_waitpoint(
+pub(crate) async fn complete_waitpoint_on(
+    log: &Arc<AnyEventLog>,
     id: &str,
     value: Option<JsonValue>,
     actor: Option<String>,
     reason: Option<String>,
     metadata: Option<JsonValue>,
 ) -> Result<WaitpointRecord, VmError> {
-    let log = ensure_waitpoint_event_log();
-    complete_waitpoint_on(&log, id, value, actor, reason, metadata).await
+    complete_waitpoint_on_with_ctx(None, log, id, value, actor, reason, metadata).await
 }
 
-pub(crate) async fn complete_waitpoint_on(
+pub(crate) async fn complete_waitpoint_on_with_ctx(
+    ctx: Option<&AsyncBuiltinCtx>,
     log: &Arc<AnyEventLog>,
     id: &str,
     value: Option<JsonValue>,
@@ -383,21 +384,22 @@ pub(crate) async fn complete_waitpoint_on(
         record.metadata = metadata;
     }
     append_waitpoint_record(log, &record).await?;
-    trigger_waitpoint_service(log, Some(id.to_string())).await?;
+    trigger_waitpoint_service(ctx, log, Some(id.to_string())).await?;
     Ok(record)
 }
 
-pub(crate) async fn cancel_waitpoint(
+pub(crate) async fn cancel_waitpoint_on(
+    log: &Arc<AnyEventLog>,
     id: &str,
     actor: Option<String>,
     reason: Option<String>,
     metadata: Option<JsonValue>,
 ) -> Result<WaitpointRecord, VmError> {
-    let log = ensure_waitpoint_event_log();
-    cancel_waitpoint_on(&log, id, actor, reason, metadata).await
+    cancel_waitpoint_on_with_ctx(None, log, id, actor, reason, metadata).await
 }
 
-pub(crate) async fn cancel_waitpoint_on(
+pub(crate) async fn cancel_waitpoint_on_with_ctx(
+    ctx: Option<&AsyncBuiltinCtx>,
     log: &Arc<AnyEventLog>,
     id: &str,
     actor: Option<String>,
@@ -423,7 +425,7 @@ pub(crate) async fn cancel_waitpoint_on(
         record.metadata = metadata;
     }
     append_waitpoint_record(log, &record).await?;
-    trigger_waitpoint_service(log, Some(id.to_string())).await?;
+    trigger_waitpoint_service(ctx, log, Some(id.to_string())).await?;
     Ok(record)
 }
 
@@ -550,27 +552,37 @@ async fn waitpoint_wait_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     }
 }
 
-async fn waitpoint_complete_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+async fn waitpoint_complete_builtin(
+    ctx: Option<&AsyncBuiltinCtx>,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     let (id, _) = parse_single_waitpoint_handle(args.first(), "waitpoint.complete")?;
     let value = args.get(1).map(crate::llm::vm_value_to_json);
     let (actor, reason, metadata) = parse_terminal_options(args.get(2), "waitpoint.complete")?;
-    let record = complete_waitpoint(&id, value, actor, reason, metadata).await?;
+    let log = ensure_waitpoint_event_log();
+    let record =
+        complete_waitpoint_on_with_ctx(ctx, &log, &id, value, actor, reason, metadata).await?;
     Ok(waitpoint_value(&record))
 }
 
-async fn waitpoint_cancel_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+async fn waitpoint_cancel_builtin(
+    ctx: Option<&AsyncBuiltinCtx>,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     let (id, _) = parse_single_waitpoint_handle(args.first(), "waitpoint.cancel")?;
     let (actor, reason, metadata) = parse_terminal_options(args.get(1), "waitpoint.cancel")?;
-    let record = cancel_waitpoint(&id, actor, reason, metadata).await?;
+    let log = ensure_waitpoint_event_log();
+    let record = cancel_waitpoint_on_with_ctx(ctx, &log, &id, actor, reason, metadata).await?;
     Ok(waitpoint_value(&record))
 }
 
 async fn trigger_waitpoint_service(
+    ctx: Option<&AsyncBuiltinCtx>,
     log: &Arc<AnyEventLog>,
     waitpoint_id: Option<String>,
 ) -> Result<(), VmError> {
-    if let Some(base_vm) = clone_async_builtin_child_vm() {
-        let dispatcher = crate::Dispatcher::with_event_log(base_vm, log.clone());
+    if let Some(ctx) = ctx {
+        let dispatcher = crate::Dispatcher::with_event_log(ctx.child_vm(), log.clone());
         let filter = waitpoint_id.map(|id| BTreeSet::from([id]));
         service_waitpoints_once(&dispatcher, filter.as_ref())
             .await

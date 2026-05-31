@@ -2360,6 +2360,7 @@ mod tests {
 
     struct RuntimeCatalogGuard {
         _lock: MutexGuard<'static, ()>,
+        _runtime_paths_env_lock: MutexGuard<'static, ()>,
         state_dir: tempfile::TempDir,
         previous_state_dir: Option<String>,
         previous_allow_unsigned: Option<String>,
@@ -2370,6 +2371,9 @@ mod tests {
     impl RuntimeCatalogGuard {
         fn new() -> Self {
             let lock = RUNTIME_REFRESH_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let runtime_paths_env_lock = crate::runtime_paths::test_env_lock()
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let state_dir = tempfile::tempdir().expect("temp state dir");
@@ -2387,6 +2391,7 @@ mod tests {
             llm_config::clear_runtime_catalog_overlay();
             Self {
                 _lock: lock,
+                _runtime_paths_env_lock: runtime_paths_env_lock,
                 state_dir,
                 previous_state_dir,
                 previous_allow_unsigned,

@@ -2141,16 +2141,9 @@ impl Dispatcher {
                 })
             }
             DispatchUri::AutoResume { worker_id } => {
-                // Auto-resume is invoked directly in Rust (not via a VM closure
-                // through `invoke_vm_callable`), so bind the dispatcher's base VM
-                // as the async-builtin context here too: the resume path's
-                // respawn gate (`agents::warm_resume_worker`) reads
-                // `clone_async_builtin_child_vm()` and silently skips the
-                // respawn when it's empty, leaving the worker suspended forever.
-                // See harn#2667.
-                let value = crate::vm::scope_async_builtin(
-                    self.base_vm.child_vm(),
-                    crate::stdlib::agents::resume_worker_from_auto_resume_trigger(worker_id, event),
+                let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.base_vm.child_vm());
+                let value = crate::stdlib::agents::resume_worker_from_auto_resume_trigger(
+                    &ctx, worker_id, event,
                 )
                 .await
                 .map_err(|error| DispatchError::Local(error.to_string()))?;
@@ -2311,18 +2304,13 @@ impl Dispatcher {
         // Step 4: submit to the pool. Pool errors (pool not found,
         // fail_fast/fail_submitter rejection) bubble up as DispatchError so
         // the surrounding retry/DLQ machinery applies the configured policy.
-        // The dispatcher installs its own child VM on the async-builtin
-        // stack so the pool can clone an execution context when (or after)
-        // the task is scheduled to run.
-        // Bind the dispatcher's child VM as the async-builtin context for the
-        // duration of the pool submit, so the pool can clone an execution
-        // context when the task is scheduled. `submit` is the only await here;
-        // a task-local scope around it is cancel-safe and avoids the old
-        // thread-local stack strand risk.
-        let child_vm = self.base_vm.child_vm();
-        let outcome = crate::vm::scope_async_builtin(
-            child_vm,
-            crate::stdlib::pool::submit_closure_to_named_pool(pool, closure, priority, key.clone()),
+        let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.base_vm.child_vm());
+        let outcome = crate::stdlib::pool::submit_closure_to_named_pool(
+            Some(&ctx),
+            pool,
+            closure,
+            priority,
+            key.clone(),
         )
         .await
         .map_err(|error| DispatchError::Local(error.to_string()))?;
@@ -2755,10 +2743,12 @@ impl Dispatcher {
         let mut suspended = 0u32;
         let mut skipped = 0u32;
         let mut per_worker = Vec::with_capacity(target_ids.len());
+        let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.base_vm.child_vm());
         for worker_id in &target_ids {
-            let outcome = crate::stdlib::agents::panic_suspend_worker(worker_id, reason)
-                .await
-                .map_err(|error| DispatchError::Local(error.to_string()))?;
+            let outcome =
+                crate::stdlib::agents::panic_suspend_worker(Some(&ctx), worker_id, reason)
+                    .await
+                    .map_err(|error| DispatchError::Local(error.to_string()))?;
             match outcome {
                 crate::stdlib::agents::PanicSuspendOutcome::Suspended => {
                     suspended += 1;

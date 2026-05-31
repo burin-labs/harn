@@ -232,8 +232,8 @@ pub use self::agent_config::{
 };
 pub use self::agent_runtime::{current_agent_session_id, register_session_end_hook};
 pub(crate) use self::agent_runtime::{
-    current_host_bridge, emit_agent_event as emit_live_agent_event,
-    emit_agent_event_sync as emit_live_agent_event_sync,
+    current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
+    emit_agent_event_with_ctx as emit_live_agent_event_with_ctx,
 };
 pub(crate) use self::api::vm_call_llm_full;
 pub use self::api::{
@@ -300,10 +300,10 @@ pub fn reset_llm_state() {
     runtime_only = true
 )]
 async fn cost_route_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    cost_route::cost_route_impl(args).await
+    cost_route::cost_route_impl(&ctx, args).await
 }
 
 /// Execute one LLM call and return the normalized Harn result dict.
@@ -313,10 +313,10 @@ async fn cost_route_builtin(
     category = "llm.host"
 )]
 async fn llm_call_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    llm_call_impl(args).await
+    llm_call_impl(Some(&ctx), args).await
 }
 
 /// Execute one streaming LLM call and return the normalized Harn result dict.
@@ -457,10 +457,10 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     category = "llm.host"
 )]
 async fn llm_call_safe_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    match llm_call_impl(args).await {
+    match llm_call_impl(Some(&ctx), args).await {
         Ok(response) => Ok(llm_safe_envelope_ok(response)),
         Err(err) => Ok(llm_safe_envelope_err(&err)),
     }
@@ -473,11 +473,11 @@ async fn llm_call_safe_builtin(
     category = "llm.structured"
 )]
 async fn llm_call_structured_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let rewritten = rewrite_structured_args(args)?;
-    let response = llm_call_impl(rewritten).await?;
+    let response = llm_call_impl(Some(&ctx), rewritten).await?;
     Ok(extract_structured_data(response))
 }
 
@@ -488,14 +488,14 @@ async fn llm_call_structured_builtin(
     category = "llm.structured"
 )]
 async fn llm_call_structured_safe_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let rewritten = match rewrite_structured_args(args) {
         Ok(v) => v,
         Err(err) => return Ok(structured_safe_envelope_err(&err)),
     };
-    match llm_call_impl(rewritten).await {
+    match llm_call_impl(Some(&ctx), rewritten).await {
         Ok(response) => Ok(structured_safe_envelope_ok(extract_structured_data(
             response,
         ))),
@@ -536,7 +536,7 @@ async fn schema_recover_builtin(
     category = "llm.rate_limit"
 )]
 async fn with_rate_limit_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let provider = args.first().map(|a| a.display()).unwrap_or_default();
@@ -560,10 +560,10 @@ async fn with_rate_limit_builtin(
     let mut attempt: usize = 0;
     loop {
         rate_limit::acquire_permit(&provider).await;
-        let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-            VmError::Runtime("with_rate_limit requires an async builtin VM context".to_string())
-        })?;
-        match child_vm.call_closure_pub(&closure, &[]).await {
+        let mut child_vm = ctx.child_vm();
+        let result = child_vm.call_closure_pub(&closure, &[]).await;
+        ctx.forward_output(&child_vm.take_output());
+        match result {
             Ok(v) => return Ok(v),
             Err(err) => {
                 let cat = crate::value::error_to_category(&err);
@@ -900,7 +900,7 @@ mod tests {
             error: None,
         });
 
-        let response = execute_llm_call(base_opts(), None, None)
+        let response = execute_llm_call(None, base_opts(), None, None)
             .await
             .expect("structured retry should recover");
         let dict = response.as_dict().expect("dict response");

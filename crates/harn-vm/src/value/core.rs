@@ -16,8 +16,8 @@ use super::{
 ///
 /// Receives an explicit [`crate::vm::AsyncBuiltinCtx`] handle (threaded by the
 /// dispatch loop + the `#[harn_builtin]` macro) so handlers mint child VMs and
-/// forward output through the ctx they were given rather than an ambient
-/// task-local that may not be bound on the current task. See harn#2668.
+/// forward output through the ctx they were given instead of relying on hidden
+/// task state.
 pub type VmAsyncBuiltinFn = Rc<
     dyn Fn(
         crate::vm::AsyncBuiltinCtx,

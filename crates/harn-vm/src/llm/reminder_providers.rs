@@ -425,6 +425,7 @@ pub fn clear_reminder_providers() {
 }
 
 pub async fn evaluate_and_inject(
+    vm_ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     event: HookEvent,
     session_id: &str,
     payload: JsonValue,
@@ -463,7 +464,7 @@ pub async fn evaluate_and_inject(
         {
             continue;
         }
-        match evaluate_vm_provider(&provider, &ctx).await {
+        match evaluate_vm_provider(vm_ctx, &provider, &ctx).await {
             Ok(reminders) => {
                 emit_provider_evaluated(&ctx, &provider.id, !reminders.is_empty(), None);
                 for reminder in reminders {
@@ -640,10 +641,11 @@ fn canonical_provider_ids() -> [&'static str; 7] {
 }
 
 async fn evaluate_vm_provider(
+    vm_ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     provider: &VmReminderProvider,
     ctx: &ProviderContext,
 ) -> Result<Vec<ReminderSpec>, VmError> {
-    let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+    let Some(mut vm) = vm_ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
         return Err(VmError::Runtime(
             "register_reminder_provider: evaluate requires an async builtin VM context".to_string(),
         ));

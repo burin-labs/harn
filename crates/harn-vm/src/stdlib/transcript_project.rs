@@ -25,13 +25,13 @@ use crate::llm::helpers::{
 };
 use crate::stdlib::json_to_vm_value;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 /// Canonical `kind` for the transcript event emitted on each projection.
 pub(crate) const TRANSCRIPT_PROJECTION_EVENT_KIND: &str = "transcript.projection";
 
 pub(crate) fn register_transcript_projection_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("transcript_project", |_ctx, args| async move {
+    vm.register_async_builtin("transcript_project", |ctx, args| async move {
         let transcript_value = args.first().cloned().unwrap_or(VmValue::Nil);
         let transcript = transcript_value
             .as_dict()
@@ -41,7 +41,7 @@ pub(crate) fn register_transcript_projection_builtins(vm: &mut Vm) {
             })?;
         let options = args.get(1).cloned().unwrap_or(VmValue::Nil);
         let policy = parse_projection_options(&options)?;
-        let result = project_transcript(transcript, &policy).await?;
+        let result = project_transcript(Some(&ctx), transcript, &policy).await?;
         Ok(result_to_vm(&result, &policy))
     });
 }
@@ -194,15 +194,17 @@ pub(crate) struct ProjectionResult {
 }
 
 pub(crate) async fn project_transcript(
+    ctx: Option<&AsyncBuiltinCtx>,
     transcript: &BTreeMap<String, VmValue>,
     policy: &ProjectionPolicy,
 ) -> Result<ProjectionResult, VmError> {
     let raw_messages = transcript_message_list(transcript)?;
     let raw_json: Vec<JsonValue> = raw_messages.iter().map(vm_value_to_json).collect();
-    project_messages(&raw_json, transcript, policy).await
+    project_messages(ctx, &raw_json, transcript, policy).await
 }
 
 pub(crate) async fn project_messages(
+    ctx: Option<&AsyncBuiltinCtx>,
     raw: &[JsonValue],
     transcript: &BTreeMap<String, VmValue>,
     policy: &ProjectionPolicy,
@@ -218,7 +220,7 @@ pub(crate) async fn project_messages(
             &policy.summary_text,
         ),
         PolicyKind::Custom => {
-            project_custom(raw, policy.custom.as_ref().expect("custom validated")).await?
+            project_custom(ctx, raw, policy.custom.as_ref().expect("custom validated")).await?
         }
     };
 
@@ -447,6 +449,7 @@ fn project_summary_prefix(
 }
 
 async fn project_custom(
+    ctx: Option<&AsyncBuiltinCtx>,
     raw: &[JsonValue],
     callback: &VmValue,
 ) -> Result<ProjectionDecision, VmError> {
@@ -455,7 +458,7 @@ async fn project_custom(
             "transcript_project: custom projector must be a closure".into(),
         ));
     };
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+    let mut vm = ctx.map(AsyncBuiltinCtx::child_vm).ok_or_else(|| {
         VmError::Runtime("transcript_project: custom projector requires an async VM context".into())
     })?;
     let raw_vm = VmValue::List(Rc::new(raw.iter().map(json_to_vm_value).collect()));
@@ -919,7 +922,9 @@ mod tests {
             summary_text: None,
             custom: None,
         };
-        let result = project_transcript(&transcript, &policy).await.unwrap();
+        let result = project_transcript(None, &transcript, &policy)
+            .await
+            .unwrap();
         assert_eq!(result.messages.len(), 2);
         assert_eq!(result.dropped_indices.len(), 0);
         assert!(result.prefix_hash.starts_with("sha256:"));
@@ -964,7 +969,9 @@ mod tests {
             summary_text: None,
             custom: None,
         };
-        let result = project_transcript(&transcript, &policy).await.unwrap();
+        let result = project_transcript(None, &transcript, &policy)
+            .await
+            .unwrap();
         // Drops the failed assistant (index 1) and its error tool result (index 2).
         assert_eq!(result.dropped_indices, vec![1, 2]);
         assert_eq!(result.kept_indices, vec![0, 3, 4]);
@@ -1007,7 +1014,9 @@ mod tests {
             summary_text: None,
             custom: None,
         };
-        let result = project_transcript(&transcript, &policy).await.unwrap();
+        let result = project_transcript(None, &transcript, &policy)
+            .await
+            .unwrap();
         assert_eq!(result.dropped_indices, vec![1, 2]);
         assert_eq!(result.messages.len(), 2);
     }
@@ -1033,7 +1042,9 @@ mod tests {
             summary_text: None,
             custom: None,
         };
-        let result = project_transcript(&transcript, &policy).await.unwrap();
+        let result = project_transcript(None, &transcript, &policy)
+            .await
+            .unwrap();
         assert_eq!(result.messages.len(), 3); // 1 summary + 2 kept
         assert_eq!(result.dropped_indices.len(), 4);
         assert_eq!(result.kept_indices, vec![4, 5]);
@@ -1094,7 +1105,9 @@ mod tests {
             summary_text: None,
             custom: None,
         };
-        let result = project_transcript(&transcript, &policy).await.unwrap();
+        let result = project_transcript(None, &transcript, &policy)
+            .await
+            .unwrap();
         assert!(result.provider_safety_blocked);
         // Falls back to identity: all messages survive.
         assert_eq!(result.kept_indices.len(), 5);
@@ -1142,7 +1155,9 @@ mod tests {
             summary_text: None,
             custom: None,
         };
-        let result = project_transcript(&transcript, &policy).await.unwrap();
+        let result = project_transcript(None, &transcript, &policy)
+            .await
+            .unwrap();
         assert!(!result.provider_safety_blocked);
         assert!(!result.dropped_indices.is_empty());
     }

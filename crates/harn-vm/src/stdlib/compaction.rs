@@ -19,7 +19,7 @@ use crate::agent_sessions;
 use crate::llm::helpers::{extract_llm_options, transcript_event};
 use crate::orchestration::{
     self, compact_strategy_name, estimate_message_tokens, parse_policy_dict, policy_for,
-    reset_registry, run_compaction_lifecycle, set_policy, to_auto_compact_config,
+    reset_registry, run_compaction_lifecycle_with_ctx, set_policy, to_auto_compact_config,
     transcript_compactable_events, CompactLifecycle, CompactMode, CompactStrategy,
     CompactionAction, CompactionPolicyDeclaration, CompactionTrigger, PolicyStrategy,
 };
@@ -121,7 +121,7 @@ fn compaction_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     category = "compaction"
 )]
 async fn compaction_run_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = resolve_session_id(args.first(), "compaction.run")?;
@@ -183,8 +183,14 @@ async fn compaction_run_impl(
         .with_reminder_events(reminder_events)
         .with_provider_options(provider_options);
 
-    let Some(outcome) =
-        run_compaction_lifecycle(&mut messages, &mut config, llm_opts.as_ref(), lifecycle).await?
+    let Some(outcome) = run_compaction_lifecycle_with_ctx(
+        Some(&ctx),
+        &mut messages,
+        &mut config,
+        llm_opts.as_ref(),
+        lifecycle,
+    )
+    .await?
     else {
         // Nothing to compact — return an "unchanged" record with the
         // current transcript and original message count so callers can

@@ -53,30 +53,33 @@ enum GitDataParser {
 pub(crate) fn register_git_builtins(vm: &mut Vm) {
     register_git_namespace(vm);
 
-    vm.register_async_builtin("git.repo.discover", |_ctx, args| async move {
+    vm.register_async_builtin("git.repo.discover", |ctx, args| async move {
         let path = required_path_arg(&args, 0, "git.repo.discover")?;
-        run_git_command(GitCommand {
-            operation: "git.repo.discover",
-            action: "git.repo.discover",
-            cwd: path.clone(),
-            argv: vec![
-                "git".to_string(),
-                "rev-parse".to_string(),
-                "--show-toplevel".to_string(),
-                "--git-dir".to_string(),
-                "--is-bare-repository".to_string(),
-                "--is-inside-work-tree".to_string(),
-            ],
-            mutation: GitMutation::Read,
-            affected_paths: vec![display_path(&path)],
-            data_parser: GitDataParser::Discover {
-                input: display_path(&path),
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.repo.discover",
+                action: "git.repo.discover",
+                cwd: path.clone(),
+                argv: vec![
+                    "git".to_string(),
+                    "rev-parse".to_string(),
+                    "--show-toplevel".to_string(),
+                    "--git-dir".to_string(),
+                    "--is-bare-repository".to_string(),
+                    "--is-inside-work-tree".to_string(),
+                ],
+                mutation: GitMutation::Read,
+                affected_paths: vec![display_path(&path)],
+                data_parser: GitDataParser::Discover {
+                    input: display_path(&path),
+                },
             },
-        })
+        )
         .await
     });
 
-    vm.register_async_builtin("git.worktree.create", |_ctx, args| async move {
+    vm.register_async_builtin("git.worktree.create", |ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.worktree.create")?;
         let branch = required_string_arg(&args, 1, "git.worktree.create", "branch")?;
         let path = required_string_arg(&args, 2, "git.worktree.create", "path")?;
@@ -100,19 +103,22 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         if let Some(base_ref) = base_ref {
             argv.push(base_ref);
         }
-        run_git_command(GitCommand {
-            operation: "git.worktree.create",
-            action: "git.worktree.create",
-            cwd: repo,
-            argv,
-            mutation: GitMutation::Mutating,
-            affected_paths: vec![path.clone()],
-            data_parser: GitDataParser::WorktreeCreate { branch, path },
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.worktree.create",
+                action: "git.worktree.create",
+                cwd: repo,
+                argv,
+                mutation: GitMutation::Mutating,
+                affected_paths: vec![path.clone()],
+                data_parser: GitDataParser::WorktreeCreate { branch, path },
+            },
+        )
         .await
     });
 
-    vm.register_async_builtin("git.worktree.remove", |_ctx, args| async move {
+    vm.register_async_builtin("git.worktree.remove", |ctx, args| async move {
         let path = required_string_arg(&args, 0, "git.worktree.remove", "path")?;
         let options = optional_dict_arg(&args, 1);
         let force = bool_option(options, "force").unwrap_or(false);
@@ -151,89 +157,104 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
-        run_git_command(GitCommand {
-            operation: "git.worktree.remove",
-            action: "git.worktree.remove",
-            cwd,
-            argv,
-            mutation: GitMutation::Mutating,
-            affected_paths: vec![path.clone()],
-            data_parser: GitDataParser::WorktreeRemove { path },
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.worktree.remove",
+                action: "git.worktree.remove",
+                cwd,
+                argv,
+                mutation: GitMutation::Mutating,
+                affected_paths: vec![path.clone()],
+                data_parser: GitDataParser::WorktreeRemove { path },
+            },
+        )
         .await
     });
 
-    vm.register_async_builtin("git.fetch", |_ctx, args| async move {
+    vm.register_async_builtin("git.fetch", |ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.fetch")?;
         let remote = required_string_arg(&args, 1, "git.fetch", "remote")?;
         let refspecs = string_list_arg(&args, 2, "git.fetch", "refspecs")?.unwrap_or_default();
         let mut argv = vec!["git".to_string(), "fetch".to_string(), remote.clone()];
         argv.extend(refspecs);
-        run_git_command(GitCommand {
-            operation: "git.fetch",
-            action: "git.fetch",
-            cwd: repo,
-            argv,
-            mutation: GitMutation::Mutating,
-            affected_paths: Vec::new(),
-            data_parser: GitDataParser::Fetch,
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.fetch",
+                action: "git.fetch",
+                cwd: repo,
+                argv,
+                mutation: GitMutation::Mutating,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::Fetch,
+            },
+        )
         .await
     });
 
-    vm.register_async_builtin("git.rebase", |_ctx, args| async move {
+    vm.register_async_builtin("git.rebase", |ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.rebase")?;
         let base_ref = required_string_arg(&args, 1, "git.rebase", "base_ref")?;
-        run_git_command(GitCommand {
-            operation: "git.rebase",
-            action: "git.rebase",
-            cwd: repo,
-            argv: vec!["git".to_string(), "rebase".to_string(), base_ref],
-            mutation: GitMutation::Risky,
-            affected_paths: Vec::new(),
-            data_parser: GitDataParser::Rebase,
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.rebase",
+                action: "git.rebase",
+                cwd: repo,
+                argv: vec!["git".to_string(), "rebase".to_string(), base_ref],
+                mutation: GitMutation::Risky,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::Rebase,
+            },
+        )
         .await
     });
 
-    vm.register_async_builtin("git.status", |_ctx, args| async move {
+    vm.register_async_builtin("git.status", |ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.status")?;
-        run_git_command(GitCommand {
-            operation: "git.status",
-            action: "git.status",
-            cwd: repo,
-            argv: vec![
-                "git".to_string(),
-                "status".to_string(),
-                "--porcelain=v1".to_string(),
-                "--branch".to_string(),
-            ],
-            mutation: GitMutation::Read,
-            affected_paths: Vec::new(),
-            data_parser: GitDataParser::Status,
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.status",
+                action: "git.status",
+                cwd: repo,
+                argv: vec![
+                    "git".to_string(),
+                    "status".to_string(),
+                    "--porcelain=v1".to_string(),
+                    "--branch".to_string(),
+                ],
+                mutation: GitMutation::Read,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::Status,
+            },
+        )
         .await
     });
 
-    vm.register_async_builtin("git.conflicts", |_ctx, args| async move {
+    vm.register_async_builtin("git.conflicts", |ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.conflicts")?;
-        run_git_command(GitCommand {
-            operation: "git.conflicts",
-            action: "git.conflicts",
-            cwd: repo,
-            argv: vec![
-                "git".to_string(),
-                "status".to_string(),
-                "--porcelain=v1".to_string(),
-            ],
-            mutation: GitMutation::Read,
-            affected_paths: Vec::new(),
-            data_parser: GitDataParser::Conflicts,
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.conflicts",
+                action: "git.conflicts",
+                cwd: repo,
+                argv: vec![
+                    "git".to_string(),
+                    "status".to_string(),
+                    "--porcelain=v1".to_string(),
+                ],
+                mutation: GitMutation::Read,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::Conflicts,
+            },
+        )
         .await
     });
 
-    vm.register_async_builtin("git.push", |_ctx, args| async move {
+    vm.register_async_builtin("git.push", |ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.push")?;
         let remote = required_string_arg(&args, 1, "git.push", "remote")?;
         let refspec = required_string_arg(&args, 2, "git.push", "refspec")?;
@@ -291,19 +312,22 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         }
         argv.push(remote);
         argv.push(refspec.clone());
-        run_git_command(GitCommand {
-            operation: "git.push",
-            action: "git.push",
-            cwd: repo,
-            argv,
-            mutation,
-            affected_paths: Vec::new(),
-            data_parser: GitDataParser::Push { refspec },
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.push",
+                action: "git.push",
+                cwd: repo,
+                argv,
+                mutation,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::Push { refspec },
+            },
+        )
         .await
     });
 
-    vm.register_async_builtin("git.diff", |_ctx, args| async move {
+    vm.register_async_builtin("git.diff", |ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.diff")?;
         let selector = args.get(1);
         let mut argv = vec!["git".to_string(), "diff".to_string()];
@@ -324,31 +348,37 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
             }
             _ => {}
         }
-        run_git_command(GitCommand {
-            operation: "git.diff",
-            action: "git.diff",
-            cwd: repo,
-            argv,
-            mutation: GitMutation::Read,
-            affected_paths: Vec::new(),
-            data_parser: GitDataParser::Diff,
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.diff",
+                action: "git.diff",
+                cwd: repo,
+                argv,
+                mutation: GitMutation::Read,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::Diff,
+            },
+        )
         .await
     });
 
-    vm.register_async_builtin("git.merge_base", |_ctx, args| async move {
+    vm.register_async_builtin("git.merge_base", |ctx, args| async move {
         let repo = repo_path_arg(&args, 0, "git.merge_base")?;
         let left = required_string_arg(&args, 1, "git.merge_base", "left")?;
         let right = required_string_arg(&args, 2, "git.merge_base", "right")?;
-        run_git_command(GitCommand {
-            operation: "git.merge_base",
-            action: "git.merge_base",
-            cwd: repo,
-            argv: vec!["git".to_string(), "merge-base".to_string(), left, right],
-            mutation: GitMutation::Read,
-            affected_paths: Vec::new(),
-            data_parser: GitDataParser::MergeBase,
-        })
+        run_git_command(
+            Some(&ctx),
+            GitCommand {
+                operation: "git.merge_base",
+                action: "git.merge_base",
+                cwd: repo,
+                argv: vec!["git".to_string(), "merge-base".to_string(), left, right],
+                mutation: GitMutation::Read,
+                affected_paths: Vec::new(),
+                data_parser: GitDataParser::MergeBase,
+            },
+        )
         .await
     });
 }
@@ -389,12 +419,15 @@ fn namespace(entries: &[(&str, &str)]) -> VmValue {
     ))
 }
 
-async fn run_git_command(command: GitCommand) -> Result<VmValue, VmError> {
+async fn run_git_command(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    command: GitCommand,
+) -> Result<VmValue, VmError> {
     if should_plan(&command) {
         return planned_receipt(command).await;
     }
 
-    let approval = enforce_git_approval(&command).await?;
+    let approval = enforce_git_approval(ctx, &command).await?;
     let result = exec_argv(&command).await?;
     let result_json = crate::llm::vm_value_to_json(&result);
     let status = command_status(&result_json);
@@ -545,7 +578,10 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     crate::stdlib::host::dispatch_process_exec(&params, caller).await
 }
 
-async fn enforce_git_approval(command: &GitCommand) -> Result<Option<JsonValue>, VmError> {
+async fn enforce_git_approval(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    command: &GitCommand,
+) -> Result<Option<JsonValue>, VmError> {
     let args = json!({
         "operation": command.operation,
         "argv": command.argv,
@@ -553,7 +589,7 @@ async fn enforce_git_approval(command: &GitCommand) -> Result<Option<JsonValue>,
         "affected_paths": command.affected_paths,
     });
     if command.mutation == GitMutation::Risky {
-        let approval = request_permission(command.operation, &args, None).await?;
+        let approval = request_permission(ctx, command.operation, &args, None).await?;
         return Ok(Some(approval));
     }
     let Some(policy) = crate::orchestration::current_approval_policy() else {
@@ -568,19 +604,19 @@ async fn enforce_git_approval(command: &GitCommand) -> Result<Option<JsonValue>,
             category: crate::value::ErrorCategory::ToolRejected,
         })
     } else {
-        request_permission(command.operation, &args, Some(decision.receipt))
+        request_permission(ctx, command.operation, &args, Some(decision.receipt))
             .await
             .map(Some)
     }
 }
 
 async fn request_permission(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     operation: &str,
     args: &JsonValue,
     policy_decision: Option<JsonValue>,
 ) -> Result<JsonValue, VmError> {
-    let Some(bridge) = crate::vm::clone_async_builtin_child_vm().and_then(|vm| vm.bridge.clone())
-    else {
+    let Some(bridge) = ctx.and_then(|ctx| ctx.child_vm().bridge.clone()) else {
         return Err(VmError::CategorizedError {
             message: format!("{operation}: approval required but no host bridge is attached"),
             category: crate::value::ErrorCategory::ToolRejected,
@@ -1203,20 +1239,23 @@ mod tests {
         fs::write(repo.path().join("README.md"), "changed\n").expect("modify readme");
 
         run_on_local(async {
-            let receipt = run_git_command(GitCommand {
-                operation: "git.status",
-                action: "git.status",
-                cwd: repo.path().to_path_buf(),
-                argv: vec![
-                    "git".to_string(),
-                    "status".to_string(),
-                    "--porcelain=v1".to_string(),
-                    "--branch".to_string(),
-                ],
-                mutation: GitMutation::Read,
-                affected_paths: Vec::new(),
-                data_parser: GitDataParser::Status,
-            })
+            let receipt = run_git_command(
+                None,
+                GitCommand {
+                    operation: "git.status",
+                    action: "git.status",
+                    cwd: repo.path().to_path_buf(),
+                    argv: vec![
+                        "git".to_string(),
+                        "status".to_string(),
+                        "--porcelain=v1".to_string(),
+                        "--branch".to_string(),
+                    ],
+                    mutation: GitMutation::Read,
+                    affected_paths: Vec::new(),
+                    data_parser: GitDataParser::Status,
+                },
+            )
             .await
             .expect("git status receipt");
             let json = crate::llm::vm_value_to_json(&receipt);

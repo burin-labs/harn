@@ -399,7 +399,8 @@ async fn compact_transcript_mode_reduces_carried_messages() {
         None,
     );
 
-    let compacted = compact_worker_transcript(transcript).await.unwrap();
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new());
+    let compacted = compact_worker_transcript(&ctx, transcript).await.unwrap();
     let dict = compacted.as_dict().expect("transcript dict");
     let messages = crate::llm::helpers::transcript_message_list(dict).unwrap();
 
@@ -524,7 +525,7 @@ async fn emit_worker_event_routes_through_parent_session_sink() {
         .normalize(),
     };
 
-    super::bridge::emit_worker_event(&snapshot, WorkerEvent::WorkerWaitingForInput)
+    super::bridge::emit_worker_event(None, &snapshot, WorkerEvent::WorkerWaitingForInput)
         .await
         .expect("emit");
 

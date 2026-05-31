@@ -65,12 +65,15 @@ struct CacheRecord {
 }
 
 pub(crate) fn register_project_enrich_builtin(vm: &mut Vm) {
-    vm.register_async_builtin("project_enrich_native", |_ctx, args| async move {
-        project_enrich_impl(args).await
+    vm.register_async_builtin("project_enrich_native", |ctx, args| async move {
+        project_enrich_impl(Some(&ctx), args).await
     });
 }
 
-async fn project_enrich_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn project_enrich_impl(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let path = args
         .first()
         .map(VmValue::display)
@@ -133,7 +136,7 @@ async fn project_enrich_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         VmValue::Nil,
         llm_options_value.clone(),
     ])?;
-    match execute_llm_call(extracted, llm_options_value.as_dict().cloned(), None).await {
+    match execute_llm_call(ctx, extracted, llm_options_value.as_dict().cloned(), None).await {
         Ok(response) => {
             let response_dict = response.as_dict().ok_or_else(|| {
                 VmError::Thrown(VmValue::String(Rc::from(

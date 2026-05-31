@@ -795,6 +795,41 @@ fn resolve_command_dir(dir: &str) -> PathBuf {
 mod tests {
     use super::*;
 
+    struct RuntimePathsEnvGuard {
+        state: Option<String>,
+        run: Option<String>,
+        worktree: Option<String>,
+    }
+
+    impl RuntimePathsEnvGuard {
+        fn capture() -> Self {
+            Self {
+                state: std::env::var(crate::runtime_paths::HARN_STATE_DIR_ENV).ok(),
+                run: std::env::var(crate::runtime_paths::HARN_RUN_DIR_ENV).ok(),
+                worktree: std::env::var(crate::runtime_paths::HARN_WORKTREE_DIR_ENV).ok(),
+            }
+        }
+    }
+
+    impl Drop for RuntimePathsEnvGuard {
+        fn drop(&mut self) {
+            match self.state.as_deref() {
+                Some(value) => std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, value),
+                None => std::env::remove_var(crate::runtime_paths::HARN_STATE_DIR_ENV),
+            }
+            match self.run.as_deref() {
+                Some(value) => std::env::set_var(crate::runtime_paths::HARN_RUN_DIR_ENV, value),
+                None => std::env::remove_var(crate::runtime_paths::HARN_RUN_DIR_ENV),
+            }
+            match self.worktree.as_deref() {
+                Some(value) => {
+                    std::env::set_var(crate::runtime_paths::HARN_WORKTREE_DIR_ENV, value);
+                }
+                None => std::env::remove_var(crate::runtime_paths::HARN_WORKTREE_DIR_ENV),
+            }
+        }
+    }
+
     #[test]
     fn lexically_collapse_resolves_sibling_walk() {
         let path = PathBuf::from("/tmp/project/tests/../fixtures/x.json");
@@ -961,6 +996,10 @@ mod tests {
 
     #[test]
     fn runtime_paths_uses_configurable_state_roots() {
+        let _runtime_paths_env_lock = crate::runtime_paths::test_env_lock()
+            .lock()
+            .expect("runtime paths env lock");
+        let _env_guard = RuntimePathsEnvGuard::capture();
         let base =
             std::env::temp_dir().join(format!("harn-process-runtime-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir_all(&base).unwrap();
@@ -1000,9 +1039,6 @@ mod tests {
         );
 
         reset_process_state();
-        std::env::remove_var(crate::runtime_paths::HARN_STATE_DIR_ENV);
-        std::env::remove_var(crate::runtime_paths::HARN_RUN_DIR_ENV);
-        std::env::remove_var(crate::runtime_paths::HARN_WORKTREE_DIR_ENV);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

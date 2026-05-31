@@ -99,12 +99,15 @@ struct ReviewTrustInput<'a> {
 }
 
 pub(crate) fn register_review_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("self_review", |_ctx, args| async move {
-        self_review_impl(args).await
+    vm.register_async_builtin("self_review", |ctx, args| async move {
+        self_review_impl(Some(&ctx), args).await
     });
 }
 
-async fn self_review_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn self_review_impl(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let diff = args
         .first()
         .map(VmValue::display)
@@ -151,7 +154,7 @@ async fn self_review_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             VmValue::String(Rc::from(system.as_str())),
             options.clone(),
         ])?;
-        let response = execute_llm_call(extracted, Some(options_dict), None).await?;
+        let response = execute_llm_call(ctx, extracted, Some(options_dict), None).await?;
         let response_dict = response.as_dict().ok_or_else(|| {
             VmError::Runtime("self_review: expected llm response dict".to_string())
         })?;

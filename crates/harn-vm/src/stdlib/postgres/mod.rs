@@ -131,14 +131,14 @@ mod migrate;
     category = "postgres"
 )]
 async fn pg_pool_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let source = args.first().ok_or_else(|| {
         runtime_error("pg_pool: url, env:, secret:, or {url|env|secret} is required")
     })?;
     let options = args.get(1).and_then(VmValue::as_dict).cloned();
-    open_pool(source, options.as_ref(), false).await
+    open_pool(&ctx, source, options.as_ref(), false).await
 }
 
 #[harn_builtin(
@@ -147,14 +147,14 @@ async fn pg_pool_impl(
     category = "postgres"
 )]
 async fn pg_connect_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let source = args.first().ok_or_else(|| {
         runtime_error("pg_connect: url, env:, secret:, or {url|env|secret} is required")
     })?;
     let options = args.get(1).and_then(VmValue::as_dict).cloned();
-    open_pool(source, options.as_ref(), true).await
+    open_pool(&ctx, source, options.as_ref(), true).await
 }
 
 #[harn_builtin(
@@ -313,7 +313,7 @@ async fn pg_execute_impl(
     category = "postgres"
 )]
 async fn pg_transaction_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let pool_id = handle_id(args.first(), HANDLE_POOL, "pg_transaction")?;
@@ -331,7 +331,7 @@ async fn pg_transaction_impl(
         .and_then(|opts| opts.get("settings"))
         .and_then(VmValue::as_dict)
         .cloned();
-    run_managed_transaction(&pool_id, "pg_transaction", closure, move |tx_id| {
+    run_managed_transaction(&ctx, &pool_id, "pg_transaction", closure, move |tx_id| {
         let tx_id = tx_id.to_string();
         Box::pin(async move {
             if let Some(settings) = settings {
@@ -350,6 +350,7 @@ async fn pg_transaction_impl(
 /// invokes the closure with the `pg_tx` handle. Commit on `Ok(...)`,
 /// rollback on any error in the closure.
 pub(super) async fn run_managed_transaction(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     pool_id: &str,
     builtin: &'static str,
     closure: Rc<crate::value::VmClosure>,
@@ -377,9 +378,9 @@ pub(super) async fn run_managed_transaction(
         return Err(error);
     }
 
-    let mut child_vm = crate::vm::clone_async_builtin_child_vm()
-        .ok_or_else(|| runtime_error(format!("{builtin}: requires VM execution context")))?;
+    let mut child_vm = ctx.child_vm();
     let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
+    ctx.forward_output(&child_vm.take_output());
 
     unregister_tx(&tx_id);
     let tx = tx_cell
@@ -494,11 +495,12 @@ fn pg_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 async fn open_pool(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     source: &VmValue,
     options: Option<&BTreeMap<String, VmValue>>,
     single_connection: bool,
 ) -> Result<VmValue, VmError> {
-    let primary_url = resolve_connection_url(source).await?;
+    let primary_url = resolve_connection_url(ctx, source).await?;
     let stmt_cache_capacity = option_int(options, "statement_cache_capacity")
         .map(|n| n.max(0) as usize)
         .unwrap_or(DEFAULT_STATEMENT_CACHE_CAPACITY);
@@ -518,7 +520,7 @@ async fn open_pool(
     )
     .await?;
 
-    let replica_urls = collect_replica_urls(options).await?;
+    let replica_urls = collect_replica_urls(ctx, options).await?;
     let mut replicas = Vec::with_capacity(replica_urls.len());
     for url in &replica_urls {
         let pool = build_pool(
@@ -619,6 +621,7 @@ async fn build_pool(
 }
 
 async fn collect_replica_urls(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     options: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<Vec<String>, VmError> {
     let Some(replicas_value) = options.and_then(|opts| opts.get("replicas")) else {
@@ -635,7 +638,7 @@ async fn collect_replica_urls(
     };
     let mut urls = Vec::with_capacity(items.len());
     for entry in items {
-        urls.push(resolve_connection_url(entry).await?);
+        urls.push(resolve_connection_url(ctx, entry).await?);
     }
     Ok(urls)
 }
@@ -1080,7 +1083,10 @@ fn execute_result_value(rows_affected: u64, duration: std::time::Duration) -> Vm
     VmValue::Dict(Rc::new(map))
 }
 
-async fn resolve_connection_url(source: &VmValue) -> Result<String, VmError> {
+async fn resolve_connection_url(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    source: &VmValue,
+) -> Result<String, VmError> {
     match source {
         VmValue::Dict(dict) => {
             if let Some(url) = dict.get("url") {
@@ -1093,7 +1099,7 @@ async fn resolve_connection_url(source: &VmValue) -> Result<String, VmError> {
                 return env_url(&env.display(), "pg_pool");
             }
             if let Some(secret) = dict.get("secret") {
-                return secret_url(&secret.display()).await;
+                return secret_url(ctx, &secret.display()).await;
             }
             Err(runtime_error(
                 "pg_pool: connection dict must contain url, env, or secret",
@@ -1104,7 +1110,7 @@ async fn resolve_connection_url(source: &VmValue) -> Result<String, VmError> {
             if let Some(name) = text.strip_prefix("env:") {
                 env_url(name, "pg_pool")
             } else if let Some(id) = text.strip_prefix("secret:") {
-                secret_url(id).await
+                secret_url(ctx, id).await
             } else {
                 Ok(text.to_string())
             }
@@ -1124,16 +1130,16 @@ fn env_url(name: &str, builtin: &str) -> Result<String, VmError> {
     })
 }
 
-async fn secret_url(secret_id: &str) -> Result<String, VmError> {
-    let mut child_vm = crate::vm::clone_async_builtin_child_vm()
-        .ok_or_else(|| runtime_error("pg_pool: secret: references require VM execution context"))?;
-    match child_vm
+async fn secret_url(ctx: &crate::vm::AsyncBuiltinCtx, secret_id: &str) -> Result<String, VmError> {
+    let mut child_vm = ctx.child_vm();
+    let value = child_vm
         .call_named_builtin(
             "secret_get",
             vec![VmValue::String(Rc::from(secret_id.trim().to_string()))],
         )
-        .await?
-    {
+        .await?;
+    ctx.forward_output(&child_vm.take_output());
+    match value {
         VmValue::String(value) if !value.trim().is_empty() => Ok(value.to_string()),
         _ => Err(runtime_error(
             "pg_pool: secret value must be a non-empty UTF-8 string",
@@ -1601,7 +1607,10 @@ mod tests {
             "application_name".to_string(),
             s("harn-postgres-stdlib-test"),
         );
-        let handle = open_pool(&s(&url), Some(&options), false).await.unwrap();
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+        let handle = open_pool(&ctx, &s(&url), Some(&options), false)
+            .await
+            .unwrap();
         assert_eq!(handle.as_dict().unwrap()["max_connections"].display(), "1");
         let row = query_rows(
             &handle,

@@ -761,24 +761,30 @@ fn runtime_hooks_for_event(event: HookEvent) -> Vec<RuntimeHook> {
 }
 
 async fn invoke_vm_hook(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     closure: &Rc<VmClosure>,
     payload: &serde_json::Value,
 ) -> Result<VmValue, VmError> {
-    let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+    let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
         return Err(VmError::Runtime(
             "runtime hook requires an async builtin VM context".to_string(),
         ));
     };
     let arg = crate::stdlib::json_to_vm_value(payload);
-    vm.call_closure_pub(closure, &[arg]).await
+    let result = vm.call_closure_pub(closure, &[arg]).await;
+    if let Some(ctx) = ctx {
+        ctx.forward_output(&vm.take_output());
+    }
+    result
 }
 
 async fn invoke_vm_lifecycle_hooks(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     event: HookEvent,
     registrations: Vec<VmLifecycleHookRegistration>,
     payload: &serde_json::Value,
 ) -> Result<(), VmError> {
-    let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+    let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
         return Err(VmError::Runtime(
             "runtime hook requires an async builtin VM context".to_string(),
         ));
@@ -795,6 +801,9 @@ async fn invoke_vm_lifecycle_hooks(
         let raw = vm
             .call_closure_pub(&registration.closure, &[arg.clone()])
             .await?;
+        if let Some(ctx) = ctx {
+            ctx.forward_output(&vm.take_output());
+        }
         let effects = parse_hook_effects(event, &raw)?;
         record_hook_returned(
             &session_id,
@@ -1331,6 +1340,14 @@ pub async fn run_pre_tool_hooks(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> Result<PreToolAction, VmError> {
+    run_pre_tool_hooks_with_ctx(None, tool_name, args).await
+}
+
+pub async fn run_pre_tool_hooks_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> Result<PreToolAction, VmError> {
     let hooks = runtime_hooks_for_event(HookEvent::PreToolUse);
     let mut current_args = args.clone();
     // Singleton runtime hook (currently the stdlib path_scope_guard) runs
@@ -1369,7 +1386,7 @@ pub async fn run_pre_tool_hooks(
                 let payload = payload.as_ref().ok_or_else(|| {
                     VmError::Runtime("VM PreToolUse hook requires an event payload".to_string())
                 })?;
-                parse_pre_tool_result(invoke_vm_hook(closure, payload).await?)?
+                parse_pre_tool_result(invoke_vm_hook(ctx, closure, payload).await?)?
             }
             RuntimeHookHandler::NativePostTool(_) => continue,
         };
@@ -1386,6 +1403,15 @@ pub async fn run_pre_tool_hooks(
 
 /// Run all matching PostToolUse hooks. Returns the (possibly modified) result.
 pub async fn run_post_tool_hooks(
+    tool_name: &str,
+    args: &serde_json::Value,
+    result: &str,
+) -> Result<String, VmError> {
+    run_post_tool_hooks_with_ctx(None, tool_name, args, result).await
+}
+
+pub async fn run_post_tool_hooks_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     tool_name: &str,
     args: &serde_json::Value,
     result: &str,
@@ -1422,7 +1448,7 @@ pub async fn run_post_tool_hooks(
                 let payload = payload.as_ref().ok_or_else(|| {
                     VmError::Runtime("VM PostToolUse hook requires an event payload".to_string())
                 })?;
-                parse_post_tool_result(invoke_vm_hook(closure, payload).await?)?
+                parse_post_tool_result(invoke_vm_hook(ctx, closure, payload).await?)?
             }
             RuntimeHookHandler::NativePreTool(_) => continue,
         };
@@ -1448,11 +1474,19 @@ pub async fn run_lifecycle_hooks(
     event: HookEvent,
     payload: &serde_json::Value,
 ) -> Result<(), VmError> {
+    run_lifecycle_hooks_with_ctx(None, event, payload).await
+}
+
+pub async fn run_lifecycle_hooks_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    event: HookEvent,
+    payload: &serde_json::Value,
+) -> Result<(), VmError> {
     let registrations = matching_vm_lifecycle_registrations(event, payload);
     if registrations.is_empty() {
         return Ok(());
     }
-    invoke_vm_lifecycle_hooks(event, registrations, payload).await
+    invoke_vm_lifecycle_hooks(ctx, event, registrations, payload).await
 }
 
 /// Run veto-capable session-level lifecycle hooks. Successive hooks see
@@ -1471,11 +1505,19 @@ pub async fn run_lifecycle_hooks_with_control(
     event: HookEvent,
     payload: &serde_json::Value,
 ) -> Result<HookControl, VmError> {
+    run_lifecycle_hooks_with_control_with_ctx(None, event, payload).await
+}
+
+pub async fn run_lifecycle_hooks_with_control_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    event: HookEvent,
+    payload: &serde_json::Value,
+) -> Result<HookControl, VmError> {
     let registrations = matching_vm_lifecycle_registrations(event, payload);
     if registrations.is_empty() {
         return Ok(HookControl::Allow);
     }
-    let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+    let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
         return Err(VmError::Runtime(
             "session lifecycle hook requires an async builtin VM context".to_string(),
         ));
@@ -1497,6 +1539,9 @@ pub async fn run_lifecycle_hooks_with_control(
             &current_payload,
         );
         let raw = vm.call_closure_pub(&registration.closure, &[arg]).await?;
+        if let Some(ctx) = ctx {
+            ctx.forward_output(&vm.take_output());
+        }
         let outcome = parse_hook_outcome(event, &raw)?;
         record_hook_returned(
             &session_id,

@@ -144,7 +144,7 @@ async fn pg_listen_impl(
     category = "postgres"
 )]
 async fn pg_listener_recv_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let handle = required_arg(&args, 0, "pg_listener_recv", "listener handle")?;
@@ -197,9 +197,9 @@ async fn pg_listener_recv_impl(
         let mut emit_args = Vec::with_capacity(2);
         emit_args.push(VmValue::String(Rc::from(format!("pg:{channel}"))));
         emit_args.push(crate::stdlib::json_to_vm_value(&parsed_payload));
-        if let Some(mut child) = crate::vm::clone_async_builtin_child_vm() {
-            let _ = child.call_named_builtin("emit_channel", emit_args).await;
-        }
+        let mut child = ctx.child_vm();
+        let _ = child.call_named_builtin("emit_channel", emit_args).await;
+        ctx.forward_output(&child.take_output());
     }
     Ok(value)
 }

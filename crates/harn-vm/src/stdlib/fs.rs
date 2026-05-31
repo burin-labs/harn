@@ -929,17 +929,15 @@ mod tests {
         ))
     }
 
-    fn drain_feedback(handle_id: &str) -> serde_json::Value {
+    fn drain_feedback(session_id: &str, handle_id: &str) -> serde_json::Value {
         // Cap total wait at 10s; each iteration parks on the inbox's
         // sync waiter so we wake the moment a background thread pushes
         // instead of polling. The outer loop accounts for items that
-        // arrive for *other* handles (we requeue them via the
-        // `seen_handles` log; long-running fs/glob ops push under the
-        // empty session id).
+        // arrive for *other* handles in the same test session.
         let overall_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut seen_handles = Vec::new();
         loop {
-            for entry in crate::orchestration::agent_inbox::drain("") {
+            for entry in crate::orchestration::agent_inbox::drain(session_id) {
                 assert_eq!(entry.kind, "tool_result");
                 let payload: serde_json::Value = serde_json::from_str(&entry.content).unwrap();
                 if payload["handle_id"] == handle_id {
@@ -959,8 +957,8 @@ mod tests {
             // when nothing matched within the window; we still loop
             // once more to drain any stragglers that arrived just
             // before the timeout.
-            if !crate::orchestration::agent_inbox::wait_sync("", remaining) {
-                for entry in crate::orchestration::agent_inbox::drain("") {
+            if !crate::orchestration::agent_inbox::wait_sync(session_id, remaining) {
+                for entry in crate::orchestration::agent_inbox::drain(session_id) {
                     assert_eq!(entry.kind, "tool_result");
                     let payload: serde_json::Value = serde_json::from_str(&entry.content).unwrap();
                     if payload["handle_id"] == handle_id {
@@ -1085,8 +1083,11 @@ mod tests {
         let _guard = LONG_RUNNING_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _inbox_reset_guard = crate::orchestration::agent_inbox::lock_reset_for_test();
         crate::stdlib::long_running::reset_state();
-        let _ = crate::orchestration::agent_inbox::drain("");
+        let session_id = format!("fs-long-running-{}", uuid::Uuid::now_v7());
+        let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+        let _ = crate::orchestration::agent_inbox::drain(&session_id);
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/lib.harn"), "fn main() {}\n").unwrap();
@@ -1108,7 +1109,7 @@ mod tests {
             .display()
             .contains("walk_dir"));
         let handle_id = response["handle_id"].display();
-        let payload = drain_feedback(&handle_id);
+        let payload = drain_feedback(&session_id, &handle_id);
 
         assert_eq!(payload["status"], "completed");
         assert_eq!(payload["operation"], "walk_dir");
@@ -1129,8 +1130,11 @@ mod tests {
         let _guard = LONG_RUNNING_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _inbox_reset_guard = crate::orchestration::agent_inbox::lock_reset_for_test();
         crate::stdlib::long_running::reset_state();
-        let _ = crate::orchestration::agent_inbox::drain("");
+        let session_id = format!("fs-long-running-{}", uuid::Uuid::now_v7());
+        let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+        let _ = crate::orchestration::agent_inbox::drain(&session_id);
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/lib.harn"), "fn main() {}\n").unwrap();
@@ -1151,7 +1155,7 @@ mod tests {
         assert_eq!(response["status"].display(), "running");
         assert_eq!(response["operation"].display(), "glob");
         let handle_id = response["handle_id"].display();
-        let payload = drain_feedback(&handle_id);
+        let payload = drain_feedback(&session_id, &handle_id);
 
         assert_eq!(payload["status"], "completed");
         let result = payload["result"].as_array().unwrap();

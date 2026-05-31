@@ -88,7 +88,7 @@ fn non_negative_usize(value: &VmValue, builtin: &str, key: &str) -> Result<usize
     category = "workflow.host"
 )]
 pub(super) async fn transcript_auto_compact_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let mut messages: Vec<serde_json::Value> = match args.first() {
@@ -193,7 +193,8 @@ pub(super) async fn transcript_auto_compact_builtin(
     };
     let lifecycle =
         crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Workflow);
-    crate::orchestration::run_compaction_lifecycle(
+    crate::orchestration::run_compaction_lifecycle_with_ctx(
+        Some(&ctx),
         &mut messages,
         &mut config,
         llm_opts.as_ref(),

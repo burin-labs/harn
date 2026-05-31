@@ -58,11 +58,13 @@ pub(in super::super) struct WorkerEventSnapshot {
 }
 
 pub(in super::super) async fn emit_worker_event(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     snapshot: &WorkerEventSnapshot,
     event: WorkerEvent,
 ) -> Result<(), crate::value::VmError> {
     let status = event.as_status();
-    crate::orchestration::run_lifecycle_hooks(
+    crate::orchestration::run_lifecycle_hooks_with_ctx(
+        ctx,
         crate::orchestration::HookEvent::from_worker_event(event),
         &serde_json::json!({
             "event": event.as_str(),

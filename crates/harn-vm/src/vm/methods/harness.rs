@@ -486,24 +486,17 @@ impl crate::vm::Vm {
                 .map(|id| VmValue::String(std::rc::Rc::from(id)))
                 .unwrap_or(VmValue::Nil)),
             "handoff_to" => Ok(record_handoff_envelope(args)),
-            "emit_audit" => Ok(record_emit_audit_with_hooks(args).await),
+            "emit_audit" => {
+                let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.child_vm());
+                Ok(record_emit_audit_with_hooks(&ctx, args).await)
+            }
             "acknowledge_trigger" => Ok(acknowledge_trigger(args).await),
             "defer_trigger" => Ok(defer_trigger(args).await),
             "acknowledge_handoff" => Ok(acknowledge_handoff(args)),
             "finalize" => Ok(finalize_pipeline(args)),
             "spawn_settlement_agent" => {
-                // Install an async-builtin child VM context so the
-                // `OnDrainDecision` lifecycle hooks fired from inside
-                // `run_settlement_agent_loop` can resolve VM closures
-                // (the hook dispatcher needs a `clone_async_builtin_child_vm`
-                // root to invoke registered handlers). Without this guard
-                // the settlement loop still runs and records audits, but
-                // VM-side `on_drain_decision` hooks would silently skip.
-                Ok(crate::vm::scope_async_builtin(
-                    self.child_vm(),
-                    record_spawn_settlement_agent_with_hooks(args),
-                )
-                .await)
+                let ctx = crate::vm::AsyncBuiltinCtx::from_vm(self.child_vm());
+                Ok(record_spawn_settlement_agent_with_hooks(&ctx, args).await)
             }
             _ => Err(method_unsupported(handle, method)),
         }
@@ -1357,7 +1350,10 @@ fn vm_value_string(value: &VmValue) -> String {
 /// (harn#1859) first: Allow proceeds, Block returns a `blocked` receipt
 /// so the drain agent can short-circuit the tool call, Modify rewrites
 /// the audit payload before persisting.
-async fn record_emit_audit_with_hooks(args: &[VmValue]) -> VmValue {
+async fn record_emit_audit_with_hooks(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    args: &[VmValue],
+) -> VmValue {
     let kind = args
         .first()
         .map(|v| match v {
@@ -1376,7 +1372,8 @@ async fn record_emit_audit_with_hooks(args: &[VmValue]) -> VmValue {
             "item": payload.get("item").cloned().unwrap_or(serde_json::Value::Null),
             "payload": payload.clone(),
         });
-        match crate::orchestration::run_lifecycle_hooks_with_control(
+        match crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+            Some(ctx),
             crate::orchestration::HookEvent::OnDrainDecision,
             &hook_payload,
         )
@@ -1426,7 +1423,10 @@ async fn record_emit_audit_with_hooks(args: &[VmValue]) -> VmValue {
 /// hooks via the standard route), and terminates when the snapshot is
 /// empty or the configurable budget (default 5, hard cap 20) is
 /// exhausted.
-async fn record_spawn_settlement_agent_with_hooks(args: &[VmValue]) -> VmValue {
+async fn record_spawn_settlement_agent_with_hooks(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    args: &[VmValue],
+) -> VmValue {
     let mut unsettled = args
         .first()
         .map(crate::llm::vm_value_to_json)
@@ -1445,7 +1445,8 @@ async fn record_spawn_settlement_agent_with_hooks(args: &[VmValue]) -> VmValue {
         "return_value": return_value.clone(),
         "options": options.clone(),
     });
-    match crate::orchestration::run_lifecycle_hooks_with_control(
+    match crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+        Some(ctx),
         crate::orchestration::HookEvent::PreDrain,
         &pre_payload,
     )
@@ -1492,9 +1493,13 @@ async fn record_spawn_settlement_agent_with_hooks(args: &[VmValue]) -> VmValue {
             crate::tracing::span_set_metadata(span_id, "counts", counts.to_json());
         }
     }
-    let outcome_json =
-        crate::orchestration::run_settlement_agent_loop(unsettled.clone(), return_value, options)
-            .await;
+    let outcome_json = crate::orchestration::run_settlement_agent_loop_with_ctx(
+        Some(ctx),
+        unsettled.clone(),
+        return_value,
+        options,
+    )
+    .await;
     if span_id != 0 {
         if let Some(status) = outcome_json.get("status").cloned() {
             crate::tracing::span_set_metadata(span_id, "status", status);
@@ -1510,7 +1515,8 @@ async fn record_spawn_settlement_agent_with_hooks(args: &[VmValue]) -> VmValue {
         "unsettled": unsettled,
         "outcome": outcome_json,
     });
-    if let Err(err) = crate::orchestration::run_lifecycle_hooks(
+    if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
+        Some(ctx),
         crate::orchestration::HookEvent::PostDrain,
         &post_payload,
     )

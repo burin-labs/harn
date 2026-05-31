@@ -407,6 +407,7 @@ fn parse_mount_modes(value: &VmValue, label: &str) -> Result<Vec<MountMode>, VmE
 }
 
 pub(crate) async fn check_dynamic_permission(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     session_grants: &mut BTreeSet<String>,
     tool_name: &str,
     args: &serde_json::Value,
@@ -420,6 +421,7 @@ pub(crate) async fn check_dynamic_permission(
     let mut grant_result: Option<PermissionCheck> = None;
     for (index, policy) in policies.iter().enumerate() {
         match check_one_dynamic_permission(
+            ctx,
             policy,
             index,
             session_grants,
@@ -441,6 +443,7 @@ pub(crate) async fn check_dynamic_permission(
 }
 
 async fn check_one_dynamic_permission(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     policy: &DynamicPermissionPolicy,
     scope_index: usize,
     session_grants: &mut BTreeSet<String>,
@@ -461,11 +464,11 @@ async fn check_one_dynamic_permission(
         });
     }
 
-    let denied = first_matching_deny_rule(&policy.deny, tool_name, args, session_id).await?;
+    let denied = first_matching_deny_rule(ctx, &policy.deny, tool_name, args, session_id).await?;
     let allowed = if policy.allow.is_empty() {
         None
     } else {
-        Some(first_matching_allow_rule(&policy.allow, tool_name, args, session_id).await?)
+        Some(first_matching_allow_rule(ctx, &policy.allow, tool_name, args, session_id).await?)
     };
 
     let denial_reason = if let Some(reason) = denied {
@@ -501,7 +504,8 @@ async fn check_one_dynamic_permission(
         "tool": {"name": tool_name, "args": args},
         "reason": &reason,
     });
-    match crate::orchestration::run_lifecycle_hooks_with_control(
+    match crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+        ctx,
         crate::orchestration::HookEvent::PermissionAsked,
         &ask_payload,
     )
@@ -524,7 +528,8 @@ async fn check_one_dynamic_permission(
                 let grant_reason = decision_reason
                     .unwrap_or_else(|| format!("permission granted by session hook: {reason}"));
                 session_grants.insert(grant_key);
-                fire_permission_replied(session_id, tool_name, args, "allow", &grant_reason).await;
+                fire_permission_replied(ctx, session_id, tool_name, args, "allow", &grant_reason)
+                    .await;
                 return Ok(PermissionCheck::Granted {
                     reason: grant_reason,
                     escalated: true,
@@ -533,7 +538,8 @@ async fn check_one_dynamic_permission(
             "deny" => {
                 let denied_reason = decision_reason
                     .unwrap_or_else(|| format!("permission denied by session hook: {reason}"));
-                fire_permission_replied(session_id, tool_name, args, "deny", &denied_reason).await;
+                fire_permission_replied(ctx, session_id, tool_name, args, "deny", &denied_reason)
+                    .await;
                 return Ok(PermissionCheck::Denied {
                     reason: denied_reason,
                     escalated: true,
@@ -553,14 +559,14 @@ async fn check_one_dynamic_permission(
     };
 
     let request = permission_request_value(tool_name, args, session_id, &reason);
-    let response = invoke_escalation_callback(on_escalation, &request).await?;
+    let response = invoke_escalation_callback(ctx, on_escalation, &request).await?;
     if response.granted {
         emit_tier_promotion_if_needed(tool_name, args, response.approver.clone()).await;
         if matches!(response.scope, GrantScope::Session) {
             session_grants.insert(grant_key);
         }
         let grant_reason = response.reason.unwrap_or(reason);
-        fire_permission_replied(session_id, tool_name, args, "allow", &grant_reason).await;
+        fire_permission_replied(ctx, session_id, tool_name, args, "allow", &grant_reason).await;
         Ok(PermissionCheck::Granted {
             reason: grant_reason,
             escalated: true,
@@ -569,7 +575,7 @@ async fn check_one_dynamic_permission(
         let deny_reason = response
             .reason
             .unwrap_or_else(|| "permission escalation denied".to_string());
-        fire_permission_replied(session_id, tool_name, args, "deny", &deny_reason).await;
+        fire_permission_replied(ctx, session_id, tool_name, args, "deny", &deny_reason).await;
         Ok(PermissionCheck::Denied {
             reason: deny_reason,
             escalated: true,
@@ -578,6 +584,7 @@ async fn check_one_dynamic_permission(
 }
 
 async fn fire_permission_replied(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     session_id: &str,
     tool_name: &str,
     args: &serde_json::Value,
@@ -591,7 +598,8 @@ async fn fire_permission_replied(
         "decision": decision,
         "reason": reason,
     });
-    if let Err(err) = crate::orchestration::run_lifecycle_hooks(
+    if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
+        ctx,
         crate::orchestration::HookEvent::PermissionReplied,
         &payload,
     )
@@ -617,6 +625,7 @@ struct MatcherEvaluation {
 }
 
 async fn first_matching_deny_rule(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     rules: &[PermissionRule],
     tool_name: &str,
     args: &serde_json::Value,
@@ -626,7 +635,7 @@ async fn first_matching_deny_rule(
         if !crate::orchestration::glob_match(&rule.tool_pattern, tool_name) {
             continue;
         }
-        let evaluation = evaluate_matcher(&rule.matcher, args, session_id).await?;
+        let evaluation = evaluate_matcher(ctx, &rule.matcher, args, session_id).await?;
         if matches!(rule.matcher, PermissionMatcher::PathScope(_)) {
             if let Some(reason) = evaluation.rejection {
                 return Ok(Some(reason));
@@ -645,6 +654,7 @@ async fn first_matching_deny_rule(
 }
 
 async fn first_matching_allow_rule(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     rules: &[PermissionRule],
     tool_name: &str,
     args: &serde_json::Value,
@@ -654,7 +664,7 @@ async fn first_matching_allow_rule(
         if !crate::orchestration::glob_match(&rule.tool_pattern, tool_name) {
             continue;
         }
-        let evaluation = evaluate_matcher(&rule.matcher, args, session_id).await?;
+        let evaluation = evaluate_matcher(ctx, &rule.matcher, args, session_id).await?;
         if let Some(rejection) = evaluation.rejection {
             return Ok(AllowRuleMatch::Rejected(rejection));
         }
@@ -670,6 +680,7 @@ async fn first_matching_allow_rule(
 }
 
 async fn evaluate_matcher(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     matcher: &PermissionMatcher,
     args: &serde_json::Value,
     session_id: &str,
@@ -696,7 +707,7 @@ async fn evaluate_matcher(
             let VmValue::Closure(closure) = value else {
                 return Ok(MatcherEvaluation::from_bool(false));
             };
-            let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+            let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                 return Err(VmError::Runtime(
                     "permissions predicate requires an async builtin VM context".to_string(),
                 ));
@@ -990,6 +1001,7 @@ struct EscalationResponse {
 }
 
 async fn invoke_escalation_callback(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     callback: &VmValue,
     request: &VmValue,
 ) -> Result<EscalationResponse, VmError> {
@@ -1001,7 +1013,7 @@ async fn invoke_escalation_callback(
             approver: None,
         });
     };
-    let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+    let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
         return Err(VmError::Runtime(
             "permissions on_escalation requires an async builtin VM context".to_string(),
         ));
@@ -1291,6 +1303,7 @@ mod tests {
             },
         ];
         let result = first_matching_allow_rule(
+            None,
             &rules,
             "Read",
             &serde_json::json!({"path": mounted_path}),

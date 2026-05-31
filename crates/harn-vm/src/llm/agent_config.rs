@@ -400,7 +400,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
         .arity(VmBuiltinArity::Range { min: 1, max: 3 })
         .category_static("llm.host")
         .doc_static("Execute one bridge-observed LLM call and return the normalized result dict.");
-    vm.register_async_builtin_with_metadata(metadata, move |_ctx, args| {
+    vm.register_async_builtin_with_metadata(metadata, move |ctx, args| {
         let bridge = b.clone();
         async move {
             let mut opts = extract_llm_options(&args)?;
@@ -417,9 +417,12 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                     .unwrap_or(DEFAULT_LLM_CALL_BACKOFF_MS as i64)
                     .max(0) as u64,
             };
-            let _ =
-                crate::llm::structural_experiments::apply_structural_experiment(&mut opts, None)
-                    .await?;
+            let _ = crate::llm::structural_experiments::apply_structural_experiment(
+                Some(&ctx),
+                &mut opts,
+                None,
+            )
+            .await?;
 
             let result = observed_llm_call(
                 &opts,
@@ -457,13 +460,14 @@ pub fn register_llm_call_structured_with_bridge(
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
         .category_static("llm.structured")
         .doc_static("Call an LLM through the bridge for schema-valid JSON data.");
-    vm.register_async_builtin_with_metadata(structured, move |_ctx, args| {
+    vm.register_async_builtin_with_metadata(structured, move |ctx, args| {
         let bridge = b1.clone();
         async move {
             let rewritten = crate::llm::rewrite_structured_args(args)?;
             let opts = extract_llm_options(&rewritten)?;
             let options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
-            let response = crate::llm::execute_llm_call(opts, options, Some(&bridge)).await?;
+            let response =
+                crate::llm::execute_llm_call(Some(&ctx), opts, options, Some(&bridge)).await?;
             Ok(crate::llm::extract_structured_data(response))
         }
     });
@@ -473,7 +477,7 @@ pub fn register_llm_call_structured_with_bridge(
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
         .category_static("llm.structured")
         .doc_static("Call an LLM through the bridge and return a non-throwing schema envelope.");
-    vm.register_async_builtin_with_metadata(structured_safe, move |_ctx, args| {
+    vm.register_async_builtin_with_metadata(structured_safe, move |ctx, args| {
         let bridge = b2.clone();
         async move {
             let rewritten = match crate::llm::rewrite_structured_args(args) {
@@ -485,7 +489,7 @@ pub fn register_llm_call_structured_with_bridge(
                 Err(err) => return Ok(crate::llm::structured_safe_envelope_err(&err)),
             };
             let options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
-            match crate::llm::execute_llm_call(opts, options, Some(&bridge)).await {
+            match crate::llm::execute_llm_call(Some(&ctx), opts, options, Some(&bridge)).await {
                 Ok(response) => Ok(crate::llm::structured_safe_envelope_ok(
                     crate::llm::extract_structured_data(response),
                 )),

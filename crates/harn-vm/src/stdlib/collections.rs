@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{value_structural_hash_key, VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 fn dict_arg(value: &VmValue, builtin: &str) -> Result<Rc<BTreeMap<String, VmValue>>, VmError> {
     match value {
@@ -34,10 +34,8 @@ fn key_list_arg<'a>(value: &'a VmValue, builtin: &str) -> Result<&'a [VmValue], 
     }
 }
 
-fn current_async_vm(builtin: &str) -> Result<Vm, VmError> {
-    crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime(format!("{builtin}: builtin requires VM execution context"))
-    })
+fn current_async_vm(ctx: &AsyncBuiltinCtx, _builtin: &str) -> Vm {
+    ctx.child_vm()
 }
 
 fn list_arg<'a>(args: &'a [VmValue], builtin: &str) -> Result<&'a Rc<Vec<VmValue>>, VmError> {
@@ -112,7 +110,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(windows)))
     });
 
-    vm.register_async_builtin("group_by", |_ctx, args| async move {
+    vm.register_async_builtin("group_by", |ctx, args| async move {
         let items = list_arg(&args, "group_by")?;
         let callable = args
             .get(1)
@@ -123,7 +121,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 callable.type_name()
             )));
         }
-        let mut vm = current_async_vm("group_by")?;
+        let mut vm = current_async_vm(&ctx, "group_by");
         let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
         for item in items.iter() {
             let key = vm.call_callable_one(callable, item).await?;
@@ -138,7 +136,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         )))
     });
 
-    vm.register_async_builtin("partition", |_ctx, args| async move {
+    vm.register_async_builtin("partition", |ctx, args| async move {
         let items = list_arg(&args, "partition")?;
         let callable = args
             .get(1)
@@ -149,7 +147,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 callable.type_name()
             )));
         }
-        let mut vm = current_async_vm("partition")?;
+        let mut vm = current_async_vm(&ctx, "partition");
         let mut matched = Vec::new();
         let mut no_match = Vec::new();
         for item in items.iter() {
@@ -166,7 +164,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         ]))))
     });
 
-    vm.register_async_builtin("dedup_by", |_ctx, args| async move {
+    vm.register_async_builtin("dedup_by", |ctx, args| async move {
         let items = list_arg(&args, "dedup_by")?;
         let callable = args
             .get(1)
@@ -177,7 +175,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 callable.type_name()
             )));
         }
-        let mut vm = current_async_vm("dedup_by")?;
+        let mut vm = current_async_vm(&ctx, "dedup_by");
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for item in items.iter() {
@@ -189,7 +187,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
-    vm.register_async_builtin("flat_map", |_ctx, args| async move {
+    vm.register_async_builtin("flat_map", |ctx, args| async move {
         let items = list_arg(&args, "flat_map")?;
         let callable = args
             .get(1)
@@ -200,7 +198,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 callable.type_name()
             )));
         }
-        let mut vm = current_async_vm("flat_map")?;
+        let mut vm = current_async_vm(&ctx, "flat_map");
         let mut out = Vec::new();
         for item in items.iter() {
             match vm.call_callable_one(callable, item).await? {
@@ -211,7 +209,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
-    vm.register_async_builtin("take_while", |_ctx, args| async move {
+    vm.register_async_builtin("take_while", |ctx, args| async move {
         let items = list_arg(&args, "take_while")?;
         let callable = args
             .get(1)
@@ -222,7 +220,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 callable.type_name()
             )));
         }
-        let mut vm = current_async_vm("take_while")?;
+        let mut vm = current_async_vm(&ctx, "take_while");
         let mut out = Vec::new();
         for item in items.iter() {
             let result = vm.call_callable_one(callable, item).await?;
@@ -234,7 +232,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
-    vm.register_async_builtin("drop_while", |_ctx, args| async move {
+    vm.register_async_builtin("drop_while", |ctx, args| async move {
         let items = list_arg(&args, "drop_while")?;
         let callable = args
             .get(1)
@@ -245,7 +243,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 callable.type_name()
             )));
         }
-        let mut vm = current_async_vm("drop_while")?;
+        let mut vm = current_async_vm(&ctx, "drop_while");
         let mut out = Vec::new();
         let mut dropping = true;
         for item in items.iter() {
@@ -261,7 +259,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(out)))
     });
 
-    vm.register_async_builtin("count_by", |_ctx, args| async move {
+    vm.register_async_builtin("count_by", |ctx, args| async move {
         let items = list_arg(&args, "count_by")?;
         let callable = args
             .get(1)
@@ -272,7 +270,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
                 callable.type_name()
             )));
         }
-        let mut vm = current_async_vm("count_by")?;
+        let mut vm = current_async_vm(&ctx, "count_by");
         let mut counts: BTreeMap<String, i64> = BTreeMap::new();
         for item in items.iter() {
             let key = vm.call_callable_one(callable, item).await?;

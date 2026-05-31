@@ -182,7 +182,7 @@ async fn trigger_register_impl(
     category = "triggers"
 )]
 async fn trigger_fire_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let (binding_id, binding_version) = trigger_handle_from_args(&args, "trigger_fire")?;
@@ -190,7 +190,7 @@ async fn trigger_fire_impl(
         .get(1)
         .ok_or_else(|| VmError::Runtime("trigger_fire: missing trigger event".to_string()))?;
     let event = parse_trigger_event(raw_event)?;
-    dispatch_trigger_event(binding_id, binding_version, event, None, None).await
+    dispatch_trigger_event(Some(&ctx), binding_id, binding_version, event, None, None).await
 }
 
 #[harn_builtin(
@@ -199,7 +199,7 @@ async fn trigger_fire_impl(
     category = "triggers"
 )]
 async fn trigger_replay_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let event_id = args
@@ -209,7 +209,7 @@ async fn trigger_replay_impl(
             _ => None,
         })
         .ok_or_else(|| VmError::Runtime("trigger_replay: expected event id string".to_string()))?;
-    replay_trigger_event(&event_id).await
+    replay_trigger_event(Some(&ctx), &event_id).await
 }
 
 #[harn_builtin(
@@ -762,6 +762,7 @@ fn register_corrections_namespace(vm: &mut Vm) {
 }
 
 async fn dispatch_trigger_event(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     binding_id: String,
     binding_version: Option<u32>,
     event: TriggerEvent,
@@ -791,7 +792,7 @@ async fn dispatch_trigger_event(
     .await?;
     let existing_dlq_entry = find_pending_dlq_entry_for_event(&event_id).await?;
     let dispatch_outcome =
-        dispatch_binding_via_dispatcher(&binding, &event, replay_of_event_id.clone()).await?;
+        dispatch_binding_via_dispatcher(ctx, &binding, &event, replay_of_event_id.clone()).await?;
     let handle = dispatch_handle_from_outcome(
         &binding.snapshot(),
         &event_id,
@@ -806,10 +807,14 @@ async fn dispatch_trigger_event(
     Ok(value_from_serde(&handle))
 }
 
-async fn replay_trigger_event(event_id: &str) -> Result<VmValue, VmError> {
+async fn replay_trigger_event(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    event_id: &str,
+) -> Result<VmValue, VmError> {
     let record = find_replayable_event(event_id).await?;
     let received_at = record.event.received_at;
     dispatch_trigger_event(
+        ctx,
         record.binding_id,
         Some(record.binding_version),
         record.event,
@@ -837,13 +842,18 @@ fn resolve_dispatch_binding(
 }
 
 async fn dispatch_binding_via_dispatcher(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     binding: &crate::triggers::registry::TriggerBinding,
     event: &TriggerEvent,
     replay_of_event_id: Option<String>,
 ) -> Result<crate::triggers::DispatchOutcome, VmError> {
-    let base_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("trigger stdlib builtins require an async builtin VM context".to_string())
-    })?;
+    let base_vm = ctx
+        .map(crate::vm::AsyncBuiltinCtx::child_vm)
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "trigger stdlib builtins require an async builtin VM context".to_string(),
+            )
+        })?;
     let dispatcher =
         crate::triggers::Dispatcher::with_event_log(base_vm, ensure_trigger_event_log());
     let dispatch_result = if let Some(replay_of_event_id) = replay_of_event_id {
@@ -1496,6 +1506,7 @@ struct AutoResumeTimeoutSpec {
 }
 
 pub(crate) async fn register_auto_resume_trigger(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     worker_id: &str,
     conditions: Option<&VmValue>,
 ) -> Result<Option<AutoResumeTriggerHandle>, VmError> {
@@ -1568,7 +1579,7 @@ pub(crate) async fn register_auto_resume_trigger(
         version: binding.version,
     };
     if let Some(timeout) = timeout {
-        schedule_auto_resume_timeout(handle.clone(), worker_id.to_string(), timeout);
+        schedule_auto_resume_timeout(ctx, handle.clone(), worker_id.to_string(), timeout);
     }
     Ok(Some(handle))
 }
@@ -1677,13 +1688,16 @@ fn cancel_auto_resume_timeout(trigger_id: &str) {
 }
 
 fn schedule_auto_resume_timeout(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     handle: AutoResumeTriggerHandle,
     worker_id: String,
     timeout: AutoResumeTimeoutSpec,
 ) {
     cancel_auto_resume_timeout(handle.id.as_str());
     let event_log = ensure_trigger_event_log();
-    let base_vm = crate::vm::clone_async_builtin_child_vm().unwrap_or_default();
+    let base_vm = ctx
+        .map(crate::vm::AsyncBuiltinCtx::child_vm)
+        .unwrap_or_default();
     let event = auto_resume_timeout_event(&handle, &worker_id, &timeout);
     let trigger_id = handle.id.clone();
     let version = handle.version;

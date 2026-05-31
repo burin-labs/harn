@@ -17,8 +17,7 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
 use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::value::{VmError, VmValue};
-use crate::vm::clone_async_builtin_child_vm;
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm};
 use crate::waitpoints::{
     append_wait_started, append_wait_terminal, cancel_waitpoint, complete_waitpoint,
     create_waitpoint, dedupe_waitpoint_ids, find_wait_terminal, load_waitpoints,
@@ -122,10 +121,10 @@ async fn waitpoint_cancel_builtin(
     category = "waitpoint"
 )]
 async fn waitpoint_wait_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    waitpoint_wait_impl(&args).await
+    waitpoint_wait_impl(&ctx, &args).await
 }
 
 pub(crate) fn reset_waitpoint_state() {
@@ -177,7 +176,7 @@ async fn waitpoint_cancel_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     value_from_serde(&record)
 }
 
-async fn waitpoint_wait_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
+async fn waitpoint_wait_impl(ctx: &AsyncBuiltinCtx, args: &[VmValue]) -> Result<VmValue, VmError> {
     let ids = waitpoint_ids_from_value(args.first(), "waitpoint_wait")?;
     let ids = dedupe_waitpoint_ids(&ids);
     if ids.is_empty() {
@@ -224,7 +223,7 @@ async fn waitpoint_wait_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     }
 
     let wait_result =
-        wait_for_waitpoints_live(&log, &wait_id, &ids, &start_record, options.timeout).await;
+        wait_for_waitpoints_live(ctx, &log, &wait_id, &ids, &start_record, options.timeout).await;
     let resume_result = async {
         if let Some(lease) = wait_lease.as_ref() {
             lease.resume().await.map_err(dispatch_error)?;
@@ -242,6 +241,7 @@ async fn waitpoint_wait_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
 }
 
 async fn wait_for_waitpoints_live(
+    ctx: &AsyncBuiltinCtx,
     log: &std::sync::Arc<AnyEventLog>,
     wait_id: &str,
     ids: &[String],
@@ -261,7 +261,7 @@ async fn wait_for_waitpoints_live(
     }
     pin_mut!(streams);
 
-    let vm = clone_async_builtin_child_vm();
+    let vm = ctx.child_vm();
     let mut poll = tokio::time::interval(StdDuration::from_millis(10));
     let deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
 
@@ -303,7 +303,7 @@ async fn wait_for_waitpoints_live(
                 next.map_err(log_error)?;
             }
             _ = poll.tick() => {
-                if vm.as_ref().is_some_and(|vm| vm.is_cancel_requested()) {
+                if vm.is_cancel_requested() {
                     return Ok(build_wait_record(
                         wait_id,
                         ids,

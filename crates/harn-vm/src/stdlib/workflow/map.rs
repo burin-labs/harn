@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::orchestration::{ArtifactRecord, LlmUsageRecord};
 use crate::value::VmError;
+use crate::vm::AsyncBuiltinCtx;
 
 use super::artifact::artifact_from_value;
 
@@ -51,6 +52,7 @@ struct WorkflowMapFinalization {
 }
 
 pub(super) async fn map_finalize(
+    ctx: &AsyncBuiltinCtx,
     strategy: &str,
     total_items: usize,
     produced_count: usize,
@@ -65,6 +67,7 @@ pub(super) async fn map_finalize(
         "failures": failures,
     });
     let finalized: WorkflowMapFinalization = crate::stdlib::harn_entry::call_harn_export_typed(
+        ctx,
         "std/workflow/map",
         "workflow_map_finalize",
         "workflow_map_finalize",
@@ -97,6 +100,7 @@ pub(super) fn map_branch_artifact(
 }
 
 pub(super) async fn map_execution_plan(
+    ctx: &AsyncBuiltinCtx,
     node: &crate::orchestration::WorkflowNode,
     artifacts: &[ArtifactRecord],
 ) -> Result<MapExecutionPlan, VmError> {
@@ -105,6 +109,7 @@ pub(super) async fn map_execution_plan(
         "artifacts": artifacts,
     });
     let mut planned: MapExecutionPlan = crate::stdlib::harn_entry::call_harn_export_typed(
+        ctx,
         "std/workflow/map",
         "workflow_map_execution_plan",
         "workflow_map_execution_plan",

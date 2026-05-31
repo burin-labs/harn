@@ -41,10 +41,10 @@ use crate::llm::helpers::{
 use crate::value::{VmError, VmValue};
 
 use super::{
-    auto_compact_messages_with_result, compact_strategy_name, compaction_policy_metadata_fields,
-    estimate_message_tokens, parse_compact_strategy, run_lifecycle_hooks,
-    run_lifecycle_hooks_with_control, AutoCompactConfig, CompactStrategy, CompactionPolicy,
-    HookControl, HookEvent,
+    auto_compact_messages_with_result_with_ctx, compact_strategy_name,
+    compaction_policy_metadata_fields, estimate_message_tokens, parse_compact_strategy,
+    run_lifecycle_hooks_with_control_with_ctx, run_lifecycle_hooks_with_ctx, AutoCompactConfig,
+    CompactStrategy, CompactionPolicy, HookControl, HookEvent,
 };
 
 /// Identifies the call-site that initiated compaction. The string form is
@@ -295,6 +295,16 @@ pub(crate) async fn run_compaction_lifecycle(
     messages: &mut Vec<JsonValue>,
     config: &mut AutoCompactConfig,
     llm_opts: Option<&LlmCallOptions>,
+    lifecycle: CompactLifecycle<'_>,
+) -> Result<Option<CompactionOutcome>, VmError> {
+    run_compaction_lifecycle_with_ctx(None, messages, config, llm_opts, lifecycle).await
+}
+
+pub(crate) async fn run_compaction_lifecycle_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    messages: &mut Vec<JsonValue>,
+    config: &mut AutoCompactConfig,
+    llm_opts: Option<&LlmCallOptions>,
     mut lifecycle: CompactLifecycle<'_>,
 ) -> Result<Option<CompactionOutcome>, VmError> {
     // Move `reminder_events` out up front so subsequent reads of
@@ -316,7 +326,9 @@ pub(crate) async fn run_compaction_lifecycle(
                 estimated_tokens_before,
             },
         );
-        match run_lifecycle_hooks_with_control(HookEvent::PreCompact, &pre_payload).await? {
+        match run_lifecycle_hooks_with_control_with_ctx(ctx, HookEvent::PreCompact, &pre_payload)
+            .await?
+        {
             HookControl::Block { .. } => return Ok(None),
             HookControl::Modify { payload } => apply_pre_modify_overrides(config, &payload)?,
             HookControl::Allow | HookControl::Decision { .. } => {}
@@ -327,7 +339,7 @@ pub(crate) async fn run_compaction_lifecycle(
     config.custom_compactor_reminders = reminder_report.custom_reminders.clone();
 
     let Some(compact_result) =
-        auto_compact_messages_with_result(messages, config, llm_opts).await?
+        auto_compact_messages_with_result_with_ctx(ctx, messages, config, llm_opts).await?
     else {
         return Ok(None);
     };
@@ -387,10 +399,11 @@ pub(crate) async fn run_compaction_lifecycle(
                 reminder_report: &reminder_report,
             },
         );
-        run_lifecycle_hooks(HookEvent::PostCompact, &post_payload).await?;
+        run_lifecycle_hooks_with_ctx(ctx, HookEvent::PostCompact, &post_payload).await?;
 
         if let Some(session_id) = lifecycle.session_id {
             emit_transcript_compacted_event(
+                ctx,
                 session_id,
                 lifecycle.mode,
                 lifecycle.trigger.as_str(),
@@ -400,6 +413,7 @@ pub(crate) async fn run_compaction_lifecycle(
             .await;
             if lifecycle.evaluate_providers {
                 let _ = crate::llm::reminder_providers::evaluate_and_inject(
+                    ctx,
                     HookEvent::PostCompact,
                     session_id,
                     post_payload,
@@ -429,25 +443,29 @@ pub(crate) async fn run_compaction_lifecycle(
 /// records compactions performed entirely from `.harn` code; lifecycle
 /// callers reach this through [`run_compaction_lifecycle`].
 pub async fn emit_transcript_compacted_event(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     session_id: &str,
     mode: CompactMode,
     reason: &str,
     config: &AutoCompactConfig,
     metrics: TranscriptCompactedEventMetrics,
 ) {
-    crate::llm::emit_live_agent_event(&AgentEvent::TranscriptCompacted {
-        session_id: session_id.to_string(),
-        mode: mode.as_str().to_string(),
-        reason: reason.to_string(),
-        strategy: config.policy_strategy.clone(),
-        archived_messages: metrics.archived_messages,
-        estimated_tokens_before: metrics.estimated_tokens_before,
-        estimated_tokens_after: metrics.estimated_tokens_after,
-        snapshot_asset_id: metrics.snapshot_asset_id,
-        instruction_mode: Some(config.policy.instruction_mode().to_string()),
-        instruction_source: config.policy.instruction_source().map(str::to_string),
-        compaction_policy: config.policy.metadata_json(),
-    })
+    crate::llm::emit_live_agent_event_with_ctx(
+        ctx,
+        &AgentEvent::TranscriptCompacted {
+            session_id: session_id.to_string(),
+            mode: mode.as_str().to_string(),
+            reason: reason.to_string(),
+            strategy: config.policy_strategy.clone(),
+            archived_messages: metrics.archived_messages,
+            estimated_tokens_before: metrics.estimated_tokens_before,
+            estimated_tokens_after: metrics.estimated_tokens_after,
+            snapshot_asset_id: metrics.snapshot_asset_id,
+            instruction_mode: Some(config.policy.instruction_mode().to_string()),
+            instruction_source: config.policy.instruction_source().map(str::to_string),
+            compaction_policy: config.policy.metadata_json(),
+        },
+    )
     .await;
 }
 

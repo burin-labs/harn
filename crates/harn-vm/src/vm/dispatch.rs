@@ -211,7 +211,7 @@ impl Vm {
     }
 
     /// Register an async builtin function. The handler receives the explicit
-    /// [`crate::vm::AsyncBuiltinCtx`] threaded by the dispatch loop (harn#2668).
+    /// [`crate::vm::AsyncBuiltinCtx`] threaded by the dispatch loop.
     pub fn register_async_builtin<F, Fut>(&mut self, name: &str, f: F)
     where
         F: Fn(crate::vm::AsyncBuiltinCtx, Vec<VmValue>) -> Fut + 'static,
@@ -229,7 +229,7 @@ impl Vm {
     }
 
     /// Register an async builtin function with discoverable metadata. The
-    /// handler receives the explicit [`crate::vm::AsyncBuiltinCtx`] (harn#2668).
+    /// handler receives the explicit [`crate::vm::AsyncBuiltinCtx`].
     pub fn register_async_builtin_with_metadata<F, Fut>(
         &mut self,
         metadata: VmBuiltinMetadata,
@@ -584,10 +584,8 @@ impl Vm {
             VmBuiltinDispatch::Async(async_builtin) => {
                 // Bind a fresh child VM as the async-builtin context for the
                 // duration of this future, threading the explicit ctx handle
-                // into the handler (harn#2668) and also binding it as the
-                // ambient task-local for deep sync helpers not yet threaded.
-                // Drain any output VM-side closures forwarded into the ctx back
-                // to the parent. See `vm::async_builtin`.
+                // into the handler. Drain any output VM-side closures
+                // forwarded into the ctx back to the parent.
                 let (result, captured) =
                     crate::vm::run_async_builtin_with(self.child_vm(), |ctx| {
                         async_builtin(ctx, args)
