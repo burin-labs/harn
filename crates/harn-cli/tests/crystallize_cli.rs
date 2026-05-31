@@ -18,8 +18,9 @@ use harn_vm::orchestration::{
     build_crystallization_bundle, crystallize_traces, ingest_release_fixture,
     load_crystallization_traces_from_dir, shadow_replay_bundle, validate_crystallization_bundle,
     write_crystallization_artifacts, write_crystallization_bundle, BundleOptions,
-    CrystallizeOptions, PromotionStatus,
+    CrystallizeOptions, PromotionStatus, BUNDLE_SKILL_DIR, BUNDLE_SKILL_FILE,
 };
+use harn_vm::skills::{FsSkillSource, Layer, LayeredDiscovery};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -176,9 +177,18 @@ fn crystallize_version_bump_emits_validatable_bundle() {
         report.selected_candidate_id.is_some(),
         "expected a safe candidate to be selected; report: {report:#?}"
     );
+    assert!(
+        report.skill_candidates.is_empty(),
+        "skill induction should wait for a held-out sibling trace"
+    );
+    assert!(report.rejected_skill_candidates.iter().any(|skill| skill
+        .rejection_reasons
+        .iter()
+        .any(|reason| reason.contains("requires at least one held-out sibling trace"))));
 
     let manifest = write_crystallization_bundle(&bundle, &bundle_dir).expect("write bundle");
     assert_eq!(manifest.fixtures.len(), 5);
+    assert!(manifest.skill.is_none());
 
     // Manifest sanity check: schema marker, fixture redaction, plan-vs-candidate kind.
     let manifest_path = bundle_dir.join("candidate.json");
@@ -211,6 +221,7 @@ fn crystallize_version_bump_emits_validatable_bundle() {
     assert!(validation.manifest_ok);
     assert!(validation.workflow_ok);
     assert!(validation.report_ok);
+    assert!(validation.skill_ok);
     assert!(validation.fixtures_ok);
     assert!(validation.redaction_ok);
 
@@ -330,6 +341,17 @@ fn crystallize_v2_shadow_receipts_promote_only_after_holdout_passes() {
             .replay_oracle
             .as_ref()
             .is_some_and(|report| report.passed)));
+    let skill = artifacts
+        .report
+        .skill_candidates
+        .first()
+        .expect("accepted skill candidate");
+    assert_eq!(skill.workflow_candidate_id, candidate.id);
+    assert!(skill.skill_markdown.contains("Generalization Rules"));
+    assert_eq!(skill.replay_gate.original_trace_count, 3);
+    assert_eq!(skill.replay_gate.heldout_trace_count, 1);
+    assert!(skill.replay_gate.receipt.accepted);
+    let skill_name = skill.name.clone();
 
     let bundle = build_crystallization_bundle(artifacts, &bundle_traces, BundleOptions::default())
         .expect("build bundle");
@@ -340,7 +362,13 @@ fn crystallize_v2_shadow_receipts_promote_only_after_holdout_passes() {
         bundle.manifest.promotion.criteria.status,
         PromotionStatus::Ready
     );
+    let manifest_skill = bundle.manifest.skill.as_ref().expect("bundle skill ref");
+    assert_eq!(manifest_skill.name, skill_name);
     write_crystallization_bundle(&bundle, &bundle_dir).expect("write bundle");
+    assert!(bundle_dir
+        .join(BUNDLE_SKILL_DIR)
+        .join(BUNDLE_SKILL_FILE)
+        .exists());
 
     let validation = validate_crystallization_bundle(&bundle_dir).expect("validate");
     assert!(
@@ -348,9 +376,26 @@ fn crystallize_v2_shadow_receipts_promote_only_after_holdout_passes() {
         "validation reported problems: {:#?}",
         validation.problems
     );
+    assert!(validation.skill_ok);
     let (_, shadow) = shadow_replay_bundle(&bundle_dir).expect("shadow replay");
     assert!(shadow.pass, "shadow replay failed: {:#?}", shadow.failures);
     assert_eq!(shadow.compared_traces, 4);
+
+    let discovery = LayeredDiscovery::new().push(FsSkillSource::new(
+        bundle_dir.join(BUNDLE_SKILL_DIR),
+        Layer::Cli,
+    ));
+    let report = discovery.build_report();
+    assert_eq!(report.winners.len(), 1);
+    assert_eq!(report.winners[0].id, skill_name);
+    let loaded = discovery.fetch(&skill_name).expect("fetch generated skill");
+    assert_eq!(loaded.manifest.name, skill_name);
+    assert!(loaded
+        .manifest
+        .when_to_use
+        .as_deref()
+        .is_some_and(|when| when.contains("held-out sibling trace")));
+    assert!(loaded.body.contains("Replay Gate"));
 }
 
 #[test]
@@ -395,6 +440,19 @@ fn crystallize_v2_shadow_receipt_drift_blocks_promotion() {
         .rejection_reasons
         .iter()
         .any(|reason| reason.contains("trace_release_4_holdout_drift")));
+    let rejected_skill = artifacts
+        .report
+        .rejected_skill_candidates
+        .first()
+        .expect("rejected skill candidate");
+    assert_eq!(rejected_skill.workflow_candidate_id, rejected.id);
+    assert!(!rejected_skill.replay_gate.receipt.accepted);
+    assert!(rejected_skill
+        .replay_gate
+        .failures
+        .iter()
+        .any(|reason| reason.contains("held-out sibling")
+            || reason.contains("trace_release_4_holdout_drift")));
 }
 
 #[test]

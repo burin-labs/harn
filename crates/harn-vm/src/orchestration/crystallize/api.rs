@@ -16,6 +16,7 @@ use super::shadow::{
     confidence_for, estimate_savings, infer_workflow_name, refresh_promotion_metadata,
     shadow_candidate,
 };
+use super::skill::refresh_skill_candidates;
 use super::types::{
     CrystallizationAction, CrystallizationApproval, CrystallizationArtifacts, CrystallizationCost,
     CrystallizationInputFormat, CrystallizationReport, CrystallizationTrace, CrystallizationUsage,
@@ -95,7 +96,7 @@ pub fn crystallize_traces(
         .unwrap_or_else(|| rejected_workflow_stub(&rejected_candidates));
     let eval_pack_toml = selected.map(generate_eval_pack).unwrap_or_default();
 
-    let report = CrystallizationReport {
+    let mut report = CrystallizationReport {
         version: 1,
         generated_at: now_rfc3339(),
         source_trace_count: normalized.len(),
@@ -103,6 +104,8 @@ pub fn crystallize_traces(
         selected_candidate_id: selected.map(|candidate| candidate.id.clone()),
         candidates: accepted,
         rejected_candidates,
+        skill_candidates: Vec::new(),
+        rejected_skill_candidates: Vec::new(),
         warnings: Vec::new(),
         input_format: CrystallizationInputFormat {
             name: "harn.crystallization.trace".to_string(),
@@ -127,6 +130,7 @@ pub fn crystallize_traces(
         segment_summary: None,
         recovery_summary: None,
     };
+    refresh_skill_candidates(&mut report, &shadow_pool);
 
     Ok(CrystallizationArtifacts {
         report,
@@ -181,7 +185,7 @@ pub fn synthesize_candidate_from_trace(
     let eval_pack_toml = selected.map(generate_eval_pack).unwrap_or_default();
     let selected_id = selected.map(|candidate| candidate.id.clone());
 
-    let report = CrystallizationReport {
+    let mut report = CrystallizationReport {
         version: 1,
         generated_at: now_rfc3339(),
         source_trace_count: 1,
@@ -189,6 +193,8 @@ pub fn synthesize_candidate_from_trace(
         selected_candidate_id: selected_id,
         candidates: accepted,
         rejected_candidates: rejected,
+        skill_candidates: Vec::new(),
+        rejected_skill_candidates: Vec::new(),
         warnings: Vec::new(),
         input_format: CrystallizationInputFormat {
             name: "harn.crystallization.trace".to_string(),
@@ -209,6 +215,7 @@ pub fn synthesize_candidate_from_trace(
         segment_summary,
         recovery_summary,
     };
+    refresh_skill_candidates(&mut report, std::slice::from_ref(&normalized));
 
     Ok(CrystallizationArtifacts {
         report,

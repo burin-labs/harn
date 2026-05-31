@@ -5,11 +5,12 @@ into deterministic Harn code:
 
 1. Capture ordered traces from runs, host shims, or imported records.
 2. Mine a conservative workflow candidate from repeated action sequences.
-3. Generate readable Harn plus a machine-readable report.
+3. Generate readable Harn, replay-gated skill candidates, and a
+   machine-readable report.
 4. Shadow-check the candidate against the source fixtures without mutating
    external systems.
 5. Review promotion metadata, capability boundaries, secrets, rollback target,
-   and eval pack link.
+   skill induction gate, and eval pack link.
 6. Package or promote the approved workflow so later runs use CPU/interpreter
    steps for the stable portion and reserve model calls for ambiguity.
 
@@ -111,6 +112,10 @@ parameters, capability comments, side-effect comments, approval boundaries, and
 `--shadow-from` may be passed more than once. These directories are not used for
 mining; they are future/holdout traces that must match before promotion
 metadata can report the candidate as ready.
+Skill candidates use the same held-out pool: a workflow candidate can be
+selected without `--shadow-from`, but its sibling `SKILL.md` artifact remains in
+`rejected_skill_candidates` until at least one held-out sibling trace passes
+shadow/replay comparison.
 
 ```harn
 pipeline version_bump(repo_path, version, branch_name, release_target) {
@@ -133,6 +138,8 @@ The report includes:
   and success criteria)
 - source trace hashes and example action ids for provenance
 - confidence and rejection reasons
+- sibling `skill_candidates` / `rejected_skill_candidates` with generated
+  `SKILL.md`, activation metadata, evidence refs, and replay-gate receipt
 - shadow-mode pass/fail details for every source and holdout trace, including
   replay-oracle receipt comparison reports when `replay_run` is present
 - model calls avoided, token savings, estimated cost savings, wall-clock
@@ -201,6 +208,31 @@ with a `crystallization-shadow` assertion. Hosted runners can attach the trace
 fixtures and richer rubrics later; the local artifact records the candidate id,
 source trace ids, and blocking shadow expectation.
 
+## Skill induction
+
+Crystallization also projects each workflow candidate into an open `SKILL.md`
+artifact. This is an output adapter over the same trace mining and shadow
+pipeline, not a separate memory store. The generated skill includes:
+
+- scoped frontmatter (`name`, `short`, `description`, `when_to_use`,
+  `allowed_tools`, and inferred `paths`)
+- evidence refs for source and held-out sibling traces
+- a replay-gate receipt recording source replay, held-out replay, compared
+  traces, and rejection reasons
+- generalization guidance that tells the model to parameterize the recurring
+  pattern rather than memorize trace-specific repositories, ids, timestamps, or
+  outputs
+
+The skill is accepted only when the source trajectory replays and at least one
+held-out sibling trace passes. If a held-out trace is absent or drifts, the
+workflow candidate may still be reviewable, but the skill lands in
+`rejected_skill_candidates` and no `SKILL.md` is written into the bundle.
+
+Scripts that already have in-memory trace dictionaries can call
+`skill_induce({traces, heldout_traces?, options?})`. The helper routes through
+the same crystallization pipeline and returns accepted and rejected skill
+candidates; it does not perform live model calls or promote the skill.
+
 ## Portable bundle
 
 Pass `--bundle <DIR>` to also emit a portable crystallization-candidate
@@ -213,6 +245,9 @@ bundle/
 ├── workflow.harn         # generated/reviewable workflow
 ├── report.json           # full mining/shadow/eval report
 ├── harn.eval.toml        # generated eval pack (when --eval-pack is set)
+├── skill/                # generated only when skill induction passes
+│   ├── SKILL.md
+│   └── gate.json
 └── fixtures/             # redacted replay fixtures referenced by the report
     ├── trace_release_001.json
     └── ...
@@ -258,6 +293,13 @@ needs to import a candidate directly:
   "savings": {...},
   "shadow": {...},
   "eval_pack": {"path": "harn.eval.toml", "link": null},
+  "skill": {
+    "path": "skill/SKILL.md",
+    "gate_receipt_path": "skill/gate.json",
+    "name": "version_bump_skill",
+    "skill_candidate_id": "skill_...",
+    "workflow_candidate_id": "candidate_..."
+  },
   "fixtures": [
     {
       "path": "fixtures/trace_release_001.json",
@@ -336,7 +378,7 @@ secret-shaped logical ids:
 ```bash
 harn crystallize validate bundles/version-bump
 # Bundle: bundles/version-bump (schema=harn.crystallization.candidate.bundle ...)
-# Checks: manifest=ok workflow=ok report=ok eval_pack=ok fixtures=ok redaction=ok
+# Checks: manifest=ok workflow=ok report=ok eval_pack=ok skill=ok fixtures=ok redaction=ok
 # OK
 ```
 
