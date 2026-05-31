@@ -289,11 +289,7 @@ pub fn binding_manifest_from_tool_surface(
             source,
             deferred,
             policy,
-            metadata: tool
-                .get("metadata")
-                .or_else(|| tool.get("_meta"))
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+            metadata: binding_metadata(&tool),
         });
     }
     BindingManifest::new(entries, options.side_effect_ceiling)
@@ -316,13 +312,6 @@ fn tool_surface_entries(value: &Value) -> Vec<Value> {
 }
 
 fn binding_source(tool: &Value) -> String {
-    if tool
-        .get("defer_loading")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return "deferred".to_string();
-    }
     if let Some(executor) = tool.get("executor").and_then(Value::as_str) {
         return executor.to_string();
     }
@@ -332,7 +321,31 @@ fn binding_source(tool: &Value) -> String {
     if tool.get("function").is_some() {
         return "provider_native".to_string();
     }
+    if tool
+        .get("defer_loading")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return "deferred".to_string();
+    }
     "harn".to_string()
+}
+
+fn binding_metadata(tool: &Value) -> Value {
+    let mut metadata = tool
+        .get("metadata")
+        .or_else(|| tool.get("_meta"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    for key in ["_mcp_server", "mcp_server", "_mcp_tool_name"] {
+        if let Some(value) = tool.get(key) {
+            metadata
+                .entry(key.to_string())
+                .or_insert_with(|| value.clone());
+        }
+    }
+    Value::Object(metadata)
 }
 
 fn unique_binding_identifier(name: &str, used: &mut BTreeSet<String>) -> String {

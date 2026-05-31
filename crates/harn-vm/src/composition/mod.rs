@@ -20,6 +20,7 @@ use crate::vm::Vm;
 
 mod crystallization;
 mod events;
+mod harn_api;
 mod hosts;
 mod manifest;
 mod types;
@@ -30,6 +31,7 @@ mod tests;
 
 pub use crystallization::composition_crystallization_trace;
 pub use events::composition_report_events;
+pub use harn_api::composition_harn_api;
 pub use hosts::{ClosureCompositionToolHost, StaticCompositionToolHost};
 pub use manifest::{
     binding_manifest_from_tool_surface, binding_manifest_hash, BindingManifest,
@@ -713,6 +715,18 @@ pub fn register_composition_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(
             composition_typescript_declarations(&manifest),
         )))
+    });
+
+    vm.register_builtin("composition_harn_api", |args, _out| {
+        let manifest_value = args
+            .first()
+            .map(crate::llm::vm_value_to_json)
+            .ok_or_else(|| VmError::Runtime("composition_harn_api: manifest is required".into()))?;
+        let manifest: BindingManifest =
+            serde_json::from_value(manifest_value).map_err(|error| {
+                VmError::Runtime(format!("composition_harn_api: invalid manifest: {error}"))
+            })?;
+        Ok(VmValue::String(Rc::from(composition_harn_api(&manifest))))
     });
 
     vm.register_builtin("composition_crystallization_trace", |args, _out| {

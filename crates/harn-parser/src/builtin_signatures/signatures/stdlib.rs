@@ -229,6 +229,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
+        "composition_harn_api",
+        &[Param::new("manifest", TY_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
         "dedup_by",
         &[
             Param::new("items", TY_LIST),

@@ -2255,6 +2255,7 @@ tool registry dict.
 | `composition_binding_manifest(tools, options?)` | tools: list or dict, options?: dict | dict | Build a stable Code Mode binding manifest from Harn, host bridge, MCP, provider-native, or deferred tools |
 | `composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
 | `composition_search_examples(query?, limit?)` | query?: string, limit?: int | list | Return curated read-only composition examples |
+| `composition_harn_api(manifest)` | manifest: dict | string | Emit typed Harn wrapper declarations for a Code Mode binding manifest |
 | `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
 | `composition_crystallization_trace(report, options?)` | report: dict, options?: dict | dict | Convert a composition report into crystallization trace input |
 | `mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
@@ -2266,9 +2267,13 @@ tool registry dict.
 The `composition_*` builtins back [Governed Code Mode](./code-mode.md). The
 executor is read-only: it rejects imports, writes, process execution, network
 access, direct HITL, parallel/spawn, and calls outside the manifest bindings and
-pure data helpers. `std/composition` adds `composition_mcp_tools(...)`, which
-registers the compact MCP profile tools `harn.code.search_examples` and
-`harn.code.execute_composition`.
+pure data helpers. `std/composition` adds MCP-focused helpers including
+`composition_mcp_api(...)`, `composition_mcp_execute(...)`, and
+`composition_mcp_tools(...)`, which registers the compact MCP profile tools
+`harn.code.search_examples`, `harn.code.generate_harn_api`, and
+`harn.code.execute_composition`. The MCP executor profile returns only a
+reduced result envelope by default; use `composition_execute(...)` directly for
+the full child audit report.
 
 `tool_synthesize(config)` is the guarded natural-language tool bootstrapper. It
 returns a callable closure and pins the synthesis in an in-memory cache keyed by

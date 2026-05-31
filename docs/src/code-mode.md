@@ -69,8 +69,9 @@ The full form includes schemas, side-effect level, capabilities, path argument
 metadata, source (`harn`, `host_bridge`, `mcp_server`, `provider_native`, or
 `deferred`), examples, and policy status. Use `{form: "compact"}` when a prompt
 only needs names, descriptions, policy status, and examples. Use
-`composition_typescript_declarations(manifest)` to produce declaration-only
-TypeScript affordances for editor/model ergonomics.
+`composition_harn_api(manifest)` to produce the typed `.harn` wrapper surface
+the model should write against, or `composition_typescript_declarations(manifest)`
+to produce declaration-only TypeScript affordances for editor/model ergonomics.
 
 By default, bindings above the requested side-effect ceiling are omitted. Pass
 `{include_denied: true}` only for diagnostics or audit examples where the model
@@ -155,11 +156,38 @@ pipeline main() {
 The profile registers:
 
 - `harn.code.search_examples`: returns curated snippets and examples.
+- `harn.code.generate_harn_api`: returns a manifest plus typed `.harn`
+  wrapper declarations for the MCP tool surface.
 - `harn.code.execute_composition`: executes a read-only snippet against the
-  supplied binding manifest and returns the structured child audit report.
+  supplied binding manifest and returns a reduced result envelope.
 
 Hybrid servers can expose ordinary tools plus the Code Mode profile by passing
 an existing registry into `composition_mcp_tools(registry)`.
+
+Inside an agent loop, `composition_mcp_api(tools, {query?, limit?})` builds the
+same manifest/API pair from only MCP-served tools. The query path uses the same
+BM25/regex/hybrid scorer as `tool_search`, so large MCP servers can stay
+deferred until the agent asks for a slice:
+
+```harn
+import { composition_mcp_api, composition_mcp_execute } from "std/composition"
+
+let api = composition_mcp_api(tool_registry, {query: "issues", limit: 5})
+let output = composition_mcp_execute(
+  "let hits = github_search_issues({query: \"is:open label:bug\"})\nreturn hits",
+  tool_registry,
+  {manifest: api.manifest, max_operations: 4},
+)
+```
+
+`composition_mcp_execute(...)` dispatches every child binding through the normal
+agent tool dispatcher, not a side channel. That means MCP routing, schema
+validation, policy checks, approval hooks, call budgets, allowlists, and circuit
+breakers stay attached to the individual child calls. By default the helper and
+profile tool return only `{ok, result, error, failure_category, run_id,
+child_call_count}` so large MCP responses do not leak back to the model after
+the snippet has reduced them. Pass `{include_report: true}` only for diagnostics
+that need the full child audit report.
 
 ## Crystallization
 

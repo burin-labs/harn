@@ -91,6 +91,8 @@ fn binding_manifest_projects_policy_and_stable_binding_names() {
             {
                 "name": "mcp.search",
                 "_mcp_server": "docs",
+                "_mcp_tool_name": "search",
+                "defer_loading": true,
                 "parameters": {"type": "object"},
                 "annotations": {
                     "kind": "search",
@@ -134,6 +136,10 @@ fn binding_manifest_projects_policy_and_stable_binding_names() {
             .source,
         "mcp_server"
     );
+    let mcp = manifest.find_by_name("mcp.search").expect("mcp binding");
+    assert!(mcp.deferred);
+    assert_eq!(mcp.metadata["_mcp_server"], "docs");
+    assert_eq!(mcp.metadata["_mcp_tool_name"], "search");
     let deferred = manifest
         .find_by_name("rare.lookup")
         .expect("deferred binding");
@@ -155,10 +161,12 @@ fn binding_manifest_projects_policy_and_stable_binding_names() {
 }
 
 #[test]
-fn manifest_compact_form_and_typescript_declarations_are_stable() {
+fn manifest_compact_form_and_declarations_are_stable() {
     let tools = serde_json::json!([
         {
-            "name": "read.file",
+            "name": "docs__read_file",
+            "_mcp_server": "docs",
+            "_mcp_tool_name": "read_file",
             "parameters": {
                 "type": "object",
                 "required": ["path"],
@@ -176,12 +184,18 @@ fn manifest_compact_form_and_typescript_declarations_are_stable() {
     ]);
     let manifest = binding_manifest_from_tool_surface(&tools, BindingManifestOptions::default());
     let compact = manifest.to_compact_value();
-    assert_eq!(compact["bindings"][0]["binding"], "read_file");
+    assert_eq!(compact["bindings"][0]["binding"], "docs_read_file");
     assert!(compact["bindings"][0].get("input_schema").is_none());
     let declarations = composition_typescript_declarations(&manifest);
-    assert!(declarations.contains("export declare function read_file"));
+    assert!(declarations.contains("export declare function docs_read_file"));
     assert!(declarations.contains("path: string"));
     assert!(declarations.contains("limit?: number"));
+    let harn_api = composition_harn_api(&manifest);
+    assert!(harn_api.contains("// MCP docs/read_file -> docs_read_file"));
+    assert!(harn_api.contains("type DocsReadFileArgs = {limit?: int, path: string}"));
+    assert!(harn_api.contains("fn docs_read_file(args: DocsReadFileArgs)"));
+    assert!(harn_api.contains("return __composition_call(\"docs__read_file\", args)"));
+    harn_parser::parse_source(&harn_api).expect("generated Harn API should parse");
 }
 
 #[tokio::test(flavor = "current_thread")]

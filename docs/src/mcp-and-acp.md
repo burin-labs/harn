@@ -436,10 +436,10 @@ pipeline main(task) {
 }
 ```
 
-This exposes `harn.code.search_examples` and
+This exposes `harn.code.search_examples`, `harn.code.generate_harn_api`, and
 `harn.code.execute_composition`. The executor still runs through Harn's
-read-only composition path and returns child binding calls/results rather than
-an opaque "execute code" result. Hybrid servers can call
+read-only composition path and returns the reduced snippet result by default
+instead of an opaque "execute code" result. Hybrid servers can call
 `composition_mcp_tools(existing_registry)` to expose ordinary tools and the
 compact Code Mode profile together.
 
