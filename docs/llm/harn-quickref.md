@@ -1743,6 +1743,24 @@ compactors. Gotcha: `preserve_on_compact: false` with no finite
 `ttl_turns` can live forever during normal turns but vanish on
 compaction; `HARN-RMD-004` flags that shape.
 
+## External-agent delegation
+
+Import with
+`import { external_agent_delegate, external_agent_approve } from "std/external_agent"`.
+
+Use `external_agent_delegate(target, task, options?)` for open A2A external
+agents that advertise the `harn.external_agent.v1` capability contract. Options
+must include a hard `budget` cap such as `{max_usd: 0.25}` or
+`{max_tokens: 20000}`; the stdlib wrapper generates an idempotency key when one
+is not supplied.
+
+The first call normally returns `status: "checkpoint_required"` with a remote
+plan and expected scope. After host approval, pass that envelope to
+`external_agent_approve(envelope, options?)`; it preserves the idempotency key
+and dispatches at most once. Missing checkpoint support is refused unless
+`checkpoint.allow_local_fallback: true` supplies an explicit local plan, and
+over-budget results return a reviewable `status: "budget_exceeded"` envelope.
+
 ## Agent runtime
 
 ### `agent_turn`

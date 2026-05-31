@@ -27,6 +27,12 @@ pub struct ResolvedA2aEndpoint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedA2aAgent {
+    pub endpoint: ResolvedA2aEndpoint,
+    pub card: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DispatchAck {
     InlineResult {
         task_id: String,
@@ -275,6 +281,28 @@ pub async fn dispatch_trigger_event(
     ))
 }
 
+pub async fn resolve_agent(
+    raw_target: &str,
+    allow_cleartext: bool,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<ResolvedA2aAgent, A2aClientError> {
+    let target = parse_target(raw_target)?;
+    let resolved = resolve_endpoint_with_card(&target, allow_cleartext, cancel_rx).await?;
+    Ok(ResolvedA2aAgent {
+        endpoint: resolved.0,
+        card: resolved.1,
+    })
+}
+
+pub async fn send_jsonrpc_request(
+    rpc_url: &str,
+    request: &Value,
+    trace_id: &str,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<Value, A2aClientError> {
+    send_jsonrpc(rpc_url, request, trace_id, cancel_rx).await
+}
+
 fn push_notification_config() -> Option<Value> {
     let url = std::env::var(A2A_PUSH_URL_ENV)
         .ok()
@@ -375,6 +403,18 @@ async fn resolve_endpoint(
     allow_cleartext: bool,
     cancel_rx: &mut broadcast::Receiver<()>,
 ) -> Result<ResolvedA2aEndpoint, A2aClientError> {
+    Ok(
+        resolve_endpoint_with_card(target, allow_cleartext, cancel_rx)
+            .await?
+            .0,
+    )
+}
+
+async fn resolve_endpoint_with_card(
+    target: &ParsedTarget,
+    allow_cleartext: bool,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<(ResolvedA2aEndpoint, Value), A2aClientError> {
     let mut last_error = None;
     for scheme in card_resolution_schemes(allow_cleartext) {
         let mut last_scheme_error = None;
@@ -382,13 +422,14 @@ async fn resolve_endpoint(
             let card_url = format!("{scheme}://{}/{path}", target.authority);
             match fetch_agent_card(&card_url, cancel_rx).await {
                 Ok(card) => {
-                    return endpoint_from_card(
+                    let endpoint = endpoint_from_card(
                         card_url,
                         allow_cleartext,
                         &target.authority,
                         target.target_agent.clone(),
                         &card,
-                    );
+                    )?;
+                    return Ok((endpoint, card));
                 }
                 Err(AgentCardFetchError::Cancelled(message)) => {
                     return Err(A2aClientError::Cancelled(message));

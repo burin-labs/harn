@@ -1714,6 +1714,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |
 | `daemon_stop(handle)` | handle: dict or string | dict | Stop a daemon and preserve queued trigger state for resume |
 | `daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
+| `external_agent_delegate(target, task, options?)` | target: string, task: string, options: dict | dict | Delegate to an open A2A external agent using `harn.external_agent.v1`; returns a checkpoint envelope before dispatch, enforces hard budget/idempotency capability checks, and normalizes completed work into reviewable handoff/diff artifacts |
 | `trigger_list()` | — | list | Return the live trigger registry snapshot as `list<TriggerBinding>` |
 | `trigger_register(config)` | config: dict | dict | Dynamically register a trigger and return its `TriggerHandle` |
 | `trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; execution routes through the trigger dispatcher |
