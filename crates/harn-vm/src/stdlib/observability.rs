@@ -25,6 +25,7 @@ struct ObsConfig {
     backend: serde_json::Value,
     backends: BTreeMap<String, serde_json::Value>,
     routes: Vec<serde_json::Value>,
+    processors: Vec<ObsProcessor>,
     audit_to_pretty_stderr: bool,
 }
 
@@ -34,7 +35,47 @@ impl Default for ObsConfig {
             backend: serde_json::json!({"kind": "auto", "id": "auto"}),
             backends: BTreeMap::new(),
             routes: Vec::new(),
+            processors: Vec::new(),
             audit_to_pretty_stderr: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ObsProcessor {
+    Redaction,
+}
+
+impl ObsProcessor {
+    fn parse(value: &serde_json::Value) -> Result<Self, VmError> {
+        let kind = match value {
+            serde_json::Value::String(kind) => kind.as_str(),
+            serde_json::Value::Object(map) => map
+                .get("kind")
+                .or_else(|| map.get("type"))
+                .or_else(|| map.get("name"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(""),
+            _ => {
+                return Err(VmError::Runtime(
+                    "obs.configure: processor must be a string or dict".to_string(),
+                ))
+            }
+        };
+        match kind {
+            "redaction" | "redact" => Ok(Self::Redaction),
+            "" => Err(VmError::Runtime(
+                "obs.configure: processor.kind is required".to_string(),
+            )),
+            other => Err(VmError::Runtime(format!(
+                "obs.configure: unknown processor `{other}`"
+            ))),
+        }
+    }
+
+    fn apply(self, event: &mut serde_json::Value) {
+        match self {
+            Self::Redaction => crate::redact::current_policy().redact_json_in_place(event),
         }
     }
 }
@@ -405,6 +446,17 @@ fn parse_config(value: &VmValue) -> Result<ObsConfig, VmError> {
     if let Some(serde_json::Value::Array(routes)) = map.get("routes") {
         config.routes = routes.clone();
     }
+    if let Some(processors) = map.get("processors") {
+        let serde_json::Value::Array(processors) = processors else {
+            return Err(VmError::Runtime(
+                "obs.configure: processors must be a list".to_string(),
+            ));
+        };
+        config.processors = processors
+            .iter()
+            .map(ObsProcessor::parse)
+            .collect::<Result<_, _>>()?;
+    }
     if let Some(serde_json::Value::Bool(enabled)) = map.get("audit_to_pretty_stderr") {
         config.audit_to_pretty_stderr = *enabled;
     }
@@ -503,6 +555,7 @@ fn emit_event(
     OBS_STATE.with(|state| {
         let mut state = state.borrow_mut();
         enrich_event(&mut event, state.span_stack.last());
+        apply_processors(&state.config.processors, &mut event);
         let event_value = serde_json::Value::Object(event.clone());
         let targets = if let Some(backend) = explicit_backend {
             vec![backend]
@@ -524,6 +577,23 @@ fn emit_event(
         state.emissions.extend(delivered.clone());
         serde_json::Value::Array(delivered)
     })
+}
+
+fn apply_processors(
+    processors: &[ObsProcessor],
+    event: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    if processors.is_empty() {
+        return;
+    }
+    let mut event_value = serde_json::Value::Object(std::mem::take(event));
+    for processor in processors {
+        processor.apply(&mut event_value);
+    }
+    let serde_json::Value::Object(processed) = event_value else {
+        return;
+    };
+    *event = processed;
 }
 
 fn enrich_event(event: &mut serde_json::Map<String, serde_json::Value>, span: Option<&ObsSpan>) {
@@ -938,5 +1008,87 @@ mod tests {
         with_obs_env(&[], || {
             assert_eq!(auto_kind(), "pretty_stderr");
         });
+    }
+
+    #[test]
+    fn parses_stock_processors() {
+        let config = parse_config(&json_to_vm_value(&serde_json::json!({
+            "processors": ["redaction", {"kind": "redaction"}],
+        })))
+        .expect("config parses");
+        assert_eq!(
+            config.processors,
+            vec![ObsProcessor::Redaction, ObsProcessor::Redaction]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_processors() {
+        let error = parse_config(&json_to_vm_value(&serde_json::json!({
+            "processors": ["forwarder"],
+        })))
+        .expect_err("unknown processor is rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("obs.configure: unknown processor `forwarder`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn redaction_processor_scrubs_events_before_backend_formatting() {
+        reset_observability_state();
+        let _ = obs_configure_impl(
+            &[json_to_vm_value(&serde_json::json!({
+                "backend": {"kind": "test", "id": "test"},
+                "processors": ["redaction"],
+            }))],
+            &mut String::new(),
+        )
+        .expect("configure observability");
+
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "api_key".to_string(),
+            serde_json::Value::String("sk_live_1234567890abcdef".to_string()),
+        );
+        fields.insert(
+            "nested".to_string(),
+            serde_json::json!({"access_token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        );
+        fields.insert(
+            "safe".to_string(),
+            serde_json::Value::String("kept".to_string()),
+        );
+        let mut event = base_event(
+            "log",
+            "redaction_smoke",
+            Some(fields),
+            Some("info".to_string()),
+            None,
+        )
+        .expect("base event");
+        event.insert(
+            "message".to_string(),
+            serde_json::Value::String(
+                "https://user:pass@example.test/hook?token=secret".to_string(),
+            ),
+        );
+
+        let emitted = emit_event(event, None);
+        let payload = &emitted
+            .as_array()
+            .expect("emitted list")
+            .first()
+            .expect("first emission")["payload"];
+        assert_eq!(payload["fields"]["api_key"], "[redacted]");
+        assert_eq!(payload["fields"]["nested"]["access_token"], "[redacted]");
+        assert_eq!(payload["fields"]["safe"], "kept");
+        let rendered = payload.to_string();
+        assert!(!rendered.contains("sk_live_1234567890abcdef"));
+        assert!(!rendered.contains("ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(!rendered.contains("token=secret"));
+        reset_observability_state();
     }
 }

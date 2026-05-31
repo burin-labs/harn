@@ -44,19 +44,35 @@ impl VocabNamespace {
     }
 }
 
-/// Session-store primitive (A.5, harn#2502). Spans cover `put`/`get`/
-/// `list`/`delete`/`subscribe`; attributes capture session identity,
-/// operation type, and outcome.
+/// Session-store primitive. Spans cover session lifecycle, event append,
+/// snapshot/replay, verification, and retention sweeps; attributes
+/// capture session identity, operation type, signatures, and outcome.
 pub const SESSION: VocabNamespace = VocabNamespace {
     prefix: "harn.session",
     keys: &[
         "id",
+        "tenant_id",
+        "persona",
         "op",
         "outcome",
         "schema",
         "rows",
         "bytes",
         "kind",
+        "event_kind",
+        "fork_at_event_id",
+        "truncate_at_event_id",
+        "snapshot_id",
+        "signed",
+        "signature_key_id",
+        "signature_algorithm",
+        "receipt_signed",
+        "receipt_signature_key_id",
+        "receipt_signature_algorithm",
+        "sweep.archive_sink_configured",
+        "sweep.archived",
+        "sweep.soft_deleted",
+        "sweep.hard_deleted",
         "duration_ms",
     ],
 };
@@ -255,6 +271,8 @@ mod tests {
     fn declared_keys_lists_each_namespace_entry() {
         let keys = declared_keys();
         assert!(keys.contains("harn.session.id"));
+        assert!(keys.contains("harn.session.signature_key_id"));
+        assert!(keys.contains("harn.session.sweep.archived"));
         assert!(keys.contains("harn.mcp.tool"));
         assert!(keys.contains("harn.pg.query_name"));
         assert!(keys.contains("harn.request_id"));

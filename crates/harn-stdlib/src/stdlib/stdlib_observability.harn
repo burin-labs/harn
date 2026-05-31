@@ -46,9 +46,24 @@ pub fn backends() -> dict {
 }
 
 /**
+ * processors returns stock event processors for the observability
+ * pipeline. `redaction` applies the active runtime redaction policy
+ * before backend routing or wire-format conversion.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: configure({processors: [processors().redaction]})
+ */
+pub fn processors() -> dict {
+  return {redaction: "redaction"}
+}
+
+/**
  * configure installs process-local observability routing for subsequent
  * `span`, `log`, and `metric` calls. Supported keys are `backend`,
- * `backends`, `routes`, and `audit_to_pretty_stderr`.
+ * `backends`, `routes`, `processors`, and `audit_to_pretty_stderr`.
  *
  * @effects: [host]
  * @allocation: heap
@@ -304,6 +319,7 @@ pub fn reset() {
 pub fn obs() -> dict {
   return {
     Backend: backends(),
+    Processor: processors(),
     configure: { config = {} -> configure(config) },
     auto_backend: { -> auto_backend() },
     start_span: { name, attrs = {} -> start_span(name, attrs) },

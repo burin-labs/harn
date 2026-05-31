@@ -25,3 +25,15 @@ o.span("sync", {tenant: "acme"}, { ->
   o.metric("items_synced", 3)
 })
 ```
+
+Configure processors when events need a shared transform before export:
+
+```harn
+o.configure({
+  backend: o.Backend.auto,
+  processors: [o.Processor.redaction],
+})
+```
+
+The stock `redaction` processor applies the active runtime redaction policy
+before OTLP, Splunk, Honeycomb, pretty, or test payloads are formatted.
