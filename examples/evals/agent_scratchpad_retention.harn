@@ -1,0 +1,242 @@
+/**
+ * Deterministic #2715 scratchpad eval.
+ *
+ * Run with:
+ *   cargo run --quiet --bin harn -- run examples/evals/agent_scratchpad_retention.harn
+ */
+fn __eval_llm_value(text) {
+  return {
+    text: text,
+    model: "mock:cheap-worker-fixture",
+    provider: "mock",
+    input_tokens: 0,
+    output_tokens: 0,
+    usage: {input_tokens: 0, output_tokens: 0},
+  }
+}
+
+fn __eval_worker_text(turn, retained) {
+  if turn == 1 {
+    return "Subtask 1: extracted account key AURORA-17 from the intake note."
+  }
+  if turn == 2 {
+    return "Subtask 2: normalized customer id CUST-204."
+  }
+  if turn == 3 {
+    return "Subtask 3: selected the nightly export path."
+  }
+  if turn == 4 {
+    return "Subtask 4: prepared the final handoff checklist."
+  }
+  if retained {
+    return "Final: use account key AURORA-17 for the subtask-5 handoff. ##DONE##"
+  }
+  return "Final: use account key UNKNOWN for the subtask-5 handoff. ##DONE##"
+}
+
+fn __eval_fact_for_text(text) {
+  if contains(text, "AURORA-17") {
+    return "fact: account key AURORA-17"
+  }
+  if contains(text, "CUST-204") {
+    return "fact: customer id CUST-204"
+  }
+  if contains(text, "nightly export path") {
+    return "fact: nightly export path selected"
+  }
+  if contains(text, "handoff checklist") {
+    return "fact: handoff checklist prepared"
+  }
+  return ""
+}
+
+fn __eval_excerpt(text, limit) {
+  let cleaned = replace(trim(text ?? ""), "\n", " ")
+  if len(cleaned) <= limit {
+    return cleaned
+  }
+  return substring(cleaned, 0, limit - 3) + "..."
+}
+
+fn __eval_append_callback(arm) {
+  return { info ->
+    let text = info?.text ?? ""
+    let fact = __eval_fact_for_text(text)
+    if fact == "" {
+      return nil
+    }
+    let pad = agent_session_scratchpad(info.session_id)
+    if pad == nil {
+      return nil
+    }
+    let iteration_index = info?.iteration ?? 0
+    let turn = iteration_index + 1
+    let ref_id = "eval:" + arm + ":" + to_string(turn)
+    let refs = (pad?.refs ?? [])
+      .push({id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)})
+    let facts = (pad?.facts ?? []).push({text: fact, source_ref: ref_id})
+    agent_session_set_scratchpad(
+      info.session_id,
+      pad + {facts: facts, refs: refs},
+      {source: "scratchpad_eval", reason: "append_turn_fact", metadata: {arm: arm, turn: turn}},
+    )
+    return nil
+  }
+}
+
+fn __eval_reorg_response(arm, fact_text) {
+  let ref_id = "eval:" + arm + ":1"
+  return {
+    text: json_stringify(
+      {
+        schema: "harn.agent_scratchpad.v1",
+        goals: [{text: "complete five subtasks", source_ref: "user:initial"}],
+        open_items: [],
+        facts: [{text: fact_text, source_ref: ref_id}],
+        refs: [
+          {id: "user:initial", kind: "user_input", label: "Initial task"},
+          {id: ref_id, kind: "assistant_turn", label: "Subtask 1 source"},
+        ],
+        dropped: ["deduped later subtask notes"],
+      },
+    ),
+  }
+}
+
+fn __eval_estimated_tokens(chars) {
+  return (chars + 3) / 4
+}
+
+fn __eval_require(condition, message) {
+  if !condition {
+    throw message
+  }
+}
+
+fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
+  llm_mock_clear()
+  for mock in reorg_mocks {
+    llm_mock(mock)
+  }
+  let call_count = atomic(0)
+  let prompt_chars = atomic(0)
+  let caller = { call ->
+    let turn = call?.turn?.iteration ?? 1
+    let system = call?.system ?? ""
+    atomic_add(call_count, 1)
+    atomic_add(prompt_chars, len(system))
+    return {
+      ok: true,
+      value: __eval_llm_value(__eval_worker_text(turn, contains(system, "fact: account key AURORA-17"))),
+    }
+  }
+  var opts = {
+    provider: "mock",
+    llm_caller: caller,
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 6,
+    max_nudges: 8,
+  }
+  if scratchpad != nil {
+    opts = opts + {scratchpad: scratchpad}
+  }
+  if append_facts {
+    opts = opts + {post_turn_callback: __eval_append_callback(arm_id)}
+  }
+  let result = agent_loop(
+    "Complete five subtasks and use the subtask-1 account key in the final handoff.",
+    "You are a cheap deterministic worker model in a retention eval.",
+    opts,
+  )
+  let final_scratchpad = result?.transcript?.metadata?.agent_scratchpad ?? {}
+  let retained = contains(json_stringify(final_scratchpad), "fact: account key AURORA-17")
+  let success = contains(result?.visible_text ?? "", "AURORA-17")
+  let reorg_calls = len(llm_mock_calls())
+  let reorg_error_rate = if reorg_calls == 0 {
+    "n/a"
+  } else if retained {
+    "0/" + to_string(reorg_calls)
+  } else {
+    to_string(reorg_calls) + "/" + to_string(reorg_calls)
+  }
+  return {
+    arm: name,
+    success: success,
+    fact_retention: retained,
+    prompt_chars: atomic_get(prompt_chars),
+    estimated_prompt_tokens: __eval_estimated_tokens(atomic_get(prompt_chars)),
+    worker_calls: atomic_get(call_count),
+    reorg_calls: reorg_calls,
+    reorg_induced_errors: reorg_error_rate,
+  }
+}
+
+pipeline default() {
+  let none = __eval_run_arm("none", "none", nil, [], false)
+  let append = __eval_run_arm("append_only_recitation", "append", {enabled: true, reorganize_every: 0}, [], true)
+  let strong = __eval_run_arm(
+    "periodic_reorg_strong",
+    "strong",
+    {
+      enabled: true,
+      reorganize_every: 2,
+      reorganizer: {provider: "mock", model: "strong-reorganizer-fixture"},
+    },
+    [
+      __eval_reorg_response("strong", "fact: account key AURORA-17"),
+      __eval_reorg_response("strong", "fact: account key AURORA-17"),
+    ],
+    true,
+  )
+  let weak = __eval_run_arm(
+    "periodic_reorg_weak_ablation",
+    "weak",
+    {
+      enabled: true,
+      reorganize_every: 2,
+      reorganizer: {provider: "mock", model: "weak-reorganizer-fixture"},
+    },
+    [
+      __eval_reorg_response("weak", "fact: account key ORION-99"),
+      __eval_reorg_response("weak", "fact: account key ORION-99"),
+    ],
+    true,
+  )
+  let rows = [none, append, strong, weak]
+  __io_println(
+    "arm,success,fact_retention,prompt_chars,estimated_prompt_tokens,worker_calls,reorg_calls,reorg_induced_errors",
+  )
+  for row in rows {
+    __io_println(
+      row.arm
+        + ","
+        + to_string(row.success)
+        + ","
+        + to_string(row.fact_retention)
+        + ","
+        + to_string(row.prompt_chars)
+        + ","
+        + to_string(row.estimated_prompt_tokens)
+        + ","
+        + to_string(row.worker_calls)
+        + ","
+        + to_string(row.reorg_calls)
+        + ","
+        + row.reorg_induced_errors,
+    )
+  }
+  __eval_require(!none.success, "no-scratchpad arm should lose the subtask-1 fact")
+  __eval_require(
+    append.success && append.fact_retention,
+    "append-only recitation should retain the fact",
+  )
+  __eval_require(
+    strong.success && strong.fact_retention,
+    "strong periodic reorg should retain the fact",
+  )
+  __eval_require(
+    !weak.success && !weak.fact_retention,
+    "weak reorg ablation should corrupt the retained fact",
+  )
+}

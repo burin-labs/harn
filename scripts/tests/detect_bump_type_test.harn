@@ -1,39 +1,24 @@
-// Tests for scripts/detect_bump_type.harn — exercise the pure
-// version-parsing/comparison helpers without touching Cargo.toml or
-// CHANGELOG.md.
+import { parse } from "std/semver"
+// Tests for scripts/detect_bump_type.harn — exercise the pure comparison
+// helper without touching Cargo.toml or CHANGELOG.md.
 import "../detect_bump_type.harn"
 
 @test
 pipeline test_parse_valid_semver(task) {
-  assert_eq(parse("1.2.3"), [1, 2, 3])
-  assert_eq(parse("0.0.0"), [0, 0, 0])
-  assert_eq(parse("10.20.30"), [10, 20, 30])
+  assert_eq(parse("1.2.3"), {major: 1, minor: 2, patch: 3})
+  assert_eq(parse("0.0.0"), {major: 0, minor: 0, patch: 0})
+  assert_eq(parse("10.20.30"), {major: 10, minor: 20, patch: 30})
 }
 
 @test
 pipeline test_parse_rejects_non_triple(task) {
-  let r1 = try {
-    parse("1.2")
-  } catch (_) {
-    "caught"
-  }
-  assert_eq(r1, "caught")
-  let r2 = try {
-    parse("1.2.3.4")
-  } catch (_) {
-    "caught"
-  }
-  assert_eq(r2, "caught")
+  assert_eq(parse("1.2"), nil)
+  assert_eq(parse("1.2.3.4"), nil)
 }
 
 @test
 pipeline test_parse_rejects_non_numeric(task) {
-  let r = try {
-    parse("1.x.3")
-  } catch (_) {
-    "caught"
-  }
-  assert_eq(r, "caught")
+  assert_eq(parse("1.x.3"), nil)
 }
 
 @test

@@ -24,6 +24,7 @@ import {
   agent_required_tools_inject_feedback,
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
+import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 import { agent_skills_match } from "std/agent/skills"
 import {
   agent_stall_apply_result,
@@ -62,6 +63,18 @@ import {
 } from "std/agent/workers"
 import { omit } from "std/json"
 import { llm_call_options } from "std/llm/options"
+
+/*
+ * Pipeline entrypoints execute agent loops without a lexical `Harness` binding,
+ * so loop budget timing uses the ambient builtins that share the VM clock backend.
+ */
+fn __agent_loop_clock_now_ms() {
+  return now_ms()
+}
+
+fn __agent_loop_clock_sleep_ms(delay_ms) {
+  sleep_ms(delay_ms)
+}
 
 fn __default_invoke_llm(message, turn_system, llm_opts) {
   let result = try {
@@ -997,7 +1010,7 @@ fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates = n
 }
 
 fn __agent_loop_elapsed_ms(start_ms) {
-  let elapsed = now_ms() - start_ms
+  let elapsed = __agent_loop_clock_now_ms() - start_ms
   if elapsed < 0 {
     return 0
   }
@@ -1659,6 +1672,9 @@ fn __agent_loop_run(message, session, initial_opts) {
       max: opts?.max_iterations ?? 50,
       extend_by: 0,
       expose_decisions: false,
+      wall_clock_ms: nil,
+      total_cost_usd: nil,
+      consecutive_failures: nil,
     }
     var current_max = budget.initial
     var extensions_used = 0
@@ -1666,7 +1682,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var consecutive_failure_count = 0
     var budget_exhausted_emitted = false
     var last_tool_count = 0
-    let loop_start_ms = now_ms()
+    let loop_start_ms = __agent_loop_clock_now_ms()
     while iteration < current_max {
       let boundary_exhaustion = __agent_loop_budget_exhaustion(
         session.session_id,
@@ -1783,7 +1799,7 @@ fn __agent_loop_run(message, session, initial_opts) {
               },
             )
             if paused_for_ms > 0 {
-              sleep_ms(paused_for_ms)
+              __agent_loop_clock_sleep_ms(paused_for_ms)
             }
             let exhaustion = __agent_loop_budget_aggregates(session.session_id, nil, loop_start_ms)
               + {exhausted: true, kind: "consecutive_failures", iteration: iteration, max_iterations: current_max}
@@ -2264,6 +2280,19 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
       }
+      if should_continue {
+        agent_scratchpad_reorganize_if_due(
+          session,
+          opts,
+          iteration_index,
+          {
+            reason: "iteration_end",
+            outcome_kind: outcome.kind,
+            bridge_step_delivered: bridge_step_delivered,
+            tool_count: tool_count,
+          },
+        )
+      }
       let loop_state = agent_loop_snapshot_state(
         {
           iteration: iteration,
@@ -2419,6 +2448,7 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   if session?.done {
     return session.result
   }
+  agent_scratchpad_init(session, opts)
   if opts?._tool_format_override != nil {
     agent_emit_event(session.session_id, "tool_format_override", opts._tool_format_override)
   }

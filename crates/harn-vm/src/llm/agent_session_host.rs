@@ -1799,6 +1799,19 @@ fn build_agent_event(
                 .cloned()
                 .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
         }),
+        "agent_scratchpad_reorganization" => {
+            let mut details = payload.clone();
+            if let Some(object) = details.as_object_mut() {
+                object.remove("iteration");
+                object.remove("status");
+            }
+            Ok(AgentEvent::AgentScratchpadReorganization {
+                session_id: session_id.to_string(),
+                iteration: get_usize("iteration"),
+                status: get_string("status"),
+                details,
+            })
+        }
         "budget_exhausted" => Ok(AgentEvent::BudgetExhausted {
             session_id: session_id.to_string(),
             max_iterations: get_usize("max_iterations"),

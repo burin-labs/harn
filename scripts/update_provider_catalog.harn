@@ -40,6 +40,9 @@ let FIXED_FETCHED_AT = "fixture-time"
 
 fn __install_fixture_mocks(harness: Harness) {
   http_mock_clear()
+  egress_policy(
+    {allow: ["www.anthropic.com", "platform.openai.com", "openrouter.ai"], default: "deny"},
+  )
   http_mock(
     "GET",
     "https://www.anthropic.com/pricing",

@@ -40,6 +40,7 @@ pub const DEFAULT_TRANSCRIPT_MESSAGE_CAP: usize = 4096;
 /// Default cap on retained transcript audit events per session. Events
 /// include message-derived entries plus orchestration lifecycle records.
 pub const DEFAULT_TRANSCRIPT_EVENT_CAP: usize = 32768;
+pub const MAX_SCRATCHPAD_BYTES: usize = 16 * 1024;
 #[cfg(debug_assertions)]
 const CACHE_STABLE_SYSTEM_PROMPT_DIAGNOSTIC: &str = "HARN-CACHE-001";
 
@@ -151,6 +152,10 @@ pub struct SessionState {
     /// (epic #2208). `None` until a host opens the session with one or
     /// the ACP `reanchor` / `add_root` primitives populate it.
     pub workspace_anchor: Option<WorkspaceAnchor>,
+    /// Small session-local working memory rendered into agent prompts by the
+    /// Harn stdlib agent loop. This is live state, not a replayed message.
+    pub scratchpad: Option<VmValue>,
+    pub scratchpad_version: u64,
     pub transcript_budget_policy: SessionTranscriptBudgetPolicy,
     pub last_transcript_budget_action: Option<serde_json::Value>,
 }
@@ -175,6 +180,8 @@ impl SessionState {
             pinned_reasoning_policy: None,
             workspace_policy: WorkspacePolicy::default(),
             workspace_anchor: None,
+            scratchpad: None,
+            scratchpad_version: 0,
             transcript_budget_policy: default_transcript_budget_policy(),
             last_transcript_budget_action: None,
         }
@@ -405,6 +412,147 @@ pub fn length(id: &str) -> Option<usize> {
     })
 }
 
+pub fn scratchpad(id: &str) -> Option<VmValue> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .and_then(|state| state.scratchpad.clone())
+    })
+}
+
+pub fn scratchpad_version(id: &str) -> Option<u64> {
+    SESSIONS.with(|s| s.borrow().get(id).map(|state| state.scratchpad_version))
+}
+
+pub fn set_scratchpad(
+    id: &str,
+    scratchpad: VmValue,
+    source: impl Into<String>,
+    reason: Option<String>,
+    metadata: serde_json::Value,
+) -> Result<u64, String> {
+    validate_scratchpad_value(&scratchpad)?;
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let version = state.scratchpad_version.saturating_add(1);
+        let event = scratchpad_transcript_event(
+            "set",
+            version,
+            Some(&scratchpad),
+            source.into(),
+            reason,
+            metadata,
+        );
+        append_event_to_state(state, event, "set_scratchpad")?;
+        state.scratchpad = Some(scratchpad);
+        state.scratchpad_version = version;
+        state.last_accessed = Instant::now();
+        Ok(version)
+    })
+}
+
+pub fn clear_scratchpad(
+    id: &str,
+    source: impl Into<String>,
+    reason: Option<String>,
+    metadata: serde_json::Value,
+) -> Result<u64, String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let version = state.scratchpad_version.saturating_add(1);
+        let event =
+            scratchpad_transcript_event("clear", version, None, source.into(), reason, metadata);
+        append_event_to_state(state, event, "clear_scratchpad")?;
+        state.scratchpad = None;
+        state.scratchpad_version = version;
+        state.last_accessed = Instant::now();
+        Ok(version)
+    })
+}
+
+fn validate_scratchpad_value(value: &VmValue) -> Result<(), String> {
+    if !matches!(value, VmValue::Dict(_)) {
+        return Err("agent session scratchpad must be a dict".to_string());
+    }
+    let json = crate::llm::helpers::vm_value_to_json(value);
+    let approx_bytes = serde_json::to_vec(&json)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX);
+    if approx_bytes > MAX_SCRATCHPAD_BYTES {
+        return Err(format!(
+            "agent session scratchpad is {approx_bytes} bytes; max is {MAX_SCRATCHPAD_BYTES}"
+        ));
+    }
+    Ok(())
+}
+
+fn scratchpad_transcript_event(
+    action: &str,
+    version: u64,
+    scratchpad: Option<&VmValue>,
+    source: String,
+    reason: Option<String>,
+    metadata: serde_json::Value,
+) -> VmValue {
+    let scratchpad_json = scratchpad.map(crate::llm::helpers::vm_value_to_json);
+    let approx_bytes = scratchpad_json
+        .as_ref()
+        .and_then(|value| serde_json::to_vec(value).ok().map(|bytes| bytes.len()))
+        .unwrap_or(0);
+    let event_metadata = serde_json::json!({
+        "action": action,
+        "version": version,
+        "source": normalize_scratchpad_source(source),
+        "reason": reason.unwrap_or_default(),
+        "approx_bytes": approx_bytes,
+        "counts": scratchpad_json
+            .as_ref()
+            .map(scratchpad_counts_json)
+            .unwrap_or_else(|| serde_json::json!({})),
+        "metadata": metadata,
+    });
+    let content = format!("Agent scratchpad {action}");
+    crate::llm::helpers::transcript_event(
+        "agent_scratchpad",
+        "system",
+        "internal",
+        &content,
+        Some(event_metadata),
+    )
+}
+
+fn normalize_scratchpad_source(source: String) -> String {
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        "harn.agent_scratchpad".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn scratchpad_counts_json(value: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "goals": scratchpad_array_len(value, "goals"),
+        "open_items": scratchpad_array_len(value, "open_items"),
+        "facts": scratchpad_array_len(value, "facts"),
+        "refs": scratchpad_array_len(value, "refs"),
+    })
+}
+
+fn scratchpad_array_len(value: &serde_json::Value, key: &str) -> usize {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0)
+}
+
 pub fn snapshot(id: &str) -> Option<VmValue> {
     SESSIONS.with(|s| s.borrow().get(id).map(session_snapshot))
 }
@@ -602,6 +750,8 @@ pub fn reset_transcript(id: &str) -> bool {
         state.transcript = empty_transcript(id);
         state.tool_format = None;
         state.system_prompt = None;
+        state.scratchpad = None;
+        state.scratchpad_version = 0;
         state.last_transcript_budget_action = None;
         state.last_accessed = Instant::now();
         true
@@ -623,6 +773,8 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         src_pinned_reasoning_policy,
         src_workspace_anchor,
         src_workspace_policy,
+        src_scratchpad,
+        src_scratchpad_version,
         src_transcript_budget_policy,
         src_last_transcript_budget_action,
         dst,
@@ -640,6 +792,8 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             src.pinned_reasoning_policy.clone(),
             src.workspace_anchor.clone(),
             src.workspace_policy.clone(),
+            src.scratchpad.clone(),
+            src.scratchpad_version,
             src.transcript_budget_policy.clone(),
             src.last_transcript_budget_action.clone(),
             dst,
@@ -657,6 +811,8 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.pinned_reasoning_policy = src_pinned_reasoning_policy;
             state.workspace_anchor = src_workspace_anchor;
             state.workspace_policy = src_workspace_policy;
+            state.scratchpad = src_scratchpad;
+            state.scratchpad_version = src_scratchpad_version;
             state.transcript_budget_policy = src_transcript_budget_policy;
             state.last_transcript_budget_action = src_last_transcript_budget_action;
             state.last_accessed = Instant::now();
@@ -2470,6 +2626,16 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
     } else {
         metadata.remove(WORKSPACE_ANCHOR_METADATA_KEY);
     }
+    if let Some(scratchpad) = state.scratchpad.as_ref() {
+        metadata.insert("agent_scratchpad".to_string(), scratchpad.clone());
+        metadata.insert(
+            "agent_scratchpad_version".to_string(),
+            VmValue::Int(state.scratchpad_version as i64),
+        );
+    } else {
+        metadata.remove("agent_scratchpad");
+        metadata.remove("agent_scratchpad_version");
+    }
     if let Some(last_action) = state.last_transcript_budget_action.as_ref() {
         let usage = transcript_usage(
             &VmValue::Dict(std::sync::Arc::new(next.clone())),
@@ -2568,6 +2734,14 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .as_ref()
             .map(|policy| VmValue::String(std::sync::Arc::from(policy.clone())))
             .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "scratchpad".to_string(),
+        state.scratchpad.clone().unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "scratchpad_version".to_string(),
+        VmValue::Int(state.scratchpad_version as i64),
     );
     next.insert(
         "workspace_anchor".to_string(),

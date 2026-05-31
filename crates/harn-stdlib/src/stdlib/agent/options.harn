@@ -1,5 +1,6 @@
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
+import { agent_scratchpad_options } from "std/agent/scratchpad"
 
 fn __profile_defaults(profile) {
   if profile == "tool_using" {
@@ -810,6 +811,9 @@ fn __validate_agent_loop_callback_options(opts) {
   if __has_key(opts, "transcript_projection") {
     __validate_transcript_projection(opts.transcript_projection)
   }
+  if __has_key(opts, "scratchpad") {
+    agent_scratchpad_options(opts)
+  }
 }
 
 fn __normalize_reminder_provider_options(opts) {
@@ -840,7 +844,16 @@ fn __normalize_iteration_budget(opts) {
   let raw = opts?.iteration_budget
   let legacy = opts?.max_iterations
   if raw == nil && legacy == nil {
-    return {mode: "fixed", initial: 50, max: 50, extend_by: 0, expose_decisions: false}
+    return {
+      mode: "fixed",
+      initial: 50,
+      max: 50,
+      extend_by: 0,
+      expose_decisions: false,
+      wall_clock_ms: nil,
+      total_cost_usd: nil,
+      consecutive_failures: nil,
+    }
   }
   let user_budget = if type_of(raw) == "string" {
     {mode: raw}
@@ -849,7 +862,16 @@ fn __normalize_iteration_budget(opts) {
   }
   if user_budget == nil {
     let cap = __positive_int_budget_field(legacy, 50, "max_iterations")
-    return {mode: "fixed", initial: cap, max: cap, extend_by: 0, expose_decisions: false}
+    return {
+      mode: "fixed",
+      initial: cap,
+      max: cap,
+      extend_by: 0,
+      expose_decisions: false,
+      wall_clock_ms: nil,
+      total_cost_usd: nil,
+      consecutive_failures: nil,
+    }
   }
   if type_of(user_budget) != "dict" {
     throw "agent_loop: iteration_budget must be a dict, string, or nil; got "

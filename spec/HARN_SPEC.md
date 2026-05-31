@@ -413,6 +413,10 @@ Imports starting with `std/` load embedded stdlib modules:
   agent_state_handoff)
 - `import "std/agent/progress"` — agent progress narration and task-list
   helpers (agent_progress, agent_progress_tool)
+- `import "std/agent/scratchpad"` — live session-local agent working memory
+  helpers (agent_scratchpad_options, agent_scratchpad_init,
+  agent_scratchpad_recitation_fragment, agent_scratchpad_reorganize,
+  agent_scratchpad_reorganize_if_due)
 - `import "std/agent/fact"` — typed fact envelopes over durable memory
   (store_fact, recall_facts, invalidate_facts)
 - `import "std/agent/probe"` — probe-first verification primitive: run a
@@ -1568,6 +1572,17 @@ mailboxes are shared by every task that receives or resolves the handle.
 `spawn_agent` workers have independent worker/session lineage; use explicit
 mailboxes, shared state handles, `agent_state_*`, or host storage for data
 exchange outside the transcript.
+
+Named sessions may also carry a small `scratchpad` dict plus a monotonic
+`scratchpad_version`. The scratchpad is live session-local working memory, not a
+replayable transcript message. `agent_session_scratchpad(id)`,
+`agent_session_set_scratchpad(id, scratchpad, opts?)`, and
+`agent_session_clear_scratchpad(id, opts?)` are the direct state boundary.
+Updates append compact `agent_scratchpad` transcript events that include
+action, version, source, reason, counts, and caller metadata without copying the
+full scratchpad into the event. Snapshots expose `scratchpad` and
+`scratchpad_version`; final transcripts also mirror the current values under
+`metadata.agent_scratchpad` and `metadata.agent_scratchpad_version`.
 
 `agent_session_seed_from_jsonl(path, opts?)` creates a new session from a
 replayable LLM transcript sidecar. Exact replay uses prompt-visible `message`
@@ -2758,6 +2773,23 @@ progress reports as non-terminal `TaskStatusUpdateEvent` messages with
 tool; dict form may override `name`, `description`, and
 `system_prompt_nudge`. Progress reports are intended for meaningful sub-step
 completion or plan changes, not fixed timer ticks.
+
+#### Agent scratchpad
+
+`agent_loop(..., {scratchpad: true})` initializes a session-local
+`harn.agent_scratchpad.v1` value with `goals`, `open_items`, `facts`, and
+`refs`. The current scratchpad is recited as a prompt-tail fragment every turn
+and, by default, reorganized every three continuing turns through a
+structured-output LLM call. Dict form may set `enabled`, `recite`,
+`reorganize_every`, `max_recent_messages`, `schema_retries`, `initial`, and
+`reorganizer`; the reorganizer options may select a different provider/model
+from the worker.
+
+Reorganization is required to keep heavy content by reference. Returned facts
+must cite `source_ref` values present in the current scratchpad or recent
+session messages; a reorganization that invents refs is rejected and the prior
+scratchpad remains active. Successful and failed reorganization attempts emit
+`agent_scratchpad_reorganization` events with status and count metadata.
 
 `agent_turn(prompt, options?)` is the high-level wrapper for a single complete
 agent request. It uses `agent_loop`, folds `options.system` into the system
@@ -4074,6 +4106,9 @@ once in transcript metadata and as one leading internal `system_prompt`
 fingerprint event; it is not injected into the replayable message list. A later
 continuation that omits all system prompt fields reuses the stored session
 prompt for the provider request without writing another transcript event.
+Internal `_system_fragments` entries may set `bucket: "before"` (default) or
+`bucket: "after"`; the latter is used for live prompt-tail recitations such as
+the agent scratchpad.
 
 ```harn
 import { system_preamble, with_system_prompt_parts } from "std/llm/prompts"

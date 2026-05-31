@@ -7,6 +7,7 @@ GET /openapi.json
 GET /v1
 GET /v1/runtime
 GET /v1/capabilities
+GET /v1/provider-catalog
 GET /v1/tools
 GET /v1/tools/{tool_id}
 GET /v1/agent-card
@@ -42,6 +43,13 @@ POST /v1/tasks/{task_id}/cancel
 GET /v1/permission-requests
 GET /v1/tasks/{task_id}/permission-requests
 POST /v1/permission-requests/{request_id}/respond
+GET /v1/permissions/policy
+PUT /v1/permissions/policy
+GET /v1/permissions/rules
+POST /v1/permissions/rules
+DELETE /v1/permissions/rules/{rule_id}
+GET /v1/permissions/history
+POST /v1/permissions/check
 POST /v1/tasks/{task_id}/replay
 POST /v1/tasks/{task_id}/messages
 GET /v1/tasks/{task_id}/events
@@ -88,6 +96,7 @@ RuntimeVersion
 RuntimeMetadata
 Capability
 CapabilitySummary
+ProviderCatalog
 Tool
 ToolList
 Persona
@@ -117,6 +126,17 @@ CancelTaskRequest
 PermissionRequest
 PermissionRequestList
 PermissionResponseRequest
+PermissionPolicy
+PermissionPolicyResponse
+RememberRule
+RememberRuleList
+PermissionCheckRequest
+PermissionCheckResponse
+PermissionDecisionGranted
+PermissionDecisionDenied
+PermissionDecisionSuspend
+AuditEntry
+AuditEntryList
 ReplayMode
 ReplayTaskRequest
 ReplayOverride

@@ -22,7 +22,7 @@ A fragment is one contributor to the system string:
 | --- | --- |
 | `id` | stable identifier, e.g. `host:system_preamble`, `primary:active_skills`, `tool:todo.guidance` |
 | `source` | who contributed it (`host:*`, `primary`, `reminder`, `tool:<name>`) |
-| `bucket` | `before` (preamble … primary … reminders) or `after` (appendix/suffix) |
+| `bucket` | `before` (preamble … primary … reminders) or `after` (appendix/suffix and tail recitations) |
 | `requires_tools` | included only when every named tool is in the active tool set |
 | `requires_caps` | included only when every named capability flag is set |
 | `body` | the already-rendered text; trimmed, and skipped if empty |
@@ -39,6 +39,8 @@ nudge, and the loop/tool contracts. Rather than glue these into one opaque
 own fragment through the internal `_system_fragments` channel, so every part is
 traced on its own (`primary:system`, `primary:active_skills`,
 `primary:loop_contract`, …) and can be gated with `requires_tools` independently.
+Those internal fragments may also set `bucket: "after"` when a live recitation
+must land at the prompt tail.
 Joining the fragment bodies with a blank line reproduces the single string the
 legacy path produced, so the assembled prompt is unchanged — only its provenance
 is finer-grained. `agent_build_turn_system_fragments` is the stdlib helper that
