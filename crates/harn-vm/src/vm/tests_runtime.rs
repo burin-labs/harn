@@ -1933,10 +1933,6 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
             r#"pipeline t(task) {{ delete_file("{}") }}"#,
             outside_file.display()
         ),
-        format!(
-            r#"pipeline t(task) {{ file_exists("{}") }}"#,
-            outside_file.display()
-        ),
     ];
 
     for source in escapes {
@@ -1956,6 +1952,25 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
             "expected sandbox violation message, got {err}"
         );
     }
+
+    // `file_exists`/`exists` is the one read-scope probe that soft-falses
+    // instead of throwing on an out-of-root path (v0.8.55): an absent path and
+    // an out-of-sandbox path are indistinguishable to a caller, so the safe,
+    // non-leaky answer is `false` rather than a sandbox violation. Content
+    // reads (`read_file`, asserted above) still error — only presence probing
+    // is softened.
+    let (_, exists_outside) = run_harn_with_policy(
+        &format!(
+            r#"pipeline t(task) {{ file_exists("{}") }}"#,
+            outside_file.display()
+        ),
+        policy.clone(),
+    )
+    .expect("file_exists outside sandbox should soft-false, not error");
+    assert!(
+        matches!(exists_outside, VmValue::Bool(false)),
+        "file_exists on an out-of-root path must read as absent, got {exists_outside:?}"
+    );
 }
 
 #[test]
