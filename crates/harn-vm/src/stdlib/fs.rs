@@ -463,11 +463,23 @@ fn queue_file_edited_for(resolved: &std::path::Path, operation: &str, bytes: usi
 fn file_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let resolved = resolve_fs_path(&path);
-    crate::stdlib::sandbox::enforce_fs_path(
-        "file_exists",
+    // A presence probe for a path outside the sandbox reads as "absent",
+    // matching how OS sandboxes behave (paths outside the jail appear
+    // non-existent) rather than crashing the pipeline with a violation. Only
+    // a fully out-of-scope path (not a read-only-root denial) maps to false;
+    // reads inside a read-only root are already permitted by the scope check.
+    // Reading file *content* outside roots still errors (see read_text).
+    if let Err(violation) = crate::stdlib::sandbox::check_fs_path_scope(
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
-    )?;
+    ) {
+        if !violation.read_only {
+            return Ok(VmValue::Bool(false));
+        }
+        return Err(crate::stdlib::sandbox::sandbox_rejection(
+            violation.message("file_exists"),
+        ));
+    }
     Ok(VmValue::Bool(overlay::exists(&resolved)))
 }
 
@@ -979,6 +991,65 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn file_exists_outside_sandbox_reads_as_absent_not_error() {
+        use crate::orchestration::{
+            pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+        };
+
+        // An out-of-root presence probe must read as "absent" (false) rather
+        // than throwing a sandbox violation, so eval/setup pipelines that
+        // check for paths outside the workspace don't crash. Reading the
+        // *content* of the same out-of-root path must still be denied.
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_file = outside.path().join("present.txt");
+        std::fs::write(&outside_file, "secret").unwrap();
+        let outside_arg = outside_file.to_string_lossy().into_owned();
+
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+
+        let mut vm = vm();
+
+        // file_exists on a real-but-out-of-root file returns false, no error.
+        assert!(
+            matches!(
+                call(&mut vm, "file_exists", vec![s(&outside_arg)]).unwrap(),
+                VmValue::Bool(false)
+            ),
+            "file_exists outside the sandbox must read as absent"
+        );
+
+        // Reading its content is still denied with a sandbox violation.
+        let read_err = call(&mut vm, "read_file", vec![s(&outside_arg)])
+            .expect_err("reading content outside the sandbox must still be denied");
+        let message = match read_err {
+            VmError::Thrown(VmValue::String(text)) => text.to_string(),
+            other => format!("{other:?}"),
+        };
+        assert!(
+            message.contains("sandbox violation"),
+            "expected a sandbox violation, got: {message}"
+        );
+
+        // A path inside the workspace still reports its true presence.
+        let inside = workspace.path().join("inside.txt");
+        std::fs::write(&inside, "ok").unwrap();
+        assert!(
+            matches!(
+                call(&mut vm, "file_exists", vec![s(&inside.to_string_lossy())]).unwrap(),
+                VmValue::Bool(true)
+            ),
+            "file_exists inside the workspace must report true"
+        );
+
+        pop_execution_policy();
     }
 
     #[test]
