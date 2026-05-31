@@ -402,10 +402,10 @@ impl Debugger {
         };
         let name = name.to_string();
         let value_expr = value_expr.to_string();
-        self.runtime
-            .as_ref()
-            .unwrap()
-            .block_on(async { vm.set_variable_in_frame(&name, &value_expr, 0).await })
+        let runtime = self.runtime.as_ref().unwrap();
+        let local_set = self.local_set.as_ref().unwrap();
+        runtime
+            .block_on(local_set.run_until(vm.set_variable_in_frame(&name, &value_expr, 0)))
             .map_err(|e| format!("setVariable: {e}"))
     }
 
@@ -438,10 +438,10 @@ impl Debugger {
             ));
         };
         let expression_owned = expression.to_string();
-        self.runtime
-            .as_ref()
-            .unwrap()
-            .block_on(async { vm.evaluate_in_frame(&expression_owned, 0).await })
+        let runtime = self.runtime.as_ref().unwrap();
+        let local_set = self.local_set.as_ref().unwrap();
+        runtime
+            .block_on(local_set.run_until(vm.evaluate_in_frame(&expression_owned, 0)))
             .map_err(|e| format!("Cannot evaluate '{expression}': {e}"))
     }
 

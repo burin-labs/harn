@@ -256,11 +256,9 @@ impl Debugger {
                 self.ensure_runtime();
                 if let Some(vm) = self.vm.as_mut() {
                     let runtime = self.runtime.as_ref().unwrap();
+                    let local_set = self.local_set.as_ref().unwrap();
                     runtime
-                        .block_on(async {
-                            let local = tokio::task::LocalSet::new();
-                            local.run_until(vm.evaluate_in_frame(&expr, 0)).await
-                        })
+                        .block_on(local_set.run_until(vm.evaluate_in_frame(&expr, 0)))
                         .map(|v| v.is_truthy())
                         .unwrap_or(true)
                 } else {

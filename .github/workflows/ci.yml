@@ -322,7 +322,7 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
         run: |
-          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-fmt) or package(harn-lint) or package(harn-modules)'
+          windows_filter='package(harn-lexer) or package(harn-parser) or package(harn-stdlib) or package(harn-vm) or package(harn-hostlib) or package(harn-fmt) or package(harn-lint) or package(harn-modules) or package(harn-dap)'
           package_args=(--workspace)
 
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
