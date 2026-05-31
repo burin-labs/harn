@@ -123,6 +123,7 @@ small, named kernel feature, never an open-ended escape hatch.
 | `workspace.write_text` | Landlock `_WRITE_FILE` + `_REMOVE_*` + `_MAKE_*` + (ABI ≥ 2) `_REFER` + (ABI ≥ 3) `_TRUNCATE` | writes scoped to `workspace_roots` |
 | `workspace.delete` | Landlock `_REMOVE_DIR` + `_REMOVE_FILE` | removes scoped to `workspace_roots` |
 | `read_only_roots: [...]` | Landlock `_READ_FILE` + `_READ_DIR` + `_EXECUTE` only | each read-only root is readable but never writable, regardless of the `workspace.*` capabilities |
+| standard process devices | Landlock grants read/write on `/dev/null` and read-only access on `/dev/zero`, `/dev/random`, and `/dev/urandom`; ABI ≥ 5 also handles `_IOCTL_DEV` but does not grant it to these device rules | language runtimes and test harnesses can open the devices they normally need without broad `/dev` access or device ioctl rights |
 | `side_effect_level < network` | seccomp-bpf blocklist on `socket`, `socketpair`, `connect`, `accept`, `accept4`, `bind`, `listen`, `sendto`, `sendmsg`, `recvfrom`, `recvmsg` (return `EPERM`) | network syscalls fail without taking down the process |
 | always | seccomp-bpf blocklist on `bpf`, `mount`, `umount2`, `init_module`, `delete_module`, `finit_module`, `kexec_*`, `ptrace`, `process_vm_readv`/`process_vm_writev`, `perf_event_open`, `swapon`/`swapoff`, `reboot`, `userfaultfd`, `fanotify_init`, `open_by_handle_at` (return `EPERM`) | tier-1 dangerous syscalls are denied unconditionally |
 | always | `prctl(PR_SET_NO_NEW_PRIVS, 1)` | no setuid escalation across `exec` |
@@ -137,7 +138,8 @@ falls back to the warn/enforce decision documented above.
 | Capability / policy | `sandbox-exec` rule | Effect |
 |---|---|---|
 | always | `(deny default)` | every operation requires an explicit allow |
-| always | `(allow process*)` + `(allow sysctl-read)` + `(allow mach-lookup)` + `(allow file-read-data (literal "/"))` + `(allow file-write* (subpath "/dev"))` | minimum surface required to exec a binary and reach `/dev` |
+| always | `(allow process*)` + `(allow sysctl-read)` + `(allow mach-lookup)` + `(allow file-read-data (literal "/"))` | minimum surface required to exec a binary |
+| standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |
 | always | `(allow file-read* (subpath "/bin" \| "/etc" \| "/Library" \| "/opt/homebrew" \| "/private/etc" \| "/System" \| "/usr"))` | read access to the directories the dynamic linker and most CLI tools need |
 | `workspace_roots: [...]` / `read_only_roots: [...]` | `(allow file-read* (subpath "<root>"))` | workspace and read-only roots are readable |
 | `workspace.write_text` / `workspace.delete` (or empty `capabilities`) | `(allow file-write* (subpath "/tmp" \| "/private/tmp" \| "/var/tmp"))` + `(allow file-write* (subpath "<root>"))` + `(deny file-write* (subpath "<read_only_root>"))` | scratch dirs and writable `workspace_roots` are writable; each `read_only_roots` entry is then re-denied write. `sandbox-exec` is last-match-wins, so the trailing deny keeps a read-only root nested under a writable root unwritable even though the two lists are nominally disjoint |

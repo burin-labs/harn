@@ -1172,7 +1172,10 @@ pub async fn prepare_stage_node(
             let (program, args) = if cfg!(target_os = "windows") {
                 ("cmd", vec!["/C".to_string(), command.to_string()])
             } else {
-                ("/bin/sh", vec!["-lc".to_string(), command.to_string()])
+                // Do not use a login shell here. On macOS, `/bin/sh -l`
+                // reads user dotfiles such as `~/.profile`, which makes
+                // sandboxed verification depend on out-of-worktree state.
+                ("/bin/sh", vec!["-c".to_string(), command.to_string()])
             };
             let mut process_config = crate::stdlib::sandbox::ProcessCommandConfig {
                 stdin_null: true,

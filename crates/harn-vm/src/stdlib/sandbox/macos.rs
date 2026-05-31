@@ -88,11 +88,11 @@ fn render_profile(policy: &CapabilityPolicy) -> String {
          (allow mach-lookup)\n\
          (allow file-read-metadata)\n\
          (allow file-read-data (literal \"/\"))\n\
-         (allow file-write* (subpath \"/dev\"))\n\
          (allow file-read* (subpath \"/private/var/select\"))\n\
          (allow file-read* (subpath \"/var/select\"))\n\
          (allow file-read* (subpath \"/Library/Developer\"))\n",
     );
+    profile.push_str(standard_device_profile_rules());
     for root in system_read_roots() {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
@@ -152,6 +152,26 @@ fn sandbox_profile_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn standard_device_profile_rules() -> &'static str {
+    // Keep this aligned with `is_standard_io_device` in `mod.rs`, but include
+    // common read-only entropy/zero devices that language runtimes and test
+    // harnesses legitimately open while still avoiding a broad `/dev` grant.
+    "(allow file-read* \
+       (literal \"/dev/null\") \
+       (literal \"/dev/zero\") \
+       (literal \"/dev/random\") \
+       (literal \"/dev/urandom\") \
+       (literal \"/dev/stdin\") \
+       (literal \"/dev/stdout\") \
+       (literal \"/dev/stderr\") \
+       (subpath \"/dev/fd\"))\n\
+     (allow file-write* \
+       (literal \"/dev/null\") \
+       (literal \"/dev/stdout\") \
+       (literal \"/dev/stderr\") \
+       (subpath \"/dev/fd\"))\n"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +220,58 @@ mod tests {
 
         let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
         assert!(writable.contains("(subpath \"/tmp\") (subpath \"/private/tmp\")"));
+    }
+
+    #[test]
+    fn sandbox_profile_allows_standard_devices_without_broad_dev_write() {
+        let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+        for device in ["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"] {
+            assert!(
+                profile.contains(&format!("(literal \"{device}\")")),
+                "standard device {device} should be explicitly allowed: {profile}"
+            );
+        }
+        for device in ["/dev/zero", "/dev/random", "/dev/urandom"] {
+            assert!(
+                profile.contains(&format!("(literal \"{device}\")")),
+                "common read-only device {device} should be explicitly allowed: {profile}"
+            );
+        }
+        assert!(
+            profile.contains("(subpath \"/dev/fd\")"),
+            "numeric descriptor aliases should be allowed narrowly: {profile}"
+        );
+        assert!(
+            !profile.contains("(allow file-write* (subpath \"/dev\"))"),
+            "profile must not grant broad writes to every device: {profile}"
+        );
+    }
+
+    #[test]
+    fn sandbox_exec_profile_allows_common_device_runtime_access() {
+        if !Path::new(SANDBOX_EXEC_PATH).exists() {
+            return;
+        }
+        let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+        let output = Command::new(SANDBOX_EXEC_PATH)
+            .args([
+                "-p",
+                &profile,
+                "--",
+                "/bin/sh",
+                "-c",
+                "cat /dev/null >/dev/null \
+                 && dd if=/dev/zero of=/dev/null bs=1 count=1 2>/dev/null \
+                 && dd if=/dev/urandom of=/dev/null bs=1 count=1 2>/dev/null",
+            ])
+            .output()
+            .expect("run sandbox-exec device smoke");
+        assert!(
+            output.status.success(),
+            "standard device smoke should pass\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
