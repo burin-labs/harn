@@ -492,20 +492,26 @@ fn matching_route(
 }
 
 async fn call_server_closure(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     closure: &Rc<VmClosure>,
     args: &[VmValue],
-    builtin: &str,
+    _builtin: &str,
 ) -> Result<VmValue, VmError> {
-    let mut vm = crate::vm::clone_async_builtin_child_vm()
-        .ok_or_else(|| vm_error(format!("{builtin}: requires an async builtin VM context")))?;
-    vm.call_closure_pub(closure, args).await
+    let mut vm = ctx.child_vm();
+    let result = vm.call_closure_pub(closure, args).await;
+    ctx.forward_output(&vm.take_output());
+    result
 }
 
 fn value_is_response(value: &VmValue) -> bool {
     matches!(value, VmValue::Dict(dict) if dict.contains_key("status"))
 }
 
-async fn run_http_server_request(server_id: &str, request: VmValue) -> Result<VmValue, VmError> {
+async fn run_http_server_request(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    server_id: &str,
+    request: VmValue,
+) -> Result<VmValue, VmError> {
     let server = HTTP_SERVERS.with(|servers| servers.borrow().get(server_id).cloned());
     let Some(server) = server else {
         return Err(vm_error(format!(
@@ -520,6 +526,7 @@ async fn run_http_server_request(server_id: &str, request: VmValue) -> Result<Vm
     }
     if let Some(readiness) = &server.readiness {
         let ready = call_server_closure(
+            ctx,
             readiness,
             &[http_server_handle_value(server_id)],
             "http_server_request",
@@ -565,7 +572,8 @@ async fn run_http_server_request(server_id: &str, request: VmValue) -> Result<Vm
     );
 
     for before in &server.before {
-        let result = call_server_closure(before, &[req.clone()], "http_server_request").await?;
+        let result =
+            call_server_closure(ctx, before, &[req.clone()], "http_server_request").await?;
         if value_is_response(&result) {
             return Ok(normalize_response(result));
         }
@@ -575,11 +583,12 @@ async fn run_http_server_request(server_id: &str, request: VmValue) -> Result<Vm
     }
 
     let handler_result =
-        call_server_closure(&route.handler, &[req.clone()], "http_server_request").await?;
+        call_server_closure(ctx, &route.handler, &[req.clone()], "http_server_request").await?;
     let mut response = normalize_response(handler_result);
 
     for after in &server.after {
         let result = call_server_closure(
+            ctx,
             after,
             &[response.clone(), req.clone()],
             "http_server_request",
@@ -802,20 +811,20 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_request", |_ctx, args| async move {
+    vm.register_async_builtin("http_server_request", |ctx, args| async move {
         if args.len() < 2 {
             return Err(vm_error("http_server_request: requires server and request"));
         }
         let server_id = server_from_value(&args[0], "http_server_request")?;
-        run_http_server_request(&server_id, args[1].clone()).await
+        run_http_server_request(&ctx, &server_id, args[1].clone()).await
     });
 
-    vm.register_async_builtin("http_server_test", |_ctx, args| async move {
+    vm.register_async_builtin("http_server_test", |ctx, args| async move {
         if args.len() < 2 {
             return Err(vm_error("http_server_test: requires server and request"));
         }
         let server_id = server_from_value(&args[0], "http_server_test")?;
-        run_http_server_request(&server_id, args[1].clone()).await
+        run_http_server_request(&ctx, &server_id, args[1].clone()).await
     });
 
     vm.register_builtin("http_server_set_ready", |args, _out| {
@@ -860,7 +869,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_ready", |_ctx, args| async move {
+    vm.register_async_builtin("http_server_ready", |ctx, args| async move {
         let Some(server_arg) = args.first() else {
             return Err(vm_error("http_server_ready: requires server"));
         };
@@ -878,6 +887,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
             return Ok(VmValue::Bool(server.ready));
         };
         let result = call_server_closure(
+            &ctx,
             &readiness,
             &[http_server_handle_value(&server_id)],
             "http_server_ready",
@@ -907,7 +917,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         Ok(http_server_handle_value(&server_id))
     });
 
-    vm.register_async_builtin("http_server_shutdown", |_ctx, args| async move {
+    vm.register_async_builtin("http_server_shutdown", |ctx, args| async move {
         let Some(server_arg) = args.first() else {
             return Err(vm_error("http_server_shutdown: requires server"));
         };
@@ -924,6 +934,7 @@ fn register_http_server_builtins(vm: &mut Vm) {
         })?;
         for hook in hooks {
             let _ = call_server_closure(
+                &ctx,
                 &hook,
                 &[http_server_handle_value(&server_id)],
                 "http_server_shutdown",

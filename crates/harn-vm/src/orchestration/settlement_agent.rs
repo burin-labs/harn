@@ -142,6 +142,15 @@ pub async fn run_settlement_agent_loop(
     return_value: Value,
     options: Value,
 ) -> Value {
+    run_settlement_agent_loop_with_ctx(None, initial_unsettled, return_value, options).await
+}
+
+pub async fn run_settlement_agent_loop_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    initial_unsettled: Value,
+    return_value: Value,
+    options: Value,
+) -> Value {
     let budget = decode_drain_budget(&options);
     let _guard = SettlementAgentGuard::new();
     let audit_baseline = lifecycle_audit_log_snapshot().len();
@@ -174,7 +183,7 @@ pub async fn run_settlement_agent_loop(
         if snapshot.is_empty() {
             break;
         }
-        let progress = drain_one_iteration(&snapshot).await;
+        let progress = drain_one_iteration(ctx, &snapshot).await;
         total_processed += progress.total();
         if progress.total() == 0 {
             // The loop could not make progress on any bucket this iteration —
@@ -248,6 +257,7 @@ fn unsettled_is_empty(value: &Value) -> bool {
 /// `emit_drain_decision`, which routes through the `OnDrainDecision`
 /// lifecycle hook (P-06) before persisting.
 async fn drain_one_iteration(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     snapshot: &crate::orchestration::UnsettledStateSnapshot,
 ) -> IterationProgress {
     let mut progress = IterationProgress::default();
@@ -266,6 +276,7 @@ async fn drain_one_iteration(
             .cloned()
             .unwrap_or(Value::Null);
         emit_drain_decision(
+            ctx,
             "cancel",
             "suspended_subagent",
             handle,
@@ -286,6 +297,7 @@ async fn drain_one_iteration(
     if let Some(item) = snapshot.queued_triggers.first() {
         let id = item.get("id").cloned().unwrap_or(Value::Null);
         emit_drain_decision(
+            ctx,
             "acknowledge",
             "queued_trigger",
             id,
@@ -322,6 +334,7 @@ async fn drain_one_iteration(
             serde_json::json!({"disposition": "deferred", "source": "settlement_agent"}),
         );
         emit_drain_decision(
+            ctx,
             "acknowledge",
             "partial_handoff",
             item_id,
@@ -339,6 +352,7 @@ async fn drain_one_iteration(
     if let Some(item) = snapshot.in_flight_llm_calls.first() {
         let id = item.get("call_id").cloned().unwrap_or(Value::Null);
         emit_drain_decision(
+            ctx,
             "drain",
             "in_flight_llm_call",
             id,
@@ -358,6 +372,7 @@ async fn drain_one_iteration(
             .cloned()
             .unwrap_or(Value::Null);
         emit_drain_decision(
+            ctx,
             "defer",
             "pool_pending_task",
             id,
@@ -377,6 +392,7 @@ async fn drain_one_iteration(
 /// `record_emit_audit_with_hooks` path used by `harness.emit_audit`
 /// (P-06) but factored to keep the loop body readable.
 async fn emit_drain_decision(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     action: &str,
     category: &str,
     item_id: Value,
@@ -400,8 +416,12 @@ async fn emit_drain_decision(
         "payload": payload.clone(),
     });
     let mut effective = payload;
-    match super::hooks::run_lifecycle_hooks_with_control(HookEvent::OnDrainDecision, &hook_payload)
-        .await
+    match super::hooks::run_lifecycle_hooks_with_control_with_ctx(
+        ctx,
+        HookEvent::OnDrainDecision,
+        &hook_payload,
+    )
+    .await
     {
         Ok(HookControl::Allow) | Err(_) => {}
         Ok(HookControl::Block { .. }) => return,

@@ -298,14 +298,17 @@ pub fn reset_channel_state() {
     crate::channel_guardrails::clear();
 }
 
-pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+pub(crate) async fn emit_channel_from_vm(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let name = required_string(args.first(), "emit_channel", "name")?;
     let payload = vm_value_to_json(
         args.get(1)
             .ok_or_else(|| VmError::TypeError("emit_channel: missing payload".to_string()))?,
     );
     let options = parse_options(args.get(2), "emit_channel")?;
-    let context = ChannelContext::current();
+    let context = ChannelContext::current(ctx);
     let resolved = resolve_channel(&name, &options, &context)?;
     let event_id = options
         .id
@@ -329,9 +332,13 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
         "event_id": event_id,
         "emitted_by": emitted_by,
     });
-    let decision =
-        crate::channel_guardrails::evaluate(&payload, &guardrail_context, &resolved.resolved_name)
-            .await?;
+    let decision = crate::channel_guardrails::evaluate(
+        ctx,
+        &payload,
+        &guardrail_context,
+        &resolved.resolved_name,
+    )
+    .await?;
     if matches!(
         decision.verdict,
         crate::channel_guardrails::Verdict::Block { .. }
@@ -433,7 +440,7 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
             .get("payload")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        let context_for_fanout = ChannelContext::current();
+        let context_for_fanout = ChannelContext::current(ctx);
         let fanout_payload = ChannelEventPayload {
             id: event_id.clone(),
             name: parse_name(&name)
@@ -448,16 +455,19 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
             session_id: context_for_fanout.session_id_for_receipt(&resolved),
             pipeline_id: context_for_fanout.pipeline_id_for_receipt(&resolved),
         };
-        dispatch_channel_emit_to_triggers(&resolved, fanout_payload, emit_link).await?;
+        dispatch_channel_emit_to_triggers(ctx, &resolved, fanout_payload, emit_link).await?;
     }
     emit_span.end();
     Ok(crate::stdlib::json_to_vm_value(&receipt))
 }
 
-pub(crate) async fn channel_events_from_vm(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+pub(crate) async fn channel_events_from_vm(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let name = required_string(args.first(), "channel_events", "name")?;
     let options = parse_options(args.get(1), "channel_events")?;
-    let context = ChannelContext::current();
+    let context = ChannelContext::current(ctx);
     let resolved = resolve_channel(&name, &options, &context)?;
     let events = log_for_scope(resolved.scope)
         .read_range(
@@ -477,9 +487,9 @@ pub(crate) async fn channel_events_from_vm(args: Vec<VmValue>) -> Result<VmValue
 }
 
 impl ChannelContext {
-    fn current() -> Self {
+    fn current(ctx: Option<&crate::vm::AsyncBuiltinCtx>) -> Self {
         let mut context = Self::default();
-        if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
+        if let Some(vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) {
             context.task_id = Some(vm.runtime_context.task_id.clone());
             context.root_task_id = Some(vm.runtime_context.root_task_id.clone());
             context.scope_id = vm.runtime_context.scope_id.clone();
@@ -1771,6 +1781,7 @@ fn validate_selector_name(name: &str) -> Result<(), String> {
 /// `window` elapses with fewer than `count` events, the dispatcher
 /// either fires a partial batch (default) or discards the buffer.
 async fn dispatch_channel_emit_to_triggers(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     resolved: &ResolvedChannel,
     payload: ChannelEventPayload,
     emit_link: Option<crate::tracing::SpanLink>,
@@ -1789,12 +1800,12 @@ async fn dispatch_channel_emit_to_triggers(
     // a stale buffer can't outlive the trigger lifecycle. Tests can also
     // call `flush_trigger_aggregations()` directly for deterministic
     // window-expire coverage.
-    flush_expired_aggregations_inner().await;
+    flush_expired_aggregations_inner(ctx).await;
 
     if bindings.is_empty() {
         return Ok(());
     }
-    let Some(base_vm) = crate::vm::clone_async_builtin_child_vm() else {
+    let Some(base_vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
         // No host VM (e.g. raw test path); nothing to dispatch.
         return Ok(());
     };
@@ -1943,12 +1954,12 @@ async fn fire_channel_match(
 /// the `flush_trigger_aggregations()` builtin so Harn scripts (and the
 /// production runtime) can deterministically advance window-expire
 /// processing.
-pub(crate) async fn flush_expired_aggregations_inner() {
+pub(crate) async fn flush_expired_aggregations_inner(ctx: Option<&crate::vm::AsyncBuiltinCtx>) {
     let expirations = crate::triggers::aggregation::drain_expired_aggregations();
     if expirations.is_empty() {
         return;
     }
-    let Some(base_vm) = crate::vm::clone_async_builtin_child_vm() else {
+    let Some(base_vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
         return;
     };
     let log = active_event_log()

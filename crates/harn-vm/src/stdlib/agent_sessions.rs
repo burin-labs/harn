@@ -965,7 +965,7 @@ async fn agent_session_reanchor_builtin(
     doc = "Compact an agent session transcript with the host compaction runtime."
 )]
 async fn agent_session_compact_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let id = arg_string_required(&args, 0, "agent_session_compact", "id")?;
@@ -995,9 +995,14 @@ async fn agent_session_compact_builtin(
             .with_reminder_events(reminder_events)
             .with_provider_options(provider_options);
 
-    let Some(outcome) =
-        crate::orchestration::run_compaction_lifecycle(&mut messages, &mut config, None, lifecycle)
-            .await?
+    let Some(outcome) = crate::orchestration::run_compaction_lifecycle_with_ctx(
+        Some(&ctx),
+        &mut messages,
+        &mut config,
+        None,
+        lifecycle,
+    )
+    .await?
     else {
         return Ok(VmValue::Int(original_count as i64));
     };

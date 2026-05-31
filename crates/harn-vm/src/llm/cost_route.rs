@@ -149,7 +149,10 @@ pub(crate) fn merge_context_options(
     Some(merged)
 }
 
-pub(crate) async fn cost_route_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+pub(crate) async fn cost_route_impl(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let config = match args.first().and_then(VmValue::as_dict) {
         Some(config) => normalize_config(config.clone()),
         None => {
@@ -167,16 +170,14 @@ pub(crate) async fn cost_route_impl(args: Vec<VmValue>) -> Result<VmValue, VmErr
         }
     };
 
-    let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("cost_route requires an async builtin VM context".to_string())
-    })?;
+    let mut child_vm = ctx.child_vm();
     let mut stack = COST_ROUTE_STACK
         .try_with(|current| current.clone())
         .unwrap_or_default();
     stack.push(config);
-    COST_ROUTE_STACK
-        .scope(stack, async move {
-            child_vm.call_closure_pub(&closure, &[]).await
-        })
-        .await
+    let result = COST_ROUTE_STACK
+        .scope(stack, child_vm.call_closure_pub(&closure, &[]))
+        .await;
+    ctx.forward_output(&child_vm.take_output());
+    result
 }

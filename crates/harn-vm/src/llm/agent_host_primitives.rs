@@ -353,6 +353,7 @@ fn agent_primitive_max_concurrent_tools(options: &BTreeMap<String, VmValue>) -> 
 }
 
 async fn host_agent_dispatch_tool_call_indexed<'a>(
+    ctx: crate::vm::AsyncBuiltinCtx,
     index: usize,
     call: VmValue,
     tools: Option<&'a VmValue>,
@@ -360,11 +361,12 @@ async fn host_agent_dispatch_tool_call_indexed<'a>(
 ) -> (usize, Result<VmValue, VmError>) {
     (
         index,
-        host_agent_dispatch_tool_call(call, tools, options).await,
+        host_agent_dispatch_tool_call(ctx, call, tools, options).await,
     )
 }
 
 async fn host_agent_dispatch_tool_batch_capped(
+    ctx: crate::vm::AsyncBuiltinCtx,
     calls: Vec<VmValue>,
     tools: Option<&VmValue>,
     options: &BTreeMap<String, VmValue>,
@@ -385,7 +387,11 @@ async fn host_agent_dispatch_tool_batch_capped(
             break;
         };
         in_flight.push(host_agent_dispatch_tool_call_indexed(
-            index, call, tools, options,
+            ctx.clone(),
+            index,
+            call,
+            tools,
+            options,
         ));
     }
 
@@ -393,7 +399,11 @@ async fn host_agent_dispatch_tool_batch_capped(
         results[index] = Some(result?);
         if let Some((next_index, next_call)) = pending.next() {
             in_flight.push(host_agent_dispatch_tool_call_indexed(
-                next_index, next_call, tools, options,
+                ctx.clone(),
+                next_index,
+                next_call,
+                tools,
+                options,
             ));
         }
     }
@@ -412,7 +422,7 @@ async fn host_agent_dispatch_tool_batch_capped(
     runtime_only = true
 )]
 async fn host_agent_dispatch_tool_batch_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let mut args = args.into_iter();
@@ -440,11 +450,13 @@ async fn host_agent_dispatch_tool_batch_impl(
     let results = if cap <= 1 || calls.len() <= 1 {
         let mut results = Vec::with_capacity(calls.len());
         for call in calls {
-            results.push(host_agent_dispatch_tool_call(call, tools.as_ref(), &options).await?);
+            results.push(
+                host_agent_dispatch_tool_call(ctx.clone(), call, tools.as_ref(), &options).await?,
+            );
         }
         results
     } else {
-        host_agent_dispatch_tool_batch_capped(calls, tools.as_ref(), &options, cap).await?
+        host_agent_dispatch_tool_batch_capped(ctx, calls, tools.as_ref(), &options, cap).await?
     };
 
     Ok(VmValue::List(Rc::new(results)))
@@ -458,7 +470,7 @@ async fn host_agent_dispatch_tool_batch_impl(
     runtime_only = true
 )]
 async fn host_agent_dispatch_tool_call_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let mut args = args.into_iter();
@@ -470,10 +482,11 @@ async fn host_agent_dispatch_tool_call_impl(
     let tools = agent_primitive_tools_value_arg(args.next(), "__host_agent_dispatch_tool_call")?;
     let options =
         agent_primitive_options_value_arg(args.next(), "__host_agent_dispatch_tool_call")?;
-    host_agent_dispatch_tool_call(call, tools.as_ref(), &options).await
+    host_agent_dispatch_tool_call(ctx, call, tools.as_ref(), &options).await
 }
 
 async fn host_agent_dispatch_tool_call(
+    ctx: crate::vm::AsyncBuiltinCtx,
     call: VmValue,
     tools: Option<&VmValue>,
     options: &BTreeMap<String, VmValue>,
@@ -548,6 +561,7 @@ async fn host_agent_dispatch_tool_call(
 
     let mut permission_grants = permissions::take_session_grants(&session_id);
     let permission_outcome = permissions::check_dynamic_permission(
+        Some(&ctx),
         &mut permission_grants,
         &tool_name,
         &tool_args,
@@ -760,7 +774,8 @@ async fn host_agent_dispatch_tool_call(
     let mut hook_reminder_reports = Vec::new();
     let (pre_tool_action, reports) = crate::orchestration::scope_hook_reminder_reports(
         crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-            crate::orchestration::run_pre_tool_hooks(&tool_name, &tool_args).await
+            crate::orchestration::run_pre_tool_hooks_with_ctx(Some(&ctx), &tool_name, &tool_args)
+                .await
         }),
     )
     .await;
@@ -872,6 +887,7 @@ async fn host_agent_dispatch_tool_call(
     .unwrap_or((None, None));
     let dispatch_future = crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
         agent_tools::dispatch_tool_execution_with_mcp(
+            Some(&ctx),
             &tool_name,
             &tool_args,
             tools,
@@ -952,7 +968,8 @@ async fn host_agent_dispatch_tool_call(
             let rendered_before_hooks = agent_tools::render_tool_result(&raw_result);
             let (rendered, reports) = crate::orchestration::scope_hook_reminder_reports(
                 crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-                    crate::orchestration::run_post_tool_hooks(
+                    crate::orchestration::run_post_tool_hooks_with_ctx(
+                        Some(&ctx),
                         &tool_name,
                         &tool_args,
                         &rendered_before_hooks,
@@ -981,6 +998,7 @@ async fn host_agent_dispatch_tool_call(
                 "final_size": rendered.len(),
             });
             let reminder_report = super::reminder_providers::evaluate_and_inject(
+                Some(&ctx),
                 crate::orchestration::HookEvent::PostToolUse,
                 &session_id,
                 reminder_payload,
@@ -1268,7 +1286,7 @@ async fn host_mcp_disconnect_impl(
     runtime_only = true
 )]
 async fn host_agent_reminder_providers_fire_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
@@ -1314,6 +1332,7 @@ async fn host_agent_reminder_providers_fire_impl(
         "__host_agent_reminder_providers_fire",
     )?;
     let report = super::reminder_providers::evaluate_and_inject(
+        Some(&ctx),
         event,
         &session_id,
         payload,

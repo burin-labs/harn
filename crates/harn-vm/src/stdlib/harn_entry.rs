@@ -5,7 +5,7 @@ use std::rc::Rc;
 use serde::de::DeserializeOwned;
 
 use crate::value::{VmError, VmValue};
-use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
+use crate::vm::{AsyncBuiltinCtx, Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 pub(crate) fn register_harn_entrypoint_category(vm: &mut Vm, category: &str) {
     for module in harn_stdlib::entrypoint_modules() {
@@ -57,9 +57,9 @@ struct HarnEntrypoint {
 
 impl HarnEntrypoint {
     fn register(self, vm: &mut Vm) {
-        vm.register_async_builtin_with_metadata(self.metadata(), move |_ctx, args| {
+        vm.register_async_builtin_with_metadata(self.metadata(), move |ctx, args| {
             let entrypoint = self.clone();
-            Box::pin(async move { call_harn_export(entrypoint, args).await })
+            Box::pin(async move { call_harn_export(&ctx, entrypoint, args).await })
         });
     }
 
@@ -76,10 +76,12 @@ impl HarnEntrypoint {
 }
 
 async fn call_harn_export(
+    ctx: &AsyncBuiltinCtx,
     entrypoint: HarnEntrypoint,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     call_harn_export_by_name(
+        ctx,
         &entrypoint.import_path,
         &entrypoint.export_name,
         &entrypoint.public_name,
@@ -89,16 +91,13 @@ async fn call_harn_export(
 }
 
 pub(crate) async fn call_harn_export_by_name(
+    ctx: &AsyncBuiltinCtx,
     import_path: &str,
     export_name: &str,
     label: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime(format!(
-            "{label}: Harn stdlib dispatch requires an async VM context"
-        ))
-    })?;
+    let mut vm = ctx.child_vm();
     let saved_env = std::mem::take(&mut vm.env);
     let saved_imported_paths = std::mem::take(&mut vm.imported_paths);
     let saved_source_dir = vm.source_dir.clone();
@@ -114,16 +113,18 @@ pub(crate) async fn call_harn_export_by_name(
     })?;
     let result = vm.call_closure_pub(&closure, args).await;
     let output = vm.take_output();
-    crate::vm::forward_child_output_to_parent(&output);
+    ctx.forward_output(&output);
     result
 }
 
 pub(crate) async fn call_agent_loop(
+    ctx: &AsyncBuiltinCtx,
     prompt: String,
     system: Option<String>,
     options: std::collections::BTreeMap<String, VmValue>,
 ) -> Result<VmValue, VmError> {
     call_harn_export_by_name(
+        ctx,
         "std/agent/loop",
         "agent_loop",
         "workflow_stage_agent_loop",
@@ -139,12 +140,14 @@ pub(crate) async fn call_agent_loop(
 }
 
 pub(crate) async fn call_harn_export_json(
+    ctx: &AsyncBuiltinCtx,
     import_path: &str,
     export_name: &str,
     label: &str,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, VmError> {
     let result = call_harn_export_by_name(
+        ctx,
         import_path,
         export_name,
         label,
@@ -155,6 +158,7 @@ pub(crate) async fn call_harn_export_json(
 }
 
 pub(crate) async fn call_harn_export_typed<T>(
+    ctx: &AsyncBuiltinCtx,
     import_path: &str,
     export_name: &str,
     label: &str,
@@ -163,7 +167,7 @@ pub(crate) async fn call_harn_export_typed<T>(
 where
     T: DeserializeOwned,
 {
-    let result = call_harn_export_json(import_path, export_name, label, payload).await?;
+    let result = call_harn_export_json(ctx, import_path, export_name, label, payload).await?;
     serde_json::from_value(result)
         .map_err(|error| VmError::Runtime(format!("{label} returned invalid shape: {error}")))
 }

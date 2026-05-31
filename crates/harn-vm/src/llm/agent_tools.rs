@@ -86,6 +86,7 @@ pub(super) async fn dispatch_tool_execution(
     tool_backoff_ms: u64,
 ) -> ToolDispatchOutcome {
     dispatch_tool_execution_with_mcp(
+        None,
         tool_name,
         tool_args,
         tools_val,
@@ -98,6 +99,7 @@ pub(super) async fn dispatch_tool_execution(
 }
 
 pub(super) async fn dispatch_tool_execution_with_mcp(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     tool_name: &str,
     tool_args: &serde_json::Value,
     tools_val: Option<&VmValue>,
@@ -183,7 +185,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 // MCP-served tools defined by the host are typically served
                 // through the host bridge today; preserve that path. A
                 // Harn-side `handler` overrides (custom MCP wrappers).
-                let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+                let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                     return ToolDispatchOutcome {
                         result: Err(VmError::CategorizedError {
                             message: format!(
@@ -198,7 +200,9 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
                 let outcome = vm.call_closure_pub(&handler, &[args_vm]).await;
                 let captured = vm.take_output();
-                crate::vm::forward_child_output_to_parent(&captured);
+                if let Some(ctx) = ctx {
+                    ctx.forward_output(&captured);
+                }
                 match outcome {
                     Ok(val) => Ok(serde_json::Value::String(val.display())),
                     Err(VmError::CategorizedError {
@@ -251,7 +255,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 Some(server_name) => ToolExecutor::McpServer { server_name },
                 None => ToolExecutor::HarnBuiltin,
             });
-            let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+            let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                 return ToolDispatchOutcome {
                     result: Err(VmError::CategorizedError {
                         message: format!(
@@ -266,7 +270,9 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
             let outcome = vm.call_closure_pub(&handler, &[args_vm]).await;
             let captured = vm.take_output();
-            crate::vm::forward_child_output_to_parent(&captured);
+            if let Some(ctx) = ctx {
+                ctx.forward_output(&captured);
+            }
             match outcome {
                 Ok(val) => Ok(serde_json::Value::String(val.display())),
                 Err(VmError::CategorizedError {

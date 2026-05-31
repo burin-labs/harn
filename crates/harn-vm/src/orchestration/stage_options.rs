@@ -24,6 +24,7 @@ impl WorkflowStageAgentOptions {
 }
 
 pub async fn prepare_workflow_stage_agent_options(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     node: &WorkflowNode,
     session_id: &str,
     has_tools: bool,
@@ -45,6 +46,7 @@ pub async fn prepare_workflow_stage_agent_options(
         },
     });
     let prepared: WorkflowStageAgentOptions = crate::stdlib::harn_entry::call_harn_export_typed(
+        ctx,
         "std/workflow/options",
         "workflow_stage_agent_options",
         "workflow_stage_agent_options",

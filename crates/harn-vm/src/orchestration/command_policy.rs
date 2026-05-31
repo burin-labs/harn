@@ -220,6 +220,14 @@ pub async fn run_command_policy_preflight(
     params: &BTreeMap<String, VmValue>,
     caller: JsonValue,
 ) -> Result<CommandPolicyPreflight, VmError> {
+    run_command_policy_preflight_with_ctx(None, params, caller).await
+}
+
+pub async fn run_command_policy_preflight_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    params: &BTreeMap<String, VmValue>,
+    caller: JsonValue,
+) -> Result<CommandPolicyPreflight, VmError> {
     let Some(policy) = current_command_policy() else {
         return Ok(CommandPolicyPreflight::Proceed {
             params: params.clone(),
@@ -304,7 +312,7 @@ pub async fn run_command_policy_preflight(
     }
 
     if let Some(pre) = policy.pre.as_ref() {
-        let action = invoke_command_hook(pre, &context).await?;
+        let action = invoke_command_hook(ctx, pre, &context).await?;
         match parse_pre_hook_action(action)? {
             ParsedPreHookAction::Allow => {}
             ParsedPreHookAction::Deny(message) => {
@@ -431,6 +439,16 @@ pub async fn run_command_policy_preflight(
 }
 
 pub async fn run_command_policy_postflight(
+    params: &BTreeMap<String, VmValue>,
+    result: VmValue,
+    pre_context: JsonValue,
+    decisions: Vec<CommandPolicyDecision>,
+) -> Result<VmValue, VmError> {
+    run_command_policy_postflight_with_ctx(None, params, result, pre_context, decisions).await
+}
+
+pub async fn run_command_policy_postflight_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     _params: &BTreeMap<String, VmValue>,
     result: VmValue,
     pre_context: JsonValue,
@@ -455,7 +473,7 @@ pub async fn run_command_policy_postflight(
         obj.insert("result".to_string(), result_json);
         obj.insert("post_scan".to_string(), post_scan);
     }
-    let action = invoke_command_hook(post, &context).await?;
+    let action = invoke_command_hook(ctx, post, &context).await?;
     let (result, annotation) = parse_post_hook_action(action, result)?;
     if annotation.is_some() {
         decisions.push(decision(
@@ -583,10 +601,11 @@ fn decision_json(decision: &CommandPolicyDecision) -> JsonValue {
 }
 
 async fn invoke_command_hook(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     closure: &Rc<VmClosure>,
     payload: &JsonValue,
 ) -> Result<VmValue, VmError> {
-    let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+    let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
         return Err(VmError::Runtime(
             "command policy hook requires an async builtin VM context".to_string(),
         ));

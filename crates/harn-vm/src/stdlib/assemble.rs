@@ -2,8 +2,8 @@
 //! [`crate::orchestration::assemble_context`] core.
 //!
 //! The builtin is registered on the agent tier because the pluggable
-//! ranker is invoked as a Harn closure, which requires an async-builtin
-//! VM context (`clone_async_builtin_child_vm`).
+//! ranker is invoked as a Harn closure, which requires an async-builtin VM
+//! context.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -13,17 +13,20 @@ use crate::orchestration::{
     AssembleOptions, AssembleStrategy, AssembledChunk, AssembledContext,
 };
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 use super::agents::parse_artifact_list;
 
 pub(crate) fn register_assemble_context_builtin(vm: &mut Vm) {
-    vm.register_async_builtin("assemble_context", |_ctx, args| async move {
-        assemble_context_impl(args).await
+    vm.register_async_builtin("assemble_context", |ctx, args| async move {
+        assemble_context_impl(&ctx, args).await
     });
 }
 
-async fn assemble_context_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn assemble_context_impl(
+    ctx: &AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let options_value = args.first().cloned().unwrap_or(VmValue::Nil);
     let dict = options_value.as_dict().ok_or_else(|| {
         VmError::Runtime(
@@ -44,6 +47,7 @@ async fn assemble_context_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             VmValue::String(Rc::from(options.query.clone().unwrap_or_default().as_str()));
         let chunks_vm = VmValue::List(Rc::new(candidates.iter().map(chunk_to_ranker_vm).collect()));
         let scores = invoke_ranker_callback(
+            ctx,
             ranker.as_ref().unwrap(),
             &query_vm,
             &chunks_vm,
@@ -161,6 +165,7 @@ fn chunk_to_ranker_vm(chunk: &AssembledChunk) -> VmValue {
 }
 
 async fn invoke_ranker_callback(
+    ctx: &AsyncBuiltinCtx,
     callback: &VmValue,
     query: &VmValue,
     chunks: &VmValue,
@@ -171,11 +176,7 @@ async fn invoke_ranker_callback(
             "assemble_context: ranker_callback must be a closure".to_string(),
         ));
     };
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime(
-            "assemble_context: ranker_callback requires an async builtin VM context".to_string(),
-        )
-    })?;
+    let mut vm = ctx.child_vm();
     let result = vm
         .call_closure_pub(&closure, &[query.clone(), chunks.clone()])
         .await?;
@@ -379,6 +380,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
 /// parse the same options dict shape but without requiring an artifacts
 /// array (the caller supplies them separately).
 pub async fn assemble_from_options(
+    ctx: &AsyncBuiltinCtx,
     artifacts: &[ArtifactRecord],
     options_value: &VmValue,
 ) -> Result<AssembledContext, VmError> {
@@ -397,6 +399,7 @@ pub async fn assemble_from_options(
         let chunks_vm = VmValue::List(Rc::new(candidates.iter().map(chunk_to_ranker_vm).collect()));
         Some(
             invoke_ranker_callback(
+                ctx,
                 ranker.as_ref().unwrap(),
                 &query_vm,
                 &chunks_vm,

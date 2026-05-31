@@ -6,10 +6,10 @@ use std::time::Instant;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use futures::future::join_all;
 use harn_vm::orchestration::{
-    clear_runtime_hooks, matching_vm_lifecycle_hooks, register_vm_hook, run_lifecycle_hooks,
-    HookEvent,
+    clear_runtime_hooks, matching_vm_lifecycle_hooks, register_vm_hook,
+    run_lifecycle_hooks_with_ctx, HookEvent,
 };
-use harn_vm::{register_vm_stdlib, reset_thread_local_state, with_async_builtin_ctx_sync, Vm};
+use harn_vm::{register_vm_stdlib, reset_thread_local_state, AsyncBuiltinCtx, Vm};
 use serde_json::{json, Value as JsonValue};
 use tokio::runtime::{Builder, Runtime};
 
@@ -118,11 +118,11 @@ fn fixture(fanout: usize) -> HookDispatchFixture {
     HookDispatchFixture { fanout, payloads }
 }
 
-async fn dispatch_fanout(payloads: &[JsonValue]) {
+async fn dispatch_fanout(ctx: &AsyncBuiltinCtx, payloads: &[JsonValue]) {
     let results = join_all(
         payloads
             .iter()
-            .map(|payload| run_lifecycle_hooks(HOOK_EVENT, payload)),
+            .map(|payload| run_lifecycle_hooks_with_ctx(Some(ctx), HOOK_EVENT, payload)),
     )
     .await;
 
@@ -131,17 +131,17 @@ async fn dispatch_fanout(payloads: &[JsonValue]) {
     }
 }
 
-fn measure_once(runtime: &Runtime, fixture: &HookDispatchFixture) {
-    runtime.block_on(dispatch_fanout(&fixture.payloads));
+fn measure_once(runtime: &Runtime, ctx: &AsyncBuiltinCtx, fixture: &HookDispatchFixture) {
+    runtime.block_on(dispatch_fanout(ctx, &fixture.payloads));
 
     let started = Instant::now();
-    runtime.block_on(dispatch_fanout(&fixture.payloads));
+    runtime.block_on(dispatch_fanout(ctx, &fixture.payloads));
     let elapsed = started.elapsed();
 
     ALLOCATION_COUNT.store(0, Ordering::Relaxed);
     ALLOCATED_BYTES.store(0, Ordering::Relaxed);
     TRACK_ALLOCATIONS.store(true, Ordering::Relaxed);
-    runtime.block_on(dispatch_fanout(&fixture.payloads));
+    runtime.block_on(dispatch_fanout(ctx, &fixture.payloads));
     TRACK_ALLOCATIONS.store(false, Ordering::Relaxed);
 
     let hook_count = fixture.fanout as f64;
@@ -161,31 +161,26 @@ fn measure_once(runtime: &Runtime, fixture: &HookDispatchFixture) {
 fn bench_hook_dispatch(c: &mut Criterion) {
     let runtime = runtime();
     let vm = install_noop_hook(&runtime);
-    // Bind the VM as the async-builtin context for the whole bench: hook
-    // dispatch resolves a `clone_async_builtin_child_vm` root, and `block_on`
-    // polls inline on this thread so the sync scope is visible throughout.
-    // (Replaces the old `install_async_builtin_child_vm` RAII guard.) harn#2667.
-    with_async_builtin_ctx_sync(vm, || {
-        let fixtures: Vec<HookDispatchFixture> = FANOUTS.into_iter().map(fixture).collect();
-        for fixture in &fixtures {
-            measure_once(&runtime, fixture);
-        }
+    let ctx = AsyncBuiltinCtx::from_vm(vm);
+    let fixtures: Vec<HookDispatchFixture> = FANOUTS.into_iter().map(fixture).collect();
+    for fixture in &fixtures {
+        measure_once(&runtime, &ctx, fixture);
+    }
 
-        let mut group = c.benchmark_group("hook_dispatch/noop_lifecycle_hook");
-        for fixture in &fixtures {
-            group.throughput(Throughput::Elements(fixture.fanout as u64));
-            group.bench_with_input(
-                BenchmarkId::from_parameter(format!("fanout_{:03}", fixture.fanout)),
-                fixture,
-                |b, fixture| {
-                    b.iter(|| {
-                        runtime.block_on(dispatch_fanout(black_box(&fixture.payloads)));
-                    });
-                },
-            );
-        }
-        group.finish();
-    });
+    let mut group = c.benchmark_group("hook_dispatch/noop_lifecycle_hook");
+    for fixture in &fixtures {
+        group.throughput(Throughput::Elements(fixture.fanout as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("fanout_{:03}", fixture.fanout)),
+            fixture,
+            |b, fixture| {
+                b.iter(|| {
+                    runtime.block_on(dispatch_fanout(&ctx, black_box(&fixture.payloads)));
+                });
+            },
+        );
+    }
+    group.finish();
 }
 
 criterion_group! {

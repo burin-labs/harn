@@ -446,6 +446,7 @@ fn applies_to_matches(rule_stacks: &[String], requested: &[String]) -> bool {
 }
 
 async fn invoke_rule_pattern(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     pattern: &VmValue,
     command: &str,
     context: &VmValue,
@@ -460,10 +461,10 @@ async fn invoke_rule_pattern(
             Ok(regex.is_match(command))
         }
         callable if Vm::is_callable_value(callable) => {
-            let mut vm = crate::vm::clone_async_builtin_child_vm()
-                .ok_or_else(|| err("tool_hooks_match: builtin requires VM execution context"))?;
+            let mut vm = ctx.child_vm();
             let command = VmValue::String(Rc::from(command));
             let result = vm.call_callable_two(callable, &command, context).await?;
+            ctx.forward_output(&vm.take_output());
             Ok(result.is_truthy())
         }
         other => Err(err(format!(
@@ -787,7 +788,7 @@ fn tool_hooks_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     kind = "async"
 )]
 async fn tool_hooks_match_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let registry = require_tagged(
@@ -838,7 +839,7 @@ async fn tool_hooks_match_impl(
             let Some(pattern) = rule_dict.get("pattern") else {
                 continue;
             };
-            if invoke_rule_pattern(pattern, &command, &context).await? {
+            if invoke_rule_pattern(&ctx, pattern, &command, &context).await? {
                 let record = make_match_record(catalogue_dict, rule_dict);
                 matches.push((
                     cat_idx,

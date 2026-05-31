@@ -13,7 +13,7 @@ use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{value_structural_hash_key, VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 const EVENT_KIND_COMPLETED: &str = "step.run.completed";
 const STEP_LOG_SCHEMA: &str = "harn.step.run.v0";
@@ -68,10 +68,10 @@ pub(crate) fn register_durable_step_builtins(vm: &mut Vm) {
     category = "durable_step"
 )]
 async fn step_run_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    step_run(args).await
+    step_run(&ctx, args).await
 }
 
 #[harn_builtin(
@@ -80,10 +80,10 @@ async fn step_run_impl(
     category = "durable_step"
 )]
 async fn step_inspect_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    step_inspect(args).await
+    step_inspect(&ctx, args).await
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&STEP_RUN_IMPL_DEF, &STEP_INSPECT_IMPL_DEF];
@@ -105,11 +105,9 @@ fn register_step_namespace(vm: &mut Vm) {
     );
 }
 
-async fn step_run(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+async fn step_run(ctx: &AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let request = parse_step_run_request(args)?;
-    let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("step.run: builtin requires VM execution context".to_string())
-    })?;
+    let mut child_vm = ctx.child_vm();
     let namespace = request
         .options
         .namespace
@@ -130,7 +128,7 @@ async fn step_run(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let result = child_vm
         .call_callable_owned(&request.callable, call_args)
         .await;
-    crate::vm::forward_child_output_to_parent(&child_vm.take_output());
+    ctx.forward_output(&child_vm.take_output());
     let result = result?;
     let result_json = vm_value_to_json(&result);
 
@@ -172,10 +170,8 @@ async fn step_run(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(result)
 }
 
-async fn step_inspect(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("step.inspect: builtin requires VM execution context".to_string())
-    })?;
+async fn step_inspect(ctx: &AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let child_vm = ctx.child_vm();
     let namespace = parse_step_inspect_namespace(args, &child_vm)?;
     let topic = topic_for_namespace(&namespace)?;
     let records = read_step_records(&ensure_step_event_log(), &topic).await?;

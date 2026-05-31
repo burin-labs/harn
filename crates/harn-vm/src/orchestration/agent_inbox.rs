@@ -99,6 +99,17 @@ fn registry() -> &'static InboxRegistry {
     REGISTRY.get_or_init(InboxRegistry::new)
 }
 
+#[cfg(test)]
+fn reset_gate() -> &'static Mutex<()> {
+    static RESET_GATE: OnceLock<Mutex<()>> = OnceLock::new();
+    RESET_GATE.get_or_init(|| Mutex::new(()))
+}
+
+#[cfg(test)]
+pub(crate) fn lock_reset_for_test() -> MutexGuard<'static, ()> {
+    reset_gate().lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn lock_map(reg: &InboxRegistry) -> MutexGuard<'_, HashMap<String, InboxState>> {
     reg.inboxes.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -213,6 +224,8 @@ pub fn clear_session(session_id: &str) {
 /// reused worker thread does not accumulate one [`InboxState`] per
 /// session id across the suite.
 pub fn reset() {
+    #[cfg(test)]
+    let _reset_guard = lock_reset_for_test();
     let reg = registry();
     let mut map = lock_map(reg);
     map.clear();

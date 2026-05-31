@@ -13,6 +13,7 @@ use crate::orchestration::{
     WorkflowSkillContextGuard,
 };
 use crate::value::{VmError, VmValue};
+use crate::vm::AsyncBuiltinCtx;
 
 use super::artifact::{
     append_child_run_record, checkpoint_run, optional_string_option, parse_execution_record,
@@ -785,6 +786,7 @@ fn failed_executed_stage_from_error(
 }
 
 async fn complete_harn_stage_call(
+    ctx: &AsyncBuiltinCtx,
     node_id: &str,
     node: &crate::orchestration::WorkflowNode,
     prepared: PreparedWorkflowStageNode,
@@ -821,18 +823,19 @@ async fn complete_harn_stage_call(
             ));
         }
     };
-    let (outcome, branch, verification) = match stage_attempt_outcome(node, &result, None).await {
-        Ok(value) => value,
-        Err(error) => {
-            return Ok(failed_executed_stage_from_error(
-                error,
-                &usage_before,
-                attempt_started_at,
-                input_transcript,
-                consumed_artifact_ids,
-            ));
-        }
-    };
+    let (outcome, branch, verification) =
+        match stage_attempt_outcome(ctx, node, &result, None).await {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(failed_executed_stage_from_error(
+                    error,
+                    &usage_before,
+                    attempt_started_at,
+                    input_transcript,
+                    consumed_artifact_ids,
+                ));
+            }
+        };
     let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
     let success = !matches!(branch.as_deref(), Some("failed"));
     Ok(ExecutedStage {
@@ -954,6 +957,7 @@ fn complete_harn_map_stage_call(
 }
 
 pub(super) async fn prepare_workflow_stage_state(
+    ctx: &AsyncBuiltinCtx,
     mut state: WorkflowRunState,
     node_id: String,
     options: &BTreeMap<String, VmValue>,
@@ -1045,6 +1049,7 @@ pub(super) async fn prepare_workflow_stage_state(
         }
     } else if node.kind == "map" {
         let selected_stage_artifacts = crate::orchestration::select_workflow_stage_artifacts(
+            ctx,
             &state.artifacts,
             &node.context_policy,
             &node.input_contract,
@@ -1077,6 +1082,7 @@ pub(super) async fn prepare_workflow_stage_state(
     ) {
         StageExecution::Precomputed(
             execute_stage_attempts(
+                ctx,
                 &state.run.task,
                 &node_id,
                 &node,
@@ -1089,6 +1095,7 @@ pub(super) async fn prepare_workflow_stage_state(
         let usage_before = llm_usage_snapshot();
         let attempt_started_at = uuid::Uuid::now_v7().to_string();
         let prepared = crate::orchestration::prepare_stage_node(
+            ctx,
             &node_id,
             &node,
             &state.run.task,
@@ -1132,6 +1139,7 @@ pub(super) async fn prepare_workflow_stage_state(
 }
 
 pub(super) async fn complete_workflow_stage_state(
+    ctx: &AsyncBuiltinCtx,
     mut state: WorkflowRunState,
     node_id: String,
     llm_result: serde_json::Value,
@@ -1168,6 +1176,7 @@ pub(super) async fn complete_workflow_stage_state(
             input_transcript,
         } => {
             complete_harn_stage_call(
+                ctx,
                 &node_id,
                 &node,
                 prepared,

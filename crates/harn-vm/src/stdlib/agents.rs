@@ -34,7 +34,7 @@ use crate::agent_events::WorkerEvent;
 use crate::orchestration::{ArtifactRecord, ContextPolicy, MutationSessionRecord};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &LIST_AGENTS_BUILTIN_DEF,
@@ -370,14 +370,17 @@ fn apply_sub_agent_replay_config(spec: &mut SubAgentRunSpec, next_task: &str, re
     }
 }
 
-fn respawn_worker_task(state: Rc<RefCell<WorkerState>>) -> Result<(), VmError> {
+fn respawn_worker_task(
+    state: Rc<RefCell<WorkerState>>,
+    ctx: &AsyncBuiltinCtx,
+) -> Result<(), VmError> {
     {
         let worker = state.borrow();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker)?;
         }
     }
-    spawn_worker_task(state);
+    spawn_worker_task(state, ctx.child_ctx());
     Ok(())
 }
 
@@ -416,12 +419,12 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
     doc = "Run or spawn a normalized Harn-authored sub-agent request."
 )]
 async fn sub_agent_run_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let request = parse_sub_agent_request(&args)?;
     if !request.background {
-        let result = execute_sub_agent(request.spec).await?;
+        let result = execute_sub_agent(&ctx, request.spec).await?;
         return Ok(crate::stdlib::json_to_vm_value(&result.payload));
     }
 
@@ -442,7 +445,7 @@ async fn sub_agent_run_builtin(
         audit: agents_workers::inherited_worker_audit("sub_agent"),
     };
     let state = fresh_worker_state(next_worker_id(), init);
-    finalize_and_run_worker(state, false, "sub_agent worker").await
+    finalize_and_run_worker(&ctx, state, false, "sub_agent worker").await
 }
 
 fn fresh_worker_state(worker_id: String, mut init: WorkerInit) -> Rc<RefCell<WorkerState>> {
@@ -489,6 +492,7 @@ fn fresh_worker_state(worker_id: String, mut init: WorkerInit) -> Rc<RefCell<Wor
 /// Persist, register, and spawn a freshly-built worker. Optionally block until
 /// it reaches a terminal state before returning the worker summary dict.
 async fn finalize_and_run_worker(
+    ctx: &AsyncBuiltinCtx,
     state: Rc<RefCell<WorkerState>>,
     wait_for_terminal: bool,
     wait_context: &'static str,
@@ -503,7 +507,7 @@ async fn finalize_and_run_worker(
     WORKER_REGISTRY.with(|registry| {
         registry.borrow_mut().insert(worker_id, state.clone());
     });
-    spawn_worker_task(state.clone());
+    spawn_worker_task(state.clone(), ctx.child_ctx());
     if wait_for_terminal {
         wait_for_worker_terminal(state.clone(), wait_context).await?;
     }
@@ -526,7 +530,7 @@ fn worker_mode_label(config: &WorkerConfig) -> &'static str {
     doc = "Spawn a workflow, stage, or sub-agent host worker."
 )]
 async fn spawn_agent_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let config = args
@@ -535,7 +539,7 @@ async fn spawn_agent_builtin(
     let init = parse_worker_config(config)?;
     let wait = init.wait;
     let state = fresh_worker_state(next_worker_id(), init);
-    finalize_and_run_worker(state, wait, "spawn_agent worker").await
+    finalize_and_run_worker(&ctx, state, wait, "spawn_agent worker").await
 }
 
 #[harn_builtin(
@@ -546,7 +550,7 @@ async fn spawn_agent_builtin(
     doc = "Resume a stopped host worker with new task input."
 )]
 async fn send_input_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
@@ -571,7 +575,7 @@ async fn send_input_builtin(
         }
         restart_worker_run(&mut worker, &next_task, true)?;
         drop(worker);
-        respawn_worker_task(state.clone())?;
+        respawn_worker_task(state.clone(), &ctx)?;
         let summary = worker_summary(&state.borrow())?;
         Ok(summary)
     })
@@ -585,7 +589,7 @@ async fn send_input_builtin(
     doc = "Trigger an awaiting retriggerable host worker."
 )]
 async fn worker_trigger_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
@@ -628,13 +632,14 @@ async fn worker_trigger_builtin(
         restart_worker_run(&mut worker, &next_task, false)?;
         let snapshot = worker_event_snapshot(&worker);
         drop(worker);
-        respawn_worker_task(state.clone())?;
+        respawn_worker_task(state.clone(), &ctx)?;
         Ok(snapshot)
     })?;
     // Emit the progressed lifecycle *after* the new cycle has been
     // spawned. Hosts see `progressed` (re-arming the run) followed
     // by `running` from the inner `WorkerSpawned` emission.
     emit_worker_event(
+        Some(&ctx),
         &progressed_snapshot,
         crate::agent_events::WorkerEvent::WorkerProgressed,
     )
@@ -661,7 +666,7 @@ async fn worker_trigger_builtin(
     doc = "Cooperatively suspend a host worker at the next turn boundary."
 )]
 async fn suspend_agent_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let target = args
@@ -692,7 +697,8 @@ async fn suspend_agent_builtin(
         "initiator": serde_json::to_value(initiator).unwrap_or(serde_json::Value::Null),
         "conditions": conditions.clone().unwrap_or(serde_json::Value::Null),
     });
-    match crate::orchestration::run_lifecycle_hooks_with_control(
+    match crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+        Some(&ctx),
         crate::orchestration::HookEvent::PreSuspend,
         &pre_payload,
     )
@@ -794,6 +800,7 @@ async fn suspend_agent_builtin(
     })?;
     if should_emit {
         if let Some(auto_resume_trigger) = super::triggers_stdlib::register_auto_resume_trigger(
+            Some(&ctx),
             &worker_id,
             conditions_value.as_ref(),
         )
@@ -811,7 +818,12 @@ async fn suspend_agent_builtin(
         if let Some(span) = suspension_span.as_mut() {
             span.end();
         }
-        emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerSuspended).await?;
+        emit_worker_event(
+            Some(&ctx),
+            &snapshot,
+            crate::agent_events::WorkerEvent::WorkerSuspended,
+        )
+        .await?;
         // PostSuspend hooks are advisory; the snapshot has already been
         // persisted by persist_worker_state_snapshot.
         let post_payload = serde_json::json!({
@@ -820,7 +832,8 @@ async fn suspend_agent_builtin(
             "reason": &reason,
             "snapshot_path": snapshot.metadata.get("snapshot_path").cloned().unwrap_or(serde_json::Value::Null),
         });
-        crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::run_lifecycle_hooks_with_ctx(
+            Some(&ctx),
             crate::orchestration::HookEvent::PostSuspend,
             &post_payload,
         )
@@ -881,6 +894,7 @@ impl PanicSuspendOutcome {
 /// "worker already suspended" / "worker is terminal" cases, which roll up
 /// as outcomes instead).
 pub(crate) async fn panic_suspend_worker(
+    ctx: Option<&AsyncBuiltinCtx>,
     worker_id: &str,
     reason: &str,
 ) -> Result<PanicSuspendOutcome, VmError> {
@@ -938,7 +952,12 @@ pub(crate) async fn panic_suspend_worker(
         )
     };
 
-    emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerSuspended).await?;
+    emit_worker_event(
+        ctx,
+        &snapshot,
+        crate::agent_events::WorkerEvent::WorkerSuspended,
+    )
+    .await?;
     Ok(outcome)
 }
 
@@ -959,7 +978,7 @@ pub(crate) fn all_registered_worker_ids() -> Vec<String> {
     doc = "Persist a top-level agent_loop suspend checkpoint as a resumable worker."
 )]
 async fn top_level_agent_suspend_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = args
@@ -1090,9 +1109,12 @@ async fn top_level_agent_suspend_builtin(
     WORKER_REGISTRY.with(|registry| {
         registry.borrow_mut().insert(worker_id.clone(), state);
     });
-    if let Some(auto_resume_trigger) =
-        super::triggers_stdlib::register_auto_resume_trigger(&worker_id, conditions_value.as_ref())
-            .await?
+    if let Some(auto_resume_trigger) = super::triggers_stdlib::register_auto_resume_trigger(
+        Some(&ctx),
+        &worker_id,
+        conditions_value.as_ref(),
+    )
+    .await?
     {
         (snapshot, summary) = with_worker_state(&worker_id, |state| {
             let mut worker = state.borrow_mut();
@@ -1104,7 +1126,7 @@ async fn top_level_agent_suspend_builtin(
         })?;
     }
     suspension_span.end();
-    emit_worker_event(&snapshot, WorkerEvent::WorkerSuspended).await?;
+    emit_worker_event(Some(&ctx), &snapshot, WorkerEvent::WorkerSuspended).await?;
     Ok(summary)
 }
 
@@ -1245,6 +1267,7 @@ fn summary_only_resume_transcript(
 }
 
 async fn resume_digest_from_transcript(
+    ctx: &AsyncBuiltinCtx,
     transcript: Option<&VmValue>,
 ) -> Result<Option<String>, VmError> {
     let Some(transcript) = transcript else {
@@ -1283,7 +1306,8 @@ async fn resume_digest_from_transcript(
     let lifecycle = crate::orchestration::CompactLifecycle::new(
         crate::orchestration::CompactMode::ResumeDigest,
     );
-    let outcome = crate::orchestration::run_compaction_lifecycle(
+    let outcome = crate::orchestration::run_compaction_lifecycle_with_ctx(
+        Some(ctx),
         &mut json_messages,
         &mut config,
         None,
@@ -1314,7 +1338,7 @@ fn apply_resume_transcript_policy(
     doc = "Resume a suspended or persisted worker into the local host worker registry."
 )]
 async fn resume_agent_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let target_value = args
@@ -1352,7 +1376,7 @@ async fn resume_agent_builtin(
         (cold_load_worker(&snapshot_target)?, true)
     };
     if state.borrow().status == "suspended" {
-        warm_resume_worker(state, options).await
+        warm_resume_worker(&ctx, state, options).await
     } else if loaded_from_snapshot {
         // A snapshot path can be used as a restore/read operation for
         // completed or awaiting persisted workers. Keep that historical
@@ -1589,6 +1613,7 @@ async fn join_checkpointed_worker_handle(state: Rc<RefCell<WorkerState>>) -> Res
 }
 
 async fn warm_resume_worker(
+    ctx: &AsyncBuiltinCtx,
     state: Rc<RefCell<WorkerState>>,
     mut options: WorkerResumeOptions,
 ) -> Result<VmValue, VmError> {
@@ -1606,7 +1631,8 @@ async fn warm_resume_worker(
             .unwrap_or(serde_json::Value::Null),
         "continue_transcript": options.continue_transcript,
     });
-    match crate::orchestration::run_lifecycle_hooks_with_control(
+    match crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+        Some(ctx),
         crate::orchestration::HookEvent::PreResume,
         &pre_payload,
     )
@@ -1639,7 +1665,7 @@ async fn warm_resume_worker(
         None
     } else {
         let transcript = state.borrow().transcript.clone();
-        resume_digest_from_transcript(transcript.as_ref()).await?
+        resume_digest_from_transcript(ctx, transcript.as_ref()).await?
     };
     let (worker_id, span_links) = {
         let worker = state.borrow();
@@ -1723,17 +1749,21 @@ async fn warm_resume_worker(
         (worker_event_snapshot(&worker), suspension)
     };
     unregister_suspension_auto_resume(suspension).await?;
-    emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerResumed).await?;
+    emit_worker_event(
+        Some(ctx),
+        &snapshot,
+        crate::agent_events::WorkerEvent::WorkerResumed,
+    )
+    .await?;
     resume_span.end();
-    if crate::vm::clone_async_builtin_child_vm().is_some() {
-        respawn_worker_task(state.clone())?;
-    }
+    respawn_worker_task(state.clone(), ctx)?;
     // PostResume hooks are advisory; the resumed turn is about to start.
     let post_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::PostResume.as_str(),
         "worker": { "id": &worker_id },
     });
-    crate::orchestration::run_lifecycle_hooks(
+    crate::orchestration::run_lifecycle_hooks_with_ctx(
+        Some(ctx),
         crate::orchestration::HookEvent::PostResume,
         &post_payload,
     )
@@ -1743,13 +1773,14 @@ async fn warm_resume_worker(
 }
 
 pub(crate) async fn resume_worker_from_auto_resume_trigger(
+    ctx: &AsyncBuiltinCtx,
     worker_id: &str,
     event: &crate::triggers::TriggerEvent,
 ) -> Result<VmValue, VmError> {
     let payload = auto_resume_event_payload(event);
     let timeout_action = auto_resume_timeout_action(&payload);
     if timeout_action.as_deref() == Some("fail") {
-        return fail_suspended_worker_from_auto_resume_timeout(worker_id).await;
+        return fail_suspended_worker_from_auto_resume_timeout(ctx, worker_id).await;
     }
     let resume_input = match timeout_action.as_deref() {
         Some("resume_with_summary") => None,
@@ -1769,7 +1800,7 @@ pub(crate) async fn resume_worker_from_auto_resume_trigger(
         trigger_event: Some(serde_json::to_value(event).unwrap_or(serde_json::Value::Null)),
     };
     let state = with_worker_state(worker_id, Ok)?;
-    warm_resume_worker(state, options).await
+    warm_resume_worker(ctx, state, options).await
 }
 
 fn auto_resume_event_payload(event: &crate::triggers::TriggerEvent) -> serde_json::Value {
@@ -1788,6 +1819,7 @@ fn auto_resume_timeout_action(payload: &serde_json::Value) -> Option<String> {
 }
 
 async fn fail_suspended_worker_from_auto_resume_timeout(
+    ctx: &AsyncBuiltinCtx,
     worker_id: &str,
 ) -> Result<VmValue, VmError> {
     let state = with_worker_state(worker_id, Ok)?;
@@ -1817,7 +1849,12 @@ async fn fail_suspended_worker_from_auto_resume_timeout(
         )
     };
     unregister_suspension_auto_resume(suspension).await?;
-    emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerFailed).await?;
+    emit_worker_event(
+        Some(ctx),
+        &snapshot,
+        crate::agent_events::WorkerEvent::WorkerFailed,
+    )
+    .await?;
     Ok(summary)
 }
 
@@ -1885,7 +1922,7 @@ async fn wait_agent_builtin(
     doc = "Cancel a host worker and emit the cancellation lifecycle event."
 )]
 async fn close_agent_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let target = args
@@ -1918,7 +1955,12 @@ async fn close_agent_builtin(
         (snapshot, summary, suspension)
     };
     unregister_suspension_auto_resume(suspension).await?;
-    emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerCancelled).await?;
+    emit_worker_event(
+        Some(&ctx),
+        &snapshot,
+        crate::agent_events::WorkerEvent::WorkerCancelled,
+    )
+    .await?;
     Ok(summary)
 }
 
@@ -2318,6 +2360,16 @@ mod suspend_tests {
             .unwrap_or_default()
     }
 
+    async fn resume_agent_for_test(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(resume_agent_builtin(
+                crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+                args,
+            ))
+            .await
+    }
+
     fn auto_resume_conditions(kind: &str) -> VmValue {
         VmValue::Dict(Rc::new(BTreeMap::from([(
             "trigger".to_string(),
@@ -2532,7 +2584,7 @@ mod suspend_tests {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-panic-running");
 
-        let outcome = panic_suspend_worker(&worker_id, "build_storm")
+        let outcome = panic_suspend_worker(None, &worker_id, "build_storm")
             .await
             .expect("panic suspend running worker");
         assert_eq!(outcome, PanicSuspendOutcome::Suspended);
@@ -2583,7 +2635,7 @@ mod suspend_tests {
         .await
         .expect("operator-suspend first");
 
-        let outcome = panic_suspend_worker(&already_suspended, "build_storm")
+        let outcome = panic_suspend_worker(None, &already_suspended, "build_storm")
             .await
             .expect("panic against already-suspended");
         assert_eq!(outcome, PanicSuspendOutcome::AlreadySuspended);
@@ -2610,13 +2662,13 @@ mod suspend_tests {
             Ok(())
         })
         .unwrap();
-        let outcome = panic_suspend_worker(&terminal, "build_storm")
+        let outcome = panic_suspend_worker(None, &terminal, "build_storm")
             .await
             .expect("panic against terminal worker");
         assert_eq!(outcome, PanicSuspendOutcome::NotRunning);
 
         // Unknown: stale worker id never crashes the broadcast.
-        let outcome = panic_suspend_worker("worker-does-not-exist", "build_storm")
+        let outcome = panic_suspend_worker(None, "worker-does-not-exist", "build_storm")
             .await
             .expect("panic against unknown worker");
         assert_eq!(outcome, PanicSuspendOutcome::Unknown);
@@ -2725,13 +2777,10 @@ mod suspend_tests {
 
         // Resume transitions back to running and wires the resume input
         // into the worker's task slot.
-        let resumed = resume_agent_builtin(
-            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-            vec![
-                handle_value(&worker_id),
-                VmValue::String(Rc::from("next: write the report")),
-            ],
-        )
+        let resumed = resume_agent_for_test(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("next: write the report")),
+        ])
         .await
         .expect("resume");
         assert_eq!(summary_status(&resumed), "running");
@@ -2789,12 +2838,9 @@ mod suspend_tests {
         assert_eq!(binding.handler.kind(), "auto_resume");
         assert_eq!(binding.match_events, vec!["review.approved".to_string()]);
 
-        let resumed = resume_agent_builtin(
-            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-            vec![handle_value(&worker_id)],
-        )
-        .await
-        .expect("operator resume");
+        let resumed = resume_agent_for_test(vec![handle_value(&worker_id)])
+            .await
+            .expect("operator resume");
         assert_eq!(summary_status(&resumed), "running");
         let snapshot = crate::triggers::snapshot_trigger_bindings()
             .into_iter()
@@ -2852,9 +2898,8 @@ mod suspend_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
-        // A `LocalSet` is required: a successful auto-resume now respawns the
-        // worker via `spawn_local` (harn#2667), which previously never fired in
-        // this test because the ambient-context gate was empty.
+        // Auto-resume respawns the worker with `spawn_local`, so the test must
+        // run inside a `LocalSet` just like the runtime path.
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
@@ -2891,10 +2936,9 @@ mod suspend_tests {
                     ),
                     crate::triggers::SignatureStatus::Unsigned,
                 );
-                // A real (stdlib-registered) base VM: the dispatcher scopes it as the
-                // async-builtin context for the respawned worker, which must be able to
-                // resolve builtins. (An empty `Vm::new()` worked on main only because
-                // the respawn never fired.) harn#2667.
+                // The dispatcher scopes this VM as the async-builtin context
+                // for the respawned worker, so it needs the stdlib surface the
+                // worker uses after resume.
                 let mut base_vm = crate::Vm::new();
                 crate::register_vm_stdlib(&mut base_vm);
                 let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, log);
@@ -3020,19 +3064,16 @@ mod suspend_tests {
         .await
         .expect("suspend");
 
-        let resumed = resume_agent_builtin(
-            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-            vec![
-                handle_value(&worker_id),
-                VmValue::Dict(Rc::new(BTreeMap::from([
-                    (
-                        "input".to_string(),
-                        VmValue::String(Rc::from("fresh prompt")),
-                    ),
-                    ("continue_transcript".to_string(), VmValue::Bool(false)),
-                ]))),
-            ],
-        )
+        let resumed = resume_agent_for_test(vec![
+            handle_value(&worker_id),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "input".to_string(),
+                    VmValue::String(Rc::from("fresh prompt")),
+                ),
+                ("continue_transcript".to_string(), VmValue::Bool(false)),
+            ]))),
+        ])
         .await
         .expect("resume with transcript reset");
         assert_eq!(summary_status(&resumed), "running");
@@ -3163,12 +3204,9 @@ mod suspend_tests {
                 .borrow_mut()
                 .insert(worker_id.clone(), Rc::new(RefCell::new(reloaded)));
         });
-        let resumed = resume_agent_builtin(
-            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-            vec![handle_value(&worker_id)],
-        )
-        .await
-        .expect("resume after restart");
+        let resumed = resume_agent_for_test(vec![handle_value(&worker_id)])
+            .await
+            .expect("resume after restart");
         assert_eq!(summary_status(&resumed), "running");
 
         teardown(&dir, &worker_id);
@@ -3235,12 +3273,9 @@ mod suspend_tests {
                 .borrow_mut()
                 .insert(worker_id.clone(), Rc::new(RefCell::new(reloaded)));
         });
-        resume_agent_builtin(
-            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-            vec![handle_value(&worker_id)],
-        )
-        .await
-        .expect("resume after restart");
+        resume_agent_for_test(vec![handle_value(&worker_id)])
+            .await
+            .expect("resume after restart");
 
         let spans = crate::tracing::peek_spans();
         let suspension = spans
@@ -3311,19 +3346,16 @@ mod suspend_tests {
         .expect("suspend");
         crate::tracing::span_end(pipeline_span_id);
 
-        resume_agent_builtin(
-            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-            vec![
-                handle_value(&worker_id),
-                VmValue::Dict(Rc::new(BTreeMap::from([
-                    (
-                        "input".to_string(),
-                        VmValue::String(Rc::from("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS")),
-                    ),
-                    ("continue_transcript".to_string(), VmValue::Bool(false)),
-                ]))),
-            ],
-        )
+        resume_agent_for_test(vec![
+            handle_value(&worker_id),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "input".to_string(),
+                    VmValue::String(Rc::from("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS")),
+                ),
+                ("continue_transcript".to_string(), VmValue::Bool(false)),
+            ]))),
+        ])
         .await
         .expect("resume");
 
@@ -3446,6 +3478,7 @@ mod suspend_tests {
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         let _runtime_context = crate::runtime_context::install_runtime_context_overlay(
             crate::runtime_context::RuntimeContextOverlay {
                 worker_id: Some(worker_id.clone()),
@@ -3453,21 +3486,19 @@ mod suspend_tests {
             },
         );
 
-        let result = crate::vm::scope_async_builtin(
-            vm,
-            crate::stdlib::harn_entry::call_harn_export_by_name(
-                "std/agent/loop",
-                "agent_loop",
-                "agent_loop_suspend_test",
-                &[
-                    VmValue::String(Rc::from("continue the task")),
-                    VmValue::Nil,
-                    VmValue::Dict(Rc::new(BTreeMap::from([(
-                        "max_iterations".to_string(),
-                        VmValue::Int(3),
-                    )]))),
-                ],
-            ),
+        let result = crate::stdlib::harn_entry::call_harn_export_by_name(
+            &ctx,
+            "std/agent/loop",
+            "agent_loop",
+            "agent_loop_suspend_test",
+            &[
+                VmValue::String(Rc::from("continue the task")),
+                VmValue::Nil,
+                VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "max_iterations".to_string(),
+                    VmValue::Int(3),
+                )]))),
+            ],
         )
         .await
         .expect("agent loop returns suspended checkpoint");
@@ -3506,6 +3537,7 @@ mod suspend_tests {
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         let _runtime_context = crate::runtime_context::install_runtime_context_overlay(
             crate::runtime_context::RuntimeContextOverlay {
                 worker_id: Some(worker_id.clone()),
@@ -3513,15 +3545,15 @@ mod suspend_tests {
             },
         );
 
-        let result = crate::vm::scope_async_builtin(
-            vm,
-            execute_sub_agent(SubAgentRunSpec {
+        let result = execute_sub_agent(
+            &ctx,
+            SubAgentRunSpec {
                 name: "worker-sub-agent-suspend".to_string(),
                 task: "continue the task".to_string(),
                 session_id: format!("session_{worker_id}"),
                 options: BTreeMap::from([("max_iterations".to_string(), VmValue::Int(3))]),
                 ..Default::default()
-            }),
+            },
         )
         .await
         .expect("sub-agent execution returns suspended checkpoint");
@@ -3633,7 +3665,8 @@ mod suspend_tests {
         let (worker_id, dir) = seed_test_worker("worker-concurrent-resume");
         let state = with_worker_state(&worker_id, Ok).unwrap();
 
-        let err = warm_resume_worker(state, WorkerResumeOptions::default())
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(Vm::new());
+        let err = warm_resume_worker(&ctx, state, WorkerResumeOptions::default())
             .await
             .expect_err("non-suspended warm resume should be a conflict");
         assert_error_code(err, Code::ConcurrentResumeConflict);

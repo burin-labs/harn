@@ -578,7 +578,7 @@ pub(super) fn settlement_agent_active_builtin(
     runtime_only = true
 )]
 pub(super) async fn fire_session_hook_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let event_name = args
@@ -597,7 +597,12 @@ pub(super) async fn fire_session_hook_builtin(
             .or_insert_with(|| serde_json::Value::String(event.as_str().to_string()));
     }
 
-    let control = crate::orchestration::run_lifecycle_hooks_with_control(event, &payload).await?;
+    let control = crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+        Some(&ctx),
+        event,
+        &payload,
+    )
+    .await?;
     crate::run_events::emit(crate::run_events::RunEvent::Hook {
         name: event_name.clone(),
         phase: match &control {
@@ -672,7 +677,7 @@ pub(super) fn notify_file_edited_builtin(
     runtime_only = true
 )]
 pub(super) async fn drain_file_edits_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(VmValue::display).unwrap_or_default();
@@ -685,7 +690,8 @@ pub(super) async fn drain_file_edits_builtin(
             "path": edit.path,
             "metadata": edit.metadata,
         });
-        crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::run_lifecycle_hooks_with_ctx(
+            Some(&ctx),
             crate::orchestration::HookEvent::FileEdited,
             &payload,
         )

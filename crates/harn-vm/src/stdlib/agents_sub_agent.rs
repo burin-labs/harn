@@ -8,6 +8,7 @@ use crate::orchestration::{
 };
 use crate::stdlib::options::{ErrorKind, OptionsParser};
 use crate::value::{VmError, VmValue};
+use crate::vm::AsyncBuiltinCtx;
 
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
 
@@ -727,6 +728,7 @@ fn parse_structured_sub_agent_data(
 }
 
 pub(super) async fn execute_sub_agent(
+    ctx: &AsyncBuiltinCtx,
     spec: SubAgentRunSpec,
 ) -> Result<SubAgentExecutionResult, VmError> {
     if let Some(parent_session_id) = spec.parent_session_id.as_deref() {
@@ -758,6 +760,7 @@ pub(super) async fn execute_sub_agent(
         VmValue::Dict(Rc::new(loop_options)),
     ];
     let result = crate::stdlib::harn_entry::call_harn_export_by_name(
+        ctx,
         "std/agent/loop",
         "agent_loop",
         "sub_agent_run",
@@ -1284,9 +1287,8 @@ mod tests {
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
-        let result = crate::vm::scope_async_builtin(vm, execute_sub_agent(spec))
-            .await
-            .unwrap();
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+        let result = execute_sub_agent(&ctx, spec).await.unwrap();
         assert_eq!(result.payload["ok"].as_bool(), Some(true));
 
         let child_messages = crate::agent_sessions::messages_json("child-subagent");
@@ -1349,9 +1351,8 @@ mod tests {
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
-        let result = crate::vm::scope_async_builtin(vm, execute_sub_agent(spec))
-            .await
-            .unwrap();
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+        let result = execute_sub_agent(&ctx, spec).await.unwrap();
 
         assert_eq!(result.payload["ok"].as_bool(), Some(false));
         assert_eq!(result.payload["budget_exceeded"].as_bool(), Some(true));

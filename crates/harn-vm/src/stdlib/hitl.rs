@@ -27,7 +27,7 @@ use crate::stdlib::waitpoint::{
 };
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
-use crate::vm::{clone_async_builtin_child_vm, Vm};
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 const HITL_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const HITL_APPROVAL_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
@@ -289,10 +289,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     category = "hitl"
 )]
 async fn ask_user_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    ask_user_impl(&args).await
+    ask_user_impl(Some(&ctx), &args).await
 }
 
 #[harn_builtin(
@@ -301,10 +301,10 @@ async fn ask_user_builtin(
     category = "hitl"
 )]
 async fn request_approval_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    request_approval_impl(&args).await
+    request_approval_impl(Some(&ctx), &args).await
 }
 
 #[harn_builtin(
@@ -313,10 +313,10 @@ async fn request_approval_builtin(
     category = "hitl"
 )]
 async fn dual_control_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    dual_control_impl(&args).await
+    dual_control_impl(&ctx, &args).await
 }
 
 #[harn_builtin(
@@ -325,10 +325,10 @@ async fn dual_control_builtin(
     category = "hitl"
 )]
 async fn escalate_to_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    escalate_to_impl(&args).await
+    escalate_to_impl(Some(&ctx), &args).await
 }
 
 pub(crate) fn reset_hitl_state() {
@@ -431,11 +431,14 @@ pub async fn append_approval_request_on(
     };
     create_request_waitpoint(log, &request).await?;
     append_request(log, &request).await?;
-    maybe_notify_host(&request);
+    maybe_notify_host(None, &request);
     Ok(request_id)
 }
 
-async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
+async fn ask_user_impl(
+    ctx: Option<&AsyncBuiltinCtx>,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     let prompt = required_string_arg(args, 0, "ask_user")?;
     let options = parse_ask_user_options(args.get(1))?;
     let keys = current_dispatch_keys();
@@ -464,7 +467,7 @@ async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     };
     create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
-    maybe_notify_host(&request);
+    maybe_notify_host(ctx, &request);
     emit_hitl_requested(&request);
     maybe_apply_mock_response(HitlRequestKind::Question, &request_id, &request.payload).await?;
 
@@ -510,7 +513,10 @@ async fn ask_user_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     }
 }
 
-async fn request_approval_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
+async fn request_approval_impl(
+    ctx: Option<&AsyncBuiltinCtx>,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     let action = required_string_arg(args, 0, "request_approval")?;
     let options = parse_approval_options(args.get(1), "request_approval")?;
     let keys = current_dispatch_keys();
@@ -581,7 +587,7 @@ async fn request_approval_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     };
     create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
-    maybe_notify_host(&request);
+    maybe_notify_host(ctx, &request);
     emit_hitl_requested(&request);
     maybe_apply_mock_response(HitlRequestKind::Approval, &request_id, &request.payload).await?;
 
@@ -644,10 +650,10 @@ pub(crate) async fn request_approval_for_side_effect(
         VmValue::String(Rc::from(action.to_string())),
         VmValue::Dict(Rc::new(options)),
     ];
-    request_approval_impl(&args).await
+    request_approval_impl(None, &args).await
 }
 
-async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
+async fn dual_control_impl(ctx: &AsyncBuiltinCtx, args: &[VmValue]) -> Result<VmValue, VmError> {
     let n = required_positive_int_arg(args, 0, "dual_control")?;
     let m = required_positive_int_arg(args, 1, "dual_control")?;
     if n > m {
@@ -736,7 +742,7 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     };
     create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
-    maybe_notify_host(&request);
+    maybe_notify_host(Some(ctx), &request);
     emit_hitl_requested(&request);
     maybe_apply_mock_response(HitlRequestKind::DualControl, &request_id, &request.payload).await?;
 
@@ -749,10 +755,9 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     {
         WaitpointOutcome::Completed(record) => {
             let _ = approval_record_from_waitpoint(&record, "dual_control")?;
-            let mut vm = clone_async_builtin_child_vm().ok_or_else(|| {
-                VmError::Runtime("dual_control requires an async builtin VM context".to_string())
-            })?;
+            let mut vm = ctx.child_vm();
             let result = vm.call_closure_pub(&action, &[]).await?;
+            ctx.forward_output(&vm.take_output());
 
             append_named_event(
                 &log,
@@ -779,7 +784,10 @@ async fn dual_control_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     }
 }
 
-async fn escalate_to_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
+async fn escalate_to_impl(
+    ctx: Option<&AsyncBuiltinCtx>,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     let role = required_string_arg(args, 0, "escalate_to")?;
     let reason = required_string_arg(args, 1, "escalate_to")?;
     let keys = current_dispatch_keys();
@@ -807,7 +815,7 @@ async fn escalate_to_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     };
     create_request_waitpoint(&log, &request).await?;
     append_request(&log, &request).await?;
-    maybe_notify_host(&request);
+    maybe_notify_host(ctx, &request);
     emit_hitl_requested(&request);
     maybe_apply_mock_response(HitlRequestKind::Escalation, &request_id, &request.payload).await?;
 
@@ -1440,8 +1448,8 @@ fn parse_hitl_response_dict(
     })
 }
 
-fn maybe_notify_host(request: &HitlRequestEnvelope) {
-    let Some(bridge) = clone_async_builtin_child_vm().and_then(|vm| vm.bridge.clone()) else {
+fn maybe_notify_host(ctx: Option<&AsyncBuiltinCtx>, request: &HitlRequestEnvelope) {
+    let Some(bridge) = ctx.and_then(|ctx| ctx.child_vm().bridge.clone()) else {
         return;
     };
     bridge.notify(

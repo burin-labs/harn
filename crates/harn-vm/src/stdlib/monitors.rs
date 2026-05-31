@@ -21,7 +21,7 @@ use crate::triggers::dispatcher::{
 };
 use crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC;
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{clone_async_builtin_child_vm, Vm};
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 const MONITOR_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 pub(crate) const MONITOR_WAITS_TOPIC: &str = "monitor.waits";
@@ -119,10 +119,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&MONITOR_WAIT_FOR_NATIVE_
     category = "monitor"
 )]
 async fn monitor_wait_for_native_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    monitor_wait_for_impl(&args).await
+    monitor_wait_for_impl(&ctx, &args).await
 }
 
 pub(crate) fn reset_monitor_state() {
@@ -131,7 +131,10 @@ pub(crate) fn reset_monitor_state() {
     });
 }
 
-async fn monitor_wait_for_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
+async fn monitor_wait_for_impl(
+    ctx: &AsyncBuiltinCtx,
+    args: &[VmValue],
+) -> Result<VmValue, VmError> {
     let options = parse_wait_options(args.first())?;
     let dispatch_keys = current_dispatch_keys();
     let wait_id = options
@@ -173,7 +176,7 @@ async fn monitor_wait_for_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
         lease.suspend().await.map_err(dispatch_error)?;
     }
 
-    let wait_result = wait_for_monitor_live(&log, &options, &start).await;
+    let wait_result = wait_for_monitor_live(ctx, &log, &options, &start).await;
     let resume_result = async {
         if let Some(lease) = wait_lease.as_ref() {
             lease.resume().await.map_err(dispatch_error)?;
@@ -191,6 +194,7 @@ async fn monitor_wait_for_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
 }
 
 async fn wait_for_monitor_live(
+    ctx: &AsyncBuiltinCtx,
     log: &RcOrArcEventLog,
     options: &MonitorWaitOptions,
     start: &MonitorWaitStartRecord,
@@ -201,9 +205,7 @@ async fn wait_for_monitor_live(
     let mut last_state = JsonValue::Null;
     let mut last_condition = JsonValue::Bool(false);
     let mut last_push_event = JsonValue::Null;
-    let mut closure_vm = clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("monitor wait requires an async builtin VM context".to_string())
-    })?;
+    let mut closure_vm = ctx.child_vm();
     let mut push_stream = if options.source.prefers_push && options.source.push_filter.is_some() {
         let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC).map_err(log_error)?;
         let from = log.latest(&topic).await.map_err(log_error)?;
@@ -235,10 +237,12 @@ async fn wait_for_monitor_live(
             "poll_count": poll_count,
             "last_push_event": last_push_event.clone(),
         }));
-        let state = call_closure(&mut closure_vm, &options.source.poll, &[poll_context]).await?;
+        let state =
+            call_closure(ctx, &mut closure_vm, &options.source.poll, &[poll_context]).await?;
         poll_count += 1;
         last_state = vm_value_to_json(&state);
-        let condition_value = call_closure(&mut closure_vm, &options.condition, &[state]).await?;
+        let condition_value =
+            call_closure(ctx, &mut closure_vm, &options.condition, &[state]).await?;
         let matched = condition_value.is_truthy();
         last_condition = vm_value_to_json(&condition_value);
         if matched {
@@ -266,6 +270,7 @@ async fn wait_for_monitor_live(
         };
         let delay = options.poll_interval.min(remaining);
         if let Some(push_event) = wait_for_wakeup(
+            ctx,
             &mut closure_vm,
             &mut push_stream,
             options.source.push_filter.as_ref(),
@@ -282,6 +287,7 @@ async fn wait_for_monitor_live(
 type RcOrArcEventLog = std::sync::Arc<AnyEventLog>;
 
 async fn wait_for_wakeup(
+    ctx: &AsyncBuiltinCtx,
     closure_vm: &mut Vm,
     push_stream: &mut Option<
         futures::stream::BoxStream<'static, Result<(u64, LogEvent), crate::event_log::LogError>>,
@@ -310,7 +316,7 @@ async fn wait_for_wakeup(
                     return Ok(Some(push_event));
                 };
                 let value = crate::stdlib::json_to_vm_value(&push_event);
-                let accepted = call_closure(closure_vm, filter, &[value]).await?;
+                let accepted = call_closure(ctx, closure_vm, filter, &[value]).await?;
                 if accepted.is_truthy() {
                     Ok(Some(push_event))
                 } else {
@@ -490,11 +496,14 @@ fn bool_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<boo
 }
 
 async fn call_closure(
+    ctx: &AsyncBuiltinCtx,
     vm: &mut Vm,
     closure: &Rc<VmClosure>,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    vm.call_closure_pub(closure, args).await
+    let result = vm.call_closure_pub(closure, args).await;
+    ctx.forward_output(&vm.take_output());
+    result
 }
 
 async fn append_monitor_started(

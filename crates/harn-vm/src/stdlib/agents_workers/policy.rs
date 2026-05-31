@@ -239,6 +239,7 @@ fn fork_worker_transcript(transcript: VmValue) -> VmValue {
 }
 
 pub(in super::super) async fn compact_worker_transcript(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     transcript: VmValue,
 ) -> Result<VmValue, VmError> {
     let Some(dict) = transcript.as_dict() else {
@@ -267,9 +268,14 @@ pub(in super::super) async fn compact_worker_transcript(
             .with_transcript_id(transcript_id_value.as_deref())
             .with_reminder_events(reminder_events)
             .with_source_transcript(Some(&transcript));
-    let Some(outcome) =
-        crate::orchestration::run_compaction_lifecycle(&mut messages, &mut config, None, lifecycle)
-            .await?
+    let Some(outcome) = crate::orchestration::run_compaction_lifecycle_with_ctx(
+        Some(ctx),
+        &mut messages,
+        &mut config,
+        None,
+        lifecycle,
+    )
+    .await?
     else {
         return Ok(transcript);
     };

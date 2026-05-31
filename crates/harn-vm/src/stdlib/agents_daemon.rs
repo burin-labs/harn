@@ -1,10 +1,9 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
@@ -139,7 +138,7 @@ async fn daemon_spawn_builtin(
         persist_root: spec.persist_root.clone(),
         snapshot_path: spec.snapshot_path.clone(),
         options: spec.options.clone(),
-        bridge: new_daemon_bridge().await?,
+        bridge: new_daemon_bridge(&ctx).await?,
         handle: None,
         monitor_handle: None,
         status: "running".to_string(),
@@ -390,7 +389,7 @@ async fn daemon_resume_builtin(
                 "daemon_resume: daemon '{persist_root}' is already running"
             )));
         }
-        let bridge = new_daemon_bridge().await?;
+        let bridge = new_daemon_bridge(&ctx).await?;
         {
             let mut daemon = state.borrow_mut();
             daemon.id = spec.id.clone();
@@ -477,7 +476,7 @@ async fn daemon_resume_builtin(
         persist_root: spec.persist_root.clone(),
         snapshot_path: spec.snapshot_path.clone(),
         options: resume_options,
-        bridge: new_daemon_bridge().await?,
+        bridge: new_daemon_bridge(&ctx).await?,
         handle: None,
         monitor_handle: None,
         status: "running".to_string(),
@@ -707,15 +706,8 @@ fn daemon_summary(daemon: &DaemonState) -> Result<VmValue, VmError> {
     Ok(crate::stdlib::json_to_vm_value(&summary))
 }
 
-async fn new_daemon_bridge() -> Result<Rc<HostBridge>, VmError> {
-    let Some(vm) = crate::vm::clone_async_builtin_child_vm() else {
-        return Ok(Rc::new(HostBridge::from_parts(
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            Arc::new(std::sync::Mutex::new(())),
-            1,
-        )));
-    };
+async fn new_daemon_bridge(ctx: &crate::vm::AsyncBuiltinCtx) -> Result<Rc<HostBridge>, VmError> {
+    let vm = ctx.child_vm();
     let module_path = daemon_bridge_module_path()?;
     HostBridge::from_harn_module(vm, &module_path)
         .await

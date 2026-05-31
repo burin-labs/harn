@@ -7,8 +7,7 @@ use serde_json::Value as JsonValue;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{values_equal, VmError, VmValue};
-use crate::vm::clone_async_builtin_child_vm;
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every
@@ -446,11 +445,18 @@ fn empty_tool_list_value() -> VmValue {
     VmValue::List(Rc::new(Vec::new()))
 }
 
-fn current_vm_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
-    clone_async_builtin_child_vm().and_then(|vm| vm.bridge.clone())
+fn current_vm_host_bridge(ctx: Option<&AsyncBuiltinCtx>) -> Option<Rc<crate::bridge::HostBridge>> {
+    ctx.and_then(|ctx| ctx.child_vm().bridge.clone())
 }
 
+#[cfg(test)]
 async fn dispatch_host_tool_list() -> Result<VmValue, VmError> {
+    dispatch_host_tool_list_with_ctx(None).await
+}
+
+async fn dispatch_host_tool_list_with_ctx(
+    ctx: Option<&AsyncBuiltinCtx>,
+) -> Result<VmValue, VmError> {
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
         if let Some(value) = bridge.list_tools()? {
@@ -458,7 +464,7 @@ async fn dispatch_host_tool_list() -> Result<VmValue, VmError> {
         }
     }
 
-    let Some(bridge) = current_vm_host_bridge() else {
+    let Some(bridge) = current_vm_host_bridge(ctx) else {
         return Ok(empty_tool_list_value());
     };
     let tools = bridge.list_host_tools().await?;
@@ -471,6 +477,14 @@ pub(crate) async fn dispatch_host_tool_call(
     name: &str,
     args: &VmValue,
 ) -> Result<VmValue, VmError> {
+    dispatch_host_tool_call_with_ctx(None, name, args).await
+}
+
+pub(crate) async fn dispatch_host_tool_call_with_ctx(
+    ctx: Option<&AsyncBuiltinCtx>,
+    name: &str,
+    args: &VmValue,
+) -> Result<VmValue, VmError> {
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
         if let Some(value) = bridge.call_tool(name, args)? {
@@ -478,7 +492,7 @@ pub(crate) async fn dispatch_host_tool_call(
         }
     }
 
-    let Some(bridge) = current_vm_host_bridge() else {
+    let Some(bridge) = current_vm_host_bridge(ctx) else {
         return Err(VmError::Thrown(VmValue::String(Rc::from(
             "host_tool_call: no host bridge is attached",
         ))));
@@ -501,6 +515,15 @@ pub(crate) async fn dispatch_host_operation(
     operation: &str,
     params: &BTreeMap<String, VmValue>,
 ) -> Result<VmValue, VmError> {
+    dispatch_host_operation_with_ctx(None, capability, operation, params).await
+}
+
+pub(crate) async fn dispatch_host_operation_with_ctx(
+    ctx: Option<&AsyncBuiltinCtx>,
+    capability: &str,
+    operation: &str,
+    params: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
     if let Some(mocked) = dispatch_mock_host_call(capability, operation, params) {
         return mocked;
     }
@@ -512,7 +535,7 @@ pub(crate) async fn dispatch_host_operation(
             "operation": "exec",
             "session_id": crate::llm::current_agent_session_id(),
         });
-        return dispatch_process_exec_with_policy(params, caller).await;
+        return dispatch_process_exec_with_policy(ctx, params, caller).await;
     }
 
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
@@ -591,15 +614,18 @@ pub(crate) async fn dispatch_process_exec(
     params: &BTreeMap<String, VmValue>,
     caller: serde_json::Value,
 ) -> Result<VmValue, VmError> {
-    dispatch_process_exec_with_policy(params, caller).await
+    dispatch_process_exec_with_policy(None, params, caller).await
 }
 
 async fn dispatch_process_exec_with_policy(
+    ctx: Option<&AsyncBuiltinCtx>,
     params: &BTreeMap<String, VmValue>,
     caller: serde_json::Value,
 ) -> Result<VmValue, VmError> {
     let (params, command_policy_context, command_policy_decisions) =
-        match crate::orchestration::run_command_policy_preflight(params, caller).await? {
+        match crate::orchestration::run_command_policy_preflight_with_ctx(ctx, params, caller)
+            .await?
+        {
             crate::orchestration::CommandPolicyPreflight::Proceed {
                 params,
                 context,
@@ -620,7 +646,8 @@ async fn dispatch_process_exec_with_policy(
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
         if let Some(value) = bridge.dispatch("process", "exec", &params)? {
-            return crate::orchestration::run_command_policy_postflight(
+            return crate::orchestration::run_command_policy_postflight_with_ctx(
+                ctx,
                 &params,
                 value,
                 command_policy_context,
@@ -630,11 +657,17 @@ async fn dispatch_process_exec_with_policy(
         }
     }
 
-    dispatch_process_exec_after_policy(&params, command_policy_context, command_policy_decisions)
-        .await
+    dispatch_process_exec_after_policy(
+        ctx,
+        &params,
+        command_policy_context,
+        command_policy_decisions,
+    )
+    .await
 }
 
 async fn dispatch_process_exec_after_policy(
+    ctx: Option<&AsyncBuiltinCtx>,
     params: &BTreeMap<String, VmValue>,
     command_policy_context: JsonValue,
     command_policy_decisions: Vec<crate::orchestration::CommandPolicyDecision>,
@@ -714,7 +747,8 @@ async fn dispatch_process_exec_after_policy(
                     success: false,
                     timed_out: true,
                 });
-                return crate::orchestration::run_command_policy_postflight(
+                return crate::orchestration::run_command_policy_postflight_with_ctx(
+                    ctx,
                     params,
                     response,
                     command_policy_context,
@@ -743,7 +777,8 @@ async fn dispatch_process_exec_after_policy(
         success: output.status.success(),
         timed_out,
     });
-    crate::orchestration::run_command_policy_postflight(
+    crate::orchestration::run_command_policy_postflight_with_ctx(
+        ctx,
         params,
         response,
         command_policy_context,
@@ -1052,7 +1087,7 @@ fn host_has_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     category = "host"
 )]
 async fn host_call_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
@@ -1066,15 +1101,15 @@ async fn host_call_builtin(
             "host_call: unsupported operation name '{name}'"
         )))));
     };
-    dispatch_host_operation(capability, operation, &params).await
+    dispatch_host_operation_with_ctx(Some(&ctx), capability, operation, &params).await
 }
 
 #[harn_builtin(sig = "host_tool_list() -> list", kind = "async", category = "host")]
 async fn host_tool_list_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     _args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    dispatch_host_tool_list().await
+    dispatch_host_tool_list_with_ctx(Some(&ctx)).await
 }
 
 #[harn_builtin(
@@ -1083,7 +1118,7 @@ async fn host_tool_list_builtin(
     category = "host"
 )]
 async fn host_tool_call_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
@@ -1093,7 +1128,7 @@ async fn host_tool_call_builtin(
         ))));
     }
     let call_args = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    dispatch_host_tool_call(&name, &call_args).await
+    dispatch_host_tool_call_with_ctx(Some(&ctx), &name, &call_args).await
 }
 
 #[cfg(test)]

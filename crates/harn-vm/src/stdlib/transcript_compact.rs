@@ -7,7 +7,7 @@ use crate::llm::helpers::{
     vm_value_to_json,
 };
 use crate::orchestration::{
-    compact_strategy_name, estimate_message_tokens, run_compaction_lifecycle,
+    compact_strategy_name, estimate_message_tokens, run_compaction_lifecycle_with_ctx,
     transcript_compactable_events, AutoCompactConfig, CompactLifecycle, CompactMode,
     CompactStrategy, CompactionPolicy,
 };
@@ -16,7 +16,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_transcript_compaction_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("transcript_compact", |_ctx, args| async move {
+    vm.register_async_builtin("transcript_compact", |ctx, args| async move {
         let transcript = args
             .first()
             .and_then(|value| value.as_dict())
@@ -25,7 +25,7 @@ pub(crate) fn register_transcript_compaction_builtins(vm: &mut Vm) {
                 VmError::Runtime("transcript_compact: first argument must be a transcript".into())
             })?;
         let options = args.get(1).and_then(|value| value.as_dict());
-        compact_transcript_impl(transcript, options, args.get(1).cloned()).await
+        compact_transcript_impl(&ctx, transcript, options, args.get(1).cloned()).await
     });
 }
 
@@ -41,6 +41,7 @@ struct TranscriptCompactOptions {
 }
 
 async fn compact_transcript_impl(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     transcript: &BTreeMap<String, VmValue>,
     options: Option<&BTreeMap<String, VmValue>>,
     raw_options: Option<VmValue>,
@@ -102,8 +103,14 @@ async fn compact_transcript_impl(
         .with_provider_options(provider_options)
         .with_source_transcript(Some(&original_transcript));
 
-    let Some(outcome) =
-        run_compaction_lifecycle(&mut messages, &mut config, llm_opts.as_ref(), lifecycle).await?
+    let Some(outcome) = run_compaction_lifecycle_with_ctx(
+        Some(ctx),
+        &mut messages,
+        &mut config,
+        llm_opts.as_ref(),
+        lifecycle,
+    )
+    .await?
     else {
         return Ok(original_transcript);
     };

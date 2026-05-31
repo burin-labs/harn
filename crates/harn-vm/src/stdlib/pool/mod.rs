@@ -30,7 +30,7 @@ use crate::event_log::{
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm};
 use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -67,16 +67,10 @@ struct PendingTask {
     key: Option<String>,
     /// Tiebreaker so FIFO order is preserved among equal priorities.
     seq: u64,
-    /// Async-builtin execution context captured at submit time, while the
-    /// `__pool_submit` builtin still holds the `task_local` context. Pool tasks
-    /// are dispatched from slot-free callbacks (a sibling task finishing, a
-    /// `pool_wait`, etc.) that run with NO ambient context — `task_local` is
-    /// task-scoped and, unlike the old `thread_local!` stack, does not leak
-    /// across `spawn_local`. So the runner VM must travel with the task rather
-    /// than be re-cloned from ambient context at dispatch time. See harn#2667.
-    /// Wrapped in `Rc<RefCell<_>>` because `PendingTask` is `Clone` and `Vm`
-    /// is not; the handle is only ever cloned-into a single dispatch.
-    context_vm: Option<Rc<RefCell<crate::vm::Vm>>>,
+    /// Execution context captured at submit time. Pool tasks are dispatched
+    /// later from slot-free callbacks, so the runner context must travel with
+    /// the task instead of being rediscovered from ambient state.
+    context: Option<AsyncBuiltinCtx>,
 }
 
 struct TaskState {
@@ -614,11 +608,14 @@ fn parse_idempotency_key(opts: &BTreeMap<String, VmValue>) -> Result<Option<Stri
 /// option overrides first, then falls back to the active runtime
 /// context (workflow_id / run_id). Returns a friendly error matching the
 /// channel scope contract when no pipeline id is in scope.
-fn resolve_pipeline_scope_id(opts: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
+fn resolve_pipeline_scope_id(
+    ctx: Option<&AsyncBuiltinCtx>,
+    opts: &BTreeMap<String, VmValue>,
+) -> Result<String, VmError> {
     if let Some(explicit) = parse_scope_id_override(opts) {
         return Ok(explicit);
     }
-    if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
+    if let Some(vm) = ctx.map(AsyncBuiltinCtx::child_vm) {
         if let VmValue::Dict(values) = crate::runtime_context::runtime_context_value(&vm) {
             for key in ["workflow_id", "run_id"] {
                 if let Some(VmValue::String(text)) = values.get(key) {
@@ -1056,10 +1053,14 @@ fn ordered_pool_config(opts: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmV
 /// Create a named agent pool and register it in the local pool registry.
 #[harn_builtin(
     sig = "__pool_create(options?: dict|nil) -> dict",
+    kind = "async",
     category = "pool",
     runtime_only = true
 )]
-fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+async fn pool_create_sync(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let opts = parse_options(args.first(), "pool_create")?;
     let name = parse_name(&opts).unwrap_or_else(|| format!("pool_{}", uuid::Uuid::now_v7()));
     if let Some(existing) = POOL_NAMES.with(|names| names.borrow().get(&name).cloned()) {
@@ -1085,7 +1086,7 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let (id, scope_id, store, persisted) = match scope {
         PoolScope::Session => (next_pool_id(), String::new(), None, None),
         PoolScope::Pipeline => {
-            let pipeline_id = resolve_pipeline_scope_id(&opts)?;
+            let pipeline_id = resolve_pipeline_scope_id(Some(&ctx), &opts)?;
             let id = deterministic_pool_id(scope, &pipeline_id, &name);
             let dir_override = parse_durable_dir(&opts)?;
             let path = pipeline_pool_file_path(dir_override.as_deref(), &pipeline_id, &name);
@@ -1282,7 +1283,7 @@ fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     runtime_only = true
 )]
 async fn pool_submit_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let pool_id = pool_id_from_value(
@@ -1314,7 +1315,8 @@ async fn pool_submit_builtin(
         parse_submit_key(&opts, &pool.queue_strategy)?
     };
 
-    let state = submit_to_pool_entry(&entry, closure, key, priority, idempotency_key).await?;
+    let state =
+        submit_to_pool_entry(Some(&ctx), &entry, closure, key, priority, idempotency_key).await?;
     let handle = task_handle_value(&state.borrow());
     Ok(handle)
 }
@@ -1364,6 +1366,7 @@ pub struct PoolSubmitOutcome {
 /// does not exist or the policy fails the submitter (fail_fast /
 /// fail_submitter); awaits when the policy blocks the submitter.
 pub async fn submit_closure_to_named_pool(
+    ctx: Option<&AsyncBuiltinCtx>,
     pool_name: &str,
     closure: Rc<VmClosure>,
     priority: i64,
@@ -1376,7 +1379,7 @@ pub async fn submit_closure_to_named_pool(
     })?;
     // Trigger-dispatcher pool submissions don't carry a caller-supplied
     // idempotency key today; the dispatcher's own dedupe runs upstream.
-    let state = submit_to_pool_entry(&entry, closure, key, priority, None).await?;
+    let state = submit_to_pool_entry(ctx, &entry, closure, key, priority, None).await?;
     let task = state.borrow();
     Ok(PoolSubmitOutcome {
         pool_id: task.pool_id.clone(),
@@ -1392,6 +1395,7 @@ pub async fn submit_closure_to_named_pool(
 /// backpressure policy: blocks on `BlockSubmitter`, drops oldest/newest in
 /// the corresponding policies, and fails on `FailFast`/`FailSubmitter`.
 async fn submit_to_pool_entry(
+    ctx: Option<&AsyncBuiltinCtx>,
     entry: &Rc<RefCell<PoolEntry>>,
     closure: Rc<VmClosure>,
     key: Option<String>,
@@ -1407,7 +1411,7 @@ async fn submit_to_pool_entry(
             return Ok(existing);
         }
     }
-    let submitted_by = current_submitter();
+    let submitted_by = current_submitter(ctx);
     let (pool_id_for_span, pool_name_for_span) = {
         let pool = entry.borrow();
         (pool.id.clone(), pool.name.clone())
@@ -1437,6 +1441,7 @@ async fn submit_to_pool_entry(
         let attempt = {
             let mut pool = entry.borrow_mut();
             submit_or_wait(
+                ctx,
                 &mut pool,
                 closure.clone(),
                 key.clone(),
@@ -1485,8 +1490,8 @@ async fn submit_to_pool_entry(
 /// observability stack (workflow span, agent session, mutation session,
 /// active worker). Falls back to `"user"` when no better identifier is
 /// in scope (e.g. submission from a CLI smoke test).
-fn current_submitter() -> String {
-    if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
+fn current_submitter(ctx: Option<&AsyncBuiltinCtx>) -> String {
+    if let Some(vm) = ctx.map(AsyncBuiltinCtx::child_vm) {
         if let VmValue::Dict(values) = crate::runtime_context::runtime_context_value(&vm) {
             for key in [
                 "agent_session_id",
@@ -1526,6 +1531,7 @@ enum SubmitAttempt {
 
 #[allow(clippy::too_many_arguments)]
 fn submit_or_wait(
+    ctx: Option<&AsyncBuiltinCtx>,
     pool: &mut PoolEntry,
     closure: Rc<VmClosure>,
     key: Option<String>,
@@ -1536,6 +1542,7 @@ fn submit_or_wait(
 ) -> SubmitAttempt {
     if can_accept_now(pool) {
         let (state, pending) = create_pending_task(
+            ctx,
             pool,
             closure,
             key,
@@ -1554,6 +1561,7 @@ fn submit_or_wait(
     match pool.backpressure.clone() {
         BackpressureStrategy::Unbounded => {
             let (state, pending) = create_pending_task(
+                ctx,
                 pool,
                 closure,
                 key,
@@ -1580,6 +1588,7 @@ fn submit_or_wait(
             max_depth,
             on_full: QueueOnFullPolicy::DropOldest,
         } => submit_with_oldest_drop(
+            ctx,
             pool,
             closure,
             key,
@@ -1595,6 +1604,7 @@ fn submit_or_wait(
             max_depth,
             on_full: QueueOnFullPolicy::DropNewest,
         } => submit_with_newest_drop(
+            ctx,
             pool,
             closure,
             key,
@@ -1624,6 +1634,7 @@ fn submit_or_wait(
             ),
         )),
         BackpressureStrategy::RingBuffer { capacity } => submit_with_oldest_drop(
+            ctx,
             pool,
             closure,
             key,
@@ -1652,6 +1663,7 @@ fn can_accept_now(pool: &PoolEntry) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 fn submit_with_oldest_drop(
+    ctx: Option<&AsyncBuiltinCtx>,
     pool: &mut PoolEntry,
     closure: Rc<VmClosure>,
     key: Option<String>,
@@ -1665,6 +1677,7 @@ fn submit_with_oldest_drop(
 ) -> SubmitAttempt {
     let queue_depth = pool.queue.len();
     let (state, pending) = create_pending_task(
+        ctx,
         pool,
         closure,
         key,
@@ -1695,6 +1708,7 @@ fn submit_with_oldest_drop(
 
 #[allow(clippy::too_many_arguments)]
 fn submit_with_newest_drop(
+    ctx: Option<&AsyncBuiltinCtx>,
     pool: &mut PoolEntry,
     closure: Rc<VmClosure>,
     key: Option<String>,
@@ -1708,6 +1722,7 @@ fn submit_with_newest_drop(
 ) -> SubmitAttempt {
     let queue_depth = pool.queue.len();
     let (state, _pending) = create_pending_task(
+        ctx,
         pool,
         closure,
         key,
@@ -1728,6 +1743,7 @@ fn submit_with_newest_drop(
 }
 
 fn create_pending_task(
+    ctx: Option<&AsyncBuiltinCtx>,
     pool: &mut PoolEntry,
     closure: Rc<VmClosure>,
     key: Option<String>,
@@ -1773,10 +1789,7 @@ fn create_pending_task(
         priority,
         key,
         seq,
-        // Capture the execution context now, synchronously, while the submit
-        // builtin still holds the task_local async-builtin context. Dispatch
-        // happens later from a context-free callback. See harn#2667.
-        context_vm: crate::vm::clone_async_builtin_child_vm().map(|vm| Rc::new(RefCell::new(vm))),
+        context: ctx.map(AsyncBuiltinCtx::child_ctx),
     };
     (state, pending)
 }
@@ -2238,7 +2251,7 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
         task_id,
         closure,
         state,
-        context_vm,
+        context,
         ..
     } = pending;
 
@@ -2297,15 +2310,7 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     // place would deadlock the next caller of `dispatch_ready`.
     tokio::task::spawn_local(emit_pool_dequeue_receipt(dequeue_receipt));
 
-    // Use the execution context captured at submit time (see `PendingTask`).
-    // The VM moves into the local task and runs the closure with a fresh
-    // execution context, so each pool task is isolated from siblings. Dispatch
-    // runs from a context-free callback, so we must NOT re-clone the ambient
-    // task_local context here (it would be empty). See harn#2667.
-    let Some(child_vm_cell) = context_vm else {
-        // Pool submissions are always called from an async builtin
-        // (`__pool_submit`), so the captured context should never be empty.
-        // Fail the task cleanly instead of leaving it stuck "running".
+    let Some(ctx) = context else {
         dequeue_span.end();
         finalize_task(
             &pool,
@@ -2322,23 +2327,12 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     dequeue_span.end();
 
     tokio::task::spawn_local(async move {
-        // The async-builtin context is task-scoped (`tokio::task_local`): unlike
-        // the old `thread_local!` stack, it does NOT leak into a `spawn_local`
-        // child running on the same thread. So this spawned pool task binds its
-        // own context from the VM captured at submit time (`child_vm_cell`), so
-        // the closure — and the async builtins it invokes — resolve a
-        // `clone_async_builtin_child_vm` root. See harn#2667.
-        let context_root = child_vm_cell.borrow().child_vm();
-        let outcome = crate::vm::scope_async_builtin(context_root, async move {
-            let Some(mut runner) = crate::vm::clone_async_builtin_child_vm() else {
-                return Err("pool: lost VM execution context".to_string());
-            };
-            runner
-                .call_closure_args(&closure, crate::vm::CallArgs::Empty)
-                .await
-                .map_err(|error| error.to_string())
-        })
-        .await;
+        let mut runner = ctx.child_vm();
+        let outcome = runner
+            .call_closure_args(&closure, crate::vm::CallArgs::Empty)
+            .await
+            .map_err(|error| error.to_string());
+        ctx.forward_output(&runner.take_output());
         finalize_task(&pool, &state, outcome);
     });
 }

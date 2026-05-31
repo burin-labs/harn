@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::{vm_call_llm_full, vm_value_to_json};
 use crate::value::{VmError, VmValue};
+use crate::vm::AsyncBuiltinCtx;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompactStrategy {
@@ -846,6 +847,7 @@ fn extend_compaction_prompt(mut prompt: String, policy: &CompactionPolicy) -> St
 }
 
 async fn custom_compaction_summary(
+    ctx: Option<&AsyncBuiltinCtx>,
     old_messages: &[serde_json::Value],
     archived_count: usize,
     callback: &VmValue,
@@ -857,11 +859,12 @@ async fn custom_compaction_summary(
             "compact_callback must be a closure when compact_strategy is 'custom'".to_string(),
         ));
     };
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime(
+    let Some(ctx) = ctx else {
+        return Err(VmError::Runtime(
             "custom transcript compaction requires an async builtin VM context".to_string(),
-        )
-    })?;
+        ));
+    };
+    let mut vm = ctx.child_vm();
     let messages_vm = VmValue::List(Rc::new(
         old_messages
             .iter()
@@ -883,6 +886,7 @@ async fn custom_compaction_summary(
         vm.call_closure_pub(&closure, &[messages_vm]).await
     };
     let summary = compact_summary_text_from_value(&result?)?;
+    ctx.forward_output(&vm.take_output());
     if summary.trim().is_empty() {
         Ok(truncate_compaction_summary(old_messages, archived_count))
     } else {
@@ -958,6 +962,7 @@ fn observation_mask_compaction_with_callback(
 
 /// Invoke the mask_callback to get per-message custom masks.
 async fn invoke_mask_callback(
+    ctx: Option<&AsyncBuiltinCtx>,
     callback: &VmValue,
     old_messages: &[serde_json::Value],
 ) -> Result<Vec<Option<String>>, VmError> {
@@ -966,9 +971,12 @@ async fn invoke_mask_callback(
             "mask_callback must be a closure".to_string(),
         ));
     };
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("mask_callback requires an async builtin VM context".to_string())
-    })?;
+    let Some(ctx) = ctx else {
+        return Err(VmError::Runtime(
+            "mask_callback requires an async builtin VM context".to_string(),
+        ));
+    };
+    let mut vm = ctx.child_vm();
     let messages_vm = VmValue::List(Rc::new(
         old_messages
             .iter()
@@ -976,6 +984,7 @@ async fn invoke_mask_callback(
             .collect(),
     ));
     let result = vm.call_closure_pub(&closure, &[messages_vm]).await?;
+    ctx.forward_output(&vm.take_output());
     let list = match result {
         VmValue::List(items) => items,
         _ => return Ok(vec![None; old_messages.len()]),
@@ -992,6 +1001,7 @@ async fn invoke_mask_callback(
 
 #[derive(Clone, Copy)]
 struct CompactionStrategyInputs<'a> {
+    ctx: Option<&'a AsyncBuiltinCtx>,
     strategy: &'a CompactStrategy,
     old_messages: &'a [serde_json::Value],
     archived_count: usize,
@@ -1015,6 +1025,7 @@ async fn apply_compaction_strategy(input: CompactionStrategyInputs<'_>) -> Resul
         mask_callback,
         summarize_prompt,
         policy,
+        ctx,
     } = input;
     match strategy {
         CompactStrategy::Truncate => Ok(truncate_compaction_summary(old_messages, archived_count)),
@@ -1034,6 +1045,7 @@ async fn apply_compaction_strategy(input: CompactionStrategyInputs<'_>) -> Resul
         }
         CompactStrategy::Custom => {
             custom_compaction_summary(
+                ctx,
                 old_messages,
                 archived_count,
                 custom_compactor.ok_or_else(|| {
@@ -1049,7 +1061,7 @@ async fn apply_compaction_strategy(input: CompactionStrategyInputs<'_>) -> Resul
         }
         CompactStrategy::ObservationMask => {
             let mask_results = if let Some(cb) = mask_callback {
-                Some(invoke_mask_callback(cb, old_messages).await?)
+                Some(invoke_mask_callback(ctx, cb, old_messages).await?)
             } else {
                 None
             };
@@ -1090,7 +1102,17 @@ pub(crate) struct AutoCompactResult {
 }
 
 /// Auto-compact a message list in place using two-tier compaction.
+#[cfg(test)]
 pub(crate) async fn auto_compact_messages_with_result(
+    messages: &mut Vec<serde_json::Value>,
+    config: &AutoCompactConfig,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+) -> Result<Option<AutoCompactResult>, VmError> {
+    auto_compact_messages_with_result_with_ctx(None, messages, config, llm_opts).await
+}
+
+pub(crate) async fn auto_compact_messages_with_result_with_ctx(
+    ctx: Option<&AsyncBuiltinCtx>,
     messages: &mut Vec<serde_json::Value>,
     config: &AutoCompactConfig,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
@@ -1142,6 +1164,7 @@ pub(crate) async fn auto_compact_messages_with_result(
 
     let (mut summary, mut strategy) = apply_compaction_strategy_with_fallback(
         CompactionStrategyInputs {
+            ctx,
             strategy: &config.compact_strategy,
             old_messages: &old_messages,
             archived_count,
@@ -1169,6 +1192,7 @@ pub(crate) async fn auto_compact_messages_with_result(
             let (hard_limit_summary, hard_limit_strategy) =
                 apply_compaction_strategy_with_fallback(
                     CompactionStrategyInputs {
+                        ctx,
                         strategy: &config.hard_limit_strategy,
                         old_messages: &tier1_as_messages,
                         archived_count,

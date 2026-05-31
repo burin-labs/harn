@@ -9,6 +9,7 @@ use crate::orchestration::{
     RunStageRecord,
 };
 use crate::value::{VmError, VmValue};
+use crate::vm::AsyncBuiltinCtx;
 
 use super::usage::{llm_usage_delta, llm_usage_snapshot};
 
@@ -92,6 +93,7 @@ struct WorkflowStageAttemptOutcome {
 }
 
 pub(super) async fn stage_attempt_outcome(
+    ctx: &AsyncBuiltinCtx,
     node: &crate::orchestration::WorkflowNode,
     result: &serde_json::Value,
     verification: Option<serde_json::Value>,
@@ -103,6 +105,7 @@ pub(super) async fn stage_attempt_outcome(
     });
     let classified: WorkflowStageAttemptOutcome =
         crate::stdlib::harn_entry::call_harn_export_typed(
+            ctx,
             "std/workflow/stage",
             "workflow_stage_attempt_outcome",
             "workflow_stage_attempt_outcome",
@@ -128,6 +131,7 @@ struct WorkflowStaticStagePlan {
 }
 
 async fn prepare_static_stage(
+    ctx: &AsyncBuiltinCtx,
     node_id: &str,
     node: &crate::orchestration::WorkflowNode,
     artifacts: &[ArtifactRecord],
@@ -138,6 +142,7 @@ async fn prepare_static_stage(
         "artifacts": artifacts,
     });
     let planned: WorkflowStaticStagePlan = crate::stdlib::harn_entry::call_harn_export_typed(
+        ctx,
         "std/workflow/stage",
         "workflow_prepare_static_stage",
         "workflow_prepare_static_stage",
@@ -177,6 +182,7 @@ type StageAttemptResult = (
 );
 
 pub(super) async fn execute_stage_attempts(
+    ctx: &AsyncBuiltinCtx,
     task: &str,
     node_id: &str,
     node: &crate::orchestration::WorkflowNode,
@@ -184,7 +190,7 @@ pub(super) async fn execute_stage_attempts(
     transcript: Option<VmValue>,
 ) -> Result<ExecutedStage, VmError> {
     let selected_stage_artifacts =
-        select_workflow_stage_artifacts(artifacts, &node.context_policy, &node.input_contract)
+        select_workflow_stage_artifacts(ctx, artifacts, &node.context_policy, &node.input_contract)
             .await?
             .artifacts;
     let consumed_artifact_ids = selected_stage_artifacts
@@ -203,7 +209,7 @@ pub(super) async fn execute_stage_attempts(
     let attempt_task = task.to_string();
     let execution_future = async {
         if let Some((result, produced, _, outcome, branch, verification)) =
-            prepare_static_stage(node_id, node, &selected_stage_artifacts).await?
+            prepare_static_stage(ctx, node_id, node, &selected_stage_artifacts).await?
         {
             return Ok((
                 result,
@@ -218,6 +224,7 @@ pub(super) async fn execute_stage_attempts(
             "subagent" => {
                 let (result, produced, next_transcript) =
                     super::super::agents_workers::execute_delegated_stage(
+                        ctx,
                         node_id,
                         node,
                         &attempt_task,
@@ -226,6 +233,7 @@ pub(super) async fn execute_stage_attempts(
                     )
                     .await?;
                 let (outcome, branch, verification) = stage_attempt_outcome(
+                    ctx,
                     node,
                     &result,
                     Some(serde_json::json!({"kind": "none", "ok": true})),
@@ -242,6 +250,7 @@ pub(super) async fn execute_stage_attempts(
             }
             _ => {
                 let (result, produced, next_transcript) = crate::orchestration::execute_stage_node(
+                    ctx,
                     node_id,
                     node,
                     &attempt_task,
@@ -249,7 +258,7 @@ pub(super) async fn execute_stage_attempts(
                 )
                 .await?;
                 let (outcome, branch, verification) =
-                    stage_attempt_outcome(node, &result, None).await?;
+                    stage_attempt_outcome(ctx, node, &result, None).await?;
                 Ok((
                     result,
                     produced,

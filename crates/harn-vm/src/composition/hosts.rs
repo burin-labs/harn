@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::agent_events::ToolCallErrorCategory;
 use crate::value::VmValue;
-use crate::vm::Vm;
+use crate::vm::AsyncBuiltinCtx;
 use crate::VmClosure;
 
 use super::manifest::BindingManifestEntry;
@@ -47,24 +47,26 @@ impl CompositionToolHost for StaticCompositionToolHost {
 /// sees the manifest bindings plus pure helpers.
 pub struct ClosureCompositionToolHost {
     closure: VmClosure,
-    outer_vm: Vm,
+    ctx: AsyncBuiltinCtx,
 }
 
 impl ClosureCompositionToolHost {
-    pub fn new(closure: VmClosure, outer_vm: Vm) -> Self {
-        Self { closure, outer_vm }
+    pub fn new(closure: VmClosure, ctx: AsyncBuiltinCtx) -> Self {
+        Self { closure, ctx }
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl CompositionToolHost for ClosureCompositionToolHost {
     async fn call(&self, binding: &BindingManifestEntry, input: Value) -> CompositionToolOutput {
-        let mut vm = self.outer_vm.child_vm();
+        let mut vm = self.ctx.child_vm();
         let args = vec![
             VmValue::String(Rc::from(binding.name.as_str())),
             crate::json_to_vm_value(&input),
         ];
-        match vm.call_closure_pub(&self.closure, &args).await {
+        let result = vm.call_closure_pub(&self.closure, &args).await;
+        self.ctx.forward_output(&vm.take_output());
+        match result {
             Ok(value) => {
                 let json = crate::llm::vm_value_to_json(&value);
                 CompositionToolOutput::ok(json)

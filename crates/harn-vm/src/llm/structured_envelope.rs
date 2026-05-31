@@ -68,16 +68,17 @@ pub(crate) async fn run_structured_envelope(
     let provider_hint = opts.provider.clone();
     let model_hint = opts.model.clone();
 
-    let main_outcome = match execute_schema_retry_loop(opts, options_dict.clone(), bridge).await {
-        Ok(outcome) => outcome,
-        Err(err) => {
-            return Ok(envelope_from_transport_error(
-                &err,
-                &provider_hint,
-                &model_hint,
-            ));
-        }
-    };
+    let main_outcome =
+        match execute_schema_retry_loop(None, opts, options_dict.clone(), bridge).await {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                return Ok(envelope_from_transport_error(
+                    &err,
+                    &provider_hint,
+                    &model_hint,
+                ));
+            }
+        };
 
     if main_outcome.errors.is_empty() {
         return Ok(envelope_success(&main_outcome, false));
@@ -231,7 +232,7 @@ async fn run_repair_pass(
         VmValue::Dict(Rc::new(merged_options)),
     ];
     let opts = extract_llm_options(&args).ok()?;
-    let outcome = execute_schema_retry_loop(opts, merged_dict, bridge)
+    let outcome = execute_schema_retry_loop(None, opts, merged_dict, bridge)
         .await
         .ok()?;
     if outcome.errors.is_empty() {

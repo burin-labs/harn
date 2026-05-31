@@ -348,7 +348,10 @@ fn join_limited_keys(keys: &[String]) -> String {
 /// on the LLM error taxonomy);
 /// `llm_call_safe` wraps it in a `{ok: false, error: …}` envelope with
 /// the same fields.
-pub(super) async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+pub(super) async fn llm_call_impl(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let options = args.get(2).and_then(|a| a.as_dict()).cloned();
     let opts = extract_llm_options(&args)?;
     let provider = opts.provider.clone();
@@ -364,7 +367,7 @@ pub(super) async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     // runtime-introspection snapshot — that's the single DRY point for
     // every llm_call path (plain, bridged, structured), so we don't
     // also record here.
-    match execute_llm_call(opts, options, None).await {
+    match execute_llm_call(ctx, opts, options, None).await {
         Ok(v) => Ok(v),
         Err(err) => Err(VmError::Thrown(build_llm_error_dict(
             &err, &provider, &model,
@@ -437,6 +440,7 @@ fn llm_error_message(err: &VmError) -> String {
 }
 
 pub(crate) async fn execute_llm_call(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
@@ -448,9 +452,9 @@ pub(crate) async fn execute_llm_call(
     // `llm_call_impl` — so recording here is the single DRY point.
     super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
     let outcome = if let Some(policy) = opts.routing_policy.clone() {
-        execute_routing_schema_retry_loop(policy, opts, options, bridge).await?
+        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge).await?
     } else {
-        execute_schema_retry_loop(opts, options, bridge).await?
+        execute_schema_retry_loop(ctx, opts, options, bridge).await?
     };
     if outcome.errors.is_empty() {
         return Ok(outcome.vm_result);
@@ -484,12 +488,13 @@ pub(crate) async fn execute_llm_call(
 /// link's result is wrapped in the standard `llm_call` envelope plus
 /// a `routing` block summarizing every attempt.
 async fn execute_routing_schema_retry_loop(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     policy: Rc<routing::RoutingPolicyConfig>,
     mut opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<SchemaLoopOutcome, VmError> {
-    let _ = structural_experiments::apply_structural_experiment(&mut opts, None).await?;
+    let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
     let schema_retries = helpers::opt_int(&options, "schema_retries")
         .unwrap_or(1)
         .max(0) as usize;
@@ -629,11 +634,12 @@ pub(crate) struct SchemaLoopOutcome {
 }
 
 pub(crate) async fn execute_schema_retry_loop(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     mut opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<SchemaLoopOutcome, VmError> {
-    let _ = structural_experiments::apply_structural_experiment(&mut opts, None).await?;
+    let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
     let retry_config = agent_observe::LlmRetryConfig {
         retries: helpers::opt_int(&options, "llm_retries")
             .unwrap_or(agent_observe::DEFAULT_LLM_CALL_RETRIES as i64)
@@ -1079,9 +1085,10 @@ mod schema_stream_abort_retry_tests {
             );
 
             let opts = fake_opts_with_schema();
-            let outcome = execute_schema_retry_loop(opts, Some(options_with_retries(2)), None)
-                .await
-                .expect("retry loop runs cleanly");
+            let outcome =
+                execute_schema_retry_loop(None, opts, Some(options_with_retries(2)), None)
+                    .await
+                    .expect("retry loop runs cleanly");
 
             assert_eq!(outcome.attempts, 2, "expected the recovery to run twice");
             assert!(
@@ -1166,7 +1173,7 @@ mod schema_stream_abort_retry_tests {
 
             let mut opts = fake_opts_with_schema();
             opts.routing_policy = Some(fake_routing_policy());
-            let result = execute_llm_call(opts, Some(options_with_retries(1)), None)
+            let result = execute_llm_call(None, opts, Some(options_with_retries(1)), None)
                 .await
                 .expect("routed schema retry should recover");
 
@@ -1208,9 +1215,10 @@ mod schema_stream_abort_retry_tests {
 
             let mut opts = fake_opts_with_schema();
             opts.schema_stream_abort = false;
-            let outcome = execute_schema_retry_loop(opts, Some(options_with_retries(0)), None)
-                .await
-                .expect("retry loop completes");
+            let outcome =
+                execute_schema_retry_loop(None, opts, Some(options_with_retries(0)), None)
+                    .await
+                    .expect("retry loop completes");
 
             // No mid-stream abort fired; the stream ran to completion and
             // the schema validator caught the failure post-hoc instead.

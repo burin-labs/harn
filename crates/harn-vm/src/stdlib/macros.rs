@@ -41,8 +41,8 @@ pub type AsyncBuiltinFuture = Pin<Box<dyn Future<Output = Result<VmValue, VmErro
 /// Sync builtin handler signature (matches `crate::vm::dispatch`'s register_builtin shape).
 pub type SyncHandler = fn(&[VmValue], &mut String) -> Result<VmValue, VmError>;
 /// Async builtin handler signature. Receives an explicit
-/// [`crate::vm::AsyncBuiltinCtx`] handle (see harn#2668) so handlers thread the
-/// context they were given instead of reading an ambient task-local.
+/// [`crate::vm::AsyncBuiltinCtx`] handle so handlers thread the context they
+/// were given through async helper calls.
 pub type AsyncHandler = fn(crate::vm::AsyncBuiltinCtx, Vec<VmValue>) -> AsyncBuiltinFuture;
 
 /// Runtime handler attached to a `VmBuiltinDef`. `None` covers parser-only

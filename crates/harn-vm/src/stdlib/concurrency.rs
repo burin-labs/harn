@@ -306,12 +306,8 @@ fn scoped_from_handle_or_name(
     Ok(ScopedKey { scope, key })
 }
 
-fn current_async_vm(builtin: &str) -> Result<Vm, VmError> {
-    crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime(format!(
-            "{builtin}: async builtin requires VM execution context"
-        ))
-    })
+fn current_async_vm(ctx: &crate::vm::AsyncBuiltinCtx, _builtin: &str) -> Vm {
+    ctx.child_vm()
 }
 
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
@@ -327,10 +323,10 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
     doc = "Acquire a named mutex permit."
 )]
 async fn sync_mutex_acquire_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("sync_mutex_acquire")?;
+    let vm = current_async_vm(&ctx, "sync_mutex_acquire");
     let key = args
         .first()
         .map(|a| a.display())
@@ -351,10 +347,10 @@ async fn sync_mutex_acquire_builtin(
     doc = "Acquire permits from a named semaphore."
 )]
 async fn sync_semaphore_acquire_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("sync_semaphore_acquire")?;
+    let vm = current_async_vm(&ctx, "sync_semaphore_acquire");
     let key = args
         .first()
         .map(|a| a.display())
@@ -384,10 +380,10 @@ async fn sync_semaphore_acquire_builtin(
     doc = "Acquire one permit from a named gate."
 )]
 async fn sync_gate_acquire_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("sync_gate_acquire")?;
+    let vm = current_async_vm(&ctx, "sync_gate_acquire");
     let key = args
         .first()
         .map(|a| a.display())
@@ -409,11 +405,11 @@ async fn sync_gate_acquire_builtin(
     doc = "Acquire a read or write permit from a named read-write lock."
 )]
 async fn sync_rwlock_acquire_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     const RWLOCK_CAPACITY: u32 = 1024;
-    let vm = current_async_vm("sync_rwlock_acquire")?;
+    let vm = current_async_vm(&ctx, "sync_rwlock_acquire");
     let key = args
         .first()
         .map(|a| a.display())
@@ -468,10 +464,10 @@ fn sync_release_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     doc = "Return synchronization runtime metrics."
 )]
 async fn sync_metrics_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("sync_metrics")?;
+    let vm = current_async_vm(&ctx, "sync_metrics");
     let kind = args.first().map(|v| v.display());
     let key = args.get(1).map(|v| v.display());
     Ok(vm.sync_runtime.metrics(kind.as_deref(), key.as_deref()))
@@ -484,10 +480,10 @@ async fn sync_metrics_builtin(
     doc = "Resolve a shared-state scope identifier."
 )]
 async fn shared_scope_id_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("shared_scope_id")?;
+    let vm = current_async_vm(&ctx, "shared_scope_id");
     let options = args.get(1).and_then(VmValue::as_dict);
     let raw_scope = args.first().map(VmValue::display);
     Ok(VmValue::String(Rc::from(resolve_shared_scope(
@@ -505,10 +501,10 @@ async fn shared_scope_id_builtin(
     doc = "Open or create a scoped shared cell."
 )]
 async fn shared_cell_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("shared_cell")?;
+    let vm = current_async_vm(&ctx, "shared_cell");
     let shared_runtime = vm.shared_state_runtime.clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "shared_cell", "key")?;
     let initial = options
@@ -526,10 +522,10 @@ async fn shared_cell_builtin(
     doc = "Read a shared cell value."
 )]
 async fn shared_get_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("shared_get")?;
+    let vm = current_async_vm(&ctx, "shared_get");
     let shared_runtime = vm.shared_state_runtime.clone();
     let handle = args
         .first()
@@ -545,10 +541,10 @@ async fn shared_get_builtin(
     doc = "Return a shared cell snapshot."
 )]
 async fn shared_snapshot_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("shared_snapshot")?;
+    let vm = current_async_vm(&ctx, "shared_snapshot");
     let shared_runtime = vm.shared_state_runtime.clone();
     let handle = args
         .first()
@@ -564,10 +560,10 @@ async fn shared_snapshot_builtin(
     doc = "Set a shared cell value."
 )]
 async fn shared_set_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("shared_set")?;
+    let vm = current_async_vm(&ctx, "shared_set");
     let shared_runtime = vm.shared_state_runtime.clone();
     let handle = args
         .first()
@@ -584,7 +580,7 @@ async fn shared_set_builtin(
     doc = "Compare and swap a shared cell value."
 )]
 async fn shared_cas_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 3 {
@@ -592,7 +588,7 @@ async fn shared_cas_builtin(
             "shared_cas: requires handle, expected, and new value".to_string(),
         ));
     }
-    let vm = current_async_vm("shared_cas")?;
+    let vm = current_async_vm(&ctx, "shared_cas");
     let shared_runtime = vm.shared_state_runtime.clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_cell", "shared_cas")?;
     Ok(VmValue::Bool(shared_runtime.cell_cas(
@@ -609,10 +605,10 @@ async fn shared_cas_builtin(
     doc = "Open or create a scoped shared map."
 )]
 async fn shared_map_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("shared_map")?;
+    let vm = current_async_vm(&ctx, "shared_map");
     let shared_runtime = vm.shared_state_runtime.clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "shared_map", "key")?;
     let initial = options
@@ -631,7 +627,7 @@ async fn shared_map_builtin(
     doc = "Read a shared map entry."
 )]
 async fn shared_map_get_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
@@ -639,7 +635,7 @@ async fn shared_map_get_builtin(
             "shared_map_get: requires handle and key".to_string(),
         ));
     }
-    let vm = current_async_vm("shared_map_get")?;
+    let vm = current_async_vm(&ctx, "shared_map_get");
     let shared_runtime = vm.shared_state_runtime.clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_get")?;
     let default = args.get(2).cloned().unwrap_or(VmValue::Nil);
@@ -653,7 +649,7 @@ async fn shared_map_get_builtin(
     doc = "Return a shared map entry snapshot."
 )]
 async fn shared_map_snapshot_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
@@ -661,7 +657,7 @@ async fn shared_map_snapshot_builtin(
             "shared_map_snapshot: requires handle and key".to_string(),
         ));
     }
-    let vm = current_async_vm("shared_map_snapshot")?;
+    let vm = current_async_vm(&ctx, "shared_map_snapshot");
     let shared_runtime = vm.shared_state_runtime.clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_snapshot")?;
     Ok(shared_runtime.map_snapshot(&scoped, &args[1].display()))
@@ -674,10 +670,10 @@ async fn shared_map_snapshot_builtin(
     doc = "Return all shared map entries."
 )]
 async fn shared_map_entries_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("shared_map_entries")?;
+    let vm = current_async_vm(&ctx, "shared_map_entries");
     let shared_runtime = vm.shared_state_runtime.clone();
     let handle = args
         .first()
@@ -693,7 +689,7 @@ async fn shared_map_entries_builtin(
     doc = "Set a shared map entry."
 )]
 async fn shared_map_set_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 3 {
@@ -701,7 +697,7 @@ async fn shared_map_set_builtin(
             "shared_map_set: requires handle, key, and value".to_string(),
         ));
     }
-    let vm = current_async_vm("shared_map_set")?;
+    let vm = current_async_vm(&ctx, "shared_map_set");
     let shared_runtime = vm.shared_state_runtime.clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_set")?;
     Ok(shared_runtime.map_set(&scoped, args[1].display(), args[2].clone()))
@@ -714,7 +710,7 @@ async fn shared_map_set_builtin(
     doc = "Delete a shared map entry."
 )]
 async fn shared_map_delete_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
@@ -722,7 +718,7 @@ async fn shared_map_delete_builtin(
             "shared_map_delete: requires handle and key".to_string(),
         ));
     }
-    let vm = current_async_vm("shared_map_delete")?;
+    let vm = current_async_vm(&ctx, "shared_map_delete");
     let shared_runtime = vm.shared_state_runtime.clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_delete")?;
     Ok(shared_runtime.map_delete(&scoped, &args[1].display()))
@@ -735,7 +731,7 @@ async fn shared_map_delete_builtin(
     doc = "Compare and swap a shared map entry."
 )]
 async fn shared_map_cas_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 4 {
@@ -743,7 +739,7 @@ async fn shared_map_cas_builtin(
             "shared_map_cas: requires handle, key, expected, and new value".to_string(),
         ));
     }
-    let vm = current_async_vm("shared_map_cas")?;
+    let vm = current_async_vm(&ctx, "shared_map_cas");
     let shared_runtime = vm.shared_state_runtime.clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "shared_map", "shared_map_cas")?;
     Ok(VmValue::Bool(shared_runtime.map_cas(
@@ -761,10 +757,10 @@ async fn shared_map_cas_builtin(
     doc = "Return shared-state runtime metrics."
 )]
 async fn shared_metrics_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("shared_metrics")?;
+    let vm = current_async_vm(&ctx, "shared_metrics");
     let shared_runtime = vm.shared_state_runtime.clone();
     let Some(handle) = args.first() else {
         return Ok(shared_runtime.metrics(None, None));
@@ -785,10 +781,10 @@ async fn shared_metrics_builtin(
     doc = "Open or create a scoped mailbox."
 )]
 async fn mailbox_open_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("mailbox_open")?;
+    let vm = current_async_vm(&ctx, "mailbox_open");
     let shared_runtime = vm.shared_state_runtime.clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "mailbox_open", "name")?;
     let capacity_arg = options
@@ -806,10 +802,10 @@ async fn mailbox_open_builtin(
     doc = "Look up a scoped mailbox handle."
 )]
 async fn mailbox_lookup_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("mailbox_lookup")?;
+    let vm = current_async_vm(&ctx, "mailbox_lookup");
     let shared_runtime = vm.shared_state_runtime.clone();
     let target = args.first().ok_or_else(|| {
         VmError::Runtime("mailbox_lookup: name or handle is required".to_string())
@@ -825,7 +821,7 @@ async fn mailbox_lookup_builtin(
     doc = "Send a value to a mailbox."
 )]
 async fn mailbox_send_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
@@ -833,7 +829,7 @@ async fn mailbox_send_builtin(
             "mailbox_send: requires target and value".to_string(),
         ));
     }
-    let vm = current_async_vm("mailbox_send")?;
+    let vm = current_async_vm(&ctx, "mailbox_send");
     let shared_runtime = vm.shared_state_runtime.clone();
     let scoped = scoped_from_handle_or_name(&vm, &args[0], "mailbox", "mailbox_send")?;
     let Some(channel) = shared_runtime.mailbox_channel(&scoped) else {
@@ -855,10 +851,10 @@ async fn mailbox_send_builtin(
     doc = "Try to receive one mailbox value without blocking."
 )]
 async fn mailbox_try_receive_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("mailbox_try_receive")?;
+    let vm = current_async_vm(&ctx, "mailbox_try_receive");
     let shared_runtime = vm.shared_state_runtime.clone();
     let target = args
         .first()
@@ -886,10 +882,10 @@ async fn mailbox_try_receive_builtin(
     doc = "Receive one mailbox value."
 )]
 async fn mailbox_receive_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("mailbox_receive")?;
+    let vm = current_async_vm(&ctx, "mailbox_receive");
     let shared_runtime = vm.shared_state_runtime.clone();
     let cancel_token = vm.cancel_token.clone();
     let target = args
@@ -941,10 +937,10 @@ async fn mailbox_receive_builtin(
     doc = "Close a scoped mailbox."
 )]
 async fn mailbox_close_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("mailbox_close")?;
+    let vm = current_async_vm(&ctx, "mailbox_close");
     let shared_runtime = vm.shared_state_runtime.clone();
     let target = args
         .first()
@@ -960,10 +956,10 @@ async fn mailbox_close_builtin(
     doc = "Return metrics for a scoped mailbox."
 )]
 async fn mailbox_metrics_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let vm = current_async_vm("mailbox_metrics")?;
+    let vm = current_async_vm(&ctx, "mailbox_metrics");
     let shared_runtime = vm.shared_state_runtime.clone();
     let target = args
         .first()

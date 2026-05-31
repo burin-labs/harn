@@ -267,6 +267,7 @@ fn parse_scalar_value(input: &str) -> Result<serde_json::Value, VmError> {
 }
 
 pub(crate) async fn apply_structural_experiment(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     opts: &mut crate::llm::api::LlmCallOptions,
     iteration: Option<usize>,
 ) -> Result<Option<AppliedStructuralExperiment>, VmError> {
@@ -288,11 +289,13 @@ pub(crate) async fn apply_structural_experiment(
                     "structural_experiment transform must be a closure".to_string(),
                 ));
             };
-            let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-                VmError::Runtime(
-                    "structural_experiment requires an async builtin VM context".to_string(),
-                )
-            })?;
+            let mut vm = ctx
+                .map(crate::vm::AsyncBuiltinCtx::child_vm)
+                .ok_or_else(|| {
+                    VmError::Runtime(
+                        "structural_experiment requires an async builtin VM context".to_string(),
+                    )
+                })?;
             let mut ctx = BTreeMap::new();
             ctx.insert(
                 "messages".to_string(),

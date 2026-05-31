@@ -751,7 +751,7 @@ pub fn register_composition_builtins(vm: &mut Vm) {
         )))
     });
 
-    vm.register_async_builtin("composition_execute", |_ctx, args| async move {
+    vm.register_async_builtin("composition_execute", |ctx, args| async move {
         let snippet = args
             .first()
             .map(VmValue::display)
@@ -794,15 +794,7 @@ pub fn register_composition_builtins(vm: &mut Vm) {
             }
         }
         let host: Rc<dyn CompositionToolHost> = match dispatcher {
-            Some(closure) => {
-                let outer_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-                    VmError::Runtime(
-                        "composition_execute: dispatcher requires an async builtin VM context"
-                            .into(),
-                    )
-                })?;
-                Rc::new(ClosureCompositionToolHost::new(closure, outer_vm))
-            }
+            Some(closure) => Rc::new(ClosureCompositionToolHost::new(closure, ctx.clone())),
             None => Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
         };
         let report = execute_harn_composition(request, host).await;

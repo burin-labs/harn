@@ -208,7 +208,7 @@ fn now_id() -> String {
     runtime_only = true
 )]
 async fn host_agent_session_init(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let message = args.first().map(|v| v.display()).unwrap_or_default();
@@ -235,7 +235,8 @@ async fn host_agent_session_init(
         "system": system.clone().unwrap_or_default(),
     });
     if let crate::orchestration::HookControl::Block { reason } =
-        crate::orchestration::run_lifecycle_hooks_with_control(
+        crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+            Some(&ctx),
             crate::orchestration::HookEvent::UserPromptSubmit,
             &prompt_payload,
         )
@@ -360,7 +361,8 @@ async fn host_agent_session_init(
         "system": system.clone().unwrap_or_default(),
         "max_iterations": max_iterations,
     });
-    crate::orchestration::run_lifecycle_hooks(
+    crate::orchestration::run_lifecycle_hooks_with_ctx(
+        Some(&ctx),
         crate::orchestration::HookEvent::SessionStart,
         &start_payload,
     )
@@ -371,6 +373,7 @@ async fn host_agent_session_init(
     // Mirrors the pattern used at the `PostToolUse` and `PostCompact` call
     // sites so adding new providers does not require new wiring.
     let _ = super::reminder_providers::evaluate_and_inject(
+        Some(&ctx),
         crate::orchestration::HookEvent::SessionStart,
         &resolved,
         start_payload,
@@ -502,7 +505,7 @@ fn agent_init_control_done(
     runtime_only = true
 )]
 async fn host_agent_session_finalize(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = args
@@ -543,7 +546,8 @@ async fn host_agent_session_finalize(
         });
         // SessionError hooks are advisory — log but do not propagate so
         // session cleanup always runs.
-        if let Err(err) = crate::orchestration::run_lifecycle_hooks(
+        if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
+            Some(&ctx),
             crate::orchestration::HookEvent::SessionError,
             &error_payload,
         )
@@ -563,7 +567,8 @@ async fn host_agent_session_finalize(
         "stop_reason": stop_reason,
         "iterations": opt_int(&status_dict, "iterations").unwrap_or(0),
     });
-    if let Err(err) = crate::orchestration::run_lifecycle_hooks(
+    if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
+        Some(&ctx),
         crate::orchestration::HookEvent::SessionEnd,
         &end_payload,
     )
@@ -1488,7 +1493,7 @@ fn host_agent_budget_pre_call_builtin(
     runtime_only = true
 )]
 async fn host_agent_emit_event(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
@@ -1538,7 +1543,7 @@ async fn host_agent_emit_event(
                 .map_err(VmError::Runtime)?;
         }
     }
-    crate::llm::agent_runtime::emit_agent_event(&event).await;
+    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &event).await;
     Ok(VmValue::Nil)
 }
 
@@ -2043,7 +2048,7 @@ fn host_agent_record_compaction_builtin(
     runtime_only = true
 )]
 async fn host_agent_session_project_turn(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = match args.first() {
@@ -2062,19 +2067,26 @@ async fn host_agent_session_project_turn(
         )));
     };
     let transcript_dict = transcript.as_dict().cloned().unwrap_or_default();
-    let result =
-        crate::stdlib::transcript_project::project_transcript(&transcript_dict, &policy).await?;
+    let result = crate::stdlib::transcript_project::project_transcript(
+        Some(&ctx),
+        &transcript_dict,
+        &policy,
+    )
+    .await?;
     let event = crate::stdlib::transcript_project::projection_event_value(&result, &policy);
     let _ = crate::agent_sessions::append_event(&session_id, event.clone());
-    crate::llm::emit_live_agent_event(&AgentEvent::TranscriptProjected {
-        session_id: session_id.clone(),
-        policy: policy.kind.as_str().to_string(),
-        reason: result.reason.clone(),
-        prefix_hash: result.prefix_hash.clone(),
-        kept_count: result.kept_indices.len(),
-        dropped_count: result.dropped_indices.len(),
-        provider_safety_blocked: result.provider_safety_blocked,
-    })
+    crate::llm::emit_live_agent_event_with_ctx(
+        Some(&ctx),
+        &AgentEvent::TranscriptProjected {
+            session_id: session_id.clone(),
+            policy: policy.kind.as_str().to_string(),
+            reason: result.reason.clone(),
+            prefix_hash: result.prefix_hash.clone(),
+            kept_count: result.kept_indices.len(),
+            dropped_count: result.dropped_indices.len(),
+            provider_safety_blocked: result.provider_safety_blocked,
+        },
+    )
     .await;
     Ok(crate::stdlib::transcript_project::result_to_vm(
         &result, &policy,
@@ -2292,10 +2304,11 @@ async fn drain_bridge_injections_for_checkpoint(
 /// path and emit a `LoopCheckpoint` so the rest of the seam catalog
 /// (Harn-side `__agent_loop_checkpoint`, ACP `loop_checkpoint`
 /// notifications, debugger views) sees daemon-side activity through the
-/// same surface. The actual drain reuses the bridge primitive — only
-/// the observability wrapper is daemon-specific because the daemon
-/// can't call back into Harn.
+/// same surface. The actual drain reuses the bridge primitive; this
+/// wrapper adds daemon-specific observability while preserving the
+/// caller's Harn callback context for live subscribers.
 async fn daemon_checkpoint_drain(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     session_id: &str,
     bridge: &crate::bridge::HostBridge,
     kind: &'static str,
@@ -2314,7 +2327,7 @@ async fn daemon_checkpoint_drain(
         inbox_delivered: 0,
         dispatch_skipped: false,
     };
-    super::agent_runtime::emit_agent_event(&event).await;
+    super::agent_runtime::emit_agent_event_with_ctx(Some(ctx), &event).await;
     Ok((delivered, reason))
 }
 
@@ -2481,7 +2494,7 @@ async fn host_agent_session_drain_bridge_injections(
     runtime_only = true
 )]
 async fn host_agent_daemon_wait(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
@@ -2502,7 +2515,8 @@ async fn host_agent_daemon_wait(
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": "resume"})));
         }
-        let (_, reason) = daemon_checkpoint_drain(&session_id, bridge, "daemon_idle_pre").await?;
+        let (_, reason) =
+            daemon_checkpoint_drain(&ctx, &session_id, bridge, "daemon_idle_pre").await?;
         if let Some(reason) = reason {
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": reason})));
@@ -2514,7 +2528,8 @@ async fn host_agent_daemon_wait(
     }
 
     if let Some(bridge) = bridge.as_ref() {
-        let (_, reason) = daemon_checkpoint_drain(&session_id, bridge, "daemon_idle_post").await?;
+        let (_, reason) =
+            daemon_checkpoint_drain(&ctx, &session_id, bridge, "daemon_idle_post").await?;
         if let Some(reason) = reason {
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": reason})));

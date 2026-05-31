@@ -1088,12 +1088,14 @@ pub struct PreparedWorkflowStageNode {
 }
 
 pub async fn prepare_stage_node(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     node_id: &str,
     node: &WorkflowNode,
     task: &str,
     artifacts: &[ArtifactRecord],
 ) -> Result<PreparedWorkflowStageNode, VmError> {
     let selected_stage = super::select_workflow_stage_artifacts(
+        ctx,
         artifacts,
         &node.context_policy,
         &node.input_contract,
@@ -1103,7 +1105,7 @@ pub async fn prepare_stage_node(
     let context_policy = selected_stage.context_policy;
     let rendered_context_override = if let Some(assembler) = node.raw_context_assembler.as_ref() {
         let assembled =
-            crate::stdlib::assemble::assemble_from_options(&selected, assembler).await?;
+            crate::stdlib::assemble::assemble_from_options(ctx, &selected, assembler).await?;
         Some(super::render_assembled_chunks(&assembled))
     } else {
         None
@@ -1132,6 +1134,7 @@ pub async fn prepare_stage_node(
         }
     }
     let prepared_prompt = super::prepare_workflow_stage_prompt(
+        ctx,
         task,
         node.task_label.as_deref(),
         &selected,
@@ -1146,6 +1149,7 @@ pub async fn prepare_stage_node(
 
     let tool_names = tool_names_from_spec(&node.tools);
     let stage_agent_options = super::prepare_workflow_stage_agent_options(
+        ctx,
         node,
         &stage_session_id,
         !tool_names.is_empty(),
@@ -1387,16 +1391,18 @@ pub fn complete_prepared_stage_node(
 }
 
 pub async fn execute_stage_node(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     node_id: &str,
     node: &WorkflowNode,
     task: &str,
     artifacts: &[ArtifactRecord],
 ) -> Result<(serde_json::Value, Vec<ArtifactRecord>, Option<VmValue>), VmError> {
-    let prepared = prepare_stage_node(node_id, node, task, artifacts).await?;
+    let prepared = prepare_stage_node(ctx, node_id, node, task, artifacts).await?;
     let llm_result = if let Some(result) = prepared.result.clone() {
         result
     } else if prepared.run_agent_loop {
         let result = crate::stdlib::harn_entry::call_agent_loop(
+            ctx,
             prepared.prompt.clone(),
             prepared.system.clone(),
             prepared.agent_loop_options.clone(),

@@ -83,7 +83,7 @@ async fn pg_try_advisory_xact_lock_impl(
     category = "postgres"
 )]
 async fn pg_with_advisory_lock_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let pool_handle = required_arg(&args, 0, "pg_with_advisory_lock", "pool handle")?;
@@ -100,11 +100,17 @@ async fn pg_with_advisory_lock_impl(
     let options = args.get(3).and_then(VmValue::as_dict).cloned();
     let key = resolve_key(key_value, options.as_ref(), "pg_with_advisory_lock")?;
 
-    super::run_managed_transaction(&pool_id, "pg_with_advisory_lock", closure, move |tx_id| {
-        let key = key;
-        let tx_id_owned = tx_id.to_string();
-        Box::pin(async move { take_xact_lock(&tx_id_owned, &key).await })
-    })
+    super::run_managed_transaction(
+        &ctx,
+        &pool_id,
+        "pg_with_advisory_lock",
+        closure,
+        move |tx_id| {
+            let key = key;
+            let tx_id_owned = tx_id.to_string();
+            Box::pin(async move { take_xact_lock(&tx_id_owned, &key).await })
+        },
+    )
     .await
 }
 

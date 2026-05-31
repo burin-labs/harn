@@ -101,7 +101,10 @@ pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
 /// cross threads. The agent loop runs on a tokio `LocalSet`-pinned
 /// task, and `agent_subscribe` (the host builtin that appends to the
 /// session) runs on that same task, so the invariant holds.
-pub(crate) async fn emit_agent_event(event: &AgentEvent) {
+pub(crate) async fn emit_agent_event_with_ctx(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    event: &AgentEvent,
+) {
     agent_events::emit_event(event);
 
     let loop_sink = CURRENT_LOOP_SINKS.with(|stack| stack.borrow().last().cloned());
@@ -119,12 +122,15 @@ pub(crate) async fn emit_agent_event(event: &AgentEvent) {
         let VmValue::Closure(closure) = closure else {
             continue;
         };
-        let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+        let Some(ctx) = ctx else {
             continue;
         };
+        let mut vm = ctx.child_vm();
         // Log but don't propagate: one broken subscriber must not tear
         // down the agent loop.
-        if let Err(err) = vm.call_closure_pub(&closure, &[arg.clone()]).await {
+        let result = vm.call_closure_pub(&closure, &[arg.clone()]).await;
+        ctx.forward_output(&vm.take_output());
+        if let Err(err) = result {
             crate::events::log_warn(
                 "agent.subscriber",
                 &format!(

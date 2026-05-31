@@ -380,6 +380,7 @@ pub struct SelectedWorkflowStageArtifacts {
 }
 
 pub async fn select_workflow_stage_artifacts(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     artifacts: &[ArtifactRecord],
     context_policy: &ContextPolicy,
     input_contract: &StageContract,
@@ -390,6 +391,7 @@ pub async fn select_workflow_stage_artifacts(
         "input_contract": input_contract,
     });
     let mut selected: SelectedWorkflowStageArtifacts = call_harn_export_typed(
+        ctx,
         "std/workflow/context",
         "workflow_select_stage_artifacts",
         "workflow_select_stage_artifacts",
@@ -412,6 +414,7 @@ pub struct PreparedWorkflowStagePrompt {
 }
 
 pub async fn prepare_workflow_stage_prompt(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     task: &str,
     task_label: Option<&str>,
     artifacts: &[ArtifactRecord],
@@ -428,6 +431,7 @@ pub async fn prepare_workflow_stage_prompt(
         "verification_contracts": verification_contracts,
     });
     let prepared = call_harn_export_json(
+        ctx,
         "std/workflow/prompts",
         "workflow_prepare_stage_prompt",
         "workflow_prepare_stage_prompt",
