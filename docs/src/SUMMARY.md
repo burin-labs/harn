@@ -250,6 +250,7 @@
 - [Platform compatibility](./dev/platform-compatibility.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Deterministic test patterns](./dev/testing.md)
+- [Thread-local work-stealing audit](./dev/thread-local-work-stealing-audit.md)
 - [Testbench mode](./dev/testbench.md)
 - [Tape format](./dev/tape-format.md)
 - [Annotation tape format](./dev/annotation-tape-format.md)
