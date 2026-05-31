@@ -33,6 +33,12 @@ fn fixture_path(rel: &str) -> PathBuf {
         .join(rel)
 }
 
+fn structural_diff_fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/structural_diff")
+        .join(rel)
+}
+
 fn invoke(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
     let entry = registry
         .find(name)
@@ -68,6 +74,13 @@ fn int_value(value: &VmValue) -> i64 {
     match value {
         VmValue::Int(n) => *n,
         other => panic!("expected int, got {other:?}"),
+    }
+}
+
+fn bool_value(value: &VmValue) -> bool {
+    match value {
+        VmValue::Bool(b) => *b,
+        other => panic!("expected bool, got {other:?}"),
     }
 }
 
@@ -499,6 +512,166 @@ fn undefined_names_marks_unsupported_languages() {
     );
     let diagnostics = list_value(&dict_field(&result, "diagnostics"));
     assert!(diagnostics.is_empty());
+}
+
+fn structural_diff_payload(before: &str, after: &str, extra: &[(&str, VmValue)]) -> VmValue {
+    let before_path = structural_diff_fixture_path(before);
+    let after_path = structural_diff_fixture_path(after);
+    let mut pairs = vec![
+        (
+            "path_a",
+            VmValue::String(Arc::from(before_path.to_string_lossy().as_ref())),
+        ),
+        (
+            "path_b",
+            VmValue::String(Arc::from(after_path.to_string_lossy().as_ref())),
+        ),
+        ("language", VmValue::String(Arc::from("rust"))),
+    ];
+    pairs.extend_from_slice(extra);
+    dict(&pairs)
+}
+
+fn structural_summary(result: &VmValue) -> VmValue {
+    dict_field(result, "summary")
+}
+
+#[test]
+fn structural_diff_ignores_reformat_only_changes() {
+    let registry = ast_registry();
+    let payload = structural_diff_payload("reformat_before.rs", "reformat_after.rs", &[]);
+    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "result")), "ok");
+    assert_eq!(string_value(&dict_field(&result, "mode")), "structural");
+    assert!(!bool_value(&dict_field(&result, "changed")));
+    let changes = list_value(&dict_field(&result, "changes"));
+    assert!(changes.is_empty());
+    assert_eq!(
+        int_value(&dict_field(&structural_summary(&result), "change_count")),
+        0
+    );
+}
+
+#[test]
+fn structural_diff_reports_rename_as_identifier_replacement() {
+    let registry = ast_registry();
+    let payload = structural_diff_payload("rename_before.rs", "rename_after.rs", &[]);
+    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "mode")), "structural");
+    let changes = list_value(&dict_field(&result, "changes"));
+    assert_eq!(
+        changes.len(),
+        1,
+        "rename should produce one syntax change: {changes:?}"
+    );
+    assert_eq!(string_value(&dict_field(&changes[0], "kind")), "replace");
+    assert_eq!(
+        string_value(&dict_field(&changes[0], "node_kind")),
+        "identifier"
+    );
+    assert_eq!(
+        string_value(&dict_field(&changes[0], "before_text")),
+        "value"
+    );
+    assert_eq!(
+        string_value(&dict_field(&changes[0], "after_text")),
+        "total"
+    );
+}
+
+#[test]
+fn structural_diff_reports_moved_nodes_without_line_patch_noise() {
+    let registry = ast_registry();
+    let payload = structural_diff_payload("move_before.rs", "move_after.rs", &[]);
+    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "mode")), "structural");
+    let summary = structural_summary(&result);
+    assert!(int_value(&dict_field(&summary, "moves")) >= 1);
+    let changes = list_value(&dict_field(&result, "changes"));
+    assert_eq!(string_value(&dict_field(&changes[0], "kind")), "move");
+    assert_eq!(
+        string_value(&dict_field(&changes[0], "node_kind")),
+        "function_item"
+    );
+    assert!(matches!(dict_field(&result, "line_diff"), VmValue::Nil));
+}
+
+#[test]
+fn structural_diff_reports_logic_change_as_literal_replacement() {
+    let registry = ast_registry();
+    let payload = structural_diff_payload("logic_before.rs", "logic_after.rs", &[]);
+    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "mode")), "structural");
+    let changes = list_value(&dict_field(&result, "changes"));
+    assert_eq!(
+        changes.len(),
+        1,
+        "logic change should stay focused: {changes:?}"
+    );
+    assert_eq!(string_value(&dict_field(&changes[0], "kind")), "replace");
+    assert_eq!(
+        string_value(&dict_field(&changes[0], "node_kind")),
+        "integer_literal"
+    );
+    assert_eq!(string_value(&dict_field(&changes[0], "before_text")), "41");
+    assert_eq!(string_value(&dict_field(&changes[0], "after_text")), "42");
+}
+
+#[test]
+fn structural_diff_falls_back_to_line_diff_when_limit_is_exceeded() {
+    let registry = ast_registry();
+    let payload = structural_diff_payload(
+        "logic_before.rs",
+        "logic_after.rs",
+        &[("max_bytes", VmValue::Int(8))],
+    );
+    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "result")), "fallback");
+    assert_eq!(string_value(&dict_field(&result, "mode")), "line");
+    assert!(string_value(&dict_field(&result, "fallback_reason")).contains("byte_limit_exceeded"));
+    let line_diff = dict_field(&result, "line_diff");
+    assert!(string_value(&dict_field(&line_diff, "diff")).contains("-    41"));
+    assert!(string_value(&dict_field(&line_diff, "diff")).contains("+    42"));
+}
+
+#[test]
+fn structural_diff_enforces_node_limit_before_descent() {
+    let registry = ast_registry();
+    let payload = structural_diff_payload(
+        "logic_before.rs",
+        "logic_after.rs",
+        &[("max_nodes", VmValue::Int(1))],
+    );
+    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "result")), "fallback");
+    assert_eq!(string_value(&dict_field(&result, "mode")), "line");
+    assert!(string_value(&dict_field(&result, "fallback_reason")).contains("node_limit_exceeded"));
+    assert_eq!(
+        int_value(&dict_field(&structural_summary(&result), "nodes_before")),
+        0
+    );
+}
+
+#[test]
+fn structural_diff_falls_back_to_line_diff_on_parse_error() {
+    let registry = ast_registry();
+    let payload = structural_diff_payload("logic_before.rs", "parse_error_after.rs", &[]);
+    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+
+    assert_eq!(string_value(&dict_field(&result, "result")), "fallback");
+    assert_eq!(string_value(&dict_field(&result, "mode")), "line");
+    assert_eq!(
+        string_value(&dict_field(&result, "fallback_reason")),
+        "parse_error"
+    );
+    let line_diff = dict_field(&result, "line_diff");
+    assert!(!string_value(&dict_field(&line_diff, "diff")).is_empty());
 }
 
 // `perf_smoke_against_external_file_when_available` (env-gated maintainer

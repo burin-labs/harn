@@ -49,6 +49,7 @@ mod mutation;
 mod outline;
 mod parse;
 mod parse_errors;
+mod structural_diff;
 mod symbols;
 mod symbols_call;
 mod types;
@@ -226,6 +227,12 @@ impl HostlibCapability for AstCapability {
             insert_at_anchor::run,
         );
         register(registry, "hostlib_ast_dry_run", "dry_run", dry_run::run);
+        register(
+            registry,
+            "hostlib_ast_structural_diff",
+            "structural_diff",
+            structural_diff::run,
+        );
         register(
             registry,
             "hostlib_ast_capabilities",

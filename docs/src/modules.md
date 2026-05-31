@@ -590,8 +590,8 @@ log(render_table(
 
 ### std/diff
 
-Pure-Harn line diff helpers for short texts, generated reports, and release
-scripts that need a stable unified diff without shelling out:
+Line diff helpers for short texts, generated reports, release scripts, and
+syntax-aware source review:
 
 | Function | Description |
 |---|---|
@@ -600,11 +600,16 @@ scripts that need a stable unified diff without shelling out:
 | `colorize_diff(diff_text, options?)` | Apply ANSI coloring to an existing unified diff |
 | `diff_summary(before, after)` | Return compact changed/insertions/deletions counts |
 | `render_diff_stat(entries, options?)` | Render per-file diff stats from `{path, before, after}` or stat dicts |
+| `structural_diff(path_a, path_b, options?)` | Host-backed tree-sitter review diff with line-diff fallback |
 
-`std/diff` favors predictable, dependency-free rendering over competing with
-`git diff` for large repository diffs. For large file sets, call `git diff`
-through `std/git` or `std/command` and use `colorize_diff` or
+The line helpers favor predictable, dependency-free rendering over competing
+with `git diff` for large repository diffs. For large file sets, call
+`git diff` through `std/git` or `std/command` and use `colorize_diff` or
 `render_diff_stat` for presentation.
+
+Use `structural_diff` when a UI or agent review pass needs changed syntax-node
+spans instead of a patch. It falls back to a unified line diff on unsupported
+languages, parse errors, or size limits.
 
 ```harn
 import { unified_diff } from "std/diff"

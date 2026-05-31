@@ -74,9 +74,14 @@ The `ast::*` builtins emit row/column coordinates as **0-based** values
 the lowercase hostlib wire set
 (`function`, `method`, `class`, `struct`, `enum`, `interface`,
 `protocol`, `type`, `variable`, `module`, `other`).
+`ast.structural_diff` uses the same coordinate convention for changed
+syntax-node spans and falls back to a unified line diff when parsing or
+size limits make structural comparison unsuitable.
 
 Per-language fixture goldens live at
 `tests/fixtures/ast/<language>/{source.<ext>,symbols.golden.json,outline.golden.json}`.
+Structural-diff before/after fixtures live under
+`tests/fixtures/structural_diff/`.
 To regenerate after a deliberate change, run
 
 ```text

@@ -2456,6 +2456,16 @@ plain terminal.
 - `read_lines(path)` → list of lines (no trailing newline). Handles
   CRLF correctly.
 
+### Diff helpers
+
+`std/diff` exposes `diff_lines`, `unified_diff`, `colorize_diff`,
+`diff_summary`, `render_diff_stat`, and `structural_diff`.
+`structural_diff(path_a, path_b, language_or_options?)` parses both files
+with the hostlib tree-sitter registry and returns changed syntax-node spans
+for human review. It is not patch-applicable. On unsupported languages,
+parse errors, or `max_bytes` / `max_nodes` / `max_graph_edges` limits, it
+returns `result: "fallback"`, `mode: "line"`, and a `line_diff` payload.
+
 ### CSV
 
 ```harn

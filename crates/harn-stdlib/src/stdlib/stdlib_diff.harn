@@ -248,6 +248,39 @@ pub fn diff_summary(before: string, after: string) -> dict {
 }
 
 /**
+ * Compare two source files with tree-sitter and return changed syntax-node
+ * spans. The result is for human review, not patch application: staging and
+ * apply paths should keep using line diffs.
+ *
+ * `options` may be a language string (`"rust"`) or a dict with `language`,
+ * `max_bytes`, `max_nodes`, and `max_graph_edges`. If parsing fails or a limit
+ * is exceeded, the host returns `result: "fallback"` with `mode: "line"` and
+ * a `line_diff` payload instead of throwing.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: structural_diff("before.rs", "after.rs", "rust")
+ */
+pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
+  let opts = if type_of(options) == "string" {
+    {language: options}
+  } else {
+    options ?? {}
+  }
+  let payload = hostlib_ast_structural_diff((opts ?? {}).merge({path_a: path_a, path_b: path_b})) ?? {}
+  return payload
+    .merge(
+    {
+      ok: payload?.result ?? "" == "ok" || payload?.result ?? "" == "fallback",
+      structural: payload?.mode ?? "" == "structural",
+      provenance: {module: "std/diff", helper: "structural_diff"},
+    },
+  )
+}
+
+/**
  * Render per-file diff stats from entries with `{path, before, after}` or stat fields.
  *
  * @effects: []
