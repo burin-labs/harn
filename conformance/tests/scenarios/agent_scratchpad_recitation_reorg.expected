@@ -1,0 +1,10 @@
+status:done
+calls:3
+first_has_scratchpad:true
+first_tail:true
+reorg_prompt:true
+second_has_fact:true
+second_has_source:true
+snapshot_fact:observe returned observed-value-42
+invalid_status:invalid_sources
+invalid_preserved:stable fact

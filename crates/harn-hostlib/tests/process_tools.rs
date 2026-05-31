@@ -110,6 +110,14 @@ fn install_mock_with(
     (spawner, controller, guard)
 }
 
+fn unique_session_id(prefix: &str) -> String {
+    format!(
+        "{prefix}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    )
+}
+
 // -------- run_command --------
 
 #[test]
@@ -577,6 +585,9 @@ fn manage_packages_runs_for_detected_ecosystem_with_explicit_cwd() {
 
 #[test]
 fn run_command_long_running_returns_handle_immediately() {
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "test-run-command-long-running",
+    ));
     // Stay running until the test cancels.
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
@@ -619,6 +630,9 @@ fn run_command_long_running_returns_handle_immediately() {
 
 #[test]
 fn run_command_background_after_returns_progress_snapshot() {
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "test-run-command-background-after",
+    ));
     let mut config = MockProcessConfig::running();
     config.stdout = b"started\n".to_vec();
     let (_spawner, _controller, _guard) = install_mock_with(config);
@@ -781,6 +795,9 @@ fn cancel_handle_unknown_handle_returns_false() {
 
 #[test]
 fn run_test_long_running_returns_handle() {
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "test-run-test-long-running",
+    ));
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
     let mut req = dict();
@@ -804,6 +821,9 @@ fn run_test_long_running_returns_handle() {
 
 #[test]
 fn run_build_command_long_running_returns_handle() {
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "test-run-build-long-running",
+    ));
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
     let mut req = dict();

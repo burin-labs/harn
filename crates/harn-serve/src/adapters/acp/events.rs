@@ -1294,6 +1294,22 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 self.emit_agent_event_ext("compass_routing_decision", session_id, payload);
             }
+            AgentEvent::AgentScratchpadReorganization {
+                session_id,
+                iteration,
+                status,
+                details,
+            } => {
+                self.emit_agent_event_ext(
+                    "agent_scratchpad_reorganization",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "status": status,
+                        "details": details,
+                    }),
+                );
+            }
             AgentEvent::FeedbackInjected {
                 session_id,
                 kind,

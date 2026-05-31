@@ -251,6 +251,7 @@ Same as `llm_call`, plus additional options:
 | `compact_keep_last` | int | strategy default | Prompt-visible messages to keep verbatim after the compaction summary |
 | `auto_compact` | bool/dict | nil | Auto-compaction options. Dict values may include the same compaction policy fields as `compaction` |
 | `transcript_projection` | string/dict | nil | Per-turn model-visible projection over the immutable raw transcript. Policies include `clean_tool_repair`, `squash_failed_calls`, `summary_prefix`, `reachability_gc`, and `custom` |
+| `scratchpad` | bool/dict | `false` | Session-local working memory. `true` initializes a compact `{goals, open_items, facts, refs}` scratchpad, recites it at the prompt tail each turn, and periodically reorganizes it. Dict configs may set `enabled`, `recite`, `reorganize_every`, `max_recent_messages`, `schema_retries`, `initial`, and `reorganizer` |
 | `idle_watchdog_attempts` | int | nil (disabled) | Max consecutive idle-wait ticks that may return no wake reason before the daemon terminates with `status = "watchdog"`. Guards against a misconfigured daemon (e.g. bridge never signals, no timer, no watch paths) hanging the session silently |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
@@ -296,6 +297,42 @@ that session inherit the pin unless their options explicitly set
 
 Profiles preload the common loop-budget and retry keys below. Pass any
 key explicitly to override the profile's value for that call.
+
+### Agent scratchpad
+
+`agent_loop(..., {scratchpad: true})` creates a small structured scratchpad for
+the session, renders it as a tail system fragment on every turn, and runs a
+structured reorganization pass every three continuing turns. The reorganizer may
+use a different provider or model:
+
+```harn
+agent_loop(task, system, {
+  loop_until_done: true,
+  scratchpad: {
+    reorganize_every: 2,
+    reorganizer: {provider: "ollama", model: "qwen3.6-coding"},
+  },
+})
+```
+
+The scratchpad is capped at 16 KiB and is stored as live session state, not as a
+synthetic replay message. Updates append compact `agent_scratchpad` transcript
+events with action/version/count metadata; session snapshots and final
+transcripts expose `scratchpad`, `scratchpad_version`, and
+`metadata.agent_scratchpad`.
+
+Scripts can read and write the state directly with
+`agent_session_scratchpad(id)`, `agent_session_set_scratchpad(id, pad, opts?)`,
+and `agent_session_clear_scratchpad(id, opts?)`. Reorganization validates that
+returned facts cite source refs already present in the scratchpad or recent
+turns, so heavy tool output remains referenced rather than copied.
+
+The deterministic regression/eval harness for the none vs append-only vs
+periodic-reorg comparison is:
+
+```sh
+cargo run --quiet --bin harn -- run examples/evals/agent_scratchpad_retention.harn
+```
 
 ### Resilience knobs
 

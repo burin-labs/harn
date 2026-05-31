@@ -1,0 +1,637 @@
+/**
+ * Session-local agent scratchpad helpers.
+ *
+ * The scratchpad is deliberately small live state: every turn recites the
+ * current notes at the prompt tail, while optional reorganization rewrites the
+ * notes into a compact, cited form for the next turn.
+ */
+import { agent_emit_event, agent_session_messages } from "std/agent/state"
+
+fn __scratchpad_default_options(enabled, recite, reorganize_every) {
+  return {
+    enabled: enabled,
+    recite: recite,
+    reorganize_every: reorganize_every,
+    max_recent_messages: 8,
+    schema_retries: 1,
+    initial: nil,
+    reorganizer: {},
+  }
+}
+
+fn __scratchpad_bool(label, value, fallback) {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) != "bool" {
+    throw "agent_loop: `" + label + "` must be a bool or nil; got " + type_of(value)
+  }
+  return value
+}
+
+fn __scratchpad_nonnegative_int(label, value, fallback) {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `" + label + "` must be a non-negative integer or nil; got "
+      + type_of(value)
+  }
+  if value < 0 {
+    throw "agent_loop: `" + label + "` must be >= 0"
+  }
+  return value
+}
+
+fn __scratchpad_dict(label, value, fallback) {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `" + label + "` must be a dict or nil; got " + type_of(value)
+  }
+  return value
+}
+
+/**
+ * Normalize the public `agent_loop(..., {scratchpad})` option.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_scratchpad_options({scratchpad: true})
+ */
+pub fn agent_scratchpad_options(opts = nil) {
+  let raw = (opts ?? {})?.scratchpad
+  if raw == nil {
+    return __scratchpad_default_options(false, false, 0)
+  }
+  if type_of(raw) == "bool" {
+    if !raw {
+      return __scratchpad_default_options(false, false, 0)
+    }
+    return __scratchpad_default_options(true, true, 3)
+  }
+  if type_of(raw) != "dict" {
+    throw "agent_loop: `scratchpad` must be a bool, dict, or nil; got " + type_of(raw)
+  }
+  let enabled = __scratchpad_bool("scratchpad.enabled", raw?.enabled, true)
+  return {
+    enabled: enabled,
+    recite: __scratchpad_bool("scratchpad.recite", raw?.recite ?? raw?.recitation, true),
+    reorganize_every: __scratchpad_nonnegative_int(
+      "scratchpad.reorganize_every",
+      raw?.reorganize_every ?? raw?.reorg_every ?? raw?.periodic_reorg_every,
+      3,
+    ),
+    max_recent_messages: __scratchpad_nonnegative_int("scratchpad.max_recent_messages", raw?.max_recent_messages, 8),
+    schema_retries: __scratchpad_nonnegative_int("scratchpad.schema_retries", raw?.schema_retries ?? raw?.retries, 1),
+    initial: raw?.initial,
+    reorganizer: __scratchpad_dict(
+      "scratchpad.reorganizer",
+      raw?.reorganizer ?? raw?.reorganizer_options ?? raw?.llm_options,
+      {},
+    ),
+  }
+}
+
+fn __scratchpad_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __scratchpad_task_ref(task) {
+  let text = trim(to_string(task ?? ""))
+  if text == "" {
+    return nil
+  }
+  return {
+    id: "user:initial",
+    kind: "user_input",
+    label: "Initial task",
+    excerpt: __scratchpad_excerpt(text, 200),
+  }
+}
+
+fn __scratchpad_initial_goal(task) {
+  let text = trim(to_string(task ?? ""))
+  if text == "" {
+    return []
+  }
+  return [{text: text, source_ref: "user:initial"}]
+}
+
+fn __scratchpad_normalize(pad, task) {
+  if type_of(pad) != "dict" {
+    throw "agent_loop: `scratchpad.initial` must be a dict when provided"
+  }
+  let task_ref = __scratchpad_task_ref(task)
+  let refs = __scratchpad_list(pad?.refs)
+  let normalized_refs = if task_ref == nil || __scratchpad_ref_ids(refs)["user:initial"] {
+    refs
+  } else {
+    [task_ref] + refs
+  }
+  let goals = __scratchpad_list(pad?.goals)
+  return pad
+    + {
+    schema: pad?.schema ?? "harn.agent_scratchpad.v1",
+    goals: if len(goals) > 0 {
+      goals
+    } else {
+      __scratchpad_initial_goal(task)
+    },
+    open_items: __scratchpad_list(pad?.open_items),
+    facts: __scratchpad_list(pad?.facts),
+    refs: normalized_refs,
+  }
+}
+
+fn __scratchpad_empty(task) {
+  return __scratchpad_normalize(
+    {
+      schema: "harn.agent_scratchpad.v1",
+      goals: __scratchpad_initial_goal(task),
+      open_items: [],
+      facts: [],
+      refs: [],
+    },
+    task,
+  )
+}
+
+/**
+ * Initialize a session scratchpad when the `scratchpad` agent_loop option is
+ * enabled and the session does not already carry one.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_scratchpad_init(session, opts)
+ */
+pub fn agent_scratchpad_init(session, opts) {
+  let cfg = agent_scratchpad_options(opts)
+  if !cfg.enabled {
+    return {ok: true, status: "disabled"}
+  }
+  let current = agent_session_scratchpad(session.session_id)
+  if current != nil {
+    return {ok: true, status: "existing", scratchpad: current}
+  }
+  let pad = if cfg.initial != nil {
+    __scratchpad_normalize(cfg.initial, session?.task ?? "")
+  } else {
+    __scratchpad_empty(session?.task ?? "")
+  }
+  let result = agent_session_set_scratchpad(
+    session.session_id,
+    pad,
+    {source: "agent_loop", reason: "init", metadata: {task_ref: "user:initial"}},
+  )
+  return {ok: true, status: "initialized", scratchpad: result.scratchpad, version: result.version}
+}
+
+fn __scratchpad_excerpt(value, limit) {
+  let text = replace(replace(trim(to_string(value ?? "")), "\n", " "), "\t", " ")
+  if len(text) <= limit {
+    return text
+  }
+  if limit <= 3 {
+    return substring(text, 0, limit)
+  }
+  return substring(text, 0, limit - 3) + "..."
+}
+
+fn __scratchpad_item_text(item) {
+  if type_of(item) == "dict" {
+    return trim(to_string(item?.text ?? item?.title ?? item?.note ?? ""))
+  }
+  return trim(to_string(item))
+}
+
+fn __scratchpad_item_source(item) {
+  if type_of(item) != "dict" {
+    return ""
+  }
+  return trim(to_string(item?.source_ref ?? item?.source ?? ""))
+}
+
+fn __scratchpad_format_items(items, empty_label) {
+  let values = __scratchpad_list(items)
+  if len(values) == 0 {
+    return "- (" + empty_label + ")"
+  }
+  var lines = []
+  for item in values {
+    let text = __scratchpad_item_text(item)
+    if text == "" {
+      continue
+    }
+    let source = __scratchpad_item_source(item)
+    let suffix = if source == "" {
+      ""
+    } else {
+      " [source_ref: " + source + "]"
+    }
+    lines = lines.push("- " + text + suffix)
+  }
+  if len(lines) == 0 {
+    return "- (" + empty_label + ")"
+  }
+  return join(lines, "\n")
+}
+
+fn __scratchpad_format_refs(refs) {
+  let values = __scratchpad_list(refs)
+  if len(values) == 0 {
+    return "- (none)"
+  }
+  var lines = []
+  for ref in values {
+    let id = trim(to_string(ref?.id ?? ""))
+    if id == "" {
+      continue
+    }
+    let kind = trim(to_string(ref?.kind ?? "source"))
+    let label = __scratchpad_excerpt(ref?.label ?? ref?.excerpt ?? "", 120)
+    let suffix = if label == "" {
+      ""
+    } else {
+      ": " + label
+    }
+    lines = lines.push("- " + id + " (" + kind + ")" + suffix)
+  }
+  if len(lines) == 0 {
+    return "- (none)"
+  }
+  return join(lines, "\n")
+}
+
+fn __scratchpad_render(pad) {
+  return "## Agent scratchpad\n"
+    + "Use this live working memory before deciding the next action. Keep it compact and preserve source_ref ids.\n\n"
+    + "### Goals\n"
+    + __scratchpad_format_items(pad?.goals, "none")
+    + "\n\n### Open items\n"
+    + __scratchpad_format_items(pad?.open_items, "none")
+    + "\n\n### Facts\n"
+    + __scratchpad_format_items(pad?.facts, "none")
+    + "\n\n### Source refs\n"
+    + __scratchpad_format_refs(pad?.refs)
+}
+
+/**
+ * Return the tail system fragment that recites the current scratchpad.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_scratchpad_recitation_fragment(session, opts)
+ */
+pub fn agent_scratchpad_recitation_fragment(session, opts) {
+  let cfg = agent_scratchpad_options(opts)
+  if !cfg.enabled || !cfg.recite {
+    return nil
+  }
+  let pad = agent_session_scratchpad(session.session_id)
+  if pad == nil {
+    return nil
+  }
+  return {id: "primary:agent_scratchpad", source: "primary", bucket: "after", body: __scratchpad_render(pad)}
+}
+
+fn __scratchpad_message_refs(messages, limit) {
+  let values = __scratchpad_list(messages)
+  let cap = if limit > 0 {
+    limit
+  } else {
+    0
+  }
+  if cap == 0 || len(values) == 0 {
+    return []
+  }
+  var start = len(values) - cap
+  if start < 0 {
+    start = 0
+  }
+  var refs = []
+  var index = start
+  while index < len(values) {
+    let msg = values[index]
+    let excerpt = __scratchpad_excerpt(msg?.content ?? msg?.text ?? "", 200)
+    if excerpt != "" {
+      refs = refs
+        .push(
+        {id: "turn:" + to_string(index + 1), kind: to_string(msg?.role ?? "message"), label: excerpt},
+      )
+    }
+    index = index + 1
+  }
+  return refs
+}
+
+fn __scratchpad_ref_ids(refs) {
+  var out = {}
+  for ref in __scratchpad_list(refs) {
+    let id = trim(to_string(ref?.id ?? ""))
+    if id != "" {
+      out = out + {[id]: true}
+    }
+  }
+  return out
+}
+
+fn __scratchpad_merge_refs(existing, additions) {
+  var refs = []
+  var seen = {}
+  for ref in __scratchpad_list(existing) {
+    let id = trim(to_string(ref?.id ?? ""))
+    if id != "" && !seen[id] {
+      seen = seen + {[id]: true}
+      refs = refs.push(ref)
+    }
+  }
+  for ref in __scratchpad_list(additions) {
+    let id = trim(to_string(ref?.id ?? ""))
+    if id != "" && !seen[id] {
+      seen = seen + {[id]: true}
+      refs = refs.push(ref)
+    }
+  }
+  return refs
+}
+
+fn __scratchpad_schema() {
+  return {
+    type: "object",
+    required: ["schema", "goals", "open_items", "facts", "refs"],
+    additionalProperties: false,
+    properties: {
+      schema: {type: "string"},
+      goals: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["text"],
+          additionalProperties: true,
+          properties: {text: {type: "string"}, source_ref: {type: "string"}},
+        },
+      },
+      open_items: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["text"],
+          additionalProperties: true,
+          properties: {text: {type: "string"}, source_ref: {type: "string"}},
+        },
+      },
+      facts: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["text", "source_ref"],
+          additionalProperties: true,
+          properties: {text: {type: "string"}, source_ref: {type: "string"}},
+        },
+      },
+      refs: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "kind"],
+          additionalProperties: true,
+          properties: {id: {type: "string"}, kind: {type: "string"}, label: {type: "string"}, excerpt: {type: "string"}},
+        },
+      },
+      dropped: {type: "array", items: {type: "string"}},
+    },
+  }
+}
+
+fn __scratchpad_allowed_ref_lines(refs) {
+  var lines = []
+  for ref in __scratchpad_list(refs) {
+    let id = trim(to_string(ref?.id ?? ""))
+    if id == "" {
+      continue
+    }
+    lines = lines.push("- " + id + ": " + __scratchpad_excerpt(ref?.label ?? ref?.excerpt ?? "", 180))
+  }
+  return join(lines, "\n")
+}
+
+fn __scratchpad_reorganize_prompt(current, allowed_refs, context) {
+  return "Reorganize the live agent scratchpad.\n\n"
+    + "Rules:\n"
+    + "- Keep only compact working-memory notes that help the next agent turn.\n"
+    + "- Deduplicate repeated items and promote useful observations into facts.\n"
+    + "- Drop stale or speculative content.\n"
+    + "- Store heavy content by source reference, not by copying it into facts.\n"
+    + "- Every fact must cite a source_ref from the allowed refs list.\n"
+    + "- Return only JSON matching the schema.\n\n"
+    + "Current scratchpad JSON:\n"
+    + json_stringify(current)
+    + "\n\nAllowed source refs:\n"
+    + __scratchpad_allowed_ref_lines(allowed_refs)
+    + "\n\nReorganization context:\n"
+    + json_stringify(context ?? {})
+}
+
+fn __scratchpad_reorganizer_options(opts, cfg) {
+  var out = cfg.reorganizer ?? {}
+  if out?.provider == nil && opts?.provider != nil {
+    out = out + {provider: opts.provider}
+  }
+  if out?.model == nil && opts?.model != nil {
+    out = out + {model: opts.model}
+  }
+  if out?.temperature == nil {
+    out = out + {temperature: 0.0}
+  }
+  if out?.retries == nil {
+    out = out + {retries: cfg.schema_retries}
+  }
+  if out?.schema_retries == nil {
+    out = out + {schema_retries: cfg.schema_retries}
+  }
+  return out
+}
+
+fn __scratchpad_validate_refs(pad, allowed_refs) {
+  let allowed = __scratchpad_ref_ids(allowed_refs)
+  let returned = __scratchpad_ref_ids(pad?.refs)
+  var errors = []
+  for ref in __scratchpad_list(pad?.refs) {
+    let id = trim(to_string(ref?.id ?? ""))
+    if id == "" {
+      errors = errors.push("refs entries must have non-empty id")
+    } else if !allowed[id] {
+      errors = errors.push("refs contains unknown source ref `" + id + "`")
+    }
+  }
+  for fact in __scratchpad_list(pad?.facts) {
+    let source = __scratchpad_item_source(fact)
+    if source == "" {
+      errors = errors.push("facts must include source_ref")
+    } else if !returned[source] {
+      errors = errors.push("fact cites unknown source_ref `" + source + "`")
+    }
+  }
+  for item in __scratchpad_list(pad?.goals) + __scratchpad_list(pad?.open_items) {
+    let source = __scratchpad_item_source(item)
+    if source != "" && !returned[source] {
+      errors = errors.push("item cites unknown source_ref `" + source + "`")
+    }
+  }
+  return {ok: len(errors) == 0, errors: errors}
+}
+
+fn __scratchpad_counts(pad) {
+  return {
+    goals: len(__scratchpad_list(pad?.goals)),
+    open_items: len(__scratchpad_list(pad?.open_items)),
+    facts: len(__scratchpad_list(pad?.facts)),
+    refs: len(__scratchpad_list(pad?.refs)),
+  }
+}
+
+fn __scratchpad_emit_reorganization(session_id, iteration, status, payload = nil) {
+  let details = payload ?? {}
+  agent_emit_event(
+    session_id,
+    "agent_scratchpad_reorganization",
+    {iteration: iteration, status: status} + details,
+  )
+}
+
+/**
+ * Reorganize the session scratchpad through a structured-output LLM call.
+ *
+ * @effects: [agent, llm]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_scratchpad_reorganize(session, opts, 1, {reason: "iteration_end"})
+ */
+pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
+  let cfg = agent_scratchpad_options(opts)
+  if !cfg.enabled {
+    return {ok: true, status: "disabled"}
+  }
+  var current = agent_session_scratchpad(session.session_id)
+  if current == nil {
+    let initialized = agent_scratchpad_init(session, opts)
+    current = initialized?.scratchpad
+  }
+  if current == nil {
+    __scratchpad_emit_reorganization(session.session_id, iteration, "missing_scratchpad")
+    return {ok: false, status: "missing_scratchpad"}
+  }
+  let message_refs = __scratchpad_message_refs(agent_session_messages(session.session_id), cfg.max_recent_messages)
+  let allowed_refs = __scratchpad_merge_refs(current?.refs, message_refs)
+  let envelope = llm_call_structured_result(
+    __scratchpad_reorganize_prompt(current, allowed_refs, context),
+    __scratchpad_schema(),
+    __scratchpad_reorganizer_options(opts, cfg),
+  )
+  if !envelope.ok {
+    __scratchpad_emit_reorganization(
+      session.session_id,
+      iteration,
+      "llm_error",
+      {error: to_string(envelope?.error ?? envelope)},
+    )
+    return {ok: false, status: "llm_error", error: envelope?.error ?? envelope}
+  }
+  let next = __scratchpad_normalize(envelope.data, session?.task ?? "")
+  let validation = __scratchpad_validate_refs(next, allowed_refs)
+  if !validation.ok {
+    __scratchpad_emit_reorganization(
+      session.session_id,
+      iteration,
+      "invalid_sources",
+      {
+        errors: validation.errors,
+        before_counts: __scratchpad_counts(current),
+        after_counts: __scratchpad_counts(next),
+      },
+    )
+    return {
+      ok: false,
+      status: "invalid_sources",
+      errors: validation.errors,
+      before_counts: __scratchpad_counts(current),
+      after_counts: __scratchpad_counts(next),
+    }
+  }
+  let set_result = try {
+    agent_session_set_scratchpad(
+      session.session_id,
+      next,
+      {
+        source: "scratchpad_reorganizer",
+        reason: "periodic_reorganization",
+        metadata: {
+          iteration: iteration,
+          before_counts: __scratchpad_counts(current),
+          after_counts: __scratchpad_counts(next),
+        },
+      },
+    )
+  }
+  if is_err(set_result) {
+    let store_error = to_string(unwrap_err(set_result))
+    __scratchpad_emit_reorganization(session.session_id, iteration, "store_error", {error: store_error})
+    return {ok: false, status: "store_error", error: store_error}
+  }
+  let stored = unwrap(set_result)
+  __scratchpad_emit_reorganization(
+    session.session_id,
+    iteration,
+    "reorganized",
+    {
+      version: stored.version,
+      before_counts: __scratchpad_counts(current),
+      after_counts: __scratchpad_counts(stored.scratchpad),
+    },
+  )
+  return {
+    ok: true,
+    status: "reorganized",
+    scratchpad: stored.scratchpad,
+    version: stored.version,
+    before_counts: __scratchpad_counts(current),
+    after_counts: __scratchpad_counts(stored.scratchpad),
+  }
+}
+
+/**
+ * Reorganize when the configured cadence is due after a completed turn.
+ *
+ * @effects: [agent, llm]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_scratchpad_reorganize_if_due(session, opts, 0)
+ */
+pub fn agent_scratchpad_reorganize_if_due(session, opts, iteration_index, context = nil) {
+  let cfg = agent_scratchpad_options(opts)
+  if !cfg.enabled {
+    return {ok: true, status: "disabled"}
+  }
+  let cadence = cfg.reorganize_every
+  if cadence <= 0 {
+    return {ok: true, status: "skipped", reason: "cadence_disabled"}
+  }
+  let turn = iteration_index + 1
+  if turn % cadence != 0 {
+    return {ok: true, status: "skipped", reason: "cadence", next_due: turn + (cadence - turn % cadence)}
+  }
+  return agent_scratchpad_reorganize(session, opts, turn, context ?? {reason: "iteration_end"})
+}

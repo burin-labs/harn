@@ -1254,7 +1254,7 @@ pub(crate) fn assemble_system_prompt(
     // joined string. When present it fully supersedes the single-string
     // primary path (the `system` arg / `opts.system` is already represented as
     // one of those fragments).
-    let decomposed = append_decomposed_primary_fragments(&mut fragments, options);
+    let decomposed = append_decomposed_primary_fragments(&mut fragments, options)?;
     if !decomposed {
         let primary_system = system
             .filter(|system| !system.trim().is_empty())
@@ -1375,7 +1375,7 @@ fn append_tool_guidance_fragments(
 }
 
 /// Expand the agent loop's `_system_fragments` channel — an ordered list of
-/// `{id, source?, body, requires_tools?}` dicts — into primary-region
+/// `{id, source?, body, bucket?, requires_tools?}` dicts — into primary-region
 /// [`PromptFragment`]s. This is how `agent_build_turn_system` ships the
 /// primary block already decomposed into its parts, so the whole system prompt
 /// (not just the host parts and reminders) is auditable through `assemble`.
@@ -1386,11 +1386,11 @@ fn append_tool_guidance_fragments(
 fn append_decomposed_primary_fragments(
     fragments: &mut Vec<crate::llm::prompt::PromptFragment>,
     options: Option<&BTreeMap<String, VmValue>>,
-) -> bool {
+) -> Result<bool, VmError> {
     use crate::llm::prompt::{FragmentBucket, PromptFragment};
     let Some(VmValue::List(items)) = options.and_then(|options| options.get("_system_fragments"))
     else {
-        return false;
+        return Ok(false);
     };
     for (index, item) in items.iter().enumerate() {
         let Some(dict) = item.as_dict() else {
@@ -1413,12 +1413,24 @@ fn append_decomposed_primary_fragments(
             Some(VmValue::List(tools)) => tools.iter().map(VmValue::display).collect(),
             _ => Vec::new(),
         };
-        fragments.push(
-            PromptFragment::new(id, source, FragmentBucket::Before, body)
-                .requiring_tools(requires_tools),
-        );
+        let bucket = match dict
+            .get("bucket")
+            .map(VmValue::display)
+            .map(|bucket| bucket.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            None | Some("") | Some("before") => FragmentBucket::Before,
+            Some("after") => FragmentBucket::After,
+            Some(other) => {
+                return Err(VmError::Runtime(format!(
+                    "_system_fragments[{index}].bucket must be \"before\" or \"after\"; got {other:?}"
+                )));
+            }
+        };
+        fragments
+            .push(PromptFragment::new(id, source, bucket, body).requiring_tools(requires_tools));
     }
-    true
+    Ok(true)
 }
 
 fn assemble_ctx(options: Option<&BTreeMap<String, VmValue>>) -> crate::llm::prompt::AssembleCtx {
@@ -2980,6 +2992,55 @@ mod reminder_render_tests {
             .expect("nudge trace");
         assert!(!trace.included);
         assert!(trace.reason.contains("requires tool `todo`"));
+    }
+
+    #[test]
+    fn system_fragments_can_target_the_tail_bucket() {
+        let options = BTreeMap::from([
+            (
+                "_system_fragments".to_string(),
+                list(vec![
+                    fragment("primary:system", "base"),
+                    dict(&[
+                        ("id", s("primary:scratchpad")),
+                        ("source", s("primary")),
+                        ("body", s("scratchpad tail")),
+                        ("bucket", s("after")),
+                    ]),
+                ]),
+            ),
+            ("system_suffix".to_string(), s("host suffix")),
+        ]);
+
+        let prompt = compose_system_prompt(None, Some(&options))
+            .expect("system prompt")
+            .expect("non-empty prompt");
+        assert_eq!(prompt, "base\n\nhost suffix\n\nscratchpad tail");
+
+        let assembled = assemble_system_prompt(None, Some(&options), &[]).expect("assembled");
+        let trace = assembled
+            .provenance
+            .iter()
+            .find(|t| t.id == "primary:scratchpad")
+            .expect("scratchpad trace");
+        assert_eq!(trace.bucket, "after");
+    }
+
+    #[test]
+    fn system_fragments_reject_unknown_bucket() {
+        let options = BTreeMap::from([(
+            "_system_fragments".to_string(),
+            list(vec![dict(&[
+                ("id", s("primary:bad")),
+                ("body", s("bad")),
+                ("bucket", s("middle")),
+            ])]),
+        )]);
+        let error = assemble_system_prompt(None, Some(&options), &[]).unwrap_err();
+        assert!(
+            error.to_string().contains("bucket must be"),
+            "unexpected error: {error}"
+        );
     }
 }
 

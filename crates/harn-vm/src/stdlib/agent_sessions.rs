@@ -36,6 +36,9 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &AGENT_SESSION_SET_WORKSPACE_ANCHOR_BUILTIN_DEF,
     &AGENT_SESSION_WORKSPACE_POLICY_BUILTIN_DEF,
     &AGENT_SESSION_SET_WORKSPACE_POLICY_BUILTIN_DEF,
+    &AGENT_SESSION_SCRATCHPAD_BUILTIN_DEF,
+    &AGENT_SESSION_SET_SCRATCHPAD_BUILTIN_DEF,
+    &AGENT_SESSION_CLEAR_SCRATCHPAD_BUILTIN_DEF,
     &AGENT_SESSION_ADD_ROOT_BUILTIN_DEF,
     &AGENT_SESSION_REMOVE_ROOT_BUILTIN_DEF,
     &AGENT_SESSION_LIST_ROOTS_BUILTIN_DEF,
@@ -158,6 +161,12 @@ fn opt_usize(
             Ok(Some(raw as usize))
         }
     }
+}
+
+fn opt_json(opts: &BTreeMap<String, VmValue>, arg_name: &str) -> serde_json::Value {
+    opts.get(arg_name)
+        .map(crate::llm::helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null)
 }
 
 fn opts_dict_arg(
@@ -574,6 +583,110 @@ fn agent_session_system_prompt_builtin(
     Ok(agent_sessions::system_prompt(&id)
         .map(|value| VmValue::String(std::sync::Arc::from(value)))
         .unwrap_or(VmValue::Nil))
+}
+
+const AGENT_SESSION_SCRATCHPAD_OPT_KEYS: &[&str] = &["source", "reason", "metadata"];
+
+fn validate_scratchpad_opts(
+    opts: &BTreeMap<String, VmValue>,
+    fn_name: &str,
+) -> Result<(), VmError> {
+    for key in opts.keys() {
+        if !AGENT_SESSION_SCRATCHPAD_OPT_KEYS.contains(&key.as_str()) {
+            let expected = AGENT_SESSION_SCRATCHPAD_OPT_KEYS.join(", ");
+            return Err(err(format!(
+                "{fn_name}: unknown option key '{key}' (expected one of: {expected})"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn scratchpad_result(version: u64, scratchpad: VmValue) -> VmValue {
+    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+        ("ok".to_string(), VmValue::Bool(true)),
+        ("version".to_string(), VmValue::Int(version as i64)),
+        ("scratchpad".to_string(), scratchpad),
+    ])))
+}
+
+#[harn_builtin(
+    sig = "agent_session_scratchpad(id: string) -> dict?",
+    category = "agent.session",
+    doc = "Return the session-local agent scratchpad, or nil when none is set."
+)]
+fn agent_session_scratchpad_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_scratchpad", "id")?;
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_scratchpad: unknown session id '{id}'"
+        )));
+    }
+    Ok(agent_sessions::scratchpad(&id).unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "agent_session_set_scratchpad(id: string, scratchpad: dict, opts?: dict) -> dict",
+    category = "agent.session",
+    doc = "Set the small session-local agent scratchpad and return {ok, version, scratchpad}. opts may carry source, reason, and metadata."
+)]
+fn agent_session_set_scratchpad_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_set_scratchpad", "id")?;
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_set_scratchpad: unknown session id '{id}'"
+        )));
+    }
+    let scratchpad = args
+        .get(1)
+        .cloned()
+        .ok_or_else(|| err("agent_session_set_scratchpad: `scratchpad` argument is required"))?;
+    if !matches!(scratchpad, VmValue::Dict(_)) {
+        return Err(err(
+            "agent_session_set_scratchpad: `scratchpad` must be a dict",
+        ));
+    }
+    let opts = opts_dict_arg(args, 2, "agent_session_set_scratchpad")?;
+    validate_scratchpad_opts(&opts, "agent_session_set_scratchpad")?;
+    let source = opt_string(&opts, "agent_session_set_scratchpad", "source")?
+        .unwrap_or_else(|| "harn.agent_scratchpad".to_string());
+    let reason = opt_string(&opts, "agent_session_set_scratchpad", "reason")?;
+    let metadata = opt_json(&opts, "metadata");
+    let version = agent_sessions::set_scratchpad(&id, scratchpad.clone(), source, reason, metadata)
+        .map_err(|message| err(format!("agent_session_set_scratchpad: {message}")))?;
+    Ok(scratchpad_result(version, scratchpad))
+}
+
+#[harn_builtin(
+    sig = "agent_session_clear_scratchpad(id: string, opts?: dict) -> dict",
+    category = "agent.session",
+    doc = "Clear the session-local agent scratchpad and return {ok, version, scratchpad:nil}."
+)]
+fn agent_session_clear_scratchpad_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_clear_scratchpad", "id")?;
+    if !agent_sessions::exists(&id) {
+        return Err(err(format!(
+            "agent_session_clear_scratchpad: unknown session id '{id}'"
+        )));
+    }
+    let opts = opts_dict_arg(args, 1, "agent_session_clear_scratchpad")?;
+    validate_scratchpad_opts(&opts, "agent_session_clear_scratchpad")?;
+    let source = opt_string(&opts, "agent_session_clear_scratchpad", "source")?
+        .unwrap_or_else(|| "harn.agent_scratchpad".to_string());
+    let reason = opt_string(&opts, "agent_session_clear_scratchpad", "reason")?;
+    let metadata = opt_json(&opts, "metadata");
+    let version = agent_sessions::clear_scratchpad(&id, source, reason, metadata)
+        .map_err(|message| err(format!("agent_session_clear_scratchpad: {message}")))?;
+    Ok(scratchpad_result(version, VmValue::Nil))
 }
 
 #[harn_builtin(
