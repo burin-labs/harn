@@ -1,0 +1,693 @@
+# Every `thread_local!` macro under `src/` must be listed here so
+# work-stealing changes have an explicit migration plan or safe
+# thread-private rationale before they cross a spawned-worker boundary.
+
+[plans]
+task_local_or_explicit = "Logical execution state. Convert to tokio::task_local! scope or explicit Vm/AsyncBuiltinCtx state before it is read from work-stealing tasks."
+arc_registry_scope = "Runtime/resource registry. Promote to an Arc-backed VM/runtime registry and scope or pass the handle into spawned work before the surface crosses a work-stealing boundary."
+thread_private_cache = "Thread-private cache, mock, or warning de-dupe state. Safe to keep thread-local because it is non-authoritative and resettable."
+thread_private_test = "Test harness state. Safe to keep thread-local because tests install/reset it on the owning thread and production work-stealing tasks must not depend on it."
+
+[[thread_local]]
+path = "src/agent_sessions.rs"
+statics = ["SESSIONS", "SESSION_CAP", "DEFAULT_TRANSCRIPT_BUDGET_POLICY", "CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/autonomy.rs"
+statics = ["AUTONOMY_POLICY_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/call_budget.rs"
+statics = ["MCP_CALL_BUDGET", "MCP_CALL_COUNT", "PG_QUERY_BUDGET", "PG_QUERY_COUNT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/channel_guardrails.rs"
+statics = ["REGISTRY"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/checkpoint.rs"
+statics = ["CHECKPOINT_STATE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/compiler/state.rs"
+statics = ["FORCE_DISCARDED_PRODUCES_VALUE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/connectors/harn_module.rs"
+statics = ["ACTIVE_HARN_CONNECTOR_CTX"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/connectors/mod.rs"
+statics = ["ACTIVE_CONNECTOR_CLIENTS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/egress.rs"
+statics = ["REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/event_log/mod.rs"
+statics = ["ACTIVE_EVENT_LOG", "PENDING_DEFAULT_EVENT_LOG"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/events.rs"
+statics = ["EVENT_SINKS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/harness_tenant.rs"
+statics = ["ACTIVE_TENANT_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/http/client.rs"
+statics = ["HTTP_CLIENTS", "HTTP_SESSIONS", "HTTP_STREAMS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/http/mock.rs"
+statics = ["HTTP_MOCKS", "HTTP_MOCK_CALLS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/http/mod.rs"
+statics = ["TRANSPORT_HANDLE_COUNTER", "HTTP_SERVERS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/http/streaming.rs"
+statics = ["SSE_MOCKS", "SSE_HANDLES", "SSE_SERVER_HANDLES", "WEBSOCKET_MOCKS", "WEBSOCKET_HANDLES", "WEBSOCKET_SERVERS", "TRANSPORT_MOCK_CALLS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/llm/agent_observe.rs"
+statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_TOOL_SCHEMAS_HASH", "TRANSCRIPT_DIR_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/agent_runtime.rs"
+statics = ["CURRENT_HOST_BRIDGE", "CURRENT_LOOP_SINKS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/agent_session_host.rs"
+statics = ["AGENT_HOST_SESSIONS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/llm/autonomy_budget.rs"
+statics = ["AUTONOMY_COUNTERS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/cache.rs"
+statics = ["ACCESS_CLOCK"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/cache.rs"
+statics = ["MEM_STORE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/cache.rs"
+statics = ["METRICS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/call.rs"
+statics = ["IN_FLIGHT_LLM_CALLS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/capabilities.rs"
+statics = ["USER_OVERRIDES"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/cost.rs"
+statics = ["LLM_BUDGET", "LLM_ACCUMULATED_COST", "LLM_TOKEN_BUDGET", "LLM_ACCUMULATED_TOKENS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/fake.rs"
+statics = ["FAKE_LLM_TURNS", "FAKE_LLM_CALLS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/introspection.rs"
+statics = ["LAST_RESOLVED_LLM_CALL"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/mock.rs"
+statics = ["LLM_REPLAY_MODE", "LLM_FIXTURE_DIR", "TOOL_RECORDINGS", "LLM_MOCKS", "CLI_LLM_MOCK_MODE", "CLI_LLM_MOCKS", "CLI_LLM_RECORDINGS", "LLM_MOCK_CALLS", "LLM_PROMPT_CACHE", "LLM_MOCK_SCOPES"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/permissions.rs"
+statics = ["DYNAMIC_PERMISSION_STACK", "SESSION_PERMISSION_GRANTS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/provider.rs"
+statics = ["PROVIDER_NAMES"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/providers/anthropic.rs"
+statics = ["ANTHROPIC_PREFILL_WARN_ONCE", "ANTHROPIC_SAMPLING_WARN_ONCE", "ANTHROPIC_ADAPTIVE_WARN_ONCE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/rate_limit.rs"
+statics = ["LIMITERS", "INITIALIZED_FROM_CONFIG"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/reminder_providers.rs"
+statics = ["USER_PROVIDERS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/routing.rs"
+statics = ["POLICY_REGISTRY"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/trace.rs"
+statics = ["LLM_TRACE", "LLM_TRACING_ENABLED"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/trace.rs"
+statics = ["AGENT_TRACE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/trigger_predicate.rs"
+statics = ["ACTIVE_PREDICATE_EVALUATION"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm_config.rs"
+statics = ["USER_OVERRIDES"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/mcp_elicit.rs"
+statics = ["CURRENT_BUS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/mcp_file_upload.rs"
+statics = ["FILE_UPLOAD_CONFIG"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/mcp_progress.rs"
+statics = ["ACTIVE_BUS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/mcp_server/register.rs"
+statics = ["MCP_SERVE_REGISTRY", "MCP_SERVE_RESOURCES", "MCP_SERVE_RESOURCE_TEMPLATES", "MCP_SERVE_PROMPTS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/metadata.rs"
+statics = ["METADATA_STATE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/observability/request_id.rs"
+statics = ["ACTIVE_REQUEST_ID_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/command_policy.rs"
+statics = ["COMMAND_POLICY_STACK", "COMMAND_POLICY_HOOK_DEPTH"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/compaction_policy_registry.rs"
+statics = ["POLICIES"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/handoffs.rs"
+statics = ["HANDOFF_ROUTES"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/orchestration/hooks.rs"
+statics = ["RUNTIME_HOOKS", "FILE_EDIT_QUEUE", "SINGLETON_PRE_TOOL_HOOK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/lifecycle_receipts.rs"
+statics = ["LIFECYCLE_RECEIPT_LOG", "LIFECYCLE_RECEIPT_SEQ"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/mod.rs"
+statics = ["CURRENT_MUTATION_SESSION", "CURRENT_WORKFLOW_SKILL_CONTEXT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/pipeline_lifecycle.rs"
+statics = ["PIPELINE_ON_FINISH", "LIFECYCLE_AUDIT_LOG", "PARTIAL_HANDOFF_REGISTRY", "PIPELINE_DISPOSITION", "LIFECYCLE_SEQ"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/policy/approval_rules.rs"
+statics = ["APPROVAL_CALL_COUNTS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/policy/mod.rs"
+statics = ["EXECUTION_POLICY_STACK", "EXECUTION_APPROVAL_POLICY_STACK", "TRUSTED_BRIDGE_CALL_DEPTH"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/settlement_agent.rs"
+statics = ["SETTLEMENT_AGENT_ACTIVE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/redact/mod.rs"
+statics = ["REDACTION_POLICY_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/redact/patterns.rs"
+statics = ["CUSTOM_PATTERNS", "AUDIT_SINK", "AUDIT_RING"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/runtime_context.rs"
+statics = ["RUNTIME_CONTEXT_OVERLAY_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/schema/api.rs"
+statics = ["PARAM_SCHEMA_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/shells.rs"
+statics = ["SELECTED_DEFAULT_SHELL_ID"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/skills/runtime.rs"
+statics = ["CURRENT_SKILL_REGISTRY"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/agents_daemon.rs"
+statics = ["DAEMON_REGISTRY", "DAEMON_COUNTER"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/agents_workers/mod.rs"
+statics = ["WORKER_REGISTRY", "WORKER_COUNTER"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/clock.rs"
+statics = ["MOCK_TIME_GUARDS"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/stdlib/concurrency.rs"
+statics = ["CIRCUITS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/durable_step.rs"
+statics = ["STEP_CALL_COUNTS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/fs.rs"
+statics = ["FILE_TEXT_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/hitl.rs"
+statics = ["REQUEST_SEQUENCE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/host.rs"
+statics = ["HOST_MOCKS", "HOST_MOCK_CALLS", "HOST_MOCK_SCOPES"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/stdlib/host.rs"
+statics = ["HOST_CALL_BRIDGE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/io.rs"
+statics = ["STDIN_MOCK", "STDIN_LINES", "STDERR_BUFFER", "STDERR_CAPTURING", "STDOUT_PASSTHROUGH", "TTY_MOCK", "COLOR_MODE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/json.rs"
+statics = ["JSON_PARSE_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/json_stream.rs"
+statics = ["JSON_STREAM_VALIDATORS", "NEXT_JSON_STREAM_VALIDATOR_ID"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/jsonrpc.rs"
+statics = ["JSONRPC_ID_COUNTER"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/logging.rs"
+statics = ["VM_TRACE_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/monitors.rs"
+statics = ["MONITOR_WAIT_SEQUENCE"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/oauth_dynreg.rs"
+statics = ["DYNREG_STORES"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/oauth_storage.rs"
+statics = ["MEMORY_STORE", "FILE_SECRETS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/observability.rs"
+statics = ["OBS_STATE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/postgres/listen.rs"
+statics = ["LISTENERS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/postgres/mod.rs"
+statics = ["POOLS", "TXS", "MOCKS"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/process.rs"
+statics = ["VM_SOURCE_DIR", "VM_EXECUTION_CONTEXT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/records.rs"
+statics = ["EVAL_METRICS", "FRICTION_EVENTS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/regex.rs"
+statics = ["REGEX_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/sandbox/mod.rs"
+statics = ["WARNED_KEYS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/shapes.rs"
+statics = ["SHAPE_SPEC_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/supervisor.rs"
+statics = ["SUPERVISORS", "SUPERVISOR_COUNTER"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/template/assets.rs"
+statics = ["TEMPLATE_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/template/llm_context.rs"
+statics = ["LLM_RENDER_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/template/mod.rs"
+statics = ["PROMPT_REGISTRY", "PROMPT_RENDER_INDICES", "PROMPT_RENDER_ORDINAL"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/template/mod.rs"
+statics = ["PROMPT_SERIAL"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/timing.rs"
+statics = ["FINALIZED"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/tool_hooks.rs"
+statics = ["CLASSIFIER_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/tools.rs"
+statics = ["CURRENT_TOOL_REGISTRY", "TOOL_SYNTHESIS_CACHE"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/stdlib/triggers_stdlib.rs"
+statics = ["AUTO_RESUME_TIMEOUTS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/vision.rs"
+statics = ["OCR_BACKEND_OVERRIDE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/stdlib/waitpoint.rs"
+statics = ["CREATE_SEQUENCE", "WAIT_SEQUENCE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/waitpoints.rs"
+statics = ["WAITPOINT_ID_SEQUENCE", "WAITPOINT_WAIT_SEQUENCE"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/stdlib/workflow/state.rs"
+statics = ["WORKFLOW_RUN_STATES"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/step_runtime.rs"
+statics = ["STEP_REGISTRY", "PERSONA_REGISTRY", "STEP_REGISTRY_LEN", "PERSONA_REGISTRY_LEN", "PERSONA_STACK", "STEP_STACK", "COMPLETED_STEPS", "PERSONA_HOOKS"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/testbench/overlay_fs.rs"
+statics = ["ACTIVE_OVERLAY"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/testbench/process_tape.rs"
+statics = ["ACTIVE_TAPE"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/testbench/tape.rs"
+statics = ["ACTIVE_RECORDER"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/testbench/wasi_process.rs"
+statics = ["ACTIVE_WASI_TOOLCHAIN"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/tool_call_cancellations.rs"
+statics = ["REGISTRY"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/tracing.rs"
+statics = ["COLLECTOR", "TRACING_ENABLED"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/triggers/aggregation.rs"
+statics = ["REGISTRY"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/triggers/dispatcher/state.rs"
+statics = ["ACTIVE_DISPATCHER_STATE", "ACTIVE_DISPATCH_CONTEXT", "ACTIVE_DISPATCH_WAIT_LEASE", "TEST_INBOX_DEQUEUED_SIGNAL"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/triggers/registry.rs"
+statics = ["TRIGGER_REGISTRY"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/triggers/registry.rs"
+statics = ["ORCHESTRATOR_BUDGET"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/triggers/test_util/clock.rs"
+statics = ["MOCK_CLOCK_STACK"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/triggers/webhook_intake.rs"
+statics = ["REGISTRY"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/triggers/webhook_intake.rs"
+statics = ["CACHED_INBOX"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/waitpoints.rs"
+statics = ["TEST_WAIT_SIGNALS"]
+category = "thread_private"
+plan = "thread_private_test"

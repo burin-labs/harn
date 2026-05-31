@@ -2407,7 +2407,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     dequeue_span.end();
 
     let registry = ctx.pool_registry();
-    tokio::spawn(with_pool_registry_scope(registry, async move {
+    spawn_pool_worker(registry, async move {
         tokio::task::yield_now().await;
         let outcome = std::panic::AssertUnwindSafe(async {
             let mut runner = ctx.child_vm();
@@ -2422,7 +2422,14 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
         .await
         .unwrap_or_else(|payload| Err(pool_panic_error(payload)));
         finalize_task(&pool, &state, outcome);
-    }));
+    });
+}
+
+fn spawn_pool_worker<F>(registry: Arc<PoolRegistry>, future: F) -> tokio::task::JoinHandle<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(with_pool_registry_scope(registry, future))
 }
 
 fn pool_panic_error(payload: Box<dyn Any + Send>) -> String {

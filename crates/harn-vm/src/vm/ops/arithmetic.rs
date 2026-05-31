@@ -57,23 +57,20 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_adaptive_binary(&mut self, op: AdaptiveBinaryOp) -> Result<(), VmError> {
-        // Read the cache slot index from the flat side-table (O(1) `Vec`
-        // index after #2470) and, if a slot exists, peek the cached
-        // `AdaptiveBinaryState` by value. The peek avoids cloning the
-        // wrapping `InlineCacheEntry` enum — that clone used to fire on
-        // every dispatch of every binary op, paying a 24-32B memcpy
-        // that the variant-checking match would just throw away. Since
-        // `AdaptiveBinaryState: Copy`, the read here is a single scalar
-        // move (`u8`/`u64` fields, all stack-resident).
-        let (chunk, cache_slot) = {
+        // Read the cache slot from the chunk side table, then access the
+        // VM-local cache by scalar chunk metadata. Avoiding a shared Chunk
+        // clone here keeps parallel workers from contending on the same
+        // compiled closure refcount in arithmetic-heavy pool tasks.
+        let (cache_id, slot_count, cache_slot) = {
             let frame = self.frames.last().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
-            let chunk = Arc::clone(&frame.chunk);
+            let cache_id = frame.chunk.cache_id();
+            let slot_count = frame.chunk.inline_cache_slot_count();
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (chunk, cache_slot)
+            (cache_id, slot_count, cache_slot)
         };
         let cached_state = cache_slot
-            .and_then(|slot| self.peek_adaptive_binary_cache(&chunk, slot))
+            .and_then(|slot| self.peek_adaptive_binary_cache_by_key(cache_id, slot_count, slot))
             .filter(|(cached_op, _)| *cached_op == op)
             .map(|(_, state)| state);
 
@@ -85,8 +82,9 @@ impl super::super::Vm {
             Self::try_specialized_binary(op, cached_state, &a, &b)
         {
             if let Some(slot) = cache_slot {
-                self.set_inline_cache_entry(
-                    &chunk,
+                self.set_inline_cache_entry_by_key(
+                    cache_id,
+                    slot_count,
                     slot,
                     InlineCacheEntry::AdaptiveBinary {
                         op,
@@ -99,8 +97,9 @@ impl super::super::Vm {
             let result = Self::generic_binary_result(self, op, a, b)?;
             if let (Some(slot), Some(shape)) = (cache_slot, shape) {
                 let next_state = Self::next_adaptive_binary_state(cached_state, shape);
-                self.set_inline_cache_entry(
-                    &chunk,
+                self.set_inline_cache_entry_by_key(
+                    cache_id,
+                    slot_count,
                     slot,
                     InlineCacheEntry::AdaptiveBinary {
                         op,
@@ -115,13 +114,11 @@ impl super::super::Vm {
         Ok(())
     }
 
-    /// Adaptive-binary specialization fast path. Takes the peeked
-    /// `Copy` `AdaptiveBinaryState` (already filtered for the current
-    /// op by [`execute_adaptive_binary`]) instead of `&InlineCacheEntry`,
-    /// so the helper no longer destructures the outer enum on every
-    /// dispatch. Returns `(result, next_state)` on a hit; the caller
-    /// is responsible for wrapping `next_state` into `InlineCacheEntry`
-    /// before writing it back through `set_inline_cache_entry`.
+    /// Adaptive-binary specialization fast path. The caller supplies the
+    /// peeked `Copy` state after filtering for the current op, which keeps
+    /// this helper focused on shape matching and result production. Returns
+    /// `(result, next_state)` on a hit; the caller wraps `next_state` into an
+    /// `InlineCacheEntry` before writing it back.
     fn try_specialized_binary(
         op: AdaptiveBinaryOp,
         cached_state: Option<AdaptiveBinaryState>,
