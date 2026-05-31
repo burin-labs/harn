@@ -168,6 +168,7 @@ ACP_SESSION_UPDATES: tuple = (
     "config_option_update",
     "session_info_update",
     "session_truncated",
+    "artifact",
     "fs_watch",
     "handoff",
     "hitl_request",
@@ -186,6 +187,7 @@ ACP_SESSION_UPDATES: tuple = (
     "worker_update",
 )
 HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
+    "artifact",
     "available_commands_update",
     "fs_watch",
     "handoff",
@@ -450,6 +452,7 @@ class ACPSessionUpdate(str, Enum):
     CONFIG_OPTION_UPDATE = "config_option_update"
     SESSION_INFO_UPDATE = "session_info_update"
     SESSION_TRUNCATED = "session_truncated"
+    ARTIFACT = "artifact"
     FS_WATCH = "fs_watch"
     HANDOFF = "handoff"
     HITL_REQUEST = "hitl_request"

@@ -572,6 +572,7 @@
       "properties": {
         "sessionUpdate": {
           "enum": [
+            "artifact",
             "available_commands_update",
             "fs_watch",
             "handoff",
@@ -586,6 +587,7 @@
             "tool_search_query",
             "tool_search_result",
             "transcript_compacted",
+            "transcript_projected",
             "worker_update"
           ]
         },

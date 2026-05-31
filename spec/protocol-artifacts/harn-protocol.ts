@@ -77,6 +77,7 @@ export const ACP_SESSION_UPDATES = [
   "config_option_update",
   "session_info_update",
   "session_truncated",
+  "artifact",
   "fs_watch",
   "handoff",
   "hitl_request",
@@ -97,6 +98,7 @@ export const ACP_SESSION_UPDATES = [
 export type ACPSessionUpdate = (typeof ACP_SESSION_UPDATES)[number]
 
 export const HARN_ACP_SESSION_UPDATE_EXTENSIONS = [
+  "artifact",
   "available_commands_update",
   "fs_watch",
   "handoff",

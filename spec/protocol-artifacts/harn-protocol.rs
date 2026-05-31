@@ -181,6 +181,7 @@ pub const ACP_SESSION_UPDATE_CURRENT_MODE_UPDATE: &str = "current_mode_update";
 pub const ACP_SESSION_UPDATE_CONFIG_OPTION_UPDATE: &str = "config_option_update";
 pub const ACP_SESSION_UPDATE_SESSION_INFO_UPDATE: &str = "session_info_update";
 pub const ACP_SESSION_UPDATE_SESSION_TRUNCATED: &str = "session_truncated";
+pub const ACP_SESSION_UPDATE_ARTIFACT: &str = "artifact";
 pub const ACP_SESSION_UPDATE_FS_WATCH: &str = "fs_watch";
 pub const ACP_SESSION_UPDATE_HANDOFF: &str = "handoff";
 pub const ACP_SESSION_UPDATE_HITL_REQUEST: &str = "hitl_request";
@@ -212,6 +213,7 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "config_option_update",
     "session_info_update",
     "session_truncated",
+    "artifact",
     "fs_watch",
     "handoff",
     "hitl_request",
@@ -230,6 +232,7 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "worker_update",
 ];
 
+pub const HARN_ACP_SESSION_UPDATE_EXTENSION_ARTIFACT: &str = "artifact";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_AVAILABLE_COMMANDS_UPDATE: &str = "available_commands_update";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_FS_WATCH: &str = "fs_watch";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HANDOFF: &str = "handoff";
@@ -250,6 +253,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSION_WORKER_UPDATE: &str = "worker_update
 
 /// Harn-specific `session/update` discriminators beyond the canonical ACP set (the values Swift publishes as `acpSessionUpdateExtensions`).
 pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
+    "artifact",
     "available_commands_update",
     "fs_watch",
     "handoff",

@@ -2815,6 +2815,7 @@ Options mirror `agent_loop` where relevant (`provider`, `model`, `tools`,
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `artifact(payload)` | payload: dict | artifact | Normalize a typed artifact/resource |
+| `artifact_emit(kind, spec, options?)` | kind, spec, options | dict | Validate and emit a renderable Vega-Lite, Mermaid, or table artifact event |
 | `artifact_derive(parent, kind, extra?)` | parent, kind, extra | artifact | Derive a new artifact from a prior one |
 | `artifact_select(artifacts, policy?)` | artifacts, policy | list | Select artifacts under context policy and budget |
 | `artifact_context(artifacts, policy?)` | artifacts, policy | string | Render selected artifacts into context |

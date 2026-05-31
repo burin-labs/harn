@@ -10,6 +10,51 @@
       "params": {
         "sessionId": "session-1",
         "update": {
+          "sessionUpdate": "artifact",
+          "_meta": {
+            "harn": {
+              "artifactId": "artifact-chart-1",
+              "kind": "vega-lite",
+              "title": "Build throughput",
+              "mimeType": "application/vnd.vegalite.v5+json",
+              "spec": {
+                "mark": "bar",
+                "data": {
+                  "values": [
+                    {
+                      "name": "a",
+                      "count": 2
+                    }
+                  ]
+                },
+                "encoding": {
+                  "x": {
+                    "field": "name"
+                  },
+                  "y": {
+                    "field": "count"
+                  }
+                }
+              },
+              "fallback": "Build throughput (bar chart)",
+              "sizeBytes": 153,
+              "provenance": {
+                "source": "agent"
+              },
+              "metadata": {
+                "unit": "builds"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
           "sessionUpdate": "skill_activated",
           "skillName": "rust-review",
           "iteration": 1,

@@ -107,6 +107,7 @@
     ],
     "harnAgentEventMethod": "_harn/agentEvent",
     "harnSessionUpdateExtensions": [
+      "artifact",
       "available_commands_update",
       "fs_watch",
       "handoff",
@@ -139,6 +140,7 @@
       "config_option_update",
       "session_info_update",
       "session_truncated",
+      "artifact",
       "fs_watch",
       "handoff",
       "hitl_request",

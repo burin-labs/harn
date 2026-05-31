@@ -10,6 +10,31 @@ pub(super) struct A2aWorkerSink {
 impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
     fn handle_event(&self, event: &harn_vm::agent_events::AgentEvent) {
         let payload = match event {
+            harn_vm::agent_events::AgentEvent::Artifact {
+                artifact_id,
+                kind,
+                title,
+                mime_type,
+                spec,
+                fallback,
+                size_bytes,
+                provenance,
+                metadata,
+                ..
+            } => {
+                self.emit_agent_artifact(AgentArtifactUpdate {
+                    artifact_id,
+                    kind,
+                    title: title.as_deref(),
+                    mime_type,
+                    spec,
+                    fallback,
+                    size_bytes: *size_bytes,
+                    provenance,
+                    metadata,
+                });
+                return;
+            }
             harn_vm::agent_events::AgentEvent::ToolCallUpdate {
                 tool_call_id,
                 tool_name,
@@ -102,7 +127,53 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
     }
 }
 
+struct AgentArtifactUpdate<'a> {
+    artifact_id: &'a str,
+    kind: &'a str,
+    title: Option<&'a str>,
+    mime_type: &'a str,
+    spec: &'a JsonValue,
+    fallback: &'a str,
+    size_bytes: u64,
+    provenance: &'a JsonValue,
+    metadata: &'a JsonValue,
+}
+
 impl A2aWorkerSink {
+    /// Translate a validated Harn artifact event into an A2A
+    /// `TaskArtifactUpdateEvent`. The declarative spec is the primary data
+    /// part; `fallback` gives text-only clients a stable degraded view.
+    fn emit_agent_artifact(&self, update: AgentArtifactUpdate<'_>) {
+        let name = update.title.unwrap_or(update.kind);
+        let artifact = json!({
+            "artifactId": update.artifact_id,
+            "name": name,
+            "parts": [
+                {
+                    "type": "data",
+                    "data": {
+                        "kind": update.kind,
+                        "mimeType": update.mime_type,
+                        "spec": update.spec,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": update.fallback,
+                },
+            ],
+            "metadata": {
+                "timestamp": current_timestamp_rfc3339(),
+                "artifact_kind": update.kind,
+                "mime_type": update.mime_type,
+                "size_bytes": update.size_bytes,
+                "provenance": update.provenance,
+                "harn_metadata": update.metadata,
+            }
+        });
+        self.publish_artifact_update(artifact);
+    }
+
     /// Translate a completed tool call's output into an A2A
     /// `TaskArtifactUpdateEvent` and append the resulting artifact to
     /// the task's stored artifact list. Each tool call materialises as
@@ -111,6 +182,10 @@ impl A2aWorkerSink {
     /// `tasks/get` callers see the same canonical shape.
     fn emit_tool_artifact(&self, tool_call_id: &str, tool_name: &str, output: &JsonValue) {
         let artifact = tool_output_artifact(tool_call_id, tool_name, output);
+        self.publish_artifact_update(artifact);
+    }
+
+    fn publish_artifact_update(&self, artifact: JsonValue) {
         let context_id = {
             let tasks = self.tasks.lock().expect("tasks poisoned");
             tasks

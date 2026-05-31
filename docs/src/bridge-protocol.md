@@ -47,6 +47,7 @@ ride as top-level `sessionUpdate` discriminators for compatibility with
 existing Burin Code and other host renderers, advertised during
 `initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`:
 
+- `artifact`
 - `available_commands_update`
 - `fs_watch`
 - `handoff`
@@ -62,6 +63,7 @@ existing Burin Code and other host renderers, advertised during
 - `tool_search_query`
 - `tool_search_result`
 - `transcript_compacted`
+- `transcript_projected`
 - `worker_update`
 
 Unknown values should be ignored per ACP forward-compatibility rules.
@@ -102,11 +104,13 @@ that route on it keep working unchanged. Concretely:
 
 | Update variant         | Vendor fields under `_meta.harn`                                                                                                       |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `artifact`             | `artifactId`, `kind`, `title`, `mimeType`, `spec`, `fallback`, `sizeBytes`, `provenance`, `metadata`                                   |
 | `progress`             | `phase`, `message`, `progress`, `total`, `data`                                                                                        |
 | `log`                  | `level`, `message`, `fields`                                                                                                           |
 | `fs_watch`             | `subscriptionId`, `events`                                                                                                             |
 | `worker_update`        | `workerId`, `workerName`, `workerTask`, `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`                               |
 | `transcript_compacted` | `mode`, `reason`, `strategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`, `instructionMode`, `instructionSource`, `compactionPolicy` |
+| `transcript_projected` | `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`, `providerSafetyBlocked`                                                 |
 | `handoff`              | `handoffId`, `artifactId`, `handoff`                                                                                                   |
 | `skill_activated`      | `skillName`, `iteration`, `reason`                                                                                                     |
 | `skill_deactivated`    | `skillName`, `iteration`                                                                                                               |

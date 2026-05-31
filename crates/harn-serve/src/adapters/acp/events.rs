@@ -1157,6 +1157,55 @@ impl AgentEventSink for AcpAgentEventSink {
                     serde_json::json!({"checkpoint": checkpoint}),
                 );
             }
+            AgentEvent::Artifact {
+                session_id,
+                artifact_id,
+                kind,
+                title,
+                mime_type,
+                spec,
+                fallback,
+                size_bytes,
+                provenance,
+                metadata,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "artifact",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "artifactId".to_string(),
+                    serde_json::Value::String(artifact_id.clone()),
+                );
+                harn_meta.insert("kind".to_string(), serde_json::Value::String(kind.clone()));
+                harn_meta.insert(
+                    "title".to_string(),
+                    title
+                        .as_ref()
+                        .map(|value| serde_json::Value::String(value.clone()))
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                harn_meta.insert(
+                    "mimeType".to_string(),
+                    serde_json::Value::String(mime_type.clone()),
+                );
+                harn_meta.insert("spec".to_string(), spec.clone());
+                harn_meta.insert(
+                    "fallback".to_string(),
+                    serde_json::Value::String(fallback.clone()),
+                );
+                harn_meta.insert(
+                    "sizeBytes".to_string(),
+                    serde_json::Value::from(*size_bytes),
+                );
+                harn_meta.insert("provenance".to_string(), provenance.clone());
+                harn_meta.insert("metadata".to_string(), metadata.clone());
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             AgentEvent::ProgressReported {
                 session_id,
                 message,

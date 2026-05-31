@@ -18,6 +18,7 @@ pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[
 ];
 
 pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
+    "artifact",
     "available_commands_update",
     "fs_watch",
     "handoff",

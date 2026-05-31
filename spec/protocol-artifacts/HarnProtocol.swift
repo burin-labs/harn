@@ -59,6 +59,7 @@ public enum HarnProtocolConstants {
         "web",
     ]
     public static let acpSessionUpdateExtensions: [String] = [
+        "artifact",
         "available_commands_update",
         "fs_watch",
         "handoff",
@@ -212,6 +213,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case configOptionUpdate = "config_option_update"
     case sessionInfoUpdate = "session_info_update"
     case sessionTruncated = "session_truncated"
+    case artifact = "artifact"
     case fsWatch = "fs_watch"
     case handoff = "handoff"
     case hitlRequest = "hitl_request"
@@ -242,6 +244,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "config_option_update",
         "session_info_update",
         "session_truncated",
+        "artifact",
         "fs_watch",
         "handoff",
         "hitl_request",
