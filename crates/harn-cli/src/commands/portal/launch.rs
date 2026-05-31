@@ -14,7 +14,7 @@ use super::errors::{bad_request_error, internal_error};
 use super::query::ErrorResponse;
 use super::run_analysis::scan_runs;
 use super::state::PortalState;
-use super::util::{portal_timestamp_id, redacted_string};
+use super::util::{portal_now_rfc3339, portal_unique_id, redacted_string};
 
 const MAX_LAUNCH_JOB_LOG_BYTES: usize = 256 * 1024;
 const MAX_COMPLETED_LAUNCH_JOBS: usize = 200;
@@ -25,8 +25,8 @@ pub(super) async fn create_launch_job(
 ) -> Result<PortalLaunchJob, (StatusCode, Json<ErrorResponse>)> {
     validate_launch_request(&request)?;
 
-    let job_id = portal_timestamp_id("job");
-    let started_at = portal_timestamp_id("started");
+    let job_id = portal_unique_id("job");
+    let started_at = portal_now_rfc3339();
     let before_paths = known_run_paths(&state.run_dir).map_err(internal_error)?;
     let launch_env = validated_env_overrides(request.env.as_ref())?;
     let materialized =
@@ -88,13 +88,13 @@ pub(super) async fn create_launch_job(
                     } else {
                         "failed".to_string()
                     };
-                    job.finished_at = Some(portal_timestamp_id("finished"));
+                    job.finished_at = Some(portal_now_rfc3339());
                     job.discovered_run_paths =
                         discovered_run_paths(&run_dir, &before_paths).unwrap_or_default();
                 }
                 Err(error) => {
                     job.status = "failed".to_string();
-                    job.finished_at = Some(portal_timestamp_id("finished"));
+                    job.finished_at = Some(portal_now_rfc3339());
                     job.logs = format!("failed to start harn run: {error}");
                 }
             }
@@ -114,8 +114,8 @@ pub(super) async fn create_trigger_replay_job(
         return Err(bad_request_error("event_id is required"));
     }
 
-    let job_id = portal_timestamp_id("job");
-    let started_at = portal_timestamp_id("started");
+    let job_id = portal_unique_id("job");
+    let started_at = portal_now_rfc3339();
     let before_paths = known_run_paths(&state.run_dir).map_err(internal_error)?;
     let job = PortalLaunchJob {
         id: job_id.clone(),
@@ -161,13 +161,13 @@ pub(super) async fn create_trigger_replay_job(
                     } else {
                         "failed".to_string()
                     };
-                    job.finished_at = Some(portal_timestamp_id("finished"));
+                    job.finished_at = Some(portal_now_rfc3339());
                     job.discovered_run_paths =
                         discovered_run_paths(&run_dir, &before_paths).unwrap_or_default();
                 }
                 Err(error) => {
                     job.status = "failed".to_string();
-                    job.finished_at = Some(portal_timestamp_id("finished"));
+                    job.finished_at = Some(portal_now_rfc3339());
                     job.logs = format!("failed to start trigger replay: {error}");
                 }
             }
@@ -257,13 +257,14 @@ pub(super) fn validated_env_overrides(
     let mut validated = BTreeMap::new();
     if let Some(env) = env {
         for (key, value) in env {
-            if key.is_empty()
-                || !key
-                    .chars()
-                    .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
-            {
+            if !valid_env_key(key) {
                 return Err(bad_request_error(format!(
-                    "invalid env key '{key}'; use uppercase shell-style names only"
+                    "invalid env key '{key}'; use uppercase shell-style names that start with a letter or underscore"
+                )));
+            }
+            if value.contains('\0') {
+                return Err(bad_request_error(format!(
+                    "env value for '{key}' contains a NUL byte"
                 )));
             }
             if value.len() > 16_384 {
@@ -275,6 +276,15 @@ pub(super) fn validated_env_overrides(
         }
     }
     Ok(validated)
+}
+
+fn valid_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_uppercase() || first == '_')
+        && chars.all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
 }
 
 pub(super) fn build_launch_env(
@@ -400,7 +410,16 @@ fn resolve_workspace_file(workspace_root: &Path, relative_path: &str) -> Result<
     if !resolved.exists() {
         return Err(format!("file not found: {relative_path}"));
     }
-    Ok(resolved)
+    let canonical_root = workspace_root
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve workspace root: {error}"))?;
+    let canonical_resolved = resolved
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve file path: {error}"))?;
+    if !canonical_resolved.starts_with(&canonical_root) {
+        return Err("file_path must stay inside the current workspace".to_string());
+    }
+    Ok(canonical_resolved)
 }
 
 fn build_playground_source(

@@ -268,6 +268,10 @@ fn matches_run_search(run: &PortalRunSummary, needle: &str) -> bool {
     .contains(needle)
 }
 
+fn trace_span_end_ms(span: &harn_vm::orchestration::RunTraceSpanRecord) -> u64 {
+    span.start_ms.saturating_add(span.duration_ms)
+}
+
 fn collect_run_files(
     root: &Path,
     current: &Path,
@@ -420,7 +424,11 @@ pub(super) fn summarize_runs(runs: &[PortalRunSummary]) -> PortalStats {
     let avg_duration_ms = if durations.is_empty() {
         0
     } else {
-        durations.iter().sum::<u64>() / durations.len() as u64
+        let total = durations
+            .iter()
+            .map(|duration| u128::from(*duration))
+            .sum::<u128>();
+        u64::try_from(total / durations.len() as u128).unwrap_or(u64::MAX)
     };
     PortalStats {
         total_runs,
@@ -634,11 +642,11 @@ fn build_spans(run: &harn_vm::orchestration::RunRecord) -> Vec<PortalSpan> {
             let depth = span_depth(&span, &by_id);
             let lane = match lane_ends.iter().position(|end| *end <= span.start_ms) {
                 Some(index) => {
-                    lane_ends[index] = span.start_ms + span.duration_ms;
+                    lane_ends[index] = trace_span_end_ms(&span);
                     index
                 }
                 None => {
-                    lane_ends.push(span.start_ms + span.duration_ms);
+                    lane_ends.push(trace_span_end_ms(&span));
                     lane_ends.len() - 1
                 }
             };
@@ -650,7 +658,7 @@ fn build_spans(run: &harn_vm::orchestration::RunRecord) -> Vec<PortalSpan> {
                 name: span.name.clone(),
                 start_ms: span.start_ms,
                 duration_ms: span.duration_ms,
-                end_ms: span.start_ms + span.duration_ms,
+                end_ms: trace_span_end_ms(&span),
                 label: span_label(&span),
                 lane,
                 depth,
@@ -1029,17 +1037,16 @@ fn run_duration_ms(run: &harn_vm::orchestration::RunRecord) -> Option<u64> {
             return Some(duration);
         }
     }
-    if let Some(max_end) = run
-        .trace_spans
-        .iter()
-        .map(|span| span.start_ms + span.duration_ms)
-        .max()
-    {
+    if let Some(max_end) = run.trace_spans.iter().map(trace_span_end_ms).max() {
         if max_end > 0 {
             return Some(max_end);
         }
     }
-    let stage_total = run.stages.iter().filter_map(stage_duration_ms).sum::<u64>();
+    let stage_total = run
+        .stages
+        .iter()
+        .filter_map(stage_duration_ms)
+        .fold(0u64, u64::saturating_add);
     if stage_total > 0 {
         return Some(stage_total);
     }

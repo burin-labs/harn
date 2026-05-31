@@ -455,6 +455,10 @@ fn queue_file_edited_for(resolved: &std::path::Path, operation: &str, bytes: usi
     );
 }
 
+fn edited_byte_count(bytes: u64) -> usize {
+    usize::try_from(bytes).unwrap_or(usize::MAX)
+}
+
 #[harn_builtin(
     sig = "file_exists(path: string) -> bool",
     category = "fs",
@@ -510,6 +514,7 @@ fn delete_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     FILE_TEXT_CACHE.with(|cache| {
         cache.borrow_mut().remove(&resolved);
     });
+    queue_file_edited_for(&resolved, "delete", 0);
     Ok(VmValue::Nil)
 }
 
@@ -596,6 +601,7 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
             resolved.display()
         ))))
     })?;
+    queue_file_edited_for(&resolved, "mkdir", 0);
     Ok(VmValue::Nil)
 }
 
@@ -635,7 +641,7 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             &resolved_dst,
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
-        std::fs::copy(&resolved_src, &resolved_dst).map_err(|e| {
+        let bytes = overlay::copy(&resolved_src, &resolved_dst).map_err(|e| {
             VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "Failed to copy {} to {}: {e}",
                 resolved_src.display(),
@@ -645,6 +651,7 @@ fn copy_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         FILE_TEXT_CACHE.with(|cache| {
             cache.borrow_mut().remove(&resolved_dst);
         });
+        queue_file_edited_for(&resolved_dst, "copy", edited_byte_count(bytes));
     }
     Ok(VmValue::Nil)
 }
@@ -754,27 +761,34 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     crate::stdlib::sandbox::enforce_fs_path(
         "move_file",
         &src,
-        crate::stdlib::sandbox::FsAccess::Write,
+        crate::stdlib::sandbox::FsAccess::Read,
+    )?;
+    crate::stdlib::sandbox::enforce_fs_path(
+        "move_file",
+        &src,
+        crate::stdlib::sandbox::FsAccess::Delete,
     )?;
     crate::stdlib::sandbox::enforce_fs_path(
         "move_file",
         &dst,
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
-    if std::fs::rename(&src, &dst).is_ok() {
+    if let Ok(bytes) = overlay::rename(&src, &dst) {
         FILE_TEXT_CACHE.with(|c| {
             let mut c = c.borrow_mut();
             c.remove(&src);
             c.remove(&dst);
         });
+        queue_file_edited_for(&src, "move_from", 0);
+        queue_file_edited_for(&dst, "move", edited_byte_count(bytes));
         return Ok(VmValue::Nil);
     }
-    std::fs::copy(&src, &dst).map_err(|e| {
+    let bytes = overlay::copy(&src, &dst).map_err(|e| {
         VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "move_file: copy failed: {e}"
         ))))
     })?;
-    std::fs::remove_file(&src).map_err(|e| {
+    overlay::remove_file(&src).map_err(|e| {
         VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "move_file: remove src failed: {e}"
         ))))
@@ -784,6 +798,8 @@ fn move_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         c.remove(&src);
         c.remove(&dst);
     });
+    queue_file_edited_for(&src, "move_from", 0);
+    queue_file_edited_for(&dst, "move", edited_byte_count(bytes));
     Ok(VmValue::Nil)
 }
 
@@ -1077,6 +1093,121 @@ mod tests {
             !path.exists(),
             "overlay write should not materialize on the underlying fs"
         );
+    }
+
+    #[test]
+    fn copy_file_observes_active_overlay_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = std::sync::Arc::new(crate::testbench::overlay_fs::OverlayFs::rooted_at(
+            dir.path(),
+        ));
+        let _guard = crate::testbench::overlay_fs::install_overlay(overlay);
+        let mut vm = vm();
+        let src = dir.path().join("src.txt");
+        let dst = dir.path().join("dst.txt");
+
+        call(
+            &mut vm,
+            "write_file",
+            vec![s(&src.to_string_lossy()), s("overlay only")],
+        )
+        .unwrap();
+        call(
+            &mut vm,
+            "copy_file",
+            vec![s(&src.to_string_lossy()), s(&dst.to_string_lossy())],
+        )
+        .unwrap();
+
+        assert_eq!(
+            call(&mut vm, "read_file", vec![s(&dst.to_string_lossy())])
+                .unwrap()
+                .display(),
+            "overlay only"
+        );
+        assert!(!dst.exists(), "overlay copy should not touch real disk");
+    }
+
+    #[test]
+    fn move_file_observes_active_overlay_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = std::sync::Arc::new(crate::testbench::overlay_fs::OverlayFs::rooted_at(
+            dir.path(),
+        ));
+        let _guard = crate::testbench::overlay_fs::install_overlay(overlay);
+        let mut vm = vm();
+        let src = dir.path().join("src.txt");
+        let dst = dir.path().join("dst.txt");
+
+        call(
+            &mut vm,
+            "write_file",
+            vec![s(&src.to_string_lossy()), s("overlay only")],
+        )
+        .unwrap();
+        call(
+            &mut vm,
+            "move_file",
+            vec![s(&src.to_string_lossy()), s(&dst.to_string_lossy())],
+        )
+        .unwrap();
+
+        assert_eq!(
+            call(&mut vm, "read_file", vec![s(&dst.to_string_lossy())])
+                .unwrap()
+                .display(),
+            "overlay only"
+        );
+        assert!(call(&mut vm, "read_file", vec![s(&src.to_string_lossy())]).is_err());
+        assert!(!dst.exists(), "overlay move should not touch real disk");
+    }
+
+    #[test]
+    fn fs_mutations_emit_file_edited_notifications() {
+        crate::orchestration::clear_file_edit_queue();
+        let dir = tempfile::tempdir().unwrap();
+        let mut vm = vm();
+        let src = dir.path().join("src.txt");
+        let dst = dir.path().join("dst.txt");
+        let moved = dir.path().join("moved.txt");
+        let subdir = dir.path().join("subdir");
+
+        call(
+            &mut vm,
+            "write_file",
+            vec![s(&src.to_string_lossy()), s("hi")],
+        )
+        .unwrap();
+        call(
+            &mut vm,
+            "copy_file",
+            vec![s(&src.to_string_lossy()), s(&dst.to_string_lossy())],
+        )
+        .unwrap();
+        call(
+            &mut vm,
+            "move_file",
+            vec![s(&dst.to_string_lossy()), s(&moved.to_string_lossy())],
+        )
+        .unwrap();
+        call(&mut vm, "mkdir", vec![s(&subdir.to_string_lossy())]).unwrap();
+        call(&mut vm, "delete_file", vec![s(&moved.to_string_lossy())]).unwrap();
+
+        let operations = crate::orchestration::drain_file_edits()
+            .into_iter()
+            .filter_map(|entry| {
+                entry
+                    .metadata
+                    .get("operation")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+        assert!(operations.contains(&"write".to_string()));
+        assert!(operations.contains(&"copy".to_string()));
+        assert!(operations.contains(&"move".to_string()));
+        assert!(operations.contains(&"mkdir".to_string()));
+        assert!(operations.contains(&"delete".to_string()));
     }
 
     #[test]

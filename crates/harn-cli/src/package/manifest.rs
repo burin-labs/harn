@@ -1663,6 +1663,16 @@ mod tests {
     }
 
     #[test]
+    fn toml_string_literal_escapes_all_basic_control_characters() {
+        let literal = toml_string_literal("a\u{08}\t\n\u{0C}\r\"\\\u{07}z").unwrap();
+        let parsed: toml::Value = toml::from_str(&format!("value = {literal}\n")).unwrap();
+        assert_eq!(
+            parsed.get("value").and_then(toml::Value::as_str),
+            Some("a\u{08}\t\n\u{0C}\r\"\\\u{07}z")
+        );
+    }
+
+    #[test]
     fn orchestrator_drain_config_parses_defaults_and_overrides() {
         let default_manifest: Manifest = toml::from_str(
             r#"

@@ -1380,26 +1380,6 @@ fn push_toml_string_field(out: &mut String, key: &str, value: &str) -> Result<()
     Ok(())
 }
 
-fn toml_string_literal(value: &str) -> Result<String, PackageError> {
-    let mut out = String::with_capacity(value.len() + 2);
-    out.push('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch.is_control() => {
-                out.push_str(&format!("\\u{:04X}", ch as u32));
-            }
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
-    Ok(out)
-}
-
 fn render_unified_diff(old: &str, new: &str, label: &str) -> Result<String, PackageError> {
     let temp = tempfile::tempdir()
         .map_err(|error| PackageError::Ops(format!("failed to create temp dir: {error}")))?;

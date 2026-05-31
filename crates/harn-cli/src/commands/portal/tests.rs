@@ -11,7 +11,9 @@ use tower::util::ServiceExt;
 
 use crate::commands::persona;
 
-use super::dto::{PortalLaunchRequest, PortalRunDiff, PortalRunSummary};
+use super::dto::{
+    PortalLaunchRequest, PortalRunDiff, PortalRunSummary, PortalSpan, PortalStage, PortalStageDebug,
+};
 use super::launch::{
     build_launch_env, launch_output_logs, materialize_launch_target, prune_completed_launch_jobs,
     scan_launch_targets, validate_launch_request, validated_env_overrides,
@@ -20,10 +22,11 @@ use super::query::ListRunsQuery;
 use super::router::build_router;
 use super::run_analysis::{
     build_policy_summary, build_replay_summary, build_run_detail, build_run_summary,
-    filter_and_sort_runs, resolve_run_path, scan_runs,
+    filter_and_sort_runs, resolve_run_path, scan_runs, summarize_runs,
 };
 use super::state::PortalState;
 use super::transcript::discover_transcript_steps;
+use super::util::{date_ms, owning_stage, portal_now_rfc3339, portal_unique_id, preview_text};
 
 fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
     test_portal_state_with_mutations(run_dir, true)
@@ -78,11 +81,132 @@ fn test_portal_state_with_personas(
     })
 }
 
+fn empty_stage_debug() -> PortalStageDebug {
+    PortalStageDebug {
+        call_count: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        consumed_artifact_ids: Vec::new(),
+        produced_artifact_ids: Vec::new(),
+        selected_artifact_ids: Vec::new(),
+        worker_id: None,
+        error: None,
+        model_policy: None,
+        auto_compact: None,
+        output_visibility: None,
+        context_policy: None,
+        retry_policy: None,
+        capability_policy: None,
+        input_contract: None,
+        output_contract: None,
+        prompt: None,
+        system_prompt: None,
+        rendered_context: None,
+    }
+}
+
+fn run_summary_with_duration(id: &str, duration_ms: Option<u64>) -> PortalRunSummary {
+    PortalRunSummary {
+        path: format!("{id}.json"),
+        id: id.to_string(),
+        workflow_name: "workflow".to_string(),
+        status: "complete".to_string(),
+        last_stage_node_id: None,
+        failure_summary: None,
+        started_at: String::new(),
+        finished_at: None,
+        duration_ms,
+        stage_count: 0,
+        child_run_count: 0,
+        call_count: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        models: Vec::new(),
+        updated_at_ms: 0,
+        skills: Vec::new(),
+    }
+}
+
 #[test]
 fn resolve_run_path_rejects_parent_segments() {
     let temp = tempfile::tempdir().unwrap();
     let error = resolve_run_path(temp.path(), "../outside.json").unwrap_err();
     assert_eq!(error.0, StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn date_ms_rejects_pre_epoch_dates() {
+    assert_eq!(date_ms("1969-12-31T23:59:59Z"), None);
+    assert_eq!(date_ms("1970-01-01T00:00:00Z"), Some(0));
+}
+
+#[test]
+fn portal_launch_ids_are_unique_and_timestamps_are_rfc3339() {
+    let mut ids = std::collections::BTreeSet::new();
+    for _ in 0..128 {
+        let id = portal_unique_id("job");
+        assert!(id.starts_with("job-"));
+        assert!(ids.insert(id));
+    }
+    assert!(time::OffsetDateTime::parse(
+        &portal_now_rfc3339(),
+        &time::format_description::well_known::Rfc3339
+    )
+    .is_ok());
+}
+
+#[test]
+fn preview_text_truncates_on_character_boundaries() {
+    let line = "é".repeat(181);
+    let preview = preview_text(&line);
+    assert_eq!(preview, format!("{}...", "é".repeat(180)));
+}
+
+#[test]
+fn owning_stage_saturates_stage_boundaries() {
+    let stages = vec![PortalStage {
+        id: "stage-1".to_string(),
+        node_id: "huge".to_string(),
+        kind: "stage".to_string(),
+        status: "running".to_string(),
+        outcome: String::new(),
+        branch: None,
+        started_at: String::new(),
+        finished_at: None,
+        duration_ms: Some(u64::MAX),
+        artifact_count: 0,
+        attempt_count: 0,
+        verification_summary: None,
+        debug: empty_stage_debug(),
+    }];
+    let span = PortalSpan {
+        span_id: 1,
+        parent_id: None,
+        kind: "llm_call".to_string(),
+        name: "call".to_string(),
+        start_ms: u64::MAX - 1,
+        duration_ms: 1,
+        end_ms: u64::MAX,
+        label: "call".to_string(),
+        lane: 0,
+        depth: 0,
+        metadata: BTreeMap::new(),
+    };
+
+    assert_eq!(
+        owning_stage(&span, &stages).map(|stage| stage.node_id.as_str()),
+        Some("huge")
+    );
+}
+
+#[test]
+fn summarize_runs_averages_large_durations_without_overflow() {
+    let stats = summarize_runs(&[
+        run_summary_with_duration("run-1", Some(u64::MAX)),
+        run_summary_with_duration("run-2", Some(u64::MAX)),
+    ]);
+
+    assert_eq!(stats.avg_duration_ms, u64::MAX);
 }
 
 #[test]
@@ -243,6 +367,30 @@ fn build_run_detail_exposes_observability_summary() {
         .transcript_pointers
         .iter()
         .any(|pointer| pointer.kind == "llm_jsonl"));
+}
+
+#[test]
+fn build_run_detail_saturates_trace_span_end_times() {
+    let temp = tempfile::tempdir().unwrap();
+    let run = harn_vm::orchestration::RunRecord {
+        id: "run-overflow".to_string(),
+        workflow_id: "wf".to_string(),
+        workflow_name: Some("demo".to_string()),
+        status: "complete".to_string(),
+        trace_spans: vec![harn_vm::orchestration::RunTraceSpanRecord {
+            span_id: 1,
+            kind: "tool_call".to_string(),
+            name: "huge-span".to_string(),
+            start_ms: u64::MAX - 1,
+            duration_ms: 10,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let detail = build_run_detail(temp.path(), "run.json", &run);
+    assert_eq!(detail.summary.duration_ms, Some(u64::MAX));
+    assert_eq!(detail.spans[0].end_ms, u64::MAX);
 }
 
 #[test]
@@ -412,6 +560,15 @@ fn validated_env_overrides_rejects_non_shell_style_names() {
         ("bad-key".to_string(), "oops".to_string()),
     ]);
     assert!(validated_env_overrides(Some(&env)).is_err());
+
+    let starts_with_digit = BTreeMap::from([("1BAD".to_string(), "oops".to_string())]);
+    assert!(validated_env_overrides(Some(&starts_with_digit)).is_err());
+}
+
+#[test]
+fn validated_env_overrides_rejects_nul_values() {
+    let env = BTreeMap::from([("GOOD_KEY".to_string(), "before\0after".to_string())]);
+    assert!(validated_env_overrides(Some(&env)).is_err());
 }
 
 #[test]
@@ -511,6 +668,35 @@ fn materialize_playground_target_creates_workspace_files() {
     let source = fs::read_to_string(workspace_dir.join("workflow.harn")).unwrap();
     assert!(source.contains("workspace_file"));
     assert!(source.contains("persist_path"));
+    assert_eq!(source.matches("kind: \"stage\"").count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn materialize_file_target_rejects_symlink_escape() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().join("workspace");
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("secret.harn"), "pipeline main() {}\n").unwrap();
+    std::os::unix::fs::symlink(outside.join("secret.harn"), workspace.join("link.harn")).unwrap();
+
+    let error = materialize_launch_target(
+        temp.path(),
+        &workspace,
+        "job-1",
+        PortalLaunchRequest {
+            file_path: Some("link.harn".to_string()),
+            source: None,
+            task: None,
+            provider: None,
+            model: None,
+            env: None,
+        },
+    )
+    .unwrap_err();
+    assert!(error.contains("stay inside"));
 }
 
 #[tokio::test]
@@ -874,7 +1060,7 @@ fn filter_and_sort_runs_applies_search_status_and_ordering() {
     ];
 
     let query = ListRunsQuery {
-        q: Some("assertion".to_string()),
+        q: Some("ASSERTION".to_string()),
         workflow: None,
         status: Some("failed".to_string()),
         sort: Some("duration".to_string()),
