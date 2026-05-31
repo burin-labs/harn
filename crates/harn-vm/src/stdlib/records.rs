@@ -4,17 +4,19 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use crate::orchestration::{
-    compute_handoff_effects, diff_run_records, evaluate_context_pack_suggestion_expectations,
-    evaluate_eval_pack_manifest, evaluate_run_against_fixture, evaluate_run_suite,
-    evaluate_run_suite_manifest, extract_handoff_from_artifact, generate_context_pack_suggestions,
-    handoff_context_text, handoff_from_json_value, normalize_artifact,
-    normalize_context_pack_manifest, normalize_eval_pack_manifest_value,
-    normalize_eval_suite_manifest, normalize_friction_event, normalize_handoff_artifact_json,
-    normalize_persona_eval_ladder_manifest_value, normalize_run_record,
-    parse_context_pack_manifest_src, parse_friction_events_value, render_artifacts_context,
-    render_unified_diff, replay_fixture_from_run, run_persona_eval_ladder, save_run_record,
-    select_artifacts, ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
-    ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
+    compute_handoff_effects, crystallize_traces, diff_run_records,
+    evaluate_context_pack_suggestion_expectations, evaluate_eval_pack_manifest,
+    evaluate_run_against_fixture, evaluate_run_suite, evaluate_run_suite_manifest,
+    extract_handoff_from_artifact, generate_context_pack_suggestions, handoff_context_text,
+    handoff_from_json_value, normalize_artifact, normalize_context_pack_manifest,
+    normalize_eval_pack_manifest_value, normalize_eval_suite_manifest, normalize_friction_event,
+    normalize_handoff_artifact_json, normalize_persona_eval_ladder_manifest_value,
+    normalize_run_record, parse_context_pack_manifest_src, parse_friction_events_value,
+    render_artifacts_context, render_unified_diff, replay_fixture_from_run,
+    run_persona_eval_ladder, save_run_record, select_artifacts, synthesize_candidate_from_trace,
+    ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
+    ContextPackSuggestionOptions, ContextPolicy, CrystallizationTrace, CrystallizeOptions,
+    ReplayFixture,
 };
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -913,6 +915,134 @@ fn eval_pack_run_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     to_vm(&evaluate_eval_pack_manifest(&manifest)?)
 }
 
+#[harn_builtin(sig = "skill_induce(payload: dict) -> dict", category = "records")]
+fn skill_induce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let payload_value = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("skill_induce: missing payload dict".to_string()))?;
+    let payload_json = crate::llm::vm_value_to_json(payload_value);
+    let payload = payload_json
+        .as_object()
+        .ok_or_else(|| VmError::Runtime("skill_induce: payload must be a dict".to_string()))?;
+    let traces = parse_skill_induce_traces(payload)?;
+    let options = parse_skill_induce_options(payload)?;
+    let artifacts = if traces.len() == 1 && options.shadow_traces.is_empty() {
+        synthesize_candidate_from_trace(
+            traces.into_iter().next().expect("len checked"),
+            options,
+            Vec::new(),
+            None,
+            None,
+        )?
+    } else {
+        crystallize_traces(traces, options)?
+    };
+    let report = artifacts.report;
+    to_vm(&serde_json::json!({
+        "accepted": !report.skill_candidates.is_empty(),
+        "skill_candidates": report.skill_candidates,
+        "rejected_skill_candidates": report.rejected_skill_candidates,
+        "selected_candidate_id": report.selected_candidate_id,
+    }))
+}
+
+fn parse_skill_induce_traces(
+    payload: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Vec<CrystallizationTrace>, VmError> {
+    let value = payload
+        .get("traces")
+        .or_else(|| payload.get("trajectory"))
+        .or_else(|| payload.get("trace"))
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "skill_induce: payload requires `traces`, `trajectory`, or `trace`".to_string(),
+            )
+        })?;
+    let traces = match value {
+        serde_json::Value::Array(_) => {
+            serde_json::from_value::<Vec<CrystallizationTrace>>(value.clone())
+        }
+        _ => serde_json::from_value::<CrystallizationTrace>(value.clone()).map(|trace| vec![trace]),
+    }
+    .map_err(|error| VmError::Runtime(format!("skill_induce: invalid trace payload: {error}")))?;
+    if traces.is_empty() {
+        return Err(VmError::Runtime(
+            "skill_induce: at least one trace is required".to_string(),
+        ));
+    }
+    Ok(traces)
+}
+
+fn parse_skill_induce_options(
+    payload: &serde_json::Map<String, serde_json::Value>,
+) -> Result<CrystallizeOptions, VmError> {
+    let mut options = CrystallizeOptions::default();
+    let empty = serde_json::Map::new();
+    let opts = payload
+        .get("options")
+        .and_then(serde_json::Value::as_object)
+        .unwrap_or(&empty);
+    options.min_examples = json_usize(
+        payload
+            .get("min_examples")
+            .or_else(|| opts.get("min_examples")),
+    )
+    .unwrap_or_default();
+    options.promotion_min_confidence = json_f64(
+        payload
+            .get("promotion_min_confidence")
+            .or_else(|| opts.get("promotion_min_confidence")),
+    )
+    .unwrap_or_default();
+    options.workflow_name = json_string(
+        payload
+            .get("workflow_name")
+            .or_else(|| opts.get("workflow_name")),
+    );
+    options.package_name = json_string(
+        payload
+            .get("package_name")
+            .or_else(|| opts.get("package_name")),
+    );
+    options.author = json_string(payload.get("author").or_else(|| opts.get("author")));
+    options.approver = json_string(payload.get("approver").or_else(|| opts.get("approver")));
+    options.eval_pack_link = json_string(
+        payload
+            .get("eval_pack_link")
+            .or_else(|| opts.get("eval_pack_link")),
+    );
+    let heldout = payload
+        .get("heldout_traces")
+        .or_else(|| payload.get("shadow_traces"))
+        .or_else(|| opts.get("heldout_traces"))
+        .or_else(|| opts.get("shadow_traces"));
+    if let Some(value) = heldout {
+        options.shadow_traces = serde_json::from_value::<Vec<CrystallizationTrace>>(value.clone())
+            .map_err(|error| {
+                VmError::Runtime(format!("skill_induce: invalid heldout_traces: {error}"))
+            })?;
+    }
+    Ok(options)
+}
+
+fn json_string(value: Option<&serde_json::Value>) -> Option<String> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn json_usize(value: Option<&serde_json::Value>) -> Option<usize> {
+    value
+        .and_then(serde_json::Value::as_u64)
+        .map(|value| value as usize)
+}
+
+fn json_f64(value: Option<&serde_json::Value>) -> Option<f64> {
+    value.and_then(serde_json::Value::as_f64)
+}
+
 #[harn_builtin(
     sig = "persona_eval_ladder_manifest(payload: dict) -> dict",
     category = "records"
@@ -1202,6 +1332,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &EVAL_SUITE_RUN_IMPL_DEF,
     &EVAL_PACK_MANIFEST_IMPL_DEF,
     &EVAL_PACK_RUN_IMPL_DEF,
+    &SKILL_INDUCE_IMPL_DEF,
     &PERSONA_EVAL_LADDER_MANIFEST_IMPL_DEF,
     &PERSONA_EVAL_LADDER_RUN_IMPL_DEF,
     &FRICTION_EVENT_IMPL_DEF,

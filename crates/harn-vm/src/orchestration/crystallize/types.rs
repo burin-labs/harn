@@ -25,6 +25,12 @@ pub const BUNDLE_REPORT_FILE: &str = "report.json";
 pub const BUNDLE_WORKFLOW_FILE: &str = "workflow.harn";
 pub const BUNDLE_EVAL_PACK_FILE: &str = "harn.eval.toml";
 pub const BUNDLE_FIXTURES_DIR: &str = "fixtures";
+pub const BUNDLE_SKILL_DIR: &str = "skill";
+pub const BUNDLE_SKILL_FILE: &str = "SKILL.md";
+pub const BUNDLE_SKILL_GATE_FILE: &str = "gate.json";
+pub const SKILL_CANDIDATE_SCHEMA: &str = "harn.crystallization.skill_candidate";
+pub const SKILL_CANDIDATE_SCHEMA_VERSION: u32 = 1;
+pub const SKILL_GATE_RECEIPT_SCHEMA: &str = "harn.skill_induction.replay_gate.v1";
 
 /// Default rollout policy applied when a bundle is emitted without one
 /// explicitly configured. Hosted promotion surfaces can override it.
@@ -302,6 +308,81 @@ impl WorkflowCandidate {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SkillCandidateEvidenceRef {
+    pub trace_id: String,
+    pub source_hash: String,
+    pub source_url: Option<String>,
+    pub action_ids: Vec<String>,
+    pub role: SkillCandidateEvidenceRole,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillCandidateEvidenceRole {
+    #[default]
+    Source,
+    HeldOut,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SkillInductionGateReceipt {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub schema_version: u32,
+    pub skill_candidate_id: String,
+    pub workflow_candidate_id: String,
+    pub accepted: bool,
+    pub decision: String,
+    pub original_trace_count: usize,
+    pub heldout_trace_count: usize,
+    pub compared_trace_count: usize,
+    pub failures: Vec<String>,
+    pub replay_trace_ids: Vec<String>,
+    pub heldout_trace_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SkillInductionReplayGate {
+    pub original_replay_pass: bool,
+    pub heldout_replay_pass: bool,
+    pub original_trace_count: usize,
+    pub heldout_trace_count: usize,
+    pub compared_trace_count: usize,
+    pub failures: Vec<String>,
+    pub receipt: SkillInductionGateReceipt,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SkillCandidateArtifact {
+    pub schema: String,
+    pub schema_version: u32,
+    pub id: String,
+    pub workflow_candidate_id: String,
+    pub name: String,
+    pub short: String,
+    pub description: String,
+    pub when_to_use: String,
+    pub allowed_tools: Vec<String>,
+    pub paths: Vec<String>,
+    pub source_trace_hashes: Vec<String>,
+    pub evidence_refs: Vec<SkillCandidateEvidenceRef>,
+    pub replay_gate: SkillInductionReplayGate,
+    pub skill_markdown: String,
+    pub warnings: Vec<String>,
+    pub rejection_reasons: Vec<String>,
+}
+
+impl SkillCandidateArtifact {
+    pub fn is_safe_to_propose(&self) -> bool {
+        self.rejection_reasons.is_empty() && self.replay_gate.receipt.accepted
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CrystallizationReport {
@@ -312,6 +393,10 @@ pub struct CrystallizationReport {
     pub selected_candidate_id: Option<String>,
     pub candidates: Vec<WorkflowCandidate>,
     pub rejected_candidates: Vec<WorkflowCandidate>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skill_candidates: Vec<SkillCandidateArtifact>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rejected_skill_candidates: Vec<SkillCandidateArtifact>,
     pub warnings: Vec<String>,
     pub input_format: CrystallizationInputFormat,
     pub harn_code_path: Option<String>,

@@ -12,11 +12,13 @@ use super::shadow::{find_sequence_start, shadow_candidate};
 use super::types::{
     CrystallizationApproval, CrystallizationArtifacts, CrystallizationReport,
     CrystallizationSideEffect, CrystallizationTrace, PromotionApprovalRecord, PromotionCriteria,
-    PromotionDivergenceRecord, SavingsEstimate, SegmentKind, ShadowRunReport, WorkflowCandidate,
-    WorkflowCandidateStep, BUNDLE_EVAL_PACK_FILE, BUNDLE_FIXTURES_DIR, BUNDLE_MANIFEST_FILE,
-    BUNDLE_REPORT_FILE, BUNDLE_SCHEMA, BUNDLE_SCHEMA_VERSION, BUNDLE_WORKFLOW_FILE,
-    DEFAULT_ROLLOUT_POLICY,
+    PromotionDivergenceRecord, SavingsEstimate, SegmentKind, ShadowRunReport,
+    SkillInductionGateReceipt, WorkflowCandidate, WorkflowCandidateStep, BUNDLE_EVAL_PACK_FILE,
+    BUNDLE_FIXTURES_DIR, BUNDLE_MANIFEST_FILE, BUNDLE_REPORT_FILE, BUNDLE_SCHEMA,
+    BUNDLE_SCHEMA_VERSION, BUNDLE_SKILL_DIR, BUNDLE_SKILL_FILE, BUNDLE_SKILL_GATE_FILE,
+    BUNDLE_WORKFLOW_FILE, DEFAULT_ROLLOUT_POLICY, SKILL_GATE_RECEIPT_SCHEMA,
 };
+use crate::skills::{parse_frontmatter, split_frontmatter};
 use crate::value::VmError;
 
 // ===== Crystallization bundle =====
@@ -130,6 +132,18 @@ pub struct BundleEvalPackRef {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+pub struct BundleSkillRef {
+    /// Relative path to the generated `SKILL.md` inside the bundle.
+    pub path: String,
+    /// Relative path to the replay/held-out gate receipt for the skill.
+    pub gate_receipt_path: String,
+    pub name: String,
+    pub skill_candidate_id: String,
+    pub workflow_candidate_id: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct BundleFixtureRef {
     pub path: String,
     pub trace_id: String,
@@ -219,6 +233,7 @@ pub struct CrystallizationBundleManifest {
     pub savings: SavingsEstimate,
     pub shadow: ShadowRunReport,
     pub eval_pack: Option<BundleEvalPackRef>,
+    pub skill: Option<BundleSkillRef>,
     pub fixtures: Vec<BundleFixtureRef>,
     pub promotion: BundlePromotion,
     pub redaction: BundleRedactionSummary,
@@ -263,6 +278,8 @@ pub struct CrystallizationBundle {
     pub report: CrystallizationReport,
     pub harn_code: String,
     pub eval_pack_toml: String,
+    pub skill_markdown: String,
+    pub skill_gate_receipt_json: String,
     pub fixtures: Vec<CrystallizationTrace>,
 }
 
@@ -279,6 +296,7 @@ pub struct BundleValidation {
     pub workflow_ok: bool,
     pub report_ok: bool,
     pub eval_pack_ok: bool,
+    pub skill_ok: bool,
     pub fixtures_ok: bool,
     pub redaction_ok: bool,
     pub problems: Vec<String>,
@@ -489,6 +507,25 @@ pub fn build_crystallization_bundle(
                 .filter(|link| !link.trim().is_empty()),
         })
     };
+    let selected_skill = selected.and_then(|candidate| {
+        report
+            .skill_candidates
+            .iter()
+            .find(|skill| skill.workflow_candidate_id == candidate.id)
+    });
+    let skill = selected_skill.map(|skill| BundleSkillRef {
+        path: format!("{BUNDLE_SKILL_DIR}/{BUNDLE_SKILL_FILE}"),
+        gate_receipt_path: format!("{BUNDLE_SKILL_DIR}/{BUNDLE_SKILL_GATE_FILE}"),
+        name: skill.name.clone(),
+        skill_candidate_id: skill.id.clone(),
+        workflow_candidate_id: skill.workflow_candidate_id.clone(),
+    });
+    let skill_markdown = selected_skill
+        .map(|skill| skill.skill_markdown.clone())
+        .unwrap_or_default();
+    let skill_gate_receipt_json = selected_skill
+        .and_then(|skill| serde_json::to_string_pretty(&skill.replay_gate.receipt).ok())
+        .unwrap_or_default();
 
     let manifest = CrystallizationBundleManifest {
         schema: BUNDLE_SCHEMA.to_string(),
@@ -525,6 +562,7 @@ pub fn build_crystallization_bundle(
             .map(|candidate| candidate.shadow.clone())
             .unwrap_or_default(),
         eval_pack,
+        skill,
         fixtures: fixture_refs,
         promotion,
         redaction,
@@ -544,6 +582,8 @@ pub fn build_crystallization_bundle(
         report,
         harn_code,
         eval_pack_toml,
+        skill_markdown,
+        skill_gate_receipt_json,
         fixtures: fixture_payloads,
     })
 }
@@ -574,6 +614,26 @@ pub fn write_crystallization_bundle(
             &bundle_dir.join(BUNDLE_EVAL_PACK_FILE),
             bundle.eval_pack_toml.as_bytes(),
         )?;
+    }
+
+    if !bundle.skill_markdown.trim().is_empty() {
+        let skill_dir = bundle_dir.join(BUNDLE_SKILL_DIR);
+        std::fs::create_dir_all(&skill_dir).map_err(|error| {
+            VmError::Runtime(format!(
+                "failed to create skill dir {}: {error}",
+                skill_dir.display()
+            ))
+        })?;
+        write_bytes(
+            &skill_dir.join(BUNDLE_SKILL_FILE),
+            bundle.skill_markdown.as_bytes(),
+        )?;
+        if !bundle.skill_gate_receipt_json.trim().is_empty() {
+            write_bytes(
+                &skill_dir.join(BUNDLE_SKILL_GATE_FILE),
+                bundle.skill_gate_receipt_json.as_bytes(),
+            )?;
+        }
     }
 
     if !bundle.fixtures.is_empty() {
@@ -766,6 +826,125 @@ pub fn validate_crystallization_bundle(bundle_dir: &Path) -> Result<BundleValida
         }
     } else {
         validation.eval_pack_ok = true;
+    }
+
+    if let Some(skill) = &manifest.skill {
+        let mut skill_problem = false;
+        match resolve_bundle_manifest_path(bundle_dir, &skill.path, "skill") {
+            Ok(path) if path.exists() => match std::fs::read_to_string(&path) {
+                Ok(source) => {
+                    let (frontmatter, _) = split_frontmatter(&source);
+                    match parse_frontmatter(frontmatter) {
+                        Ok(parsed) => {
+                            if parsed.manifest.name.trim().is_empty() {
+                                validation
+                                    .problems
+                                    .push("skill SKILL.md is missing frontmatter name".to_string());
+                                skill_problem = true;
+                            } else if parsed.manifest.name != skill.name {
+                                validation.problems.push(format!(
+                                    "skill SKILL.md name {} does not match manifest skill name {}",
+                                    parsed.manifest.name, skill.name
+                                ));
+                                skill_problem = true;
+                            }
+                            if parsed.manifest.short.trim().is_empty() {
+                                validation.problems.push(
+                                    "skill SKILL.md is missing required short card".to_string(),
+                                );
+                                skill_problem = true;
+                            }
+                        }
+                        Err(error) => {
+                            validation
+                                .problems
+                                .push(format!("invalid skill SKILL.md frontmatter: {error}"));
+                            skill_problem = true;
+                        }
+                    }
+                }
+                Err(error) => {
+                    validation.problems.push(format!(
+                        "failed to read skill file {}: {error}",
+                        path.display()
+                    ));
+                    skill_problem = true;
+                }
+            },
+            Ok(path) => {
+                validation.problems.push(format!(
+                    "manifest references skill {} but file is missing",
+                    path.display()
+                ));
+                skill_problem = true;
+            }
+            Err(problem) => {
+                validation.problems.push(problem);
+                skill_problem = true;
+            }
+        }
+        match resolve_bundle_manifest_path(bundle_dir, &skill.gate_receipt_path, "skill gate") {
+            Ok(path) if path.exists() => match std::fs::read_to_string(&path) {
+                Ok(source) => match serde_json::from_str::<SkillInductionGateReceipt>(&source) {
+                    Ok(receipt) => {
+                        if receipt.type_name != SKILL_GATE_RECEIPT_SCHEMA {
+                            validation.problems.push(format!(
+                                "skill gate receipt has unexpected type {}",
+                                receipt.type_name
+                            ));
+                            skill_problem = true;
+                        }
+                        if receipt.skill_candidate_id != skill.skill_candidate_id {
+                            validation.problems.push(format!(
+                                "skill gate receipt candidate id {} does not match manifest {}",
+                                receipt.skill_candidate_id, skill.skill_candidate_id
+                            ));
+                            skill_problem = true;
+                        }
+                        if receipt.workflow_candidate_id != skill.workflow_candidate_id {
+                            validation.problems.push(format!(
+                                "skill gate receipt workflow id {} does not match manifest {}",
+                                receipt.workflow_candidate_id, skill.workflow_candidate_id
+                            ));
+                            skill_problem = true;
+                        }
+                        if !receipt.accepted {
+                            validation
+                                .problems
+                                .push("skill gate receipt is not accepted".to_string());
+                            skill_problem = true;
+                        }
+                    }
+                    Err(error) => {
+                        validation
+                            .problems
+                            .push(format!("invalid skill gate receipt JSON: {error}"));
+                        skill_problem = true;
+                    }
+                },
+                Err(error) => {
+                    validation.problems.push(format!(
+                        "failed to read skill gate receipt {}: {error}",
+                        path.display()
+                    ));
+                    skill_problem = true;
+                }
+            },
+            Ok(path) => {
+                validation.problems.push(format!(
+                    "manifest references skill gate receipt {} but file is missing",
+                    path.display()
+                ));
+                skill_problem = true;
+            }
+            Err(problem) => {
+                validation.problems.push(problem);
+                skill_problem = true;
+            }
+        }
+        validation.skill_ok = !skill_problem;
+    } else {
+        validation.skill_ok = true;
     }
 
     let mut fixtures_problem = false;

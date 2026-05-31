@@ -9,6 +9,7 @@ mod bundle;
 mod codegen;
 mod normalize;
 mod shadow;
+mod skill;
 mod trajectory;
 mod types;
 mod util;
@@ -21,10 +22,12 @@ pub use bundle::{
     build_crystallization_bundle, load_crystallization_bundle,
     load_crystallization_bundle_manifest, shadow_replay_bundle, validate_crystallization_bundle,
     write_crystallization_bundle, BundleEvalPackRef, BundleFixtureRef, BundleGenerator, BundleKind,
-    BundleOptions, BundlePromotion, BundleRedactionSummary, BundleSourceTrace, BundleStep,
-    BundleValidation, BundleWorkflowRef, CrystallizationBundle, CrystallizationBundleManifest,
+    BundleOptions, BundlePromotion, BundleRedactionSummary, BundleSkillRef, BundleSourceTrace,
+    BundleStep, BundleValidation, BundleWorkflowRef, CrystallizationBundle,
+    CrystallizationBundleManifest,
 };
 pub use codegen::{generate_eval_pack, generate_harn_code};
+pub use skill::{induce_skill_candidate, refresh_skill_candidates};
 pub use trajectory::{
     apply_trajectory_verifier, ingest_agent_loop_trajectory, turn_record, AgentTurnRecord,
     AgentTurnToolCall, TrajectoryIngestResult, TrajectoryTap, TRAJECTORY_SOURCE,
@@ -35,10 +38,13 @@ pub use types::{
     CrystallizationSideEffect, CrystallizationTrace, CrystallizationUsage, CrystallizeOptions,
     PromotionApprovalRecord, PromotionCriteria, PromotionDivergenceRecord, PromotionMetadata,
     PromotionStatus, RecoveryFeedbackSummary, SavingsEstimate, SegmentKind, SegmentSummary,
-    ShadowRunReport, ShadowTraceResult, WorkflowCandidate, WorkflowCandidateExample,
-    WorkflowCandidateParameter, WorkflowCandidateStep, WorkflowClusterKey, BUNDLE_EVAL_PACK_FILE,
-    BUNDLE_FIXTURES_DIR, BUNDLE_MANIFEST_FILE, BUNDLE_REPORT_FILE, BUNDLE_SCHEMA,
-    BUNDLE_SCHEMA_VERSION, BUNDLE_WORKFLOW_FILE,
+    ShadowRunReport, ShadowTraceResult, SkillCandidateArtifact, SkillCandidateEvidenceRef,
+    SkillCandidateEvidenceRole, SkillInductionGateReceipt, SkillInductionReplayGate,
+    WorkflowCandidate, WorkflowCandidateExample, WorkflowCandidateParameter, WorkflowCandidateStep,
+    WorkflowClusterKey, BUNDLE_EVAL_PACK_FILE, BUNDLE_FIXTURES_DIR, BUNDLE_MANIFEST_FILE,
+    BUNDLE_REPORT_FILE, BUNDLE_SCHEMA, BUNDLE_SCHEMA_VERSION, BUNDLE_SKILL_DIR, BUNDLE_SKILL_FILE,
+    BUNDLE_SKILL_GATE_FILE, BUNDLE_WORKFLOW_FILE, SKILL_CANDIDATE_SCHEMA,
+    SKILL_CANDIDATE_SCHEMA_VERSION, SKILL_GATE_RECEIPT_SCHEMA,
 };
 
 #[cfg(test)]

@@ -139,11 +139,12 @@ fn run_validate(args: CrystallizeValidateArgs) -> Result<(), String> {
         }
     );
     println!(
-        "Checks: manifest={} workflow={} report={} eval_pack={} fixtures={} redaction={}",
+        "Checks: manifest={} workflow={} report={} eval_pack={} skill={} fixtures={} redaction={}",
         ok_label(validation.manifest_ok),
         ok_label(validation.workflow_ok),
         ok_label(validation.report_ok),
         ok_label(validation.eval_pack_ok),
+        ok_label(validation.skill_ok),
         ok_label(validation.fixtures_ok),
         ok_label(validation.redaction_ok),
     );

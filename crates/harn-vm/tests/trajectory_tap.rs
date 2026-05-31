@@ -177,6 +177,70 @@ fn merge_captain_trajectory_yields_deterministic_skill_with_bundle() {
 }
 
 #[test]
+fn trajectory_skill_induction_requires_and_records_heldout_replay() {
+    let mut failed = merge_captain_turn(3, "burin-labs/harn");
+    failed.success = false;
+    let mining_turns = vec![
+        merge_captain_turn(1, "burin-labs/harn"),
+        merge_captain_turn(2, "burin-labs/harn"),
+        failed,
+        merge_captain_turn(4, "burin-labs/harn"),
+        merge_captain_turn(5, "burin-labs/harn"),
+    ];
+    let tap = TrajectoryTap::new("merge_captain_session")
+        .with_workflow_id("merge_captain")
+        .with_segment_len(2, 12);
+    let holdout_traces = tap.collect(&[
+        merge_captain_turn(10, "burin-labs/harn"),
+        merge_captain_turn(11, "burin-labs/harn"),
+    ]);
+    assert_eq!(holdout_traces.len(), 1);
+
+    let result = ingest_agent_loop_trajectory(
+        &tap,
+        &mining_turns,
+        CrystallizeOptions {
+            min_examples: 2,
+            shadow_traces: holdout_traces.clone(),
+            workflow_name: Some("merge_captain_sweep".to_string()),
+            package_name: Some("merge-captain-trajectories".to_string()),
+            ..CrystallizeOptions::default()
+        },
+    )
+    .expect("trajectory ingestion succeeds")
+    .expect("trajectory produces segments");
+
+    let skill = result
+        .artifacts
+        .report
+        .skill_candidates
+        .first()
+        .expect("accepted trajectory skill candidate");
+    assert!(skill.replay_gate.receipt.accepted);
+    assert_eq!(skill.replay_gate.original_trace_count, 2);
+    assert_eq!(skill.replay_gate.heldout_trace_count, 1);
+    assert!(skill.evidence_refs.iter().any(
+        |evidence| evidence.role == harn_vm::orchestration::SkillCandidateEvidenceRole::HeldOut
+    ));
+
+    let mut bundle_traces = result.traces.clone();
+    bundle_traces.extend(holdout_traces);
+    let bundle =
+        build_crystallization_bundle(result.artifacts, &bundle_traces, BundleOptions::default())
+            .expect("build bundle");
+    assert!(bundle.manifest.skill.is_some());
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_crystallization_bundle(&bundle, dir.path()).expect("write bundle");
+    let validation = validate_crystallization_bundle(dir.path()).expect("validate bundle");
+    assert!(
+        validation.is_ok(),
+        "trajectory skill bundle validation problems: {:?}",
+        validation.problems
+    );
+    assert!(validation.skill_ok);
+}
+
+#[test]
 fn verifier_rejects_candidate_when_trace_diverges() {
     // Same as the happy-path test, but we mutate one of the source
     // traces after collection so the candidate's expected_output no

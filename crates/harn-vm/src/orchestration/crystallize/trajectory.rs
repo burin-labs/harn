@@ -694,6 +694,7 @@ pub fn apply_trajectory_verifier(
             artifacts.eval_pack_toml.clear();
         }
     }
+    super::skill::refresh_skill_candidates(&mut artifacts.report, traces);
 }
 
 /// Convenience constructor for an [`AgentTurnRecord`] used by tests
