@@ -511,6 +511,14 @@ pub struct AcpServerConfig {
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub profile: AcpProfileConfig,
     pub budget: Option<BudgetSpec>,
+    /// Read-only sandbox roots the embedder grants on top of the user's
+    /// `workspace_roots`. Paths resolving under one of these are readable
+    /// during a turn even though they sit outside the user workspace, but
+    /// they are never writable or executable. Intended for an in-process
+    /// host (e.g. burin's Rust TUI) that ships bundled assets — pipelines
+    /// and their `@partials` — outside the user's project tree. Empty by
+    /// default so embedders that do not set it keep the stock sandbox.
+    pub read_only_roots: Vec<String>,
 }
 
 impl AcpServerConfig {
@@ -524,6 +532,7 @@ impl AcpServerConfig {
             llm_capability_overrides: None,
             profile: AcpProfileConfig::default(),
             budget: None,
+            read_only_roots: Vec::new(),
         }
     }
 
@@ -582,6 +591,36 @@ impl AcpServerConfig {
         self.budget = normalize_budget_spec(budget);
         self
     }
+
+    /// Register read-only sandbox roots that the embedder grants on top of
+    /// the user's `workspace_roots`. Each path is canonicalized so the
+    /// per-turn policy compares against the same normalized form the
+    /// sandbox scope check uses; entries that cannot be canonicalized
+    /// (e.g. they do not exist yet) fall back to their input string.
+    /// Empty/blank entries are dropped.
+    pub fn with_read_only_roots(mut self, roots: Vec<String>) -> Self {
+        self.read_only_roots = canonicalize_read_only_roots(roots);
+        self
+    }
+}
+
+/// Canonicalize embedder-supplied read-only roots, dropping blank entries.
+/// Falls back to the trimmed input when canonicalization fails so a root
+/// that does not exist on disk yet is still carried verbatim.
+fn canonicalize_read_only_roots(roots: Vec<String>) -> Vec<String> {
+    roots
+        .into_iter()
+        .filter_map(|root| {
+            let trimmed = root.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let canonical = std::fs::canonicalize(trimmed)
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| trimmed.to_string());
+            Some(canonical)
+        })
+        .collect()
 }
 
 /// Cached compiled pipeline. The ACP server re-uses the same pipeline file
@@ -647,6 +686,10 @@ pub struct AcpServer {
     profile: AcpProfileConfig,
     /// Server-level budget inherited by sessions unless they override it.
     default_budget: Option<BudgetSpec>,
+    /// Embedder-granted read-only sandbox roots, unioned into the per-turn
+    /// capability policy so bundled assets outside the user workspace stay
+    /// readable. Empty for embedders that do not opt in.
+    read_only_roots: Vec<String>,
 }
 
 impl AcpServer {
@@ -679,6 +722,7 @@ impl AcpServer {
             vm_baseline_cache: None,
             profile: config.profile,
             default_budget: config.budget,
+            read_only_roots: config.read_only_roots,
         }
     }
 
@@ -1603,7 +1647,7 @@ impl AcpServer {
             })),
         );
         let profile_turn = self.begin_profile_turn(&session_id);
-        let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id);
+        let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id, &self.read_only_roots);
         let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match self
             .prepare_vm_baseline_cached(
                 &source,

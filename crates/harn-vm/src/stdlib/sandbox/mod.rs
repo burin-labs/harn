@@ -905,6 +905,57 @@ mod tests {
     }
 
     #[test]
+    fn read_only_root_outside_workspace_allows_read_denies_write() {
+        // Models an embedder (burin's in-process TUI) that grants a
+        // read-only root R holding bundled pipelines/partials outside the
+        // user's writable workspace. A read under R passes; a write under R
+        // is denied; a read outside both R and the workspace is denied.
+        let workspace = tempfile::tempdir().unwrap();
+        let read_only = tempfile::tempdir().unwrap();
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            read_only_roots: vec![read_only.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+
+        let asset = read_only
+            .path()
+            .join("partials/agent-web-tools.harn.prompt");
+        // READ under the read-only root is allowed.
+        assert!(
+            check_fs_path_scope(&asset, FsAccess::Read).is_ok(),
+            "read under a configured read-only root must be allowed"
+        );
+
+        // WRITE under the read-only root is denied, flagged read_only.
+        let write_err = check_fs_path_scope(&asset, FsAccess::Write)
+            .expect_err("write under a read-only root must be denied");
+        assert!(write_err.read_only, "write rejection must set read_only");
+
+        // DELETE under the read-only root is likewise denied.
+        assert!(
+            check_fs_path_scope(&asset, FsAccess::Delete).is_err(),
+            "delete under a read-only root must be denied"
+        );
+
+        // A read inside the writable workspace still passes.
+        assert!(check_fs_path_scope(&workspace.path().join("src/main.rs"), FsAccess::Read).is_ok());
+
+        // A read outside BOTH the workspace and the read-only root is denied
+        // and is NOT flagged read_only (it fell outside every root).
+        let stranger = tempfile::tempdir().unwrap();
+        let outside_err = check_fs_path_scope(&stranger.path().join("secret.txt"), FsAccess::Read)
+            .expect_err("read outside all roots must be denied");
+        assert!(
+            !outside_err.read_only,
+            "out-of-scope rejection must not be flagged read_only"
+        );
+
+        pop_execution_policy();
+    }
+
+    #[test]
     fn path_within_root_accepts_root_and_children() {
         let root = Path::new("/tmp/harn-root");
         assert!(path_is_within(root, root));
