@@ -250,6 +250,7 @@ Same as `llm_call`, plus additional options:
 | `compact_keep_first` | int | `0` | Prompt-visible messages to keep verbatim before the compaction summary. The system prompt is always kept separately |
 | `compact_keep_last` | int | strategy default | Prompt-visible messages to keep verbatim after the compaction summary |
 | `auto_compact` | bool/dict | nil | Auto-compaction options. Dict values may include the same compaction policy fields as `compaction` |
+| `transcript_projection` | string/dict | nil | Per-turn model-visible projection over the immutable raw transcript. Policies include `clean_tool_repair`, `squash_failed_calls`, `summary_prefix`, `reachability_gc`, and `custom` |
 | `idle_watchdog_attempts` | int | nil (disabled) | Max consecutive idle-wait ticks that may return no wake reason before the daemon terminates with `status = "watchdog"`. Guards against a misconfigured daemon (e.g. bridge never signals, no timer, no watch paths) hanging the session silently |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |

@@ -16,3 +16,16 @@ blocked_safety:true
 blocked_dropped:0
 bypassed_safety:false
 bypassed_dropped:2
+gc_policy:reachability_gc
+gc_redacted:1
+gc_reclaimed:true
+gc_old_reclaimed:true
+gc_live_preserved:true
+gc_roots:true
+gc_pointer:transcript.messages[2].content
+gc_barrier_blocked:true
+long_raw_redacted:0
+long_gc_redacted:60
+long_gc_reclaimed:true
+long_gc_live_preserved:true
+long_barrier_gc_redacted:60

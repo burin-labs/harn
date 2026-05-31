@@ -2163,6 +2163,10 @@ async fn host_agent_session_project_turn(
             kept_count: result.kept_indices.len(),
             dropped_count: result.dropped_indices.len(),
             provider_safety_blocked: result.provider_safety_blocked,
+            redacted_count: result.redaction_pointers.len(),
+            reclaimed_tokens: result.reclaimed_tokens,
+            roots_consulted: result.roots_consulted.clone(),
+            redaction_pointers: result.redaction_pointers.clone(),
         },
     )
     .await;

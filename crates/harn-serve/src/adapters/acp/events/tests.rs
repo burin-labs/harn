@@ -214,6 +214,10 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
             kept_count: 3,
             dropped_count: 2,
             provider_safety_blocked: false,
+            redacted_count: 0,
+            reclaimed_tokens: 0,
+            roots_consulted: Vec::new(),
+            redaction_pointers: Vec::new(),
         },
         AgentEvent::ReminderEmitted {
             session_id: "session-1".to_string(),
@@ -1141,6 +1145,10 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             kept_count: 3,
             dropped_count: 2,
             provider_safety_blocked: false,
+            redacted_count: 0,
+            reclaimed_tokens: 0,
+            roots_consulted: Vec::new(),
+            redaction_pointers: Vec::new(),
         },
         AgentEvent::Handoff {
             session_id: "session-1".to_string(),

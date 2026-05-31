@@ -390,7 +390,7 @@ pub fn agent_record_compaction(session_id, payload) {
  * The persisted message list is never mutated — projection only
  * controls what the next provider request will see. Supported policies:
  * "raw", "clean_tool_repair", "squash_failed_calls", "summary_prefix",
- * and "custom" (with a `projector` closure).
+ * "reachability_gc", and "custom" (with a `projector` closure).
  *
  * @effects: [host]
  * @allocation: heap

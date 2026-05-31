@@ -409,6 +409,14 @@ pub enum AgentEvent {
         kept_count: usize,
         dropped_count: usize,
         provider_safety_blocked: bool,
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        redacted_count: usize,
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        reclaimed_tokens: usize,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        roots_consulted: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        redaction_pointers: Vec<serde_json::Value>,
     },
     /// Emitted when a pending `system_reminder` is rendered into the
     /// next provider request. ACP clients show these in a reminder lane

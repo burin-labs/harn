@@ -634,6 +634,10 @@ impl AgentEventSink for AcpAgentEventSink {
                 kept_count,
                 dropped_count,
                 provider_safety_blocked,
+                redacted_count,
+                reclaimed_tokens,
+                roots_consulted,
+                redaction_pointers,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "transcript_projected",
@@ -663,6 +667,30 @@ impl AgentEventSink for AcpAgentEventSink {
                     "providerSafetyBlocked".to_string(),
                     serde_json::Value::Bool(*provider_safety_blocked),
                 );
+                if *redacted_count > 0 {
+                    harn_meta.insert(
+                        "redactedCount".to_string(),
+                        serde_json::Value::from(*redacted_count),
+                    );
+                }
+                if *reclaimed_tokens > 0 {
+                    harn_meta.insert(
+                        "reclaimedTokens".to_string(),
+                        serde_json::Value::from(*reclaimed_tokens),
+                    );
+                }
+                if !roots_consulted.is_empty() {
+                    harn_meta.insert(
+                        "rootsConsulted".to_string(),
+                        serde_json::to_value(roots_consulted).unwrap_or_default(),
+                    );
+                }
+                if !redaction_pointers.is_empty() {
+                    harn_meta.insert(
+                        "redactionPointers".to_string(),
+                        serde_json::Value::Array(redaction_pointers.clone()),
+                    );
+                }
                 merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
