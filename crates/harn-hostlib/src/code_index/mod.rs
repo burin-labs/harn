@@ -429,6 +429,16 @@ impl HostlibCapability for CodeIndexCapability {
     }
 }
 
+/// Programmatic entry point for callers that need to compose
+/// `rename_symbol` with another hostlib capability while sharing the
+/// same in-memory code-index state.
+pub(crate) fn run_rename_symbol(
+    index: &SharedIndex,
+    args: &[VmValue],
+) -> Result<VmValue, HostlibError> {
+    rename::run(index, args)
+}
+
 fn register(
     registry: &mut BuiltinRegistry,
     index: SharedIndex,

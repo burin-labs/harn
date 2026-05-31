@@ -459,6 +459,11 @@ pipeline default(task) {
         select: "first",
       },
       {op: "safe_text_patch", path: "src/lib.rs", old_text: "fn greet", new_text: "fn greeter"},
+      {
+        op: "rename_symbol",
+        symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
+        new_name: "Gadget",
+      },
     ],
   })
 

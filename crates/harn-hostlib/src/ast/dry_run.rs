@@ -51,6 +51,7 @@ use std::sync::Arc;
 
 use harn_vm::VmValue;
 
+use crate::code_index::SharedIndex;
 use crate::error::HostlibError;
 use crate::fs::FsMode;
 use crate::tools::args::{build_dict, dict_arg, optional_string, require_string, str_value};
@@ -62,6 +63,13 @@ const TRANSIENT_PREFIX: &str = "__edit_dry_run__-";
 
 /// Entry point registered as the `hostlib_ast_dry_run` builtin.
 pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    run_with_code_index(None, args)
+}
+
+pub(super) fn run_with_code_index(
+    code_index: Option<&SharedIndex>,
+    args: &[VmValue],
+) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN, args)?;
     let dict = raw.as_ref();
     let plan = require_plan(dict)?;
@@ -75,11 +83,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let mut rejected_count = 0usize;
 
     for (index, op_value) in plan.into_iter().enumerate() {
-        let outcome = dispatch_op(&session_id, index, &op_value);
+        let outcome = dispatch_op(code_index, &session_id, index, &op_value);
         match &outcome {
-            OpOutcome::Applied { path, .. } => {
+            OpOutcome::Applied { paths, .. } => {
                 applied_count += 1;
-                touched.insert(path.clone());
+                touched.extend(paths.iter().cloned());
             }
             OpOutcome::Rejected { .. } | OpOutcome::Error { .. } => {
                 rejected_count += 1;
@@ -91,10 +99,16 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let mut per_file_diffs: Vec<FileDiffEntry> = Vec::new();
     let mut lines_added_total = 0usize;
     let mut lines_removed_total = 0usize;
+    let staged_paths: BTreeSet<PathBuf> = crate::fs::staged_status(&session_id)?
+        .pending_writes
+        .into_iter()
+        .map(|write| PathBuf::from(write.path))
+        .collect();
+    let diff_targets = diff_targets(staged_paths, touched);
 
-    for path in touched.iter() {
-        let (before, before_existed) = read_before(path);
-        let after = read_after(path, &session_id).unwrap_or_default();
+    for target in &diff_targets {
+        let (before, before_existed) = read_before(&target.read_path);
+        let after = read_after(&target.read_path, &session_id).unwrap_or_default();
         let kind = if !before_existed {
             ChangeKind::Create
         } else if after.is_empty() {
@@ -105,7 +119,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         } else {
             ChangeKind::Modify
         };
-        let display = path.to_string_lossy().into_owned();
+        let display = diff_path_label(&target.display_path);
         let diff = render_unified_diff(&display, &before, &after, kind);
         lines_added_total += diff.lines_added;
         lines_removed_total += diff.lines_removed;
@@ -201,7 +215,7 @@ fn transient_session_id() -> String {
 enum OpOutcome {
     Applied {
         op: &'static str,
-        path: PathBuf,
+        paths: Vec<PathBuf>,
         details: String,
         match_count: usize,
     },
@@ -217,7 +231,12 @@ enum OpOutcome {
     },
 }
 
-fn dispatch_op(session_id: &str, index: usize, raw: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn dispatch_op(
+    code_index: Option<&SharedIndex>,
+    session_id: &str,
+    index: usize,
+    raw: &Arc<BTreeMap<String, VmValue>>,
+) -> OpOutcome {
     let dict = raw.as_ref();
     let op_name = match dict.get("op") {
         Some(VmValue::String(s)) => s.to_string(),
@@ -242,15 +261,7 @@ fn dispatch_op(session_id: &str, index: usize, raw: &Arc<BTreeMap<String, VmValu
         "apply_node" => run_apply_node(session_id, raw),
         "insert_at_anchor" => run_insert_at_anchor(session_id, raw),
         "safe_text_patch" => run_safe_text_patch(session_id, raw),
-        "rename_symbol" => OpOutcome::Rejected {
-            op: op_name,
-            reason: "use_standalone",
-            details: "rename_symbol is a workspace-level operation backed by the typed symbol graph (#2434); \
-                      its preview surface returns per-file edit metadata that the unified-diff bundle here \
-                      would lose. Call `edit_rename_symbol({..., dry_run: true})` directly for the preview."
-                .into(),
-            path: optional_string(BUILTIN, dict, "path").ok().flatten(),
-        },
+        "rename_symbol" => run_rename_symbol(code_index, session_id, raw),
         other => OpOutcome::Rejected {
             op: other.to_string(),
             reason: "unknown_op",
@@ -330,7 +341,7 @@ fn parse_builtin_outcome(
         let path = path.as_ref().map(PathBuf::from).unwrap_or_default();
         OpOutcome::Applied {
             op: op_label,
-            path,
+            paths: vec![path],
             details: format!("{op_label}: applied with {match_count} match(es)"),
             match_count,
         }
@@ -356,6 +367,119 @@ fn classify_builtin_failure(result: &str) -> &'static str {
         "unsupported_language" => "unsupported_language",
         "syntax_error" => "syntax_error",
         _ => "rejected",
+    }
+}
+
+fn run_rename_symbol(
+    code_index: Option<&SharedIndex>,
+    session_id: &str,
+    raw: &Arc<BTreeMap<String, VmValue>>,
+) -> OpOutcome {
+    let Some(index) = code_index else {
+        return OpOutcome::Rejected {
+            op: "rename_symbol".into(),
+            reason: "code_index_unavailable",
+            details: "rename_symbol dry-run ops require hostlib_ast_dry_run to be registered with the shared code_index capability"
+                .into(),
+            path: None,
+        };
+    };
+    let mut forwarded: BTreeMap<String, VmValue> = (**raw).clone();
+    forwarded.remove("op");
+    forwarded.insert("session_id".to_string(), str_value(session_id));
+    forwarded.insert("dry_run".to_string(), VmValue::Bool(false));
+    forwarded
+        .entry("scope".to_string())
+        .or_insert_with(|| str_value("workspace"));
+
+    let request = VmValue::Dict(Arc::new(forwarded));
+    match crate::code_index::run_rename_symbol(index, &[request]) {
+        Ok(VmValue::Dict(result)) => parse_rename_outcome(&result),
+        Ok(_) => OpOutcome::Error {
+            op: "rename_symbol".into(),
+            message: "rename_symbol returned non-dict result".into(),
+        },
+        Err(err) => OpOutcome::Error {
+            op: "rename_symbol".into(),
+            message: err.to_string(),
+        },
+    }
+}
+
+fn parse_rename_outcome(result: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
+    let result_str = match result.get("result") {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return OpOutcome::Error {
+                op: "rename_symbol".into(),
+                message: "rename_symbol response missing `result`".into(),
+            }
+        }
+    };
+    let details = match result.get("details") {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => result_str.clone(),
+    };
+    if result_str != "applied" {
+        return OpOutcome::Rejected {
+            op: "rename_symbol".into(),
+            reason: classify_rename_failure(&result_str),
+            details,
+            path: None,
+        };
+    }
+
+    let failed_count = match result.get("failed_paths_with_reasons") {
+        Some(VmValue::List(items)) => items.len(),
+        _ => 0,
+    };
+    if failed_count > 0 {
+        return OpOutcome::Error {
+            op: "rename_symbol".into(),
+            message: "rename_symbol staged preview had failed paths; see standalone edit_rename_symbol for details".into(),
+        };
+    }
+
+    OpOutcome::Applied {
+        op: "rename_symbol",
+        paths: rename_touched_paths(result),
+        details,
+        match_count: int_field(result, "match_count").unwrap_or(0) as usize,
+    }
+}
+
+fn classify_rename_failure(result: &str) -> &'static str {
+    match result {
+        "conflict" => "conflict",
+        "no_match" => "no_match",
+        "ambiguous_symbol" => "ambiguous_symbol",
+        "unsupported_language" => "unsupported_language",
+        "syntax_error" => "syntax_error",
+        "invalid_identifier" => "invalid_identifier",
+        _ => "rejected",
+    }
+}
+
+fn rename_touched_paths(result: &Arc<BTreeMap<String, VmValue>>) -> Vec<PathBuf> {
+    match result.get("touched_files") {
+        Some(VmValue::List(files)) => files
+            .iter()
+            .filter_map(|file| match file {
+                VmValue::Dict(entry) => match entry.get("path") {
+                    Some(VmValue::String(path)) => Some(PathBuf::from(path.to_string())),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn int_field(result: &Arc<BTreeMap<String, VmValue>>, key: &str) -> Option<i64> {
+    match result.get(key) {
+        Some(VmValue::Int(n)) => Some(*n),
+        _ => None,
     }
 }
 
@@ -444,7 +568,7 @@ fn run_safe_text_patch(session_id: &str, raw: &Arc<BTreeMap<String, VmValue>>) -
     }
     OpOutcome::Applied {
         op: "safe_text_patch",
-        path,
+        paths: vec![path],
         details: "safe_text_patch: replaced unique exact match".into(),
         match_count: 1,
     }
@@ -500,6 +624,82 @@ fn read_after(path: &Path, session_id: &str) -> Option<String> {
         Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
         Err(_) => Some(String::new()),
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DiffTarget {
+    read_path: PathBuf,
+    display_path: PathBuf,
+}
+
+fn diff_targets(staged_paths: BTreeSet<PathBuf>, touched: BTreeSet<PathBuf>) -> Vec<DiffTarget> {
+    if staged_paths.is_empty() {
+        return touched
+            .into_iter()
+            .map(|path| DiffTarget {
+                read_path: path.clone(),
+                display_path: path,
+            })
+            .collect();
+    }
+
+    let allow_single_path_fallback = staged_paths.len() == 1 && touched.len() == 1;
+    let mut remaining_touched: Vec<PathBuf> = touched.into_iter().collect();
+    staged_paths
+        .into_iter()
+        .map(|read_path| {
+            let display_path = take_matching_display_path(
+                &read_path,
+                &mut remaining_touched,
+                allow_single_path_fallback,
+            )
+            .unwrap_or_else(|| read_path.clone());
+            DiffTarget {
+                read_path,
+                display_path,
+            }
+        })
+        .collect()
+}
+
+fn take_matching_display_path(
+    read_path: &Path,
+    candidates: &mut Vec<PathBuf>,
+    allow_single_path_fallback: bool,
+) -> Option<PathBuf> {
+    if candidates.is_empty() {
+        return None;
+    }
+    if allow_single_path_fallback && candidates.len() == 1 {
+        return Some(candidates.remove(0));
+    }
+
+    let index = candidates
+        .iter()
+        .position(|candidate| paths_match_for_display(read_path, candidate))?;
+    Some(candidates.remove(index))
+}
+
+fn paths_match_for_display(read_path: &Path, candidate: &Path) -> bool {
+    if read_path == candidate {
+        return true;
+    }
+    if let (Ok(read), Ok(candidate)) = (
+        std::fs::canonicalize(read_path),
+        std::fs::canonicalize(candidate),
+    ) {
+        if read == candidate {
+            return true;
+        }
+    }
+
+    let read = diff_path_label(read_path);
+    let candidate = diff_path_label(candidate);
+    read == candidate || read.ends_with(&format!("/{candidate}"))
+}
+
+fn diff_path_label(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 // ---------------------------------------------------------------------------
@@ -563,17 +763,25 @@ fn op_outcome_to_value(outcome: &OpOutcome) -> VmValue {
     match outcome {
         OpOutcome::Applied {
             op,
-            path,
+            paths,
             details,
             match_count,
-        } => build_dict([
-            ("op", str_value(*op)),
-            ("applied", VmValue::Bool(true)),
-            ("result", str_value("applied")),
-            ("path", str_value(path.to_string_lossy())),
-            ("details", str_value(details)),
-            ("match_count", VmValue::Int(*match_count as i64)),
-        ]),
+        } => {
+            let path_values: Vec<VmValue> = paths
+                .iter()
+                .map(|path| str_value(diff_path_label(path)))
+                .collect();
+            let primary = paths.first().cloned().unwrap_or_default();
+            build_dict([
+                ("op", str_value(*op)),
+                ("applied", VmValue::Bool(true)),
+                ("result", str_value("applied")),
+                ("path", str_value(diff_path_label(&primary))),
+                ("paths", VmValue::List(Arc::new(path_values))),
+                ("details", str_value(details)),
+                ("match_count", VmValue::Int(*match_count as i64)),
+            ])
+        }
         OpOutcome::Rejected {
             op,
             reason,
@@ -604,8 +812,11 @@ fn op_outcome_to_value(outcome: &OpOutcome) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::code_index::{CodeIndexCapability, IndexState};
+    use std::fs;
     use std::io::Write;
-    use tempfile::NamedTempFile;
+    use std::path::{Path, PathBuf};
+    use tempfile::{tempdir, NamedTempFile};
 
     fn vm_string(s: &str) -> VmValue {
         VmValue::String(Arc::from(s))
@@ -648,6 +859,73 @@ mod tests {
 
     fn invoke(payload: VmValue) -> VmValue {
         run(&[payload]).expect("dry_run runs")
+    }
+
+    fn invoke_with_code_index(index: &SharedIndex, payload: VmValue) -> VmValue {
+        run_with_code_index(Some(index), &[payload]).expect("dry_run runs")
+    }
+
+    fn build_index(root: &Path) -> CodeIndexCapability {
+        let capability = CodeIndexCapability::new();
+        let shared = capability.shared();
+        let mut guard = shared.lock().expect("mutex");
+        let (state, _outcome) = IndexState::build_from_root(root);
+        *guard = Some(state);
+        drop(guard);
+        capability
+    }
+
+    #[test]
+    fn diff_target_labels_keep_logical_single_op_path() {
+        let staged = BTreeSet::from([PathBuf::from(r"C:\Temp\project\module.rs")]);
+        let touched = BTreeSet::from([PathBuf::from("C:/Temp/project/module.rs")]);
+
+        let targets = diff_targets(staged, touched);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(
+            targets[0].read_path,
+            PathBuf::from(r"C:\Temp\project\module.rs")
+        );
+        assert_eq!(
+            diff_path_label(&targets[0].display_path),
+            "C:/Temp/project/module.rs"
+        );
+    }
+
+    #[test]
+    fn diff_target_labels_pair_relative_multi_file_paths() {
+        let staged = BTreeSet::from([
+            PathBuf::from("/tmp/workspace/src/a.rs"),
+            PathBuf::from("/tmp/workspace/src/b.rs"),
+        ]);
+        let touched = BTreeSet::from([PathBuf::from("src/a.rs"), PathBuf::from("src/b.rs")]);
+
+        let labels: Vec<String> = diff_targets(staged, touched)
+            .into_iter()
+            .map(|target| diff_path_label(&target.display_path))
+            .collect();
+
+        assert_eq!(labels, vec!["src/a.rs", "src/b.rs"]);
+    }
+
+    #[test]
+    fn diff_target_labels_do_not_guess_unmatched_multi_file_paths() {
+        let staged = BTreeSet::from([
+            PathBuf::from("/tmp/workspace/src/a.rs"),
+            PathBuf::from("/tmp/workspace/src/b.rs"),
+        ]);
+        let touched = BTreeSet::from([PathBuf::from("elsewhere/c.rs")]);
+
+        let labels: Vec<String> = diff_targets(staged, touched)
+            .into_iter()
+            .map(|target| diff_path_label(&target.display_path))
+            .collect();
+
+        assert_eq!(
+            labels,
+            vec!["/tmp/workspace/src/a.rs", "/tmp/workspace/src/b.rs"]
+        );
     }
 
     #[test]
@@ -792,11 +1070,19 @@ mod tests {
     }
 
     #[test]
-    fn rename_symbol_op_points_callers_at_standalone_primitive() {
+    fn rename_symbol_op_rejects_without_code_index() {
         let op = vm_dict(&[
             ("op", vm_string("rename_symbol")),
-            ("symbol_ref", vm_string("crate::alpha")),
+            (
+                "symbol_ref",
+                vm_dict(&[
+                    ("name", vm_string("alpha")),
+                    ("path", vm_string("src/lib.rs")),
+                    ("kind", vm_string("Function")),
+                ]),
+            ),
             ("new_name", vm_string("beta")),
+            ("scope", vm_string("workspace")),
         ]);
         let result = invoke(vm_dict(&[("plan", vm_list(&[op]))]));
         let ops = match field(&result, "ops") {
@@ -804,7 +1090,46 @@ mod tests {
             _ => panic!(),
         };
         assert_eq!(s(field(&ops[0], "result")), "rejected");
-        assert_eq!(s(field(&ops[0], "reason")), "use_standalone");
+        assert_eq!(s(field(&ops[0], "reason")), "code_index_unavailable");
+    }
+
+    #[test]
+    fn rename_symbol_op_produces_diff_without_touching_disk() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let original = "fn alpha() { println!(\"hi\"); }\nfn caller() { alpha(); }\n";
+        fs::write(root.join("src/lib.rs"), original).unwrap();
+
+        let capability = build_index(root);
+        let shared = capability.shared();
+        let op = vm_dict(&[
+            ("op", vm_string("rename_symbol")),
+            (
+                "symbol_ref",
+                vm_dict(&[
+                    ("name", vm_string("alpha")),
+                    ("path", vm_string("src/lib.rs")),
+                    ("kind", vm_string("Function")),
+                ]),
+            ),
+            ("new_name", vm_string("beta")),
+            ("scope", vm_string("workspace")),
+        ]);
+        let result = invoke_with_code_index(&shared, vm_dict(&[("plan", vm_list(&[op]))]));
+        assert_eq!(s(field(&result, "result")), "ok");
+        let per_file = match field(&result, "per_file_unified_diff") {
+            VmValue::List(items) => items.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(per_file.len(), 1);
+        let diff = s(field(&per_file[0], "diff"));
+        assert!(diff.contains("-fn alpha()"));
+        assert!(diff.contains("+fn beta()"));
+        assert!(diff.contains("-fn caller() { alpha(); }"));
+        assert!(diff.contains("+fn caller() { beta(); }"));
+        let on_disk = fs::read_to_string(root.join("src/lib.rs")).unwrap();
+        assert_eq!(on_disk, original);
     }
 
     #[test]
