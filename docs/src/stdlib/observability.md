@@ -72,3 +72,22 @@ o.configure({
 
 Span attributes merge into log and metric fields while the span is active, so
 correlated events carry the same `trace_id`, `span_id`, and attribute bag.
+
+## Processors
+
+Processors run after span/request/tenant enrichment and before backend routing.
+Use the stock redaction processor when logs or spans can carry credentials:
+
+```harn
+import { obs } from "std/observability"
+
+let o = obs()
+o.configure({
+  backend: o.Backend.otel("http://collector:4318"),
+  processors: [o.Processor.redaction],
+})
+```
+
+`redaction` applies the active runtime redaction policy to the entire event, so
+OTLP, Splunk, Honeycomb, pretty, and test backends all receive the same scrubbed
+payload.

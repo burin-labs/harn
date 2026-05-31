@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::event::{AppendEvent, EventId, SessionEventKind};
+use super::event::{AppendEvent, EventId, EventSignature, SessionEventKind};
 use super::store::{
     CreateSession, ListFilter, ReadRange, SessionId, SessionStore, SharedSessionStore, SnapshotId,
     StoreError,
@@ -105,9 +105,8 @@ fn map_error(error: StoreError) -> (StatusCode, Json<ErrorBody>) {
     )
 }
 
-// Span names + attribute keys follow the `harn.session.*` schema. The
-// A.10 observability primitive (#2513) will export these spans through
-// its OTLP pipeline without further changes here.
+// Span names and attribute keys follow the published `harn.session.*`
+// vocabulary so session-store telemetry can flow through any A.10 backend.
 #[tracing::instrument(
     name = "harn.session.create",
     skip_all,
@@ -201,6 +200,9 @@ async fn hard_delete_session(
     fields(
         harn.session.id = %id,
         harn.session.event_kind = body.kind.discriminator(),
+        harn.session.signed = tracing::field::Empty,
+        harn.session.signature_key_id = tracing::field::Empty,
+        harn.session.signature_algorithm = tracing::field::Empty,
     ),
 )]
 async fn append_event(
@@ -217,7 +219,15 @@ async fn append_event(
         headers: body.headers,
     };
     match state.store.append(&id, event).await {
-        Ok(stored) => (StatusCode::CREATED, Json(json!(stored))).into_response(),
+        Ok(stored) => {
+            record_signature_fields(
+                stored.signed_by.as_ref(),
+                "harn.session.signed",
+                "harn.session.signature_key_id",
+                "harn.session.signature_algorithm",
+            );
+            (StatusCode::CREATED, Json(json!(stored))).into_response()
+        }
         Err(error) => map_error(error).into_response(),
     }
 }
@@ -321,14 +331,27 @@ async fn replay_snapshot(
 #[tracing::instrument(
     name = "harn.session.close",
     skip_all,
-    fields(harn.session.id = %id),
+    fields(
+        harn.session.id = %id,
+        harn.session.receipt_signed = tracing::field::Empty,
+        harn.session.receipt_signature_key_id = tracing::field::Empty,
+        harn.session.receipt_signature_algorithm = tracing::field::Empty,
+    ),
 )]
 async fn close_session(
     State(state): State<SessionsState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.store.close(&id).await {
-        Ok(receipt) => (StatusCode::OK, Json(json!(receipt))).into_response(),
+        Ok(receipt) => {
+            record_signature_fields(
+                receipt.signed_by.as_ref(),
+                "harn.session.receipt_signed",
+                "harn.session.receipt_signature_key_id",
+                "harn.session.receipt_signature_algorithm",
+            );
+            (StatusCode::OK, Json(json!(receipt))).into_response()
+        }
         Err(error) => map_error(error).into_response(),
     }
 }
@@ -345,5 +368,24 @@ async fn verify_session(
     match state.store.verify(&id).await {
         Ok(report) => (StatusCode::OK, Json(json!(report))).into_response(),
         Err(error) => map_error(error).into_response(),
+    }
+}
+
+fn record_signature_fields(
+    signed_by: Option<&EventSignature>,
+    signed_field: &'static str,
+    key_id_field: &'static str,
+    algorithm_field: &'static str,
+) {
+    let span = tracing::Span::current();
+    match signed_by {
+        Some(signature) => {
+            span.record(signed_field, true);
+            span.record(key_id_field, signature.key_id.as_str());
+            span.record(algorithm_field, signature.algorithm.as_str());
+        }
+        None => {
+            span.record(signed_field, false);
+        }
     }
 }
