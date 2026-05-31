@@ -1650,6 +1650,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var suspend_result = nil
     var stall_state = agent_stall_initial_state()
     var stall_enabled_seen = false
+    var stall_prev_dispatch = nil
     let max_verify_attempts = opts?.max_verify_attempts ?? 20
     let budget = opts?.iteration_budget
       ?? {
@@ -1859,6 +1860,8 @@ fn __agent_loop_run(message, session, initial_opts) {
         turn_opts?.stall_diagnostics,
         stall_state,
         stall_judge_due,
+        stall_prev_dispatch,
+        visible_text,
       )
       stall_state = stall_observation.state
       stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
@@ -1993,6 +1996,23 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
       }
+      if stall_observation.hard_stop {
+        agent_emit_event(
+          session.session_id,
+          "loop_control_decision",
+          {
+            iteration: iteration_index + 1,
+            action: "stop",
+            old_limit: current_max,
+            new_limit: current_max,
+            reason: "thrash_hard_stop",
+            status: "stuck",
+          },
+        )
+        final_status = "stuck"
+        stop_reason = "thrash_hard_stop"
+        break
+      }
       if turn_opts?.step_judge != nil {
         let remaining_iterations = current_max - iteration_index
         let step_verdict = agent_step_judge(
@@ -2107,6 +2127,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         turn_opts + {_iteration: iteration_index + 1, _tool_caller: opts?._tool_caller},
       )
       let dispatch = dispatched.dispatch
+      stall_prev_dispatch = dispatch
       audit_background_tasks = __spawn_audit_flushes(audit_background_tasks, dispatched.audit_flushes)
       opts = __sync_tool_search_state(opts, dispatched.turn_opts)
       successful_tools_seen = __merge_tool_names(successful_tools_seen, __tool_names_by_status(dispatch, true))

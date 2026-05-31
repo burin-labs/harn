@@ -1,0 +1,235 @@
+// Deterministic thrash/loop detector conditions (#2712). Exercises each new
+// trip condition in std/agent/stall directly through the public observer, plus
+// the principled polling exemption (changing observation must NOT trip;
+// byte-identical must trip at threshold), and asserts the advisory judge gate
+// is never consulted until a deterministic trip fires.
+import { agent_capture_events } from "std/agent/events"
+import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/agent/stall"
+
+/* A dispatch result envelope shaped like agent_dispatch_tool_batch output. */
+fn ok_dispatch(name: string, payload) {
+  return {results: [{tool_name: name, ok: true, status: "ok", result: payload}]}
+}
+
+fn err_dispatch(name: string, error_text: string) {
+  return {results: [{tool_name: name, ok: false, status: "error", error: error_text}]}
+}
+
+fn call(name: string, args) {
+  return [{name: name, arguments: args}]
+}
+
+/*
+ * Feed a sequence of (tool_call, prev_dispatch) steps through the detector and
+ * return the pattern of the FIRST warning emitted, or "" if none tripped.
+ */
+fn run_actions(config, steps) {
+  var state = agent_stall_initial_state()
+  var first_pattern = ""
+  var trip_count = 0
+  for step in steps {
+    let obs = agent_stall_observe_tool_calls(
+      "thrash-test",
+      step.calls,
+      1,
+      config,
+      state,
+      false,
+      step?.prev,
+      step?.text ?? "",
+    )
+    state = obs.state
+    let warning = obs.warning
+    if warning != nil {
+      trip_count = trip_count + 1
+      if first_pattern == "" {
+        first_pattern = warning.pattern
+      }
+    }
+  }
+  return {
+    pattern: first_pattern,
+    trips: trip_count,
+    hard_stop: state.hard_stop,
+    consecutive: state.consecutive_trips,
+  }
+}
+
+pipeline default() {
+  let cfg = {enabled: true, inject_feedback: false}
+  // 1. Same action -> byte-identical observation, 4x -> repeated_same_observation.
+  let same_obs = run_actions(
+    cfg,
+    [
+      {calls: call("read", {path: "a"}), prev: nil},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+    ],
+  )
+  require same_obs.pattern == "repeated_same_observation", "byte-identical observation must trip at threshold"
+  __io_println("same_obs=" + same_obs.pattern)
+  // Polling exemption: same action, CHANGING observation each turn -> no trip.
+  let polling = run_actions(
+    cfg,
+    [
+      {calls: call("poll", {job: "j"}), prev: nil},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "pending-1")},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "pending-2")},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "pending-3")},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "pending-4")},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "pending-5")},
+    ],
+  )
+  require polling.trips == 0, "changing observation (polling) must never trip"
+  __io_println("polling=" + polling.pattern + ",trips=" + to_string(polling.trips))
+  // 2. Same action -> same error, 3x -> repeated_error.
+  let same_err = run_actions(
+    cfg,
+    [
+      {calls: call("build", {}), prev: nil},
+      {calls: call("build", {}), prev: err_dispatch("build", "E0001: boom")},
+      {calls: call("build", {}), prev: err_dispatch("build", "E0001: boom")},
+      {calls: call("build", {}), prev: err_dispatch("build", "E0001: boom")},
+    ],
+  )
+  __io_println("same_err=" + same_err.pattern)
+  // Distinct errors from the same action do NOT trip repeated_error.
+  let distinct_err = run_actions(
+    cfg,
+    [
+      {calls: call("build", {}), prev: nil},
+      {calls: call("build", {}), prev: err_dispatch("build", "E0001")},
+      {calls: call("build", {}), prev: err_dispatch("build", "E0002")},
+      {calls: call("build", {}), prev: err_dispatch("build", "E0003")},
+    ],
+  )
+  __io_println("distinct_err=" + distinct_err.pattern + ",trips=" + to_string(distinct_err.trips))
+  // 3. No-progress monologue: 3 consecutive text-only turns -> no_progress_monologue.
+  let monologue = run_actions(
+    cfg,
+    [
+      {calls: [], text: "thinking..."},
+      {calls: [], text: "still thinking..."},
+      {calls: [], text: "more thinking..."},
+    ],
+  )
+  __io_println("monologue=" + monologue.pattern)
+  // A progress (tool-call) turn resets the monologue streak.
+  let monologue_reset = run_actions(
+    cfg,
+    [
+      {calls: [], text: "thinking"},
+      {calls: [], text: "thinking"},
+      {calls: call("read", {path: "z"}), prev: nil},
+      {calls: [], text: "thinking"},
+      {calls: [], text: "thinking"},
+    ],
+  )
+  __io_println(
+    "monologue_reset=" + monologue_reset.pattern + ",trips=" + to_string(monologue_reset.trips),
+  )
+  // 4. Ping-pong: A,B,A,B alternation for 6 cycles -> ping_pong. Each step has a
+  // unique observation so the same-observation condition can never fire first.
+  var pingpong_steps = []
+  for i in range(0, 13) {
+    let name = if i % 2 == 0 {
+      "A"
+    } else {
+      "B"
+    }
+    pingpong_steps = pingpong_steps.push({calls: call(name, {}), prev: ok_dispatch(name, "obs-" + to_string(i))})
+  }
+  let pingpong = run_actions(cfg, pingpong_steps)
+  __io_println("pingpong=" + pingpong.pattern)
+  // 5. Repeated context-window errors, 2x -> repeated_context_window_error.
+  let ctx = run_actions(
+    cfg,
+    [
+      {calls: call("summarize", {}), prev: nil},
+      {
+        calls: call("summarize", {}),
+        prev: err_dispatch("summarize", "model error: context window exceeded"),
+      },
+      {
+        calls: call("summarize", {}),
+        prev: err_dispatch("summarize", "model error: context window exceeded"),
+      },
+    ],
+  )
+  __io_println("ctx=" + ctx.pattern)
+  // Hard stop after 3 consecutive un-recovered trips. We force three back-to-
+  // back same-observation trips with no recovering step between them.
+  let hard = run_actions(
+    {enabled: true, inject_feedback: false, repeat_same_observation: 2},
+    [
+      {calls: call("read", {path: "a"}), prev: nil},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+      {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
+    ],
+  )
+  __io_println(
+    "hard_stop=" + to_string(hard.hard_stop) + ",consecutive=" + to_string(hard.consecutive),
+  )
+  // exempt_tools still works as a secondary escape hatch (back-compat).
+  let exempt = run_actions(
+    {enabled: true, inject_feedback: false, exempt_tools: ["poll"]},
+    [
+      {calls: call("poll", {job: "j"}), prev: nil},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "X")},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "X")},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "X")},
+      {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "X")},
+    ],
+  )
+  __io_println("exempt=" + exempt.pattern + ",trips=" + to_string(exempt.trips))
+  // Invariant: the advisory judge is NOT consulted until a deterministic trip
+  // fires. Run a full agent_loop with a stalled done_judge but only ONE noop
+  // call (below threshold) so no stall warning ever fires; assert zero judge
+  // decisions were emitted.
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Return the same harmless result",
+    {
+      handler: { _args -> return "noop" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  llm_mock_clear()
+  llm_mock({text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]})
+  llm_mock({text: "Done. ##DONE##"})
+  let session = "thrash-judge-gate-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "Finish without stalling.",
+      nil,
+      {
+        provider: "mock",
+        tools: tools,
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 4,
+        session_id: session,
+        stall_diagnostics: {enabled: true, threshold: 3},
+        done_judge: {cadence: {when: "stalled"}},
+      },
+    ) },
+  )
+  let stalls = captured.events.filter({ event -> event.type == "agent_loop_stall_warning" })
+  let judges = captured.events.filter({ event -> event.type == "judge_decision" })
+  // Invariant: with no deterministic stall warning, the advisory judge must
+  // never be consulted (the gate at loop.harn's `stall_judge_due && stall_warning != nil`).
+  require len(stalls) == 0, "no stall warning should fire below threshold"
+  require len(judges) == 0, "advisory judge must not be consulted without a deterministic trip"
+  __io_println("gate_stalls=" + to_string(len(stalls)))
+  __io_println("gate_judges=" + to_string(len(judges)))
+}

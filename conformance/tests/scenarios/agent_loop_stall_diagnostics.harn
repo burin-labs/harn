@@ -28,7 +28,11 @@ pipeline default() {
   llm_mock({tool_calls: [{id: "r1", name: "read", arguments: {path: "src/lib.rs"}}]})
   llm_mock({tool_calls: [{id: "r2", name: "read", arguments: {path: "src/lib.rs"}}]})
   llm_mock({tool_calls: [{id: "r3", name: "read", arguments: {path: "src/lib.rs"}}]})
+  llm_mock({tool_calls: [{id: "r4", name: "read", arguments: {path: "src/lib.rs"}}]})
   llm_mock({text: "Done. ##DONE##"})
+  // With the observation-signature detector (#2712) a bare `stall_diagnostics:
+  // true` trips the same-observation condition at its default of 4 byte-
+  // identical (action, observation) repeats.
   let stalled = agent_loop(
     "Inspect the file",
     nil,
@@ -37,7 +41,7 @@ pipeline default() {
       tools: tools(),
       tool_format: "native",
       loop_until_done: true,
-      max_iterations: 4,
+      max_iterations: 5,
       stall_diagnostics: true,
     },
   )
