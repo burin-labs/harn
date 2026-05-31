@@ -6,8 +6,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use harn_hostlib::fs::{self as host_fs, FsCapability, FsMode};
 use harn_hostlib::tools::permissions;
-use harn_hostlib::{fs::FsCapability, tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
+use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
@@ -104,6 +105,46 @@ fn staged_write_is_read_through_until_commit() {
     };
     assert_eq!(committed.len(), 1);
     assert_eq!(fs::read_to_string(&file).unwrap(), "draft");
+}
+
+#[test]
+fn remove_session_state_deletes_transient_overlay_artifacts() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("transient.txt");
+    let session = unique_session("transient-cleanup");
+    let reg = registry();
+
+    host_fs::set_mode(&session, FsMode::Staged, Some(dir.path())).unwrap();
+    let write = reg.find("hostlib_tools_write_file").unwrap();
+    (write.handler)(&dict_arg(&[
+        ("session_id", vm_string(&session)),
+        ("path", vm_string(&path_str(&file))),
+        ("content", vm_string("preview")),
+    ]))
+    .unwrap();
+
+    let session_dir = dir
+        .path()
+        .join(".harn")
+        .join("state")
+        .join("staged")
+        .join(&session);
+    assert!(
+        session_dir.join("manifest.json").exists(),
+        "staged mode should persist preview metadata before cleanup"
+    );
+
+    host_fs::discard_staged(&session, &[]).unwrap();
+    host_fs::remove_session_state(&session, Some(dir.path())).unwrap();
+
+    assert!(
+        !session_dir.exists(),
+        "transient cleanup should remove the staged-fs session directory"
+    );
+    assert!(
+        !file.exists(),
+        "transient staged writes must never reach the working tree"
+    );
 }
 
 #[test]

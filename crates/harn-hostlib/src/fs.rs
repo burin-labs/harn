@@ -396,6 +396,37 @@ pub fn discard_staged(session_id: &str, paths: &[String]) -> Result<DiscardResul
     Ok(DiscardResult { discarded_paths })
 }
 
+/// Remove all persisted staged-fs state for a caller-owned throw-away session.
+///
+/// Normal agent sessions keep their manifest after `discard_staged` so hosts can
+/// continue reporting session state. Transient dry-run sessions own their ids,
+/// though, and should remove both the in-memory entry and on-disk overlay after
+/// their preview is rendered.
+pub fn remove_session_state(session_id: &str, root: Option<&Path>) -> Result<(), HostlibError> {
+    validate_session_id(DISCARD_BUILTIN, session_id)?;
+    let mut guard = sessions()
+        .lock()
+        .expect("hostlib fs session mutex poisoned");
+    let state = match guard.remove(session_id) {
+        Some(state) => state,
+        None => load_state(session_id, root.map(normalize_logical)).map_err(|err| {
+            HostlibError::Backend {
+                builtin: DISCARD_BUILTIN,
+                message: err,
+            }
+        })?,
+    };
+    let dir = session_dir(&state.root, &state.session_id);
+    match stdfs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(HostlibError::Backend {
+            builtin: DISCARD_BUILTIN,
+            message: format!("remove staged session {}: {err}", dir.display()),
+        }),
+    }
+}
+
 pub(crate) fn read(
     path: &Path,
     explicit_session_id: Option<&str>,

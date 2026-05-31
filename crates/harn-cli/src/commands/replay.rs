@@ -120,9 +120,9 @@ enum ReplaySource {
         /// at` are rehydrated, replaying the session as it stood at that
         /// point. `None` replays the whole session.
         at: Option<u64>,
-        /// Counterfactual: path to a `.harn` edit plan to evaluate against
+        /// Counterfactual: paths to `.harn` edit plans to evaluate against
         /// the workspace state at the cutoff. `None` for a plain replay.
-        counterfactual: Option<PathBuf>,
+        counterfactual: Vec<PathBuf>,
     },
 }
 
@@ -173,15 +173,12 @@ impl ReplaySource {
         }
     }
 
-    /// Path to the counterfactual `.harn` plan, when `--counterfactual` was
-    /// passed (Session sources only).
-    fn counterfactual_plan(&self) -> Option<&Path> {
+    /// Paths to the counterfactual `.harn` plans, when `--counterfactual`
+    /// was passed (Session sources only).
+    fn counterfactual_plans(&self) -> &[PathBuf] {
         match self {
-            Self::Session {
-                counterfactual: Some(path),
-                ..
-            } => Some(path.as_path()),
-            _ => None,
+            Self::Session { counterfactual, .. } => counterfactual,
+            _ => &[],
         }
     }
 }
@@ -208,40 +205,25 @@ pub(crate) fn run(args: ReplayArgs) -> i32 {
         }
     };
 
-    // The counterfactual is composed *after* the recorded replay is
-    // reconstructed at the `--at` cutoff: the recorded path defines the
-    // baseline, and the plan's dry-run divergence is reported against it.
-    let counterfactual = match source.counterfactual_plan() {
-        Some(plan_path) => match crate::commands::counterfactual::evaluate(plan_path) {
-            Ok(report) => Some(report),
-            Err(error) => {
-                if args.json {
-                    print_json_error("replay_counterfactual_failed", error);
-                } else {
-                    eprintln!("error: {error}");
-                }
-                return 1;
-            }
-        },
-        None => None,
-    };
-
     if args.json {
-        run_json(source, args.runs, counterfactual)
+        run_json(source, args.runs)
     } else {
-        run_human(source, args.runs, counterfactual)
+        run_human(source, args.runs)
     }
 }
 
-fn run_json(
-    source: ReplaySource,
-    runs: usize,
-    counterfactual: Option<crate::commands::counterfactual::CounterfactualReport>,
-) -> i32 {
+fn run_json(source: ReplaySource, runs: usize) -> i32 {
     let mut executions = match execute_runs(&source, runs) {
         Ok(executions) => executions,
         Err(error) => {
             print_json_error(source.load_error_code(), error);
+            return 1;
+        }
+    };
+    let counterfactual = match evaluate_counterfactual(&source) {
+        Ok(report) => report,
+        Err(error) => {
+            print_json_error("replay_counterfactual_failed", error);
             return 1;
         }
     };
@@ -309,13 +291,16 @@ fn run_json(
     exit
 }
 
-fn run_human(
-    source: ReplaySource,
-    runs: usize,
-    counterfactual: Option<crate::commands::counterfactual::CounterfactualReport>,
-) -> i32 {
+fn run_human(source: ReplaySource, runs: usize) -> i32 {
     let executions = match execute_runs(&source, runs) {
         Ok(executions) => executions,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    };
+    let counterfactual = match evaluate_counterfactual(&source) {
+        Ok(report) => report,
         Err(error) => {
             eprintln!("error: {error}");
             return 1;
@@ -351,6 +336,16 @@ fn run_human(
     i32::from(!executions[0].report.fixture.pass)
 }
 
+fn evaluate_counterfactual(
+    source: &ReplaySource,
+) -> Result<Option<crate::commands::counterfactual::CounterfactualReport>, String> {
+    let plan_paths = source.counterfactual_plans();
+    if plan_paths.is_empty() {
+        return Ok(None);
+    }
+    crate::commands::counterfactual::evaluate(plan_paths).map(Some)
+}
+
 fn resolve_source(args: &ReplayArgs) -> Result<ReplaySource, String> {
     if let Some(session_id) = &args.session_id {
         let events_db = args
@@ -361,7 +356,7 @@ fn resolve_source(args: &ReplayArgs) -> Result<ReplaySource, String> {
             session_id: session_id.clone(),
             events_db: PathBuf::from(events_db),
             at: args.at,
-            counterfactual: args.counterfactual.as_ref().map(PathBuf::from),
+            counterfactual: args.counterfactual.iter().map(PathBuf::from).collect(),
         });
     }
     if let Some(fixture) = &args.fixture {

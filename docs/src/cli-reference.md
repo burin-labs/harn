@@ -1458,6 +1458,7 @@ fixture, or an agent session stored in the SQLite EventLog.
 harn replay .harn-runs/<run>.json
 harn replay --fixture conformance/replay-oracle/fixtures/simple_trigger_local_handler.valid.json --runs 3 --json
 harn replay --session-id <id> --events-db .harn/events.sqlite --runs 3 --json
+harn replay --session-id <id> --events-db .harn/events.sqlite --at 7 --counterfactual ./what-if.harn --json
 ```
 
 `--session-id` reads the `observability.agent_events.<sanitized-id>` topic
@@ -1465,6 +1466,9 @@ from `--events-db` in append order, reconstructs a replayable run record,
 and feeds it through the same replay summary path as run-record input.
 When `--runs N` is greater than one, JSON output includes per-run reports
 plus an allowlist-normalized determinism summary.
+`--at <event-id>` rehydrates the session prefix through the inclusive
+event id. Repeat `--counterfactual <plan.harn>` to chain returned edit-op
+lists into one cumulative dry-run divergence report.
 
 ## harn eval
 
