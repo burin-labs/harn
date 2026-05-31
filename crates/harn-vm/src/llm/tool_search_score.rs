@@ -108,8 +108,11 @@ fn candidate_from_entry(tool: &serde_json::Value) -> Option<Candidate> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let param_text =
-        extract_param_text(tool.get("input_schema").or_else(|| tool.get("parameters")));
+    let param_text = extract_param_text(
+        tool.get("inputSchema")
+            .or_else(|| tool.get("input_schema"))
+            .or_else(|| tool.get("parameters")),
+    );
     Some(Candidate {
         name,
         description,
