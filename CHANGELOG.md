@@ -8,6 +8,33 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.57
+
+### Added
+
+- Added replay-gated skill induction to crystallization reports and bundles,
+  including generated `SKILL.md` artifacts, evidence refs, gate receipts, and
+  the `skill_induce(...)` helper.
+- **External-agent delegation contract (#2723).** Added `std/external_agent`
+  wrappers and the VM-side `harn.external_agent.v1` A2A delegation contract with
+  capability discovery, pre-dispatch checkpoints, hard budget/idempotency
+  checks, local checkpoint fallback, idempotent replay, and reviewable
+  handoff/diff envelopes.
+
+### Fixed
+
+- **Harn DAP now drives debuggee execution on a multi-threaded Tokio runtime with
+  a persistent local task set (#2691).** Debug sessions can run `parallel`
+  blocks and lifecycle pool workers without diverging from the VM concurrency
+  paths used by normal execution.
+- **DAP source requests now parse `file:` URIs with the standard URL parser.**
+  This keeps source lookup correct for platform-native paths, including Windows
+  drive-letter paths and `localhost` file URIs.
+Allow standard process device files such as `/dev/null` through the macOS and
+Linux process sandboxes without granting broad `/dev` access, and mediate Linux
+device ioctls on kernels that support Landlock ABI 5. Workflow verifier
+commands also avoid login-shell dotfile reads under those sandboxes.
+
 ## v0.8.56
 
 ### Added
