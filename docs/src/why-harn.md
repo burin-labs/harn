@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD033 -->
+
 # Why Harn?
 
 ## The problem
@@ -85,15 +87,30 @@ mcp_disconnect(client)
 
 ### Concurrency without async/await
 
-`parallel each`, `parallel`, `spawn`/`await`, and channels are keywords,
-not library functions. No callback chains, no promise combinators, no
-`async def` annotations:
+Agent work is mostly waiting: for files, HTTP calls, tool calls, model
+responses, or other workers. Harn makes that waiting explicit in the program
+without asking you to write an event loop.
 
 ```harn
 let results = parallel each files { file ->
   llm_call(read_file(file), "Review this file for security issues")
 }
 ```
+
+<details>
+<summary>How to read this snippet</summary>
+
+For each path in `files`, Harn starts a child task, reads the file inside that
+task, calls the model, and returns the results in input order. If there are `N`
+files and the slowest branch takes `T` seconds, wall-clock time is roughly `T`
+plus scheduling overhead. Memory grows with in-flight tasks and their
+inputs/results, so use `with { max_concurrent: K }` for large file sets or
+provider queues.
+
+Because `parallel each` is part of the language runtime, cancellation, replay,
+trace spans, and host-capability checks stay attached to the whole fan-out.
+
+</details>
 
 ### Retry and error recovery
 
@@ -114,11 +131,22 @@ where they don't. Structural shape types let you describe expected dict
 fields:
 
 ```harn
-fn score(text: string) -> int {
-  let result = llm_call(text, "Rate 1-10. Respond with just the number.")
-  return to_int(result)
+type Review = {
+  path: string,
+  risk: "low" | "medium" | "high",
+  summary?: string,
 }
+
+fn render_review(review: Review) -> string {
+  return "${review.path}: ${review.risk}"
+}
+
+render_review({path: "src/auth.rs", risk: "high", owner: "security"})
 ```
+
+`path` and `risk` are required keys. `summary` is optional. Extra keys such as
+`owner` are allowed, so typed boundaries can describe the fields a function
+actually needs without forcing every caller to erase useful metadata.
 
 ### Embeddable
 
@@ -148,7 +176,7 @@ from langchain_anthropic import ChatAnthropic
 from tenacity import retry, stop_after_attempt
 import aiohttp
 
-llm = ChatAnthropic(model="claude-sonnet-4-20250514")
+llm = ChatAnthropic(model="claude-sonnet-4-6")
 
 @retry(stop=stop_after_attempt(3))
 async def summarize(url):

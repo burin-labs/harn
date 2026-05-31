@@ -167,7 +167,6 @@ args = ["-y", "@modelcontextprotocol/server-github"]
 name = "notion"
 transport = "http"
 url = "https://mcp.notion.com/mcp"
-scopes = "read write"
 
 [[mcp]]
 name = "modern"

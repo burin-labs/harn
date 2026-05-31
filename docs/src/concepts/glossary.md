@@ -46,6 +46,16 @@ terminal conditions.
 
 ## Containers and graphs
 
+**VM (virtual machine).** The Harn interpreter state for one running script or
+child task. Most user-facing docs say "interpreter instance" or "child task";
+runtime and ADR pages often use VM because they describe implementation
+boundaries.
+
+**Child VM.** The isolated interpreter instance created for a `spawn` or
+`parallel` child task. Captured values are copied into it. Explicit shared
+handles such as channels, shared cells/maps, mailboxes, and sync permits are
+the way child tasks coordinate with siblings or the parent.
+
 **Stage.** One node in a workflow graph. Kinds: `stage`, `verify`, `join`,
 `condition`, `fork`, `map`, `reduce`, `subagent`, `escalation`.
 

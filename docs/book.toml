@@ -18,14 +18,12 @@ preferred-dark-theme = "ayu"
 # `harn dump-highlight-keywords` (make gen-highlight); harn-hljs.js
 # consumes it and registers the language with the bundled highlight.js.
 # Order matters — the keyword file must load before the language module.
-additional-js = ["theme/harn-keywords.js", "theme/harn-hljs.js"]
+additional-js = ["theme/harn-keywords.js", "theme/harn-hljs.js", "theme/harn-docs-nav.js"]
 additional-css = ["theme/css/harn-theme.css"]
 
 [output.html.redirect]
 "/docs/prompt-templating/index.html" = "https://harnlang.com/prompt-templating.html"
 "/docs/prompt-templating.html" = "https://harnlang.com/prompt-templating.html"
-"/docs/llm/harn-quickref.md" = "https://harnlang.com/docs/llm/harn-quickref.html"
-"/docs/llm/harn-triggers-quickref.md" = "https://harnlang.com/docs/llm/harn-triggers-quickref.html"
 "/typed-tools.html" = "https://harnlang.com/llm/tools.html"
 "/docs/typed-tools.html" = "https://harnlang.com/llm/tools.html"
 "/providers.html" = "https://harnlang.com/llm/providers.html"

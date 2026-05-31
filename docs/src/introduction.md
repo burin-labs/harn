@@ -3,7 +3,7 @@
 
 # Harn
 
-<p class="tagline">A pipeline-oriented language for AI agent orchestration. LLM calls, tool use, concurrency, retries, and replay are language primitives — not SDK glue.</p>
+<p class="tagline">A pipeline-oriented language for AI agent orchestration. LLM calls, tool use, concurrency, retries, and replay are built into the runtime.</p>
 
 ```harn
 let response = llm_call(
@@ -23,7 +23,7 @@ log(response)
 
 ## What Harn is
 
-Harn is a small language built around one observation: when you write an AI agent, most of your code is *coordination* — calling a model, dispatching a tool, retrying, fanning out work, persisting state, recovering from a crash, replaying a trace for debugging. In Python or TypeScript this becomes a stack of libraries, each with its own configuration surface. In Harn the same patterns are keywords and builtins.
+Harn is a small language built around one observation: when you write an AI agent, most of your code is *coordination* — calling a model, dispatching a tool, retrying, fanning out work, persisting state, recovering from a crash, replaying a trace for debugging. Harn gives those patterns one runtime and one syntax surface.
 
 ```harn
 pipeline review(task) {
@@ -42,7 +42,8 @@ pipeline review(task) {
 }
 ```
 
-No imports. No async annotations. No retry decorators. No HTTP client setup. The orchestration logic *is* the code.
+The orchestration logic is the code: which work fans out, which calls retry,
+where results join, and which effects pass through the harness.
 
 ## Why it exists
 
@@ -58,9 +59,10 @@ No imports. No async annotations. No retry decorators. No HTTP client setup. The
 
 <div class="harn-feature">
 
-### Concurrency without ceremony
+### Concurrency with structure
 
-`parallel each`, `spawn`/`await`, channels, and deadlines are keywords. No promise combinators, no callback chains.
+`parallel each`, `spawn`/`await`, channels, and deadlines keep fan-out, joins,
+and cancellation visible in the program.
 
 </div>
 

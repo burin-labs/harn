@@ -31,7 +31,7 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 
 | Provider | Environment variable | Default model |
 |---|---|---|
-| Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` |
+| Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
 | OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.6` |
 | HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
@@ -576,7 +576,7 @@ Set the model explicitly or via environment:
 
 ```harn
 // In code
-llm_call("...", nil, {model: "claude-sonnet-4-5-20241022"})
+llm_call("...", nil, {model: "claude-sonnet-4-6"})
 
 // Or via environment
 // export HARN_LLM_MODEL=gpt-4o

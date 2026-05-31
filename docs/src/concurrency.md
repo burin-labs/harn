@@ -1,6 +1,21 @@
 # Concurrency
 
-Harn has built-in concurrency primitives that don't require callbacks, promises, or async/await boilerplate.
+Harn concurrency is structured around child tasks. A child task runs the block
+you give to `spawn` or `parallel` in its own interpreter instance, while the
+parent keeps a handle, result list, stream, or settlement record that joins the
+work back together.
+
+The practical model is:
+
+- normal values are copied into the child task when it starts
+- channels, shared cells/maps, mailboxes, and sync permits are explicit shared
+  handles
+- cancellation and deadlines flow from the parent into children
+- results come back through `await`, `parallel`, `parallel each`,
+  `parallel settle`, or streams
+
+That gives Harn the same shape on the page as the work you are trying to run:
+fan out, wait, collect, and clean up.
 
 ## spawn and await
 
@@ -23,7 +38,9 @@ let handle = spawn { sleep(10s) }
 cancel(handle)
 ```
 
-Each spawned task runs in an isolated interpreter instance.
+Each spawned task runs in an isolated interpreter instance. In runtime and ADR
+pages you may see this called a **child VM**; in day-to-day Harn code, read that
+as "the child task's interpreter."
 
 ## parallel
 
@@ -173,8 +190,14 @@ same `{index, value, channel}` dict.
 
 ## Scoped shared state
 
-Normal values are copied into child VMs. Use shared cells or maps only when
+Normal values are copied into child tasks. Use shared cells or maps only when
 tasks need to coordinate on the same mutable state.
+
+The multithreaded runtime keeps child interpreters isolated, and the shared
+state primitives are the explicit bridge between them. Shared cells/maps,
+mailboxes, mutexes, rwlocks, semaphores, and gates are thread-safe handles
+inherited by `spawn` and `parallel` children. If you do not pass one of those
+handles, the child sees its own copy of the value it captured at start.
 
 ```harn
 let budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
@@ -303,7 +326,7 @@ Atomic updates mutate the handle and return the previous integer value.
 ## Mutex
 
 `mutex { ... }` is a process-local, fair critical section inherited by
-`spawn` and `parallel` child VMs. It uses the default mutex key
+`spawn` and `parallel` child tasks. It uses the default mutex key
 `"__default__"` and releases automatically when the lexical scope exits,
 including `throw`, `return`, `break`, and caught runtime errors.
 

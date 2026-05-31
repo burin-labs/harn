@@ -37,7 +37,7 @@ body,
 .content {
   font-family: var(--harn-font-sans);
   line-height: 1.65;
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
 }
 
 .content h1,
@@ -48,7 +48,7 @@ body,
 .content h6 {
   font-family: var(--harn-font-sans);
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   line-height: 1.25;
 }
 
@@ -184,8 +184,7 @@ pre > code.language-harn {
 .chapter li.part-title {
   font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
   color: var(--harn-violet);
   margin-top: 1.8em;
   margin-bottom: 0.4em;
@@ -202,7 +201,43 @@ pre > code.language-harn {
 
 .menu-title {
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
+}
+
+.harn-section-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-left: 1rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.harn-section-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.harn-section-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.55rem;
+  border-radius: var(--harn-radius-sm);
+  color: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.harn-section-nav a:hover,
+.harn-section-nav a.active {
+  color: var(--harn-violet);
+  background: rgba(91, 77, 255, 0.08);
+}
+
+.harn-sidebar-hidden {
+  display: none !important;
 }
 
 /* ---------- Search ---------- */
@@ -240,7 +275,7 @@ pre > code.language-harn {
   border-bottom: none;
   margin: 0 0 0.4em 0;
   font-size: 2.6rem;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   font-weight: 700;
 }
 
@@ -432,6 +467,17 @@ pre > code.language-harn {
 /* ---------- Responsive ---------- */
 
 @media (max-width: 720px) {
+  .harn-section-nav {
+    order: 3;
+    flex-basis: 100%;
+    margin: 0.25rem 0 0 0;
+    padding-bottom: 0.25rem;
+  }
+
+  .harn-section-nav a {
+    font-size: 0.8rem;
+  }
+
   .harn-hero {
     padding: 1.8rem 1.2rem;
   }

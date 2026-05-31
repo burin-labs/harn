@@ -183,6 +183,7 @@ jobs:
           make check-provider-support
           make check-connector-matrix
           make check-trigger-examples
+          make check-docs-model-refs
           make check-docs-snippets
           make check-diagnostics-catalog
 
@@ -478,7 +479,7 @@ jobs:
           BEFORE="${{ github.event.before }}"
           if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$BEFORE" HEAD | grep -q '^docs/'; then
+          elif git diff --name-only "$BEFORE" HEAD | grep -Eq '^(docs/|scripts/build_docs_site\.sh$)'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
