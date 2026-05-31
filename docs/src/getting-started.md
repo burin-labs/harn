@@ -175,14 +175,21 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```harn
 let response = llm_call(
   "Explain quicksort in two sentences.",
-  "You are a computer science tutor."
+  "You are a computer science tutor.",
+  {provider: "anthropic", model: "claude-sonnet-4-6"}
 )
 log(response)
 ```
 
-No imports, no SDK initialization, no response parsing. Harn ships with
-built-in configs for Anthropic, OpenAI, OpenRouter, Ollama, HuggingFace,
-and local OpenAI-compatible servers.
+The third argument is the model route. You can omit it after `harn quickstart`
+writes defaults, or when environment variables select a provider. With no
+explicit options, Harn checks `HARN_LLM_PROVIDER`, then `HARN_LLM_MODEL`, then
+the default provider from `HARN_DEFAULT_PROVIDER` or provider config. The
+built-in default is Anthropic when its key is available; otherwise Harn can fall
+back to keyless Ollama/local routes. See [LLM providers](./llm/providers.md)
+for the full resolution order, provider table, and `providers.toml` format.
+
+No imports, no SDK initialization, no response parsing.
 
 For production callers, wrap with retry middleware from
 `std/llm/handlers`:
@@ -243,13 +250,42 @@ See [LLM providers](./llm/providers.md) for provider setup.
 
 ## Remote MCP quick start
 
-If you want to use a cloud MCP server such as Notion, authorize it once with
-the CLI and then reference it from `harn.toml`:
+Use a remote MCP server when a Harn program needs tools hosted outside your
+machine. Notion is the common example: the server runs on Notion's side, Harn
+stores your OAuth token locally, and your `.harn` code calls the server through
+the normal MCP builtins.
 
 ```bash
-harn mcp redirect-uri
-harn mcp login https://mcp.notion.com/mcp --scope "read write"
+harn mcp login notion
+harn mcp status notion
 ```
+
+`harn mcp login notion` opens the browser, completes OAuth with PKCE, and
+stores the token in the local OS keychain. `harn mcp redirect-uri` just prints
+the default callback URI (`http://127.0.0.1:9783/oauth/callback`) for servers
+that ask you to pre-register one; you usually do not need it for built-in
+presets such as Notion.
+
+Then declare the server in `harn.toml`:
+
+```toml
+[[mcp]]
+name = "notion"
+transport = "http"
+url = "https://mcp.notion.com/mcp"
+```
+
+And call it from a program:
+
+```harn,ignore
+fn main(harness: Harness) {
+  let pages = mcp_call(mcp.notion, "search", {query: "release notes"})
+  harness.stdio.println(json_stringify_pretty(pages))
+}
+```
+
+For the complete client/server surface, see
+[MCP, ACP, and A2A integration](./mcp-and-acp.md).
 
 ## Next steps
 

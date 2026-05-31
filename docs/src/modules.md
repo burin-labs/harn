@@ -1381,7 +1381,7 @@ review semantics.
 ### std/personas/prelude
 
 Reusable orchestration primitives for durable persona workflows. See
-[Persona Prelude](./personas/prelude.md) for the complete API.
+[Persona prelude](./personas/prelude.md) for the complete API.
 
 | Function | Description |
 |---|---|

@@ -165,7 +165,7 @@ const PRESETS: &[McpPreset] = &[
         args: &[],
         url: "https://mcp.notion.com/mcp",
         auth_kind: PresetAuthKind::Oauth,
-        oauth_scopes: Some("read write"),
+        oauth_scopes: None,
         placeholders: NOTION_PLACEHOLDERS,
     },
     McpPreset {
@@ -312,6 +312,10 @@ mod tests {
         assert_eq!(
             notion["url"],
             serde_json::json!("https://mcp.notion.com/mcp")
+        );
+        assert!(
+            notion.get("oauthScopes").is_none(),
+            "Notion MCP does not currently expose configurable OAuth scopes"
         );
     }
 }

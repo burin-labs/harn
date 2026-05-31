@@ -666,8 +666,7 @@ For remote HTTP MCP servers, authorize once with the CLI and reuse the
 stored token:
 
 ```bash
-harn mcp redirect-uri
-harn mcp login https://mcp.notion.com/mcp --scope "read write"
+harn mcp login notion
 ```
 
 ### How to give an agent MCP tools

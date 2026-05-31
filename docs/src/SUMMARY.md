@@ -106,11 +106,11 @@
 - [Context maintenance hooks](./context-maintenance-hooks.md)
 - [Skills](./skills.md)
 - [Personas](./personas.md)
-  - [Persona Prelude](./personas/prelude.md)
+  - [Persona prelude](./personas/prelude.md)
   - [Per-stage tool scoping](./personas/stages.md)
   - [Handoff policy overrides](./personas/handoff.md)
   - [Profile bulletins](./personas/profile-bulletins.md)
-  - [Merge Captain](./personas/merge-captain.md)
+  - [Merge captain](./personas/merge-captain.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)
 - [Workspace anchor cache contract](./agents/cache_contract.md)
@@ -143,8 +143,8 @@
 - [Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md)
 - [MCP Apps UI resources](./interop/ui-resource.md)
 - [Agents Protocol v1](./spec/agents-protocol/v1.md)
-- [Agents Protocol Receipt Format](./spec/agents-protocol/receipt-format-v1.md)
-- [Agents Protocol Replay Contract](./spec/agents-protocol/replay-v1.md)
+- [Agents Protocol receipt format](./spec/agents-protocol/receipt-format-v1.md)
+- [Agents Protocol replay contract](./spec/agents-protocol/replay-v1.md)
 
 ## Orchestration
 
@@ -180,10 +180,10 @@
 - [Connector testkit](./connectors/testkit.md)
 - [Triage inbox envelopes](./connectors/triage-inbox.md)
 - [Cron connector](./connectors/cron.md)
-- [GitHub App connector](./connectors/github.md)
+- [GitHub app connector](./connectors/github.md)
 - [Linear connector](./connectors/linear.md)
 - [Notion connector](./connectors/notion.md)
-- [Slack Events connector](./connectors/slack-events.md)
+- [Slack events connector](./connectors/slack-events.md)
 - [Generic webhook connector](./connectors/webhook.md)
 - [A2A push connector](./connectors/a2a-push.md)
 

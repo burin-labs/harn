@@ -101,7 +101,7 @@ prove it out.
    make conformance       # tool_hooks_catalogue_<stack> cases pass
    make lint-md           # docs lint clean
    make check-docs-snippets   # harn,ignore fences only — others must type-check
-   mdbook build docs      # mdBook builds clean
+   ./scripts/build_docs_site.sh  # mdBook builds clean and emits raw .md companions
    ```
 
 ## Adding a new stack catalogue
@@ -204,7 +204,7 @@ Reviewers should check:
 - [ ] Docs updated: shipped-catalogues table, cookbook recipe (when
       the rule unblocks a workflow), CHANGELOG Unreleased entry.
 - [ ] `make conformance`, `make lint-md`, `make check-docs-snippets`,
-      and `mdbook build docs` all pass locally.
+      and `./scripts/build_docs_site.sh` all pass locally.
 
 ## Tracking
 

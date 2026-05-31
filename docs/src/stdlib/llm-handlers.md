@@ -275,7 +275,7 @@ let caller = with_retry(default_llm_caller(), {max_attempts: 3})
 let envelope = caller({
   prompt: "hello",
   system: nil,
-  opts: {provider: "auto", model: "claude-sonnet-4-5"},
+  opts: {provider: "auto", model: "claude-sonnet-4-6"},
   turn: {iteration: 0, session_id: "", attempt: 1},
 })
 if envelope.ok { log(envelope.value.text) }
@@ -391,7 +391,7 @@ import {recommend_max_output_tokens, fits_in_context} from "std/llm/budget"
 let max_out = recommend_max_output_tokens({
   prompt: long_text,
   system: sys,
-  model: "claude-sonnet-4-5",
+  model: "claude-sonnet-4-6",
   task_kind: "summarize",
 })
 
@@ -447,7 +447,7 @@ GPT-5/5.5/4o/4.1, Gemini 2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
 ```harn,ignore
 import {pack_agent} from "std/llm/defaults"
 
-let opts = pack_agent("claude-sonnet-4-5", {
+let opts = pack_agent("claude-sonnet-4-6", {
   thinking: "medium",
   effort: "quality",
 })

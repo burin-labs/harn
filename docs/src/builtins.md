@@ -1872,7 +1872,7 @@ chat_endpoint = "/v1/chat/completions"
 completion_endpoint = "/v1/completions"
 
 [llm.aliases]
-sonnet = { id = "claude-sonnet-4-20250514", provider = "anthropic" }
+sonnet = { id = "claude-sonnet-4-6", provider = "anthropic" }
 
 [[llm.inference_rules]]
 pattern = "claude-*"

@@ -425,7 +425,7 @@ Harn provides builtins for estimating and controlling LLM costs:
 
 ```harn
 // Estimate cost for a specific call
-let cost = llm_cost("claude-sonnet-4-20250514", 1000, 500)
+let cost = llm_cost("claude-sonnet-4-6", 1000, 500)
 log("Estimated cost: $${cost}")
 
 // Check cumulative session costs
