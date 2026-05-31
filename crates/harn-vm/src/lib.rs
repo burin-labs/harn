@@ -28,6 +28,7 @@ pub mod corrections;
 pub mod egress;
 pub mod event_log;
 pub mod events;
+pub mod external_agent;
 pub mod flow;
 pub mod harness;
 pub(crate) mod harness_crypto;

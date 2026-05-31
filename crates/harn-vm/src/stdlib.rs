@@ -40,6 +40,7 @@ mod csv;
 mod datetime;
 mod durable_step;
 mod event_log;
+mod external_agent;
 pub(crate) mod files;
 mod flow;
 mod fs;
@@ -208,6 +209,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     token_redaction::register_token_redaction_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     artifact_emit::register_artifact_emit_builtins(vm);
+    external_agent::register_external_agent_builtins(vm);
     path_scope_guard::register_path_scope_guard_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
@@ -401,6 +403,7 @@ pub fn reset_stdlib_state() {
     crate::egress::reset_egress_policy_for_host();
     hitl::reset_hitl_state();
     crate::http::reset_http_state();
+    crate::external_agent::reset_external_agent_state();
     jsonrpc::reset_jsonrpc_state();
     monitors::reset_monitor_state();
     waitpoints::reset_waitpoint_state();
