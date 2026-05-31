@@ -1038,6 +1038,31 @@ async fn host_agent_dispatch_tool_call(
             let error_text = error.to_string();
             let observation =
                 format!("[error from {tool_name}]\n{error_text}\n[end of {tool_name} error]\n");
+            let reminder_payload = serde_json::json!({
+                "event": crate::orchestration::HookEvent::PostToolUse.as_str(),
+                "session": {"id": &session_id},
+                "iteration": agent_primitive_option_int(options, "_iteration").unwrap_or(0),
+                "tool": {"name": &tool_name, "args": &tool_args},
+                "tool_name": &tool_name,
+                "status": "error",
+                "ok": false,
+                "error": &error_text,
+                "error_category": category.as_str(),
+                "result": {
+                    "text": &error_text,
+                    "status": "error",
+                    "ok": false,
+                    "error": &error_text,
+                },
+            });
+            let reminder_report = super::reminder_providers::evaluate_and_inject(
+                Some(&ctx),
+                crate::orchestration::HookEvent::PostToolUse,
+                &session_id,
+                reminder_payload,
+                super::reminder_providers::options_map_to_json(options),
+            )
+            .await?;
             let result = serde_json::json!({
                 "ok": false,
                 "status": "error",
@@ -1052,6 +1077,7 @@ async fn host_agent_dispatch_tool_call(
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,
+                "reminder_provider_report": reminder_report,
             });
             let result = attach_hook_reminder_audit(result, hook_reminder_reports);
             Ok(json_to_vm_value(&result))

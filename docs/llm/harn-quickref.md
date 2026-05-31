@@ -1694,9 +1694,18 @@ log(cleared.removed_count)
   optional `kind_filter`, and renders the top `max_facts` (default 5)
   as a `<system-reminder>` block so a fresh session boots with
   project context already in scope.
-- `idle_nudge`, `tool_output_truncated`, and `resume_continuity` use
-  `propagate: "none"`; `post_compact_recap` and `project_facts` use
-  `propagate: "session"`.
+- `workspace_anchor` on `session_start` and `on_budget_threshold`
+  (`ttl_turns: 1`) when the session has an active workspace anchor.
+- `grounded_review` on `post_tool_use`, `post_step`,
+  and `post_agent_turn` (`ttl_turns: 2`). It only injects advisory
+  review context from concrete verifier/runtime evidence: explicit tool
+  errors, non-accepted routing verifier signals, parse errors,
+  undefined-name diagnostics, error-severity diagnostics, or failure
+  lines from known verification commands. Warnings and style nits stay
+  quiet unless `include_warnings: true`.
+- `idle_nudge`, `tool_output_truncated`, `resume_continuity`, and
+  `grounded_review` use `propagate: "none"`; `post_compact_recap`,
+  `project_facts`, and `workspace_anchor` use `propagate: "session"`.
 
 Opt out per loop:
 

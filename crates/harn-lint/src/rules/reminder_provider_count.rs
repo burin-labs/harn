@@ -18,6 +18,8 @@ const CANONICAL_PROVIDERS: &[&str] = &[
     "post_compact_recap",
     "resume_continuity",
     "project_facts",
+    "workspace_anchor",
+    "grounded_review",
 ];
 
 pub(crate) fn check_reminder_provider_count(
@@ -183,7 +185,7 @@ pipeline default(task) {
 pipeline default(task) {
   agent_loop(task, nil, {
     reminders: {
-      providers: ["-token_pressure", "-idle_nudge", "-tool_output_truncated", "-post_compact_recap", "a", "b", "c", "d", "e"],
+      providers: ["-token_pressure", "-idle_nudge", "-tool_output_truncated", "-post_compact_recap", "-grounded_review", "a", "b", "c", "d", "e"],
     },
   })
 }
