@@ -477,6 +477,90 @@ fn compare_kind(
                 });
             }
         }
+        (
+            McpJsonRpc {
+                server: r_server,
+                method: r_method,
+                request_digest: r_request_digest,
+                response_digest: r_response_digest,
+                latency_ms: r_latency,
+                request_payload: r_request_payload,
+                response_payload: r_response_payload,
+            },
+            McpJsonRpc {
+                server: p_server,
+                method: p_method,
+                request_digest: p_request_digest,
+                response_digest: p_response_digest,
+                latency_ms: p_latency,
+                request_payload: p_request_payload,
+                response_payload: p_response_payload,
+            },
+        ) => {
+            if r_server != p_server {
+                out.push(Divergence {
+                    seq: Some(seq),
+                    category: "mcp_server".to_string(),
+                    message: format!("MCP server diverged: recorded={r_server} replay={p_server}"),
+                });
+            }
+            if r_method != p_method {
+                out.push(Divergence {
+                    seq: Some(seq),
+                    category: "mcp_method".to_string(),
+                    message: format!("MCP method diverged: recorded={r_method} replay={p_method}"),
+                });
+            }
+            if r_request_digest != p_request_digest {
+                out.push(Divergence {
+                    seq: Some(seq),
+                    category: "mcp_request_digest".to_string(),
+                    message: format!(
+                        "MCP request digest diverged: recorded={r_request_digest} replay={p_request_digest}"
+                    ),
+                });
+            }
+            if r_response_digest != p_response_digest {
+                out.push(Divergence {
+                    seq: Some(seq),
+                    category: "mcp_response_digest".to_string(),
+                    message: format!(
+                        "MCP response digest diverged: recorded={r_response_digest} replay={p_response_digest}"
+                    ),
+                });
+            }
+            if byte_strict && r_latency != p_latency {
+                out.push(Divergence {
+                    seq: Some(seq),
+                    category: "mcp_latency".to_string(),
+                    message: format!(
+                        "MCP latency diverged: recorded={r_latency}ms replay={p_latency}ms"
+                    ),
+                });
+            }
+            if r_request_payload.content_hash() != p_request_payload.content_hash() {
+                out.push(Divergence {
+                    seq: Some(seq),
+                    category: "mcp_request_hash".to_string(),
+                    message: format!(
+                        "MCP request hash diverged: recorded={} replay={}",
+                        r_request_payload.content_hash(),
+                        p_request_payload.content_hash(),
+                    ),
+                });
+            }
+            if r_response_payload.content_hash() != p_response_payload.content_hash() {
+                out.push(Divergence {
+                    seq: Some(seq),
+                    category: "mcp_response_hash".to_string(),
+                    message: format!(
+                        "MCP response hash diverged: recorded={} replay={}",
+                        r_response_payload.content_hash(),
+                        p_response_payload.content_hash(),
+                    ),
+                });
+            }
+        }
         (Unknown, _) | (_, Unknown) => out.push(Divergence {
             seq: Some(seq),
             category: "unknown_kind".to_string(),
@@ -627,6 +711,7 @@ fn record_kind_tag(kind: &TapeRecordKind) -> &'static str {
         TapeRecordKind::FileWrite { .. } => "file_write",
         TapeRecordKind::FileDelete { .. } => "file_delete",
         TapeRecordKind::ProcessSpawn { .. } => "process_spawn",
+        TapeRecordKind::McpJsonRpc { .. } => "mcp_json_rpc",
         TapeRecordKind::Unknown => "unknown",
     }
 }
@@ -702,6 +787,51 @@ mod tests {
             semantic.is_byte_identical(),
             "semantic should not flag pure timing drift, got {semantic:?}"
         );
+    }
+
+    #[test]
+    fn mcp_json_rpc_records_compare_schema_and_response_digests() {
+        let mut a = empty_tape();
+        let mut b = empty_tape();
+        let request_payload = TapePayload::Inline {
+            content_hash: "request-hash".to_string(),
+            text: "{}".to_string(),
+        };
+        a.records.push(record(
+            0,
+            TapeRecordKind::McpJsonRpc {
+                server: "github".to_string(),
+                method: "tools/list".to_string(),
+                request_digest: "request".to_string(),
+                response_digest: "schema-a".to_string(),
+                latency_ms: 1,
+                request_payload: request_payload.clone(),
+                response_payload: TapePayload::Inline {
+                    content_hash: "schema-a".to_string(),
+                    text: "{}".to_string(),
+                },
+            },
+        ));
+        b.records.push(record(
+            0,
+            TapeRecordKind::McpJsonRpc {
+                server: "github".to_string(),
+                method: "tools/list".to_string(),
+                request_digest: "request".to_string(),
+                response_digest: "schema-b".to_string(),
+                latency_ms: 1,
+                request_payload,
+                response_payload: TapePayload::Inline {
+                    content_hash: "schema-b".to_string(),
+                    text: "{}".to_string(),
+                },
+            },
+        ));
+        let report = compare(&a, &b, FidelityMode::Semantic);
+        assert!(report
+            .divergences
+            .iter()
+            .any(|divergence| divergence.category == "mcp_response_digest"));
     }
 
     #[test]

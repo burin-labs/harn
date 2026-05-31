@@ -79,6 +79,68 @@ Replays a prior `--process-record` tape. The script must request the
 same `(program, args, cwd)` tuples in the same order; divergence
 fails the run.
 
+### `harn mcp mock`
+
+`harn mcp mock` is the MCP-specific companion to testbench mode. It
+keeps tool-server behavior deterministic without credentials or network
+egress.
+
+Record a redacted JSON-RPC cassette while proxying a real stdio MCP
+server:
+
+```sh
+harn mcp mock record --cassette fixtures/github.cassette.json -- \
+    github-mcp-server --stdio
+```
+
+Replay the cassette as a mock stdio server:
+
+```sh
+harn mcp mock replay --cassette fixtures/github.cassette.json
+```
+
+Verify a saved cassette against either another cassette or an updated
+stdio server:
+
+```sh
+harn mcp mock verify --cassette fixtures/github.cassette.json \
+    --candidate fixtures/github-next.cassette.json
+
+harn mcp mock verify --cassette fixtures/github.cassette.json -- \
+    github-mcp-server --stdio
+```
+
+The cassette stores full JSON-RPC request/response envelopes after the
+unified Harn redaction policy runs. Tool `outputSchema`, tool
+annotations (`readOnlyHint`, `idempotentHint`, `destructiveHint`,
+`openWorldHint`, and any future keys), `structuredContent`, JSON-RPC
+errors, and observed latency are all retained so verify mode can flag
+schema or behavior drift.
+
+For stateful side-effect evals, serve a seeded simulated world:
+
+```sh
+harn mcp mock world --spec fixtures/tickets.world.json \
+    --state-out run-state.json --report run-report.json
+```
+
+The world spec declares tools, input/output schemas, annotations,
+initial state, goal state, and deterministic faults such as JSON-RPC
+429/503-style errors, timeout errors that do not sleep, MCP tool
+errors, and partial writes. Mutating tools update the in-memory state.
+When stdin closes, `--state-out` writes the final state and `--report`
+scores goal-state match plus collateral damage.
+
+Score one or more final states independently:
+
+```sh
+harn mcp mock eval --spec fixtures/tickets.world.json \
+    --state run-1.json --state run-2.json
+```
+
+The eval report includes `pass_rate` and `pass_power_k` so repeated
+runs can report reliability without requiring trace equality.
+
 ## Rust API
 
 The CLI is a thin wrapper over `harn_vm::testbench::Testbench`:

@@ -4,7 +4,7 @@ use std::time::Duration as StdDuration;
 use super::{
     CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
-    FlowCommand, HarnessThreadingMode, LocalCommand, McpCommand, ModelsCommand,
+    FlowCommand, HarnessThreadingMode, LocalCommand, McpCommand, McpMockCommand, ModelsCommand,
     OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
     OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
     PackageCacheCommand, PackageCommand, PackageScaffoldCommand, PersonaCommand, ProjectTemplate,
@@ -682,6 +682,56 @@ fn test_parses_mcp_serve_flags() {
     assert_eq!(serve.path, "/rpc");
     assert_eq!(serve.sse_path, "/events");
     assert_eq!(serve.messages_path, "/legacy/messages");
+}
+
+#[test]
+fn test_parses_mcp_mock_commands() {
+    let cli = Cli::parse_from([
+        "harn",
+        "mcp",
+        "mock",
+        "record",
+        "--cassette",
+        "cassette.json",
+        "--",
+        "python3",
+        "server.py",
+    ]);
+    let Command::Mcp(args) = cli.command.unwrap() else {
+        panic!("expected mcp command");
+    };
+    let McpCommand::Mock(mock) = args.command else {
+        panic!("expected mcp mock");
+    };
+    let McpMockCommand::Record(record) = mock.command else {
+        panic!("expected mcp mock record");
+    };
+    assert_eq!(record.cassette, "cassette.json");
+    assert_eq!(record.command, vec!["python3", "server.py"]);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "mcp",
+        "mock",
+        "eval",
+        "--spec",
+        "world.json",
+        "--state",
+        "run1.json",
+        "--state",
+        "run2.json",
+    ]);
+    let Command::Mcp(args) = cli.command.unwrap() else {
+        panic!("expected mcp command");
+    };
+    let McpCommand::Mock(mock) = args.command else {
+        panic!("expected mcp mock");
+    };
+    let McpMockCommand::Eval(eval) = mock.command else {
+        panic!("expected mcp mock eval");
+    };
+    assert_eq!(eval.spec, "world.json");
+    assert_eq!(eval.states, vec!["run1.json", "run2.json"]);
 }
 
 #[test]

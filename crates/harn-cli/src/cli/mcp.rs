@@ -15,6 +15,8 @@ pub(crate) struct McpArgs {
 pub(crate) enum McpCommand {
     /// Expose a running orchestrator as an MCP server.
     Serve(McpServeArgs),
+    /// Record, replay, verify, or simulate MCP servers for deterministic evals.
+    Mock(McpMockArgs),
     /// Log in to a remote MCP server via OAuth.
     Login(McpLoginArgs),
     /// Remove a stored OAuth token.
@@ -32,6 +34,85 @@ pub(crate) struct McpPresetsArgs {
     /// Emit the catalog as a stable JSON envelope instead of a table.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpMockArgs {
+    #[command(subcommand)]
+    pub command: McpMockCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum McpMockCommand {
+    /// Proxy a stdio MCP server and write a redacted JSON-RPC cassette.
+    Record(McpMockRecordArgs),
+    /// Serve a redacted cassette back as a credential-free stdio MCP server.
+    Replay(McpMockReplayArgs),
+    /// Diff a cassette against another cassette or a freshly probed stdio server.
+    Verify(McpMockVerifyArgs),
+    /// Serve a seeded stateful simulated world over stdio MCP.
+    World(McpMockWorldArgs),
+    /// Score one or more final world states against a world spec.
+    Eval(McpMockEvalArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpMockRecordArgs {
+    /// Path to write the redacted cassette JSON.
+    #[arg(long, value_name = "PATH")]
+    pub cassette: String,
+    /// Upstream stdio MCP server command. Pass after `--`.
+    #[arg(last = true, required = true)]
+    pub command: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpMockReplayArgs {
+    /// Cassette JSON produced by `harn mcp mock record`.
+    #[arg(long, value_name = "PATH")]
+    pub cassette: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpMockVerifyArgs {
+    /// Recorded cassette to treat as the baseline.
+    #[arg(long, value_name = "PATH")]
+    pub cassette: String,
+    /// Candidate cassette to diff against the baseline.
+    #[arg(long, value_name = "PATH", conflicts_with = "command")]
+    pub candidate: Option<String>,
+    /// Write the structured verify report here. Defaults to stdout.
+    #[arg(long, value_name = "PATH")]
+    pub report: Option<String>,
+    /// Candidate stdio MCP server command. Pass after `--`.
+    #[arg(last = true)]
+    pub command: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpMockWorldArgs {
+    /// World spec JSON.
+    #[arg(long, value_name = "PATH")]
+    pub spec: String,
+    /// Write the final state JSON when stdin closes.
+    #[arg(long = "state-out", value_name = "PATH")]
+    pub state_out: Option<String>,
+    /// Write a world eval report against `goal_state` when stdin closes.
+    #[arg(long, value_name = "PATH")]
+    pub report: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpMockEvalArgs {
+    /// World spec JSON containing `initial_state` and `goal_state`.
+    #[arg(long, value_name = "PATH")]
+    pub spec: String,
+    /// Final state JSON. Repeat to compute pass-rate and pass^k.
+    #[arg(long = "state", value_name = "PATH", required = true)]
+    pub states: Vec<String>,
+    /// Write the structured report here. Defaults to stdout.
+    #[arg(long, value_name = "PATH")]
+    pub report: Option<String>,
 }
 
 #[derive(Debug, Args)]

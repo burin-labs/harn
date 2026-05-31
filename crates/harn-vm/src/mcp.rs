@@ -218,15 +218,42 @@ impl VmMcpClientHandle {
         if method != "initialize" && method != "server/discover" {
             self.notify_roots_list_changed_if_needed().await?;
         }
+        let record_request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params.clone(),
+        });
+        let started_at = crate::clock_mock::instant_now();
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
-        match inner {
+        let result = match inner {
             McpClientInner::Stdio(inner) => stdio_call_raw(inner, &self.name, method, params).await,
             McpClientInner::Http(inner) => http_call_raw(inner, &self.name, method, params).await,
-        }
+        };
+        let latency_ms = crate::clock_mock::instant_now()
+            .duration_since(started_at)
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        let record_response = match &result {
+            Ok(response) => response.clone(),
+            Err(error) => serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": {
+                    "message": error.to_string(),
+                }
+            }),
+        };
+        crate::testbench::tape::record_mcp_json_rpc(
+            &self.name,
+            method,
+            &record_request,
+            &record_response,
+            latency_ms,
+        );
+        result
     }
 
     async fn notify(&self, method: &str, params: serde_json::Value) -> Result<(), VmError> {

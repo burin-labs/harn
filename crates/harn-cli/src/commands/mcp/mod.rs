@@ -11,6 +11,7 @@ use url::Url;
 use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
 use crate::package::{self, McpAuthConfig, McpServerConfig};
 
+mod mock;
 mod oauth_resource;
 pub(crate) mod presets;
 pub(crate) mod serve;
@@ -41,6 +42,14 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 process::exit(1);
             }
         }
+        McpCommand::Mock(args) => match mock::run(&args.command).await {
+            Ok(0) => {}
+            Ok(code) => process::exit(code),
+            Err(error) => {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        },
         McpCommand::Login(options) => {
             if let Err(error) = login(options).await {
                 eprintln!("error: {error}");
