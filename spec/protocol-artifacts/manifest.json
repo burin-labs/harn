@@ -106,6 +106,7 @@
       "typed_checkpoint"
     ],
     "harnAgentEventMethod": "_harn/agentEvent",
+    "harnProviderCatalogMethod": "_harn/providerCatalog",
     "harnSessionUpdateExtensions": [
       "artifact",
       "available_commands_update",

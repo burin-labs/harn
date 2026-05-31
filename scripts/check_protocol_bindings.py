@@ -54,6 +54,10 @@ def main() -> int:
         raise AssertionError(
             f"agent-event method drift: bindings={hp.HARN_AGENT_EVENT_METHOD} fixture={fixture['harnAgentEventMethod']}"
         )
+    if fixture["harnProviderCatalogMethod"] != hp.HARN_PROVIDER_CATALOG_METHOD:
+        raise AssertionError(
+            f"provider-catalog method drift: bindings={hp.HARN_PROVIDER_CATALOG_METHOD} fixture={fixture['harnProviderCatalogMethod']}"
+        )
 
     envelopes = fixture["envelopes"]
     cases = [

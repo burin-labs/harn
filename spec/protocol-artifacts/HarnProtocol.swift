@@ -7,6 +7,7 @@ public enum HarnProtocolConstants {
     public static let artifactVersion = "0.8.55"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let harnAgentEventMethod = "_harn/agentEvent"
+    public static let harnProviderCatalogMethod = "_harn/providerCatalog"
     public static let mcpProtocolVersion = "2025-11-25"
     public static let mcpStableProtocolVersion = "2025-11-25"
     public static let mcpDraftProtocolVersion = "DRAFT-2026-v1"

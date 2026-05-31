@@ -904,21 +904,62 @@ fn env_nonempty(name: &str) -> Option<String> {
 }
 
 pub fn artifact() -> ProviderCatalogArtifact {
-    let alias_entries = llm_config::alias_entries();
+    let config = llm_config::effective_config();
+    artifact_from_config(&config, CatalogCapabilityOverrides::CurrentThread)
+}
+
+/// Build a catalog artifact for a runtime that has captured explicit provider
+/// and capability overlays. `None` means no override for that layer; unlike
+/// `artifact()`, this does not read thread-local user overrides implicitly.
+pub fn artifact_with_overrides(
+    llm_config_overrides: Option<&llm_config::ProvidersConfig>,
+    llm_capability_overrides: Option<&llm::capabilities::CapabilitiesFile>,
+) -> ProviderCatalogArtifact {
+    let config = llm_config::effective_config_with_user_overrides(llm_config_overrides);
+    artifact_from_config(
+        &config,
+        CatalogCapabilityOverrides::Explicit(llm_capability_overrides),
+    )
+}
+
+#[derive(Clone, Copy)]
+enum CatalogCapabilityOverrides<'a> {
+    CurrentThread,
+    Explicit(Option<&'a llm::capabilities::CapabilitiesFile>),
+}
+
+fn artifact_from_config(
+    config: &llm_config::ProvidersConfig,
+    llm_capability_overrides: CatalogCapabilityOverrides<'_>,
+) -> ProviderCatalogArtifact {
+    let alias_entries = config
+        .aliases
+        .iter()
+        .map(|(name, alias)| (name.clone(), alias.clone()))
+        .collect::<Vec<_>>();
     let aliases_by_model = aliases_by_model(&alias_entries);
-    let providers = llm_config::provider_names()
-        .into_iter()
-        .filter_map(|id| {
-            llm_config::provider_config(&id).map(|provider| catalog_provider(id, provider))
-        })
+    let providers = config
+        .providers
+        .iter()
+        .map(|(id, provider)| catalog_provider(id.clone(), provider.clone()))
         .collect();
-    let models = llm_config::model_catalog_entries()
+    let models = llm_config::sorted_model_entries_with_config(config)
         .into_iter()
-        .map(|(id, model)| catalog_model(id, model, &aliases_by_model))
+        .map(|(id, model)| {
+            catalog_model(
+                id,
+                model,
+                &aliases_by_model,
+                config,
+                llm_capability_overrides,
+            )
+        })
         .collect::<Vec<_>>();
     let aliases = alias_entries
         .iter()
-        .map(|(name, alias)| catalog_alias(name, alias))
+        .map(|(name, alias)| {
+            catalog_alias(name, alias, config.alias_tool_calling.get(name).cloned())
+        })
         .collect::<Vec<_>>();
     let variants = catalog_variants(&models, &aliases);
 
@@ -930,7 +971,7 @@ pub fn artifact() -> ProviderCatalogArtifact {
         models,
         aliases,
         variants,
-        qc_defaults: llm_config::qc_defaults(),
+        qc_defaults: config.qc_defaults.clone(),
     }
 }
 
@@ -1460,13 +1501,17 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
     }
 }
 
-fn catalog_alias(name: &str, alias: &AliasDef) -> CatalogAlias {
+fn catalog_alias(
+    name: &str,
+    alias: &AliasDef,
+    tool_calling: Option<AliasToolCallingDef>,
+) -> CatalogAlias {
     CatalogAlias {
         name: name.to_string(),
         model_id: alias.id.clone(),
         provider: alias.provider.clone(),
         tool_format: alias.tool_format.clone(),
-        tool_calling: llm_config::alias_tool_calling_entry(name),
+        tool_calling,
     }
 }
 
@@ -1474,8 +1519,17 @@ fn catalog_model(
     id: String,
     model: ModelDef,
     aliases_by_model: &BTreeMap<(String, String), Vec<String>>,
+    config: &llm_config::ProvidersConfig,
+    llm_capability_overrides: CatalogCapabilityOverrides<'_>,
 ) -> CatalogModel {
-    let caps = llm::capabilities::lookup(&model.provider, &id);
+    let caps = match llm_capability_overrides {
+        CatalogCapabilityOverrides::CurrentThread => {
+            llm::capabilities::lookup(&model.provider, &id)
+        }
+        CatalogCapabilityOverrides::Explicit(overrides) => {
+            llm::capabilities::lookup_with_user_overrides(&model.provider, &id, overrides)
+        }
+    };
     let structured_output = caps
         .structured_output
         .clone()
@@ -1486,6 +1540,7 @@ fn catalog_model(
         .cloned()
         .unwrap_or_default();
     let quality_tags = model_quality_tags(&model, &aliases);
+    let capability_tags = llm_config::capability_tags_from_capabilities(&caps);
     CatalogModel {
         aliases,
         modalities: modalities_from_caps(&caps),
@@ -1529,12 +1584,12 @@ fn catalog_model(
         },
         availability: ModelAvailabilityStatus::from(model.availability),
         quality_tags,
-        capability_tags: model.capabilities.clone(),
-        family: llm_config::model_family(&model.provider, &id),
-        lineage: llm_config::model_lineage(&model.provider, &id),
+        capability_tags,
+        family: llm_config::model_family_with_config(config, &model.provider, &id),
+        lineage: llm_config::model_lineage_with_config(config, &model.provider, &id),
         complementary_with: model.complementary_with.clone(),
         avoid_as_reviewer_for: model.avoid_as_reviewer_for.clone(),
-        tier: llm_config::model_tier(&id),
+        tier: llm_config::model_tier_with_config(config, &id),
         open_weight: model.open_weight,
         strengths: model.strengths.clone(),
         benchmarks: model.benchmarks.clone(),

@@ -778,7 +778,14 @@ pub fn clear_runtime_catalog_overlay() {
     set_runtime_catalog_overlay(None);
 }
 
-fn effective_config() -> ProvidersConfig {
+pub(crate) fn effective_config() -> ProvidersConfig {
+    let user_overrides = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    effective_config_with_user_overrides(user_overrides.as_ref())
+}
+
+pub(crate) fn effective_config_with_user_overrides(
+    user_overrides: Option<&ProvidersConfig>,
+) -> ProvidersConfig {
     let mut merged = load_config().clone();
     if let Some(overlay) = runtime_catalog_overlay()
         .read()
@@ -787,11 +794,9 @@ fn effective_config() -> ProvidersConfig {
     {
         merged.merge_from(overlay);
     }
-    USER_OVERRIDES.with(|cell| {
-        if let Some(overlay) = cell.borrow().as_ref() {
-            merged.merge_from(overlay);
-        }
-    });
+    if let Some(overlay) = user_overrides {
+        merged.merge_from(overlay);
+    }
     merged
 }
 
@@ -951,7 +956,7 @@ pub fn model_tier(model_id: &str) -> String {
     model_tier_with_config(&config, model_id)
 }
 
-fn model_tier_with_config(config: &ProvidersConfig, model_id: &str) -> String {
+pub(crate) fn model_tier_with_config(config: &ProvidersConfig, model_id: &str) -> String {
     // Per-model self-declared tier wins. This is the only path.
     if let Some(model) = config.models.get(model_id) {
         if let Some(tier) = model.tier.as_deref() {
@@ -990,7 +995,11 @@ pub fn model_family(provider: &str, model_id: &str) -> String {
     model_family_with_config(&config, provider, model_id)
 }
 
-fn model_family_with_config(config: &ProvidersConfig, provider: &str, model_id: &str) -> String {
+pub(crate) fn model_family_with_config(
+    config: &ProvidersConfig,
+    provider: &str,
+    model_id: &str,
+) -> String {
     catalog_family_token(config, model_id)
         .unwrap_or_else(|| derive_model_family(provider, model_id))
 }
@@ -1023,7 +1032,11 @@ pub fn model_lineage(provider: &str, model_id: &str) -> String {
     model_lineage_with_config(&config, provider, model_id)
 }
 
-fn model_lineage_with_config(config: &ProvidersConfig, provider: &str, model_id: &str) -> String {
+pub(crate) fn model_lineage_with_config(
+    config: &ProvidersConfig,
+    provider: &str,
+    model_id: &str,
+) -> String {
     catalog_lineage_token(config, model_id)
         .unwrap_or_else(|| derive_model_lineage(provider, model_id))
 }
@@ -1248,8 +1261,14 @@ pub fn alias_tool_calling_entry(alias: &str) -> Option<AliasToolCallingDef> {
 
 /// Return every configured model-catalog entry, sorted by provider then id.
 pub fn model_catalog_entries() -> Vec<(String, ModelDef)> {
-    let mut entries: Vec<_> = effective_config()
-        .models
+    let config = effective_config();
+    model_catalog_entries_with_config(&config)
+}
+
+pub(crate) fn model_catalog_entries_with_config(
+    config: &ProvidersConfig,
+) -> Vec<(String, ModelDef)> {
+    sorted_model_entries_with_config(config)
         .into_iter()
         .map(|(id, model)| {
             let provider = model.provider.clone();
@@ -1258,6 +1277,16 @@ pub fn model_catalog_entries() -> Vec<(String, ModelDef)> {
                 with_effective_capability_tags(id, provider, model),
             )
         })
+        .collect()
+}
+
+pub(crate) fn sorted_model_entries_with_config(
+    config: &ProvidersConfig,
+) -> Vec<(String, ModelDef)> {
+    let mut entries: Vec<_> = config
+        .models
+        .iter()
+        .map(|(id, model)| (id.clone(), model.clone()))
         .collect();
     entries.sort_by(|(id_a, model_a), (id_b, model_b)| {
         model_a
@@ -1448,6 +1477,12 @@ fn with_effective_capability_tags(
 /// providers.toml is accepted only for backwards-compatible parsing.
 pub fn effective_model_capability_tags(provider: &str, model_id: &str) -> Vec<String> {
     let caps = crate::llm::capabilities::lookup(provider, model_id);
+    capability_tags_from_capabilities(&caps)
+}
+
+pub(crate) fn capability_tags_from_capabilities(
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Vec<String> {
     let mut tags = Vec::new();
     // Today all Harn chat providers expose streaming. Keep this as a
     // transport baseline rather than a duplicated per-model declaration.

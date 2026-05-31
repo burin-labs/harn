@@ -15,6 +15,9 @@ const ArtifactVersion = "0.8.55"
 // HarnAgentEventMethod is the JSON-RPC method for `_harn/agentEvent` notifications.
 const HarnAgentEventMethod = "_harn/agentEvent"
 
+// HarnProviderCatalogMethod is the JSON-RPC method for Harn's provider catalog extension.
+const HarnProviderCatalogMethod = "_harn/providerCatalog"
+
 // ACPSchemaCompatibility is the upstream ACP schema version Harn tracks.
 const ACPSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
 

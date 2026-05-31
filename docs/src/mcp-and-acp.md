@@ -812,6 +812,14 @@ behind editor `/model` commands (Crush, OpenCode `<leader>m`, Codex
 `/model`) and replaces the "the change takes effect after `/clear`"
 workaround.
 
+ACP clients can request the full picker source of truth with the Harn
+extension method `_harn/providerCatalog`. The result is the provider
+catalog v2 artifact returned by `harn providers export`, normalized
+through the runtime's effective overlays. Clients should use that
+catalog for model display names, aliases, auth env names, local/cloud
+classification, context windows, tool-support hints, availability, and
+pricing instead of vendoring picker rows.
+
 ```json
 {
   "jsonrpc": "2.0",

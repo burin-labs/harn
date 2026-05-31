@@ -721,7 +721,8 @@ public let harnProviderCatalogJSON = #"""
       "features": [],
       "caveats": [
         "Native Ollama chat returns NDJSON and can apply model-family parsers."
-      ]
+      ],
+      "latency_p50_ms": 1200
     },
     {
       "id": "openai",

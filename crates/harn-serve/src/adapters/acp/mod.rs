@@ -34,8 +34,8 @@ use schema::{
 };
 pub use schema::{
     ACP_SCHEMA_COMPATIBILITY, ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use sessions::{
     lookup_session_cancellation, preempt_session_interruption, prepare_session_prompt, Session,
@@ -683,6 +683,9 @@ pub struct AcpServer {
     vm_baseline_cache: Option<VmBaselineCacheEntry>,
     /// Per-turn profile emission settings.
     profile: AcpProfileConfig,
+    /// Provider/catalog overlays installed by the embedder for this server.
+    llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
+    llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     /// Server-level budget inherited by sessions unless they override it.
     default_budget: Option<BudgetSpec>,
     /// Embedder-granted read-only sandbox roots, unioned into the per-turn
@@ -699,6 +702,8 @@ impl AcpServer {
     fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
         harn_vm::llm_config::set_user_overrides(config.llm_config_overrides.clone());
         harn_vm::llm::capabilities::set_user_overrides(config.llm_capability_overrides.clone());
+        let llm_config_overrides = config.llm_config_overrides.clone();
+        let llm_capability_overrides = config.llm_capability_overrides.clone();
 
         Self {
             descriptor: AdapterDescriptor {
@@ -720,6 +725,8 @@ impl AcpServer {
             compile_cache: None,
             vm_baseline_cache: None,
             profile: config.profile,
+            llm_config_overrides,
+            llm_capability_overrides,
             default_budget: config.budget,
             read_only_roots: config.read_only_roots,
         }
@@ -974,6 +981,17 @@ impl AcpServer {
                 },
                 "authMethods": self.auth_policy.acp_auth_methods(),
             }),
+        );
+    }
+
+    fn handle_provider_catalog(&self, id: &serde_json::Value) {
+        self.send_response(
+            id,
+            serde_json::to_value(harn_vm::provider_catalog::artifact_with_overrides(
+                self.llm_config_overrides.as_ref(),
+                self.llm_capability_overrides.as_ref(),
+            ))
+            .expect("provider catalog serializes"),
         );
     }
 
@@ -3537,6 +3555,12 @@ impl AcpServer {
             }
             "authenticate" => {
                 self.handle_authenticate(&id, &params).await;
+            }
+            HARN_PROVIDER_CATALOG_METHOD => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_provider_catalog(&id);
             }
             "session/new" => {
                 if self.reject_unauthenticated(&id) {

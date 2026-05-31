@@ -129,6 +129,12 @@ func TestRoundTripFixture(t *testing.T) {
 			HarnAgentEventMethod, got,
 		)
 	}
+	if got := mustString(t, fixture, "harnProviderCatalogMethod"); got != HarnProviderCatalogMethod {
+		t.Fatalf(
+			"provider-catalog method drift: bindings=%q fixture=%q",
+			HarnProviderCatalogMethod, got,
+		)
+	}
 
 	var envelopes map[string]json.RawMessage
 	if err := json.Unmarshal(fixture["envelopes"], &envelopes); err != nil {
