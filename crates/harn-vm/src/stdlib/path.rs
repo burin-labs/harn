@@ -18,6 +18,15 @@ fn to_posix(s: &str) -> String {
     s.replace('\\', "/")
 }
 
+fn to_native(s: &str) -> String {
+    let posix = to_posix(s);
+    if cfg!(windows) {
+        posix.replace('/', "\\")
+    } else {
+        posix
+    }
+}
+
 /// Returns true if the path is absolute (leading `/` on posix or `X:/` drive
 /// root on windows). `X:foo` is drive-relative, not absolute.
 fn is_absolute_str(p: &str) -> bool {
@@ -364,10 +373,8 @@ fn path_to_posix_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(sig = "path_to_native(path: string?) -> string", category = "path")]
 fn path_to_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    // Harn normalises on `/` regardless of OS, so this currently mirrors
-    // path_to_posix. Reserved for future Windows-host specialisation.
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(to_posix(&p))))
+    Ok(VmValue::String(std::sync::Arc::from(to_native(&p))))
 }
 
 #[harn_builtin(
@@ -496,6 +503,16 @@ mod tests {
         assert!(!is_absolute_str("a/b"));
         assert!(!is_absolute_str("./a"));
         assert!(!is_absolute_str(""));
+    }
+
+    #[test]
+    fn native_path_conversion_matches_host_separator() {
+        let native = to_native("a\\b/c");
+        if cfg!(windows) {
+            assert_eq!(native, "a\\b\\c");
+        } else {
+            assert_eq!(native, "a/b/c");
+        }
     }
 
     #[test]

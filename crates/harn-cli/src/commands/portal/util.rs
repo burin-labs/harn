@@ -7,15 +7,21 @@ pub(super) fn system_time_ms(time: SystemTime) -> Option<u128> {
     time.duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis())
 }
 
-pub(super) fn portal_timestamp_id(prefix: &str) -> String {
+pub(super) fn portal_unique_id(prefix: &str) -> String {
     let millis = system_time_ms(SystemTime::now()).unwrap_or_default();
-    format!("{prefix}-{millis}")
+    format!("{prefix}-{millis}-{}", uuid::Uuid::now_v7().simple())
+}
+
+pub(super) fn portal_now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
 pub(super) fn date_ms(value: &str) -> Option<u64> {
     let parsed =
         time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()?;
-    Some(parsed.unix_timestamp_nanos() as u64 / 1_000_000)
+    u64::try_from(parsed.unix_timestamp_nanos() / 1_000_000).ok()
 }
 
 pub(super) fn compact_metadata(metadata: &BTreeMap<String, serde_json::Value>) -> String {
@@ -119,7 +125,10 @@ pub(super) fn string_array_value(
 pub(super) fn span_kind_totals(spans: &[PortalSpan]) -> Vec<(String, u64)> {
     let mut totals = HashMap::<String, u64>::new();
     for span in spans {
-        *totals.entry(span.kind.clone()).or_default() += span.duration_ms;
+        totals
+            .entry(span.kind.clone())
+            .and_modify(|total| *total = total.saturating_add(span.duration_ms))
+            .or_insert(span.duration_ms);
     }
     let mut values = totals.into_iter().collect::<Vec<_>>();
     values.sort_by_key(|entry| std::cmp::Reverse(entry.1));
@@ -140,7 +149,7 @@ pub(super) fn owning_stage<'a>(
     let mut cursor = 0u64;
     for (stage, duration) in offsets {
         let start = cursor;
-        let end = cursor + duration;
+        let end = cursor.saturating_add(duration);
         if span.start_ms >= start && span.end_ms <= end {
             return Some(stage);
         }
@@ -156,10 +165,13 @@ pub(super) fn preview_text(text: &str) -> String {
         .find(|line| !line.trim().is_empty())
         .unwrap_or("")
         .trim();
-    if line.len() > 180 {
-        format!("{}...", &line[..180])
+    const MAX_PREVIEW_CHARS: usize = 180;
+    let mut chars = line.chars();
+    let preview = chars.by_ref().take(MAX_PREVIEW_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{preview}...")
     } else {
-        line.to_string()
+        preview
     }
 }
 

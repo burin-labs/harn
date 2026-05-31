@@ -8,10 +8,8 @@
 //! it back with `git apply`, or discard it.
 //!
 //! Only the surface that stdlib `fs.*` builtins exercise is intercepted:
-//! read/write text and bytes, append, exists, remove, list, create_dir.
-//! `rename`, `copy`, and `metadata` fall through to the underlying fs
-//! (they're mostly useful only for production-style checks the testbench
-//! doesn't replace).
+//! read/write text and bytes, append, exists, remove, copy, rename, list,
+//! and create_dir. Metadata still falls through to the underlying fs.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -136,6 +134,19 @@ impl OverlayFs {
         self.write(path, &combined)
     }
 
+    pub fn copy(&self, src: &Path, dst: &Path) -> std::io::Result<u64> {
+        let bytes = self.read(src)?;
+        let len = bytes.len() as u64;
+        self.write(dst, &bytes)?;
+        Ok(len)
+    }
+
+    pub fn rename(&self, src: &Path, dst: &Path) -> std::io::Result<u64> {
+        let len = self.copy(src, dst)?;
+        self.remove_file(src)?;
+        Ok(len)
+    }
+
     pub fn exists(&self, path: &Path) -> bool {
         if !self.within_root(path) {
             return path.exists();
@@ -164,6 +175,7 @@ impl OverlayFs {
                 format!("overlay: {} already deleted", key.display()),
             )),
             _ => {
+                layer.retain(|entry_path, _| !entry_path.starts_with(&key) || entry_path == &key);
                 if underlying_present {
                     layer.insert(key, OverlayEntry::Deleted);
                 } else {
@@ -180,7 +192,25 @@ impl OverlayFs {
         }
         let key = self.key(path);
         let mut layer = self.layer.lock().expect("overlay layer poisoned");
-        layer.insert(key, OverlayEntry::Directory);
+        if key == self.root {
+            layer.insert(key, OverlayEntry::Directory);
+            return Ok(());
+        }
+        let relative = key.strip_prefix(&self.root).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "overlay: {} is outside {}",
+                    key.display(),
+                    self.root.display()
+                ),
+            )
+        })?;
+        let mut current = self.root.clone();
+        for component in relative.components() {
+            current.push(component.as_os_str());
+            layer.insert(current.clone(), OverlayEntry::Directory);
+        }
         Ok(())
     }
 
@@ -198,8 +228,33 @@ impl OverlayFs {
             return Ok(entries);
         }
         let dir_key = self.key(path);
+        let virtual_dir_exists;
+        {
+            let layer = self.layer.lock().expect("overlay layer poisoned");
+            match layer.get(&dir_key) {
+                Some(OverlayEntry::Deleted) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("overlay: {} was deleted", dir_key.display()),
+                    ));
+                }
+                Some(OverlayEntry::File(_)) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotADirectory,
+                        format!("overlay: {} is a file", dir_key.display()),
+                    ));
+                }
+                Some(OverlayEntry::Directory) => {
+                    virtual_dir_exists = true;
+                }
+                None => {
+                    virtual_dir_exists = false;
+                }
+            }
+        }
+        let disk_dir_exists = path.exists();
         let mut entries: BTreeMap<PathBuf, OverlayDirEntry> = BTreeMap::new();
-        if path.exists() {
+        if disk_dir_exists {
             for entry in std::fs::read_dir(path)? {
                 let entry = entry?;
                 let p = entry.path();
@@ -243,6 +298,12 @@ impl OverlayFs {
                     entries.remove(key);
                 }
             }
+        }
+        if entries.is_empty() && !disk_dir_exists && !virtual_dir_exists {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("overlay: {} was not found", dir_key.display()),
+            ));
         }
         Ok(entries.into_values().collect())
     }
@@ -529,6 +590,65 @@ pub mod helpers {
         result
     }
 
+    pub fn copy(src: &Path, dst: &Path) -> std::io::Result<u64> {
+        match active_overlay() {
+            Some(overlay) => {
+                let result = overlay.copy(src, dst);
+                if let Ok(bytes) = overlay.read(src) {
+                    record_file_read(src, &bytes);
+                    if result.is_ok() {
+                        record_file_write(dst, &bytes);
+                    }
+                }
+                result
+            }
+            None => {
+                let copied = std::fs::copy(src, dst)?;
+                if tape::active_recorder().is_some() {
+                    let bytes = std::fs::read(dst)?;
+                    record_file_read(src, &bytes);
+                    record_file_write(dst, &bytes);
+                }
+                Ok(copied)
+            }
+        }
+    }
+
+    pub fn rename(src: &Path, dst: &Path) -> std::io::Result<u64> {
+        match active_overlay() {
+            Some(overlay) => {
+                let bytes_for_record = overlay.read(src).ok();
+                let result = overlay.rename(src, dst);
+                if result.is_ok() {
+                    if let Some(bytes) = bytes_for_record.as_deref() {
+                        record_file_read(src, bytes);
+                        record_file_write(dst, bytes);
+                        record_file_delete(src);
+                    }
+                }
+                result
+            }
+            None => {
+                let bytes = tape::active_recorder()
+                    .is_some()
+                    .then(|| std::fs::read(src))
+                    .transpose()?;
+                let len = bytes
+                    .as_ref()
+                    .map(|bytes| bytes.len() as u64)
+                    .or_else(|| std::fs::metadata(src).ok().map(|metadata| metadata.len()))
+                    .unwrap_or(0);
+                std::fs::rename(src, dst)?;
+                if let Some(bytes) = bytes.as_deref() {
+                    record_file_read(src, bytes);
+                    record_file_write(dst, bytes);
+                    record_file_delete(src);
+                }
+                Ok(len)
+            }
+        }
+    }
+
     pub fn exists(path: &Path) -> bool {
         match active_overlay() {
             Some(overlay) => overlay.exists(path),
@@ -619,6 +739,58 @@ mod tests {
         let diff = overlay.diff();
         assert_eq!(diff.len(), 1);
         assert!(matches!(diff[0].kind, DiffKind::Deleted));
+    }
+
+    #[test]
+    fn delete_masks_underlying_directory_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("doomed");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("secret.txt"), "x").unwrap();
+        let overlay = OverlayFs::rooted_at(dir.path());
+
+        overlay.remove_file(&nested).unwrap();
+
+        assert!(!overlay.exists(&nested));
+        assert_eq!(
+            overlay.read_dir(&nested).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert!(nested.join("secret.txt").exists());
+    }
+
+    #[test]
+    fn recursive_mkdir_creates_visible_overlay_ancestors() {
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = OverlayFs::rooted_at(dir.path());
+        overlay
+            .create_dir_all(&dir.path().join("alpha/beta/gamma"))
+            .unwrap();
+
+        let root_entries = overlay.read_dir(&dir.path().join("alpha")).unwrap();
+        assert_eq!(root_entries.len(), 1);
+        assert_eq!(
+            root_entries[0]
+                .path
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("beta")
+        );
+        assert!(root_entries[0].is_dir);
+    }
+
+    #[test]
+    fn read_dir_reports_missing_empty_overlay_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = OverlayFs::rooted_at(dir.path());
+
+        assert_eq!(
+            overlay
+                .read_dir(&dir.path().join("missing"))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
     }
 
     #[test]
