@@ -207,11 +207,19 @@ jobs:
     needs: setup
     if: needs.setup.outputs.should_build_binaries == 'true'
     runs-on: ${{ matrix.os }}
+    # Avoid GitHub's multi-hour default timeout for release artifacts. Native
+    # macOS x86_64 is the slowest leg; if it cannot finish inside this budget,
+    # fail loudly so the release queue does not burn hours silently.
+    timeout-minutes: 150
     strategy:
+      fail-fast: true
       matrix:
         include:
           - target: x86_64-apple-darwin
-            os: macos-latest
+            # Build Intel artifacts on Intel hardware. Cross-building this leg
+            # on arm64 `macos-latest` repeatedly left sccache/rustc orphaned and
+            # pushed the build past 85 minutes.
+            os: macos-15-intel
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
@@ -255,6 +263,11 @@ jobs:
       # workflow_dispatch restore) keeps the per-repo 10 GB cache budget
       # focused on the entries we can actually read back.
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        # Cache restore/save is a release latency optimization, not a release
+        # precondition. The Windows cache backend has had transient misses and
+        # auth/setup failures before the build step; fall back to a cold build
+        # instead of fail-fast cancelling every artifact leg.
+        continue-on-error: true
         with:
           shared-key: release-${{ matrix.target }}
           cache-on-failure: true
@@ -275,6 +288,7 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build
+        timeout-minutes: 90
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # Scope the compile-time optimization tradeoff to release CI only.
@@ -289,6 +303,7 @@ jobs:
       # which is silent once the binary is notarized.
       - name: Apple sign + notarize (macOS)
         if: runner.os == 'macOS' && needs.setup.outputs.is_release == 'true'
+        timeout-minutes: 45
         env:
           APPLE_DEVELOPER_ID_CERT_P12: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
           APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
