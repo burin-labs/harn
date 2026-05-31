@@ -3,6 +3,87 @@ use super::{
     sample_tool_registry, validate_tool_args,
 };
 
+// Regression: text/bare-mode models (OpenRouter `qwen/qwen3-coder`) wrap
+// their bare `name({ ... })` calls in `<tool_call>...</tool_call>` tags
+// unpredictably even when the prompt asks for bare calls. Before the fix a
+// same-line wrapper hid the call entirely (`tool_calls: []`) and a trailing
+// `</tool_call>` leaked into the visible prose as a `_call>` fragment.
+#[test]
+fn bare_parser_executes_same_line_tool_call_wrapper() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>run({ command: \"cargo test\" })</tool_call>";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "wrapped call must execute (violations: {:?}, errors: {:?})",
+        result.violations,
+        result.errors
+    );
+    assert_eq!(result.calls[0]["name"], "run");
+    assert_eq!(
+        result.calls[0]["arguments"]["command"], "cargo test",
+        "inner call args preserved"
+    );
+    assert!(result.errors.is_empty(), "no errors: {:?}", result.errors);
+    assert!(
+        !result.prose.contains("tool_call"),
+        "wrapper must not leak into prose: {:?}",
+        result.prose
+    );
+}
+
+#[test]
+fn bare_parser_strips_multiline_tool_call_wrapper_and_trailing_fragment() {
+    let tools = sample_tool_registry();
+    // Wrapper across its own lines, plus leading prose. This is the exact
+    // qwen3-coder shape from the failing transcript.
+    let text = "I'll find the file.\n<tool_call>\nrun({ command: \"cargo test\" })\n</tool_call>";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["name"], "run");
+    assert_eq!(result.prose, "I'll find the file.");
+    assert!(
+        !result.prose.contains("_call>") && !result.prose.contains("tool_call"),
+        "wrapper fragments must not leak: {:?}",
+        result.prose
+    );
+
+    // A bare call with only a trailing `</tool_call>` fragment (model forgot
+    // the open tag). The fragment must not survive into prose.
+    let text = "run({ command: \"cargo test\" })\n</tool_call>";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1);
+    assert!(
+        result.prose.trim().is_empty(),
+        "trailing fragment must not leak: {:?}",
+        result.prose
+    );
+}
+
+// End-to-end through the tagged protocol the runtime actually uses: a
+// `<tool_call>`-wrapped call executes with no protocol violation and clean
+// visible text, regardless of which protocol the prompt selected.
+#[test]
+fn tagged_parser_executes_tool_call_wrapper_cleanly() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\nrun({ command: \"cargo test\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "violations: {:?}", result.violations);
+    assert_eq!(result.calls[0]["name"], "run");
+    assert!(
+        result.violations.is_empty(),
+        "no violation for a properly wrapped call: {:?}",
+        result.violations
+    );
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert!(
+        !result.prose.contains("tool_call"),
+        "no wrapper leak: {:?}",
+        result.prose
+    );
+}
+
 #[test]
 fn validate_tool_args_reports_missing_required_params() {
     let tools = sample_tool_registry();

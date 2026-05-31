@@ -437,6 +437,32 @@ fn session_status_indicates_error(final_status: &str) -> bool {
     )
 }
 
+/// Detect a model-less agent turn: the loop finalized a *completed* turn
+/// (empty status or `done`) but never actually called the provider. We
+/// treat "no iterations AND no tokens recorded for this session" as the
+/// signal, since any real provider round-trip increments iterations and
+/// records token usage.
+///
+/// Only the success-completion statuses qualify. Intentional non-terminal
+/// states — `suspended`, `blocked`, `paused`, `cancelled`, waitpoints — and
+/// already-errored turns legitimately finalize with zero iterations and must
+/// be left alone; otherwise we would turn an intentional pause into a
+/// spurious failure.
+fn agent_turn_made_no_llm_call(
+    final_status: &str,
+    has_terminal_error: bool,
+    iterations: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+) -> bool {
+    let is_success_completion = final_status.is_empty() || final_status == "done";
+    !has_terminal_error
+        && is_success_completion
+        && iterations == 0
+        && input_tokens == 0
+        && output_tokens == 0
+}
+
 fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) -> VmValue {
     let transcript_json = crate::agent_sessions::transcript(session_id)
         .as_ref()
@@ -514,9 +540,10 @@ async fn host_agent_session_finalize(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| VmError::Runtime(format!("{HOST_SESSION_FINALIZE}: missing session_id")))?;
     let status_dict = opts_dict(args.get(1));
-    let final_status = opt_str(&status_dict, "final_status").unwrap_or_default();
-    let stop_reason = opt_str(&status_dict, "stop_reason").unwrap_or_default();
-    let terminal_error = opt_json(&status_dict, "error");
+    let mut final_status = opt_str(&status_dict, "final_status").unwrap_or_default();
+    let mut stop_reason = opt_str(&status_dict, "stop_reason").unwrap_or_default();
+    let mut terminal_error = opt_json(&status_dict, "error");
+    let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
 
     let session = AGENT_HOST_SESSIONS
         .with(|sessions| sessions.borrow_mut().remove(&session_id))
@@ -529,6 +556,34 @@ async fn host_agent_session_finalize(
     crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
     if session.pushed_transcript_dir {
         super::agent_observe::pop_llm_transcript_dir();
+    }
+
+    // Fail loud on a model-less turn. If the loop finalized a non-error,
+    // success-shaped result but never actually called the provider (zero
+    // iterations and zero input/output tokens recorded for this session),
+    // the turn silently short-circuited — typically because no model
+    // resolved or the input was empty. Returning success-with-empty-text
+    // here masks a configuration failure and costs hours of forensics, so
+    // promote it to a terminal error that flows through the normal
+    // SessionError path below.
+    if agent_turn_made_no_llm_call(
+        &final_status,
+        terminal_error.is_some(),
+        iterations,
+        session.input_tokens,
+        session.output_tokens,
+    ) {
+        terminal_error = Some(serde_json::json!({
+            "category": "no_llm_call",
+            "message": "agent turn made no LLM call: no model resolved / empty input. \
+                        The agent loop completed without ever calling the provider \
+                        (0 iterations, 0 tokens). Check that a model is configured and \
+                        the prompt is non-empty.",
+        }));
+        final_status = "error".to_string();
+        if stop_reason.is_empty() {
+            stop_reason = "no_llm_call".to_string();
+        }
     }
 
     let canonical_status = if final_status.is_empty() {
@@ -587,7 +642,6 @@ async fn host_agent_session_finalize(
     // the active map so hooks observe a fully-quiesced session.
     super::agent_runtime::fire_session_end_hooks(&session_id);
 
-    let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or(session.tool_mode);
     let acp_stop_reason = canonical_acp_stop_reason(
         &final_status,
@@ -2815,11 +2869,31 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        assistant_message_from_llm_result, canonical_acp_stop_reason,
+        agent_turn_made_no_llm_call, assistant_message_from_llm_result, canonical_acp_stop_reason,
         canonical_provider_stop_reason, initial_user_content, last_assistant_text,
         tool_result_message_for_provider, vm_to_json,
     };
     use std::collections::BTreeMap;
+
+    #[test]
+    fn model_less_turn_is_flagged_as_no_llm_call() {
+        // Zero iterations + zero tokens + non-error status = silent
+        // short-circuit. This is the model-less turn we must fail loud on.
+        assert!(agent_turn_made_no_llm_call("", false, 0, 0, 0));
+        assert!(agent_turn_made_no_llm_call("done", false, 0, 0, 0));
+    }
+
+    #[test]
+    fn real_turn_is_not_flagged_as_no_llm_call() {
+        // Any real provider round-trip records iterations and/or tokens.
+        assert!(!agent_turn_made_no_llm_call("done", false, 1, 0, 0));
+        assert!(!agent_turn_made_no_llm_call("done", false, 0, 12, 0));
+        assert!(!agent_turn_made_no_llm_call("done", false, 0, 0, 34));
+        // Already-errored or terminal-error turns are left as-is.
+        assert!(!agent_turn_made_no_llm_call("error", false, 0, 0, 0));
+        assert!(!agent_turn_made_no_llm_call("failed", false, 0, 0, 0));
+        assert!(!agent_turn_made_no_llm_call("", true, 0, 0, 0));
+    }
 
     #[test]
     fn native_tool_calls_replay_with_openai_wire_shape() {

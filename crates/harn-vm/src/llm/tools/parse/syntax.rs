@@ -25,6 +25,45 @@ pub(super) fn strip_thinking_tags(text: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(result)
 }
 
+/// Strip `<tool_call>`/`</tool_call>` (and the compact `<toolcall>` spelling)
+/// wrapper tags from a bare-mode body, replacing each with a newline.
+///
+/// Text-format models emit these wrappers unpredictably even when the prompt
+/// asks for bare `name({ ... })` calls (OpenRouter `qwen/qwen3-coder` does this
+/// on most turns). Without stripping, two failures occur in the bare scanner:
+///   1. `<tool_call>run({...})</tool_call>` on one line hides the call —
+///      `run(` is not at a line start, so the scanner never recognizes it and
+///      the whole turn comes back with zero tool calls.
+///   2. A trailing `</tool_call>` (or leading `<tool_call>`) on its own line is
+///      not a call, so it leaks into the visible prose as a `</tool_call>` /
+///      `_call>` fragment.
+///
+/// Replacing each tag token with `\n` fixes both: the inner call lands at a
+/// line start and the wrapper bytes never reach `prose`. Returns a borrowed
+/// `Cow` unchanged when no wrapper tags are present.
+pub(super) fn strip_tool_call_wrappers(text: &str) -> std::borrow::Cow<'_, str> {
+    use super::super::{
+        TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN,
+        TEXT_TOOL_CALL_OPEN_COMPACT,
+    };
+    const TAGS: [&str; 4] = [
+        TEXT_TOOL_CALL_OPEN,
+        TEXT_TOOL_CALL_CLOSE,
+        TEXT_TOOL_CALL_OPEN_COMPACT,
+        TEXT_TOOL_CALL_CLOSE_COMPACT,
+    ];
+    if !TAGS.iter().any(|tag| text.contains(tag)) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut result = text.to_string();
+    for tag in TAGS {
+        if result.contains(tag) {
+            result = result.replace(tag, "\n");
+        }
+    }
+    std::borrow::Cow::Owned(result)
+}
+
 /// Match a balanced `<tag>...</tag>` block starting at `start` in `src`.
 /// Returns `(body_slice, end_cursor)` on success. Does not support nested
 /// same-name tags — not needed for this grammar and attempting to support
