@@ -108,6 +108,7 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 |---|---|---|---|
 | `provider` | string | `"anthropic"` | Any configured provider. Built-in names include `"anthropic"`, `"openai"`, `"openrouter"`, `"huggingface"`, `"ollama"`, `"gemini"`, and `"local"` |
 | `model` | string | varies by provider | Model identifier |
+| `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal provider/model/routing resolution. Explicit call options win. The `merge`/`fast_apply` roles also read `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
 | `max_tokens` | int | `16384` | Maximum tokens in the response |
 | `temperature` | float | provider default | Sampling temperature (0.0-2.0) |
 | `top_p` | float | nil | Nucleus sampling |
@@ -158,6 +159,21 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 The `cache` option above enables provider-side prompt caching when a provider
 supports it. It does not memoize full LLM responses. For Harn-owned response
 caching, import `with_cache` from `std/llm/handlers`:
+
+Model roles are ordinary option defaults, so they compose with the
+existing routing layer instead of bypassing it:
+
+```toml
+[model_roles.merge]
+provider = "ollama"
+model = "qwen3.6-coding"
+temperature = 0.0
+route_policy = "manual"
+```
+
+```harn
+let merged = llm_call(prompt, sys, {model_role: "merge", output_schema: schema})
+```
 
 ```harn
 import { with_cache } from "std/llm/handlers"

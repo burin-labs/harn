@@ -754,6 +754,53 @@ fn apply_active_step_defaults(options: &mut Option<BTreeMap<String, VmValue>>) {
     }
 }
 
+fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
+    match value {
+        toml::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
+        toml::Value::Integer(i) => VmValue::Int(*i),
+        toml::Value::Float(f) => VmValue::Float(*f),
+        toml::Value::Boolean(b) => VmValue::Bool(*b),
+        toml::Value::Datetime(dt) => VmValue::String(std::sync::Arc::from(dt.to_string())),
+        toml::Value::Array(items) => VmValue::List(std::sync::Arc::new(
+            items.iter().map(toml_value_to_vm_value).collect(),
+        )),
+        toml::Value::Table(table) => VmValue::Dict(std::sync::Arc::new(
+            table
+                .iter()
+                .map(|(key, value)| (key.clone(), toml_value_to_vm_value(value)))
+                .collect(),
+        )),
+    }
+}
+
+fn model_role_option(options: &Option<BTreeMap<String, VmValue>>) -> Option<String> {
+    options
+        .as_ref()
+        .and_then(|opts| opts.get("model_role").or_else(|| opts.get("role")))
+        .filter(|value| !matches!(value, VmValue::Nil | VmValue::Bool(false)))
+        .map(VmValue::display)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_model_role_defaults(options: &mut Option<BTreeMap<String, VmValue>>) {
+    let Some(role) = model_role_option(options) else {
+        return;
+    };
+    let defaults = crate::llm_config::model_role_defaults(&role);
+    if defaults.is_empty() {
+        return;
+    }
+    let opts = options.get_or_insert_with(BTreeMap::new);
+    for (key, value) in defaults {
+        if key == "model_role" || key == "role" {
+            continue;
+        }
+        opts.entry(key)
+            .or_insert_with(|| toml_value_to_vm_value(&value));
+    }
+}
+
 #[derive(Clone, Copy)]
 enum SystemPromptPosition {
     Before,
@@ -1452,6 +1499,7 @@ pub(crate) fn extract_llm_options(
     // and budget. The persona body stays free of "if step == X use
     // cheap model" branching.
     let mut options = options;
+    apply_model_role_defaults(&mut options);
     apply_active_step_defaults(&mut options);
 
     let routing_policy = crate::llm::routing::extract_routing_policy(options.as_ref())?;
@@ -3093,6 +3141,221 @@ mod routing_tests {
             VmValue::Nil,
             VmValue::Dict(std::sync::Arc::new(opts)),
         ])
+    }
+
+    fn model_role_options(role: &str) -> BTreeMap<String, VmValue> {
+        BTreeMap::from([(
+            "model_role".to_string(),
+            VmValue::String(std::sync::Arc::from(role.to_string())),
+        )])
+    }
+
+    fn clear_merge_role_env() {
+        std::env::remove_var("HARN_LLM_MERGE_PROVIDER");
+        std::env::remove_var("HARN_LLM_MERGE_MODEL");
+        std::env::remove_var("HARN_LLM_MERGE_ROUTE_POLICY");
+        std::env::remove_var("HARN_LLM_ROLE_MERGE_PROVIDER");
+        std::env::remove_var("HARN_LLM_ROLE_MERGE_MODEL");
+        std::env::remove_var("HARN_LLM_ROLE_MERGE_ROUTE_POLICY");
+        std::env::remove_var("HARN_LLM_FAST_APPLY_PROVIDER");
+        std::env::remove_var("HARN_LLM_FAST_APPLY_MODEL");
+        std::env::remove_var("HARN_LLM_FAST_APPLY_ROUTE_POLICY");
+        std::env::remove_var("HARN_LLM_ROLE_FAST_APPLY_PROVIDER");
+        std::env::remove_var("HARN_LLM_ROLE_FAST_APPLY_MODEL");
+        std::env::remove_var("HARN_LLM_ROLE_FAST_APPLY_ROUTE_POLICY");
+    }
+
+    #[test]
+    fn model_role_defaults_fill_missing_llm_options() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        clear_merge_role_env();
+        let mut overlay = ProvidersConfig::default();
+        overlay.model_roles.insert(
+            "merge".to_string(),
+            BTreeMap::from([
+                (
+                    "provider".to_string(),
+                    toml::Value::String("mock".to_string()),
+                ),
+                (
+                    "model".to_string(),
+                    toml::Value::String("mock-merge".to_string()),
+                ),
+                ("max_tokens".to_string(), toml::Value::Integer(4096)),
+                ("temperature".to_string(), toml::Value::Float(0.0)),
+            ]),
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+        super::super::reset_provider_key_cache();
+
+        let opts = extract_with_options(model_role_options("merge")).expect("options");
+
+        assert_eq!(opts.provider, "mock");
+        assert_eq!(opts.model, "mock-merge");
+        assert_eq!(opts.max_tokens, 4096);
+        assert_eq!(opts.temperature, Some(0.0));
+
+        crate::llm_config::clear_user_overrides();
+        clear_merge_role_env();
+        super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn explicit_options_win_over_model_role_defaults() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        clear_merge_role_env();
+        let mut overlay = ProvidersConfig::default();
+        overlay.model_roles.insert(
+            "merge".to_string(),
+            BTreeMap::from([
+                (
+                    "provider".to_string(),
+                    toml::Value::String("mock".to_string()),
+                ),
+                (
+                    "model".to_string(),
+                    toml::Value::String("mock-merge".to_string()),
+                ),
+                ("max_tokens".to_string(), toml::Value::Integer(4096)),
+            ]),
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+        super::super::reset_provider_key_cache();
+
+        let mut options = model_role_options("merge");
+        options.insert(
+            "model".to_string(),
+            VmValue::String(std::sync::Arc::from("mock-explicit".to_string())),
+        );
+        options.insert("max_tokens".to_string(), VmValue::Int(512));
+        let opts = extract_with_options(options).expect("options");
+
+        assert_eq!(opts.provider, "mock");
+        assert_eq!(opts.model, "mock-explicit");
+        assert_eq!(opts.max_tokens, 512);
+
+        crate::llm_config::clear_user_overrides();
+        clear_merge_role_env();
+        super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn merge_model_role_has_env_overrides() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        crate::llm_config::clear_user_overrides();
+        clear_merge_role_env();
+        std::env::set_var("HARN_LLM_MERGE_PROVIDER", "mock");
+        std::env::set_var("HARN_LLM_MERGE_MODEL", "mock-env-merge");
+        super::super::reset_provider_key_cache();
+
+        let opts = extract_with_options(model_role_options("merge")).expect("options");
+
+        assert_eq!(opts.provider, "mock");
+        assert_eq!(opts.model, "mock-env-merge");
+
+        clear_merge_role_env();
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn model_role_aliases_do_not_override_exact_role_defaults() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        clear_merge_role_env();
+        let mut overlay = ProvidersConfig::default();
+        overlay.model_roles.insert(
+            "fast_apply".to_string(),
+            BTreeMap::from([
+                (
+                    "provider".to_string(),
+                    toml::Value::String("mock".to_string()),
+                ),
+                (
+                    "model".to_string(),
+                    toml::Value::String("mock-fast-apply".to_string()),
+                ),
+            ]),
+        );
+        overlay.model_roles.insert(
+            "merge".to_string(),
+            BTreeMap::from([
+                (
+                    "provider".to_string(),
+                    toml::Value::String("mock".to_string()),
+                ),
+                (
+                    "model".to_string(),
+                    toml::Value::String("mock-merge".to_string()),
+                ),
+            ]),
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+        super::super::reset_provider_key_cache();
+
+        let merge_opts = extract_with_options(model_role_options("merge")).expect("merge options");
+        let fast_apply_opts =
+            extract_with_options(model_role_options("fast_apply")).expect("fast_apply options");
+
+        assert_eq!(merge_opts.model, "mock-merge");
+        assert_eq!(fast_apply_opts.model, "mock-fast-apply");
+
+        crate::llm_config::clear_user_overrides();
+        clear_merge_role_env();
+        super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn model_role_env_aliases_do_not_override_exact_role_env() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        crate::llm_config::clear_user_overrides();
+        clear_merge_role_env();
+        std::env::set_var("HARN_LLM_FAST_APPLY_PROVIDER", "mock");
+        std::env::set_var("HARN_LLM_FAST_APPLY_MODEL", "mock-env-fast-apply");
+        std::env::set_var("HARN_LLM_MERGE_PROVIDER", "mock");
+        std::env::set_var("HARN_LLM_MERGE_MODEL", "mock-env-merge");
+        super::super::reset_provider_key_cache();
+
+        let merge_opts = extract_with_options(model_role_options("merge")).expect("merge options");
+        let fast_apply_opts =
+            extract_with_options(model_role_options("fast_apply")).expect("fast_apply options");
+
+        assert_eq!(merge_opts.model, "mock-env-merge");
+        assert_eq!(fast_apply_opts.model, "mock-env-fast-apply");
+
+        clear_merge_role_env();
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+    }
+
+    #[test]
+    fn model_role_config_keys_normalize_like_call_options() {
+        let _guard = crate::llm::env_lock().lock().unwrap();
+        clear_merge_role_env();
+        let mut overlay = ProvidersConfig::default();
+        overlay.model_roles.insert(
+            "fast-apply".to_string(),
+            BTreeMap::from([
+                (
+                    "provider".to_string(),
+                    toml::Value::String("mock".to_string()),
+                ),
+                (
+                    "model".to_string(),
+                    toml::Value::String("mock-fast-apply".to_string()),
+                ),
+            ]),
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+        super::super::reset_provider_key_cache();
+
+        let opts = extract_with_options(model_role_options("fast_apply")).expect("options");
+
+        assert_eq!(opts.provider, "mock");
+        assert_eq!(opts.model, "mock-fast-apply");
+
+        crate::llm_config::clear_user_overrides();
+        clear_merge_role_env();
+        super::super::reset_provider_key_cache();
     }
 
     fn fast_options(model: &str) -> BTreeMap<String, VmValue> {
