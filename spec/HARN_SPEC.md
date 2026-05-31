@@ -2092,13 +2092,15 @@ runnable patterns live in `docs/src/cookbooks/channels.md`.
 
 ### Agent pools
 
-Agent pools (epic #1883) are named, concurrency-bounded thread pools
+Agent pools (epic #1883) are named, concurrency-bounded worker pools
 for agent work. They sit between `parallel each ... with {
 max_concurrent: N }` (a local, call-site bound) and host worker tiers
 (a deployment-time bound), filling the "many independent submitters
 share one budget" gap. Pools are exposed through `std/lifecycle/pool`
 and the host-call group registered at
-`crates/harn-vm/src/stdlib/pool.rs`.
+`crates/harn-vm/src/stdlib/pool/mod.rs`. On a multi-thread Tokio runtime,
+pool workers run as `tokio::spawn`ed child-VM isolates that inherit the VM's
+pool registry handle and move `Send` VM values across the worker boundary.
 
 #### `Pool`
 
@@ -2120,9 +2122,10 @@ PoolScope ::= "session" | "pipeline" | "tenant" | "org"
 
 `pool_create(options?)` allocates a handle; `pool_get(name_or_id)`
 returns an existing one or `nil`; `pool_list()` enumerates the
-runtime registry. Re-creating the same `(scope, scope_id, name)` is
-idempotent and returns the existing handle, so reload across process
-restart binds to the same id.
+runtime registry. Names are unique within a live VM registry, so
+callers use `pool_get` to reuse an existing pool. Pipeline-scope pools
+use a deterministic `(scope, scope_id, name)` id so re-creating the pool
+after process restart binds to the persisted state.
 
 #### `PoolTaskHandle`
 
@@ -2208,16 +2211,18 @@ sees a task handle whose terminal snapshot is
 
 | Scope | Storage | Survives | Notes |
 |---|---|---|---|
-| `session` | In-memory thread-local registry. | Process lifetime. | Default. Zero I/O. |
-| `pipeline` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Pending queue + in-flight task metadata reload on next `pool_create({scope: "pipeline", ...})`. |
-| `tenant`, `org` | Host-routed (harn-cloud, [#306][harn-cloud-306]). | Tenant / org lifetime. | Currently rejected with a `host-routed (harn-cloud) — not wired` diagnostic. |
+| `session` | VM-scoped in-memory registry. | VM/session lifetime. | Default. Zero I/O. |
+| `pipeline` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Terminal and stale task metadata reload on next `pool_create({scope: "pipeline", ...})`. |
+| `tenant`, `org` | Host-managed registry. | Tenant / org lifetime. | Currently rejected by the in-process runtime unless an embedding host implements tenant/org pool routing. |
 
-[harn-cloud-306]: https://github.com/burin-labs/harn-cloud/issues/306
-
-On pipeline-scope reload, any `Running` task whose `heartbeat_at_ms`
-is older than `stale_after_ms` (default 30000 ms; configurable via
-`opts.stale_after_ms`) is re-enqueued at the head of its partition.
-The store compacts opportunistically when
+On pipeline-scope reload, persisted `Queued` or `Running` task records
+are restored as failed stale markers because the in-memory closure body
+cannot be reconstructed after process death. Callers that need retry
+semantics resubmit with an `idempotency_key`; the stale marker preserves
+the audit trail and allows the fresh submit to execute as a new task.
+`stale_after_ms` (default 30000 ms; configurable via
+`opts.stale_after_ms`) is retained as the freshness knob for future host
+backends. The store compacts opportunistically when
 `max_concurrent + |queue| + |terminal-since-compaction|` exceeds an
 internal threshold. `pool_simulate_restart()` drops the in-process
 registry without touching disk and is the conformance affordance for
@@ -2260,12 +2265,11 @@ Pool activity is published on one EventLog topic:
 
 | Topic | Records |
 |---|---|
-| `lifecycle.pool.audit` | `pool_create`, `pool_submit`, `pool_dispatch`, `pool_complete`, `pool_drop` |
+| `lifecycle.pool.audit` | `pool_submit`, `pool_dequeue`, `pool_drop` |
 
 Every submit opens an OTel `pool.submit <pool_name>` span; every
-dispatch opens `pool.dispatch <pool_name>` and links back to the
-submit span via `set_span_link` (#1858) so async-boundary traces
-remain stitched.
+dequeue opens `pool.dequeue <pool_name>` and links back to the
+submit span so async-boundary traces remain stitched.
 
 Pool tasks surface in pipeline lifecycle drains:
 `harness.unsettled_state().pool_pending_tasks` lists tasks blocking

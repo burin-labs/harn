@@ -1,11 +1,10 @@
-//! Named agent thread pools (PL-01/PL-03/PL-05).
+//! Named agent worker pools.
 //!
-//! Foundation for the agent pool epic (#1883). Provides a VM-scoped
-//! registry of named pools that bound the number of concurrent Harn
-//! closure executions and queue excess submissions. Queue strategy ships
-//! here, with bounded backpressure policies layered on the single submit
-//! path. PL-05 (#1890) adds durability backends so pipeline-scope pools
-//! survive process restart with stale-in-flight detection.
+//! Provides a VM-scoped registry of named pools that bound the number of
+//! concurrent Harn closure executions and queue excess submissions. Queue
+//! strategies, bounded backpressure, and pipeline-scope durability all flow
+//! through the single submit path so trigger, agent, and direct-submit callers
+//! observe the same scheduling rules.
 //!
 //! Scope conventions follow the channel scope contract (CH-01 / CH-03):
 //!
@@ -13,10 +12,9 @@
 //! * `scope: "pipeline"` — file-backed JSONL store under `.harn/pools/`,
 //!   keyed by pipeline id + pool name so reload across process restart
 //!   reuses the same persistent state.
-//! * `scope: "tenant"` / `scope: "org"` — host-routed (harn-cloud, see
-//!   harn-cloud#306). Accepted at the API level so user code is portable;
-//!   today they fail with a clear "host-routed (harn-cloud) — not
-//!   wired" diagnostic until the host capability ships.
+//! * `scope: "tenant"` / `scope: "org"` — host-managed scopes. Accepted at
+//!   the API level so user code is portable; today they fail with a clear
+//!   diagnostic until an embedding host wires a tenant/org pool backend.
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -163,11 +161,11 @@ struct PoolEntry {
     /// fn, backpressure). Queue strategy is evaluated by this module;
     /// later pool tickets wire the other config knobs.
     config: BTreeMap<String, VmValue>,
-    /// Durability scope (PL-05 / #1890). `Session` is in-memory only.
+    /// Durability scope. `Session` is in-memory only.
     /// `Pipeline` writes a JSONL append-log under `.harn/pools/` so the
     /// pool's pending queue + in-flight task metadata survives process
-    /// restart. `Tenant` / `Org` are reserved for harn-cloud (#306) and
-    /// today fail with a clear host-routed diagnostic.
+    /// restart. `Tenant` / `Org` are reserved for host-managed runtimes and
+    /// today fail with a clear diagnostic.
     scope: PoolScope,
     /// Scope identifier (e.g. pipeline run id). Empty for session-scoped
     /// pools because `Session` is registry-local.
@@ -254,11 +252,9 @@ enum PoolScope {
     /// File-backed JSONL store under `.harn/pools/`. Pending queue +
     /// in-flight task metadata survive process restart.
     Pipeline,
-    /// Reserved for harn-cloud (#306). Today fails with a clear
-    /// host-routed diagnostic until the host capability lands.
+    /// Reserved for host-managed runtimes until the host capability lands.
     Tenant,
-    /// Reserved for harn-cloud (#306). Today fails with a clear
-    /// host-routed diagnostic until the host capability lands.
+    /// Reserved for host-managed runtimes until the host capability lands.
     Org,
 }
 
@@ -284,10 +280,10 @@ impl PoolScope {
         }
     }
 
-    /// True for scopes the host must service (harn-cloud). At the
+    /// True for scopes that require a host-managed backing service. At the
     /// language level we still accept the keyword so user code stays
-    /// portable across runtimes, but the in-process pool registry has
-    /// no business persisting tenant/org state on its own.
+    /// portable across runtimes, but the in-process pool registry must not
+    /// invent tenant/org persistence semantics on its own.
     fn is_host_routed(self) -> bool {
         matches!(self, Self::Tenant | Self::Org)
     }
@@ -1158,9 +1154,9 @@ async fn pool_create_sync(
 
     if scope.is_host_routed() {
         return Err(VmError::Runtime(format!(
-            "pool_create: scope '{}' is host-routed (harn-cloud, see harn-cloud#306) and \
-             not wired in the in-process runtime. Use scope: \"session\" or \
-             scope: \"pipeline\" until the host capability ships",
+            "pool_create: scope '{}' is host-managed and is not wired in the \
+             in-process runtime. Use scope: \"session\" or scope: \"pipeline\", \
+             or provide a host runtime that implements tenant/org pool routing",
             scope.as_str()
         )));
     }
@@ -1181,7 +1177,7 @@ async fn pool_create_sync(
                 persisted,
             )
         }
-        PoolScope::Tenant | PoolScope::Org => unreachable!("host-routed scope returned above"),
+        PoolScope::Tenant | PoolScope::Org => unreachable!("host-managed scope returned above"),
     };
 
     // Compute the live submit counter from any persisted state so newly

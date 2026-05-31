@@ -1,6 +1,6 @@
 # Agent pools
 
-Agent pools are named, concurrency-bounded thread pools for agent work.
+Agent pools are named, concurrency-bounded worker pools for agent work.
 Use a pool when many independently-submitted tasks need to share **one**
 concurrency budget — capping how many PR-review agents run at once,
 fairly draining a per-customer queue, throttling a provider's API tier,
@@ -21,9 +21,9 @@ narrowest one that fits.
 | Goal | Use | Why |
 |---|---|---|
 | Bound concurrency at one call site | `parallel each ... with { max_concurrent: N }` | Local, no registry, lives and dies with the parallel block. |
-| Bound concurrency across many call sites in one pipeline | **Pool**, scope `"session"` | One named budget shared by every `pool.submit` in the process. No durability. |
-| Bound concurrency across pipeline runs that survive restart | **Pool**, scope `"pipeline"` | JSONL state in `.harn/pools/` survives crashes; pending tasks resume on next start. |
-| Bound concurrency across tenants/orgs (cloud) | **Pool**, scope `"tenant"` / `"org"` | Host-routed (harn-cloud, #306). Accepted at API level; today fails with a clear host-routed diagnostic. |
+| Bound concurrency across many call sites in one VM session | **Pool**, scope `"session"` | One named budget shared by every `pool.submit` using the VM's registry. No durability. |
+| Bound concurrency across pipeline runs that survive restart | **Pool**, scope `"pipeline"` | JSONL state in `.harn/pools/` survives crashes; stale tasks remain inspectable on next start. |
+| Bound concurrency across tenants/orgs | **Pool**, scope `"tenant"` / `"org"` | Host-managed. Accepted at API level; the in-process runtime rejects it unless an embedding host provides tenant/org routing. |
 | Route trigger events through a shared concurrency budget | **Pool** + `SpawnToPool` handler | One trigger per provider, one pool draining them at a fixed rate. |
 | Block on a cap inside one task | A semaphore (`std/sync`) | Pools are *task-shaped*; semaphores are *thread-shaped*. |
 
@@ -35,8 +35,8 @@ Three anti-patterns worth calling out:
 - **Pools are not durable workflows.** Pipeline-scope pools persist
   *queued* and *in-flight* state so the pool survives restart, but the
   task closures themselves are not journalled. A task killed mid-run
-  re-enqueues as a fresh attempt — at-least-once, not exactly-once.
-  Idempotent task bodies are your responsibility.
+  reloads as a failed stale marker; callers that want a retry submit
+  fresh work explicitly. Idempotent task bodies are your responsibility.
 - **Pools are not fan-out triggers.** One submit runs one closure.
   Use a `channel.emit` trigger when many subscribers should react to
   one event.
@@ -55,9 +55,10 @@ let pool = pool_create({
 })
 ```
 
-Names must be unique within a `(scope, scope_id)` pair. Re-creating
-the same `(scope, scope_id, name)` returns the existing handle (with
-the same id) so reload-after-restart is idempotent.
+Names must be unique within the live VM registry. Use `pool_get(name)`
+to reuse an existing pool in the same process. Pipeline-scope pools use
+a deterministic `(scope, scope_id, name)` id, so after a process restart
+creating the same pool binds to the persisted state.
 
 The returned handle is a dict with:
 
@@ -86,7 +87,7 @@ The returned handle is a dict with:
 | `backpressure` | dict / string | unbounded | Backpressure descriptor (see [Backpressure](#backpressure)). `nil` keeps the queue unbounded. |
 | `scope` | string | `"session"` | Durability scope: `"session"`, `"pipeline"`, `"tenant"`, or `"org"`. |
 | `pipeline_id` | string | active pipeline id | Required for `scope: "pipeline"` when not running inside a pipeline. |
-| `stale_after_ms` | int / duration | `30000` | Pipeline scope: a `Running` task with no heartbeat in this window is re-enqueued on reload. |
+| `stale_after_ms` | int / duration | `30000` | Pipeline scope: freshness knob for persisted running-task markers on reload. |
 
 `pool_get(name_or_id)` looks up an existing pool and returns `nil` when
 not found. `pool_list()` returns every pool registered in the current
@@ -97,6 +98,9 @@ runtime.
 `pool.submit(closure, options?)` enqueues a zero-arg closure. The pool
 spawns a worker the moment a slot is free; everything else queues
 according to the pool's queue strategy and backpressure policy.
+On a multi-thread Tokio runtime, those workers run as `tokio::spawn`ed
+child-VM isolates with their own execution stacks and the same VM-scoped
+pool registry handle.
 
 ```harn,ignore
 let handle = pool.submit({ ->
@@ -243,22 +247,23 @@ A pool's `scope` decides where its state lives.
 
 | Scope | State | Survives | Notes |
 |---|---|---|---|
-| `"session"` | In-memory thread-local registry. | Process lifetime. | Default. Zero I/O. |
-| `"pipeline"` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Pending queue + in-flight task metadata reload on next `pool_create({scope: "pipeline", ...})`. |
-| `"tenant"` | Host-routed (harn-cloud, [#306](https://github.com/burin-labs/harn-cloud/issues/306)). | Tenant lifetime, cross-pipeline. | Currently fails with a `host-routed (harn-cloud) — not wired` diagnostic. |
-| `"org"` | Host-routed. | Org lifetime, cross-tenant. | Currently fails with a `host-routed (harn-cloud) — not wired` diagnostic. |
+| `"session"` | VM-scoped in-memory registry. | VM/session lifetime. | Default. Zero I/O. |
+| `"pipeline"` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Terminal and stale task metadata reload on next `pool_create({scope: "pipeline", ...})`. |
+| `"tenant"` | Host-managed registry. | Tenant lifetime, cross-pipeline. | Requires an embedding host with tenant pool routing. The in-process runtime rejects it. |
+| `"org"` | Host-managed registry. | Org lifetime, cross-tenant. | Requires an embedding host with org pool routing. The in-process runtime rejects it. |
 
 ### Pipeline scope on reload
 
 When a pipeline-scope pool reloads after a restart:
 
 1. The JSONL log is replayed to reconstruct queued + in-flight tasks.
-2. Any task whose `heartbeat_at_ms` is older than `stale_after_ms`
-   (default 30s) is treated as crashed and re-enqueued at the front
-   of its partition.
+2. Any queued or running task is restored as a failed stale marker,
+   because the in-memory closure body cannot be reconstructed after
+   process death.
 3. Tasks with `idempotency_key` short-circuit on resubmit: the second
    `pool.submit(closure, {idempotency_key: "..."})` returns the
    previously recorded terminal snapshot instead of running again.
+   Submit fresh work with a new key when you want a retry attempt.
 
 The log is compacted opportunistically: when reload sees
 `max_concurrent + |queue| + |terminal-since-compaction|` exceed an
@@ -268,7 +273,7 @@ live state.
 `pool_simulate_restart()` drops the in-process registry without
 touching disk, so pipeline-scope pools can be exercised under
 conformance tests by re-calling `pool_create(...)` and asserting the
-queue rehydrates.
+stale records rehydrate.
 
 ## Idempotency
 
@@ -346,11 +351,11 @@ Pools produce one observable stream end-to-end:
 
 | Topic | Purpose | Records |
 |---|---|---|
-| `lifecycle.pool.audit` | Durable audit. Receipts for create, submit, dispatch, terminal, and drop. | `pool_create`, `pool_submit`, `pool_dispatch`, `pool_complete`, `pool_drop` |
+| `lifecycle.pool.audit` | Durable audit. Receipts for submit, dequeue, and drop. | `pool_submit`, `pool_dequeue`, `pool_drop` |
 
 OTel spans wrap every submit (`pool.submit <pool_name>`) and every
-dispatch (`pool.dispatch <pool_name>`). The dispatch span links back
-to the submit span via `set_span_link` (#1858) so traces across the
+dequeue (`pool.dequeue <pool_name>`). The dequeue span links back
+to the submit span so traces across the
 async boundary stay stitched even when the queue holds tasks for
 minutes.
 
