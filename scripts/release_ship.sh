@@ -59,7 +59,7 @@ log_step() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_ship.sh --prepare --bump patch|minor|major [--skip-audit] [--skip-dry-run]
+  ./scripts/release_ship.sh --prepare --bump patch|minor|major [--skip-audit] [--skip-dry-run]  # release_harn.harn only
   ./scripts/release_ship.sh --bump patch|minor|major [--skip-dry-run] [--base main]   # recovery
   ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--base main]
 
@@ -80,11 +80,11 @@ DEFAULT FLOW (one human PR, then bot finalizes)
   3. Run prepare-here, which audits, dry-run-publishes, bumps
      Cargo.toml/Cargo.lock, regenerates derived files, and stages
      everything ready for a single commit:
-       ./scripts/release_ship.sh --prepare --bump patch
+       harn run --no-sandbox ~/projects/harn-bump-fleet/release_harn.harn -- --mode ship-pr --agent --yes-live-release
 
-  4. Commit + push + tag + push tag + open PR. The release_harn.harn
-     harness orchestrates these in order so the tag is on origin BEFORE
-     the PR is opened:
+  4. The release_harn.harn harness commits, pushes, tags, pushes the tag,
+     and opens the PR in that order so the tag is on origin BEFORE the PR
+     is opened:
        git commit -m "Release vX.Y.Z"
        git push -u origin release/vX.Y.Z
        git tag -a vX.Y.Z -m "Release vX.Y.Z"
@@ -103,6 +103,9 @@ DEFAULT FLOW (one human PR, then bot finalizes)
 PREPARE MODE
 ==============================================================================
 
+  - Implementation detail used by release_harn.harn. Standalone prepare is
+    rejected because the tag must be pushed before the Release PR enters the
+    merge queue.
   - Runs from a non-main branch with the release content already authored.
   - Detects bump type via --bump and confirms it matches the CHANGELOG
     top entry (CHANGELOG must be at the next vX.Y.Z heading already).
@@ -181,6 +184,10 @@ ENVIRONMENT VARIABLES
     Force --finalize to re-run the full release-gate audit. Defaults
     off — merge-queue CI already proved the same gates a few minutes
     ago. Use when finalizing locally after edits.
+
+  HARN_RELEASE_HARNESS=1
+    Required for --prepare. Set by harn-bump-fleet/release_harn.harn after
+    it pins the release commit and before it pushes the vX.Y.Z tag.
 EOF
 }
 
@@ -322,6 +329,16 @@ require_release_branch() {
     echo "hint: git checkout -b release/vX.Y.Z"
     exit 1
   fi
+}
+
+require_release_harness_prepare() {
+  if [[ "${HARN_RELEASE_HARNESS:-0}" == "1" ]]; then
+    return 0
+  fi
+  echo "error: release_ship.sh --prepare is only supported through release_harn.harn"
+  echo "hint: run: harn run --no-sandbox ~/projects/harn-bump-fleet/release_harn.harn -- --mode ship-pr --agent --yes-live-release"
+  echo "hint: tag-first is mandatory; standalone prepare can open a racy Release PR without a pre-pushed tag"
+  exit 1
 }
 
 # Verify the top CHANGELOG.md heading matches the expected next version.
@@ -661,6 +678,7 @@ esac
 #   bump-pr:      clean main, opens recovery release branch
 #   finalize:     clean main with Cargo.toml ahead of latest tag
 if [[ "$MODE" == "prepare-here" ]]; then
+  require_release_harness_prepare
   require_release_branch "$BASE_BRANCH"
 elif [[ "$MODE" == "finalize" ]]; then
   require_clean_tree
