@@ -38,6 +38,7 @@
 
 pub mod annotations;
 pub mod fidelity;
+pub mod mcp_mock;
 pub mod overlay_fs;
 pub mod process_tape;
 pub mod tape;

@@ -219,6 +219,18 @@ pub enum TapeRecordKind {
         stdout_payload: TapePayload,
         stderr_payload: TapePayload,
     },
+    /// MCP JSON-RPC exchange observed by Harn's MCP client. The request
+    /// and response payloads are redacted before they are written so
+    /// cassettes and unified tapes share the same privacy boundary.
+    McpJsonRpc {
+        server: String,
+        method: String,
+        request_digest: String,
+        response_digest: String,
+        latency_ms: u64,
+        request_payload: TapePayload,
+        response_payload: TapePayload,
+    },
     /// Catch-all for record kinds emitted by a newer producer. Lets
     /// older fidelity checkers compare what they understand and flag
     /// the rest as `Unknown` divergence rather than refusing to load.
@@ -240,6 +252,7 @@ impl TapeRecordKind {
             Self::FileWrite { .. } => "file_write",
             Self::FileDelete { .. } => "file_delete",
             Self::ProcessSpawn { .. } => "process_spawn",
+            Self::McpJsonRpc { .. } => "mcp_json_rpc",
             Self::Unknown => "unknown",
         }
     }
@@ -494,6 +507,14 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
             visit(stdout_payload);
             visit(stderr_payload);
         }
+        TapeRecordKind::McpJsonRpc {
+            request_payload,
+            response_payload,
+            ..
+        } => {
+            visit(request_payload);
+            visit(response_payload);
+        }
         TapeRecordKind::ClockRead { .. }
         | TapeRecordKind::ClockSleep { .. }
         | TapeRecordKind::FileRead { .. }
@@ -615,6 +636,39 @@ pub fn install_recorder(recorder: Arc<TapeRecorder>) -> TapeRecorderGuard {
 /// untouched because nothing installs a recorder outside testbench mode.
 pub fn active_recorder() -> Option<Arc<TapeRecorder>> {
     ACTIVE_RECORDER.with(|slot| slot.borrow().clone())
+}
+
+/// Record an MCP JSON-RPC exchange in the active unified tape, if one
+/// is installed. Payloads are redacted here so every caller gets the
+/// same privacy behavior as MCP cassettes.
+pub fn record_mcp_json_rpc(
+    server: &str,
+    method: &str,
+    request: &serde_json::Value,
+    response: &serde_json::Value,
+    latency_ms: u64,
+) {
+    let Some(recorder) = active_recorder() else {
+        return;
+    };
+    let policy = crate::redact::current_policy();
+    let request = policy.redact_json(request);
+    let response = policy.redact_json(response);
+    let request_bytes = serde_json::to_vec(&request).unwrap_or_default();
+    let response_bytes = serde_json::to_vec(&response).unwrap_or_default();
+    let request_digest = content_hash(&request_bytes);
+    let response_digest = content_hash(&response_bytes);
+    let request_payload = recorder.payload_from_bytes(request_bytes);
+    let response_payload = recorder.payload_from_bytes(response_bytes);
+    recorder.record(TapeRecordKind::McpJsonRpc {
+        server: server.to_string(),
+        method: method.to_string(),
+        request_digest,
+        response_digest,
+        latency_ms,
+        request_payload,
+        response_payload,
+    });
 }
 
 /// RAII guard that temporarily changes the phase stamped onto records

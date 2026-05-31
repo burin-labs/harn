@@ -106,6 +106,12 @@ Smaller payloads stay inline:
 oracle compares hashes only; it never re-hashes payloads at compare
 time.
 
+MCP client calls appear as `mcp_json_rpc` records. Each record carries
+the server name, method, request/response digests, latency, and redacted
+request/response payloads. This lets a single unified tape catch MCP
+schema or behavior drift alongside LLM, subprocess, filesystem, and
+clock drift.
+
 [threshold]: https://docs.rs/harn-vm/latest/harn_vm/testbench/tape/constant.MAX_INLINE_BYTES.html
 
 ## Versioning contract
