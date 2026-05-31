@@ -110,7 +110,7 @@ that route on it keep working unchanged. Concretely:
 | `fs_watch`             | `subscriptionId`, `events`                                                                                                             |
 | `worker_update`        | `workerId`, `workerName`, `workerTask`, `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`                               |
 | `transcript_compacted` | `mode`, `reason`, `strategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`, `instructionMode`, `instructionSource`, `compactionPolicy` |
-| `transcript_projected` | `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`, `providerSafetyBlocked`                                                 |
+| `transcript_projected` | `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`, `providerSafetyBlocked`, `redactedCount`, `reclaimedTokens`, `rootsConsulted`, `redactionPointers` |
 | `handoff`              | `handoffId`, `artifactId`, `handoff`                                                                                                   |
 | `skill_activated`      | `skillName`, `iteration`, `reason`                                                                                                     |
 | `skill_deactivated`    | `skillName`, `iteration`                                                                                                               |

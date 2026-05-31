@@ -719,16 +719,33 @@ fn __validate_agent_loop_completion_options(opts) {
   }
 }
 
+fn __is_transcript_projection_policy(policy) {
+  return policy == "raw" || policy == "clean_tool_repair" || policy == "squash_failed_calls"
+    || policy == "summary_prefix"
+    || policy == "reachability_gc"
+    || policy == "context_gc"
+    || policy == "tool_result_gc"
+    || policy == "custom"
+}
+
+fn __is_reachability_projection_policy(policy) {
+  return policy == "reachability_gc" || policy == "context_gc" || policy == "tool_result_gc"
+}
+
+fn __validate_non_negative_int_option(label, value) {
+  if value != nil && (type_of(value) != "int" || value < 0) {
+    throw "agent_loop: `" + label + "` must be a non-negative integer"
+  }
+}
+
 fn __validate_transcript_projection(value) {
   if value == nil {
     return
   }
   if type_of(value) == "string" {
     let policy = value
-    if policy != "raw" && policy != "clean_tool_repair" && policy != "squash_failed_calls"
-      && policy != "summary_prefix"
-      && policy != "custom" {
-      throw "agent_loop: `transcript_projection` policy must be one of raw, clean_tool_repair, squash_failed_calls, summary_prefix, custom; got "
+    if !__is_transcript_projection_policy(policy) {
+      throw "agent_loop: `transcript_projection` policy must be one of raw, clean_tool_repair, squash_failed_calls, summary_prefix, reachability_gc, custom; got "
         + policy
     }
     return
@@ -740,10 +757,8 @@ fn __validate_transcript_projection(value) {
   if type_of(policy) != "string" {
     throw "agent_loop: `transcript_projection.policy` must be a string"
   }
-  if policy != "raw" && policy != "clean_tool_repair" && policy != "squash_failed_calls"
-    && policy != "summary_prefix"
-    && policy != "custom" {
-    throw "agent_loop: `transcript_projection.policy` must be one of raw, clean_tool_repair, squash_failed_calls, summary_prefix, custom; got "
+  if !__is_transcript_projection_policy(policy) {
+    throw "agent_loop: `transcript_projection.policy` must be one of raw, clean_tool_repair, squash_failed_calls, summary_prefix, reachability_gc, custom; got "
       + policy
   }
   if policy == "custom" {
@@ -753,9 +768,16 @@ fn __validate_transcript_projection(value) {
     }
   }
   if policy == "summary_prefix" {
-    let keep_last = value?.keep_last
-    if keep_last != nil && (type_of(keep_last) != "int" || keep_last < 0) {
-      throw "agent_loop: `transcript_projection.keep_last` must be a non-negative integer"
+    __validate_non_negative_int_option("transcript_projection.keep_last", value?.keep_last)
+  }
+  if __is_reachability_projection_policy(policy) {
+    let root_window = value?.root_window ?? value?.recent_messages ?? value?.keep_last
+    __validate_non_negative_int_option("transcript_projection.root_window", root_window)
+    let min_chars = value?.min_chars ?? value?.min_reclaim_chars ?? value?.tool_result_min_chars
+    __validate_non_negative_int_option("transcript_projection.min_chars", min_chars)
+    let require_barrier = value?.require_write_barrier ?? value?.require_barrier
+    if require_barrier != nil && type_of(require_barrier) != "bool" {
+      throw "agent_loop: `transcript_projection.require_write_barrier` must be a bool"
     }
   }
 }

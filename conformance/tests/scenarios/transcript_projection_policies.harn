@@ -34,6 +34,68 @@ fn signed_reasoning_transcript() {
   )
 }
 
+fn gc_transcript() {
+  var stale = "src/old.rs\n"
+  var rooted = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
+  for i in range(0, 80) {
+    stale = stale + "old stale line " + to_string(i) + "\n"
+    rooted = rooted + "live rooted line " + to_string(i) + "\n"
+  }
+  return transcript_from_messages(
+    [
+      {role: "user", content: "inspect old and live files"},
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{id: "old_call", name: "read", arguments: {path: "src/old.rs"}}],
+      },
+      {role: "tool", tool_call_id: "old_call", name: "read", content: stale},
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{id: "live_call", name: "read", arguments: {path: "src/live.rs"}}],
+      },
+      {role: "tool", tool_call_id: "live_call", name: "read", content: rooted},
+      {role: "assistant", content: "The active change is in src/live.rs."},
+      {role: "user", content: "Continue from the live file finding."},
+    ],
+  )
+}
+
+fn long_gc_transcript(stale_count) {
+  var messages = [{role: "user", content: "inspect many stale files and one live file"}]
+  for i in range(0, stale_count) {
+    let path = "src/stale_" + to_string(i) + ".rs"
+    let call_id = "stale_call_" + to_string(i)
+    var body = path + "\n"
+    for j in range(0, 24) {
+      body = body + "stale output " + to_string(i) + " line " + to_string(j) + "\n"
+    }
+    messages = messages
+      .push(
+      {role: "assistant", content: "", tool_calls: [{id: call_id, name: "read", arguments: {path: path}}]},
+    )
+    messages = messages.push({role: "tool", tool_call_id: call_id, name: "read", content: body})
+  }
+  var live_body = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
+  for k in range(0, 24) {
+    live_body = live_body + "live output line " + to_string(k) + "\n"
+  }
+  messages = messages
+    .push(
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{id: "live_call", name: "read", arguments: {path: "src/live.rs"}}],
+    },
+  )
+  let live_result_index = messages.count
+  messages = messages.push({role: "tool", tool_call_id: "live_call", name: "read", content: live_body})
+  messages = messages.push({role: "assistant", content: "The active change is in src/live.rs."})
+  messages = messages.push({role: "user", content: "Continue from the live file finding."})
+  return {transcript: transcript_from_messages(messages), live_result_index: live_result_index}
+}
+
 pipeline default() {
   let transcript = raw_transcript()
   let raw_result = transcript_project(transcript, {policy: "raw"})
@@ -74,4 +136,45 @@ pipeline default() {
   )
   __io_println("bypassed_safety:" + to_string(bypassed.provider_safety_blocked))
   __io_println("bypassed_dropped:" + to_string(bypassed.dropped_count))
+  let gc = transcript_project(gc_transcript(), {policy: "reachability_gc", root_window: 2, min_chars: 100})
+  __io_println("gc_policy:" + gc.policy)
+  __io_println("gc_redacted:" + to_string(gc.redacted_count))
+  __io_println("gc_reclaimed:" + to_string(gc.reclaimed_tokens > 0))
+  __io_println(
+    "gc_old_reclaimed:" + to_string(gc.messages[2].content.contains("reclaimed by reachability_gc")),
+  )
+  __io_println(
+    "gc_live_preserved:" + to_string(gc.messages[4].content.contains("IMPORTANT_LIVE_VALUE")),
+  )
+  __io_println("gc_roots:" + to_string(gc.event.metadata.roots_consulted.contains("last_2_messages")))
+  __io_println("gc_pointer:" + gc.redaction_pointers[0].source)
+  let blocked_gc = transcript_project(
+    gc_transcript(),
+    {policy: "reachability_gc", root_window: 2, min_chars: 100, require_write_barrier: true},
+  )
+  __io_println("gc_barrier_blocked:" + to_string(blocked_gc.redacted_count == 0))
+  let long_case = long_gc_transcript(60)
+  let long_raw = transcript_project(long_case.transcript, {policy: "raw"})
+  let long_gc = transcript_project(
+    long_case.transcript,
+    {policy: "reachability_gc", root_window: 2, min_chars: 100},
+  )
+  let long_barrier_gc = transcript_project(
+    long_case.transcript,
+    {
+      policy: "reachability_gc",
+      root_window: 2,
+      min_chars: 100,
+      require_write_barrier: true,
+      write_barrier_refs: ["scratchpad:live-file-state"],
+    },
+  )
+  __io_println("long_raw_redacted:" + to_string(long_raw.redacted_count))
+  __io_println("long_gc_redacted:" + to_string(long_gc.redacted_count))
+  __io_println("long_gc_reclaimed:" + to_string(long_gc.reclaimed_tokens > 1000))
+  __io_println(
+    "long_gc_live_preserved:"
+      + to_string(long_gc.messages[long_case.live_result_index].content.contains("IMPORTANT_LIVE_VALUE")),
+  )
+  __io_println("long_barrier_gc_redacted:" + to_string(long_barrier_gc.redacted_count))
 }

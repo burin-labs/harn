@@ -1615,6 +1615,23 @@ Helper policies in `std/agent/autocompact`:
 `compact_preserving_test_failures(...)`, and
 `compact_retaining_current_plan(...)`.
 
+### Transcript projection
+
+`transcript_project(transcript, opts?)` derives a model-visible prefix without
+mutating raw transcript history. `agent_loop(..., {transcript_projection: ...})`
+applies the same projection before each provider turn and records a
+`transcript.projection` event. Built-in policies: `raw`,
+`clean_tool_repair`, `squash_failed_calls`, `summary_prefix`,
+`reachability_gc`, and `custom`.
+
+`reachability_gc` reclaims stale tool-result bodies only in the projected
+prompt. It keeps tool-call metadata and emits `redacted_indices`,
+`reclaimed_tokens`, `roots_consulted`, and `redaction_pointers`; raw
+transcript/audit content stays available by pointer. Useful options:
+`root_window`, `min_chars`, `roots`, `active_plan`, `scratchpad`,
+`pending_tool_args`, `unresolved_findings`, `write_barrier_refs`, and
+`require_write_barrier`.
+
 ## Reminders
 
 System reminders are typed, ephemeral `system_reminder` transcript events

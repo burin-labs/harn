@@ -31,6 +31,8 @@ let view = transcript_project(transcript, {policy: "clean_tool_repair"})
 log(view.policy)          // "clean_tool_repair"
 log(view.kept_count)      // messages surviving
 log(view.dropped_count)   // messages hidden from the next request
+log(view.redacted_count)  // tool-result bodies replaced by audit pointers
+log(view.reclaimed_tokens)// estimated prompt tokens reclaimed
 log(view.prefix_hash)     // "sha256:..." of the projected prefix
 log(view.event.kind)      // "transcript.projection" — ready to append to a session
 log(view.messages)        // the model-visible prefix
@@ -47,6 +49,10 @@ log(view.provider_safety_blocked) // true when a signed reasoning block was
 | `reason` | derived | Override the human-readable reason recorded on the projection event. |
 | `keep_last` | `0` | `summary_prefix` only — number of trailing messages kept verbatim. |
 | `summary` | `transcript.summary` | `summary_prefix` only — synthetic summary message body. |
+| `root_window` | `8` | `reachability_gc` only — recent message count treated as roots. `recent_messages` and `keep_last` are aliases. |
+| `min_chars` | `500` | `reachability_gc` only — shortest tool-result body eligible for reclamation. |
+| `roots`, `active_plan`, `scratchpad`, `pending_tool_args`, `unresolved_findings` | `nil` | `reachability_gc` only — additional root material used to keep referenced results visible. |
+| `require_write_barrier` | `false` | `reachability_gc` only — when `true`, reclaim only if `write_barrier`, `write_barrier_refs`, or `barrier_refs` is supplied. |
 | `projector` | _required for `custom`_ | Closure receiving `messages: list`, returning either a list of projected messages or `{messages, reason?, kept_indices?, dropped_indices?}`. |
 
 ## Built-in policies
@@ -84,6 +90,39 @@ let view = transcript_project(transcript, {
   summary: "Earlier turns: investigated repo layout and ran tests.",
 })
 ```
+
+### `reachability_gc`
+
+Keep every transcript message in place, but replace stale, unreachable
+tool-result bodies in the model-visible prefix with compact audit pointers.
+The raw transcript is not changed. Tool-call IDs, tool names, roles, and
+provider message shape are preserved so provider replay stays valid.
+
+Roots are the last `root_window` messages plus optional caller-supplied root
+material such as an active plan, scratchpad, pending tool args, unresolved
+review findings, or explicit `roots`. A tool result whose path, symbol, object
+ID, or call metadata appears in those roots is preserved. Error results are
+preserved by default; they are often still useful repair evidence.
+
+```harn
+let view = transcript_project(transcript, {
+  policy: "reachability_gc",
+  root_window: 6,
+  scratchpad: current_scratchpad,
+  unresolved_findings: review_findings,
+  write_barrier_refs: ["scratchpad:turn-42"],
+  require_write_barrier: true,
+})
+log(view.redacted_count)
+log(view.redaction_pointers[0].source) // transcript.messages[N].content
+```
+
+Redacted tool-result bodies carry `_harn_projection.redaction_pointer`;
+messages containing redacted content also record redaction pointers under
+`_harn_projection`. The projection event records `redacted_indices`,
+`redacted_count`, `reclaimed_tokens`, `reclaimed_chars`, `roots_consulted`, and
+`redaction_pointers`. Hosts can use those pointers to show or recover the raw
+body from the transcript/audit store without sending it to the next model call.
 
 ### `custom`
 
@@ -132,6 +171,8 @@ log(events[0].metadata.policy)                    // "clean_tool_repair"
 log(events[0].metadata.prefix_hash)               // "sha256:..."
 log(events[0].metadata.kept_indices)              // indices kept from raw messages
 log(events[0].metadata.dropped_indices)           // indices hidden from the prefix
+log(events[0].metadata.redacted_indices)          // bodies reclaimed in place
+log(events[0].metadata.reclaimed_tokens)          // estimated prompt-token savings
 log(events[0].metadata.provider_safety_blocked)   // signed-reasoning guardrail state
 ```
 
@@ -162,8 +203,10 @@ The same metadata reaches hosts two ways:
   audit log.
 - **Live** as the typed `TranscriptProjected` agent event, surfaced over ACP as
   a `transcript_projected` `sessionUpdate` carrying `_meta.harn` fields:
-  `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`, and
-  `providerSafetyBlocked`. Burin Code and other hosts use this to render a
+  `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`,
+  `providerSafetyBlocked`, and when projection reclaims tool-result bodies,
+  `redactedCount`, `reclaimedTokens`, `rootsConsulted`, and
+  `redactionPointers`. Burin Code and other hosts use this to render a
   raw vs. projected side-by-side view without re-parsing the transcript.
 
 Replay can reconstruct both views deterministically: the raw events are
