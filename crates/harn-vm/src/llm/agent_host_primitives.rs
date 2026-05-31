@@ -996,13 +996,13 @@ async fn host_agent_dispatch_tool_call(
                 "original_size": rendered_before_hooks.len(),
                 "final_size": rendered.len(),
             });
-            let reminder_report = super::reminder_providers::evaluate_and_inject(
+            let reminder_report = Box::pin(super::reminder_providers::evaluate_and_inject(
                 Some(&ctx),
                 crate::orchestration::HookEvent::PostToolUse,
                 &session_id,
                 reminder_payload,
                 super::reminder_providers::options_map_to_json(options),
-            )
+            ))
             .await?;
             let denied = agent_tools::is_denied_tool_result(&raw_result);
             let observation =
@@ -1055,13 +1055,13 @@ async fn host_agent_dispatch_tool_call(
                     "error": &error_text,
                 },
             });
-            let reminder_report = super::reminder_providers::evaluate_and_inject(
+            let reminder_report = Box::pin(super::reminder_providers::evaluate_and_inject(
                 Some(&ctx),
                 crate::orchestration::HookEvent::PostToolUse,
                 &session_id,
                 reminder_payload,
                 super::reminder_providers::options_map_to_json(options),
-            )
+            ))
             .await?;
             let result = serde_json::json!({
                 "ok": false,
