@@ -38,10 +38,17 @@
  *   pg_listener_close(listener)
  *   pg_notify(pool, "receipts.updated", {receipt_id: "r1"})
  *
+ *   // JSONB helpers use Postgres' jsonb_path_query / || / @> semantics
+ *   // with operands bound as parameters.
+ *   let ids = pg.jsonb.path(pool, {items: [{id: 1}]}, "$.items[*].id")
+ *   let merged = pg.jsonb.merge(pool, {a: 1}, {b: 2})
+ *   let has_b = pg.jsonb.contains(pool, merged, {b: 2})
+ *
  *   // Pool + statement-cache + circuit-breaker observability.
  *   let stats = pg_pool_stats(pool)
  *     // → {size, idle, in_use, max_connections, statement_cache_capacity,
- *     //    replicas, circuit_state, circuit_failures, circuit_opened_at_ms}
+ *     //    read_routing_policy, replicas, circuit_state, circuit_failures,
+ *     //    circuit_opened_at_ms}
  *   let cleared = pg_stmt_cache_clear(pool)
  *     // → {pools, connections_cleared, connections_skipped}
  *
@@ -65,9 +72,11 @@
  *   let pool = pg_pool("env:DATABASE_URL", {
  *     max_connections: 10,
  *     replicas: ["env:DATABASE_REPLICA_URL", "env:DATABASE_REPLICA2_URL"],
+ *     read_routing_policy: "round_robin_replica",
  *     circuit_breaker: {failure_threshold: 5, reset_after_ms: 30000},
  *   })
  *   pg_query(pool, "select * from receipts where id = $1", [id], {read_only: true})
+ *   pg_query(pool, "select count(*) from receipts", [], {route: "primary"})
  *
  * `pg_mock_pool(fixtures)` returns a deterministic mock so unit tests do
  * not need a live database.
@@ -99,6 +108,7 @@ type PgPoolStats = {
   in_use: int,
   max_connections: int,
   statement_cache_capacity: int,
+  read_routing_policy: string,
   replicas: int,
   circuit_state: string,
   circuit_failures: int,

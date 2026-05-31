@@ -218,6 +218,10 @@ async fn pg_pool_stats_impl(
         VmValue::Int(record.statement_cache_capacity as i64),
     );
     dict.insert(
+        "read_routing_policy".to_string(),
+        VmValue::String(Rc::from(record.read_routing_policy.as_str())),
+    );
+    dict.insert(
         "replicas".to_string(),
         VmValue::Int(record.replicas.len() as i64),
     );
