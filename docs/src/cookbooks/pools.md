@@ -81,7 +81,7 @@ does not vanish on restart.
 
 A multi-tenant inference service has four GPUs. Each inference call
 must run on exactly one GPU; the pool's `max_concurrent` is sized to
-the GPU count and the worker tier is pinned via the harn-cloud worker
+the GPU count and the worker tier is pinned via the Harn Cloud worker
 selector. Tenants share the budget fairly, and any cross-tenant burst
 queues rather than spilling onto non-GPU hosts.
 
@@ -98,7 +98,7 @@ pipeline inference_pool_setup() {
     max_concurrent: gpu_count,
     queue: fair_round_robin("tenant_id"),
     backpressure: bp.queue(1000, "fail_submitter"),
-    scope: "tenant",   // harn-cloud routes to the GPU-tier worker pool
+    scope: "tenant",   // host routes to the GPU-tier worker pool
   })
 
   trigger_register({
@@ -113,7 +113,7 @@ pipeline inference_pool_setup() {
         let req = event.provider_payload.payload
         return { ->
           // Per-request closure; runs on a GPU-tier worker because the
-          // pool's scope routes through the harn-cloud GPU worker tier.
+          // pool's scope routes through the host GPU worker tier.
           return run_gpu_inference(req.model, req.prompt, req.params)
         }
       },
@@ -142,9 +142,9 @@ backs up for more than ~1000 deep is almost certainly going to time
 out at the caller anyway. Failing fast with `HARN-POL-001` lets the
 caller pick a fallback model or shed load deliberately.
 
-Why `scope: "tenant"`: the pool routes through harn-cloud's GPU
-worker tier (#306). Today this fails with a `host-routed (harn-cloud)
-— not wired` diagnostic; you can run the same code with
+Why `scope: "tenant"`: the pool routes through a host-managed GPU
+worker tier. The in-process runtime rejects this scope until an
+embedding host provides tenant pool routing; you can run the same code with
 `scope: "session"` for local development and flip the scope at deploy
 time.
 

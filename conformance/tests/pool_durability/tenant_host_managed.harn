@@ -1,0 +1,20 @@
+// Tenant- and org-scope pools are host-managed. The in-process runtime accepts
+// the spec keyword for portability but fails fast with a public diagnostic
+// when no embedding host wires a backend.
+import { pool_create } from "std/lifecycle/pool"
+
+fn has_text(result, snippet) {
+  return is_err(result) && contains(to_string(unwrap_err(result)), snippet)
+}
+
+pipeline default() {
+  let tenant_result = try {
+    pool_create({name: "tenant-demo", scope: "tenant"})
+  }
+  log(has_text(tenant_result, "host-managed"))
+  log(is_err(tenant_result) && !contains(to_string(unwrap_err(tenant_result)), "harn-cloud"))
+  let org_result = try {
+    pool_create({name: "org-demo", scope: "org"})
+  }
+  log(has_text(org_result, "host-managed"))
+}

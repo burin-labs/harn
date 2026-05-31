@@ -79,3 +79,21 @@ pipeline main(task) {
 
     assert_eq!(lines, vec!["completed", "inner-ok", "inner-ok"]);
 }
+
+#[test]
+fn host_managed_pool_scope_diagnostic_is_public() {
+    let err = run_on_multithread(
+        r#"
+import { pool_create } from "std/lifecycle/pool"
+
+pipeline main(task) {
+  pool_create({name: "tenant-backed", scope: "tenant"})
+}
+"#,
+    )
+    .unwrap_err();
+
+    assert!(err.contains("host-managed"), "{err}");
+    assert!(!err.contains("harn-cloud"), "{err}");
+    assert!(!err.contains("#306"), "{err}");
+}

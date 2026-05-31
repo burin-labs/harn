@@ -3239,7 +3239,7 @@ Cross-ref: the suspend/resume primitive that drives
 
 ### Agent pools
 
-`std/lifecycle/pool` provides named, concurrency-bounded thread pools.
+`std/lifecycle/pool` provides named, concurrency-bounded worker pools.
 One named pool, one shared concurrency budget across every submitter.
 Use a pool when many independent call sites need to share a cap; use
 `parallel each ... with { max_concurrent: N }` when one call site
@@ -3269,9 +3269,9 @@ Pick-the-right-primitive:
 | Need | Use |
 |---|---|
 | Bound concurrency at one call site | `parallel each ... with { max_concurrent }` |
-| Bound concurrency across many call sites in one process | Pool, `scope: "session"` (default) |
+| Bound concurrency across many call sites in one VM session | Pool, `scope: "session"` (default) |
 | Bound across pipeline runs that survive restart | Pool, `scope: "pipeline"` (state in `.harn/pools/`) |
-| Bound across tenants/orgs (cloud) | Pool, `scope: "tenant"` / `"org"` (host-routed; harn-cloud#306) |
+| Bound across tenants/orgs | Pool, `scope: "tenant"` / `"org"` (host-managed by the embedding runtime) |
 | Route trigger events through a shared budget | `SpawnToPool` handler (see below) |
 
 Queue strategies (factories from `std/lifecycle/pool`):

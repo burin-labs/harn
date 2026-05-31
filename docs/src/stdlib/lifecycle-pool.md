@@ -1,15 +1,14 @@
 # Pool stdlib
 
-`std/lifecycle/pool` provides named, concurrency-bounded **agent thread pools**.
+`std/lifecycle/pool` provides named, concurrency-bounded **agent worker pools**.
 Use a pool when work needs to share a single concurrency budget across an
 entire pipeline, session, or tenant — for example, capping how many PR-review
 agents run at once, fairly draining a per-customer queue, or throttling a
 provider's API tier.
 
-This is the PL-01/PL-03 foundation for the agent-pool epic
-([#1883](https://github.com/burin-labs/harn/issues/1883)). Queue strategies
-and backpressure policies ship with the pool surface; channel composition,
-durable state, and OTel spans land in later pool tickets.
+Pool workers run as child-VM isolates. On a multi-thread Tokio runtime they are
+scheduled with `tokio::spawn`, while the pool registry is scoped through the
+VM so nested pool operations see the same named budgets.
 
 ```harn,ignore
 import { fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
@@ -30,8 +29,10 @@ let result = pool_wait(handle)
 ## Creating a pool
 
 `pool_create(options?)` allocates a new pool and registers it under
-`options.name`. Names must be unique within the runtime — re-creating a
-pool errors; use `pool_get(name)` to reuse an existing one.
+`options.name`. Names must be unique within the live VM registry; use
+`pool_get(name)` to reuse an existing one. Pipeline-scope pools use a
+deterministic id so creating the same `(scope, scope_id, name)` after process
+restart binds to the persisted state.
 
 | Option           | Type   | Default          | Notes                                          |
 |------------------|--------|------------------|------------------------------------------------|
@@ -39,7 +40,9 @@ pool errors; use `pool_get(name)` to reuse an existing one.
 | `max_concurrent` | int    | `1`              | Hard cap on simultaneously running tasks.      |
 | `queue`          | dict/string | `priority()` | Queue strategy descriptor. |
 | `backpressure`   | dict/string | `nil`        | Backpressure descriptor. `nil` keeps the queue unbounded. |
-| `priority`       | any    | `nil`            | Reserved for later priority callbacks. |
+| `scope`          | string | `"session"`      | `"session"`, `"pipeline"`, `"tenant"`, or `"org"`. |
+| `pipeline_id`    | string | active pipeline id | Required for `scope: "pipeline"` outside a pipeline. |
+| `stale_after_ms` | int/duration | `30000` | Pipeline-scope freshness knob for persisted running-task markers on reload. |
 
 The returned handle is a dict with `_type: "pool"`, plus `submit`, `size`, and
 `snapshot` callable fields that close over the pool's id.
@@ -55,6 +58,7 @@ time options:
 | `priority` | int    | `0`     | Higher dequeues sooner; ties resolve by submission order (FIFO). |
 | `key`      | string | nil     | Fairness key for `fair_round_robin("key")` and task observability. |
 | custom key | string | nil     | When using `fair_round_robin("tenant_id")`, pass `tenant_id` here. |
+| `idempotency_key` | string | nil | Duplicate submits with the same key return the same task handle. |
 
 Each call returns a task handle (`_type: "pool_task"`) with `id`, `pool`,
 `pool_id`, `submitted_at`, `status`, and the optional `key`. Drop policies
@@ -133,18 +137,17 @@ let outcomes = pool_wait(handles)  // or: wait_agent(handles)
   the selected `backpressure`, the per-task list, and the original
   `config` so observability stacks can show "what was configured".
 - `pool_get(name_or_id)` — lookup by name; returns `nil` when missing.
-- `pool_list()` — every pool registered on the current runtime.
+- `pool_list()` — every pool registered on the current VM runtime.
 
 ## Composability
 
 - **With `wait_agent`** — pool task handles route through the same agent
   waiter, so user code does not need to learn a second waiter API.
-- **With `parallel each`** — the pool's `max_concurrent` is a process-wide
+- **With `parallel each`** — the pool's `max_concurrent` is a VM-scoped
   cap; `parallel each ... with { max_concurrent: N }` remains the right tool
   for a per-call-site bound.
-- **With future siblings** — channel handlers
-  ([#1889](https://github.com/burin-labs/harn/issues/1889)) will route trigger
-  events through a named pool, and durable state
-  ([#1890](https://github.com/burin-labs/harn/issues/1890)) will let
-  pipeline-scoped pools survive process restarts. Both build on the registry
-  shipped here without changing the user-facing API.
+- **With trigger routing** — `SpawnToPool` trigger handlers submit matched
+  events into a named pool without bypassing queue strategy or backpressure.
+- **With pipeline scope** — the JSONL store keeps terminal and stale task
+  records inspectable after restart; closure bodies are not journalled, so
+  callers submit fresh work when they want a retry attempt.
