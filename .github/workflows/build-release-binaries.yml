@@ -207,16 +207,19 @@ jobs:
     needs: setup
     if: needs.setup.outputs.should_build_binaries == 'true'
     runs-on: ${{ matrix.os }}
-    # Avoid GitHub's multi-hour default timeout for release artifacts. A cold
-    # macOS x86_64 build is the slowest leg; if it cannot finish inside this
-    # budget, fail loudly so the release queue does not burn hours silently.
+    # Avoid GitHub's multi-hour default timeout for release artifacts. Native
+    # macOS x86_64 is the slowest leg; if it cannot finish inside this budget,
+    # fail loudly so the release queue does not burn hours silently.
     timeout-minutes: 150
     strategy:
       fail-fast: true
       matrix:
         include:
           - target: x86_64-apple-darwin
-            os: macos-latest
+            # Build Intel artifacts on Intel hardware. Cross-building this leg
+            # on arm64 `macos-latest` repeatedly left sccache/rustc orphaned and
+            # pushed the build past 85 minutes.
+            os: macos-15-intel
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
