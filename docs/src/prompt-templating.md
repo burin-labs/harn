@@ -320,17 +320,17 @@ The injected value is shaped:
 llm = {
   provider: "anthropic",          // resolved provider name
   model:    "claude-3-5-sonnet",  // resolved model id
-  family:   "claude",             // canonical model-family token
+  family:   "anthropic-claude",   // canonical review-diversity family token
   capabilities: { ... },          // result of provider_capabilities()
 }
 ```
 
-`family` is one of `claude` / `gpt` / `gemini` / `qwen` / `llama` /
-`mistral` / `deepseek` / `phi` / `grok` / `command`, derived from the
-model id with a provider-alias fallback. Branch on `family` for
-human-readable identity checks; branch on `capabilities.*` for wire-
-format adaptation (native vs text-format tools, prompt caching,
-structured output, etc.).
+`family` is a normalized token such as `anthropic-claude`,
+`openai-gpt`, `google-gemini`, `qwen`, `llama`, `mistral`, or
+`deepseek`, derived from catalog metadata with a provider-alias
+fallback. Branch on `family` for human-readable identity checks;
+branch on `capabilities.*` for wire-format adaptation (native vs
+text-format tools, prompt caching, structured output, etc.).
 
 Bare `render()` calls outside any LLM frame leave `llm = nil`, so the
 same template works in CI / doc-gen contexts as long as it guards with

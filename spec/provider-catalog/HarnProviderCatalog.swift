@@ -126,6 +126,10 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let availability: String
     public let qualityTags: [String]
     public let capabilityTags: [String]
+    public let family: String
+    public let lineage: String
+    public let complementaryWith: [String]
+    public let avoidAsReviewerFor: [String]
     /// Popular-consensus tier label: "small" | "mid" | "frontier" | "reasoning".
     public let tier: String
     /// True when weights are downloadable / self-hostable; nil when the
@@ -157,6 +161,10 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case availability
         case qualityTags = "quality_tags"
         case capabilityTags = "capability_tags"
+        case family
+        case lineage
+        case complementaryWith = "complementary_with"
+        case avoidAsReviewerFor = "avoid_as_reviewer_for"
         case tier
         case openWeight = "open_weight"
         case strengths
@@ -184,6 +192,10 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         availability = try container.decode(String.self, forKey: .availability)
         qualityTags = try container.decode([String].self, forKey: .qualityTags)
         capabilityTags = try container.decode([String].self, forKey: .capabilityTags)
+        family = try container.decode(String.self, forKey: .family)
+        lineage = try container.decode(String.self, forKey: .lineage)
+        complementaryWith = try container.decodeIfPresent([String].self, forKey: .complementaryWith) ?? []
+        avoidAsReviewerFor = try container.decodeIfPresent([String].self, forKey: .avoidAsReviewerFor) ?? []
         tier = try container.decode(String.self, forKey: .tier)
         openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
@@ -709,8 +721,7 @@ public let harnProviderCatalogJSON = #"""
       "features": [],
       "caveats": [
         "Native Ollama chat returns NDJSON and can apply model-family parsers."
-      ],
-      "latency_p50_ms": 1200
+      ]
     },
     {
       "id": "openai",
@@ -946,6 +957,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
       "tier": "small",
       "open_weight": false,
       "strengths": [
@@ -1021,6 +1034,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1096,6 +1111,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1171,6 +1188,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1251,6 +1270,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
       "tier": "mid",
       "open_weight": false,
       "strengths": [
@@ -1334,6 +1355,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1419,6 +1442,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1505,6 +1530,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1606,6 +1633,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-opus-adaptive",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1707,6 +1736,15 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-opus-adaptive",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1806,6 +1844,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1891,6 +1931,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1981,6 +2023,15 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -2066,6 +2117,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -2138,6 +2191,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2201,6 +2256,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "llama",
+      "lineage": "llama",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2265,6 +2322,8 @@ public let harnProviderCatalogJSON = #"""
         "prompt_caching",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2332,6 +2391,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "reasoning",
       "open_weight": true,
       "strengths": [
@@ -2402,6 +2463,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2477,6 +2540,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -2557,6 +2622,15 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "mid",
       "open_weight": false,
       "strengths": [
@@ -2635,6 +2709,15 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "google-gemini",
+      "lineage": "gemini-pro",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -2705,6 +2788,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2771,6 +2856,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2833,6 +2920,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2896,6 +2985,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2958,6 +3049,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -3021,6 +3114,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "small",
       "open_weight": true,
       "strengths": [
@@ -3084,6 +3179,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "small",
       "open_weight": true,
       "strengths": [
@@ -3150,6 +3247,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3222,6 +3321,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -3289,6 +3390,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3359,6 +3462,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -3431,6 +3536,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3494,6 +3601,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3562,6 +3671,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3626,6 +3737,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "mistral",
+      "lineage": "mistral",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3690,6 +3803,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "vision"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3746,6 +3861,8 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools"
       ],
+      "family": "llama",
+      "lineage": "llama",
       "tier": "small",
       "open_weight": true,
       "strengths": [
@@ -3814,6 +3931,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3877,6 +3996,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -3944,6 +4065,8 @@ public let harnProviderCatalogJSON = #"""
         "audio",
         "structured_output"
       ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -4015,6 +4138,15 @@ public let harnProviderCatalogJSON = #"""
         "vision",
         "audio",
         "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
       ],
       "tier": "mid",
       "open_weight": false,
@@ -4089,6 +4221,15 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
       ],
       "tier": "frontier",
       "open_weight": false,
@@ -4172,6 +4313,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
       "tier": "reasoning",
       "open_weight": false,
       "strengths": [
@@ -4237,6 +4380,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
       "tier": "reasoning",
       "open_weight": false,
       "strengths": [
@@ -4303,6 +4448,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
       "tier": "reasoning",
       "open_weight": false,
       "strengths": [
@@ -4372,6 +4519,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
       "tier": "reasoning",
       "open_weight": false,
       "strengths": [
@@ -4440,6 +4589,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "small",
       "open_weight": true,
       "strengths": [
@@ -4506,6 +4657,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
       "tier": "mid",
       "open_weight": false,
       "strengths": [
@@ -4575,6 +4728,15 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
       ],
       "tier": "frontier",
       "open_weight": false,
@@ -4648,6 +4810,15 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -4717,6 +4888,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -4788,6 +4961,8 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -4864,6 +5039,15 @@ public let harnProviderCatalogJSON = #"""
         "extended_thinking",
         "structured_output"
       ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "mid",
       "open_weight": false,
       "strengths": [
@@ -4929,6 +5113,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -4992,6 +5178,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5057,6 +5245,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "mistral",
+      "lineage": "mistral",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5120,6 +5310,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "mistral",
+      "lineage": "mistral",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -5185,6 +5377,15 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "thinking",
         "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
       ],
       "tier": "frontier",
       "open_weight": true,
@@ -5255,6 +5456,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -5318,6 +5521,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5385,6 +5590,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5447,6 +5654,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5512,6 +5721,8 @@ public let harnProviderCatalogJSON = #"""
         "tools",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -5573,6 +5784,15 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
       ],
       "tier": "frontier",
       "open_weight": true,
@@ -5642,6 +5862,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5712,6 +5934,8 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [

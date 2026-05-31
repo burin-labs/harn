@@ -1,5 +1,5 @@
-// std/llm/catalog.family_of classifies model IDs into per-family buckets
-// driven by the inferred provider.
+// std/llm/catalog.family_of returns normalized review-diversity families
+// driven by catalog metadata and inferred provider fallback.
 import { family_of } from "std/llm/catalog"
 
 pipeline default() {

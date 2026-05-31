@@ -1,13 +1,13 @@
 // @harn-entrypoint-category llm.stdlib
 //
-// std/llm/defaults — task-pinned, provider/family-aware option packs that
+// std/llm/defaults — task-pinned, provider/lineage-aware option packs that
 // produce a complete `llm_call`-ready dict by layering:
 //
 //   1. resolved_options(opts)         (runtime catalog defaults)
-//   2. family + effort patch          (family default behavior)
-//   3. family + thinking patch        (explicit caller intent — wins on
+//   2. lineage + effort patch         (lineage default behavior)
+//   3. lineage + thinking patch       (explicit caller intent — wins on
 //                                       overlapping keys, e.g. `reasoning_effort`
-//                                       for the openai_gpt5_family)
+//                                       for the openai-gpt5 lineage)
 //   4. task overlay                   (only fills unset fields)
 //   5. recommend_max_output_tokens()  (only when prompt is provided and
 //                                       neither user nor effort already
@@ -34,7 +34,7 @@
 //     published recommendation. Match commonly-cited cookbook values.
 import { agent_emit_event } from "std/agent/state"
 import { recommend_max_output_tokens } from "std/llm/budget"
-import { family_of, resolved_options } from "std/llm/catalog"
+import { lineage_of, resolved_options } from "std/llm/catalog"
 
 fn __has_key(d, key) {
   if type_of(d) != "dict" {
@@ -48,7 +48,7 @@ fn __has_key(d, key) {
 // -------------------------------------------------------------------------------------------------
 
 /**
- * Map (family, thinking) → patch dict. thinking ∈ {"off","low","medium",
+ * Map (lineage, thinking) → patch dict. thinking ∈ {"off","low","medium",
  * "high","auto"}. An empty dict means "omit the thinking knob entirely".
  *
  * - Anthropic Sonnet/Opus (pre-4.7): extended thinking budgets per
@@ -67,8 +67,8 @@ fn __has_key(d, key) {
  * - Ollama qwen3: host injects /no_think capability-side; don't
  * duplicate. All other Ollama: omit.
  */
-fn __thinking_patch(family, thinking) {
-  if family == "anthropic_sonnet_opus" {
+fn __thinking_patch(lineage, thinking) {
+  if lineage == "claude-sonnet-opus" {
     if thinking == "off" {
       return {}
     }
@@ -82,14 +82,14 @@ fn __thinking_patch(family, thinking) {
     // can't honor "auto" the way Opus 4.7 can, so we treat auto≡medium.
     return {thinking: {enabled: true, budget_tokens: 4096}}
   }
-  if family == "anthropic_opus_adaptive" {
+  if lineage == "claude-opus-adaptive" {
     // Opus 4.7+ rejects manual `thinking` budgets — always omit.
     return {}
   }
-  if family == "anthropic_haiku" {
+  if lineage == "claude-haiku" {
     return {}
   }
-  if family == "openai_gpt5_family" {
+  if lineage == "openai-gpt5" {
     if thinking == "off" {
       // "minimal" is the safe floor across GPT-5 + GPT-5.5.
       return {reasoning_effort: "minimal"}
@@ -103,10 +103,10 @@ fn __thinking_patch(family, thinking) {
     // medium and auto.
     return {reasoning_effort: "medium"}
   }
-  if family == "openai_legacy" {
+  if lineage == "openai-legacy" {
     return {}
   }
-  if family == "gemini_pro" {
+  if lineage == "gemini-pro" {
     if thinking == "off" {
       return {thinking: {mode: "disabled"}}
     }
@@ -122,7 +122,7 @@ fn __thinking_patch(family, thinking) {
     // medium.
     return {thinking: {mode: "enabled", budget_tokens: 8192}}
   }
-  if family == "gemini_flash" {
+  if lineage == "gemini-flash" {
     if thinking == "off" {
       return {thinking: {mode: "disabled"}}
     }
@@ -138,12 +138,10 @@ fn __thinking_patch(family, thinking) {
     }
     return {thinking: {mode: "enabled", budget_tokens: 8192}}
   }
-  // ollama_qwen3, ollama_generic, generic — no thinking knob to set here;
+  // qwen3, gemma4, and generic lineages have no thinking knob to set here;
   // the host's capability-driven /no_think directive (Qwen3) handles "off".
-  // Note on Gemini 3: family_of() does not yet distinguish Gemini 3
-  // models; if a future model can't disable thinking, callers should
-  // observe model_info(model).capabilities.thinking_modes. Treated as
-  // a hand-wavy area until Gemini 3 ships and family_of learns it.
+  // Future Gemini lineages should branch here when their thinking controls
+  // diverge from the current Pro/Flash shapes.
   return {}
 }
 
@@ -158,20 +156,20 @@ fn __thinking_patch(family, thinking) {
 // Anthropic temperatures sweep 0.2 / 0.7 / 1.0 (cookbook values).
 // max_tokens caps reflect typical Claude messages-API budgets:
 // Sonnet/Opus 1024/4096/8192; Haiku is capped lower (1024/2048/4096).
-// OpenAI GPT-5 family piggybacks on reasoning_effort; GPT-4o/4.1 use
+// OpenAI GPT-5 lineage piggybacks on reasoning_effort; GPT-4o/4.1 use
 // temperature only (their max_tokens default flows from the catalog).
 // Gemini effort dial maps to typed thinking steps, which the native
 // provider lowers to generationConfig.thinkingConfig.
 // Ollama exposes num_predict (default 128 per Modelfile reference) so
 // we override it for "balanced" / "quality" to give meaningful output.
 @complexity(allow)
-fn __effort_patch(family, effort) {
+fn __effort_patch(lineage, effort) {
   let kind = if effort == "auto" {
     "balanced"
   } else {
     effort
   }
-  if family == "anthropic_sonnet_opus" {
+  if lineage == "claude-sonnet-opus" {
     if kind == "fast" {
       return {temperature: 0.2, max_tokens: 1024}
     }
@@ -182,7 +180,7 @@ fn __effort_patch(family, effort) {
     }
     return {temperature: 0.7, max_tokens: 4096}
   }
-  if family == "anthropic_opus_adaptive" {
+  if lineage == "claude-opus-adaptive" {
     if kind == "fast" {
       return {temperature: 0.2, max_tokens: 1024}
     }
@@ -192,7 +190,7 @@ fn __effort_patch(family, effort) {
     }
     return {temperature: 0.7, max_tokens: 4096}
   }
-  if family == "anthropic_haiku" {
+  if lineage == "claude-haiku" {
     if kind == "fast" {
       return {temperature: 0.2, max_tokens: 1024}
     }
@@ -201,7 +199,7 @@ fn __effort_patch(family, effort) {
     }
     return {temperature: 0.7, max_tokens: 2048}
   }
-  if family == "openai_gpt5_family" {
+  if lineage == "openai-gpt5" {
     if kind == "fast" {
       return {reasoning_effort: "low"}
     }
@@ -210,7 +208,7 @@ fn __effort_patch(family, effort) {
     }
     return {reasoning_effort: "medium"}
   }
-  if family == "openai_legacy" {
+  if lineage == "openai-legacy" {
     if kind == "fast" {
       return {temperature: 0.2}
     }
@@ -219,7 +217,7 @@ fn __effort_patch(family, effort) {
     }
     return {temperature: 0.7}
   }
-  if family == "gemini_pro" {
+  if lineage == "gemini-pro" {
     if kind == "fast" {
       return {thinking: {mode: "disabled"}}
     }
@@ -228,7 +226,7 @@ fn __effort_patch(family, effort) {
     }
     return {thinking: {mode: "enabled", budget_tokens: 4096}}
   }
-  if family == "gemini_flash" {
+  if lineage == "gemini-flash" {
     if kind == "fast" {
       return {thinking: {mode: "disabled"}}
     }
@@ -237,7 +235,7 @@ fn __effort_patch(family, effort) {
     }
     return {thinking: {mode: "enabled", budget_tokens: 2048}}
   }
-  if family == "ollama_qwen3" || family == "ollama_generic" {
+  if lineage == "qwen3" || lineage == "gemma4" {
     if kind == "fast" {
       return {num_predict: 512}
     }
@@ -303,7 +301,7 @@ fn __safe_resolved_options(opts) {
 }
 
 fn __maybe_emit_strip(opts, requested) {
-  // Best-effort warn when manual thinking is stripped on opus_4_7. If no
+  // Best-effort warn when manual thinking is stripped on adaptive Opus. If no
   // session_id is in opts (the usual case for pack_for), skip silently.
   // This mirrors the "emit when bound; punt otherwise" pattern from
   // std/llm/budget.
@@ -315,7 +313,7 @@ fn __maybe_emit_strip(opts, requested) {
     agent_emit_event(
       sid,
       "pack_thinking_stripped",
-      {model: opts?.model, requested: requested, reason: "opus_4_7_adaptive"},
+      {model: opts?.model, requested: requested, reason: "claude_opus_adaptive"},
     )
   }
 }
@@ -340,7 +338,7 @@ fn __fill_unset(result, overlay) {
  * pack_for(opts) -> dict
  *
  * Returns an `llm_call`-ready options dict, calibrated for the model's
- * provider/family and pinned to a task. User opts always win.
+ * provider/lineage and pinned to a task. User opts always win.
  *
  * Required: opts.model
  * Optional: opts.provider, opts.task, opts.thinking, opts.effort,
@@ -378,22 +376,22 @@ pub fn pack_for(opts) {
     {model: model}
   }
   var result = __safe_resolved_options(resolved_input)
-  // family classification (uses the inferred provider in the catalog).
-  let family = family_of(model)
+  // Lineage classification uses the inferred provider in the catalog.
+  let lineage = lineage_of(model)
   // 2. Effort patch. Applied BEFORE the thinking patch so that on families
-  //    where both knobs write to the same key (notably openai_gpt5_family
+  //    where both knobs write to the same key (notably openai-gpt5
   //    where both target `reasoning_effort`) an explicit `thinking: ...`
-  //    can override the family default.
+  //    can override the lineage default.
   let effort = opts?.effort ?? "balanced"
-  let e_patch = __effort_patch(family, effort)
+  let e_patch = __effort_patch(lineage, effort)
   result = result + e_patch
   // 3. Thinking patch. Strip + warn for Opus 4.7 adaptive when caller
   //    asked for a manual mode.
   let thinking_req = opts?.thinking ?? "auto"
-  if family == "anthropic_opus_adaptive" && thinking_req != "auto" && thinking_req != nil {
+  if lineage == "claude-opus-adaptive" && thinking_req != "auto" && thinking_req != nil {
     __maybe_emit_strip(opts, thinking_req)
   }
-  let t_patch = __thinking_patch(family, thinking_req)
+  let t_patch = __thinking_patch(lineage, thinking_req)
   result = result + t_patch
   // 4. Task overlay — only fill fields not already set above.
   let task = opts?.task ?? "chat"

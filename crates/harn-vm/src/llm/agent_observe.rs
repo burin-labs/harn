@@ -1209,7 +1209,7 @@ mod retry_tests {
         let event: serde_json::Value = serde_json::from_str(line).expect("parse event");
         assert_eq!(event["type"], "template.render");
         assert_eq!(event["llm"]["provider"], "anthropic");
-        assert_eq!(event["llm"]["family"], "claude");
+        assert_eq!(event["llm"]["family"], "anthropic-claude");
         assert_eq!(event["llm"]["capabilities"]["native_tools"], true);
         let branches = event["branches"].as_array().expect("branches array");
         let if_branch = branches

@@ -240,6 +240,13 @@
             "unknown"
           ]
         },
+        "avoid_as_reviewer_for": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
         "benchmarks": {
           "additionalProperties": {
             "type": "number"
@@ -252,12 +259,23 @@
           },
           "type": "array"
         },
+        "complementary_with": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "type": "array"
+        },
         "context_window": {
           "minimum": 1,
           "type": "integer"
         },
         "deprecation": {
           "$ref": "#/$defs/deprecation"
+        },
+        "family": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "type": "string"
         },
         "fast_mode": {
           "$ref": "#/$defs/fast_mode"
@@ -267,6 +285,10 @@
         },
         "id": {
           "minLength": 1,
+          "type": "string"
+        },
+        "lineage": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
           "type": "string"
         },
         "modalities": {
@@ -343,6 +365,8 @@
         "availability",
         "quality_tags",
         "capability_tags",
+        "family",
+        "lineage",
         "tier"
       ],
       "type": "object"

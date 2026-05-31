@@ -125,6 +125,12 @@ pub struct CatalogModel {
     pub availability: ModelAvailabilityStatus,
     pub quality_tags: Vec<String>,
     pub capability_tags: Vec<String>,
+    pub family: String,
+    pub lineage: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub complementary_with: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub avoid_as_reviewer_for: Vec<String>,
     /// Popular-consensus tier label: "small" | "mid" | "frontier" |
     /// "reasoning". Self-declared on the model row; the rule-based path
     /// is a fallback only.
@@ -801,6 +807,10 @@ fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
         open_weight: model.open_weight,
         strengths: model.strengths.clone(),
         benchmarks: model.benchmarks.clone(),
+        family: Some(model.family.clone()),
+        lineage: Some(model.lineage.clone()),
+        complementary_with: model.complementary_with.clone(),
+        avoid_as_reviewer_for: model.avoid_as_reviewer_for.clone(),
     }
 }
 
@@ -1042,6 +1052,14 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 model.id, model.provider
             ));
         }
+        validate_token_field(model, "family", &model.family, &mut result);
+        validate_token_field(model, "lineage", &model.lineage, &mut result);
+        for family in &model.complementary_with {
+            validate_token_field(model, "complementary_with", family, &mut result);
+        }
+        for selector in &model.avoid_as_reviewer_for {
+            validate_reviewer_selector(model, selector, &mut result);
+        }
         if model.context_window == 0 {
             result.errors.push(format!(
                 "model {} context_window must be positive",
@@ -1243,6 +1261,8 @@ pub fn schema_value() -> Value {
                     "availability",
                     "quality_tags",
                     "capability_tags",
+                    "family",
+                    "lineage",
                     "tier"
                 ],
                 "properties": {
@@ -1264,6 +1284,10 @@ pub fn schema_value() -> Value {
                     "availability": {"enum": ["serverless", "dedicated", "unknown"]},
                     "quality_tags": {"type": "array", "items": {"type": "string"}},
                     "capability_tags": {"type": "array", "items": {"type": "string"}},
+                    "family": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+                    "lineage": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+                    "complementary_with": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"}},
+                    "avoid_as_reviewer_for": {"type": "array", "items": {"type": "string", "minLength": 1}},
                     "tier": {"enum": ["small", "mid", "frontier", "reasoning"]},
                     "open_weight": {"type": "boolean"},
                     "strengths": {"type": "array", "items": {"type": "string"}},
@@ -1505,6 +1529,10 @@ fn catalog_model(
         availability: ModelAvailabilityStatus::from(model.availability),
         quality_tags,
         capability_tags: model.capabilities.clone(),
+        family: llm_config::model_family(&model.provider, &id),
+        lineage: llm_config::model_lineage(&model.provider, &id),
+        complementary_with: model.complementary_with.clone(),
+        avoid_as_reviewer_for: model.avoid_as_reviewer_for.clone(),
         tier: llm_config::model_tier(&id),
         open_weight: model.open_weight,
         strengths: model.strengths.clone(),
@@ -1704,6 +1732,44 @@ fn validate_pricing(
     }
 }
 
+fn validate_token_field(
+    model: &CatalogModel,
+    field: &str,
+    value: &str,
+    result: &mut ProviderCatalogValidation,
+) {
+    if !is_catalog_token(value) {
+        result.errors.push(format!(
+            "model {} {field} must be a lowercase catalog token, got {:?}",
+            model.id, value
+        ));
+    }
+}
+
+fn validate_reviewer_selector(
+    model: &CatalogModel,
+    value: &str,
+    result: &mut ProviderCatalogValidation,
+) {
+    if value.trim().is_empty() {
+        result.errors.push(format!(
+            "model {} avoid_as_reviewer_for cannot contain an empty selector",
+            model.id
+        ));
+    }
+}
+
+fn is_catalog_token(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+}
+
 fn provider_classification(provider: &ProviderDef) -> ProviderClassification {
     if provider.auth_style == "none"
         || provider.base_url.contains("localhost")
@@ -1884,6 +1950,10 @@ export interface HarnCatalogModel {
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
+  family: string
+  lineage: string
+  complementary_with?: string[]
+  avoid_as_reviewer_for?: string[]
   tier: "small" | "mid" | "frontier" | "reasoning"
   open_weight?: boolean
   strengths?: string[]
@@ -1935,6 +2005,8 @@ export interface CatalogEntry {
   contextWindow: number
   runtimeContextWindow?: number
   capabilities: string[]
+  family: string
+  lineage: string
   pricing?: {
     inputPerMTok: number
     outputPerMTok: number
@@ -1962,6 +2034,8 @@ export const MODEL_CATALOG: readonly CatalogEntry[] = harnProviderCatalog.models
   contextWindow: model.context_window,
   runtimeContextWindow: model.runtime_context_window,
   capabilities: model.capability_tags,
+  family: model.family,
+  lineage: model.lineage,
   pricing: model.pricing
     ? {
         inputPerMTok: model.pricing.input_per_mtok,
@@ -2124,6 +2198,10 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let availability: String
     public let qualityTags: [String]
     public let capabilityTags: [String]
+    public let family: String
+    public let lineage: String
+    public let complementaryWith: [String]
+    public let avoidAsReviewerFor: [String]
     /// Popular-consensus tier label: "small" | "mid" | "frontier" | "reasoning".
     public let tier: String
     /// True when weights are downloadable / self-hostable; nil when the
@@ -2155,6 +2233,10 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case availability
         case qualityTags = "quality_tags"
         case capabilityTags = "capability_tags"
+        case family
+        case lineage
+        case complementaryWith = "complementary_with"
+        case avoidAsReviewerFor = "avoid_as_reviewer_for"
         case tier
         case openWeight = "open_weight"
         case strengths
@@ -2182,6 +2264,10 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         availability = try container.decode(String.self, forKey: .availability)
         qualityTags = try container.decode([String].self, forKey: .qualityTags)
         capabilityTags = try container.decode([String].self, forKey: .capabilityTags)
+        family = try container.decode(String.self, forKey: .family)
+        lineage = try container.decode(String.self, forKey: .lineage)
+        complementaryWith = try container.decodeIfPresent([String].self, forKey: .complementaryWith) ?? []
+        avoidAsReviewerFor = try container.decodeIfPresent([String].self, forKey: .avoidAsReviewerFor) ?? []
         tier = try container.decode(String.self, forKey: .tier)
         openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
@@ -2766,6 +2852,51 @@ availability = "unknown"
     }
 
     #[test]
+    fn catalog_exports_family_and_lineage_for_hosted_wrappers() {
+        let catalog = artifact();
+        let hosted_claude = catalog
+            .models
+            .iter()
+            .find(|model| model.id == "anthropic/claude-sonnet-4-6")
+            .expect("OpenRouter Claude wrapper is exported");
+        assert_eq!(hosted_claude.provider, "openrouter");
+        assert_eq!(hosted_claude.family, "anthropic-claude");
+        assert_eq!(hosted_claude.lineage, "claude-sonnet-opus");
+
+        let direct_gemini = catalog
+            .models
+            .iter()
+            .find(|model| model.id == "gemini-2.5-flash")
+            .expect("Gemini Flash is exported");
+        assert_eq!(direct_gemini.family, "google-gemini");
+        assert_eq!(direct_gemini.lineage, "gemini-flash");
+    }
+
+    #[test]
+    fn validation_rejects_malformed_family_metadata() {
+        let mut catalog = artifact();
+        catalog.models[0].family = "Not Normalized".to_string();
+        catalog.models[0].lineage.clear();
+        let report = validate_artifact(&catalog);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|message| message.contains("family")),
+            "expected family validation error, got {:?}",
+            report.errors
+        );
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|message| message.contains("lineage")),
+            "expected lineage validation error, got {:?}",
+            report.errors
+        );
+    }
+
+    #[test]
     fn deprecated_models_require_notes() {
         let _guard = install_overlay(
             r#"
@@ -2795,6 +2926,12 @@ deprecated = true
             schema["$defs"]["tool_support"]["properties"]["empirical_parity"]["$ref"],
             "#/$defs/tool_empirical_parity"
         );
+        assert!(schema["$defs"]["model"]["required"]
+            .as_array()
+            .is_some_and(|required| required.iter().any(|field| field == "family")));
+        assert!(schema["$defs"]["model"]["required"]
+            .as_array()
+            .is_some_and(|required| required.iter().any(|field| field == "lineage")));
         let artifact_value = serde_json::to_value(artifact()).expect("artifact serializes");
         assert_eq!(
             artifact_value["schema_version"],
@@ -2806,6 +2943,8 @@ deprecated = true
         assert!(artifact_value["models"]
             .as_array()
             .is_some_and(|v| !v.is_empty()));
+        assert!(artifact_value["models"][0]["family"].is_string());
+        assert!(artifact_value["models"][0]["lineage"].is_string());
     }
 
     #[test]
@@ -2836,11 +2975,15 @@ deprecated = true
         assert!(typescript.contains("export interface HarnModelFastMode"));
         assert!(typescript.contains("fast_mode?: HarnModelFastMode"));
         assert!(typescript.contains("superseded_by?: string"));
+        assert!(typescript.contains("family: string"));
+        assert!(typescript.contains("lineage: string"));
 
         let swift = swift_binding().expect("swift binding renders");
         assert!(swift.contains("public struct HarnModelFastMode"));
         assert!(swift.contains("public let fastMode: HarnModelFastMode?"));
         assert!(swift.contains("case supersededBy = \"superseded_by\""));
+        assert!(swift.contains("public let family: String"));
+        assert!(swift.contains("public let lineage: String"));
     }
 
     #[test]

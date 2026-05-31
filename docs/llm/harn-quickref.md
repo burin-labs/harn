@@ -3402,7 +3402,8 @@ Nine opinionated modules wrap common LLM patterns:
 - `std/llm/prompts` — `system_prelude`, `tool_use_prelude`,
   `structured_output_preface`.
 - `std/llm/catalog` — `model_info(selector)`, `resolved_options(opts)`,
-  `has_capability(model, cap)`, `family_of(model_id)`. Note:
+  `has_capability(model, cap)`, `family_of(model_id)`,
+  `lineage_of(model_id)`, `complementary_reviewer(opts)`. Note:
   Harn-side names are `model_info` / `resolved_options` to avoid
   shadowing the same-named builtins.
 
@@ -4225,8 +4226,9 @@ the same `workspace_roots` read boundary as `read_file(...)`.
   `llm = {provider, model, family, capabilities: {...}}` so a single
   logical prompt can adapt by capability. Branch on `{{ if llm }}` for
   the bare-render fallback; branch on `{{ if llm.capabilities.native_tools }}`
-  to pick wire envelope. `family` is one of `claude` / `gpt` / `gemini` /
-  `qwen` / `llama` / `mistral` / `deepseek` / `phi` / `grok` / `command`.
+  to pick wire envelope. `family` is a normalized token such as
+  `anthropic-claude`, `openai-gpt`, `google-gemini`, `qwen`, `llama`,
+  `mistral`, or `deepseek`.
   User bindings that already provide an `llm` key win for back-compat
   and trigger a one-shot warning under `template.llm_scope`.
 - **Variant resolution transcripts**: a `template.render` event lands in

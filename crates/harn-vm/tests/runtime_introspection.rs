@@ -187,7 +187,7 @@ fn snapshot_reads_resolved_call() {
     let snapshot = introspection::current_snapshot().expect("snapshot");
     assert_eq!(snapshot.provider, "anthropic");
     assert_eq!(snapshot.model, "claude-opus-4-7");
-    assert_eq!(snapshot.family, "claude");
+    assert_eq!(snapshot.family, "anthropic-claude");
     introspection::reset_snapshot();
 }
 
@@ -208,7 +208,7 @@ fn current_model_tool_dispatch_reports_resolution() {
     let parsed: serde_json::Value = serde_json::from_str(&payload).expect("json");
     assert_eq!(parsed["resolved"], serde_json::json!(true));
     assert_eq!(parsed["model"], serde_json::json!("claude-opus-4-7"));
-    assert_eq!(parsed["family"], serde_json::json!("claude"));
+    assert_eq!(parsed["family"], serde_json::json!("anthropic-claude"));
     introspection::reset_snapshot();
 }
 

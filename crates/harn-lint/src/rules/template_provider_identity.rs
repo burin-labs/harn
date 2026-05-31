@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn family_branch_triggers_diag() {
-        let d = diags("{{ if llm.family == \"claude\" }}x{{ end }}");
+        let d = diags("{{ if llm.family == \"anthropic-claude\" }}x{{ end }}");
         assert_eq!(rule_count(&d, super::RULE_NAME), 1);
         assert!(d[0].message.contains("`llm.family`"));
     }

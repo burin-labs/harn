@@ -11,6 +11,9 @@ pipeline test(task) {
   assert_eq(tier3, "small")
   let tier4 = llm_model_tier("deepseek-v4-flash")
   assert_eq(tier4, "mid")
+  let resolved = llm_resolve_model("frontier")
+  assert_eq(resolved.family, "anthropic-claude")
+  assert_eq(resolved.lineage, "claude-sonnet-opus")
   // Test provider inference
   let p1 = llm_infer_provider("claude-sonnet-4-20250514")
   assert_eq(p1, "anthropic")

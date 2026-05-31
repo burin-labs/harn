@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{OnceLock, RwLock};
 
 static CONFIG: OnceLock<ProvidersConfig> = OnceLock::new();
@@ -360,6 +360,22 @@ pub struct ModelDef {
     /// score so future readers can audit the source.
     #[serde(default)]
     pub benchmarks: BTreeMap<String, f64>,
+    /// Normalized model-family token used as a diversity signal for
+    /// reviewer selection. Distinct from provider: hosted wrappers should
+    /// keep the underlying family (for example OpenRouter-hosted Claude
+    /// still uses `anthropic-claude`).
+    #[serde(default)]
+    pub family: Option<String>,
+    /// Narrower family lineage used by option-pack calibration.
+    #[serde(default)]
+    pub lineage: Option<String>,
+    /// Preferred reviewer families for critique/review workloads.
+    #[serde(default)]
+    pub complementary_with: Vec<String>,
+    /// Author families, lineages, model ids, or provider/model selectors
+    /// this row should not review.
+    #[serde(default)]
+    pub avoid_as_reviewer_for: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -406,6 +422,73 @@ pub struct ResolvedModel {
     pub alias: Option<String>,
     pub tool_format: String,
     pub tier: String,
+    pub family: String,
+    pub lineage: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComplementaryReviewerOptions {
+    pub author_model: String,
+    pub author_provider: Option<String>,
+    pub intent: ComplementaryReviewerIntent,
+    pub max_price_multiplier: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComplementaryReviewerIntent {
+    Review,
+    Critique,
+    PlanReview,
+}
+
+impl ComplementaryReviewerIntent {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "review" => Some(Self::Review),
+            "critique" => Some(Self::Critique),
+            "plan_review" => Some(Self::PlanReview),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Review => "review",
+            Self::Critique => "critique",
+            Self::PlanReview => "plan_review",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ComplementaryReviewerSelection {
+    pub intent: String,
+    pub author: ComplementaryModelIdentity,
+    pub reviewer: ComplementaryModelIdentity,
+    pub fallback: bool,
+    pub fallback_reason: Option<String>,
+    pub reason: String,
+    pub estimated_incremental_cost: Option<ComplementaryCostEstimate>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ComplementaryModelIdentity {
+    pub id: String,
+    pub provider: String,
+    pub family: String,
+    pub lineage: String,
+    pub tier: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<ModelPricing>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ComplementaryCostEstimate {
+    pub input_per_mtok: f64,
+    pub output_per_mtok: f64,
+    pub total_per_mtok: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multiplier_vs_author: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -607,6 +690,8 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
             .unwrap_or_else(|| default_tool_format_with_config(&config, &id, &provider));
         return ResolvedModel {
             tier: model_tier_with_config(&config, &id),
+            family: model_family_with_config(&config, &provider, &id),
+            lineage: model_lineage_with_config(&config, &provider, &id),
             id,
             provider,
             alias: Some(selector.to_string()),
@@ -615,15 +700,21 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
     }
 
     let id = normalize_model_id(selector);
-    let provider = infer_provider_with_config(&config, selector).provider;
+    let inference = infer_provider_with_config(&config, selector);
+    let source = inference.source;
+    let provider = inference.provider;
     let tool_format = default_tool_format_with_config(&config, &id, &provider);
     let tier = model_tier_with_config(&config, &id);
+    let family = model_family_with_inference_source(&config, &provider, &id, source);
+    let lineage = model_lineage_with_inference_source(&config, &provider, &id, source);
     ResolvedModel {
         id,
         provider,
         alias: None,
         tool_format,
         tier,
+        family,
+        lineage,
     }
 }
 
@@ -742,6 +833,220 @@ fn model_tier_with_config(config: &ProvidersConfig, model_id: &str) -> String {
         }
     }
     config.tier_defaults.default.clone()
+}
+
+/// Return the normalized model-family token used for cross-family review.
+pub fn model_family(provider: &str, model_id: &str) -> String {
+    let config = effective_config();
+    model_family_with_config(&config, provider, model_id)
+}
+
+fn model_family_with_config(config: &ProvidersConfig, provider: &str, model_id: &str) -> String {
+    catalog_family_token(config, model_id)
+        .unwrap_or_else(|| derive_model_family(provider, model_id))
+}
+
+fn model_family_with_inference_source(
+    config: &ProvidersConfig,
+    provider: &str,
+    model_id: &str,
+    source: crate::llm::provider::ProviderInferenceSource,
+) -> String {
+    if let Some(family) = catalog_family_token(config, model_id) {
+        return family;
+    }
+    let id_family = derive_model_family("", model_id);
+    if id_family != "unknown" {
+        return id_family;
+    }
+    if matches!(
+        source,
+        crate::llm::provider::ProviderInferenceSource::DefaultFallback
+    ) {
+        return "unknown".to_string();
+    }
+    derive_model_family(provider, model_id)
+}
+
+/// Return the narrower lineage token used for model-aware option packs.
+pub fn model_lineage(provider: &str, model_id: &str) -> String {
+    let config = effective_config();
+    model_lineage_with_config(&config, provider, model_id)
+}
+
+fn model_lineage_with_config(config: &ProvidersConfig, provider: &str, model_id: &str) -> String {
+    catalog_lineage_token(config, model_id)
+        .unwrap_or_else(|| derive_model_lineage(provider, model_id))
+}
+
+fn model_lineage_with_inference_source(
+    config: &ProvidersConfig,
+    provider: &str,
+    model_id: &str,
+    source: crate::llm::provider::ProviderInferenceSource,
+) -> String {
+    if let Some(lineage) = catalog_lineage_token(config, model_id) {
+        return lineage;
+    }
+    let id_lineage = derive_model_lineage("", model_id);
+    if id_lineage != "unknown" {
+        return id_lineage;
+    }
+    if matches!(
+        source,
+        crate::llm::provider::ProviderInferenceSource::DefaultFallback
+    ) {
+        return "unknown".to_string();
+    }
+    derive_model_lineage(provider, model_id)
+}
+
+fn catalog_family_token(config: &ProvidersConfig, model_id: &str) -> Option<String> {
+    config
+        .models
+        .get(model_id)
+        .and_then(|model| normalized_catalog_token(model.family.as_deref()))
+}
+
+fn catalog_lineage_token(config: &ProvidersConfig, model_id: &str) -> Option<String> {
+    config
+        .models
+        .get(model_id)
+        .and_then(|model| normalized_catalog_token(model.lineage.as_deref()))
+}
+
+fn normalized_catalog_token(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase().replace('_', "-"))
+}
+
+fn derive_model_family(provider: &str, model_id: &str) -> String {
+    let id = model_id.to_ascii_lowercase();
+    if contains_any(&id, &["claude", "anthropic.claude"]) {
+        return "anthropic-claude".to_string();
+    }
+    if contains_any(&id, &["gemini", "google/gemini"]) {
+        return "google-gemini".to_string();
+    }
+    if contains_any(&id, &["deepseek"]) {
+        return "deepseek".to_string();
+    }
+    if contains_any(&id, &["qwen"]) {
+        return "qwen".to_string();
+    }
+    if contains_any(&id, &["kimi", "moonshot"]) {
+        return "kimi".to_string();
+    }
+    if contains_any(&id, &["glm", "z-ai/glm", "zhipu"]) {
+        return "glm".to_string();
+    }
+    if contains_any(&id, &["mistral", "mixtral", "devstral"]) {
+        return "mistral".to_string();
+    }
+    if contains_any(&id, &["minimax"]) {
+        return "minimax".to_string();
+    }
+    if contains_any(&id, &["llama"]) {
+        return "llama".to_string();
+    }
+    if contains_any(&id, &["gemma"]) {
+        return "gemma".to_string();
+    }
+    if is_openai_reasoning_model(&id) {
+        return "openai-reasoning".to_string();
+    }
+    if contains_any(&id, &["gpt-oss", "openai/gpt", "gpt-"]) {
+        return "openai-gpt".to_string();
+    }
+    match provider {
+        "anthropic" | "bedrock" | "vertex-anthropic" => "anthropic-claude".to_string(),
+        "openai" | "azure" | "azure_openai" => "openai-gpt".to_string(),
+        "gemini" | "vertex" | "google" => "google-gemini".to_string(),
+        "deepseek" => "deepseek".to_string(),
+        "zai" => "glm".to_string(),
+        "minimax" => "minimax".to_string(),
+        other if !other.is_empty() => normalize_identifier_token(other),
+        _ => "unknown".to_string(),
+    }
+}
+
+fn derive_model_lineage(provider: &str, model_id: &str) -> String {
+    let id = model_id.to_ascii_lowercase();
+    if contains_any(&id, &["haiku"]) {
+        return "claude-haiku".to_string();
+    }
+    if contains_any(&id, &["opus-4-7", "opus-4-8", "opus-mythos"]) {
+        return "claude-opus-adaptive".to_string();
+    }
+    if contains_any(&id, &["claude"]) {
+        return "claude-sonnet-opus".to_string();
+    }
+    if contains_any(&id, &["gpt-5"]) {
+        return "openai-gpt5".to_string();
+    }
+    if is_openai_reasoning_model(&id) {
+        return "openai-reasoning".to_string();
+    }
+    if contains_any(&id, &["gpt-", "gpt_"]) {
+        return "openai-legacy".to_string();
+    }
+    if contains_any(&id, &["gemini"]) {
+        if contains_any(&id, &["flash"]) {
+            return "gemini-flash".to_string();
+        }
+        return "gemini-pro".to_string();
+    }
+    if contains_any(&id, &["qwen3", "qwen/qwen3"]) {
+        return "qwen3".to_string();
+    }
+    if contains_any(&id, &["gemma4", "gemma-4"]) {
+        return "gemma4".to_string();
+    }
+    let family = derive_model_family(provider, model_id);
+    if family == "unknown" {
+        "unknown".to_string()
+    } else {
+        family
+    }
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn starts_with_any(haystack: &str, prefixes: &[&str]) -> bool {
+    prefixes.iter().any(|prefix| haystack.starts_with(prefix))
+}
+
+fn is_openai_reasoning_model(id: &str) -> bool {
+    starts_with_any(id, &["o1", "o3", "o4"])
+        || contains_any(
+            id,
+            &[
+                "/o1", "/o3", "/o4", ":o1", ":o3", ":o4", ".o1", ".o3", ".o4",
+            ],
+        )
+}
+
+fn normalize_identifier_token(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// Get provider config for resolving base_url, auth, etc.
@@ -1116,6 +1421,320 @@ pub fn all_model_candidates() -> Vec<(String, String)> {
     candidates
 }
 
+pub fn pick_complementary_reviewer(
+    options: ComplementaryReviewerOptions,
+) -> ComplementaryReviewerSelection {
+    let config = effective_config();
+    let mut author = resolve_model_info(&options.author_model);
+    if let Some(provider) = options
+        .author_provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+    {
+        author.provider = provider.to_string();
+        author.family = model_family_with_config(&config, &author.provider, &author.id);
+        author.lineage = model_lineage_with_config(&config, &author.provider, &author.id);
+        author.tool_format = default_tool_format_with_config(&config, &author.id, &author.provider);
+    }
+    let author_entry = config.models.get(&author.id);
+    let author_identity = complementary_identity(
+        author.id.clone(),
+        author.provider.clone(),
+        author.family.clone(),
+        author.lineage.clone(),
+        author.tier.clone(),
+        author_entry.and_then(|model| model.pricing.clone()),
+    );
+
+    let fallback = |fallback_reason: String| ComplementaryReviewerSelection {
+        intent: options.intent.as_str().to_string(),
+        reviewer: author_identity.clone(),
+        estimated_incremental_cost: cost_estimate(
+            author_identity.pricing.as_ref(),
+            author_identity.pricing.as_ref(),
+        ),
+        author: author_identity.clone(),
+        fallback: true,
+        reason: format!(
+            "using author model {} because {fallback_reason}",
+            author_identity.id
+        ),
+        fallback_reason: Some(fallback_reason),
+    };
+
+    if author_identity.family == "unknown" {
+        return fallback("author model family is unknown".to_string());
+    }
+
+    let preferred_families = author_entry
+        .map(|model| model.complementary_with.clone())
+        .unwrap_or_default();
+    let author_refs = reviewer_match_refs(&author_identity);
+    let mut rejected_by_price = 0usize;
+    let mut diff_family_seen = 0usize;
+    let mut candidates = Vec::new();
+
+    for (id, model) in config.models.iter() {
+        if id == &author_identity.id && model.provider == author_identity.provider {
+            continue;
+        }
+        if model.deprecated || model.availability != ModelAvailability::Serverless {
+            continue;
+        }
+        let family = model_family_with_config(&config, &model.provider, id);
+        if family == "unknown" || family == author_identity.family {
+            continue;
+        }
+        diff_family_seen += 1;
+        let lineage = model_lineage_with_config(&config, &model.provider, id);
+        let candidate_identity = complementary_identity(
+            id.clone(),
+            model.provider.clone(),
+            family,
+            lineage,
+            model_tier_with_config(&config, id),
+            model.pricing.clone(),
+        );
+        if model
+            .avoid_as_reviewer_for
+            .iter()
+            .any(|selector| refs_contain_selector(&author_refs, selector))
+        {
+            continue;
+        }
+        if exceeds_price_cap(
+            author_identity.pricing.as_ref(),
+            candidate_identity.pricing.as_ref(),
+            options.max_price_multiplier,
+        ) {
+            rejected_by_price += 1;
+            continue;
+        }
+        let score = reviewer_score(
+            &options,
+            &author_identity,
+            &candidate_identity,
+            model,
+            &preferred_families,
+        );
+        candidates.push(ReviewerCandidate {
+            identity: candidate_identity,
+            score,
+        });
+    }
+
+    candidates.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.identity.provider.cmp(&right.identity.provider))
+            .then_with(|| left.identity.id.cmp(&right.identity.id))
+    });
+
+    let Some(best) = candidates.into_iter().next() else {
+        if rejected_by_price > 0 {
+            let cap = options.max_price_multiplier.unwrap_or_default();
+            return fallback(format!(
+                "no different-family reviewer satisfied max_price_multiplier {cap}"
+            ));
+        }
+        if diff_family_seen == 0 {
+            return fallback(
+                "no active serverless different-family reviewer is cataloged".to_string(),
+            );
+        }
+        return fallback("all different-family reviewer candidates were excluded".to_string());
+    };
+
+    let estimate = cost_estimate(
+        best.identity.pricing.as_ref(),
+        author_identity.pricing.as_ref(),
+    );
+    ComplementaryReviewerSelection {
+        intent: options.intent.as_str().to_string(),
+        reason: reviewer_reason(&author_identity, &best.identity, estimate.as_ref()),
+        estimated_incremental_cost: estimate,
+        author: author_identity,
+        reviewer: best.identity,
+        fallback: false,
+        fallback_reason: None,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ReviewerCandidate {
+    identity: ComplementaryModelIdentity,
+    score: f64,
+}
+
+fn complementary_identity(
+    id: String,
+    provider: String,
+    family: String,
+    lineage: String,
+    tier: String,
+    pricing: Option<ModelPricing>,
+) -> ComplementaryModelIdentity {
+    ComplementaryModelIdentity {
+        id,
+        provider,
+        family,
+        lineage,
+        tier,
+        pricing,
+    }
+}
+
+fn reviewer_score(
+    options: &ComplementaryReviewerOptions,
+    author: &ComplementaryModelIdentity,
+    candidate: &ComplementaryModelIdentity,
+    model: &ModelDef,
+    preferred_families: &[String],
+) -> f64 {
+    let candidate_refs = reviewer_match_refs(candidate);
+    let mut score = 0.0;
+    if let Some(rank) = preferred_families
+        .iter()
+        .position(|selector| refs_contain_selector(&candidate_refs, selector))
+    {
+        score += 1_000.0 - rank as f64;
+    }
+    if candidate.provider != author.provider {
+        score += 100.0;
+    }
+    score += match tier_distance(&author.tier, &candidate.tier) {
+        0 => 80.0,
+        1 => 45.0,
+        2 => 15.0,
+        _ => 0.0,
+    };
+    for strength in intent_strengths(options.intent) {
+        if model.strengths.iter().any(|tag| tag == strength) {
+            score += 8.0;
+        }
+    }
+    if model.capabilities.iter().any(|tag| tag == "tools") {
+        score += 4.0;
+    }
+    if let (Some(author_total), Some(candidate_total)) = (
+        pricing_total(author.pricing.as_ref()),
+        pricing_total(candidate.pricing.as_ref()),
+    ) {
+        if author_total > 0.0 {
+            let ratio = candidate_total / author_total;
+            if ratio <= 1.0 {
+                score += 20.0;
+            }
+            score -= (ratio - 1.0).abs().min(10.0) * 8.0;
+        }
+    }
+    score
+}
+
+fn intent_strengths(intent: ComplementaryReviewerIntent) -> &'static [&'static str] {
+    match intent {
+        ComplementaryReviewerIntent::Review => &["reasoning", "coding", "tool_use"],
+        ComplementaryReviewerIntent::Critique => &["reasoning", "long_context", "tool_use"],
+        ComplementaryReviewerIntent::PlanReview => {
+            &["reasoning", "coding", "agentic", "long_context", "tool_use"]
+        }
+    }
+}
+
+fn tier_distance(left: &str, right: &str) -> u8 {
+    let left = tier_rank(left);
+    let right = tier_rank(right);
+    left.abs_diff(right)
+}
+
+fn tier_rank(tier: &str) -> u8 {
+    match tier {
+        "small" => 0,
+        "mid" => 1,
+        "frontier" | "reasoning" => 2,
+        _ => 1,
+    }
+}
+
+fn exceeds_price_cap(
+    author_pricing: Option<&ModelPricing>,
+    candidate_pricing: Option<&ModelPricing>,
+    max_price_multiplier: Option<f64>,
+) -> bool {
+    let Some(max_price_multiplier) = max_price_multiplier else {
+        return false;
+    };
+    let Some(author_total) = pricing_total(author_pricing) else {
+        return false;
+    };
+    let Some(candidate_total) = pricing_total(candidate_pricing) else {
+        return true;
+    };
+    author_total > 0.0 && candidate_total > author_total * max_price_multiplier
+}
+
+fn cost_estimate(
+    reviewer_pricing: Option<&ModelPricing>,
+    author_pricing: Option<&ModelPricing>,
+) -> Option<ComplementaryCostEstimate> {
+    let reviewer_pricing = reviewer_pricing?;
+    let total_per_mtok = reviewer_pricing.input_per_mtok + reviewer_pricing.output_per_mtok;
+    let multiplier_vs_author = pricing_total(author_pricing)
+        .filter(|author_total| *author_total > 0.0)
+        .map(|author_total| total_per_mtok / author_total);
+    Some(ComplementaryCostEstimate {
+        input_per_mtok: reviewer_pricing.input_per_mtok,
+        output_per_mtok: reviewer_pricing.output_per_mtok,
+        total_per_mtok,
+        multiplier_vs_author,
+    })
+}
+
+fn pricing_total(pricing: Option<&ModelPricing>) -> Option<f64> {
+    pricing.map(|pricing| pricing.input_per_mtok + pricing.output_per_mtok)
+}
+
+fn reviewer_reason(
+    author: &ComplementaryModelIdentity,
+    reviewer: &ComplementaryModelIdentity,
+    estimate: Option<&ComplementaryCostEstimate>,
+) -> String {
+    let cost = estimate
+        .and_then(|estimate| estimate.multiplier_vs_author)
+        .map(|multiplier| format!("{multiplier:.2}x the author model price"))
+        .unwrap_or_else(|| "price ratio unavailable".to_string());
+    format!(
+        "selected {} via {} because family {} differs from author family {}, tier {} matches author tier {}, and {}",
+        reviewer.id,
+        reviewer.provider,
+        reviewer.family,
+        author.family,
+        reviewer.tier,
+        author.tier,
+        cost
+    )
+}
+
+fn reviewer_match_refs(identity: &ComplementaryModelIdentity) -> BTreeSet<String> {
+    BTreeSet::from([
+        identity.id.to_ascii_lowercase(),
+        identity.provider.to_ascii_lowercase(),
+        format!("{}/{}", identity.provider, identity.id).to_ascii_lowercase(),
+        format!("{}:{}", identity.provider, identity.id).to_ascii_lowercase(),
+        identity.family.to_ascii_lowercase(),
+        identity.lineage.to_ascii_lowercase(),
+    ])
+}
+
+fn refs_contain_selector(refs: &BTreeSet<String>, selector: &str) -> bool {
+    normalized_catalog_token(Some(selector))
+        .or_else(|| Some(selector.trim().to_ascii_lowercase()))
+        .is_some_and(|selector| refs.contains(&selector))
+}
+
 /// Simple glob matching for patterns like "claude-*", "qwen/*", "ollama:*".
 fn glob_match(pattern: &str, input: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix('*') {
@@ -1345,6 +1964,10 @@ mod tests {
                 open_weight: None,
                 strengths: Vec::new(),
                 benchmarks: std::collections::BTreeMap::new(),
+                family: None,
+                lineage: None,
+                complementary_with: Vec::new(),
+                avoid_as_reviewer_for: Vec::new(),
             },
         );
         set_user_overrides(Some(overlay));
@@ -1387,6 +2010,69 @@ mod tests {
         assert_eq!(model_tier("glm-5.1"), "frontier");
         // Unknown ids resolve to the default.
         assert_eq!(model_tier("definitely-not-a-real-model"), "mid");
+    }
+
+    #[test]
+    fn test_model_family_preserves_underlying_hosted_lineage() {
+        assert_eq!(
+            model_family("openrouter", "anthropic/claude-sonnet-4-6"),
+            "anthropic-claude"
+        );
+        assert_eq!(
+            model_family("openrouter", "google/gemini-2.5-flash"),
+            "google-gemini"
+        );
+        assert_eq!(
+            model_family("openrouter", "openai/o3-mini"),
+            "openai-reasoning"
+        );
+        assert_eq!(model_lineage("openrouter", "openai/gpt-5.5"), "openai-gpt5");
+        assert_eq!(
+            model_lineage("openrouter", "openai/o3-mini"),
+            "openai-reasoning"
+        );
+        assert_eq!(
+            model_lineage("anthropic", "claude-opus-4-8"),
+            "claude-opus-adaptive"
+        );
+        assert_eq!(
+            model_lineage("ollama", "qwen3.6:35b-a3b-coding-nvfp4"),
+            "qwen3"
+        );
+    }
+
+    #[test]
+    fn test_complementary_reviewer_uses_different_family() {
+        let selection = pick_complementary_reviewer(ComplementaryReviewerOptions {
+            author_model: "claude-sonnet-4-6".to_string(),
+            author_provider: None,
+            intent: ComplementaryReviewerIntent::PlanReview,
+            max_price_multiplier: Some(3.0),
+        });
+
+        assert!(!selection.fallback, "{selection:?}");
+        assert_eq!(selection.author.family, "anthropic-claude");
+        assert_ne!(selection.reviewer.family, selection.author.family);
+        assert_eq!(selection.reviewer.tier, "frontier");
+        assert!(selection.estimated_incremental_cost.is_some());
+    }
+
+    #[test]
+    fn test_complementary_reviewer_falls_back_deterministically_on_price_cap() {
+        let selection = pick_complementary_reviewer(ComplementaryReviewerOptions {
+            author_model: "gpt-4o-mini".to_string(),
+            author_provider: Some("openai".to_string()),
+            intent: ComplementaryReviewerIntent::Review,
+            max_price_multiplier: Some(0.01),
+        });
+
+        assert!(selection.fallback, "{selection:?}");
+        assert_eq!(selection.reviewer.id, "gpt-4o-mini");
+        assert_eq!(selection.reviewer.family, selection.author.family);
+        assert!(selection
+            .fallback_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("max_price_multiplier")));
     }
 
     #[test]
@@ -1553,6 +2239,31 @@ mod tests {
     }
 
     #[test]
+    fn test_unknown_model_family_ignores_default_provider_fallback() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
+        unsafe {
+            std::env::set_var("HARN_DEFAULT_PROVIDER", "ollama");
+        }
+
+        let unknown = resolve_model_info("mystery-model-xyz");
+        let known_family = resolve_model_info("deepseek-mystery-model");
+
+        unsafe {
+            match prev_default_provider {
+                Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
+                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
+            }
+        }
+
+        assert_eq!(unknown.provider, "ollama");
+        assert_eq!(unknown.family, "unknown");
+        assert_eq!(unknown.lineage, "unknown");
+        assert_eq!(known_family.family, "deepseek");
+        assert_eq!(known_family.lineage, "deepseek");
+    }
+
+    #[test]
     fn test_resolve_base_url_no_env() {
         let pdef = ProviderDef {
             base_url: "https://example.com".to_string(),
@@ -1715,6 +2426,10 @@ mod tests {
                 open_weight: None,
                 strengths: Vec::new(),
                 benchmarks: std::collections::BTreeMap::new(),
+                family: None,
+                lineage: None,
+                complementary_with: Vec::new(),
+                avoid_as_reviewer_for: Vec::new(),
             },
         );
         overlay

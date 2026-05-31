@@ -20,7 +20,8 @@ use std::path::Path;
 use std::process::Command;
 
 /// A four-profile mock-free render fixture: each fleet member maps to a
-/// distinct capability family (claude / gpt / gemini / qwen) so the
+/// distinct capability family (anthropic-claude / openai-gpt /
+/// google-gemini / qwen) so the
 /// rendered envelopes differ across the report, and the terminal
 /// renderer's "diff vs #0" summary actually fires.
 const RENDER_TEMPLATE: &str = "{{ if llm.capabilities.native_tools }}\

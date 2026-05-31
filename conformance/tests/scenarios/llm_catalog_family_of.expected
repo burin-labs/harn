@@ -1,8 +1,8 @@
-anthropic_haiku
-anthropic_opus_adaptive
-anthropic_sonnet_opus
-openai_gpt5_family
-openai_legacy
-gemini_flash
-ollama_qwen3
-anthropic_sonnet_opus
+anthropic-claude
+anthropic-claude
+anthropic-claude
+openai-gpt
+openai-gpt
+google-gemini
+qwen
+unknown

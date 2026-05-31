@@ -100,6 +100,10 @@ export interface HarnCatalogModel {
   availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
+  family: string
+  lineage: string
+  complementary_with?: string[]
+  avoid_as_reviewer_for?: string[]
   tier: "small" | "mid" | "frontier" | "reasoning"
   open_weight?: boolean
   strengths?: string[]
@@ -151,6 +155,8 @@ export interface CatalogEntry {
   contextWindow: number
   runtimeContextWindow?: number
   capabilities: string[]
+  family: string
+  lineage: string
   pricing?: {
     inputPerMTok: number
     outputPerMTok: number
@@ -536,8 +542,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "features": [],
       "caveats": [
         "Native Ollama chat returns NDJSON and can apply model-family parsers."
-      ],
-      "latency_p50_ms": 1200
+      ]
     },
     {
       "id": "openai",
@@ -773,6 +778,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
       "tier": "small",
       "open_weight": false,
       "strengths": [
@@ -848,6 +855,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -923,6 +932,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -998,6 +1009,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1078,6 +1091,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
       "tier": "mid",
       "open_weight": false,
       "strengths": [
@@ -1161,6 +1176,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1246,6 +1263,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1332,6 +1351,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1433,6 +1454,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-opus-adaptive",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1534,6 +1557,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-opus-adaptive",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1633,6 +1665,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1718,6 +1752,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1808,6 +1844,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1893,6 +1938,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -1965,6 +2012,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2028,6 +2077,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "llama",
+      "lineage": "llama",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2092,6 +2143,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "prompt_caching",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2159,6 +2212,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "reasoning",
       "open_weight": true,
       "strengths": [
@@ -2229,6 +2284,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2304,6 +2361,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -2384,6 +2443,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "mid",
       "open_weight": false,
       "strengths": [
@@ -2462,6 +2530,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "google-gemini",
+      "lineage": "gemini-pro",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -2532,6 +2609,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2598,6 +2677,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2660,6 +2741,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2723,6 +2806,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "thinking"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -2785,6 +2870,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "thinking"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -2848,6 +2935,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "thinking"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "small",
       "open_weight": true,
       "strengths": [
@@ -2911,6 +3000,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "thinking"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "small",
       "open_weight": true,
       "strengths": [
@@ -2977,6 +3068,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3049,6 +3142,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -3116,6 +3211,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3186,6 +3283,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -3258,6 +3357,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3321,6 +3422,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3389,6 +3492,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3453,6 +3558,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "mistral",
+      "lineage": "mistral",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3517,6 +3624,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "vision"
       ],
+      "family": "gemma",
+      "lineage": "gemma4",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3573,6 +3682,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "streaming",
         "tools"
       ],
+      "family": "llama",
+      "lineage": "llama",
       "tier": "small",
       "open_weight": true,
       "strengths": [
@@ -3641,6 +3752,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -3704,6 +3817,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -3771,6 +3886,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "audio",
         "structured_output"
       ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -3842,6 +3959,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "vision",
         "audio",
         "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
       ],
       "tier": "mid",
       "open_weight": false,
@@ -3916,6 +4042,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
       ],
       "tier": "frontier",
       "open_weight": false,
@@ -3999,6 +4134,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
       "tier": "reasoning",
       "open_weight": false,
       "strengths": [
@@ -4064,6 +4201,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
       "tier": "reasoning",
       "open_weight": false,
       "strengths": [
@@ -4130,6 +4269,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
       "tier": "reasoning",
       "open_weight": false,
       "strengths": [
@@ -4199,6 +4340,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "openai-reasoning",
+      "lineage": "openai-reasoning",
       "tier": "reasoning",
       "open_weight": false,
       "strengths": [
@@ -4267,6 +4410,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "small",
       "open_weight": true,
       "strengths": [
@@ -4333,6 +4478,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
       "tier": "mid",
       "open_weight": false,
       "strengths": [
@@ -4402,6 +4549,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "extended_thinking",
         "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
       ],
       "tier": "frontier",
       "open_weight": false,
@@ -4475,6 +4631,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -4544,6 +4709,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -4615,6 +4782,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "deepseek",
+      "lineage": "deepseek",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -4691,6 +4860,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "extended_thinking",
         "structured_output"
       ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "mid",
       "open_weight": false,
       "strengths": [
@@ -4756,6 +4934,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -4819,6 +4999,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "minimax",
+      "lineage": "minimax",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -4884,6 +5066,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "mistral",
+      "lineage": "mistral",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -4947,6 +5131,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "mistral",
+      "lineage": "mistral",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -5012,6 +5198,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "thinking",
         "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
       ],
       "tier": "frontier",
       "open_weight": true,
@@ -5082,6 +5277,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -5145,6 +5342,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "qwen",
+      "lineage": "qwen3",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5212,6 +5411,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5274,6 +5475,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5339,6 +5542,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tools",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "mid",
       "open_weight": true,
       "strengths": [
@@ -5400,6 +5605,15 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "streaming",
         "tools",
         "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
       ],
       "tier": "frontier",
       "open_weight": true,
@@ -5469,6 +5683,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5539,6 +5755,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "thinking",
         "structured_output"
       ],
+      "family": "glm",
+      "lineage": "glm",
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
@@ -5896,6 +6114,8 @@ export const MODEL_CATALOG: readonly CatalogEntry[] = harnProviderCatalog.models
   contextWindow: model.context_window,
   runtimeContextWindow: model.runtime_context_window,
   capabilities: model.capability_tags,
+  family: model.family,
+  lineage: model.lineage,
   pricing: model.pricing
     ? {
         inputPerMTok: model.pricing.input_per_mtok,
