@@ -8,6 +8,116 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.56
+
+### Added
+
+- **Replay counterfactual chains.** `harn replay --counterfactual` can now
+  chain repeated plan files into one cumulative dry-run divergence report,
+  evaluates plans only after the requested replay cutoff is valid, and
+  isolates accidental plan-side filesystem writes from the workspace (#2611).
+- **MCP mock and simulated-world eval harness (#2710).** `harn mcp mock`
+  can now record redacted stdio MCP cassettes, replay them without
+  credentials, verify schema/behavior drift, serve seeded stateful
+  worlds with fault injection, and score final states for goal match,
+  collateral damage, pass rate, and pass^k reliability.
+- **Web grounding helpers in `std/web` (#2711).** Added provider-agnostic
+  `web_search`, deterministic `verify_imports`, and `web_grounding_tools` for
+  provenance-carrying search, post-edit import verification, and
+  capability-gated model guidance.
+- **Stall detector now catches more degenerate-loop patterns (#2712).** The
+  deterministic detector in `std/agent/stall` gained four new trip conditions
+  alongside the existing repeated-identical-call check: same action → same
+  error, no-progress monologue (consecutive assistant turns with text but no
+  tool call), ping-pong alternation between two actions, and repeated
+  context-window/token-limit errors. Each is behind a named, tunable threshold
+  (`repeat_same_observation`, `repeat_same_error`, `no_progress_messages`,
+  `ping_pong_cycles`, `repeat_context_window_error`, `hard_stop_after_trips`).
+  A principled polling exemption replaces brittle allowlists: a repeated
+  identical action only counts toward a trip when its observation is
+  byte-identical across repeats, so legitimate polling (a status that advances,
+  a watched file that changes) never trips. `exempt_tools` still works as a
+  secondary escape hatch. All trips route through the existing
+  `agent_loop_stall_warning` event (now enriched with `pattern`, `signature`,
+  `count`, `threshold`, and `consecutive_trips`), the advisory judge stays
+  gated on a deterministic trip, and a hard stop after repeated un-recovered
+  trips surfaces through the loop's existing terminal stuck /
+  `loop_control_decision` path — no new hook or event surface was added.
+- Added the `grounded_review` reminder provider, which injects advisory
+  code-review reminders only from concrete verifier, diagnostic, test, or
+  runtime-error evidence.
+- **Transcript projection can now reclaim stale tool-result bodies by
+  reachability (#2714).** The new `reachability_gc` policy preserves raw
+  transcript/audit history while replacing unreachable projected tool-result
+  bodies with redaction pointers, reclaimed-token estimates, and root-set audit
+  metadata.
+- Added `harn eval skill-gate` for contamination-safe held-out
+  skill/guidance gates with context-cost accounting, regression checks,
+  immutable grader hashes, Pareto variant reporting, and
+  `harn.skill_gate.receipt.v1` receipts.
+- Add bounded MCP Code Mode fan-out with trusted retry gates,
+  idempotency-key replay, per-server bulkheads, and outputSchema validation.
+- **Structural diff stdlib and hostlib surface (#2720).**
+  `std/diff` now exposes `structural_diff(path_a, path_b, language_or_options?)`,
+  backed by a new `hostlib_ast_structural_diff` method that parses both files with
+  tree-sitter, returns changed syntax-node spans for human review, reports pure
+  moves separately from line churn, and falls back to a line diff on parse errors
+  or size limits.
+- Added `artifact_emit(kind, spec, options?)` for validated Vega-Lite, Mermaid, and table artifact events on agent sessions.
+- **Provider catalog model-family metadata and complementary reviewer
+  selection (#2722).** Catalog exports now include normalized `family` and
+  `lineage` fields, optional reviewer-diversity hints, and a new
+  `llm_complementary_reviewer` builtin plus
+  `std/llm/catalog.complementary_reviewer` wrapper for selecting a
+  different-family reviewer with fallback reasoning and estimated cost.
+- Expose the normalized provider/model catalog at runtime through harn-serve
+  `GET /v1/provider-catalog` and the ACP `_harn/providerCatalog` extension
+  method.
+
+### Changed
+
+- Added an observability processor pipeline with a stock redaction processor, and
+  surfaced session event/receipt signature metadata as declared `harn.session.*`
+  span attributes.
+- **VM dispatch, inline caches, and pool fan-out are now `Send`-ready (#2690, #2691).**
+  Builtin ABIs, VM shared state, host bridges, isolate-local inline caches, and
+  the first pool worker path now use `Send`/`Sync` handles, with pool workers
+  scheduled on `tokio::spawn` and scoped through a VM-owned pool registry for
+  multi-thread execution.
+- **Pool multithreading now has an enforceable thread-local audit guard and CPU fan-out benchmark (#2691, #2692).**
+  The VM keeps a checked-in inventory for every `thread_local!` site, tests that
+  new sites are classified before landing, documents the `tokio::spawn`
+  pool-worker boundary that must stay task-local or explicitly scoped, and
+  avoids hot shared-closure refcount contention in adaptive arithmetic dispatch.
+- **Harnlang documentation navigation and first-run guidance.** The mdBook docs
+  now add a top-level section nav, narrow the sidebar to the active
+  documentation mode, clarify LLM provider/model resolution and remote MCP
+  login, stop suggesting Notion MCP OAuth scopes, and publish raw Markdown
+  companions for docs pages during the docs build. CI now also fails when
+  hand-written Sonnet examples drift from the live provider catalog alias.
+
+### Fixed
+
+- `edit_dry_run` now previews `rename_symbol` plan operations through the
+  shared code-index graph when the full hostlib surface is installed, so
+  multi-step edit plans can include cross-file renames in the unified diff
+  bundle.
+- Emitted Burin compass routing decisions as live agent events and aligned router coverage with the AST language registry.
+- **Agent pool multithreading docs and diagnostics now match the Send VM closeout (#2688).**
+  The public pool references describe the VM-scoped registry, `tokio::spawn`
+  worker boundary, pipeline reload semantics, and host-managed tenant/org
+  scopes without leaking private host issue links.
+- **Portal and filesystem helpers are more robust.** Portal launches now use
+  collision-resistant IDs and real RFC 3339 timestamps, portal run analysis
+  handles case-insensitive search and large duration values safely, and
+  stdlib filesystem copy/move/delete/mkdir operations now honor the
+  testbench overlay and mutation notifications consistently.
+- **Release publishing now fails closed without a pre-pushed tag.** The
+  push-to-main release workflow refuses to tag main HEAD when Cargo.toml is
+  ahead of the latest release tag, and `release_ship.sh --prepare` now routes
+  through the tag-first release harness.
+- Break module closure reference cycles and add a VM RSS soak gate.
+
 ## v0.8.55
 
 ### Fixed
