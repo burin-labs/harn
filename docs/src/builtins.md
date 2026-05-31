@@ -1104,6 +1104,9 @@ log response bodies by itself.
 | Function | Args | Returns | Description |
 |---|---|---|---|
 | `web_fetch(url, options?)` | url: string, options: dict | dict | Fetch a source and return `{ok, status, body, headers, content_type, etag, last_modified, fetched_at, cache_status, source_url, final_url, not_modified}` |
+| `web_search(query, options?)` | query: string, options: dict | dict | Search curated docs/registry entries, a configured JSON API, provider-hosted result captures, or `HARN_WEB_SEARCH_URL`; returns normalized results with per-result provenance |
+| `verify_imports(paths, options?)` | paths: string or list, options: dict | dict | Verify imports in source files against manifests, installed-package hints, registry evidence, symbol metadata, and package trust signals |
+| `web_grounding_tools(registry?, options?)` | registry: tool registry or nil, options: dict | tool registry | Add read-only `web_search` and `verify_imports` tools with capability-gated model guidance |
 | `web_parse_html(html, source_url?)` | html: string, source_url: string or nil | dict | Extract `{title, meta, canonical_url, links, tables, json_ld, text}` from deterministic HTTP-fetched HTML |
 | `web_resolve_url(base_url, href)` | base_url: string, href: string | string or nil | Resolve a relative URL reference against a source URL |
 | `web_origin_url(url, path?)` | url: string, path: string | string | Return the URL origin with a replacement path and no query or fragment. Relative paths are rooted at `/` |
@@ -1122,6 +1125,25 @@ cache key, `conditional: false` to suppress conditional headers, and
 method plus the effective request URL after `query` options are applied, so
 distinct query variants do not share a cached envelope.
 
+`web_search` is provider-agnostic. Pass `index` or `results` for deterministic
+curated entries, `api` for a JSON search service fetched through `web_fetch`,
+`provider_results` to normalize externally captured hosted-search results, or
+configure `HARN_WEB_SEARCH_URL` for process-level search. Each result includes
+`title`, `url`, `snippet`, `source_url`, ranking metadata, and a `provenance`
+record with backend id, evidence type, score, source URL, and trust metadata
+when available. Result envelopes expose only public backend metadata; configured
+API request headers and bodies are not echoed back.
+
+`verify_imports` scans Python, JavaScript/TypeScript, Rust, and Harn imports.
+It resolves packages from nearby `package.json`, `pyproject.toml`,
+`requirements*.txt`, and `Cargo.toml` manifests, optional
+`installed_packages`, and optional registry entries with `symbols`,
+`source_url`, `trust_score`, `first_seen`, or `published_at`. The return status
+is `pass`, `warn`, or `fail`; `package_not_found` and `symbol_not_found` are
+blocking unresolved findings, while `low_trust_package`, `fresh_package`, and
+`symbol_unverified` are warnings intended to force a lookup before coding
+continues.
+
 `robots_allowed` implements a deterministic robots subset for source-ingest
 workflows: exact user-agent groups take precedence over wildcard groups,
 multiple matching groups at the same specificity are combined, and
@@ -1129,7 +1151,7 @@ Allow/Disallow decisions use longest-prefix matching with Allow winning ties.
 
 ```harn
 import { mem_cache } from "std/cache"
-import { web_fetch, web_parse_html, robots_allowed, sitemap_urls } from "std/web"
+import { verify_imports, web_fetch, web_parse_html, web_search, robots_allowed, sitemap_urls } from "std/web"
 
 let store = mem_cache({namespace: "weekly-doc-monitor"})
 let page = web_fetch("https://docs.example.com/models", {store: store})
@@ -1138,6 +1160,20 @@ if page.cache_status != "not_modified" && robots_allowed(page.final_url) {
   log(parsed.title)
   log(sitemap_urls(page.final_url))
 }
+
+let docs = web_search("fastapi dependency injection", {
+  index: [
+    {
+      title: "FastAPI Dependencies",
+      url: "https://fastapi.tiangolo.com/tutorial/dependencies/",
+      source_type: "docs",
+      authority: true,
+    },
+  ],
+})
+let imports = verify_imports("app.py", {
+  registry: [{ecosystem: "python", name: "fastapi", symbols: ["FastAPI"]}],
+})
 ```
 
 HTTP server TLS helper builtins only describe listener/security policy. Runtime

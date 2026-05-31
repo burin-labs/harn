@@ -1,5 +1,6 @@
 // std/web — deterministic HTTP-backed source ingest and extraction helpers.
 import { cache_get, cache_put } from "std/cache"
+import { safe_parse } from "std/json"
 
 fn __web_header(headers, name) {
   let wanted = lowercase(name)
@@ -176,6 +177,417 @@ pub fn web_fetch(url: string, options = nil) -> dict {
     cache_put(cache_key, envelope, store_opts)
   }
   return envelope
+}
+
+fn __web_search_tokens(query) {
+  let normalized = regex_replace("[^A-Za-z0-9_./@:-]+", " ", lowercase(query ?? ""))
+  var out = []
+  for token in split(trim(normalized), " ") {
+    if token != "" && len(token) > 1 && !out.contains(token) {
+      out = out.push(token)
+    }
+  }
+  return out
+}
+
+fn __web_search_text(entry) {
+  return lowercase(
+    to_string(entry?.title ?? "")
+      + " "
+      + to_string(entry?.name ?? "")
+      + " "
+      + to_string(entry?.url ?? entry?.href ?? entry?.source_url ?? "")
+      + " "
+      + to_string(entry?.snippet ?? entry?.description ?? entry?.text ?? "")
+      + " "
+      + join(entry?.tags ?? [], " ")
+      + " "
+      + to_string(entry?.package ?? ""),
+  )
+}
+
+fn __web_search_score(entry, query, tokens) {
+  let haystack = __web_search_text(entry)
+  var score = 0
+  let phrase = lowercase(trim(query ?? ""))
+  if phrase != "" && contains(haystack, phrase) {
+    score = score + 25
+  }
+  let title = lowercase(to_string(entry?.title ?? entry?.name ?? ""))
+  let url = lowercase(to_string(entry?.url ?? entry?.href ?? entry?.source_url ?? ""))
+  for token in tokens {
+    if contains(title, token) {
+      score = score + 8
+    } else if contains(url, token) {
+      score = score + 5
+    } else if contains(haystack, token) {
+      score = score + 2
+    }
+  }
+  let source_type = entry?.source_type ?? entry?.kind
+  if ["docs", "pinned_docs", "package_registry", "registry"].contains(source_type) {
+    score = score + 6
+  }
+  if entry?.authority || entry?.authoritative {
+    score = score + 8
+  }
+  if entry?.version != nil || entry?.pinned_version != nil {
+    score = score + 2
+  }
+  return score
+}
+
+fn __web_search_take(items, limit) {
+  var out = []
+  for item in items {
+    if len(out) >= limit {
+      return out
+    }
+    out = out.push(item)
+  }
+  return out
+}
+
+fn __web_search_path_get(value, path, fallback = nil) {
+  if path == nil {
+    return fallback
+  }
+  let parts = if type_of(path) == "list" {
+    path
+  } else {
+    split(to_string(path), ".").filter({ part -> part != "" })
+  }
+  var current = value
+  for part in parts {
+    if current == nil {
+      return fallback
+    }
+    current = current[part]
+  }
+  return current ?? fallback
+}
+
+fn __web_search_merge_headers(left, right) {
+  let merged = left ?? {}
+  let extra = right ?? {}
+  return merged + extra
+}
+
+fn __web_search_tool_options(base, args) {
+  let merged = base ?? {}
+  let extra = args?.options ?? args ?? {}
+  return merged + extra
+}
+
+fn __web_search_backend(opts) {
+  let explicit = opts?.backend
+  if type_of(explicit) == "dict" {
+    return explicit
+      + {
+      kind: explicit?.kind ?? explicit?.type ?? "curated_index",
+      id: explicit?.id ?? explicit?.name ?? explicit?.kind ?? "configured",
+      deterministic: true,
+    }
+  }
+  if type_of(explicit) == "string" {
+    return {kind: explicit, id: explicit, deterministic: true}
+  }
+  if opts?.provider_results != nil {
+    return {kind: "provider_hosted", id: "provider_results", deterministic: true, evidence: "provider_results"}
+  }
+  if opts?.api != nil {
+    let api = opts.api
+    return {
+      kind: "api",
+      id: api?.id ?? api?.name ?? api?.url ?? "configured_search_api",
+      deterministic: true,
+      evidence: "search_api",
+      api: api,
+    }
+  }
+  let env_url = harness.env.get("HARN_WEB_SEARCH_URL")
+  if env_url != nil && env_url != "" {
+    var headers = {}
+    let bearer = harness.env.get("HARN_WEB_SEARCH_BEARER_TOKEN")
+    if bearer != nil && bearer != "" {
+      headers = {Authorization: "Bearer " + bearer}
+    }
+    return {
+      kind: "api",
+      id: "env:HARN_WEB_SEARCH_URL",
+      deterministic: true,
+      evidence: "search_api",
+      api: {
+        url: env_url,
+        query_param: harness.env.get_or("HARN_WEB_SEARCH_QUERY_PARAM", "q"),
+        headers: headers,
+      },
+    }
+  }
+  return {
+    kind: "curated_index",
+    id: opts?.index_id ?? "inline",
+    deterministic: true,
+    evidence: "curated_index",
+  }
+}
+
+fn __web_search_public_backend(backend) {
+  var public = {
+    kind: backend.kind,
+    id: backend.id,
+    deterministic: backend?.deterministic ?? true,
+    evidence: backend?.evidence ?? backend.kind,
+  }
+  if backend?.source_url != nil {
+    public = public + {source_url: backend.source_url}
+  }
+  if backend?.final_url != nil {
+    public = public + {final_url: backend.final_url}
+  }
+  return public
+}
+
+fn __web_search_normalize(entry, rank, backend, score = nil) {
+  let url = entry?.url ?? entry?.href ?? entry?.source_url ?? entry?.docs_url
+  return {
+    rank: rank,
+    title: to_string(entry?.title ?? entry?.name ?? url ?? ""),
+    url: url,
+    snippet: to_string(entry?.snippet ?? entry?.description ?? entry?.text ?? ""),
+    source_url: entry?.source_url ?? url,
+    final_url: entry?.final_url ?? url,
+    source_type: entry?.source_type ?? entry?.kind ?? "web",
+    authority: entry?.authority ?? entry?.authoritative ?? false,
+    package: entry?.package ?? entry?.name,
+    registry: entry?.registry ?? entry?.ecosystem,
+    version: entry?.version ?? entry?.pinned_version,
+    provenance: {
+      backend_kind: backend.kind,
+      backend_id: backend.id,
+      evidence: backend?.evidence ?? backend.kind,
+      score: score,
+      source_url: entry?.source_url ?? url,
+      trust_score: entry?.trust_score,
+      first_seen: entry?.first_seen,
+      fetched_at: backend?.fetched_at,
+    },
+  }
+}
+
+fn __web_search_curated(query, opts, backend) {
+  let tokens = __web_search_tokens(query)
+  let limit = opts?.limit ?? 10
+  var scored = []
+  for entry in opts?.index ?? opts?.results ?? backend?.index ?? [] {
+    let score = __web_search_score(entry, query, tokens)
+    if score > 0 || opts?.include_zero_score {
+      scored = scored.push({entry: entry, score: score})
+    }
+  }
+  let ordered = scored.sort_by({ item -> 0 - item.score })
+  var results = []
+  var rank = 1
+  for item in __web_search_take(ordered, limit) {
+    results = results.push(__web_search_normalize(item.entry, rank, backend, item.score))
+    rank = rank + 1
+  }
+  return {
+    ok: true,
+    query: query,
+    backend: __web_search_public_backend(backend),
+    results: results,
+    provenance: {resolver: "std/web", result_count: len(results), authoritative_first: true},
+  }
+}
+
+fn __web_search_provider_results(query, opts, backend) {
+  var results = []
+  var rank = 1
+  for entry in __web_search_take(opts.provider_results ?? [], opts?.limit ?? 10) {
+    results = results.push(__web_search_normalize(entry, rank, backend))
+    rank = rank + 1
+  }
+  return {
+    ok: true,
+    query: query,
+    backend: __web_search_public_backend(backend),
+    results: results,
+    provenance: {resolver: "std/web", result_count: len(results), authoritative_first: false},
+  }
+}
+
+fn __web_search_api_item(item, api) {
+  if type_of(item) != "dict" {
+    return {title: to_string(item), snippet: to_string(item)}
+  }
+  return item
+    + {
+    title: __web_search_path_get(item, api?.title_path ?? "title", item?.title ?? item?.name),
+    url: __web_search_path_get(item, api?.url_path ?? "url", item?.url ?? item?.href),
+    snippet: __web_search_path_get(
+      item,
+      api?.snippet_path ?? "snippet",
+      item?.snippet ?? item?.description ?? item?.text,
+    ),
+    source_url: __web_search_path_get(item, api?.source_url_path ?? "source_url", item?.source_url),
+  }
+}
+
+fn __web_search_api(query, opts, backend) {
+  let api = backend.api ?? opts.api
+  let limit = opts?.limit ?? api?.limit ?? 10
+  var fetch_options = api?.fetch_options ?? {}
+  let method = uppercase(api?.method ?? fetch_options?.method ?? "GET")
+  if method == "GET" {
+    let query_param = api?.query_param ?? "q"
+    let existing_query = fetch_options?.query ?? {}
+    fetch_options = fetch_options + {method: method, query: existing_query + {[query_param]: query}}
+  } else {
+    let headers = __web_search_merge_headers(fetch_options?.headers, api?.headers)
+    fetch_options = fetch_options
+      + {method: method, headers: headers, body: api?.body ?? json_stringify({query: query, limit: limit})}
+  }
+  if api?.headers != nil && method == "GET" {
+    fetch_options = fetch_options + {headers: __web_search_merge_headers(fetch_options?.headers, api.headers)}
+  }
+  let fetched = web_fetch(api.url, fetch_options)
+  let parsed = safe_parse(fetched.body)
+  let items = __web_search_path_get(parsed, api?.results_path ?? "results", [])
+  let raw_results = if type_of(items) == "list" {
+    items
+  } else {
+    []
+  }
+  var results = []
+  var rank = 1
+  for item in __web_search_take(raw_results, limit) {
+    let normalized = __web_search_api_item(item, api)
+    results = results
+      .push(
+      __web_search_normalize(
+        normalized,
+        rank,
+        backend + {fetched_at: fetched.fetched_at},
+        normalized?.score,
+      ),
+    )
+    rank = rank + 1
+  }
+  let fetch_ok = fetched.ok ?? false
+  let parsed_ok = parsed != nil
+  return {
+    ok: fetch_ok && parsed_ok,
+    query: query,
+    backend: __web_search_public_backend(
+      backend + {source_url: fetched.source_url, final_url: fetched.final_url},
+    ),
+    results: results,
+    provenance: {
+      resolver: "std/web",
+      result_count: len(results),
+      authoritative_first: false,
+      fetched_at: fetched.fetched_at,
+      cache_status: fetched.cache_status,
+      source_url: fetched.source_url,
+      final_url: fetched.final_url,
+    },
+  }
+}
+
+/**
+ * Search authoritative web, docs, or registry evidence through a normalized
+ * backend contract.
+ *
+ * Backends:
+ *   - `index` / `results`: deterministic curated entries scored locally.
+ *   - `api`: configured JSON search API fetched through `web_fetch`.
+ *   - `provider_results`: externally captured hosted-tool results normalized
+ *     without coupling this primitive to any provider.
+ *   - `HARN_WEB_SEARCH_URL`: optional process configuration for an API backend.
+ *
+ * @effects: [net, time]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: web_search(query, options)
+ */
+pub fn web_search(query: string, options = nil) -> dict {
+  let opts = options ?? {}
+  let backend = __web_search_backend(opts)
+  if backend.kind == "api" {
+    return __web_search_api(query, opts, backend)
+  }
+  if backend.kind == "provider_hosted" {
+    return __web_search_provider_results(query, opts, backend)
+  }
+  return __web_search_curated(query, opts, backend)
+}
+
+/**
+ * Deterministically verify package imports and optional symbol evidence for
+ * source files. Options include `project_root`, `installed_packages`,
+ * `registry`, `now`, `low_trust_threshold`, and `min_package_age_days`.
+ *
+ * @effects: [fs]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: verify_imports(paths, options)
+ */
+pub fn verify_imports(paths, options = nil) -> dict {
+  return __verify_imports(paths, options ?? {})
+}
+
+/**
+ * Add model-callable `web_search` and `verify_imports` tools with
+ * capability-gated grounding guidance.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: web_grounding_tools(registry, options)
+ */
+pub fn web_grounding_tools(registry = nil, options = nil) {
+  let opts = options ?? {}
+  var tools = registry ?? tool_registry()
+  tools = tool_define(
+    tools,
+    opts?.search_tool_name ?? "web_search",
+    "Search authoritative docs, package registries, or a configured search API and return normalized results with provenance.",
+    {
+      parameters: {
+        type: "object",
+        required: ["query"],
+        properties: {query: {type: "string"}, limit: {type: "integer"}, index: {type: "array"}, api: {type: "object"}},
+      },
+      annotations: {readOnlyHint: true},
+      handler: { args -> web_search(args.query, __web_search_tool_options(opts, args)) },
+      guidance: "For unfamiliar APIs, package names, or recent behavior, call web_search against authoritative docs or registries before coding. Prefer pinned docs and registry evidence over general web snippets, and carry source URLs into the answer or follow-up prompt.",
+    },
+  )
+  tools = tool_define(
+    tools,
+    opts?.verify_tool_name ?? "verify_imports",
+    "Verify imports in source files against manifests, installed-package hints, registry evidence, symbol metadata, and package trust signals.",
+    {
+      parameters: {
+        type: "object",
+        required: ["paths"],
+        properties: {
+          paths: {type: "array", items: {type: "string"}},
+          project_root: {type: "string"},
+          registry: {type: "array"},
+          installed_packages: {},
+        },
+      },
+      annotations: {readOnlyHint: true},
+      handler: { args -> verify_imports(args.paths ?? [args.path], __web_search_tool_options(opts, args)) },
+      guidance: "After generating or editing code with imports, call verify_imports on the touched source files. Treat package_not_found and symbol_not_found as blockers. Treat fresh_package or low_trust_package warnings as a forced lookup trigger before proceeding.",
+    },
+  )
+  return tools
 }
 
 /**

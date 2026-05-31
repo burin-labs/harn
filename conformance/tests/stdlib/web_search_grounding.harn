@@ -1,0 +1,173 @@
+import { verify_imports, web_grounding_tools, web_search } from "std/web"
+
+fn has_finding(items, kind, package) {
+  for item in items {
+    if item.kind == kind && item.package == package {
+      return true
+    }
+  }
+  return false
+}
+
+fn has_import_status(items, package, symbol, status) {
+  for item in items {
+    if item.package == package && item.symbol == symbol && item.status == status {
+      return true
+    }
+  }
+  return false
+}
+
+pipeline test(task) {
+  let curated = web_search(
+    "fastapi dependency injection",
+    {
+      limit: 1,
+      index: [
+        {
+          title: "FastAPI Dependencies",
+          url: "https://fastapi.tiangolo.com/tutorial/dependencies/",
+          snippet: "Dependency injection and Depends examples.",
+          source_type: "docs",
+          authority: true,
+          package: "fastapi",
+          version: "0.115",
+        },
+        {title: "Random blog", url: "https://example.net/post", snippet: "A generic overview."},
+      ],
+    },
+  )
+  assert_eq(curated.backend.kind, "curated_index")
+  assert_eq(curated.results[0].package, "fastapi")
+  assert_eq(curated.results[0].provenance.evidence, "curated_index")
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://search.example/api*",
+    {
+      status: 200,
+      headers: {"content-type": "application/json"},
+      body: json_stringify(
+        {
+          items: [
+            {
+              title: "std/web",
+              link: "https://harnlang.com/docs/builtins.html#web",
+              summary: "Harn web_fetch and web_search helpers.",
+              source_type: "docs",
+            },
+          ],
+        },
+      ),
+    },
+  )
+  let api = web_search(
+    "harn web",
+    {
+      api: {
+        url: "https://search.example/api",
+        headers: {Authorization: "Bearer SECRET_SEARCH_TOKEN"},
+        results_path: "items",
+        url_path: "link",
+        snippet_path: "summary",
+      },
+    },
+  )
+  assert_eq(api.backend.kind, "api")
+  assert_eq(api.results[0].url, "https://harnlang.com/docs/builtins.html#web")
+  assert(api.backend.api == nil, "web_search does not expose backend request config")
+  assert(!contains(json_stringify(api), "SECRET_SEARCH_TOKEN"), "web_search redacts API credentials")
+  let calls = http_mock_calls({redact_sensitive: false})
+  assert(contains(calls[0].url, "https://search.example/api?"), "web_search used web_fetch/http mock")
+  assert(contains(calls[0].url, "q=harn"), "web_search forwarded query")
+  let root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + uuid_v7())
+  harness.fs.mkdir(root)
+  harness.fs
+    .write_text(
+    path_join(root, "package.json"),
+    "{\"dependencies\":{\"react\":\"19.0.0\",\"react-dom\":\"19.0.0\"}}\n",
+  )
+  harness.fs
+    .write_text(
+    path_join(root, "Cargo.toml"),
+    "[package]\nname=\"grounding-demo\"\nversion=\"0.1.0\"\n[dependencies]\nserde=\"1\"\n",
+  )
+  let app_py = path_join(root, "app.py")
+  let ui_ts = path_join(root, "ui.ts")
+  let lib_rs = path_join(root, "lib.rs")
+  harness.fs
+    .write_text(
+    app_py,
+    "import requests\nfrom fastapi import FastAPI, NopeSymbol\nimport madeup_package_zz\n",
+  )
+  harness.fs
+    .write_text(
+    ui_ts,
+    "import React from 'react'\nimport { createRoot } from 'react-dom/client'\nimport nope from 'fresh-slop'\n",
+  )
+  harness.fs.write_text(lib_rs, "use serde::Serialize;\nuse hallucinate_crate::Thing;\n")
+  let verified = verify_imports(
+    [app_py, ui_ts, lib_rs],
+    {
+      project_root: root,
+      now: "2026-05-31",
+      low_trust_threshold: 0.4,
+      min_package_age_days: 30,
+      registry: [
+        {
+          ecosystem: "python",
+          name: "requests",
+          symbols: [],
+          source_url: "https://pypi.org/project/requests/",
+        },
+        {
+          ecosystem: "python",
+          name: "fastapi",
+          symbols: ["FastAPI"],
+          source_url: "https://fastapi.tiangolo.com/",
+        },
+        {
+          ecosystem: "npm",
+          name: "react-dom",
+          symbols: ["createRoot"],
+          source_url: "https://www.npmjs.com/package/react-dom",
+        },
+        {ecosystem: "cargo", name: "serde", symbols: ["Serialize"], source_url: "https://docs.rs/serde/"},
+        {
+          ecosystem: "npm",
+          name: "fresh-slop",
+          exists: true,
+          trust_score: 0.1,
+          first_seen: "2026-05-30",
+          source_url: "https://www.npmjs.com/package/fresh-slop",
+        },
+      ],
+    },
+  )
+  assert_eq(verified.status, "fail")
+  assert(
+    has_finding(verified.unresolved, "package_not_found", "madeup_package_zz"),
+    "missing Python package",
+  )
+  assert(
+    has_finding(verified.unresolved, "package_not_found", "hallucinate_crate"),
+    "missing Rust crate",
+  )
+  assert(has_finding(verified.unresolved, "symbol_not_found", "fastapi"), "missing Python symbol")
+  assert(has_import_status(verified.imports, "fastapi", "FastAPI", "resolved"), "known Python symbol")
+  assert(
+    has_import_status(verified.imports, "react-dom", "createRoot", "resolved"),
+    "known npm symbol",
+  )
+  assert(has_import_status(verified.imports, "serde", "Serialize", "resolved"), "known Rust symbol")
+  assert(
+    has_finding(verified.warnings, "low_trust_package", "fresh-slop"),
+    "low-trust package warning",
+  )
+  assert(has_finding(verified.warnings, "fresh_package", "fresh-slop"), "fresh package warning")
+  let explained = prompt_explain({tools: web_grounding_tools()})
+  assert(contains(explained.system, "call web_search"), "search guidance is gated with the tool")
+  assert(contains(explained.system, "call verify_imports"), "verify guidance is gated with the tool")
+  harness.fs.delete(root)
+  __io_println("web_search_grounding_ok")
+}
