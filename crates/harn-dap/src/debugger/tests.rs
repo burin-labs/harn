@@ -6,7 +6,7 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::state::{Debugger, StepMode};
-use crate::protocol::DapMessage;
+use crate::protocol::{DapMessage, DapResponse};
 
 fn make_request(seq: i64, command: &str, args: Option<serde_json::Value>) -> DapMessage {
     DapMessage {
@@ -26,6 +26,46 @@ fn write_temp_program(file_name: &str, source: &str) -> (TempDir, PathBuf) {
     let file = dir.path().join(file_name);
     std::fs::write(&file, source).expect("write temp Harn program");
     (dir, file)
+}
+
+fn run_debug_program(file_name: &str, source: &str) -> Vec<DapResponse> {
+    let mut dbg = Debugger::new();
+    let (_dir, file) = write_temp_program(file_name, source);
+
+    dbg.handle_message(make_request(1, "initialize", None));
+    dbg.handle_message(make_request(
+        2,
+        "launch",
+        Some(json!({"program": file.to_string_lossy()})),
+    ));
+
+    let mut responses = dbg.handle_message(make_request(3, "configurationDone", None));
+    let mut steps = 0usize;
+    while dbg.is_running() {
+        responses.extend(dbg.step_running_vm());
+        steps += 1;
+        assert!(steps < 20_000, "debug program did not terminate");
+    }
+    responses
+}
+
+fn stdout_text(responses: &[DapResponse]) -> String {
+    responses
+        .iter()
+        .filter(|r| {
+            r.event.as_deref() == Some("output")
+                && r.body
+                    .as_ref()
+                    .map(|b| b["category"] == "stdout")
+                    .unwrap_or(false)
+        })
+        .filter_map(|r| {
+            r.body
+                .as_ref()
+                .and_then(|body| body["output"].as_str())
+                .map(str::to_string)
+        })
+        .collect::<String>()
 }
 
 #[test]
@@ -186,6 +226,68 @@ fn test_launch_and_run() {
         .find(|r| r.event.as_deref() == Some("terminated"));
     assert!(terminated.is_some());
     drop(dbg);
+}
+
+#[test]
+fn test_parallel_runs_under_debugger_runtime() {
+    let responses = run_debug_program(
+        "parallel_debugger_runtime.harn",
+        r"
+pipeline test(task) {
+  let results = parallel 3 { i -> i * 10 }
+  log(results)
+}
+",
+    );
+    assert!(
+        responses
+            .iter()
+            .any(|r| r.event.as_deref() == Some("terminated")),
+        "parallel debug run should terminate: {responses:?}"
+    );
+    let output = stdout_text(&responses);
+    assert!(
+        output.contains("[harn] [0, 10, 20]"),
+        "parallel output missing from debugger stdout: {output:?}"
+    );
+}
+
+#[test]
+fn test_pool_workers_run_under_debugger_runtime() {
+    let responses = run_debug_program(
+        "pool_debugger_runtime.harn",
+        r#"
+import { pool_create, pool_wait } from "std/lifecycle/pool"
+
+pipeline test(task) {
+  let pool = pool_create({name: "dap-pool-runtime", max_concurrent: 4})
+  var handles = []
+  for i in 0 to 8 exclusive {
+    let seed = i
+    handles = handles.push(pool.submit({ -> seed + 10 }))
+  }
+  let results = pool_wait(handles)
+  var completed = 0
+  for result in results {
+    if result.status == "completed" && result.result >= 10 {
+      completed = completed + 1
+    }
+  }
+  log(completed)
+}
+"#,
+    );
+    assert!(
+        responses
+            .iter()
+            .any(|r| r.event.as_deref() == Some("terminated")),
+        "pool debug run should terminate: {responses:?}"
+    );
+    let output = stdout_text(&responses);
+    assert!(
+        output.contains("[harn] 8"),
+        "pool output missing from debugger stdout: {output:?}"
+    );
 }
 
 #[test]

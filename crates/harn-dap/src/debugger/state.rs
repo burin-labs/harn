@@ -71,6 +71,11 @@ pub struct Debugger {
     /// Built lazily so protocol-only debugger sessions and unit tests do
     /// not open runtime I/O/timer descriptors they never use.
     pub(crate) runtime: Option<tokio::runtime::Runtime>,
+    /// Persistent local task set for VM paths that still use
+    /// `spawn_local` (`parallel`, `spawn`, streams) while the owning
+    /// runtime can also execute `tokio::spawn` pool workers on OS
+    /// threads.
+    pub(crate) local_set: Option<tokio::task::LocalSet>,
     /// Next variable reference ID (start at 100 to avoid conflict with scope refs).
     pub(crate) next_var_ref: i64,
     /// Whether to break on thrown exceptions.
@@ -200,6 +205,7 @@ impl Debugger {
             var_refs: BTreeMap::new(),
             next_var_ref: 100,
             runtime: None,
+            local_set: None,
             break_on_exceptions: false,
             exception_filters: BTreeMap::new(),
             latest_debug_state: Arc::new(Mutex::new(None)),
@@ -309,11 +315,14 @@ impl Debugger {
     pub(crate) fn ensure_runtime(&mut self) {
         if self.runtime.is_none() {
             self.runtime = Some(
-                tokio::runtime::Builder::new_current_thread()
+                tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
                     .unwrap(),
             );
+        }
+        if self.local_set.is_none() {
+            self.local_set = Some(tokio::task::LocalSet::new());
         }
     }
 
@@ -352,6 +361,7 @@ impl Drop for Debugger {
             vm.signal_cancel();
         }
         self.vm = None;
+        self.local_set = None;
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_timeout(Duration::ZERO);
         }
