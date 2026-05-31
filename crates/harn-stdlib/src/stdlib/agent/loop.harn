@@ -594,6 +594,15 @@ fn __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opt
   }
 }
 
+fn __agent_loop_invalid_await_resumption_feedback(error) {
+  return "Invalid agent_await_resumption call: "
+    + to_string(error)
+    + "\n\nThis lifecycle tool is only for parking until external input or a valid resume condition. "
+    + "For ordinary work, continue with the available project tools or finish normally. "
+    + "If you do need a resume condition, `conditions.trigger` must be an object trigger spec; "
+    + "use `conditions.on_event` for an event-topic string."
+}
+
 fn __tool_call_name(call) {
   return to_string(call?.name ?? call?.tool_name ?? "")
 }
@@ -1831,7 +1840,52 @@ fn __agent_loop_run(message, session, initial_opts) {
       agent_session_record_assistant(session.session_id, recorded_assistant)
       let await_call = __agent_await_resumption_call(tool_calls)
       if await_call != nil {
-        suspend_result = __agent_loop_await_resumption(session, iteration, await_call, opts)
+        let await_result = try {
+          __agent_loop_await_resumption(session, iteration, await_call, opts)
+        }
+        if is_err(await_result) {
+          let await_error = unwrap_err(await_result)
+          agent_session_inject_feedback(
+            session.session_id,
+            "agent_await_resumption",
+            __agent_loop_invalid_await_resumption_feedback(await_error),
+          )
+          let await_totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
+          agent_emit_event(
+            session.session_id,
+            "iteration_end",
+            {
+              iteration: iteration_index + 1,
+              iteration_info: __agent_loop_iteration_info(
+                session.session_id,
+                llm_result,
+                len(tool_calls),
+                visible_text,
+                await_totals,
+                loop_start_ms,
+              )
+                + {dispatch_skipped: true, skip_reason: "invalid_agent_await_resumption"},
+            },
+          )
+          let await_exhaustion = __agent_loop_budget_exhaustion(
+            session.session_id,
+            budget,
+            iteration,
+            await_totals,
+            loop_start_ms,
+            current_max,
+          )
+          if await_exhaustion.exhausted {
+            __agent_loop_emit_budget_exhausted(session.session_id, await_exhaustion)
+            budget_exhausted_emitted = true
+            budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, await_exhaustion.kind)
+            final_status = "budget_exhausted"
+            stop_reason = await_exhaustion.kind
+            break
+          }
+          continue
+        }
+        suspend_result = unwrap(await_result)
         let _totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, iteration_index + 1)
         agent_emit_event(
           session.session_id,
