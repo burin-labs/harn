@@ -7,7 +7,7 @@
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use super::{
@@ -545,13 +545,15 @@ mod tests {
     fn standard_device_rules_allow_common_device_files_only() {
         let rules = standard_device_rules();
         assert_eq!(rules.len(), 4);
-        assert!(rules
-            .iter()
-            .any(|(path, access)| path == Path::new("/dev/null")
-                && access & LANDLOCK_ACCESS_FS_READ_FILE != 0
-                && access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0));
+        assert!(rules.iter().any(|(path, access)| path.as_path()
+            == std::path::Path::new("/dev/null")
+            && access & LANDLOCK_ACCESS_FS_READ_FILE != 0
+            && access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0));
         for device in ["/dev/zero", "/dev/random", "/dev/urandom"] {
-            let Some((_, access)) = rules.iter().find(|(path, _)| path == Path::new(device)) else {
+            let Some((_, access)) = rules
+                .iter()
+                .find(|(path, _)| path.as_path() == std::path::Path::new(device))
+            else {
                 panic!("missing standard device rule for {device}");
             };
             assert_ne!(
