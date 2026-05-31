@@ -1,5 +1,65 @@
 import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
 
+// Deterministic thrash / degenerate-loop detector over the agent's
+// action/observation stream (#2712, part of the #2708 cheap-model
+// reliability stack).
+//
+// This is the deterministic GATE in the reliability stack. An LLM
+// "are we thrashing?" self-evaluation is unreliable on its own: intrinsic
+// self-evaluation degrades otherwise-correct work (Huang et al., ICLR 2024;
+// Kamoi et al., TACL 2024). So the advisory judge (consulted via
+// `loop.harn`'s `stall_judge_due` path) must NEVER fire on its own — it is
+// consulted only AFTER this detector trips, and even then it stays advisory.
+//
+// Compose, do not duplicate: every trip is surfaced through the EXISTING
+// `agent_loop_stall_warning` event (the `warning` payload is passed through
+// to the host verbatim, so enriching it needs no Rust change), the advisory
+// judge stays gated on `stall_warning != nil`, and a hard stop surfaces
+// through the loop's existing terminal `stuck` / `loop_control_decision`
+// path. We deliberately avoid a parallel Rust detector or a new hook surface.
+//
+// Trip conditions (each behind a named, tunable threshold; mirrors the
+// design reference's defaults):
+//
+//   1. same action -> byte-identical observation, repeated >= 4 times. This
+//      SUBSUMES the old adjacent-same-signature logic with an
+//      observation-signature refinement.
+//   2. same action -> same error, repeated >= 3 times.
+//   3. no-progress monologue: >= 3 consecutive assistant turns with text but
+//      no tool call.
+//   4. ping-pong: A,B,A,B alternation between two actions >= 6 cycles.
+//   5. repeated context-window / token-limit errors >= 2 times.
+//
+// The polling / retry exemption (principled, not an allowlist; the fix for
+// OpenHands #5355): a repeated identical action only counts toward conditions
+// (1) and (4) when its observation signature is BYTE-IDENTICAL across
+// repeats. Legitimate polling produces a changing observation (the status
+// advances, the watched file mutates), which resets the streak, so polling
+// never trips. The `exempt_tools` allowlist still works for back-compat but
+// is now a SECONDARY escape hatch — the observation-signature principle is
+// the primary mechanism.
+// same action -> identical observation repeats before tripping.
+const STALL_REPEAT_SAME_OBSERVATION = 4
+
+// same action -> same error repeats before tripping.
+const STALL_REPEAT_SAME_ERROR = 3
+
+// consecutive no-progress agent messages (text, no tool call) before tripping.
+const STALL_NO_PROGRESS_MESSAGES = 3
+
+// ping-pong cycles (A,B,A,B,...) between two actions before tripping.
+const STALL_PING_PONG_CYCLES = 6
+
+// repeated context-window / token-limit errors before tripping.
+const STALL_REPEAT_CONTEXT_WINDOW_ERROR = 2
+
+// consecutive un-recovered trips before a hard stop is recommended. A trip
+// "recovers" when a turn produces a step that does not itself trip (the agent
+// broke the loop). Past this many back-to-back trips the detector flags
+// `hard_stop` so the loop can surface a terminal stuck stop instead of
+// nudging forever.
+const STALL_HARD_STOP_AFTER_TRIPS = 3
+
 type AgentStallConfig = {
   enabled: bool,
   threshold: int,
@@ -7,6 +67,12 @@ type AgentStallConfig = {
   max_feedback: int,
   exempt_tools: list,
   include_arguments: bool,
+  repeat_same_observation: int,
+  repeat_same_error: int,
+  no_progress_messages: int,
+  ping_pong_cycles: int,
+  repeat_context_window_error: int,
+  hard_stop_after_trips: int,
 }
 
 type AgentStallWarning = {
@@ -16,6 +82,11 @@ type AgentStallWarning = {
   threshold: int,
   arguments_digest: string,
   signature_digest: string,
+  pattern: string,
+  signature: string,
+  count: int,
+  consecutive_trips: int,
+  hard_stop: bool,
   arguments?: dict,
 }
 
@@ -25,6 +96,17 @@ type AgentStallState = {
   warnings: list<AgentStallWarning>,
   repeated_tool_calls: int,
   feedback_count: int,
+  last_observation_signature: string,
+  last_outcome_kind: string,
+  same_observation_streak: int,
+  same_error_streak: int,
+  context_window_error_streak: int,
+  no_progress_streak: int,
+  ping_pong_a: string,
+  ping_pong_b: string,
+  ping_pong_alternations: int,
+  consecutive_trips: int,
+  hard_stop: bool,
 }
 
 type AgentStallObservation = {
@@ -33,6 +115,7 @@ type AgentStallObservation = {
   warning: AgentStallWarning?,
   feedback_deferred: bool,
   config: AgentStallConfig,
+  hard_stop: bool,
 }
 
 fn __agent_stall_bool(value, fallback: bool, field: string) -> bool {
@@ -55,26 +138,37 @@ fn __agent_stall_list(value, field: string) -> list {
   throw "agent_loop: stall_diagnostics." + field + " must be a list; got " + type_of(value)
 }
 
+fn __agent_stall_int(value, fallback: int, minimum: int) -> int {
+  if type_of(value) == "int" && value >= minimum {
+    return value
+  }
+  return fallback
+}
+
+fn __agent_stall_default_config() -> AgentStallConfig {
+  return {
+    enabled: false,
+    threshold: 3,
+    inject_feedback: true,
+    max_feedback: 1,
+    exempt_tools: [],
+    include_arguments: false,
+    repeat_same_observation: STALL_REPEAT_SAME_OBSERVATION,
+    repeat_same_error: STALL_REPEAT_SAME_ERROR,
+    no_progress_messages: STALL_NO_PROGRESS_MESSAGES,
+    ping_pong_cycles: STALL_PING_PONG_CYCLES,
+    repeat_context_window_error: STALL_REPEAT_CONTEXT_WINDOW_ERROR,
+    hard_stop_after_trips: STALL_HARD_STOP_AFTER_TRIPS,
+  }
+}
+
 fn __agent_stall_config(value) -> AgentStallConfig {
+  let defaults = __agent_stall_default_config()
   if value == nil {
-    return {
-      enabled: false,
-      threshold: 3,
-      inject_feedback: true,
-      max_feedback: 1,
-      exempt_tools: [],
-      include_arguments: false,
-    }
+    return defaults
   }
   if type_of(value) == "bool" {
-    return {
-      enabled: value,
-      threshold: 3,
-      inject_feedback: true,
-      max_feedback: 1,
-      exempt_tools: [],
-      include_arguments: false,
-    }
+    return defaults + {enabled: value}
   }
   if type_of(value) != "dict" {
     throw "agent_loop: `stall_diagnostics` must be a dict, bool, or nil; got " + type_of(value)
@@ -86,13 +180,23 @@ fn __agent_stall_config(value) -> AgentStallConfig {
   } else {
     __agent_stall_list(value?.allow_repeated_tools, "allow_repeated_tools")
   }
+  let resolved_threshold = if type_of(threshold) == "int" && threshold >= 2 {
+    threshold
+  } else {
+    3
+  }
+  // The legacy `threshold` knob (N repeated identical calls) IS the same intent
+  // as the same-observation condition, so when a caller sets it explicitly it
+  // also drives `repeat_same_observation` for back-compat. Absent an explicit
+  // `threshold`, the same-observation condition uses the reference default (4).
+  let same_observation_default = if value?.threshold != nil {
+    resolved_threshold
+  } else {
+    STALL_REPEAT_SAME_OBSERVATION
+  }
   return {
     enabled: __agent_stall_bool(value?.enabled, true, "enabled"),
-    threshold: if type_of(threshold) == "int" && threshold >= 2 {
-      threshold
-    } else {
-      3
-    },
+    threshold: resolved_threshold,
     inject_feedback: __agent_stall_bool(value?.inject_feedback, true, "inject_feedback"),
     max_feedback: if type_of(max_feedback) == "int" && max_feedback >= 0 {
       max_feedback
@@ -101,6 +205,12 @@ fn __agent_stall_config(value) -> AgentStallConfig {
     },
     exempt_tools: exempt_tools,
     include_arguments: __agent_stall_bool(value?.include_arguments, false, "include_arguments"),
+    repeat_same_observation: __agent_stall_int(value?.repeat_same_observation, same_observation_default, 2),
+    repeat_same_error: __agent_stall_int(value?.repeat_same_error, STALL_REPEAT_SAME_ERROR, 2),
+    no_progress_messages: __agent_stall_int(value?.no_progress_messages, STALL_NO_PROGRESS_MESSAGES, 2),
+    ping_pong_cycles: __agent_stall_int(value?.ping_pong_cycles, STALL_PING_PONG_CYCLES, 2),
+    repeat_context_window_error: __agent_stall_int(value?.repeat_context_window_error, STALL_REPEAT_CONTEXT_WINDOW_ERROR, 1),
+    hard_stop_after_trips: __agent_stall_int(value?.hard_stop_after_trips, STALL_HARD_STOP_AFTER_TRIPS, 1),
   }
 }
 
@@ -114,11 +224,45 @@ fn __agent_stall_config(value) -> AgentStallConfig {
  * @example: agent_stall_initial_state()
  */
 pub fn agent_stall_initial_state() -> AgentStallState {
-  return {last_signature: "", streak: 0, warnings: [], repeated_tool_calls: 0, feedback_count: 0}
+  return {
+    last_signature: "",
+    streak: 0,
+    warnings: [],
+    repeated_tool_calls: 0,
+    feedback_count: 0,
+    last_observation_signature: "",
+    last_outcome_kind: "",
+    same_observation_streak: 0,
+    same_error_streak: 0,
+    context_window_error_streak: 0,
+    no_progress_streak: 0,
+    ping_pong_a: "",
+    ping_pong_b: "",
+    ping_pong_alternations: 0,
+    consecutive_trips: 0,
+    hard_stop: false,
+  }
 }
 
-fn __agent_stall_reset_state(state: AgentStallState) -> AgentStallState {
-  return state + {last_signature: "", streak: 0}
+/*
+ * Reset only the action-stream tracking (signatures, observation/error
+ * streaks, ping-pong). Leaves the consecutive-trip escalation and feedback
+ * counters alone. Used when an action is exempt or the turn made no tool call.
+ */
+fn __agent_stall_reset_action(state: AgentStallState) -> AgentStallState {
+  return state
+    + {
+    last_signature: "",
+    streak: 0,
+    last_observation_signature: "",
+    last_outcome_kind: "",
+    same_observation_streak: 0,
+    same_error_streak: 0,
+    context_window_error_streak: 0,
+    ping_pong_a: "",
+    ping_pong_b: "",
+    ping_pong_alternations: 0,
+  }
 }
 
 fn __agent_tool_call_name(call) -> string {
@@ -138,12 +282,104 @@ fn __agent_tool_call_signature(call) -> string {
   return __agent_tool_call_name(call) + "\n" + args_text
 }
 
+/* observation classification (the polling-exemption mechanism) */
+fn __agent_stall_result_ok(result) -> bool {
+  if result?.ok != nil {
+    return result.ok ? true : false
+  }
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  let status = to_string(result?.status ?? "")
+  return status == "ok" || status == "success"
+}
+
+fn __agent_stall_result_name(result) -> string {
+  return to_string(result?.tool_name ?? result?.name ?? "")
+}
+
+/*
+ * A context-window / token-limit error is its own trip condition because
+ * repeating it is never productive and never recovers on its own.
+ */
+fn __agent_stall_is_context_window_error(text: string) -> bool {
+  let lowered = lowercase(text)
+  return contains(lowered, "context window")
+    || contains(lowered, "context length")
+    || contains(lowered, "context_length")
+    || contains(lowered, "maximum context")
+    || contains(lowered, "token limit")
+    || contains(lowered, "too many tokens")
+    || contains(lowered, "context_length_exceeded")
+    || contains(lowered, "max_tokens")
+}
+
+/*
+ * Outcome of a dispatched result, normalized for the detector: one of
+ * "ok" / "error" / "context_window", plus a byte-stable signature of the
+ * observation payload (for "ok") or the error text (for "error").
+ */
+fn __agent_stall_result_outcome(result) -> dict {
+  if __agent_stall_result_ok(result) {
+    let payload = json_stringify(result?.result ?? result?.output ?? result?.content ?? nil)
+    return {kind: "ok", signature: "ok:" + sha256(payload)}
+  }
+  let error_text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  if __agent_stall_is_context_window_error(error_text) {
+    return {kind: "context_window", signature: "ctx"}
+  }
+  return {kind: "error", signature: "err:" + sha256(error_text)}
+}
+
+/*
+ * Find the dispatch result for the given tool name. The detector tracks one
+ * action at a time, so the first matching result is the relevant observation.
+ */
+fn __agent_stall_outcome_for(prev_dispatch, tool_name: string) {
+  if prev_dispatch == nil {
+    return nil
+  }
+  let results = if type_of(prev_dispatch) == "list" {
+    prev_dispatch
+  } else {
+    prev_dispatch?.results ?? []
+  }
+  for result in results {
+    if __agent_stall_result_name(result) == tool_name {
+      return __agent_stall_result_outcome(result)
+    }
+  }
+  return nil
+}
+
 fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
-  return "Stall diagnostic: the last "
-    + to_string(warning.repeat_count)
-    + " tool calls repeated `"
-    + warning.tool_name
-    + "` with identical arguments. Use different evidence, finish, or explain why another identical call is necessary before repeating it."
+  let pattern = warning.pattern
+  let count = to_string(warning.count)
+  let core = if pattern == "repeated_same_observation" {
+    "the action `" + warning.tool_name + "` produced the same observation " + count
+      + " times in a row"
+  } else if pattern == "repeated_error" {
+    "the action `" + warning.tool_name + "` failed with the same error " + count + " times in a row"
+  } else if pattern == "no_progress_monologue" {
+    count + " consecutive assistant messages made no progress (no tool call)"
+  } else if pattern == "ping_pong" {
+    "the loop is ping-ponging between two actions (" + count + " cycles)"
+  } else if pattern == "repeated_context_window_error" {
+    "the run hit a context-window error " + count + " times in a row"
+  } else {
+    "the last " + count + " tool calls repeated `" + warning.tool_name
+      + "` with identical arguments"
+  }
+  if warning.hard_stop {
+    return "Loop detector (hard stop): "
+      + core
+      + ". "
+      + to_string(warning.consecutive_trips)
+      + " trips with no recovery — stop and report the blocker instead of repeating."
+  }
+  return "Stall diagnostic: "
+    + core
+    + ". Use different evidence, finish, or explain why repeating is necessary before doing so again."
 }
 
 fn __agent_stall_warning_record(
@@ -151,17 +387,26 @@ fn __agent_stall_warning_record(
   tool_name: string,
   args: dict,
   signature: string,
-  repeat_count: int,
+  pattern: string,
+  count: int,
+  consecutive_trips: int,
+  hard_stop: bool,
   config: AgentStallConfig,
+  threshold: int,
 ) -> AgentStallWarning {
   let args_text = json_stringify(args)
   var record = {
     iteration: iteration,
     tool_name: tool_name,
-    repeat_count: repeat_count,
-    threshold: config.threshold,
+    repeat_count: count,
+    threshold: threshold,
     arguments_digest: "sha256:" + sha256(args_text),
     signature_digest: "sha256:" + sha256(signature),
+    pattern: pattern,
+    signature: signature,
+    count: count,
+    consecutive_trips: consecutive_trips,
+    hard_stop: hard_stop,
   }
   if config.include_arguments {
     record = record + {arguments: args}
@@ -211,14 +456,251 @@ fn __agent_stall_maybe_emit(
   }
 }
 
+/*
+ * ping-pong tracking: track the two action signatures in a candidate A/B
+ * alternation and the count of alternations. Two alternations (A->B->A) is one
+ * cycle. Returns the updated state; the cycle count lives in
+ * `ping_pong_alternations`.
+ */
+fn __agent_stall_update_ping_pong(state: AgentStallState, signature: string) -> AgentStallState {
+  let a = state.ping_pong_a
+  let b = state.ping_pong_b
+  if a == "" {
+    return state + {ping_pong_a: signature, ping_pong_b: "", ping_pong_alternations: 0}
+  }
+  if b == "" {
+    if a == signature {
+      // Same action twice — this is the same-action repeat path, not ping-pong.
+      return state + {ping_pong_alternations: 0}
+    }
+    return state + {ping_pong_b: signature, ping_pong_alternations: 1}
+  }
+  let expected_next = if state.ping_pong_alternations % 2 == 1 {
+    a
+  } else {
+    b
+  }
+  if expected_next == signature {
+    return state + {ping_pong_alternations: state.ping_pong_alternations + 1}
+  }
+  if a == signature || b == signature {
+    // Within the A/B pair but out of strict alternation: restart the pair
+    // anchored on the current value.
+    return state + {ping_pong_a: signature, ping_pong_b: "", ping_pong_alternations: 0}
+  }
+  // A third distinct action: not a two-action ping-pong.
+  return state + {ping_pong_a: signature, ping_pong_b: "", ping_pong_alternations: 0}
+}
+
+/*
+ * Apply a fired trip: bump the consecutive-trip escalation and decide whether
+ * to flag a hard stop. Returns the state with the trip recorded.
+ */
+fn __agent_stall_register_trip(state: AgentStallState, config: AgentStallConfig) -> AgentStallState {
+  let trips = state.consecutive_trips + 1
+  return state + {consecutive_trips: trips, hard_stop: trips >= config.hard_stop_after_trips}
+}
+
+/*
+ * A non-tripping step recovers: reset the consecutive-trip escalation so the
+ * hard stop only fires on genuinely uninterrupted thrashing.
+ */
+fn __agent_stall_register_recovery(state: AgentStallState) -> AgentStallState {
+  return state + {consecutive_trips: 0, hard_stop: false}
+}
+
+/*
+ * Detect a no-progress monologue turn (assistant produced text but no tool
+ * call). Returns the observation when the streak crosses the threshold.
+ */
+fn __agent_stall_observe_no_progress(
+  session_id: string,
+  iteration: int,
+  config: AgentStallConfig,
+  state: AgentStallState,
+  defer_feedback: bool,
+) -> AgentStallObservation {
+  // An agent message breaks any action-repeat / ping-pong run.
+  var next_state = __agent_stall_reset_action(state)
+  next_state = next_state + {no_progress_streak: next_state.no_progress_streak + 1}
+  if next_state.no_progress_streak < config.no_progress_messages {
+    next_state = __agent_stall_register_recovery(next_state)
+    return {
+      state: next_state,
+      enabled: true,
+      warning: nil,
+      feedback_deferred: false,
+      config: config,
+      hard_stop: false,
+    }
+  }
+  next_state = __agent_stall_register_trip(next_state, config)
+  let warning = __agent_stall_warning_record(
+    iteration,
+    "",
+    {},
+    "",
+    "no_progress_monologue",
+    next_state.no_progress_streak,
+    next_state.consecutive_trips,
+    next_state.hard_stop,
+    config,
+    config.no_progress_messages,
+  )
+  let emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+  next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
+  return {
+    state: next_state,
+    enabled: true,
+    warning: warning,
+    feedback_deferred: emitted?.feedback_deferred ?? false,
+    config: config,
+    hard_stop: next_state.hard_stop,
+  }
+}
+
+/*
+ * __agent_stall_process_call folds a single tool call (and the observation it
+ * produced last turn) into the detector state and decides which condition, if
+ * any, tripped. Extracted from `agent_stall_observe_tool_calls` to keep that
+ * function within the cyclomatic-complexity budget. Returns the updated state
+ * plus a `trip` dict (or nil). Trip ordering: context-window, then repeated
+ * error, then repeated identical observation, then ping-pong, then the legacy
+ * signature-only threshold (used only when no dispatch results are available).
+ */
+fn __agent_stall_process_call(
+  state: AgentStallState,
+  config: AgentStallConfig,
+  call,
+  tool_name: string,
+  prev_dispatch,
+) -> dict {
+  let signature = __agent_tool_call_signature(call)
+  let same_action = signature == state.last_signature
+  let outcome = __agent_stall_outcome_for(prev_dispatch, tool_name)
+  // Observation signature of the action that just repeated. When dispatch
+  // results are unavailable, fall back to the action signature itself so the
+  // legacy adjacent-repeat behavior still trips.
+  let obs_signature = if outcome != nil {
+    outcome.signature
+  } else {
+    "sig:" + sha256(signature)
+  }
+  let outcome_kind = if outcome != nil {
+    outcome.kind
+  } else {
+    "ok"
+  }
+  // Ping-pong is independent of the same-action streak and only considers
+  // distinct alternating actions; update it first.
+  var next_state = __agent_stall_update_ping_pong(state, signature)
+  let streak = if same_action {
+    next_state.streak + 1
+  } else {
+    1
+  }
+  let repeated = if streak > 1 {
+    next_state.repeated_tool_calls + 1
+  } else {
+    next_state.repeated_tool_calls
+  }
+  // The polling exemption (principled, not an allowlist): a repeated identical
+  // action counts toward the same-observation condition UNLESS we have positive
+  // evidence the observation changed — i.e. both this turn's and last turn's
+  // observations are real (non-fallback) AND differ. A changing observation is
+  // legitimate polling (status advances, watched file mutates) and resets the
+  // streak. When observations are unavailable (no dispatch results threaded in)
+  // the streak counts the raw signature repeat, preserving the legacy
+  // adjacent-identical-call behavior so existing thresholds still trip.
+  let both_known = outcome != nil && next_state.last_outcome_kind != ""
+  let observation_changed = both_known && obs_signature != next_state.last_observation_signature
+  let new_same_observation_streak = if !same_action || outcome_kind != "ok" {
+    if outcome_kind == "ok" {
+      1
+    } else {
+      0
+    }
+  } else if observation_changed {
+    1
+  } else {
+    next_state.same_observation_streak + 1
+  }
+  // Same-error streak: same action producing the same (or unknown) error.
+  // Distinct errors reset, because the agent is making different mistakes.
+  let new_same_error_streak = if !same_action || outcome_kind != "error" {
+    if outcome_kind == "error" {
+      1
+    } else {
+      0
+    }
+  } else if observation_changed {
+    1
+  } else {
+    next_state.same_error_streak + 1
+  }
+  let new_context_streak = if outcome_kind == "context_window" {
+    next_state.context_window_error_streak + 1
+  } else {
+    0
+  }
+  next_state = next_state
+    + {
+    last_signature: signature,
+    streak: streak,
+    repeated_tool_calls: repeated,
+    last_observation_signature: obs_signature,
+    last_outcome_kind: if outcome != nil {
+      outcome_kind
+    } else {
+      ""
+    },
+    same_observation_streak: new_same_observation_streak,
+    same_error_streak: new_same_error_streak,
+    context_window_error_streak: new_context_streak,
+  }
+  let ping_pong_cycles = next_state.ping_pong_alternations / 2
+  let trip = if new_context_streak >= config.repeat_context_window_error {
+    {
+      pattern: "repeated_context_window_error",
+      count: new_context_streak,
+      threshold: config.repeat_context_window_error,
+    }
+  } else if new_same_error_streak >= config.repeat_same_error {
+    {pattern: "repeated_error", count: new_same_error_streak, threshold: config.repeat_same_error}
+  } else if outcome_kind == "ok" && new_same_observation_streak >= config.repeat_same_observation {
+    {
+      pattern: "repeated_same_observation",
+      count: new_same_observation_streak,
+      threshold: config.repeat_same_observation,
+    }
+  } else if ping_pong_cycles >= config.ping_pong_cycles {
+    {pattern: "ping_pong", count: ping_pong_cycles, threshold: config.ping_pong_cycles}
+  } else if outcome == nil && streak >= config.threshold {
+    {pattern: "repeated_same_signature", count: streak, threshold: config.threshold}
+  } else {
+    nil
+  }
+  return {state: next_state, trip: trip}
+}
+
 /**
- * agent_stall_observe_tool_calls detects repeated identical tool calls.
+ * agent_stall_observe_tool_calls detects degenerate agent loops.
+ *
+ * Conditions: same action -> identical observation, same action -> same
+ * error, no-progress monologue, ping-pong, and repeated context-window
+ * errors. `prev_dispatch` carries the previous turn's dispatch results so the
+ * detector can attribute an observation signature to the repeated action;
+ * pass nil to fall back to the signature-only same-action heuristic. The
+ * polling exemption is principled: a repeated identical action counts toward
+ * the same-observation and ping-pong conditions only when its observation is
+ * byte-identical across repeats. `exempt_tools` remains a secondary escape
+ * hatch.
  *
  * @effects: [agent]
  * @allocation: heap
  * @errors: [agent_loop]
  * @api_stability: experimental
- * @example: agent_stall_observe_tool_calls(session_id, calls, iteration, config, state, true)
+ * @example: agent_stall_observe_tool_calls(session_id, calls, iteration, config, state, true, prev_dispatch, text)
  */
 pub fn agent_stall_observe_tool_calls(
   session_id: string,
@@ -227,50 +709,61 @@ pub fn agent_stall_observe_tool_calls(
   raw_config,
   state: AgentStallState,
   defer_feedback: bool,
+  prev_dispatch = nil,
+  turn_text = "",
 ) -> AgentStallObservation {
   let config = __agent_stall_config(raw_config)
   if !config.enabled {
-    return {state: state, enabled: false, warning: nil, feedback_deferred: false, config: config}
+    return {
+      state: state,
+      enabled: false,
+      warning: nil,
+      feedback_deferred: false,
+      config: config,
+      hard_stop: false,
+    }
   }
   if len(tool_calls) == 0 {
+    // No tool call this turn. A turn with visible text but no tool call is a
+    // no-progress monologue candidate; a fully empty turn just resets the
+    // action stream.
+    if to_string(turn_text) != "" {
+      return __agent_stall_observe_no_progress(session_id, iteration, config, state, defer_feedback)
+    }
     return {
-      state: __agent_stall_reset_state(state),
+      state: __agent_stall_register_recovery(__agent_stall_reset_action(state)),
       enabled: true,
       warning: nil,
       feedback_deferred: false,
       config: config,
+      hard_stop: false,
     }
   }
-  var next_state = state
+  var next_state = state + {no_progress_streak: 0}
   var emitted_warning = nil
   var feedback_deferred = false
   for call in tool_calls {
     let tool_name = __agent_tool_call_name(call)
     if tool_name == "" || contains(config.exempt_tools, tool_name) {
-      next_state = __agent_stall_reset_state(next_state)
+      next_state = __agent_stall_register_recovery(__agent_stall_reset_action(next_state))
       continue
     }
-    let signature = __agent_tool_call_signature(call)
-    let streak = if signature == next_state.last_signature {
-      next_state.streak + 1
-    } else {
-      1
-    }
-    let repeated = if streak > 1 {
-      next_state.repeated_tool_calls + 1
-    } else {
-      next_state.repeated_tool_calls
-    }
-    next_state = next_state
-      + {last_signature: signature, streak: streak, repeated_tool_calls: repeated}
-    if streak == config.threshold {
+    let processed = __agent_stall_process_call(next_state, config, call, tool_name, prev_dispatch)
+    next_state = processed.state
+    let trip = processed.trip
+    if trip != nil {
+      next_state = __agent_stall_register_trip(next_state, config)
       let warning = __agent_stall_warning_record(
         iteration,
         tool_name,
         __agent_tool_call_args(call),
-        signature,
-        streak,
+        __agent_tool_call_signature(call),
+        trip.pattern,
+        trip.count,
+        next_state.consecutive_trips,
+        next_state.hard_stop,
         config,
+        trip.threshold,
       )
       let emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
       next_state = emitted.state
@@ -279,6 +772,8 @@ pub fn agent_stall_observe_tool_calls(
       }
       feedback_deferred = feedback_deferred || emitted?.feedback_deferred ?? false
       next_state = next_state + {warnings: next_state.warnings.push(warning)}
+    } else {
+      next_state = __agent_stall_register_recovery(next_state)
     }
   }
   return {
@@ -287,6 +782,7 @@ pub fn agent_stall_observe_tool_calls(
     warning: emitted_warning,
     feedback_deferred: feedback_deferred,
     config: config,
+    hard_stop: next_state.hard_stop,
   }
 }
 
