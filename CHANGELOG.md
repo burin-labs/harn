@@ -8,6 +8,122 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.53
+
+### Added
+
+- Finish the Postgres hostlib v2 surface with named read-replica routing
+  policies, `pg.jsonb.*` helpers, and structured range/geometric row-codegen
+  mappings.
+- **Postgres prepared-statement cache invalidation (#2581).** `std/postgres`
+  now exposes `pg_stmt_cache_clear(pool)` to clear SQLx prepared-statement
+  caches on idle primary and replica connections without closing the pool.
+- **MCP OAuth now defaults to CIMD before dynamic registration (#2645).** Harn
+  publishes a stable Client ID Metadata Document at
+  `https://harnlang.com/.well-known/oauth-client.json`, selects it for MCP
+  OAuth when the authorization server advertises CIMD support, falls back to
+  dynamic client registration otherwise, and adds a unified `auth = { mode =
+  "cimd" | "dcr" | "static" | "byo", ... }` MCP config shape. Static bearer
+  tokens reuse `harn connect api-key` secrets; BYO client secrets are referenced
+  from the same secret store instead of being embedded in host-generated config.
+Generalized MCP OAuth so any MCP server can be authorized over ACP, not just
+named connectors. A new harn-owned flow engine (`harn_vm::mcp_oauth`) does
+discovery, client resolution (DCR/CIMD/BYO), PKCE, the code exchange, the
+single-flight refresh (in-process mutex + cross-process file lock,
+per-`client_id` keyed), and keyring storage in one place; `harn mcp login` and
+the ACP path now share it instead of each carrying a copy. When a server
+answers `401` mid-session harn emits an additive
+`mcp_auth_required` agent event (server + canonical resource + challenge scope)
+as a cue, and two new ACP requests complete the loop: `mcp/authorize` mints the
+browser URL + `state`, and `mcp/oauth_callback` exchanges the returned
+`code`/`state` (or a captured client-scheme redirect URL). Token exchange and
+storage stay in harn; thin clients only open the URL and forward the callback.
+(#2646)
+- Added MCP-focused Code Mode helpers that build/search typed Harn binding APIs from
+  discovered MCP tools and execute snippets through the normal agent tool dispatcher.
+- **`harn serve acp` now passes the ACP Agent Registry auth gate (#2664).** Two changes make the bare
+  `harn serve acp` command launchable and conformant the way the agentclientprotocol/registry validator
+  expects:
+  - The positional `<FILE>` is now **optional**. With no file, `harn serve acp` boots a file-less ("attach")
+    ACP stdio server that waits for `initialize` / `session/new` from the connecting editor instead of
+    requiring a script path up front (previously it exited code 2 before the ACP loop started). The existing
+    file-provided mode is unchanged.
+  - `initialize` always advertises a **non-empty, spec-conformant `authMethods` array**. Each credentialed
+    method (API key / HMAC / OAuth 2.1) now carries an explicit top-level `type: "agent"`, and a policy with
+    no configured credentials (the local attach default) advertises a single `agent`-type `"none"` method
+    representing harn's local/anonymous flow. Authenticating against that `"none"` method id is honoured as a
+    no-op success. Verified against the registry's own `client.py` auth-check: harn now reports
+    `Found 1 valid auth method(s)`. Unblocks the deferred registry submission (#2672).
+- **ACP is now available as both an attach endpoint and an outbound provider route (#2664).**
+  `harn serve acp --transport websocket` exposes the packaged ACP adapter over
+  WebSocket text frames, and `[llm.providers.<name>] protocol = "acp"` lets
+  `llm_call` drive an external ACP agent over stdio while keeping host
+  permission requests denied unless an explicit host integration owns them.
+- **Runtime provider catalog refresh.** `harness.llm.catalog_refresh()`,
+  `llm_catalog_refresh()`, and `harn provider-catalog --refresh` can fetch a
+  validated provider/model catalog overlay, cache it under the Harn state root
+  with ETag/TTL metadata, and expose refreshed model rows through the CLI, Harn
+  catalog builtins, and ACP model selectors while preserving the bundled offline
+  fallback (#2671).
+- **ACP sessions can now own prompt budgets (#2681).** Embedders can pass
+  `AcpServerConfig::with_budget(...)`, and ACP clients can re-arm or disable the
+  session budget through `session/set_config_option(configId="budget")`.
+- **ACP read-only sandbox roots for bundled embedder assets.**
+  `AcpServerConfig::with_read_only_roots` lets an in-process ACP host register
+  read-only sandbox roots outside the user's `workspace_roots`. The configured
+  roots are unioned into the per-turn capability policy at
+  `ModePolicyGuard::enter`, so `check_fs_path_scope` permits reads under them
+  while still denying writes, deletes, and reads outside every root. This
+  unblocks embedders (e.g. burin's Rust TUI) that ship bundled pipelines and
+  their `@partials` outside the user's project tree.
+
+### Changed
+
+- **Async builtins now receive an explicit `AsyncBuiltinCtx` handle (#2668).**
+  The async-builtin ABI (`VmAsyncBuiltinFn`, `AsyncHandler`) and the
+  `#[harn_builtin(kind = "async")]` macro thread a `ctx` parameter from the
+  dispatch loop into every async handler. VM-backed helpers now receive that
+  context explicitly, mint child VMs with `ctx.child_vm()`, and forward captured
+  closure output with `ctx.forward_output(..)`, removing the async-builtin
+  task-local lookup path entirely.
+
+### Fixed
+
+- **Sandbox mount targets reject parent traversal (#2516).** Hostlib-backed
+  sandbox sessions now reject guest mount and cwd targets containing `..`
+  components before resolving them against host paths.
+- Align ACP `session/request_permission` generated bindings and bridge tests with
+  the canonical v0.12.2 `{toolCall, options}` request and
+  `{outcome: {outcome: "selected" | "cancelled"}}` response shape.
+- **MCP OAuth resource indicators are now canonical and shared across protocol
+  requests (#2643).** `harn mcp login` sends the same no-fragment,
+  no-trailing-slash resource indicator to authorization and token endpoints and
+  uses that canonical resource when finding stored MCP OAuth credentials.
+- Prevent concurrent MCP OAuth refreshes from spending the same rotated refresh
+  token by coordinating refreshes per issuer/resource/client across threads and
+  processes.
+- **Fail loud on a model-less agent turn.** When `agent_loop` finalizes a
+  completed turn that never actually called the provider (zero iterations and
+  zero tokens for a `done`/empty status), it now returns a clear `no_llm_call`
+  terminal error — "agent turn made no LLM call: no model resolved / empty
+  input" — instead of a silent success-with-empty-text. Intentional pauses
+  (`suspended`, `blocked`, `cancelled`, waitpoints) and already-errored turns
+  are unaffected.
+- **Execute `<tool_call>`-wrapped calls in text/bare mode.** Text-format models
+  (e.g. OpenRouter `qwen/qwen3-coder`) wrap their bare `name({ ... })` calls in
+  `<tool_call>...</tool_call>` tags even when the prompt asks for bare calls. The
+  bare parser now strips those wrapper tags up front, so a same-line
+  `<tool_call>run({...})</tool_call>` is executed instead of dropped
+  (`tool_calls: []`) and a trailing `</tool_call>` no longer leaks into the
+  visible assistant text as a `_call>` fragment.
+- **Harn preflight reuses the existing module graph for re-export checks.**
+  `harn check` avoids rebuilding a module graph for every file while scanning
+  re-export conflicts.
+- **Harn source discovery now skips generated and local cache directories.**
+  `harn check`, `harn lint`, and `harn fmt` no longer recursively scan
+  dependency caches, build outputs, local run artifacts, or worktree copies
+  when a project directory is passed as the target.
+
 ## v0.8.52
 
 ### Added

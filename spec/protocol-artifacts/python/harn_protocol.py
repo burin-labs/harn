@@ -113,7 +113,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.8.52"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.8.53"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
 A2A_PROTOCOL_VERSION: str = "0.3.0"
