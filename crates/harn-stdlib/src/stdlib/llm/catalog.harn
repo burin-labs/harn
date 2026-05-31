@@ -100,42 +100,10 @@ pub fn has_capability(model, capability) {
   return __capability_field(caps, capability)
 }
 
-fn __family_for_anthropic(id) {
-  if contains(id, "haiku") {
-    return "anthropic_haiku"
-  }
-  if contains(id, "opus-4-7") || contains(id, "opus-mythos") {
-    return "anthropic_opus_adaptive"
-  }
-  return "anthropic_sonnet_opus"
-}
-
-fn __family_for_openai(id) {
-  if starts_with(id, "gpt-5") {
-    return "openai_gpt5_family"
-  }
-  return "openai_legacy"
-}
-
-fn __family_for_gemini(id) {
-  if contains(id, "flash") {
-    return "gemini_flash"
-  }
-  return "gemini_pro"
-}
-
-fn __family_for_ollama(id) {
-  if contains(id, "qwen") {
-    return "ollama_qwen3"
-  }
-  return "ollama_generic"
-}
-
 /**
- * Best-effort family classifier. Returns one of:
- * "anthropic_haiku", "anthropic_opus_adaptive", "anthropic_sonnet_opus",
- * "openai_gpt5_family", "openai_legacy", "gemini_flash", "gemini_pro",
- * "ollama_qwen3", "ollama_generic", or "generic".
+ * Returns the normalized model-family token from the runtime catalog.
+ * Family is a diversity signal for review/routing; it is distinct from
+ * provider and preserves hosted lineage where known.
  *
  * @effects: []
  * @allocation: heap
@@ -146,23 +114,42 @@ fn __family_for_ollama(id) {
 pub fn family_of(model_id) {
   let info = llm_model_info(model_id)
   if type_of(info) != "dict" {
-    return "generic"
+    return "unknown"
   }
-  let provider = lowercase(to_string(info?.provider ?? ""))
-  let id = lowercase(to_string(model_id))
-  if provider == "anthropic" {
-    return __family_for_anthropic(id)
+  return to_string(info?.family ?? info?.catalog?.family ?? "unknown")
+}
+
+/**
+ * Returns the narrower catalog lineage token used by model-aware option
+ * packs. Falls back to family when a catalog row has no lineage.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: lineage_of(model_id)
+ */
+pub fn lineage_of(model_id) {
+  let info = llm_model_info(model_id)
+  if type_of(info) != "dict" {
+    return "unknown"
   }
-  if provider == "openai" {
-    return __family_for_openai(id)
-  }
-  if provider == "gemini" {
-    return __family_for_gemini(id)
-  }
-  if provider == "ollama" {
-    return __family_for_ollama(id)
-  }
-  return "generic"
+  return to_string(info?.lineage ?? info?.catalog?.lineage ?? info?.family ?? "unknown")
+}
+
+/**
+ * Pick a complementary reviewer model from a different family.
+ * Options: `{author_model, author_provider?, intent?, max_price_multiplier?}`.
+ * `intent` is `"review"`, `"critique"`, or `"plan_review"`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: ["llm_complementary_reviewer: ..."]
+ * @api_stability: experimental
+ * @example: complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
+ */
+pub fn complementary_reviewer(opts) {
+  return llm_complementary_reviewer(opts)
 }
 
 /**

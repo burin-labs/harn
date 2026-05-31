@@ -1,2 +1,2 @@
-provider=anthropic family=claude native_tools=true
+provider=anthropic family=anthropic-claude native_tools=true
 native

@@ -406,6 +406,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "llm_infer_provider",
         "llm_infer_provider(model_id) -> string",
     ),
+    (
+        "llm_complementary_reviewer",
+        "llm_complementary_reviewer(options) -> dict",
+    ),
     ("llm_model_tier", "llm_model_tier(model_id) -> string"),
     ("llm_pick_model", "llm_pick_model(target, options?) -> dict"),
     ("llm_resolve_model", "llm_resolve_model(alias) -> dict"),
@@ -990,6 +994,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "llm_budget" => "**llm_budget(max_cost)** → nil — Set session budget in USD",
         "llm_budget_remaining" => "**llm_budget_remaining()** → float — Remaining budget (nil if no budget set)",
         // LLM provider config
+        "llm_complementary_reviewer" => "**llm_complementary_reviewer(options)** → dict — Pick a different-family reviewer model with fallback reason and estimated cost",
         "llm_infer_provider" => "**llm_infer_provider(model_id)** → string — Infer provider name from model ID",
         "llm_model_tier" => "**llm_model_tier(model_id)** → string — Get model tier (e.g. flagship, mid, small)",
         "llm_pick_model" => "**llm_pick_model(target, options?)** → dict — Resolve a model alias or tier to `{id, provider, tier}`",

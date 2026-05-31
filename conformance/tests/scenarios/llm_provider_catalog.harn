@@ -25,7 +25,22 @@ pipeline test(task) {
   assert(catalog.qc_defaults.ollama != nil, "catalog exposes QC defaults")
   let mid = llm_model_info("mid")
   assert_eq(mid.id, "gpt-4o-mini")
+  assert_eq(mid.family, "openai-gpt")
+  assert_eq(mid.lineage, "openai-legacy")
+  let hosted_claude = llm_model_info("anthropic/claude-sonnet-4-6")
+  assert_eq(hosted_claude.provider, "openrouter")
+  assert_eq(hosted_claude.family, "anthropic-claude")
   assert_eq(mid.catalog.pricing.input_per_mtok, 0.15)
+  assert_eq(mid.catalog.family, "openai-gpt")
   assert(mid.capabilities.native_tools != nil, "capability lookup is present")
+  let reviewer = llm_complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
+  assert_eq(reviewer.fallback, false)
+  assert(reviewer.reviewer.family != reviewer.author.family, "reviewer uses a different family")
+  assert(reviewer.estimated_incremental_cost.total_per_mtok > 0.0, "reviewer exposes estimated cost")
+  let capped = llm_complementary_reviewer(
+    {author_model: "gpt-4o-mini", intent: "review", max_price_multiplier: 0.01},
+  )
+  assert_eq(capped.fallback, true)
+  assert_eq(capped.reviewer.id, "gpt-4o-mini")
   log("llm_provider_catalog passed")
 }

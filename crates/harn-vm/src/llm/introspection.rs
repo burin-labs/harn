@@ -248,7 +248,7 @@ fn build_snapshot(provider: &str, model: &str) -> RuntimeIntrospectionSnapshot {
     } else {
         resolved.id.clone()
     };
-    let family = crate::stdlib::template::llm_context::derive_family(provider, &resolved_id);
+    let family = llm_config::model_family(provider, &resolved_id);
     let (context_window, runtime_context_window) = llm_config::model_catalog_entry(&resolved_id)
         .map(|m| (Some(m.context_window), m.runtime_context_window))
         .unwrap_or_default();
@@ -323,7 +323,7 @@ mod tests {
         let snap = current_snapshot().expect("snapshot");
         assert_eq!(snap.provider, "anthropic");
         assert_eq!(snap.model, "claude-opus-4-7");
-        assert_eq!(snap.family, "claude");
+        assert_eq!(snap.family, "anthropic-claude");
         reset_snapshot();
     }
 
@@ -381,7 +381,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&payload).expect("json");
         assert_eq!(parsed["resolved"], serde_json::json!(true));
         assert_eq!(parsed["model"], serde_json::json!("claude-opus-4-7"));
-        assert_eq!(parsed["family"], serde_json::json!("claude"));
+        assert_eq!(parsed["family"], serde_json::json!("anthropic-claude"));
         reset_snapshot();
     }
 

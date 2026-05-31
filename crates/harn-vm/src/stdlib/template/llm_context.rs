@@ -50,7 +50,7 @@ impl LlmRenderContext {
         Self {
             provider: provider.to_string(),
             model: model.to_string(),
-            family: derive_family(provider, model),
+            family: crate::llm_config::model_family(provider, model),
             capabilities,
         }
     }
@@ -138,63 +138,24 @@ impl Drop for LlmRenderContextGuard {
     }
 }
 
-/// Map a `(provider, model)` pair to a canonical model-family token
-/// (`claude` / `gpt` / `gemini` / `qwen` / `llama` / `mistral` / ...).
-/// This is distinct from `provider_family` in the capability matrix —
-/// that walks sibling-provider lineage (e.g. `openrouter → openai`);
-/// this walks model-id heuristics so authors can branch on the
-/// underlying LLM family regardless of the routing provider. Falls
-/// back to the normalized provider name when nothing matches.
-///
-/// Shared with `crate::llm::introspection`, which surfaces the same
-/// family token through the `current_model()` tool.
-pub(crate) fn derive_family(provider: &str, model: &str) -> String {
-    let model_lc = model.to_ascii_lowercase();
-    // Order matters: longer/more-specific markers first so e.g.
-    // "claude" wins over a generic "ai" substring.
-    const MARKERS: &[(&str, &[&str])] = &[
-        ("claude", &["claude"]),
-        ("gpt", &["gpt-", "gpt_", "o1-", "o3-", "o4-"]),
-        ("gemini", &["gemini"]),
-        ("qwen", &["qwen"]),
-        ("llama", &["llama"]),
-        ("mistral", &["mistral", "mixtral"]),
-        ("deepseek", &["deepseek"]),
-        ("phi", &["phi-", "phi_"]),
-        ("grok", &["grok"]),
-        ("command", &["command-", "command_"]),
-    ];
-    for (family, needles) in MARKERS {
-        if needles.iter().any(|needle| model_lc.contains(needle)) {
-            return (*family).to_string();
-        }
-    }
-    // Model id gave us nothing — fall back to the routing provider
-    // mapped through known aliases so the family token stays stable
-    // when the same model is reached via different providers.
-    match provider {
-        "anthropic" | "bedrock" | "vertex-anthropic" => "claude".to_string(),
-        "openai" | "azure" => "gpt".to_string(),
-        "gemini" | "vertex" | "google" => "gemini".to_string(),
-        other if !other.is_empty() => other.to_string(),
-        _ => "unknown".to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn derive_family(provider: &str, model: &str) -> String {
+        crate::llm_config::model_family(provider, model)
+    }
 
     #[test]
     fn family_from_model_id_takes_precedence() {
         assert_eq!(
             derive_family("openrouter", "anthropic/claude-3-5-sonnet"),
-            "claude"
+            "anthropic-claude"
         );
-        assert_eq!(derive_family("openrouter", "openai/gpt-4o"), "gpt");
+        assert_eq!(derive_family("openrouter", "openai/gpt-4o"), "openai-gpt");
         assert_eq!(
             derive_family("openrouter", "google/gemini-1.5-pro"),
-            "gemini"
+            "google-gemini"
         );
         assert_eq!(
             derive_family("ollama", "qwen3.6:35b-a3b-coding-nvfp4"),
@@ -204,9 +165,12 @@ mod tests {
 
     #[test]
     fn family_falls_back_to_provider_alias() {
-        assert_eq!(derive_family("anthropic", "unknown-future-model"), "claude");
-        assert_eq!(derive_family("azure", "deployment-xyz"), "gpt");
-        assert_eq!(derive_family("vertex", "model-xyz"), "gemini");
+        assert_eq!(
+            derive_family("anthropic", "unknown-future-model"),
+            "anthropic-claude"
+        );
+        assert_eq!(derive_family("azure", "deployment-xyz"), "openai-gpt");
+        assert_eq!(derive_family("vertex", "model-xyz"), "google-gemini");
         assert_eq!(derive_family("local", "anonymous-snapshot"), "local");
         assert_eq!(derive_family("", ""), "unknown");
     }
@@ -218,17 +182,17 @@ mod tests {
         push_llm_render_context(LlmRenderContext::resolve("anthropic", "claude-3-5-sonnet"));
         assert_eq!(
             current_llm_render_context().map(|c| c.family),
-            Some("claude".to_string()),
+            Some("anthropic-claude".to_string()),
         );
         push_llm_render_context(LlmRenderContext::resolve("openai", "gpt-4o"));
         assert_eq!(
             current_llm_render_context().map(|c| c.family),
-            Some("gpt".to_string()),
+            Some("openai-gpt".to_string()),
         );
         pop_llm_render_context();
         assert_eq!(
             current_llm_render_context().map(|c| c.family),
-            Some("claude".to_string()),
+            Some("anthropic-claude".to_string()),
         );
         pop_llm_render_context();
         assert!(current_llm_render_context().is_none());

@@ -810,6 +810,7 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 79.6 }
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 [models."claude-sonnet-4-7"]
 name = "Claude Sonnet 4.7"
 provider = "anthropic"
@@ -848,6 +849,7 @@ pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok 
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 [models."claude-3-opus-20240229"]
 name = "Claude Opus 3"
 provider = "anthropic"
@@ -934,6 +936,7 @@ tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 88.6, swe_bench_pro = 69.2 }
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." }
 
@@ -956,6 +959,7 @@ pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok 
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 fast_mode = { param = "service_tier", value = "fast", otps_speedup = 1.5, status = "ga", pricing = { input_per_mtok = 12.50, output_per_mtok = 75.00, cache_read_per_mtok = 1.25 }, note = "Codex \"Fast mode\" (service_tier=\"fast\", ~1.5x faster output) and API priority processing (service_tier=\"priority\") both bill at 2.5x standard. Not offered for long-context, fine-tuned models, or embeddings." }
 
 # GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
@@ -984,6 +988,7 @@ pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 [models."gpt-4-turbo"]
 name = "GPT-4 Turbo"
 provider = "openai"
@@ -1051,6 +1056,7 @@ pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok =
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 [models."google/gemini-2.5-flash"]
 name = "Gemini 2.5 Flash (via OpenRouter)"
 provider = "openrouter"
@@ -1060,6 +1066,7 @@ pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok =
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 [models."gemini-2.5-pro"]
 name = "Gemini 2.5 Pro"
 provider = "gemini"
@@ -1072,6 +1079,7 @@ tier = "frontier"
 open_weight = false
 strengths = ["long_context", "vision", "reasoning", "coding"]
 benchmarks = { swe_bench_verified = 63.8 }
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 [models."mistralai/mistral-large-2512"]
 name = "Mistral Large 3 2512"
 provider = "openrouter"
@@ -1122,6 +1130,7 @@ availability = "dedicated"
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "long_context", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 [models."deepseek/deepseek-v3.2"]
 name = "DeepSeek V3.2"
 provider = "openrouter"
@@ -1131,6 +1140,7 @@ pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42 }
 tier = "mid"
 open_weight = true
 strengths = ["coding", "tool_use", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
 [models."moonshotai/kimi-k2.6"]
 name = "Kimi K2.6"
 provider = "openrouter"
@@ -1141,6 +1151,7 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
 benchmarks = { swe_bench_pro = 58.6, humanitys_last_exam_with_tools = 54.0 }
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 [models."openai/gpt-oss-120b"]
 name = "GPT-OSS 120B"
 provider = "openrouter"

@@ -1,13 +1,13 @@
 // Opus 4.7 uses adaptive thinking; manual thinking budgets return 400 from
 // the Anthropic API. pack_for must strip the field silently (or with a
 // best-effort warn event when a session is bound — not asserted here).
-import { family_of } from "std/llm/catalog"
+import { lineage_of } from "std/llm/catalog"
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
   let model = "claude-opus-4-7-20260101"
-  // Sanity: family_of must classify this id as the adaptive variant.
-  assert_eq(family_of(model), "anthropic_opus_adaptive")
+  // Sanity: lineage_of must classify this id as the adaptive variant.
+  assert_eq(lineage_of(model), "claude-opus-adaptive")
   let r = pack_for({model: model, task: "agent", thinking: "medium"})
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, model)

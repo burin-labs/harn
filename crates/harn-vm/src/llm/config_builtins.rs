@@ -29,6 +29,7 @@ const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
     &LLM_MODEL_DEFAULTS_BUILTIN_DEF,
     &LLM_PROVIDER_CATALOG_BUILTIN_DEF,
     &LLM_PICK_MODEL_BUILTIN_DEF,
+    &LLM_COMPLEMENTARY_REVIEWER_BUILTIN_DEF,
     &LLM_PROVIDERS_BUILTIN_DEF,
     &PROVIDER_REGISTER_BUILTIN_DEF,
     &LLM_CONFIG_BUILTIN_DEF,
@@ -317,6 +318,25 @@ fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
+/// Pick a different-family reviewer model for review, critique, or plan review.
+#[harn_builtin(
+    sig = "llm_complementary_reviewer(options: dict) -> dict",
+    category = "llm.config"
+)]
+fn llm_complementary_reviewer_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let options = parse_complementary_reviewer_options(args.first())?;
+    let selection = llm_config::pick_complementary_reviewer(options);
+    let json = serde_json::to_value(selection).map_err(|error| {
+        VmError::Runtime(format!(
+            "llm_complementary_reviewer: serialize result: {error}"
+        ))
+    })?;
+    Ok(json_to_vm_value(&json))
+}
+
 /// List all configured and runtime-registered LLM provider names.
 #[harn_builtin(sig = "llm_providers() -> list", category = "llm.config")]
 fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -463,6 +483,68 @@ pub(crate) fn parse_catalog_refresh_options(
         .get("force")
         .is_some_and(|value| matches!(value, VmValue::Bool(true)));
     Ok(crate::provider_catalog::CatalogRefreshOptions { url, force })
+}
+
+fn parse_complementary_reviewer_options(
+    value: Option<&VmValue>,
+) -> Result<llm_config::ComplementaryReviewerOptions, VmError> {
+    let dict = value.and_then(|value| value.as_dict()).ok_or_else(|| {
+        VmError::Runtime("llm_complementary_reviewer: options must be a dict".to_string())
+    })?;
+    let author_model = dict
+        .get("author_model")
+        .or_else(|| dict.get("model"))
+        .map(|value| value.display())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "llm_complementary_reviewer: options.author_model is required".to_string(),
+            )
+        })?;
+    let author_provider = dict
+        .get("author_provider")
+        .or_else(|| dict.get("provider"))
+        .map(|value| value.display())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let intent = dict
+        .get("intent")
+        .map(|value| value.display())
+        .unwrap_or_else(|| "review".to_string());
+    let intent =
+        llm_config::ComplementaryReviewerIntent::parse(intent.trim()).ok_or_else(|| {
+            VmError::Runtime(
+                "llm_complementary_reviewer: intent must be review, critique, or plan_review"
+                    .to_string(),
+            )
+        })?;
+    let max_price_multiplier = dict
+        .get("max_price_multiplier")
+        .map(vm_value_as_f64)
+        .transpose()?;
+    if max_price_multiplier.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(VmError::Runtime(
+            "llm_complementary_reviewer: max_price_multiplier must be positive".to_string(),
+        ));
+    }
+    Ok(llm_config::ComplementaryReviewerOptions {
+        author_model,
+        author_provider,
+        intent,
+        max_price_multiplier,
+    })
+}
+
+fn vm_value_as_f64(value: &VmValue) -> Result<f64, VmError> {
+    match value {
+        VmValue::Float(value) => Ok(*value),
+        VmValue::Int(value) => Ok(*value as f64),
+        other => Err(VmError::Runtime(format!(
+            "llm_complementary_reviewer: max_price_multiplier must be numeric, got {}",
+            other.type_name()
+        ))),
+    }
 }
 
 /// Return a list of `{name, available, credential_status}` dicts describing every
@@ -836,6 +918,14 @@ fn resolved_model_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     dict.insert(
         "tier".to_string(),
         VmValue::String(std::sync::Arc::from(resolved.tier.as_str())),
+    );
+    dict.insert(
+        "family".to_string(),
+        VmValue::String(std::sync::Arc::from(resolved.family.as_str())),
+    );
+    dict.insert(
+        "lineage".to_string(),
+        VmValue::String(std::sync::Arc::from(resolved.lineage.as_str())),
     );
     VmValue::Dict(std::sync::Arc::new(dict))
 }
@@ -1228,6 +1318,28 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
     dict.insert(
         "quality_tags".to_string(),
         string_list_to_vm_value(model.quality_tags.clone()),
+    );
+    dict.insert(
+        "family".to_string(),
+        VmValue::String(std::sync::Arc::from(llm_config::model_family(
+            &model.provider,
+            id,
+        ))),
+    );
+    dict.insert(
+        "lineage".to_string(),
+        VmValue::String(std::sync::Arc::from(llm_config::model_lineage(
+            &model.provider,
+            id,
+        ))),
+    );
+    dict.insert(
+        "complementary_with".to_string(),
+        string_list_to_vm_value(model.complementary_with.clone()),
+    );
+    dict.insert(
+        "avoid_as_reviewer_for".to_string(),
+        string_list_to_vm_value(model.avoid_as_reviewer_for.clone()),
     );
     dict.insert(
         "availability".to_string(),

@@ -45,7 +45,7 @@ pipeline answer_identity_questions(task) {
 
 When the model asks "what model am I?" it now emits
 `current_model()` and gets back
-`{model: "claude-opus-4-7", model_alias: nil, family: "claude", tier: "high", resolved: true}`
+`{model: "claude-opus-4-7", model_alias: nil, family: "anthropic-claude", tier: "high", resolved: true}`
 instead of guessing from training data.
 
 ## Tools

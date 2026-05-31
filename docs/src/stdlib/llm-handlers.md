@@ -25,7 +25,8 @@ Concretely:
   in `std/llm/safe`.
 - System-prompt builders live in `std/llm/prompts`.
 - Catalog accessors (`model_info`, `resolved_options`, `family_of`,
-  `has_capability`) live in `std/llm/catalog`.
+  `lineage_of`, `complementary_reviewer`, `has_capability`) live in
+  `std/llm/catalog`.
 
 ## Caller contract
 
@@ -516,18 +517,22 @@ shadow the builtins.
 | `model_info(selector)` | `(string) -> dict` | Wraps `llm_model_info`. Always returns a dict; `catalog` field is nil for unknown models. |
 | `resolved_options(opts)` | `(dict) -> dict` | Wraps `llm_resolved_options`. Required: `opts.model`. |
 | `has_capability(model, capability)` | `(string, string) -> bool` | Capability ∈ `{"thinking", "tool_search", "interleaved_thinking", "prompt_caching", "vision", "audio", "pdf", "files_api", "reasoning_effort", "native_tools"}`. |
-| `family_of(model_id)` | `(string) -> string` | Returns one of `"anthropic_haiku"`, `"anthropic_opus_adaptive"`, `"anthropic_sonnet_opus"`, `"openai_gpt5_family"`, `"openai_legacy"`, `"gemini_flash"`, `"gemini_pro"`, `"ollama_qwen3"`, `"ollama_generic"`, or `"generic"`. Drives `pack_for` calibration. |
+| `family_of(model_id)` | `(string) -> string` | Returns the normalized review-diversity family such as `"anthropic-claude"`, `"openai-gpt"`, `"google-gemini"`, or `"qwen"`. Hosted aliases keep the underlying model family. |
+| `lineage_of(model_id)` | `(string) -> string` | Returns the narrower calibration lineage such as `"claude-opus-adaptive"`, `"openai-gpt5"`, `"gemini-flash"`, or `"qwen3"`. Drives `pack_for` defaults. |
+| `complementary_reviewer(opts)` | `(dict) -> dict` | Wraps `llm_complementary_reviewer`. Required: `opts.author_model`; optional: `author_provider`, `intent`, `max_price_multiplier`. |
 
 ### Example
 
 ```harn,ignore
-import {family_of, has_capability} from "std/llm/catalog"
+import {complementary_reviewer, family_of, has_capability, lineage_of} from "std/llm/catalog"
 
 if has_capability(model, "thinking") {
   // safe to set `thinking: "medium"` in opts
 }
 
-let fam = family_of(model)  // e.g. "anthropic_sonnet_opus"
+let fam = family_of(model)       // e.g. "anthropic-claude"
+let lineage = lineage_of(model)  // e.g. "claude-opus-adaptive"
+let reviewer = complementary_reviewer({author_model: model, intent: "plan_review"})
 ```
 
 ---

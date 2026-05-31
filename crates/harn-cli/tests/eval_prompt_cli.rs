@@ -113,12 +113,12 @@ provider={{ llm.provider }} family={{ llm.family }}\n",
             "rendered envelope must echo family {family}: {rendered:?}",
         );
     }
-    // claude / gpt / gemini / qwen families — confirms the diff
-    // renderer actually exercises distinct capability profiles rather
-    // than collapsing every selector to the same envelope.
-    assert!(families.contains("claude"));
-    assert!(families.contains("gpt"));
-    assert!(families.contains("gemini"));
+    // Normalized family tokens confirm the diff renderer actually
+    // exercises distinct capability profiles rather than collapsing
+    // every selector to the same envelope.
+    assert!(families.contains("anthropic-claude"));
+    assert!(families.contains("openai-gpt"));
+    assert!(families.contains("google-gemini"));
     assert!(families.contains("qwen"));
 }
 

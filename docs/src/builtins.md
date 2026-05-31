@@ -1701,9 +1701,10 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `runtime_introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
-| `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier}` via providers.toml |
-| `llm_model_info(model)` | model: string | dict | Return resolved model/provider metadata plus catalog entry, capabilities, API-key availability, and QC default |
+| `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
+| `llm_model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
 | `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
+| `llm_complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost |
 | `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `llm_model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `llm_healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
@@ -1715,7 +1716,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
 | `llm_known_models()` | — | list | List configured model alias names |
 | `llm_qc_default_model(provider)` | provider: string | string/nil | Return the configured cheap QC/repair model for a provider, honoring `BURIN_QC_MODEL` |
-| `llm_provider_catalog()` | — | dict | Return the loaded provider/model catalog: providers, aliases, model metadata, pricing, QC defaults, and availability |
+| `llm_provider_catalog()` | — | dict | Return the loaded provider/model catalog: providers, aliases, model metadata, normalized family/lineage, pricing, QC defaults, and availability |
 | `harness.llm.catalog()` | — | list | Return the full configured model catalog as a list of dicts: `[{id, name, provider, context_window, runtime_context_window, capabilities, quality_tags, pricing, availability, deprecated, deprecation_note, ...}, ...]`. Read-only view used by `harn models list` / `harn models recommend` |
 | `harness.llm.catalog_refresh(options?)` | `options?: dict\|nil` | dict | Refresh the process-wide provider/model catalog overlay from the configured hosted catalog, validating the remote document before installing it |
 | `llm_catalog()` | — | list | Free-builtin alias for `harness.llm.catalog()`, available to scripts that do not receive a `Harness` parameter |
