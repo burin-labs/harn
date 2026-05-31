@@ -58,10 +58,15 @@
           },
           "reason": {
             "type": "string",
-            "description": "Stable failure tag for rejected ops (e.g. `no_match`, `ambiguous`, `invalid_query`, `syntax_error`, `unsupported_language`, `unknown_op`, `use_standalone`)."
+            "description": "Stable failure tag for rejected ops (e.g. `no_match`, `ambiguous`, `invalid_query`, `syntax_error`, `unsupported_language`, `conflict`, `unknown_op`, `code_index_unavailable`)."
           },
           "details": { "type": "string" },
           "path": { "type": "string" },
+          "paths": {
+            "type": "array",
+            "description": "All paths affected by an applied op. Single-file ops carry one path; workspace operations such as `rename_symbol` may carry several.",
+            "items": { "type": "string" }
+          },
           "match_count": { "type": "integer", "minimum": 0 }
         },
         "required": ["op", "applied", "result"]

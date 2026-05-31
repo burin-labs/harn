@@ -657,7 +657,7 @@ Each op carries an `op` tag:
 | `apply_node` | `path`, `query`, `replacement` | Same shape as `edit_apply_node`. Optional: `select`, `nth`, `target_capture`, `language`, `validate`. |
 | `insert_at_anchor` | `path`, `query`, `position`, `content` | `position` ∈ `before \| after \| first_child \| last_child`. Anchor must match exactly once. |
 | `safe_text_patch` | `path`, `old_text`, `new_text` | Exact unique-match text replacement. |
-| `rename_symbol` | `symbol_ref`, `new_name` | Workspace-level cross-file rename. Rejected with `reason: "use_standalone"` — call [`edit_rename_symbol({..., dry_run: true})`](#edit_rename_symbol--safe-cross-file-rename) directly so the response keeps the per-file `touched_files` / `conflicts` metadata a unified diff would lose. |
+| `rename_symbol` | `symbol_ref`, `new_name` | Workspace-level cross-file rename through the shared code-index graph. Optional: `scope` (`workspace` by default), `validate`. Hosts that register AST without code-index reject with `reason: "code_index_unavailable"`; call [`edit_rename_symbol({..., dry_run: true})`](#edit_rename_symbol--safe-cross-file-rename) for the standalone metadata-rich preview. |
 
 ### Result
 
@@ -676,7 +676,7 @@ Each op carries an `op` tag:
     ops_rejected,
   },
   ops: [
-    { op, applied, result: "applied"|"rejected"|"error", reason?, details, path?, match_count? },
+    { op, applied, result: "applied"|"rejected"|"error", reason?, details, path?, paths?, match_count? },
     ...
   ],
 }

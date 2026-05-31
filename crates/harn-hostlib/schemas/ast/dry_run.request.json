@@ -76,9 +76,27 @@
             "type": "object",
             "properties": {
               "op": { "type": "string", "const": "rename_symbol" },
-              "symbol_ref": { "type": "string" },
+              "symbol_ref": {
+                "type": "object",
+                "description": "Pointer at the symbol to rename. Same shape as code_index.rename_symbol: `name` and `path` are required; `line` and `kind` disambiguate.",
+                "properties": {
+                  "name": { "type": "string", "minLength": 1 },
+                  "path": { "type": "string", "minLength": 1 },
+                  "line": { "type": "integer", "minimum": 1 },
+                  "kind": {
+                    "type": "string",
+                    "enum": ["Function", "Type", "Module"]
+                  }
+                },
+                "required": ["name", "path"],
+                "additionalProperties": false
+              },
               "new_name": { "type": "string" },
-              "scope": { "type": "string" }
+              "scope": {
+                "type": "string",
+                "enum": ["file", "module", "workspace"],
+                "default": "workspace"
+              }
             },
             "required": ["op", "symbol_ref", "new_name"]
           }

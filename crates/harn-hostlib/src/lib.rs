@@ -53,9 +53,10 @@ pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, Register
 /// hostlib surface; pick-and-choose embedders should construct
 /// [`HostlibRegistry`] directly.
 pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
+    let code_index = code_index::CodeIndexCapability::new();
     let mut registry = HostlibRegistry::new()
-        .with(ast::AstCapability)
-        .with(code_index::CodeIndexCapability::new())
+        .with(ast::AstCapabilityWithCodeIndex::new(code_index.shared()))
+        .with(code_index)
         .with(scanner::ScannerCapability)
         .with(fs::FsCapability)
         .with(fs_snapshot::FsSnapshotCapability)
