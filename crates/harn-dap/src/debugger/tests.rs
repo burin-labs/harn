@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::path::PathBuf;
 
 use harn_vm::{Vm, VmValue};
@@ -26,6 +27,21 @@ fn write_temp_program(file_name: &str, source: &str) -> (TempDir, PathBuf) {
     let file = dir.path().join(file_name);
     std::fs::write(&file, source).expect("write temp Harn program");
     (dir, file)
+}
+
+fn file_uri(path: &Path) -> String {
+    url::Url::from_file_path(path)
+        .expect("absolute temporary path should convert to a file URI")
+        .to_string()
+}
+
+fn localhost_file_uri(path: &Path) -> String {
+    let uri = file_uri(path);
+    format!(
+        "file://localhost{}",
+        uri.strip_prefix("file://")
+            .expect("file_uri should produce a file scheme URI")
+    )
 }
 
 fn run_debug_program(file_name: &str, source: &str) -> Vec<DapResponse> {
@@ -458,14 +474,10 @@ fn test_source_reads_prompt_template_from_disk() {
 #[test]
 fn test_source_decodes_file_uri_paths() {
     let (dir, file) = write_temp_program("space name.harn", "pipeline test(task) {}\n");
-    let encoded = file.to_string_lossy().replace(' ', "%20");
 
-    for (seq, uri) in [
-        format!("file://{encoded}"),
-        format!("file://localhost{encoded}"),
-    ]
-    .into_iter()
-    .enumerate()
+    for (seq, uri) in [file_uri(&file), localhost_file_uri(&file)]
+        .into_iter()
+        .enumerate()
     {
         let responses = Debugger::new().handle_message(make_request(
             seq as i64 + 1,
