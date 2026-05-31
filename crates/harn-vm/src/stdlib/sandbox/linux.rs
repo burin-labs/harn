@@ -157,6 +157,9 @@ fn landlock_profile(
         rules: Vec::new(),
         handled_access_fs,
     };
+    for (path, access) in standard_device_rules() {
+        push_rule(&mut profile, path, access, true)?;
+    }
     for path in system_read_roots() {
         push_rule(
             &mut profile,
@@ -187,6 +190,21 @@ fn system_read_roots() -> Vec<PathBuf> {
     ]
     .into_iter()
     .map(PathBuf::from)
+    .collect()
+}
+
+fn standard_device_rules() -> Vec<(PathBuf, u64)> {
+    [
+        (
+            "/dev/null",
+            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE,
+        ),
+        ("/dev/zero", LANDLOCK_ACCESS_FS_READ_FILE),
+        ("/dev/random", LANDLOCK_ACCESS_FS_READ_FILE),
+        ("/dev/urandom", LANDLOCK_ACCESS_FS_READ_FILE),
+    ]
+    .into_iter()
+    .map(|(path, access)| (PathBuf::from(path), access))
     .collect()
 }
 
@@ -521,5 +539,34 @@ mod tests {
             0,
             "read-only roots stay unwritable regardless of workspace write capability",
         );
+    }
+
+    #[test]
+    fn standard_device_rules_allow_common_device_files_only() {
+        let rules = standard_device_rules();
+        assert_eq!(rules.len(), 4);
+        assert!(rules
+            .iter()
+            .any(|(path, access)| path == PathBuf::from("/dev/null")
+                && access & LANDLOCK_ACCESS_FS_READ_FILE != 0
+                && access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0));
+        for device in ["/dev/zero", "/dev/random", "/dev/urandom"] {
+            let Some((_, access)) = rules
+                .iter()
+                .find(|(path, _)| path == &PathBuf::from(device))
+            else {
+                panic!("missing standard device rule for {device}");
+            };
+            assert_ne!(
+                *access & LANDLOCK_ACCESS_FS_READ_FILE,
+                0,
+                "{device} should be readable"
+            );
+            assert_eq!(
+                *access & LANDLOCK_ACCESS_FS_WRITE_FILE,
+                0,
+                "{device} must not be writable"
+            );
+        }
     }
 }
