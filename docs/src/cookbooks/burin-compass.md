@@ -45,7 +45,8 @@ It recognises a freeform / whole-file edit on a *parseable* source file:
 - a `str_replace`-shape call (`{path, old_text, new_text}` or a `hunks`
   array),
 - a whole-file `write_file` / `create_file`,
-- a single-hunk `edit_safe_text_patch` that reads like a rename.
+- a single-hunk edit on a rename-capable language that reads like a
+  symbol rename.
 
 For anything else — a structural call, a file with no tree-sitter grammar,
 an arg shape it doesn't understand — the router is inert and the call
@@ -79,6 +80,13 @@ structural tool):
 - `harn.compass.rewritten` — a call was silently substituted.
 - `harn.compass.fell_back` — `rewrite` mode considered a substitution but
   could not prove equivalence, so the original freeform call ran.
+
+The router also emits a live `compass_routing_decision` agent event before
+dispatch. ACP surfaces it on `_harn/agentEvent` with `toolCallId`, `mode`,
+`action` (`suggested`, `rewritten`, or `fell_back`), `persona`,
+`originalTool`, `routedTool`, `targetTool`, and `path` when the edit call
+named a file. The event carries routing metadata only; it does not include
+old or new file contents.
 
 These surface in eval dashboards as the agent-loop edit-reliability signal.
 

@@ -810,11 +810,35 @@ async fn host_agent_dispatch_tool_call(
         let compass_config = compass_router::CompassConfig::from_options(&compass_options);
         if !matches!(compass_config.mode, compass_router::CompassMode::Off) {
             let original_tool = tool_name.clone();
+            let original_args = tool_args.clone();
             let decision = compass_router::route(&tool_name, &tool_args, &compass_config);
             // `rewrite` mode that could not prove equivalence degrades to a
             // suggestion; count that as `fell_back` rather than `suggested`.
             let fell_back = compass_config.mode == compass_router::CompassMode::Rewrite
                 && matches!(decision, compass_router::CompassDecision::Suggest { .. });
+            if let Some(event) = compass_router::routing_event(
+                &decision,
+                &original_tool,
+                &original_args,
+                &compass_config,
+                fell_back,
+            ) {
+                agent_runtime::emit_agent_event_with_ctx(
+                    Some(&ctx),
+                    &crate::agent_events::AgentEvent::CompassRoutingDecision {
+                        session_id: session_id.clone(),
+                        tool_call_id: tool_id.clone(),
+                        mode: event.mode.to_string(),
+                        action: event.action.to_string(),
+                        persona: event.persona,
+                        original_tool: event.original_tool,
+                        routed_tool: event.routed_tool,
+                        target_tool: event.target_tool,
+                        path: event.path,
+                    },
+                )
+                .await;
+            }
             if let compass_router::CompassDecision::Rewrite {
                 tool_name: new_name,
                 tool_args: new_args,

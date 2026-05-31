@@ -436,6 +436,17 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             session_id: "session-1".to_string(),
             run: failed_error,
         },
+        AgentEvent::CompassRoutingDecision {
+            session_id: "session-1".to_string(),
+            tool_call_id: "tool-edit-1".to_string(),
+            mode: "rewrite".to_string(),
+            action: "rewritten".to_string(),
+            persona: "fixer".to_string(),
+            original_tool: "str_replace".to_string(),
+            routed_tool: "edit_safe_text_patch".to_string(),
+            target_tool: "edit_safe_text_patch".to_string(),
+            path: Some("src/lib.rs".to_string()),
+        },
         AgentEvent::SessionClosed {
             session_id: "session-1".to_string(),
             reason: "timeout".to_string(),
@@ -578,6 +589,40 @@ async fn protocol_conformance_agent_event_fixture_is_adapter_generated() {
     crate::protocol_fixture_tests::assert_fixture_documents_match(
         "conformance/protocols/fixtures/acp/agent_event_ext_notifications.valid.json",
         actual,
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn compass_routing_decision_reaches_acp_as_ext_event() {
+    let actual = collect_notifications(vec![AgentEvent::CompassRoutingDecision {
+        session_id: "session-1".to_string(),
+        tool_call_id: "tool-edit-1".to_string(),
+        mode: "rewrite".to_string(),
+        action: "rewritten".to_string(),
+        persona: "fixer".to_string(),
+        original_tool: "str_replace".to_string(),
+        routed_tool: "edit_safe_text_patch".to_string(),
+        target_tool: "edit_safe_text_patch".to_string(),
+        path: Some("src/lib.rs".to_string()),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "compass_routing_decision");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["toolCallId"], "tool-edit-1");
+    assert_eq!(params["mode"], "rewrite");
+    assert_eq!(params["action"], "rewritten");
+    assert_eq!(params["persona"], "fixer");
+    assert_eq!(params["originalTool"], "str_replace");
+    assert_eq!(params["routedTool"], "edit_safe_text_patch");
+    assert_eq!(params["targetTool"], "edit_safe_text_patch");
+    assert_eq!(params["path"], "src/lib.rs");
+    assert!(
+        HARN_AGENT_EVENT_KINDS.contains(&"compass_routing_decision"),
+        "compass_routing_decision must be advertised so clients can subscribe"
     );
 }
 

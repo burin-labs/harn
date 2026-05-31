@@ -1,0 +1,10 @@
+edit_safe_text_patch
+true
+1
+rewritten
+rewrite
+fixer
+str_replace
+edit_safe_text_patch
+edit_safe_text_patch
+src/lib.rs

@@ -81,6 +81,14 @@ impl CompassMode {
             _ => None,
         }
     }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Suggest => "suggest",
+            Self::Rewrite => "rewrite",
+        }
+    }
 }
 
 /// Resolved compass configuration for a single tool call.
@@ -200,6 +208,17 @@ pub(crate) enum CompassDecision {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompassRoutingEvent {
+    pub mode: &'static str,
+    pub action: &'static str,
+    pub persona: String,
+    pub original_tool: String,
+    pub routed_tool: String,
+    pub target_tool: String,
+    pub path: Option<String>,
+}
+
 /// A freeform / whole-file edit call the compass recognises, normalised
 /// into the fields the router reasons about.
 #[derive(Clone, Debug)]
@@ -218,16 +237,39 @@ struct FreeformEdit {
 /// tools degrade to `Unsupported`, so a freeform patch is the right call
 /// and the compass stays out of the way. Kept conservative on purpose;
 /// `edit_capabilities()` is the authority at runtime, but a static allow
-/// list keeps this hook free of I/O.
+/// list keeps this hook free of I/O. Keep this in sync with
+/// `harn_hostlib::ast::Language::from_extension`; `harn-vm` cannot import
+/// hostlib without creating a dependency cycle.
 fn parseable_extension(path: &str) -> bool {
     const PARSEABLE: &[&str] = &[
-        "rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "go", "java", "kt", "kts", "rb", "c",
-        "h", "cc", "cpp", "hpp", "cs", "swift", "scala", "php", "lua", "harn",
+        "ts", "tsx", "js", "mjs", "cjs", "jsx", "py", "go", "rs", "java", "c", "h", "cpp", "cc",
+        "cxx", "hpp", "hxx", "hh", "cs", "csx", "rb", "kt", "kts", "php", "scala", "sc", "sh",
+        "bash", "zsh", "swift", "zig", "zon", "ex", "exs", "lua", "hs", "lhs", "r", "json", "yaml",
+        "yml", "toml", "css", "html", "htm", "sql", "md", "markdown",
     ];
+    path_extension_matches(path, PARSEABLE)
+}
+
+fn rename_supported_extension(path: &str) -> bool {
+    const RENAME_SUPPORTED: &[&str] = &[
+        "rs", "ts", "tsx", "js", "mjs", "cjs", "jsx", "py", "go", "swift",
+    ];
+    path_extension_matches(path, RENAME_SUPPORTED)
+}
+
+fn path_extension_matches(path: &str, extensions: &[&str]) -> bool {
     path.rsplit('.')
         .next()
-        .map(|ext| PARSEABLE.contains(&ext.to_ascii_lowercase().as_str()))
+        .map(|ext| extensions.contains(&ext.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+pub(crate) fn edit_path_from_args(args: &JsonValue) -> Option<String> {
+    args.get("path")
+        .or_else(|| args.get("file"))
+        .or_else(|| args.get("file_path"))
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
 }
 
 /// Recognise a freeform-edit tool call by name + arg shape. Conservative:
@@ -248,12 +290,7 @@ fn classify_freeform_edit(tool_name: &str, args: &JsonValue) -> Option<FreeformE
         return None;
     }
 
-    let path = args
-        .get("path")
-        .or_else(|| args.get("file"))
-        .or_else(|| args.get("file_path"))
-        .and_then(JsonValue::as_str)
-        .map(str::to_string);
+    let path = edit_path_from_args(args);
 
     // str_replace-shape: {path, old_text/old_str/old, new_text/new_str/new}
     let is_replace_name = matches!(
@@ -426,7 +463,14 @@ pub(crate) fn route(
     // hash-guarded patch. A persona that explicitly prefers node-level
     // editing (its `edit_strategy.prefer` lists `edit_apply_node` ahead of
     // any patch tool) nudges a plain hunk edit toward `edit_apply_node`.
-    let rename = single_token_rename(&edit.hunks);
+    let rename_supported = edit
+        .path
+        .as_deref()
+        .map(rename_supported_extension)
+        .unwrap_or(true);
+    let rename = rename_supported
+        .then(|| single_token_rename(&edit.hunks))
+        .flatten();
     let target = if rename.is_some() {
         StructuralTarget::RenameSymbol
     } else if edit.whole_file || prefers(config, StructuralTarget::ApplyNode) {
@@ -565,6 +609,35 @@ pub(crate) fn apply_decision(
     }
 }
 
+pub(crate) fn routing_event(
+    decision: &CompassDecision,
+    original_tool: &str,
+    original_args: &JsonValue,
+    config: &CompassConfig,
+    fell_back: bool,
+) -> Option<CompassRoutingEvent> {
+    let (action, target, routed_tool) = match decision {
+        CompassDecision::Passthrough => return None,
+        CompassDecision::Rewrite {
+            target, tool_name, ..
+        } => ("rewritten", *target, tool_name.clone()),
+        CompassDecision::Suggest { target, .. } => {
+            let action = if fell_back { "fell_back" } else { "suggested" };
+            (action, *target, original_tool.to_string())
+        }
+    };
+
+    Some(CompassRoutingEvent {
+        mode: config.mode.as_str(),
+        action,
+        persona: config.persona.clone(),
+        original_tool: original_tool.to_string(),
+        routed_tool,
+        target_tool: target.tool_name().to_string(),
+        path: edit_path_from_args(original_args),
+    })
+}
+
 /// Convert an agent-loop options map into the JSON the config reader and
 /// router consume.
 pub(crate) fn options_to_json(options: &BTreeMap<String, crate::value::VmValue>) -> JsonValue {
@@ -614,11 +687,31 @@ mod tests {
 
     #[test]
     fn non_parseable_file_passes_through() {
-        let args = json!({"path": "README.md", "old_text": "a", "new_text": "b"});
+        let args = json!({"path": "notes.txt", "old_text": "a", "new_text": "b"});
         assert_eq!(
             route("str_replace", &args, &cfg(CompassMode::Suggest)),
             CompassDecision::Passthrough
         );
+    }
+
+    #[test]
+    fn parseable_extensions_match_hostlib_ast_registry() {
+        // Mirror `harn_hostlib::ast::Language::from_extension` without
+        // importing hostlib into harn-vm and creating a dependency cycle.
+        let supported = [
+            "ts", "tsx", "js", "mjs", "cjs", "jsx", "py", "go", "rs", "java", "c", "h", "cpp",
+            "cc", "cxx", "hpp", "hxx", "hh", "cs", "csx", "rb", "kt", "kts", "php", "scala", "sc",
+            "sh", "bash", "zsh", "swift", "zig", "zon", "ex", "exs", "lua", "hs", "lhs", "r",
+            "json", "yaml", "yml", "toml", "css", "html", "htm", "sql", "md", "markdown",
+        ];
+        for ext in supported {
+            assert!(
+                parseable_extension(&format!("src/file.{ext}")),
+                "expected .{ext} to be parseable"
+            );
+        }
+        assert!(!parseable_extension("src/file.txt"));
+        assert!(!parseable_extension("src/file.harn"));
     }
 
     #[test]
@@ -652,6 +745,22 @@ mod tests {
                 assert!(reminder_body.contains("Gadget"));
             }
             other => panic!("expected rename Suggest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_token_replace_without_symbol_rename_support_uses_safe_patch() {
+        let args =
+            json!({"path": "config/settings.json", "old_text": "Widget", "new_text": "Gadget"});
+        match route("str_replace", &args, &cfg(CompassMode::Suggest)) {
+            CompassDecision::Suggest {
+                target,
+                reminder_body,
+            } => {
+                assert_eq!(target, StructuralTarget::SafeTextPatch);
+                assert!(reminder_body.contains("edit_safe_text_patch"));
+            }
+            other => panic!("expected safe patch Suggest, got {other:?}"),
         }
     }
 
@@ -780,6 +889,50 @@ mod tests {
         };
         let body = apply_decision(&decision, "str_replace", &cfg(CompassMode::Rewrite), false);
         assert_eq!(body, None);
+    }
+
+    #[test]
+    fn routing_event_describes_suggestions_rewrites_and_fallbacks() {
+        let args =
+            json!({"path": "src/lib.rs", "old_text": "let a = 1;", "new_text": "let a = 2;"});
+        let rewrite = route("str_replace", &args, &cfg(CompassMode::Rewrite));
+        let event = routing_event(
+            &rewrite,
+            "str_replace",
+            &args,
+            &cfg(CompassMode::Rewrite),
+            false,
+        )
+        .expect("rewrite event");
+        assert_eq!(event.mode, "rewrite");
+        assert_eq!(event.action, "rewritten");
+        assert_eq!(event.original_tool, "str_replace");
+        assert_eq!(event.routed_tool, "edit_safe_text_patch");
+        assert_eq!(event.target_tool, "edit_safe_text_patch");
+        assert_eq!(event.path.as_deref(), Some("src/lib.rs"));
+
+        let rename = json!({"path": "src/lib.rs", "old_text": "Widget", "new_text": "Gadget"});
+        let fallback = route("str_replace", &rename, &cfg(CompassMode::Rewrite));
+        let event = routing_event(
+            &fallback,
+            "str_replace",
+            &rename,
+            &cfg(CompassMode::Rewrite),
+            true,
+        )
+        .expect("fallback event");
+        assert_eq!(event.action, "fell_back");
+        assert_eq!(event.routed_tool, "str_replace");
+        assert_eq!(event.target_tool, "edit_rename_symbol");
+
+        assert!(routing_event(
+            &CompassDecision::Passthrough,
+            "read_file",
+            &json!({}),
+            &cfg(CompassMode::Suggest),
+            false,
+        )
+        .is_none());
     }
 
     #[test]
