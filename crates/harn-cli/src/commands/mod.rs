@@ -21,6 +21,7 @@ pub(crate) mod eval_model_selector;
 pub mod eval_prompt;
 pub(crate) mod eval_prompt_context;
 pub(crate) mod eval_scope_triage;
+pub mod eval_skill_gate;
 pub(crate) mod eval_tool_calls;
 pub(crate) mod explain;
 pub(crate) mod fix;

@@ -104,6 +104,9 @@ pub use records::*;
 mod context_eval;
 pub use context_eval::*;
 
+mod skill_gate;
+pub use skill_gate::*;
+
 mod merge_captain_audit;
 pub use merge_captain_audit::*;
 

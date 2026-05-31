@@ -98,8 +98,8 @@ pub(crate) use dump::{
 };
 pub use eval::{
     EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
-    EvalPromptOutput, EvalScopeTriageArgs, EvalToolCallsArgs, EvalToolCallsCommand,
-    EvalToolCallsRegressionArgs,
+    EvalPromptOutput, EvalScopeTriageArgs, EvalSkillGateArgs, EvalToolCallsArgs,
+    EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};
 pub(crate) use fix::{FixArgs, HarnessThreadingMode};

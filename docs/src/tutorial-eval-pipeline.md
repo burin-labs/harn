@@ -122,3 +122,21 @@ A good eval pipeline answers three questions:
 - did the model improve?
 - did latency or token usage regress?
 - which cases failed, and why?
+
+## Skill and guidance gates
+
+Use `harn eval skill-gate` when the artifact under review is a skill or
+guidance edit. The manifest records contamination-safe held-out tasks,
+with-vs-without observations, the frontier score, context-cost inputs, and
+immutable grader checksums:
+
+```bash
+harn eval skill-gate examples/evals/skill-gate/smoke/manifest.json \
+  --output .harn-runs/skill-gate/smoke
+```
+
+The command writes `summary.json`, `per_case.jsonl`, `summary.md`, and a
+machine-readable `receipt.json` using `harn.skill_gate.receipt.v1`. The gate
+excludes static public/pre-cutoff tasks, reports gap recovery per cluster,
+rejects regressions and context bloat, and fails closed when a protected grader
+file or directory hash changes.
