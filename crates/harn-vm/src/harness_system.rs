@@ -139,6 +139,18 @@ pub fn memory_snapshot() -> Value {
     })
 }
 
+/// Resident bytes for the current Harn process.
+pub fn current_process_memory_bytes() -> Option<u64> {
+    let pid = Pid::from_u32(std::process::id());
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        false,
+        ProcessRefreshKind::nothing().with_memory(),
+    );
+    sys.process(pid).map(|process| process.memory())
+}
+
 /// Snapshot of attached GPUs. `sysinfo` does not expose GPU details
 /// directly across all platforms; we surface a non-fatal empty list so
 /// scripts can write `if !gpus.is_empty()` portably. Richer detection
@@ -356,6 +368,13 @@ mod tests {
             Some(true),
             "self entry must be harn-owned"
         );
+    }
+
+    #[test]
+    fn current_process_memory_bytes_reports_self_when_available() {
+        if let Some(bytes) = current_process_memory_bytes() {
+            assert!(bytes > 0, "current process memory should be non-zero");
+        }
     }
 
     #[test]

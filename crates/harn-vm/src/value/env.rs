@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use crate::chunk::CompiledFunctionRef;
 
@@ -18,7 +18,7 @@ pub struct VmClosure {
     /// Module-local named functions that should resolve before builtin fallback.
     /// This lets selectively imported functions keep private sibling helpers
     /// without exporting them into the caller's environment.
-    pub module_functions: Option<ModuleFunctionRegistry>,
+    pub module_functions: Option<WeakModuleFunctionRegistry>,
     /// Shared, mutable module-level env: holds top-level `var` / `let`
     /// bindings declared at the module root (caches, counters, lazily
     /// initialized registries). All closures created from the same
@@ -31,11 +31,27 @@ pub struct VmClosure {
     /// before globals. Created in `import_declarations` after the
     /// module's init chunk runs, so the initial values from `var x = ...`
     /// land in it.
-    pub module_state: Option<ModuleState>,
+    pub module_state: Option<WeakModuleState>,
 }
 
 pub type ModuleFunctionRegistry = Arc<VmMutex<BTreeMap<String, Arc<VmClosure>>>>;
+pub type WeakModuleFunctionRegistry = Weak<VmMutex<BTreeMap<String, Arc<VmClosure>>>>;
 pub type ModuleState = Arc<VmMutex<VmEnv>>;
+pub type WeakModuleState = Weak<VmMutex<VmEnv>>;
+
+impl VmClosure {
+    pub(crate) fn module_functions(&self) -> Option<ModuleFunctionRegistry> {
+        self.module_functions
+            .as_ref()
+            .and_then(WeakModuleFunctionRegistry::upgrade)
+    }
+
+    pub(crate) fn module_state(&self) -> Option<ModuleState> {
+        self.module_state
+            .as_ref()
+            .and_then(WeakModuleState::upgrade)
+    }
+}
 
 /// VM environment for variable storage.
 ///

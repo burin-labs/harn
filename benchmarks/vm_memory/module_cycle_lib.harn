@@ -1,0 +1,5 @@
+let payload = "x" * 4000000
+
+pub fn touch() {
+  return len(payload)
+}

@@ -38,6 +38,8 @@ fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize>
 pub(crate) struct LoadedModule {
     pub(crate) functions: BTreeMap<String, Arc<VmClosure>>,
     pub(crate) public_names: HashSet<String>,
+    pub(crate) _module_functions: crate::value::ModuleFunctionRegistry,
+    pub(crate) _module_state: crate::value::ModuleState,
 }
 
 pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
@@ -212,8 +214,8 @@ impl Vm {
                 func: Arc::new(CompiledFunction::from_cached(compiled)),
                 env: module_env.clone(),
                 source_dir: module_source_dir.clone(),
-                module_functions: Some(Arc::clone(&registry)),
-                module_state: Some(Arc::clone(&module_state)),
+                module_functions: Some(Arc::downgrade(&registry)),
+                module_state: Some(Arc::downgrade(&module_state)),
             });
             registry.lock().insert(name.clone(), Arc::clone(&closure));
             self.env
@@ -269,6 +271,8 @@ impl Vm {
         Ok(LoadedModule {
             functions,
             public_names,
+            _module_functions: registry,
+            _module_state: module_state,
         })
     }
 
@@ -601,8 +605,8 @@ mod tests {
         assert!(!Arc::ptr_eq(&first.func, &second.func));
         assert!(!Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
         assert!(!Arc::ptr_eq(
-            first.module_state.as_ref().expect("first module state"),
-            second.module_state.as_ref().expect("second module state")
+            &first.module_state().expect("first module state"),
+            &second.module_state().expect("second module state")
         ));
     }
 
@@ -640,6 +644,54 @@ mod tests {
         assert_eq!(
             cached_stdlib_module_ptr("agent/prompts"),
             Some(thread_cached)
+        );
+    }
+
+    #[test]
+    fn module_closures_release_state_after_vm_drop() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+
+        let (closure_weak, registry_weak, state_weak) = runtime.block_on(async {
+            let mut vm = Vm::new();
+            let loaded = vm
+                .load_module_from_source(
+                    PathBuf::from("<test>/module_cycle.harn"),
+                    r#"
+var payload = "x" * 1024
+
+pub fn touch() {
+  return len(payload)
+}
+"#,
+                )
+                .await
+                .expect("module loads");
+            let closure = Arc::clone(loaded.functions.get("touch").expect("touch export exists"));
+            let closure_weak = Arc::downgrade(&closure);
+            let registry_weak = Arc::downgrade(&loaded._module_functions);
+            let state_weak = Arc::downgrade(&loaded._module_state);
+
+            drop(closure);
+            drop(loaded);
+            drop(vm);
+
+            (closure_weak, registry_weak, state_weak)
+        });
+
+        assert!(
+            closure_weak.upgrade().is_none(),
+            "module closure should drop with its VM"
+        );
+        assert!(
+            registry_weak.upgrade().is_none(),
+            "module function registry should drop with its VM"
+        );
+        assert!(
+            state_weak.upgrade().is_none(),
+            "module state should drop with its VM"
         );
     }
 }

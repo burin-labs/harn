@@ -32,7 +32,7 @@ impl Vm {
     /// `closure.env` + `module_state`, and we skip the closure merge
     /// entirely as a fast path for context-builder workloads.
     pub(crate) fn closure_call_env(caller_env: &VmEnv, closure: &VmClosure) -> VmEnv {
-        if closure.module_state.is_some() {
+        if closure.module_state().is_some() {
             return closure.env.clone();
         }
         let call_env = closure.env.clone();
@@ -151,8 +151,8 @@ impl Vm {
             fn_name: closure.func.name.clone(),
             argc,
             saved_source_dir,
-            module_functions: closure.module_functions.clone(),
-            module_state: closure.module_state.clone(),
+            module_functions: closure.module_functions(),
+            module_state: closure.module_state(),
             local_slots,
             local_scope_base: self.env.scope_depth().saturating_sub(1),
             local_scope_depth: 0,
@@ -281,8 +281,8 @@ impl Vm {
         } else {
             None
         };
-        let module_functions = closure.module_functions.clone();
-        let module_state = closure.module_state.clone();
+        let module_functions = closure.module_functions();
+        let module_state = closure.module_state();
         let argc = args.len();
         // Spawn the generator body as an async task.
         // The task will execute until return, sending yielded values through the channel.
