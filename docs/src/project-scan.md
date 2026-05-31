@@ -54,6 +54,69 @@ Normalization rules:
   self-contained; downstream consumers consume the stable output tags rather
   than acting as a runtime dependency for detection.
 
+## Context profiles
+
+`project_context_profile(path?, options?)` turns project signals into the prompt,
+skill, and tool preset profile that an agent should activate for the current
+workspace:
+
+```harn
+import "std/project"
+
+let profile = project_context_profile(".", {include_env_credentials: false})
+```
+
+The resolver composes existing signals instead of indexing code itself. It uses
+the shallow `project_fingerprint(...)` result when a caller has not supplied one,
+reads Git remote configuration directly, and checks credential availability only
+by normalized alias such as `"github"`; secret values are never returned.
+
+Typical fields:
+
+- `profile_ids`: stable active profile IDs such as `"git"`, `"github"`,
+  `"rust"`, `"node"`, `"python"`, or `"swift"`
+- `prompt_fragments`: reducer-ready fragments with `id`, `source`, `body`, and
+  `requires_caps`
+- `skills`: skill IDs that should be active when present in the skill registry
+- `tool_groups`: host/tooling groups such as `"git"` or `"cargo"` that a client
+  can use for preset tool surfaces
+- `mcp_presets`: MCP preset IDs whose prerequisites are already satisfied
+- `mcp_preset_candidates`: candidate preset IDs plus `status` and missing
+  credential keys when prerequisites are not satisfied
+- `caps`: capability flags that gate the prompt fragments
+- `signals`: the normalized fingerprint, redacted remote, signal source, and
+  credential aliases used for the decision
+- `token_delta`: estimated prompt-token/byte cost for activated fragments versus
+  the full always-on profile catalog
+
+`agent_loop_options(...)` resolves a context profile automatically from
+`context_profile_root`, `project_root`, `root`, `cwd`, or `"."` unless the caller
+already supplied `context_profile`/`project_context_profile` or set
+`auto_context_profile: false`. Pass `context_profile_options` through
+`agent_loop_options(...)` to forward resolver options.
+
+Callers with a pre-existing code librarian or host index signal should pass it
+instead of forcing another project scan:
+
+```harn
+import { agent_loop_options } from "std/agent/options"
+
+let _opts = agent_loop_options(
+  {
+    root: ".",
+    code_librarian_signals: {
+      source: "code_librarian",
+      fingerprint: {primary_language: "rust", languages: ["rust"]},
+      remote: "https://github.com/burin-labs/harn.git",
+    },
+  },
+)
+```
+
+The same profile can be handed to `prompt_explain(...)`; the resulting
+provenance shows each `profile:*` fragment and the capability that caused it to
+be included.
+
 ## What it returns
 
 `project_scan(path, options?)` resolves `path` to a directory and returns a

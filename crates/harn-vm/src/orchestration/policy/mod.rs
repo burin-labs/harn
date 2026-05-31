@@ -320,6 +320,7 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
             );
         }
         "project_fingerprint"
+        | "project_context_profile_native"
         | "project_scan_native"
         | "project_scan_tree_native"
         | "project_walk_tree_native"
@@ -963,7 +964,12 @@ mod approval_policy_tests {
             ..CapabilityPolicy::default()
         });
 
-        for name in ["read_lines", "walk_dir", "glob"] {
+        for name in [
+            "read_lines",
+            "walk_dir",
+            "glob",
+            "project_context_profile_native",
+        ] {
             assert!(
                 enforce_current_policy_for_builtin(name, &[]).is_err(),
                 "{name} should be rejected when the matching workspace capability is absent"
