@@ -280,6 +280,7 @@ pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_RESULT: &str = "composition_ch
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_ERROR: &str = "composition_error";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_FINISH: &str = "composition_finish";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_START: &str = "composition_start";
+pub const HARN_AGENT_EVENT_KIND_COMPASS_ROUTING_DECISION: &str = "compass_routing_decision";
 pub const HARN_AGENT_EVENT_KIND_CONTROL_OUTCOME: &str = "control_outcome";
 pub const HARN_AGENT_EVENT_KIND_DAEMON_WATCHDOG_TRIPPED: &str = "daemon_watchdog_tripped";
 pub const HARN_AGENT_EVENT_KIND_FEEDBACK_INJECTED: &str = "feedback_injected";
@@ -309,6 +310,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "composition_error",
     "composition_finish",
     "composition_start",
+    "compass_routing_decision",
     "control_outcome",
     "daemon_watchdog_tripped",
     "feedback_injected",

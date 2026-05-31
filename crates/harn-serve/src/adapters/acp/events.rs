@@ -38,8 +38,7 @@ impl AcpAgentEventSink {
     /// as `session/update`. Used for ACP `ExtNotification` envelopes
     /// (methods prefixed with `_`, per the ACP extensibility spec) when
     /// the canonical `session/update` discriminator has no slot for the
-    /// event being surfaced — currently the pipeline-loop milestones
-    /// emitted via `_harn/agentEvent`.
+    /// event being surfaced via `_harn/agentEvent`.
     fn write_jsonrpc_notification(&self, method: &str, mut params: serde_json::Value) {
         if self.replayed {
             mark_replayed_params(method, &mut params);
@@ -57,8 +56,8 @@ impl AcpAgentEventSink {
         }
     }
 
-    /// Emit a pipeline-loop milestone as an ACP `ExtNotification` under
-    /// the `_harn/agentEvent` method. The schema is the per-`kind`
+    /// Emit a Harn agent event as an ACP `ExtNotification` under the
+    /// `_harn/agentEvent` method. The schema is the per-`kind`
     /// payload defined in `HARN_AGENT_EVENT_KINDS` — `sessionId` + `kind`
     /// are required at the top level, and kind-specific fields ride
     /// directly under `params` (no nested `_meta` wrapper, since the
@@ -1269,6 +1268,31 @@ impl AgentEventSink for AcpAgentEventSink {
                         }),
                     );
                 }
+            }
+            AgentEvent::CompassRoutingDecision {
+                session_id,
+                tool_call_id,
+                mode,
+                action,
+                persona,
+                original_tool,
+                routed_tool,
+                target_tool,
+                path,
+            } => {
+                let mut payload = serde_json::json!({
+                    "toolCallId": tool_call_id,
+                    "mode": mode,
+                    "action": action,
+                    "persona": persona,
+                    "originalTool": original_tool,
+                    "routedTool": routed_tool,
+                    "targetTool": target_tool,
+                });
+                if let Some(path) = path {
+                    payload["path"] = serde_json::Value::String(path.clone());
+                }
+                self.emit_agent_event_ext("compass_routing_decision", session_id, payload);
             }
             AgentEvent::FeedbackInjected {
                 session_id,

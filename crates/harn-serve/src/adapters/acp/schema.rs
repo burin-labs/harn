@@ -47,11 +47,11 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
 /// adapter, fixtures, tests, and capability advertisement together.
 pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
 
-/// Pipeline-loop milestone kinds the adapter currently emits via
-/// `_harn/agentEvent`. The list is stable wire vocabulary — adding a
-/// new kind is additive and SHOULD be treated by clients as
-/// "unknown kind, ignore." Keep it sorted for diff-friendliness and
-/// keep it in lockstep with the match arm in `events.rs`.
+/// Harn event kinds the adapter currently emits via `_harn/agentEvent`.
+/// The list is stable wire vocabulary — adding a new kind is additive and
+/// SHOULD be treated by clients as "unknown kind, ignore." Keep it sorted
+/// for diff-friendliness and keep it in lockstep with the match arm in
+/// `events.rs`.
 pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "budget_circuit_breaker",
     "budget_exhausted",
@@ -60,6 +60,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "composition_error",
     "composition_finish",
     "composition_start",
+    "compass_routing_decision",
     "control_outcome",
     "daemon_watchdog_tripped",
     "feedback_injected",

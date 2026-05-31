@@ -130,6 +130,21 @@ pub enum AgentEvent {
         replace: bool,
         metadata: serde_json::Value,
     },
+    /// Emitted when the Burin compass observes a freeform edit and either
+    /// suggests a structural primitive, rewrites the tool call, or falls
+    /// back because rewrite mode could not prove equivalence.
+    CompassRoutingDecision {
+        session_id: String,
+        tool_call_id: String,
+        mode: String,
+        action: String,
+        persona: String,
+        original_tool: String,
+        routed_tool: String,
+        target_tool: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
     /// A renderable, declarative artifact spec emitted by an agent. Harn
     /// validates the payload and transports it; host surfaces own rendering
     /// and may fall back to the plain-text representation.
@@ -749,6 +764,7 @@ impl AgentEvent {
             | Self::ToolCallUpdate { session_id, .. }
             | Self::Plan { session_id, .. }
             | Self::ProgressReported { session_id, .. }
+            | Self::CompassRoutingDecision { session_id, .. }
             | Self::Artifact { session_id, .. }
             | Self::IterationStart { session_id, .. }
             | Self::IterationEnd { session_id, .. }

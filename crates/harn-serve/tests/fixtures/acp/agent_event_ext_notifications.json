@@ -218,6 +218,22 @@
     "jsonrpc": "2.0",
     "method": "_harn/agentEvent",
     "params": {
+      "action": "rewritten",
+      "kind": "compass_routing_decision",
+      "mode": "rewrite",
+      "originalTool": "str_replace",
+      "path": "src/lib.rs",
+      "persona": "fixer",
+      "routedTool": "edit_safe_text_patch",
+      "sessionId": "session-1",
+      "targetTool": "edit_safe_text_patch",
+      "toolCallId": "tool-edit-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
       "kind": "session_closed",
       "metadata": {
         "idle_ms": 5000
