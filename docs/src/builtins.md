@@ -2309,7 +2309,10 @@ tool registry dict.
 The `composition_*` builtins back [Governed Code Mode](./code-mode.md). The
 executor is read-only: it rejects imports, writes, process execution, network
 access, direct HITL, parallel/spawn, and calls outside the manifest bindings and
-pure data helpers. `std/composition` adds MCP-focused helpers including
+pure data helpers. Composition snippets may use `map_bounded(...)` for settled
+fan-out; child binding calls still honor global and per-MCP-server concurrency
+caps, retry policy, trusted MCP annotation gates, idempotency keys, and
+`outputSchema` validation. `std/composition` adds MCP-focused helpers including
 `composition_mcp_api(...)`, `composition_mcp_execute(...)`, and
 `composition_mcp_tools(...)`, which registers the compact MCP profile tools
 `harn.code.search_examples`, `harn.code.generate_harn_api`, and

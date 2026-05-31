@@ -5,7 +5,10 @@ use serde_json::Value;
 use super::manifest::{BindingManifest, BindingPolicyDisposition};
 
 pub fn composition_harn_api(manifest: &BindingManifest) -> String {
-    let mut out = String::from("// Harn Code Mode API. Snippets call these bindings; the executor supplies __composition_call.\n");
+    let mut out = String::from(
+        "// Harn Code Mode API. Snippets call these bindings; the executor supplies __composition_call.\n\
+         // Use map_bounded(items, { item -> ... }, {concurrency: N}) for settled fan-out.\n",
+    );
     out.push_str("type JsonValue = unknown\n\n");
     for binding in &manifest.bindings {
         if binding.policy.disposition != BindingPolicyDisposition::Allowed {

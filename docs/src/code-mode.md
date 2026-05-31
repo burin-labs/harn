@@ -110,7 +110,22 @@ The report contains:
 - `child_results`: ordered child statuses with raw output or error.
 
 The current executor is intentionally read-only. It enforces child-call,
-timeout, and output-size limits. Pass `session_id` in the execute options when
+timeout, output-size, global concurrency, and per-MCP-server concurrency limits.
+`map_bounded(items, { item -> ... }, {concurrency: N})` is available inside
+snippets for settled fan-out; each item returns a `Result.Ok` or `Result.Err`
+entry plus `succeeded` and `failed` counts, while child calls still pass through
+the same audit and policy path.
+
+MCP binding calls are wrapped with per-call timeout, retry, and bulkhead policy.
+Retries are only automatic when a server is trusted and its MCP annotations mark
+the tool as `readOnlyHint` or `idempotentHint`; destructive, non-idempotent, or
+untrusted tools are not retried unless the call input carries an idempotency key
+(`idempotency_key`, `idempotencyKey`, or `_meta.idempotencyKey`). Backoff honors
+`Retry-After` on retryable 429/503-style failures and caps attempts and delay.
+When a binding declares `outputSchema`, the executor validates the structured
+child output before returning it to the snippet.
+
+Pass `session_id` in the execute options when
 the caller wants Harn to emit the corresponding `composition_start`,
 `composition_child_call`, `composition_child_result`, and terminal composition
 events to the live agent event sinks. Future frontends must route every binding
@@ -176,7 +191,14 @@ let api = composition_mcp_api(tool_registry, {query: "issues", limit: 5})
 let output = composition_mcp_execute(
   "let hits = github_search_issues({query: \"is:open label:bug\"})\nreturn hits",
   tool_registry,
-  {manifest: api.manifest, max_operations: 4},
+  {
+    manifest: api.manifest,
+    max_operations: 16,
+    max_concurrent: 8,
+    max_concurrent_per_server: 4,
+    trusted_servers: api.servers,
+    retry: {max_attempts: 3, base_delay_ms: 100, max_delay_ms: 2000},
+  },
 )
 ```
 
