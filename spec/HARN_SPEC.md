@@ -400,6 +400,9 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/signal"` — cooperative process interruption helpers
   (on_interrupt, off_interrupt, interrupted, with_interrupt)
 - `import "std/vision"` — deterministic OCR helpers (`ocr(image, options?)`)
+- `import "std/web"` — deterministic web-source and grounding helpers
+  (web_fetch, web_search, verify_imports, web_grounding_tools,
+  web_parse_html, robots_allowed, sitemap_urls)
 - `import "std/io"` — terminal IO helpers (is_tty, read_line,
   read_password, write_stderr)
 - `import "std/prompt_library"` — reusable prompt fragments, cache metadata,

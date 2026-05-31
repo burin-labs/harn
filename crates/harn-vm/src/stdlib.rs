@@ -43,6 +43,7 @@ pub(crate) mod files;
 mod flow;
 mod fs;
 mod git;
+mod grounding;
 pub(crate) mod harn_entry;
 pub(crate) mod hitl;
 mod hitl_read;
@@ -174,6 +175,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     clock::register_clock_builtins(vm);
     testbench::register_testbench_builtins(vm);
     project::register_project_builtins(vm);
+    grounding::register_grounding_builtins(vm);
     tracing::register_tracing_builtins(vm);
     observability::register_observability_builtins(vm);
     timing::register_timing_builtins(vm);

@@ -2543,6 +2543,26 @@ query_stringify([{key: "name", value: "ali ce"}])
 - `http_mock(method, url_pattern, response)` can script multiple responses
   with `{responses: [...]}` and `http_mock_calls()` records each attempt.
 
+### `std/web` grounding helpers
+
+Import with `import { web_fetch, web_search, verify_imports, web_grounding_tools } from "std/web"`.
+
+- `web_fetch(url, options?)` wraps the HTTP stack with source provenance,
+  conditional fetch support, and `{ok, status, body, headers, source_url,
+  final_url, fetched_at, cache_status}` envelopes.
+- `web_search(query, options?)` normalizes curated `index` / `results`,
+  configured JSON `api`, `provider_results`, or `HARN_WEB_SEARCH_URL` search
+  backends into ranked results with per-result provenance. Result envelopes
+  expose only public backend metadata, not configured API headers or bodies.
+- `verify_imports(paths, options?)` checks Python, JavaScript/TypeScript,
+  Rust, and Harn imports against nearby manifests, `installed_packages`, and
+  registry evidence with optional `symbols`, `trust_score`, and package age
+  metadata. Treat `package_not_found` and `symbol_not_found` as blockers;
+  `low_trust_package`, `fresh_package`, and `symbol_unverified` are warnings.
+- `web_grounding_tools(registry?, options?)` registers read-only
+  `web_search` and `verify_imports` tools plus capability-gated model guidance
+  for unfamiliar packages, APIs, or post-edit import verification.
+
 ### Connector HTTP policy
 
 Package authors should prefer `std/connectors/shared` for provider API calls:
