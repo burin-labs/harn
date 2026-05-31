@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use super::native_json::parse_native_json_tool_calls;
 use super::syntax::{
     collapse_blank_lines, has_object_literal_arg_start, ident_length, parse_object_literal_from,
-    parse_ts_call_from, strip_empty_fences, strip_thinking_tags, unwrap_exact_code_wrapper,
+    parse_ts_call_from, strip_empty_fences, strip_thinking_tags, strip_tool_call_wrappers,
+    unwrap_exact_code_wrapper,
 };
 use super::TextToolParseResult;
 use crate::llm::tools::collect_tool_schemas;
@@ -25,17 +26,23 @@ use crate::value::VmValue;
 /// Scan a text body for bare `name({ ... })` tool calls and diagnostics.
 ///
 /// This is the body-level parser used inside `<tool_call>` tags by the
-/// tagged-protocol scanner. It is also called on whole responses as a
-/// diagnostic fallback: when a model emits calls without wrapping them in
-/// `<tool_call>` tags, we detect the calls here, report a grammar violation
-/// at the outer layer, and refuse to execute until the model re-emits
-/// properly wrapped.
+/// tagged-protocol scanner. It is also the parser the text/bare protocol
+/// runs on whole responses.
+///
+/// Text-format models emit `<tool_call>...</tool_call>` wrappers around their
+/// calls unpredictably even when the prompt asks for bare `name({ ... })`
+/// (OpenRouter `qwen/qwen3-coder` does this on most turns). To stay robust we
+/// strip those wrapper tags up front (see `strip_tool_call_wrappers`) and parse
+/// the inner call instead of dropping the turn — otherwise a same-line
+/// `<tool_call>run({...})</tool_call>` is invisible to the line-start scanner
+/// and a trailing `</tool_call>` leaks into the visible prose.
 pub(crate) fn parse_bare_calls_in_body(
     text: &str,
     tools_val: Option<&VmValue>,
 ) -> TextToolParseResult {
     let cleaned = strip_thinking_tags(text);
-    let text = cleaned.as_ref();
+    let unwrapped = strip_tool_call_wrappers(cleaned.as_ref());
+    let text = unwrapped.as_ref();
 
     if let Some(unwrapped) = unwrap_exact_code_wrapper(text) {
         let result = parse_bare_calls_in_body(unwrapped, tools_val);
