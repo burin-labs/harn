@@ -13,7 +13,7 @@ inputs:
       GitHub-hosted images vary by runner pool; larger roots should not spend
       a minute deleting SDKs they do not need to delete.
     required: false
-    default: "18"
+    default: "28"
 
 runs:
   using: composite
@@ -55,5 +55,11 @@ runs:
 
         echo "Disk after reclaim:"
         df -h /
+        available_kib="$(df --output=avail -k / | tail -n 1 | tr -d '[:space:]')"
+        if [ "${available_kib}" -lt "${min_free_kib}" ]; then
+          printf '::error::Only %s GiB available on / after reclaim; Rust CI needs at least %s GiB.\n' \
+            "$((available_kib / 1024 / 1024))" "${MIN_FREE_GB}"
+          exit 1
+        fi
       env:
         MIN_FREE_GB: ${{ inputs.min-free-gb }}

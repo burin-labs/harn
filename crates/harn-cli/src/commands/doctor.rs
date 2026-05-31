@@ -761,18 +761,7 @@ fn os_sandbox_available() -> bool {
 
 fn serialize_model_defaults() -> serde_json::Value {
     let cfg = llm_config::load_config();
-    let mut out = serde_json::Map::new();
-    for (pattern, defaults) in &cfg.model_defaults {
-        let mut inner = serde_json::Map::new();
-        for (k, v) in defaults {
-            // Best-effort TOML -> JSON conversion via toml's serde to JSON value.
-            let json_val: serde_json::Value =
-                serde_json::to_value(v).unwrap_or(serde_json::Value::Null);
-            inner.insert(k.clone(), json_val);
-        }
-        out.insert(pattern.clone(), serde_json::Value::Object(inner));
-    }
-    serde_json::Value::Object(out)
+    serde_json::to_value(&cfg.model_defaults).unwrap_or(serde_json::Value::Null)
 }
 
 /// Re-export of the canonical "no LLM provider credentials" guidance line so
