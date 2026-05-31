@@ -42,6 +42,7 @@ fn ast_capability_registers_documented_methods() {
             "hostlib_ast_apply_node",
             "hostlib_ast_insert_at_anchor",
             "hostlib_ast_dry_run",
+            "hostlib_ast_structural_diff",
             "hostlib_ast_capabilities",
         ]
     );
@@ -67,6 +68,7 @@ fn ast_capability_registers_documented_methods() {
         ("hostlib_ast_apply_node", "path"),
         ("hostlib_ast_insert_at_anchor", "path"),
         ("hostlib_ast_dry_run", "plan"),
+        ("hostlib_ast_structural_diff", "path_a"),
     ];
     // `apply_node` / `insert_at_anchor` write edited source to disk and are
     // gated on the deterministic-tools feature (#2548); enable it so the
@@ -426,10 +428,10 @@ fn install_default_wires_every_module_into_a_vm() {
             "secret_store"
         ]
     );
-    // Builtin count: 14 ast (incl. apply_node + insert_at_anchor) +
+    // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 27 code_index + 2 scanner + 4 fs + 4 fs_snapshot + 2 fs_watch
-    // + 13 tools + 1 hostlib_enable + 4 secret_store = 71.
-    assert!(registry.builtins().len() >= 71);
+    // + 13 tools + 1 hostlib_enable + 4 secret_store = 72.
+    assert!(registry.builtins().len() >= 72);
 }
 
 #[test]

@@ -1,0 +1,52 @@
+import { structural_diff } from "std/diff"
+
+fn write_fixture(dir: string, name: string, body: string) -> string {
+  let path = path_join(dir, name)
+  harness.fs.write_text(path, body)
+  return path
+}
+
+pipeline default() {
+  let root = path_join(
+    harness.fs.temp_dir(),
+    "harn_structural_diff_" + to_string(harness.random.gen_range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
+  let reformat_a = write_fixture(root, "reformat_before.rs", "fn add(a:i32,b:i32)->i32{a+b}\n")
+  let reformat_b = write_fixture(root, "reformat_after.rs", "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n")
+  let reformat = structural_diff(reformat_a, reformat_b, "rust")
+  __io_println(reformat.result == "ok")
+  __io_println(reformat.structural)
+  __io_println(!reformat.changed && len(reformat.changes) == 0)
+  let rename_a = write_fixture(root, "rename_before.rs", "fn value() -> i32 {\n    1\n}\n")
+  let rename_b = write_fixture(root, "rename_after.rs", "fn total() -> i32 {\n    1\n}\n")
+  let rename = structural_diff(rename_a, rename_b, {language: "rust"})
+  __io_println(rename.summary.replacements == 1)
+  __io_println(rename.changes[0].node_kind == "identifier")
+  __io_println(rename.changes[0].before_text == "value" && rename.changes[0].after_text == "total")
+  let move_a = write_fixture(
+    root,
+    "move_before.rs",
+    "fn first() -> i32 {\n    1\n}\n\nfn second() -> i32 {\n    2\n}\n",
+  )
+  let move_b = write_fixture(
+    root,
+    "move_after.rs",
+    "fn second() -> i32 {\n    2\n}\n\nfn first() -> i32 {\n    1\n}\n",
+  )
+  let moved = structural_diff(move_a, move_b, "rust")
+  __io_println(moved.summary.moves >= 1)
+  __io_println(moved.changes[0].kind == "move")
+  let logic_a = write_fixture(root, "logic_before.rs", "fn answer() -> i32 {\n    41\n}\n")
+  let logic_b = write_fixture(root, "logic_after.rs", "fn answer() -> i32 {\n    42\n}\n")
+  let logic = structural_diff(logic_a, logic_b, "rust")
+  __io_println(logic.summary.replacements == 1)
+  __io_println(logic.changes[0].node_kind == "integer_literal")
+  __io_println(logic.changes[0].before_text == "41" && logic.changes[0].after_text == "42")
+  let fallback = structural_diff(logic_a, logic_b, {language: "rust", max_bytes: 8})
+  __io_println(fallback.result == "fallback" && fallback.mode == "line")
+  __io_println(contains(fallback.fallback_reason, "byte_limit_exceeded"))
+  __io_println(
+    contains(fallback.line_diff.diff, "-    41") && contains(fallback.line_diff.diff, "+    42"),
+  )
+}

@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/structural_diff.response.json",
+  "title": "ast.structural_diff response",
+  "description": "Syntax-aware, human-consumable diff result. Structural mode returns changed syntax-node spans; fallback mode returns a unified line diff. The result is not patch-applicable.",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": ["ok", "fallback"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["structural", "line"]
+    },
+    "changed": { "type": "boolean" },
+    "path_a": { "type": "string" },
+    "path_b": { "type": "string" },
+    "language": {
+      "type": ["string", "null"],
+      "description": "Resolved grammar in structural mode; null when no grammar could be inferred."
+    },
+    "fallback_reason": {
+      "type": ["string", "null"],
+      "description": "Stable reason string when `mode == \"line\"`, such as `parse_error`, `unsupported_language`, or a limit-exceeded message."
+    },
+    "changes": {
+      "type": "array",
+      "description": "Structural node changes. Empty in line fallback mode.",
+      "items": { "$ref": "#/$defs/Change" }
+    },
+    "line_diff": {
+      "type": ["object", "null"],
+      "description": "Unified line diff in fallback mode; null in structural mode.",
+      "properties": {
+        "path": { "type": "string" },
+        "diff": { "type": "string" },
+        "lines_added": { "type": "integer", "minimum": 0 },
+        "lines_removed": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["path", "diff", "lines_added", "lines_removed"],
+      "additionalProperties": false
+    },
+    "summary": { "$ref": "#/$defs/Summary" },
+    "limits": { "$ref": "#/$defs/Limits" }
+  },
+  "required": [
+    "result",
+    "mode",
+    "changed",
+    "path_a",
+    "path_b",
+    "language",
+    "fallback_reason",
+    "changes",
+    "line_diff",
+    "summary",
+    "limits"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Span": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "start_byte": { "type": "integer", "minimum": 0 },
+        "end_byte": { "type": "integer", "minimum": 0 },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "path",
+        "start_byte",
+        "end_byte",
+        "start_row",
+        "start_col",
+        "end_row",
+        "end_col"
+      ],
+      "additionalProperties": false
+    },
+    "Change": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["insert", "delete", "replace", "move"]
+        },
+        "node_kind": { "type": "string" },
+        "before": {
+          "anyOf": [{ "$ref": "#/$defs/Span" }, { "type": "null" }]
+        },
+        "after": {
+          "anyOf": [{ "$ref": "#/$defs/Span" }, { "type": "null" }]
+        },
+        "before_text": { "type": ["string", "null"] },
+        "after_text": { "type": ["string", "null"] }
+      },
+      "required": [
+        "kind",
+        "node_kind",
+        "before",
+        "after",
+        "before_text",
+        "after_text"
+      ],
+      "additionalProperties": false
+    },
+    "Summary": {
+      "type": "object",
+      "properties": {
+        "change_count": { "type": "integer", "minimum": 0 },
+        "insertions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 },
+        "replacements": { "type": "integer", "minimum": 0 },
+        "moves": { "type": "integer", "minimum": 0 },
+        "line_insertions": { "type": "integer", "minimum": 0 },
+        "line_deletions": { "type": "integer", "minimum": 0 },
+        "nodes_before": { "type": "integer", "minimum": 0 },
+        "nodes_after": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "change_count",
+        "insertions",
+        "deletions",
+        "replacements",
+        "moves",
+        "line_insertions",
+        "line_deletions",
+        "nodes_before",
+        "nodes_after"
+      ],
+      "additionalProperties": false
+    },
+    "Limits": {
+      "type": "object",
+      "properties": {
+        "max_bytes": { "type": "integer", "minimum": 0 },
+        "max_nodes": { "type": "integer", "minimum": 0 },
+        "max_graph_edges": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["max_bytes", "max_nodes", "max_graph_edges"],
+      "additionalProperties": false
+    }
+  }
+}

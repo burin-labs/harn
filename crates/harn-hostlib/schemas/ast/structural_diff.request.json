@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/structural_diff.request.json",
+  "title": "ast.structural_diff request",
+  "description": "Compare two source files with the tree-sitter grammar inferred from their paths unless `language` is supplied. Size and graph caps trigger a line-diff fallback instead of an error.",
+  "type": "object",
+  "properties": {
+    "path_a": {
+      "type": "string",
+      "description": "Absolute or workspace-relative path to the before file."
+    },
+    "path_b": {
+      "type": "string",
+      "description": "Absolute or workspace-relative path to the after file."
+    },
+    "language": {
+      "type": "string",
+      "description": "Optional grammar override such as \"rust\", \"swift\", or \"typescript\"."
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum combined input bytes for structural comparison; 0 disables the byte cap."
+    },
+    "max_nodes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum parsed nodes on either side; 0 disables the node cap."
+    },
+    "max_graph_edges": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum candidate node-pair graph size for structural matching; 0 disables the graph cap."
+    }
+  },
+  "required": ["path_a", "path_b"],
+  "additionalProperties": false
+}

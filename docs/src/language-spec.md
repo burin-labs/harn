@@ -368,9 +368,9 @@ Imports starting with `std/` load embedded stdlib modules:
   ansi_success, ansi_warn, ansi_error)
 - `import "std/table"` — deterministic plain-text and Markdown table
   rendering (render_table, render_markdown_table, render_kv_table)
-- `import "std/diff"` — line diff, unified diff, colored diff, and diff
-  stat helpers (diff_lines, unified_diff, colorize_diff, diff_summary,
-  render_diff_stat)
+- `import "std/diff"` — line diff, unified diff, colored diff, diff stat,
+  and host-backed structural review helpers (diff_lines, unified_diff,
+  colorize_diff, diff_summary, render_diff_stat, structural_diff)
 - `import "std/edit"` — pure old/new text patch helpers
   (edit_apply_old_new_patch, edit_splice_lines, edit_changed_regions,
   edit_validate_changed_regions)
