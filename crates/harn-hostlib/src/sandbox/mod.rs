@@ -339,6 +339,11 @@ pub(crate) fn normalized_mount_target(target: &str) -> SandboxResult<String> {
             "mount target `{target}` must be absolute"
         )));
     }
+    if trimmed.split('/').any(|segment| segment == "..") {
+        return Err(SandboxError::InvalidRequest(format!(
+            "mount target `{target}` must not contain a `..` component"
+        )));
+    }
     Ok(trimmed.to_string())
 }
 
@@ -399,5 +404,13 @@ mod tests {
     fn quotes_shell_values() {
         assert_eq!(sh_quote("a'b"), "'a'\"'\"'b'");
         assert_eq!(sh_quote(""), "''");
+    }
+
+    #[test]
+    fn normalized_mount_target_rejects_parent_traversal() {
+        let err = normalized_mount_target("/mnt/memory/../../etc/passwd").unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("must not contain a `..` component"));
     }
 }
