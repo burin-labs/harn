@@ -10,7 +10,6 @@ use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
 use harn_vm::visible_text::VisibleTextState;
 use harn_vm::VmValue;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
@@ -126,14 +125,14 @@ async fn start_acp_code_session_with_config(
 fn attach_test_host_bridge(
     server: &mut AcpServer,
     session_id: &str,
-) -> Rc<harn_vm::bridge::HostBridge> {
+) -> Arc<harn_vm::bridge::HostBridge> {
     let inject_state = server
         .sessions
         .get(session_id)
         .expect("session")
         .inject_state
         .clone();
-    let host_bridge = Rc::new(
+    let host_bridge = Arc::new(
         harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -846,7 +845,7 @@ async fn session_inject_state_survives_prompt_bridge_replacement() {
     assert_eq!(replace["result"]["messageId"], message_id);
     assert_eq!(replace["result"]["status"], "replaced");
 
-    let replacement_bridge = Rc::new(
+    let replacement_bridge = Arc::new(
         harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

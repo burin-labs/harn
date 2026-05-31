@@ -5,7 +5,7 @@
 //! primitive host/embedding bridge adapter for semantic matchers.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::bridge::HostBridge;
 use crate::value::{VmError, VmValue};
@@ -54,7 +54,7 @@ pub(crate) async fn score_skill_registry(
     context: &VmValue,
     registry: &VmValue,
     options: &VmValue,
-    bridge: Option<Rc<HostBridge>>,
+    bridge: Option<Arc<HostBridge>>,
 ) -> Result<VmValue, VmError> {
     let skills = extract_skills(registry);
     let options = options.as_dict().cloned().unwrap_or_default();

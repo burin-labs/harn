@@ -4,10 +4,9 @@
 //! `store_save`, and `store_clear` builtins. The store file is created
 //! lazily on first mutation.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -143,35 +142,33 @@ pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {
     if let Err(error) = crate::event_log::install_lazy_default_for_base_dir(base_dir) {
         crate::events::log_warn("event_log.init", &error.to_string());
     }
-    let state = Rc::new(RefCell::new(StoreState::new(base_dir)));
+    let state = Arc::new(parking_lot::Mutex::new(StoreState::new(base_dir)));
 
-    let s = Rc::clone(&state);
+    let s = Arc::clone(&state);
     vm.register_builtin("store_get", move |args, _out| {
         let key = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(s.borrow_mut().get(&key))
+        Ok(s.lock().get(&key))
     });
 
-    let s = Rc::clone(&state);
+    let s = Arc::clone(&state);
     vm.register_builtin("store_set", move |args, _out| {
         let key = args.first().map(|a| a.display()).unwrap_or_default();
         let value = args.get(1).unwrap_or(&VmValue::Nil);
         let json_val = vm_to_json(value);
-        s.borrow_mut()
-            .set(key, json_val)
-            .map_err(VmError::Runtime)?;
+        s.lock().set(key, json_val).map_err(VmError::Runtime)?;
         Ok(VmValue::Nil)
     });
 
-    let s = Rc::clone(&state);
+    let s = Arc::clone(&state);
     vm.register_builtin("store_delete", move |args, _out| {
         let key = args.first().map(|a| a.display()).unwrap_or_default();
-        s.borrow_mut().delete(&key).map_err(VmError::Runtime)?;
+        s.lock().delete(&key).map_err(VmError::Runtime)?;
         Ok(VmValue::Nil)
     });
 
-    let s = Rc::clone(&state);
+    let s = Arc::clone(&state);
     vm.register_builtin("store_list", move |_args, _out| {
-        let keys = s.borrow_mut().list();
+        let keys = s.lock().list();
         Ok(VmValue::List(std::sync::Arc::new(
             keys.into_iter()
                 .map(|k| VmValue::String(std::sync::Arc::from(k)))
@@ -179,15 +176,15 @@ pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {
         )))
     });
 
-    let s = Rc::clone(&state);
+    let s = Arc::clone(&state);
     vm.register_builtin("store_save", move |_args, _out| {
-        s.borrow().save().map_err(VmError::Runtime)?;
+        s.lock().save().map_err(VmError::Runtime)?;
         Ok(VmValue::Nil)
     });
 
-    let s = Rc::clone(&state);
+    let s = Arc::clone(&state);
     vm.register_builtin("store_clear", move |_args, _out| {
-        s.borrow_mut().clear().map_err(VmError::Runtime)?;
+        s.lock().clear().map_err(VmError::Runtime)?;
         Ok(VmValue::Nil)
     });
 }

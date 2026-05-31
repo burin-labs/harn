@@ -1,6 +1,5 @@
-use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use harn_vm::{DebugState, Vm, VmValue};
@@ -83,7 +82,7 @@ pub struct Debugger {
     /// so a filter can gate on e.g. `err.kind == "disk_full"`.
     pub(crate) exception_filters: BTreeMap<String, Option<String>>,
     /// Latest VM debug snapshot captured through the VM debug hook.
-    pub(crate) latest_debug_state: Rc<RefCell<Option<DebugState>>>,
+    pub(crate) latest_debug_state: Arc<Mutex<Option<DebugState>>>,
     /// Optional bridge that round-trips unhandled `host_call` ops to the
     /// DAP client as reverse requests. When `None`, scripts only see the
     /// harn-vm fallbacks.
@@ -203,7 +202,7 @@ impl Debugger {
             runtime: None,
             break_on_exceptions: false,
             exception_filters: BTreeMap::new(),
-            latest_debug_state: Rc::new(RefCell::new(None)),
+            latest_debug_state: Arc::new(Mutex::new(None)),
             host_bridge: None,
             running: false,
             bp_conditions: Vec::new(),
@@ -325,7 +324,7 @@ impl Debugger {
         self.running && self.vm.is_some()
     }
 
-    /// Install a host bridge. Cloned into an `Rc` and registered with
+    /// Install a host bridge. Cloned into an `Arc` and registered with
     /// harn-vm via `set_host_call_bridge` whenever a fresh VM is built.
     pub fn attach_host_bridge(&mut self, bridge: std::sync::Arc<DapHostBridge>) {
         self.host_bridge = Some((*bridge).clone());
@@ -333,7 +332,8 @@ impl Debugger {
 
     pub(crate) fn current_debug_state(&self) -> DebugState {
         self.latest_debug_state
-            .borrow()
+            .lock()
+            .expect("debug state mutex poisoned")
             .clone()
             .or_else(|| self.vm.as_ref().map(|vm| vm.debug_state()))
             .unwrap_or(DebugState {

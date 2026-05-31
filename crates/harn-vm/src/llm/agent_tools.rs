@@ -1,6 +1,6 @@
 //! Tool dispatch helpers used by the agent-loop host primitives.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::agent_events::ToolExecutor;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
@@ -81,7 +81,7 @@ pub(super) async fn dispatch_tool_execution(
     tool_name: &str,
     tool_args: &serde_json::Value,
     tools_val: Option<&VmValue>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
     tool_retries: usize,
     tool_backoff_ms: u64,
 ) -> ToolDispatchOutcome {
@@ -104,7 +104,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     tool_args: &serde_json::Value,
     tools_val: Option<&VmValue>,
     mcp_clients: Option<&std::collections::BTreeMap<String, crate::mcp::VmMcpClientHandle>>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
     tool_retries: usize,
     tool_backoff_ms: u64,
 ) -> ToolDispatchOutcome {
@@ -630,7 +630,7 @@ mod tests {
             Arc::new(|_| Err("test bridge: no host attached".to_string())),
             1,
         );
-        let bridge = Rc::new(bridge);
+        let bridge = Arc::new(bridge);
         let args = serde_json::json!({});
         let outcome =
             dispatch_tool_execution("custom_host_tool", &args, None, Some(&bridge), 0, 0).await;
@@ -651,7 +651,7 @@ mod tests {
             Arc::new(|_| Err("test bridge".to_string())),
             1,
         );
-        let bridge = Rc::new(bridge);
+        let bridge = Arc::new(bridge);
         let mut entry = BTreeMap::new();
         entry.insert(
             "_mcp_server".to_string(),
@@ -692,7 +692,7 @@ mod tests {
             Arc::new(|_| Err("test bridge".to_string())),
             1,
         );
-        let bridge = Rc::new(bridge);
+        let bridge = Arc::new(bridge);
         let mut entry = BTreeMap::new();
         entry.insert(
             "executor".to_string(),
@@ -749,7 +749,7 @@ mod tests {
             Arc::new(|_| Err("test bridge".to_string())),
             1,
         );
-        let bridge = Rc::new(bridge);
+        let bridge = Arc::new(bridge);
         let mut entry = BTreeMap::new();
         entry.insert(
             "executor".to_string(),

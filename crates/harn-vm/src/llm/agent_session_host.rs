@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::agent_events::AgentEvent;
 use crate::orchestration::{
@@ -78,7 +78,7 @@ struct AgentHostSession {
     resumed_iterations: usize,
     daemon_watch_state: BTreeMap<String, u64>,
     daemon_idle_backoff_ms: u64,
-    host_bridge: Option<Rc<crate::bridge::HostBridge>>,
+    host_bridge: Option<Arc<crate::bridge::HostBridge>>,
     /// Provider-reported `stop_reason` from the most recent `llm_call`
     /// in this loop. Used by finalize to detect ACP `max_tokens` (when
     /// the last call truncated due to its `max_tokens` parameter) and
@@ -2306,7 +2306,7 @@ fn host_agent_daemon_snapshot_builtin(
 fn host_bridge_for_session(
     session_id: &str,
     builtin_name: &str,
-) -> Option<Rc<crate::bridge::HostBridge>> {
+) -> Option<Arc<crate::bridge::HostBridge>> {
     with_session(session_id, builtin_name, |session| {
         Ok(session.host_bridge.clone())
     })

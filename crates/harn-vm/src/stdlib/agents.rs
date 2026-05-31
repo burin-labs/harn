@@ -12,9 +12,7 @@ mod sub_agent;
 #[path = "workflow/mod.rs"]
 pub(super) mod workflow;
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -371,11 +369,11 @@ fn apply_sub_agent_replay_config(spec: &mut SubAgentRunSpec, next_task: &str, re
 }
 
 fn respawn_worker_task(
-    state: Rc<RefCell<WorkerState>>,
+    state: Arc<parking_lot::Mutex<WorkerState>>,
     ctx: &AsyncBuiltinCtx,
 ) -> Result<(), VmError> {
     {
-        let worker = state.borrow();
+        let worker = state.lock();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker)?;
         }
@@ -385,18 +383,18 @@ fn respawn_worker_task(
 }
 
 async fn wait_for_worker_terminal(
-    state: Rc<RefCell<WorkerState>>,
+    state: Arc<parking_lot::Mutex<WorkerState>>,
     context: &str,
 ) -> Result<(), VmError> {
     loop {
-        let handle = state.borrow_mut().handle.take();
+        let handle = state.lock().handle.take();
         if let Some(handle) = handle {
             let _ = handle
                 .await
                 .map_err(|error| VmError::Runtime(format!("{context} join error: {error}")))??;
             continue;
         }
-        if !worker_wait_blocks(&state.borrow().status) {
+        if !worker_wait_blocks(&state.lock().status) {
             return Ok(());
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -448,7 +446,10 @@ async fn sub_agent_run_builtin(
     finalize_and_run_worker(&ctx, state, false, "sub_agent worker").await
 }
 
-fn fresh_worker_state(worker_id: String, mut init: WorkerInit) -> Rc<RefCell<WorkerState>> {
+fn fresh_worker_state(
+    worker_id: String,
+    mut init: WorkerInit,
+) -> Arc<parking_lot::Mutex<WorkerState>> {
     let created_at = uuid::Uuid::now_v7().to_string();
     ensure_worker_config_session_ids(&mut init.config, &worker_id);
     let mode = worker_mode_label(&init.config).to_string();
@@ -456,7 +457,7 @@ fn fresh_worker_state(worker_id: String, mut init: WorkerInit) -> Rc<RefCell<Wor
     audit.worker_id = Some(worker_id.clone());
     audit.execution_kind = Some(mode.clone());
     let request = worker_request_for_config(&init.task, &init.config);
-    Rc::new(RefCell::new(WorkerState {
+    Arc::new(parking_lot::Mutex::new(WorkerState {
         id: worker_id.clone(),
         name: init.name,
         task: init.task.clone(),
@@ -493,17 +494,17 @@ fn fresh_worker_state(worker_id: String, mut init: WorkerInit) -> Rc<RefCell<Wor
 /// it reaches a terminal state before returning the worker summary dict.
 async fn finalize_and_run_worker(
     ctx: &AsyncBuiltinCtx,
-    state: Rc<RefCell<WorkerState>>,
+    state: Arc<parking_lot::Mutex<WorkerState>>,
     wait_for_terminal: bool,
     wait_context: &'static str,
 ) -> Result<VmValue, VmError> {
     {
-        let worker = state.borrow();
+        let worker = state.lock();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker)?;
         }
     }
-    let worker_id = state.borrow().id.clone();
+    let worker_id = state.lock().id.clone();
     WORKER_REGISTRY.with(|registry| {
         registry.borrow_mut().insert(worker_id, state.clone());
     });
@@ -511,7 +512,7 @@ async fn finalize_and_run_worker(
     if wait_for_terminal {
         wait_for_worker_terminal(state.clone(), wait_context).await?;
     }
-    worker_summary(&state.borrow())
+    worker_summary(&state.lock())
 }
 
 fn worker_mode_label(config: &WorkerConfig) -> &'static str {
@@ -566,7 +567,7 @@ async fn send_input_builtin(
         ));
     }
     with_worker_state(&worker_id, |state| {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         if worker.status == "running" {
             return Err(VmError::Runtime(format!(
                 "send_input: worker {} is still running",
@@ -576,7 +577,7 @@ async fn send_input_builtin(
         restart_worker_run(&mut worker, &next_task, true)?;
         drop(worker);
         respawn_worker_task(state.clone(), &ctx)?;
-        let summary = worker_summary(&state.borrow())?;
+        let summary = worker_summary(&state.lock())?;
         Ok(summary)
     })
 }
@@ -610,7 +611,7 @@ async fn worker_trigger_builtin(
     // await the lifecycle event emission, so we pull the snapshot
     // out and run `emit_worker_event` after the closure returns.
     let progressed_snapshot = with_worker_state(&worker_id, |state| {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         if !worker.carry_policy.retriggerable {
             return Err(VmError::Runtime(format!(
                 "worker_trigger: worker {} is not retriggerable",
@@ -644,7 +645,7 @@ async fn worker_trigger_builtin(
         crate::agent_events::WorkerEvent::WorkerProgressed,
     )
     .await?;
-    with_worker_state(&worker_id, |state| worker_summary(&state.borrow()))
+    with_worker_state(&worker_id, |state| worker_summary(&state.lock()))
 }
 
 /// Cooperatively suspend a running worker.
@@ -710,7 +711,7 @@ async fn suspend_agent_builtin(
         } => {
             // Blocked suspend: leave the worker running and return its summary.
             return with_worker_state(&worker_id, |state| {
-                let mut summary = worker_summary(&state.borrow())?;
+                let mut summary = worker_summary(&state.lock())?;
                 if let VmValue::Dict(map) = &mut summary {
                     let mut entries = (**map).clone();
                     entries.insert(
@@ -734,7 +735,7 @@ async fn suspend_agent_builtin(
 
     let mut suspension_span: Option<LifecycleSpanGuard> = None;
     let (mut snapshot, mut summary, should_emit) = with_worker_state(&worker_id, |state| {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         if worker.status == "suspended" {
             return Ok((
                 worker_event_snapshot(&worker),
@@ -807,7 +808,7 @@ async fn suspend_agent_builtin(
         .await?
         {
             (snapshot, summary) = with_worker_state(&worker_id, |state| {
-                let mut worker = state.borrow_mut();
+                let mut worker = state.lock();
                 if let Some(suspension) = worker.suspension.as_mut() {
                     suspension.auto_resume_trigger = Some(auto_resume_trigger);
                 }
@@ -903,7 +904,7 @@ pub(crate) async fn panic_suspend_worker(
     };
 
     let (snapshot, outcome) = {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         if worker.status == "suspended" {
             return Ok(PanicSuspendOutcome::AlreadySuspended);
         }
@@ -1105,7 +1106,7 @@ async fn top_level_agent_suspend_builtin(
     persist_worker_state_snapshot(&worker)?;
     let mut snapshot = worker_event_snapshot(&worker);
     let mut summary = worker_summary(&worker)?;
-    let state = Rc::new(RefCell::new(worker));
+    let state = Arc::new(parking_lot::Mutex::new(worker));
     WORKER_REGISTRY.with(|registry| {
         registry.borrow_mut().insert(worker_id.clone(), state);
     });
@@ -1117,7 +1118,7 @@ async fn top_level_agent_suspend_builtin(
     .await?
     {
         (snapshot, summary) = with_worker_state(&worker_id, |state| {
-            let mut worker = state.borrow_mut();
+            let mut worker = state.lock();
             if let Some(suspension) = worker.suspension.as_mut() {
                 suspension.auto_resume_trigger = Some(auto_resume_trigger);
             }
@@ -1375,7 +1376,7 @@ async fn resume_agent_builtin(
         }
         (cold_load_worker(&snapshot_target)?, true)
     };
-    if state.borrow().status == "suspended" {
+    if state.lock().status == "suspended" {
         warm_resume_worker(&ctx, state, options).await
     } else if loaded_from_snapshot {
         // A snapshot path can be used as a restore/read operation for
@@ -1383,16 +1384,16 @@ async fn resume_agent_builtin(
         // contract, but only warm-resume live registry handles when they
         // are actually suspended.
         {
-            let mut worker = state.borrow_mut();
+            let mut worker = state.lock();
             apply_resume_transcript_policy(&mut worker, options.continue_transcript, None);
             apply_resume_input(&mut worker, options.resume_input.as_ref())?;
             if worker.carry_policy.persist_state {
                 persist_worker_state_snapshot(&worker)?;
             }
         }
-        worker_summary(&state.borrow())
+        worker_summary(&state.lock())
     } else {
-        Err(resume_rejected_error(&state.borrow()))
+        Err(resume_rejected_error(&state.lock()))
     }
 }
 
@@ -1590,9 +1591,11 @@ async fn unregister_suspension_auto_resume(
     super::triggers_stdlib::unregister_auto_resume_trigger(&handle).await
 }
 
-async fn join_checkpointed_worker_handle(state: Rc<RefCell<WorkerState>>) -> Result<(), VmError> {
+async fn join_checkpointed_worker_handle(
+    state: Arc<parking_lot::Mutex<WorkerState>>,
+) -> Result<(), VmError> {
     let handle = {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         let Some(handle) = worker.handle.as_ref() else {
             return Ok(());
         };
@@ -1614,13 +1617,13 @@ async fn join_checkpointed_worker_handle(state: Rc<RefCell<WorkerState>>) -> Res
 
 async fn warm_resume_worker(
     ctx: &AsyncBuiltinCtx,
-    state: Rc<RefCell<WorkerState>>,
+    state: Arc<parking_lot::Mutex<WorkerState>>,
     mut options: WorkerResumeOptions,
 ) -> Result<VmValue, VmError> {
     join_checkpointed_worker_handle(state.clone()).await?;
     // PreResume lifecycle gate. Block keeps the worker suspended; Modify can
     // amend the resume input before the transcript policy runs.
-    let pre_worker_id = state.borrow().id.clone();
+    let pre_worker_id = state.lock().id.clone();
     let pre_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::PreResume.as_str(),
         "worker": { "id": &pre_worker_id },
@@ -1641,7 +1644,7 @@ async fn warm_resume_worker(
         crate::orchestration::HookControl::Allow => {}
         crate::orchestration::HookControl::Block { reason } => {
             // Blocked resume: do not transition out of suspended.
-            let mut summary = worker_summary(&state.borrow())?;
+            let mut summary = worker_summary(&state.lock())?;
             if let VmValue::Dict(map) = &mut summary {
                 let mut entries = (**map).clone();
                 entries.insert(
@@ -1664,11 +1667,11 @@ async fn warm_resume_worker(
     let resume_digest = if options.continue_transcript {
         None
     } else {
-        let transcript = state.borrow().transcript.clone();
+        let transcript = state.lock().transcript.clone();
         resume_digest_from_transcript(ctx, transcript.as_ref()).await?
     };
     let (worker_id, span_links) = {
-        let worker = state.borrow();
+        let worker = state.lock();
         if worker.status != "suspended" {
             return Err(diagnostic_error(
                 Code::ConcurrentResumeConflict,
@@ -1714,7 +1717,7 @@ async fn warm_resume_worker(
         link_count,
     );
     let (snapshot, suspension) = {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         if worker.status != "suspended" {
             return Err(diagnostic_error(
                 Code::ConcurrentResumeConflict,
@@ -1768,7 +1771,7 @@ async fn warm_resume_worker(
         &post_payload,
     )
     .await?;
-    let summary = worker_summary(&state.borrow())?;
+    let summary = worker_summary(&state.lock())?;
     Ok(summary)
 }
 
@@ -1824,7 +1827,7 @@ async fn fail_suspended_worker_from_auto_resume_timeout(
 ) -> Result<VmValue, VmError> {
     let state = with_worker_state(worker_id, Ok)?;
     let (snapshot, summary, suspension) = {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         if worker.status != "suspended" {
             return Err(diagnostic_error(
                 Code::ConcurrentResumeConflict,
@@ -1858,8 +1861,10 @@ async fn fail_suspended_worker_from_auto_resume_timeout(
     Ok(summary)
 }
 
-fn cold_load_worker(snapshot_target: &str) -> Result<Rc<RefCell<WorkerState>>, VmError> {
-    let state = Rc::new(RefCell::new(
+fn cold_load_worker(
+    snapshot_target: &str,
+) -> Result<Arc<parking_lot::Mutex<WorkerState>>, VmError> {
+    let state = Arc::new(parking_lot::Mutex::new(
         load_worker_state_snapshot(snapshot_target).map_err(|error| {
             diagnostic_error(
                 Code::ResumeSnapshotInvalid,
@@ -1867,9 +1872,9 @@ fn cold_load_worker(snapshot_target: &str) -> Result<Rc<RefCell<WorkerState>>, V
             )
         })?,
     ));
-    let worker_id = state.borrow().id.clone();
+    let worker_id = state.lock().id.clone();
     {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         ensure_worker_config_session_ids(&mut worker.config, &worker_id);
     }
     WORKER_REGISTRY.with(|registry| {
@@ -1877,8 +1882,8 @@ fn cold_load_worker(snapshot_target: &str) -> Result<Rc<RefCell<WorkerState>>, V
             .borrow_mut()
             .insert(worker_id.clone(), state.clone());
     });
-    if state.borrow().carry_policy.persist_state {
-        persist_worker_state_snapshot(&state.borrow())?;
+    if state.lock().carry_policy.persist_state {
+        persist_worker_state_snapshot(&state.lock())?;
     }
     Ok(state)
 }
@@ -1903,14 +1908,14 @@ async fn wait_agent_builtin(
             let worker_id = worker_id_from_value(item)?;
             let state = with_worker_state(&worker_id, Ok)?;
             wait_for_worker_terminal(state.clone(), "wait_agent").await?;
-            results.push(worker_summary(&state.borrow())?);
+            results.push(worker_summary(&state.lock())?);
         }
         return Ok(VmValue::List(std::sync::Arc::new(results)));
     }
     let worker_id = worker_id_from_value(target)?;
     let state = with_worker_state(&worker_id, Ok)?;
     wait_for_worker_terminal(state.clone(), "wait_agent").await?;
-    let summary = worker_summary(&state.borrow())?;
+    let summary = worker_summary(&state.lock())?;
     Ok(summary)
 }
 
@@ -1931,7 +1936,7 @@ async fn close_agent_builtin(
     let worker_id = worker_id_from_value(target)?;
     let state = with_worker_state(&worker_id, Ok)?;
     let (snapshot, summary, suspension) = {
-        let mut worker = state.borrow_mut();
+        let mut worker = state.lock();
         worker.cancel_token.store(true, Ordering::SeqCst);
         worker.suspend_signal.store(false, Ordering::SeqCst);
         if let Some(handle) = worker.handle.take() {
@@ -1975,7 +1980,7 @@ fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         registry
             .borrow()
             .values()
-            .map(|state| worker_summary(&state.borrow()))
+            .map(|state| worker_summary(&state.lock()))
             .collect::<Result<Vec<_>, _>>()
     })?;
     Ok(VmValue::List(std::sync::Arc::new(workers)))
@@ -2160,7 +2165,7 @@ pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
             .borrow()
             .values()
             .filter_map(|state| {
-                let worker = state.borrow();
+                let worker = state.lock();
                 if worker.status == "suspended" {
                     let suspension = worker.suspension.as_ref();
                     let suspended_at_ms =
@@ -2276,7 +2281,7 @@ mod suspend_tests {
         unsafe { std::env::set_var("HARN_WORKER_STATE_DIR", &dir) };
         let worker_id = format!("worker_{}", uuid::Uuid::now_v7());
         let snapshot_path = worker_snapshot_path(&worker_id);
-        let state = Rc::new(RefCell::new(WorkerState {
+        let state = Arc::new(parking_lot::Mutex::new(WorkerState {
             id: worker_id.clone(),
             name: name.to_string(),
             task: "do the thing".to_string(),
@@ -2435,7 +2440,7 @@ mod suspend_tests {
     fn worker_status_and_task(worker_id: &str) -> (String, String) {
         WORKER_REGISTRY.with(|registry| {
             let state = registry.borrow().get(worker_id).cloned().unwrap();
-            let worker = state.borrow();
+            let worker = state.lock();
             (worker.status.clone(), worker.task.clone())
         })
     }
@@ -2609,7 +2614,7 @@ mod suspend_tests {
         // Verify the worker is in the suspended state with the panic
         // reason recorded and the WorkerSuspension envelope installed.
         with_worker_state(&worker_id, |state| {
-            let worker = state.borrow();
+            let worker = state.lock();
             assert_eq!(worker.status, "suspended");
             assert!(worker.suspend_signal.load(Ordering::SeqCst));
             let suspension = worker.suspension.as_ref().expect("suspension envelope");
@@ -2662,7 +2667,7 @@ mod suspend_tests {
         // suspension reason.
         with_worker_state(&already_suspended, |state| {
             let suspension = state
-                .borrow()
+                .lock()
                 .suspension
                 .clone()
                 .expect("original suspension still present");
@@ -2675,7 +2680,7 @@ mod suspend_tests {
         // must be skipped with a `not_running` outcome.
         let (terminal, dir2) = seed_test_worker("worker-panic-terminal");
         with_worker_state(&terminal, |state| {
-            state.borrow_mut().status = "completed".to_string();
+            state.lock().status = "completed".to_string();
             Ok(())
         })
         .unwrap();
@@ -3061,7 +3066,7 @@ mod suspend_tests {
 
         WORKER_REGISTRY.with(|registry| {
             let state = registry.borrow().get(&worker_id).cloned().unwrap();
-            state.borrow_mut().transcript = Some(crate::llm::helpers::new_transcript_with(
+            state.lock().transcript = Some(crate::llm::helpers::new_transcript_with(
                 Some(format!("session_{worker_id}")),
                 vec![
                     message_value("user", "old request"),
@@ -3104,7 +3109,7 @@ mod suspend_tests {
                 .borrow()
                 .get(&worker_id)
                 .unwrap()
-                .borrow()
+                .lock()
                 .transcript
                 .clone()
         });
@@ -3122,7 +3127,7 @@ mod suspend_tests {
         let resume_context = WORKER_REGISTRY
             .with(|registry| {
                 let state = registry.borrow().get(&worker_id).cloned().unwrap();
-                let worker = state.borrow();
+                let worker = state.lock();
                 match &worker.config {
                     WorkerConfig::SubAgent { spec } => {
                         spec.options.get("_resume_continuity").cloned()
@@ -3179,7 +3184,7 @@ mod suspend_tests {
                 .borrow()
                 .get(&worker_id)
                 .unwrap()
-                .borrow()
+                .lock()
                 .snapshot_path
                 .clone()
         });
@@ -3217,9 +3222,10 @@ mod suspend_tests {
         // Rehydrate into the registry and warm-resume — the operator
         // wakes the worker back up after restart.
         WORKER_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .insert(worker_id.clone(), Rc::new(RefCell::new(reloaded)));
+            registry.borrow_mut().insert(
+                worker_id.clone(),
+                Arc::new(parking_lot::Mutex::new(reloaded)),
+            );
         });
         let resumed = resume_agent_for_test(vec![handle_value(&worker_id)])
             .await
@@ -3240,7 +3246,7 @@ mod suspend_tests {
                 .borrow()
                 .get(&worker_id)
                 .unwrap()
-                .borrow()
+                .lock()
                 .snapshot_path
                 .clone()
         });
@@ -3286,9 +3292,10 @@ mod suspend_tests {
         );
 
         WORKER_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .insert(worker_id.clone(), Rc::new(RefCell::new(reloaded)));
+            registry.borrow_mut().insert(
+                worker_id.clone(),
+                Arc::new(parking_lot::Mutex::new(reloaded)),
+            );
         });
         resume_agent_for_test(vec![handle_value(&worker_id)])
             .await
@@ -3759,7 +3766,7 @@ mod suspend_tests {
         let (worker_id, dir) = seed_test_worker("worker-suspend-terminal");
         WORKER_REGISTRY.with(|registry| {
             let state = registry.borrow().get(&worker_id).cloned().unwrap();
-            state.borrow_mut().status = "completed".to_string();
+            state.lock().status = "completed".to_string();
         });
 
         let err = suspend_agent_builtin(

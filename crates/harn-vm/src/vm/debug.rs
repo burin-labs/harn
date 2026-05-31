@@ -23,7 +23,7 @@ pub struct DebugState {
     pub frame_depth: usize,
 }
 
-pub(super) type DebugHook = dyn FnMut(&DebugState) -> DebugAction;
+pub(super) type DebugHook = dyn FnMut(&DebugState) -> DebugAction + Send;
 
 impl Vm {
     /// Replace breakpoints for a single source file. Pass an empty string
@@ -123,9 +123,9 @@ impl Vm {
     /// Register a debug hook invoked whenever execution advances to a new source line.
     pub fn set_debug_hook<F>(&mut self, hook: F)
     where
-        F: FnMut(&DebugState) -> DebugAction + 'static,
+        F: FnMut(&DebugState) -> DebugAction + Send + 'static,
     {
-        self.debug_hook = Some(Box::new(hook));
+        self.debug_hook = Some(parking_lot::Mutex::new(Box::new(hook)));
     }
 
     /// Clear the current debug hook.
@@ -396,8 +396,9 @@ impl Vm {
             self.last_line = current_line;
 
             let state = self.debug_state();
-            if let Some(hook) = self.debug_hook.as_mut() {
-                if matches!(hook(&state), DebugAction::Stop) {
+            if let Some(hook) = &self.debug_hook {
+                let mut hook = hook.lock();
+                if matches!((*hook)(&state), DebugAction::Stop) {
                     self.stopped = true;
                     return Ok(Some((VmValue::Nil, true)));
                 }

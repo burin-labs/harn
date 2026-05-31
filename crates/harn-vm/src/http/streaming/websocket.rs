@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc, RwLock,
@@ -298,7 +297,7 @@ pub(super) fn vm_websocket_server(
             WebSocketServer {
                 addr: addr.clone(),
                 routes,
-                events: Rc::new(tokio::sync::Mutex::new(event_rx)),
+                events: Arc::new(tokio::sync::Mutex::new(event_rx)),
                 running,
             },
         );
@@ -394,7 +393,7 @@ fn register_accepted_websocket(event: WebSocketServerEvent) -> Result<VmValue, V
         handles.insert(
             id.clone(),
             WebSocketHandle {
-                kind: WebSocketHandleKind::Server(Rc::new(tokio::sync::Mutex::new(handle))),
+                kind: WebSocketHandleKind::Server(Arc::new(tokio::sync::Mutex::new(handle))),
                 url: path.clone(),
                 max_messages,
                 max_message_bytes,
@@ -644,7 +643,7 @@ pub(super) async fn vm_websocket_connect(
 
     if let Some((messages, echo)) = consume_websocket_mock(url) {
         let handle = WebSocketHandle {
-            kind: WebSocketHandleKind::Fake(Rc::new(tokio::sync::Mutex::new(FakeWebSocket {
+            kind: WebSocketHandleKind::Fake(Arc::new(tokio::sync::Mutex::new(FakeWebSocket {
                 messages: messages.into(),
                 echo,
                 closed: false,
@@ -689,7 +688,7 @@ pub(super) async fn vm_websocket_connect(
     .max(0) as u64;
     let socket = connect_with_retry(url, options, timeout_ms).await?;
     let handle = WebSocketHandle {
-        kind: WebSocketHandleKind::Real(Rc::new(tokio::sync::Mutex::new(socket))),
+        kind: WebSocketHandleKind::Real(Arc::new(tokio::sync::Mutex::new(socket))),
         url: url.to_string(),
         max_messages,
         max_message_bytes,

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::value::{VmError, VmValue};
@@ -98,7 +98,7 @@ struct HttpStreamHandle {
 }
 
 enum HttpStreamKind {
-    Real(Rc<tokio::sync::Mutex<reqwest::Response>>),
+    Real(Arc<tokio::sync::Mutex<reqwest::Response>>),
     Fake,
 }
 
@@ -1478,7 +1478,7 @@ pub(super) async fn vm_http_stream_open(
     let status = response.status().as_u16() as i64;
     let headers = response_headers(response.headers());
     let handle = HttpStreamHandle {
-        kind: HttpStreamKind::Real(Rc::new(tokio::sync::Mutex::new(response))),
+        kind: HttpStreamKind::Real(Arc::new(tokio::sync::Mutex::new(response))),
         status,
         headers,
         pending: VecDeque::new(),

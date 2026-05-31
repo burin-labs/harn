@@ -9,7 +9,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::agent_events::{self, AgentEvent, AgentEventSink};
@@ -20,7 +19,7 @@ use crate::value::VmValue;
 pub type SessionEndHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 thread_local! {
-    static CURRENT_HOST_BRIDGE: RefCell<Option<Rc<crate::bridge::HostBridge>>> =
+    static CURRENT_HOST_BRIDGE: RefCell<Option<Arc<crate::bridge::HostBridge>>> =
         const { RefCell::new(None) };
     /// Stack of per-loop event sinks installed via `LoopSinkGuard`. The
     /// agent loop pushes on entry and pops on drop; `emit_agent_event`
@@ -171,7 +170,7 @@ pub(crate) fn fire_session_end_hooks(session_id: &str) {
     }
 }
 
-pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
+pub(crate) fn install_current_host_bridge(bridge: Arc<crate::bridge::HostBridge>) {
     CURRENT_HOST_BRIDGE.with(|slot| {
         *slot.borrow_mut() = Some(bridge);
     });
@@ -183,7 +182,7 @@ pub(crate) fn clear_current_host_bridge() {
     });
 }
 
-pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
+pub(crate) fn current_host_bridge() -> Option<Arc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }
 

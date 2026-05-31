@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::{json_to_vm_value, schema_result_value};
@@ -458,7 +458,7 @@ pub(crate) async fn execute_llm_call(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
     // Publish the resolved provider/model facts for the introspection
     // tool surface (current_model() / current_provider() / ...). All
@@ -504,10 +504,10 @@ pub(crate) async fn execute_llm_call(
 /// a `routing` block summarizing every attempt.
 async fn execute_routing_schema_retry_loop(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    policy: Rc<routing::RoutingPolicyConfig>,
+    policy: Arc<routing::RoutingPolicyConfig>,
     mut opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
     let schema_retries = helpers::opt_int(&options, "schema_retries")
@@ -658,7 +658,7 @@ pub(crate) async fn execute_schema_retry_loop(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     mut opts: api::LlmCallOptions,
     options: Option<std::collections::BTreeMap<String, VmValue>>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
     let retry_config = agent_observe::LlmRetryConfig {
@@ -1056,7 +1056,7 @@ mod schema_stream_abort_retry_tests {
         opts
     }
 
-    fn fake_routing_policy() -> Rc<routing::RoutingPolicyConfig> {
+    fn fake_routing_policy() -> Arc<routing::RoutingPolicyConfig> {
         routing::clear_policy_registry();
         let chain = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
             std::sync::Arc::new(BTreeMap::from([

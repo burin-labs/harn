@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
@@ -80,7 +80,7 @@ struct DaemonState {
     persist_root: String,
     snapshot_path: String,
     options: BTreeMap<String, VmValue>,
-    bridge: Rc<HostBridge>,
+    bridge: Arc<HostBridge>,
     handle: Option<tokio::task::JoinHandle<Result<VmValue, VmError>>>,
     monitor_handle: Option<tokio::task::JoinHandle<()>>,
     status: String,
@@ -97,7 +97,7 @@ struct DaemonState {
 }
 
 thread_local! {
-    static DAEMON_REGISTRY: RefCell<BTreeMap<String, Rc<RefCell<DaemonState>>>> =
+    static DAEMON_REGISTRY: RefCell<BTreeMap<String, Arc<parking_lot::Mutex<DaemonState>>>> =
         const { RefCell::new(BTreeMap::new()) };
     static DAEMON_COUNTER: Cell<u64> = const { Cell::new(0) };
 }
@@ -120,8 +120,7 @@ async fn daemon_spawn_builtin(
     let child_vm = ctx.child_vm();
     let config = options::dict_arg(&args, 0, "daemon_spawn", "config", ErrorKind::Runtime)?;
     let spec = parse_spawn_spec(config, None, None)?;
-    if find_daemon_by_root(&spec.persist_root)
-        .is_some_and(|state| state.borrow().status == "running")
+    if find_daemon_by_root(&spec.persist_root).is_some_and(|state| state.lock().status == "running")
     {
         return Err(VmError::Runtime(format!(
             "daemon_spawn: a daemon is already running for '{}'",
@@ -129,7 +128,7 @@ async fn daemon_spawn_builtin(
         )));
     }
 
-    let state = Rc::new(RefCell::new(DaemonState {
+    let state = Arc::new(parking_lot::Mutex::new(DaemonState {
         id: spec.id.clone(),
         name: spec.name.clone(),
         prompt: spec.prompt.clone(),
@@ -154,7 +153,7 @@ async fn daemon_spawn_builtin(
         stop_requested: false,
     }));
     {
-        let daemon = state.borrow();
+        let daemon = state.lock();
         persist_daemon_meta(&daemon)?;
     }
     register_daemon(state.clone());
@@ -169,7 +168,7 @@ async fn daemon_spawn_builtin(
         summarize_text(&spec.prompt),
     );
     let summary = {
-        let daemon = state.borrow();
+        let daemon = state.lock();
         daemon_summary(&daemon)?
     };
     Ok(summary)
@@ -193,7 +192,7 @@ async fn daemon_trigger_builtin(
     let daemon_id = daemon_id_from_value(target)?;
     let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
     {
-        let mut daemon = state.borrow_mut();
+        let mut daemon = state.lock();
         refresh_snapshot(&mut daemon)?;
         reconcile_inflight_event(&mut daemon)?;
         if daemon.status != "running" {
@@ -218,7 +217,7 @@ async fn daemon_trigger_builtin(
         persist_daemon_meta(&daemon)?;
     }
     {
-        let daemon = state.borrow();
+        let daemon = state.lock();
         record_daemon_event(
             &daemon.id,
             &daemon.name,
@@ -229,7 +228,7 @@ async fn daemon_trigger_builtin(
     }
     maybe_deliver_next_event(state.clone()).await?;
     let summary = {
-        let daemon = state.borrow();
+        let daemon = state.lock();
         daemon_summary(&daemon)?
     };
     Ok(summary)
@@ -245,7 +244,7 @@ fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
         .ok_or_else(|| VmError::Runtime("daemon_snapshot: missing daemon handle".to_string()))?;
     let daemon_id = daemon_id_from_value(target)?;
     with_daemon_state(&daemon_id, |state| {
-        let mut daemon = state.borrow_mut();
+        let mut daemon = state.lock();
         let snapshot = refresh_snapshot(&mut daemon)?;
         reconcile_inflight_event(&mut daemon)?;
         record_daemon_event(
@@ -280,7 +279,7 @@ async fn daemon_stop_builtin(
     let daemon_id = daemon_id_from_value(target)?;
     let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
     {
-        let mut daemon = state.borrow_mut();
+        let mut daemon = state.lock();
         if daemon.status == "stopped" {
             return daemon_summary(&daemon);
         }
@@ -294,7 +293,7 @@ async fn daemon_stop_builtin(
     let started = std::time::Instant::now();
     while (started.elapsed().as_millis() as u64) < DAEMON_STOP_WAIT_MS {
         {
-            let daemon = state.borrow();
+            let daemon = state.lock();
             if daemon.status != "running" || daemon.bridge.is_daemon_idle() {
                 break;
             }
@@ -303,7 +302,7 @@ async fn daemon_stop_builtin(
     }
 
     let summary = {
-        let mut daemon = state.borrow_mut();
+        let mut daemon = state.lock();
         refresh_snapshot(&mut daemon)?;
         reconcile_inflight_event(&mut daemon)?;
         requeue_inflight_event(&mut daemon)?;
@@ -384,14 +383,14 @@ async fn daemon_resume_builtin(
     )?;
 
     if let Some(state) = find_daemon_by_root(&persist_root) {
-        if state.borrow().status == "running" {
+        if state.lock().status == "running" {
             return Err(VmError::Runtime(format!(
                 "daemon_resume: daemon '{persist_root}' is already running"
             )));
         }
         let bridge = new_daemon_bridge(&ctx).await?;
         {
-            let mut daemon = state.borrow_mut();
+            let mut daemon = state.lock();
             daemon.id = spec.id.clone();
             daemon.name = spec.name.clone();
             daemon.prompt = spec.prompt.clone();
@@ -438,7 +437,7 @@ async fn daemon_resume_builtin(
         start_daemon_monitor(state.clone());
         wait_for_snapshot(state.clone(), Some(snapshot.saved_at.clone()), 500).await;
         let summary = {
-            let daemon = state.borrow();
+            let daemon = state.lock();
             record_daemon_event(
                 &daemon.id,
                 &daemon.name,
@@ -467,7 +466,7 @@ async fn daemon_resume_builtin(
         VmValue::String(std::sync::Arc::from(spec.snapshot_path.clone())),
     );
 
-    let state = Rc::new(RefCell::new(DaemonState {
+    let state = Arc::new(parking_lot::Mutex::new(DaemonState {
         id: spec.id.clone(),
         name: spec.name.clone(),
         prompt: spec.prompt.clone(),
@@ -492,10 +491,10 @@ async fn daemon_resume_builtin(
         stop_requested: false,
     }));
     {
-        let daemon = state.borrow();
+        let daemon = state.lock();
         persist_daemon_meta(&daemon)?;
     }
-    state.borrow().bridge.set_daemon_idle(true);
+    state.lock().bridge.set_daemon_idle(true);
     maybe_deliver_next_event(state.clone()).await?;
     register_daemon(state.clone());
     spawn_daemon_task(state.clone(), child_vm);
@@ -509,7 +508,7 @@ async fn daemon_resume_builtin(
         summarize_snapshot(Some(&snapshot)),
     );
     let summary = {
-        let daemon = state.borrow();
+        let daemon = state.lock();
         daemon_summary(&daemon)?
     };
     Ok(summary)
@@ -610,19 +609,19 @@ fn next_daemon_id() -> String {
     })
 }
 
-fn register_daemon(state: Rc<RefCell<DaemonState>>) {
-    let daemon_id = state.borrow().id.clone();
+fn register_daemon(state: Arc<parking_lot::Mutex<DaemonState>>) {
+    let daemon_id = state.lock().id.clone();
     DAEMON_REGISTRY.with(|registry| {
         registry.borrow_mut().insert(daemon_id, state);
     });
 }
 
-fn find_daemon_by_root(persist_root: &str) -> Option<Rc<RefCell<DaemonState>>> {
+fn find_daemon_by_root(persist_root: &str) -> Option<Arc<parking_lot::Mutex<DaemonState>>> {
     DAEMON_REGISTRY.with(|registry| {
         registry
             .borrow()
             .values()
-            .find(|state| state.borrow().persist_root == persist_root)
+            .find(|state| state.lock().persist_root == persist_root)
             .cloned()
     })
 }
@@ -645,7 +644,7 @@ fn daemon_id_from_value(value: &VmValue) -> Result<String, VmError> {
 
 fn with_daemon_state<T>(
     daemon_id: &str,
-    f: impl FnOnce(&Rc<RefCell<DaemonState>>) -> Result<T, VmError>,
+    f: impl FnOnce(&Arc<parking_lot::Mutex<DaemonState>>) -> Result<T, VmError>,
 ) -> Result<T, VmError> {
     let state = DAEMON_REGISTRY.with(|registry| registry.borrow().get(daemon_id).cloned());
     let state = state.ok_or_else(|| VmError::Runtime(format!("unknown daemon '{daemon_id}'")))?;
@@ -706,12 +705,12 @@ fn daemon_summary(daemon: &DaemonState) -> Result<VmValue, VmError> {
     Ok(crate::stdlib::json_to_vm_value(&summary))
 }
 
-async fn new_daemon_bridge(ctx: &crate::vm::AsyncBuiltinCtx) -> Result<Rc<HostBridge>, VmError> {
+async fn new_daemon_bridge(ctx: &crate::vm::AsyncBuiltinCtx) -> Result<Arc<HostBridge>, VmError> {
     let vm = ctx.child_vm();
     let module_path = daemon_bridge_module_path()?;
     HostBridge::from_harn_module(vm, &module_path)
         .await
-        .map(Rc::new)
+        .map(Arc::new)
 }
 
 fn daemon_bridge_module_path() -> Result<PathBuf, VmError> {
@@ -817,9 +816,9 @@ fn read_meta(meta_path: &str) -> Result<PersistedDaemonMeta, VmError> {
         .map_err(|error| VmError::Runtime(format!("daemon meta parse error: {error}")))
 }
 
-fn spawn_daemon_task(state: Rc<RefCell<DaemonState>>, mut vm: crate::vm::Vm) {
+fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate::vm::Vm) {
     let (prompt, system, options, bridge) = {
-        let daemon = state.borrow();
+        let daemon = state.lock();
         (
             daemon.prompt.clone(),
             daemon.system.clone(),
@@ -856,7 +855,7 @@ fn spawn_daemon_task(state: Rc<RefCell<DaemonState>>, mut vm: crate::vm::Vm) {
         }
 
         {
-            let mut daemon = task_state.borrow_mut();
+            let mut daemon = task_state.lock();
             daemon.bridge.set_daemon_idle(false);
             match &result {
                 Ok(value) => {
@@ -878,15 +877,15 @@ fn spawn_daemon_task(state: Rc<RefCell<DaemonState>>, mut vm: crate::vm::Vm) {
         result
     });
 
-    state.borrow_mut().handle = Some(handle);
+    state.lock().handle = Some(handle);
 }
 
-fn start_daemon_monitor(state: Rc<RefCell<DaemonState>>) {
+fn start_daemon_monitor(state: Arc<parking_lot::Mutex<DaemonState>>) {
     let monitor_state = state.clone();
     let handle = tokio::task::spawn_local(async move {
         loop {
             let should_exit = {
-                let mut daemon = monitor_state.borrow_mut();
+                let mut daemon = monitor_state.lock();
                 let _ = refresh_snapshot(&mut daemon);
                 let _ = reconcile_inflight_event(&mut daemon);
                 daemon.status != "running" || daemon.stop_requested
@@ -898,12 +897,14 @@ fn start_daemon_monitor(state: Rc<RefCell<DaemonState>>) {
             tokio::time::sleep(tokio::time::Duration::from_millis(DAEMON_MONITOR_POLL_MS)).await;
         }
     });
-    state.borrow_mut().monitor_handle = Some(handle);
+    state.lock().monitor_handle = Some(handle);
 }
 
-async fn maybe_deliver_next_event(state: Rc<RefCell<DaemonState>>) -> Result<(), VmError> {
+async fn maybe_deliver_next_event(
+    state: Arc<parking_lot::Mutex<DaemonState>>,
+) -> Result<(), VmError> {
     let delivery = {
-        let mut daemon = state.borrow_mut();
+        let mut daemon = state.lock();
         if daemon.status != "running"
             || daemon.stop_requested
             || daemon.inflight_event.is_some()
@@ -986,14 +987,14 @@ fn requeue_inflight_event(daemon: &mut DaemonState) -> Result<(), VmError> {
 }
 
 async fn wait_for_snapshot(
-    state: Rc<RefCell<DaemonState>>,
+    state: Arc<parking_lot::Mutex<DaemonState>>,
     baseline_saved_at: Option<String>,
     timeout_ms: u64,
 ) {
     let start = std::time::Instant::now();
     loop {
         let maybe_saved_at = {
-            let mut daemon = state.borrow_mut();
+            let mut daemon = state.lock();
             match refresh_snapshot(&mut daemon) {
                 Ok(snapshot) => snapshot.map(|snapshot| snapshot.saved_at),
                 Err(_) => None,

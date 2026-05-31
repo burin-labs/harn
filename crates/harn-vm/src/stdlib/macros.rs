@@ -36,7 +36,7 @@ pub use linkme::distributed_slice;
 pub static ALL_BUILTIN_DEFS: [&'static VmBuiltinDef];
 
 /// Pinned future returned by async builtin handlers.
-pub type AsyncBuiltinFuture = Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>;
+pub type AsyncBuiltinFuture = Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send>>;
 
 /// Sync builtin handler signature (matches `crate::vm::dispatch`'s register_builtin shape).
 pub type SyncHandler = fn(&[VmValue], &mut String) -> Result<VmValue, VmError>;

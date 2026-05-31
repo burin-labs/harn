@@ -3,7 +3,6 @@ use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::bytecode_cache;
@@ -111,14 +110,14 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
-        Rc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
+        Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
 
         let artifact = compile_module_artifact_from_source(&synthetic, source)?;
 
         self.imported_paths.push(synthetic.clone());
         let loaded = self.instantiate_module(None, &artifact).await?;
         self.imported_paths.pop();
-        Rc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+        Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
         Ok(loaded)
     }
 
@@ -131,13 +130,13 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
-        Rc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
+        Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
 
         let artifact = stdlib_module_artifact(module, &synthetic, source)?;
         self.imported_paths.push(synthetic.clone());
         let loaded = self.instantiate_stdlib_module(artifact.as_ref()).await?;
         self.imported_paths.pop();
-        Rc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+        Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
         Ok(loaded)
     }
 
@@ -311,7 +310,7 @@ impl Vm {
         &'a mut self,
         path: &'a str,
         selected_names: Option<&'a [String]>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
         Box::pin(async move {
             let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
 
@@ -358,8 +357,8 @@ impl Vm {
                     file_path.display()
                 ))
             })?;
-            Rc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());
-            Rc::make_mut(&mut self.source_cache).insert(file_path.clone(), source.clone());
+            Arc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());
+            Arc::make_mut(&mut self.source_cache).insert(file_path.clone(), source.clone());
 
             // Disk cache first: hits skip parse + compile for the imported
             // module's whole function pool, not just the entry pipeline.
@@ -384,7 +383,7 @@ impl Vm {
                 .instantiate_module(module_source_dir, &artifact)
                 .await?;
             self.imported_paths.pop();
-            Rc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
+            Arc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
             self.export_loaded_module(&canonical, &loaded, selected_names)?;
 
             Ok(())

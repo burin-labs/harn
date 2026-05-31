@@ -4,7 +4,7 @@ use super::records::{myers_diff, DiffOp};
 use super::*;
 use futures::StreamExt;
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::event_log::EventLog;
 
@@ -1236,7 +1236,7 @@ async fn pre_tool_hook_deny_blocks_execution() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "dangerous_*".to_string(),
-        pre: Some(Rc::new(|_name, _args| {
+        pre: Some(Arc::new(|_name, _args| {
             PreToolAction::Deny("blocked by policy".to_string())
         })),
         post: None,
@@ -1253,7 +1253,7 @@ async fn pre_tool_hook_allow_passes_through() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "safe_*".to_string(),
-        pre: Some(Rc::new(|_name, _args| PreToolAction::Allow)),
+        pre: Some(Arc::new(|_name, _args| PreToolAction::Allow)),
         post: None,
     });
     let result = run_pre_tool_hooks("safe_read", &serde_json::json!({}))
@@ -1268,7 +1268,7 @@ async fn pre_tool_hook_modify_rewrites_args() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "*".to_string(),
-        pre: Some(Rc::new(|_name, _args| {
+        pre: Some(Arc::new(|_name, _args| {
             PreToolAction::Modify(serde_json::json!({"path": "/sanitized"}))
         })),
         post: None,
@@ -1289,7 +1289,7 @@ async fn post_tool_hook_modifies_result() {
     register_tool_hook(ToolHook {
         pattern: "exec".to_string(),
         pre: None,
-        post: Some(Rc::new(|_name, result| {
+        post: Some(Arc::new(|_name, result: &str| {
             if result.contains("SECRET") {
                 PostToolAction::Modify("[REDACTED]".to_string())
             } else {
@@ -1313,7 +1313,7 @@ async fn unmatched_hook_pattern_does_not_fire() {
     clear_tool_hooks();
     register_tool_hook(ToolHook {
         pattern: "exec".to_string(),
-        pre: Some(Rc::new(|_name, _args| {
+        pre: Some(Arc::new(|_name, _args| {
             PreToolAction::Deny("should not match".to_string())
         })),
         post: None,

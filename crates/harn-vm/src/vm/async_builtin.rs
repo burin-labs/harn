@@ -1,6 +1,5 @@
-use std::cell::RefCell;
 use std::future::Future;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::Vm;
 
@@ -14,17 +13,17 @@ use super::Vm;
 /// [`AsyncBuiltinCtx::child_vm`], and whose `output` buffer collects text
 /// forwarded from VM-side closures via [`AsyncBuiltinCtx::forward_output`]. The
 /// dispatch loop drains that buffer back to the original parent VM after the
-/// async builtin returns. Cheap to clone — it is an `Rc` handle and everything
-/// heavy inside the `Vm` is `Rc`/`Arc`-shared.
+/// async builtin returns. Cheap to clone: it is an `Arc` handle and everything
+/// heavy inside the `Vm` is shared.
 #[derive(Clone)]
 pub struct AsyncBuiltinCtx {
-    child: Rc<RefCell<Vm>>,
+    child: Arc<parking_lot::Mutex<Vm>>,
 }
 
 impl AsyncBuiltinCtx {
     fn new(vm: Vm) -> Self {
         Self {
-            child: Rc::new(RefCell::new(vm)),
+            child: Arc::new(parking_lot::Mutex::new(vm)),
         }
     }
 
@@ -43,10 +42,16 @@ impl AsyncBuiltinCtx {
     }
 
     /// Clone a fresh child VM from this context. The returned `Vm` shares the
-    /// parent's heavy state (env, builtins, bridge, module_cache) via `Arc`/`Rc`,
-    /// so each closure-invoking handler gets its own cheap execution context.
+    /// parent's heavy state, so each closure-invoking handler gets its own
+    /// cheap execution context.
     pub fn child_vm(&self) -> Vm {
-        self.child.borrow().child_vm()
+        self.child.lock().child_vm()
+    }
+
+    /// Pool tasks may execute on any Tokio worker thread, so pool lookup state
+    /// is shared through the VM context rather than thread-local storage.
+    pub(crate) fn pool_registry(&self) -> Arc<crate::stdlib::pool::PoolRegistry> {
+        self.child.lock().pool_registry.clone()
     }
 
     /// Create an independent context rooted at a fresh child VM. Long-lived
@@ -69,7 +74,7 @@ impl AsyncBuiltinCtx {
         if text.is_empty() {
             return;
         }
-        self.child.borrow_mut().append_output(text);
+        self.child.lock().append_output(text);
     }
 }
 
@@ -85,21 +90,22 @@ pub(crate) fn run_async_builtin_with<F, M>(
     make_fut: M,
 ) -> impl Future<Output = (F::Output, String)>
 where
-    F: Future,
+    F: Future + Send,
     M: FnOnce(AsyncBuiltinCtx) -> F,
 {
     // Build the context + scope synchronously so the by-value `child: Vm` moves
-    // onto the heap (Rc) *before* any async state machine exists. If this were
+    // onto the heap *before* any async state machine exists. If this were
     // an `async fn`, the future would reserve a Vm-sized slot for `child` up to
     // its first await, and that bloat propagates into every caller's stack
     // frame, which can trip clippy::large_stack_frames in large dispatch
     // functions.
     let ctx = AsyncBuiltinCtx::new(child);
-    let sink = Rc::clone(&ctx.child);
+    let registry = ctx.pool_registry();
+    let sink = Arc::clone(&ctx.child);
     let fut = make_fut(ctx);
     async move {
-        let output = fut.await;
-        let captured = sink.borrow_mut().take_output();
+        let output = crate::stdlib::pool::with_pool_registry_scope(registry, fut).await;
+        let captured = sink.lock().take_output();
         (output, captured)
     }
 }

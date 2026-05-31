@@ -5,9 +5,7 @@
 //! opaque "execute code" blob, so policy, transcript, replay, and host approval
 //! surfaces can keep reasoning about each child call normally.
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -205,7 +203,7 @@ impl ExecutionState {
 /// Execute a read-only Harn-native composition snippet against a manifest.
 pub async fn execute_harn_composition(
     mut request: CompositionExecutionRequest,
-    host: Rc<dyn CompositionToolHost>,
+    host: Arc<dyn CompositionToolHost>,
 ) -> CompositionExecutionReport {
     if request.run_id.trim().is_empty() {
         request.run_id = uuid::Uuid::now_v7().to_string();
@@ -294,7 +292,7 @@ pub async fn execute_harn_composition(
 
 async fn execute_harn_composition_inner(
     request: CompositionExecutionRequest,
-    host: Rc<dyn CompositionToolHost>,
+    host: Arc<dyn CompositionToolHost>,
 ) -> Result<
     (
         Value,
@@ -349,7 +347,7 @@ async fn execute_harn_composition_inner(
 
     let execution_clock = harn_clock::RealClock::arc();
     let execution_started_ms = execution_clock.monotonic_ms();
-    let state = Rc::new(RefCell::new(ExecutionState {
+    let state = Arc::new(parking_lot::Mutex::new(ExecutionState {
         request,
         calls: Vec::new(),
         results: Vec::new(),
@@ -359,7 +357,7 @@ async fn execute_harn_composition_inner(
     let mut vm = Vm::new();
     crate::register_core_stdlib(&mut vm);
     register_composition_call_builtin(&mut vm, state.clone(), host);
-    if let Some(timeout_ms) = state.borrow().request.limits.timeout_ms {
+    if let Some(timeout_ms) = state.lock().request.limits.timeout_ms {
         vm.push_deadline_after(std::time::Duration::from_millis(timeout_ms));
     }
     vm.set_source_info("composition://snippet.harn", &source);
@@ -367,7 +365,7 @@ async fn execute_harn_composition_inner(
         Ok(value) => {
             let json = crate::llm::vm_value_to_json(&value);
             let stdout = vm.output().to_string();
-            let state = state.borrow();
+            let state = state.lock();
             let result_size = serde_json::to_vec(&json)
                 .map(|bytes| bytes.len())
                 .unwrap_or(0);
@@ -386,7 +384,7 @@ async fn execute_harn_composition_inner(
             Ok((json, stdout, state.calls.clone(), state.results.clone()))
         }
         Err(error) => {
-            let state = state.borrow();
+            let state = state.lock();
             let category = if error.to_string().contains("denied")
                 || error.to_string().contains("side-effect")
                 || error.to_string().contains("approval")
@@ -419,8 +417,8 @@ async fn execute_harn_composition_inner(
 
 fn register_composition_call_builtin(
     vm: &mut Vm,
-    state: Rc<RefCell<ExecutionState>>,
-    host: Rc<dyn CompositionToolHost>,
+    state: Arc<parking_lot::Mutex<ExecutionState>>,
+    host: Arc<dyn CompositionToolHost>,
 ) {
     vm.register_async_builtin("__composition_call", move |_ctx, args| {
         let state = state.clone();
@@ -435,14 +433,14 @@ fn register_composition_call_builtin(
                 .map(crate::llm::vm_value_to_json)
                 .unwrap_or_else(|| serde_json::json!({}));
             let (binding, call, clock) = {
-                let mut state = state.borrow_mut();
+                let mut state = state.lock();
                 let (binding, call) = state.next_call(&tool_name, input.clone())?;
                 (binding, call, state.clock.clone())
             };
             let started_ms = clock.monotonic_ms();
             let output = host.call(&binding, input).await;
             {
-                let mut state = state.borrow_mut();
+                let mut state = state.lock();
                 state.push_result(&call, &output, elapsed_ms(&*clock, started_ms));
             }
             if let Some(error) = output.error {
@@ -795,9 +793,9 @@ pub fn register_composition_builtins(vm: &mut Vm) {
                 request.limits.max_output_bytes = max_output_bytes;
             }
         }
-        let host: Rc<dyn CompositionToolHost> = match dispatcher {
-            Some(closure) => Rc::new(ClosureCompositionToolHost::new(closure, ctx.clone())),
-            None => Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
+        let host: Arc<dyn CompositionToolHost> = match dispatcher {
+            Some(closure) => Arc::new(ClosureCompositionToolHost::new(closure, ctx.clone())),
+            None => Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
         };
         let report = execute_harn_composition(request, host).await;
         Ok(crate::json_to_vm_value(

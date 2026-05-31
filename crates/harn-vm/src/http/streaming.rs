@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::TcpStream;
-use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc, RwLock,
@@ -48,8 +47,8 @@ struct SseHandle {
 }
 
 enum SseHandleKind {
-    Real(Rc<tokio::sync::Mutex<EventSource>>),
-    Fake(Rc<tokio::sync::Mutex<FakeSseStream>>),
+    Real(Arc<tokio::sync::Mutex<EventSource>>),
+    Fake(Arc<tokio::sync::Mutex<FakeSseStream>>),
 }
 
 struct FakeSseStream {
@@ -98,9 +97,9 @@ struct WebSocketHandle {
 }
 
 enum WebSocketHandleKind {
-    Real(Rc<tokio::sync::Mutex<RealWebSocket>>),
-    Fake(Rc<tokio::sync::Mutex<FakeWebSocket>>),
-    Server(Rc<tokio::sync::Mutex<ServerWebSocket>>),
+    Real(Arc<tokio::sync::Mutex<RealWebSocket>>),
+    Fake(Arc<tokio::sync::Mutex<FakeWebSocket>>),
+    Server(Arc<tokio::sync::Mutex<ServerWebSocket>>),
 }
 
 struct FakeWebSocket {
@@ -112,7 +111,7 @@ struct FakeWebSocket {
 struct WebSocketServer {
     addr: String,
     routes: Arc<RwLock<HashMap<String, WebSocketRoute>>>,
-    events: Rc<tokio::sync::Mutex<mpsc::Receiver<WebSocketServerEvent>>>,
+    events: Arc<tokio::sync::Mutex<mpsc::Receiver<WebSocketServerEvent>>>,
     running: Arc<AtomicBool>,
 }
 
@@ -941,7 +940,7 @@ pub(super) async fn vm_sse_connect(
 
     if let Some(events) = consume_sse_mock(url) {
         let handle = SseHandle {
-            kind: SseHandleKind::Fake(Rc::new(tokio::sync::Mutex::new(FakeSseStream {
+            kind: SseHandleKind::Fake(Arc::new(tokio::sync::Mutex::new(FakeSseStream {
                 events: events.into(),
                 opened: false,
                 closed: false,
@@ -998,7 +997,7 @@ pub(super) async fn vm_sse_connect(
     let stream = EventSource::new(request)
         .map_err(|error| vm_error(format!("sse_connect: failed to create stream: {error}")))?;
     let handle = SseHandle {
-        kind: SseHandleKind::Real(Rc::new(tokio::sync::Mutex::new(stream))),
+        kind: SseHandleKind::Real(Arc::new(tokio::sync::Mutex::new(stream))),
         url: url.to_string(),
         max_events,
         max_message_bytes,

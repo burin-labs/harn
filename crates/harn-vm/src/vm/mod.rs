@@ -1,5 +1,6 @@
 mod async_builtin;
 mod builtin;
+mod cache;
 mod call_args;
 mod debug;
 mod dispatch;

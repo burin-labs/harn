@@ -556,7 +556,7 @@ fn prune_subtree<'a>(
     dry_run: bool,
     builtin: &'static str,
     pruned: &'a mut Vec<VmValue>,
-) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
     Box::pin(async move {
         let rows = bind_params(query(PARTITION_CHILDREN_SQL), &[VmValue::Int(parent_oid)])
             .fetch_all(pool)

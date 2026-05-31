@@ -27,7 +27,7 @@
 //! since there is no raw text to salvage.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::value::{VmError, VmValue};
 
@@ -40,7 +40,7 @@ use super::{execute_schema_retry_loop, rewrite_structured_args, SchemaLoopOutcom
 /// `ok` / `error_category`.
 pub(crate) async fn run_structured_envelope(
     args: Vec<VmValue>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
     let mut rewritten = match rewrite_structured_args(args) {
         Ok(v) => v,
@@ -216,7 +216,7 @@ async fn run_repair_pass(
     main_outcome: &SchemaLoopOutcome,
     repair: &RepairConfig,
     base_options: Option<&BTreeMap<String, VmValue>>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Option<VmValue> {
     let prompt = build_repair_prompt(&main_outcome.raw_text, &main_outcome.errors);
     let merged_options = merge_repair_options(base_options, &repair.overrides);
@@ -522,7 +522,7 @@ fn detect_extracted_json(outcome: &SchemaLoopOutcome) -> bool {
 /// behavior-identical.
 pub(crate) async fn llm_call_structured_result_impl(
     args: Vec<VmValue>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
     run_structured_envelope(args, bridge).await
 }

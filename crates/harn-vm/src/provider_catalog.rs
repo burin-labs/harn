@@ -758,6 +758,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
         base_url: provider.endpoint.base_url.clone(),
         base_url_env: provider.endpoint.base_url_env.clone(),
         auth_style: provider.auth.style.clone(),
+        auth_style_explicit: true,
         auth_header: provider.auth.header.clone(),
         auth_env: match provider.auth.env.as_slice() {
             [] => llm_config::AuthEnv::None,

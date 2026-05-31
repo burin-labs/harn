@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -38,7 +37,7 @@ impl Drop for DispatchExecutionPolicyGuard {
 
 #[derive(Clone)]
 pub struct Dispatcher {
-    pub(super) base_vm: Rc<Vm>,
+    pub(super) base_vm: Arc<Vm>,
     pub(super) event_log: Arc<AnyEventLog>,
     pub(super) cancel_tx: broadcast::Sender<()>,
     pub(super) state: Arc<DispatcherRuntimeState>,

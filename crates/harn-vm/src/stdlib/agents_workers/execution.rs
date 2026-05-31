@@ -1,6 +1,4 @@
-use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -283,7 +281,10 @@ async fn execute_worker_config(
     }
 }
 
-pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>, ctx: AsyncBuiltinCtx) {
+pub(in super::super) fn spawn_worker_task(
+    state: Arc<parking_lot::Mutex<WorkerState>>,
+    ctx: AsyncBuiltinCtx,
+) {
     let worker_ctx = ctx.child_ctx();
     let (
         worker_id,
@@ -296,7 +297,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>, ctx: 
         transcript_mode,
         audit,
     ) = {
-        let worker = state.borrow();
+        let worker = state.lock();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker).ok();
         }
@@ -322,7 +323,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>, ctx: 
             });
         }
         let spawned_snapshot = {
-            let worker = state_for_task.borrow();
+            let worker = state_for_task.lock();
             worker_event_snapshot(&worker)
         };
         emit_worker_event(
@@ -385,7 +386,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>, ctx: 
         }
         {
             let completion = {
-                let mut worker = state_for_task.borrow_mut();
+                let mut worker = state_for_task.lock();
                 worker.awaiting_since = None;
                 worker.awaiting_started_at = None;
                 match &result {
@@ -484,7 +485,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>, ctx: 
         result
     });
 
-    state.borrow_mut().handle = Some(handle);
+    state.lock().handle = Some(handle);
 }
 
 fn worker_result_artifact(
@@ -575,7 +576,7 @@ pub(in super::super) async fn execute_delegated_stage(
         transcript,
     };
     let original_request = worker_request_for_config(task, &config);
-    let state = Rc::new(RefCell::new(WorkerState {
+    let state = Arc::new(parking_lot::Mutex::new(WorkerState {
         id: worker_id.clone(),
         name: worker_name.clone(),
         task: task.to_string(),
@@ -622,7 +623,7 @@ pub(in super::super) async fn execute_delegated_stage(
         .normalize(),
     }));
     {
-        let worker = state.borrow();
+        let worker = state.lock();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker)?;
         }
@@ -634,7 +635,7 @@ pub(in super::super) async fn execute_delegated_stage(
     });
     spawn_worker_task(state.clone(), ctx.child_ctx());
     let handle = state
-        .borrow_mut()
+        .lock()
         .handle
         .take()
         .ok_or_else(|| VmError::Runtime("delegated stage did not start".to_string()))?;
@@ -642,7 +643,7 @@ pub(in super::super) async fn execute_delegated_stage(
         .await
         .map_err(|error| VmError::Runtime(format!("delegated stage join error: {error}")))??;
     let mut result = executed.payload.clone();
-    result["worker"] = clone_worker_state(&state.borrow());
+    result["worker"] = clone_worker_state(&state.lock());
     let mut produced = executed.artifacts.clone();
     for artifact in &mut produced {
         artifact
@@ -658,7 +659,7 @@ pub(in super::super) async fn execute_delegated_stage(
     }
     produced.push(worker_result_artifact(
         node_id,
-        &state.borrow(),
+        &state.lock(),
         &result,
         &executed.artifacts,
         &artifacts

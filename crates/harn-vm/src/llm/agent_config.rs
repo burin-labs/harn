@@ -1,7 +1,7 @@
 //! Agent loop configuration, builtin registration, and result building
 //! extracted from `agent.rs` for maintainability.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::stdlib::harn_entry::register_harn_entrypoint_category;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
@@ -298,7 +298,7 @@ pub(crate) fn register_agent_loop(vm: &mut Vm) {
     register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
-pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
+pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
     super::agent_runtime::install_current_host_bridge(bridge);
     register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
@@ -402,7 +402,7 @@ fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 }
 
 /// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.
-pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
+pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
     let b = bridge;
     let metadata = VmBuiltinMetadata::async_static("llm_call")
         .signature_static("llm_call(prompt, system?, options?)")
@@ -461,7 +461,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
 /// `register_llm_call_with_bridge` in the ACP setup.
 pub fn register_llm_call_structured_with_bridge(
     vm: &mut Vm,
-    bridge: Rc<crate::bridge::HostBridge>,
+    bridge: Arc<crate::bridge::HostBridge>,
 ) {
     let b1 = bridge.clone();
     let structured = VmBuiltinMetadata::async_static("llm_call_structured")

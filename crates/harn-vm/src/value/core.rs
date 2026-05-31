@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::{future::Future, pin::Pin};
@@ -19,11 +18,13 @@ use super::{
 /// dispatch loop + the `#[harn_builtin]` macro) so handlers mint child VMs and
 /// forward output through the ctx they were given instead of relying on hidden
 /// task state.
-pub type VmAsyncBuiltinFn = Rc<
+pub type VmAsyncBuiltinFn = Arc<
     dyn Fn(
-        crate::vm::AsyncBuiltinCtx,
-        Vec<VmValue>,
-    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>,
+            crate::vm::AsyncBuiltinCtx,
+            Vec<VmValue>,
+        ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send>>
+        + Send
+        + Sync,
 >;
 
 type Shared<T> = Arc<T>;
@@ -597,4 +598,5 @@ pub fn struct_fields_to_map(
 }
 
 /// Sync builtin function for the VM.
-pub type VmBuiltinFn = Rc<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError>>;
+pub type VmBuiltinFn =
+    Arc<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + Send + Sync>;

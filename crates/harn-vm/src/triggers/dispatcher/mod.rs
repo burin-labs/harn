@@ -8,7 +8,6 @@
 //! the dispatch state machine across modules without a natural seam.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -135,7 +134,7 @@ impl Dispatcher {
         });
         let (cancel_tx, _) = broadcast::channel(32);
         Self {
-            base_vm: Rc::new(base_vm),
+            base_vm: Arc::new(base_vm),
             event_log,
             cancel_tx,
             state,

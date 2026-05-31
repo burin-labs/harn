@@ -307,7 +307,7 @@ pub(crate) struct LlmCallOptions {
     /// fields above still hold the "first link" defaults so callers
     /// that ignore the policy (e.g. transcript builders) see a
     /// coherent placeholder.
-    pub routing_policy: Option<std::rc::Rc<crate::llm::routing::RoutingPolicyConfig>>,
+    pub routing_policy: Option<std::sync::Arc<crate::llm::routing::RoutingPolicyConfig>>,
 
     // --- Observability ---
     /// Agent session id, when this call is driven from `run_agent_loop_internal`.

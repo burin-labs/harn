@@ -1,6 +1,6 @@
 //! Named agent thread pools (PL-01/PL-03/PL-05).
 //!
-//! Foundation for the agent pool epic (#1883). Provides a thread-local
+//! Foundation for the agent pool epic (#1883). Provides a VM-scoped
 //! registry of named pools that bound the number of concurrent Harn
 //! closure executions and queue excess submissions. Queue strategy ships
 //! here, with bounded backpressure policies layered on the single submit
@@ -18,10 +18,10 @@
 //!   today they fail with a clear "host-routed (harn-cloud) — not
 //!   wired" diagnostic until the host capability ships.
 
-use std::cell::RefCell;
+use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::event_log::{
@@ -31,6 +31,7 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
+use futures::FutureExt;
 use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -62,7 +63,7 @@ const DEFAULT_STALE_AFTER_MS: i64 = 30_000;
 struct PendingTask {
     task_id: String,
     closure: Arc<VmClosure>,
-    state: Rc<RefCell<TaskState>>,
+    state: Arc<parking_lot::Mutex<TaskState>>,
     priority: i64,
     key: Option<String>,
     /// Tiebreaker so FIFO order is preserved among equal priorities.
@@ -155,8 +156,8 @@ struct PoolEntry {
     queue_strategy: QueueStrategy,
     backpressure: BackpressureStrategy,
     round_robin_after: Option<String>,
-    active: HashMap<String, Rc<RefCell<TaskState>>>,
-    tasks: BTreeMap<String, Rc<RefCell<TaskState>>>,
+    active: HashMap<String, Arc<parking_lot::Mutex<TaskState>>>,
+    tasks: BTreeMap<String, Arc<parking_lot::Mutex<TaskState>>>,
     space_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
     /// Optional per-create user-supplied config (queue strategy, priority
     /// fn, backpressure). Queue strategy is evaluated by this module;
@@ -180,7 +181,7 @@ struct PoolEntry {
     stale_after_ms: i64,
     /// Optional durable store the pool serializes state mutations into.
     /// `None` for session-scoped pools.
-    store: Option<Rc<RefCell<PoolDurableStore>>>,
+    store: Option<Arc<parking_lot::Mutex<PoolDurableStore>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -440,12 +441,58 @@ impl QueueStrategy {
     }
 }
 
-thread_local! {
-    static POOLS: RefCell<HashMap<String, Rc<RefCell<PoolEntry>>>> =
-        RefCell::new(HashMap::new());
+#[derive(Default)]
+pub(crate) struct PoolRegistry {
+    inner: parking_lot::Mutex<PoolRegistryState>,
+}
+
+#[derive(Default)]
+struct PoolRegistryState {
+    pools: HashMap<String, Arc<parking_lot::Mutex<PoolEntry>>>,
     /// Name → pool_id lookup so `pool_get("...")` and `pool_create({name: ...})`
     /// duplicate detection stay O(1).
-    static POOL_NAMES: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    names: HashMap<String, String>,
+}
+
+impl PoolRegistryState {
+    fn clear(&mut self) {
+        self.pools.clear();
+        self.names.clear();
+    }
+}
+
+tokio::task_local! {
+    static ACTIVE_POOL_REGISTRY: Arc<PoolRegistry>;
+}
+
+static FALLBACK_POOL_REGISTRY: std::sync::OnceLock<Arc<PoolRegistry>> = std::sync::OnceLock::new();
+
+pub(crate) fn new_pool_registry() -> Arc<PoolRegistry> {
+    Arc::new(PoolRegistry::default())
+}
+
+pub(crate) async fn with_pool_registry_scope<F>(registry: Arc<PoolRegistry>, future: F) -> F::Output
+where
+    F: Future,
+{
+    ACTIVE_POOL_REGISTRY.scope(registry, future).await
+}
+
+fn fallback_pool_registry() -> Arc<PoolRegistry> {
+    FALLBACK_POOL_REGISTRY
+        .get_or_init(|| Arc::new(PoolRegistry::default()))
+        .clone()
+}
+
+fn current_pool_registry() -> Arc<PoolRegistry> {
+    ACTIVE_POOL_REGISTRY
+        .try_with(Arc::clone)
+        .unwrap_or_else(|_| fallback_pool_registry())
+}
+
+fn pool_registry_for_ctx(ctx: Option<&AsyncBuiltinCtx>) -> Arc<PoolRegistry> {
+    ctx.map(AsyncBuiltinCtx::pool_registry)
+        .unwrap_or_else(current_pool_registry)
 }
 
 fn next_pool_id() -> String {
@@ -473,14 +520,33 @@ fn next_task_id(pool: &PoolEntry) -> String {
     format!("{}_task_{}", pool.id, uuid::Uuid::now_v7())
 }
 
-fn lookup_pool(pool_id: &str) -> Result<Rc<RefCell<PoolEntry>>, VmError> {
-    POOLS.with(|pools| {
-        pools
-            .borrow()
-            .get(pool_id)
-            .cloned()
-            .ok_or_else(|| VmError::Runtime(format!("pool not found: {pool_id}")))
-    })
+fn lookup_pool(pool_id: &str) -> Result<Arc<parking_lot::Mutex<PoolEntry>>, VmError> {
+    lookup_pool_in_registry(&current_pool_registry(), pool_id)
+}
+
+fn lookup_pool_in_registry(
+    registry: &Arc<PoolRegistry>,
+    pool_id: &str,
+) -> Result<Arc<parking_lot::Mutex<PoolEntry>>, VmError> {
+    registry
+        .inner
+        .lock()
+        .pools
+        .get(pool_id)
+        .cloned()
+        .ok_or_else(|| VmError::Runtime(format!("pool not found: {pool_id}")))
+}
+
+fn lookup_pool_by_name_or_id_in_registry(
+    registry: &Arc<PoolRegistry>,
+    name_or_id: &str,
+) -> Option<Arc<parking_lot::Mutex<PoolEntry>>> {
+    let registry_ref = registry.inner.lock();
+    if let Some(id) = registry_ref.names.get(name_or_id) {
+        registry_ref.pools.get(id).cloned()
+    } else {
+        registry_ref.pools.get(name_or_id).cloned()
+    }
 }
 
 fn pool_id_from_value(value: &VmValue, builtin: &str) -> Result<String, VmError> {
@@ -815,7 +881,7 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     let mut tasks: Vec<VmValue> = pool
         .tasks
         .values()
-        .map(|task| task_snapshot_value(&task.borrow()))
+        .map(|task| task_snapshot_value(&task.lock()))
         .collect();
     tasks.sort_by_key(task_sort_key);
     let queued: i64 = pool.queue.len() as i64;
@@ -824,7 +890,7 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     let mut failed: i64 = 0;
     let mut rejected: i64 = 0;
     for task in pool.tasks.values() {
-        match task.borrow().status {
+        match task.lock().status {
             TaskStatus::Completed => completed += 1,
             TaskStatus::Failed => failed += 1,
             TaskStatus::Rejected => rejected += 1,
@@ -1075,10 +1141,14 @@ async fn pool_create_sync(
 ) -> Result<VmValue, VmError> {
     let opts = parse_options(args.first(), "pool_create")?;
     let name = parse_name(&opts).unwrap_or_else(|| format!("pool_{}", uuid::Uuid::now_v7()));
-    if let Some(existing) = POOL_NAMES.with(|names| names.borrow().get(&name).cloned()) {
-        return Err(VmError::Runtime(format!(
-            "pool_create: pool '{name}' already exists (id={existing}); use pool_get to reuse"
-        )));
+    let registry = ctx.pool_registry();
+    {
+        let registry_ref = registry.inner.lock();
+        if let Some(existing) = registry_ref.names.get(&name) {
+            return Err(VmError::Runtime(format!(
+                "pool_create: pool '{name}' already exists (id={existing}); use pool_get to reuse"
+            )));
+        }
     }
     let max_concurrent = parse_max_concurrent(&opts)?;
     let queue_strategy = parse_queue_strategy(&opts)?;
@@ -1107,7 +1177,7 @@ async fn pool_create_sync(
             (
                 id,
                 pipeline_id,
-                Some(Rc::new(RefCell::new(store))),
+                Some(Arc::new(parking_lot::Mutex::new(store))),
                 persisted,
             )
         }
@@ -1122,7 +1192,7 @@ async fn pool_create_sync(
         .map(|state| state.meta.submit_counter)
         .unwrap_or(0);
 
-    let entry = Rc::new(RefCell::new(PoolEntry {
+    let entry = Arc::new(parking_lot::Mutex::new(PoolEntry {
         id: id.clone(),
         name: name.clone(),
         max_concurrent,
@@ -1150,13 +1220,21 @@ async fn pool_create_sync(
     } else if let Some(store_ref) = store {
         // Fresh pipeline-scope pool: stamp the header so reloads find a
         // well-formed log even if no tasks have been submitted yet.
-        let meta = persisted_meta_from_entry(&entry.borrow());
-        store_ref.borrow().compact(&meta, &[])?;
+        let meta = persisted_meta_from_entry(&entry.lock());
+        store_ref.lock().compact(&meta, &[])?;
     }
 
-    POOLS.with(|pools| pools.borrow_mut().insert(id.clone(), entry.clone()));
-    POOL_NAMES.with(|names| names.borrow_mut().insert(name, id.clone()));
-    let snapshot = pool_snapshot_value(&entry.borrow());
+    {
+        let mut registry_ref = registry.inner.lock();
+        if let Some(existing) = registry_ref.names.get(&name) {
+            return Err(VmError::Runtime(format!(
+                "pool_create: pool '{name}' already exists (id={existing}); use pool_get to reuse"
+            )));
+        }
+        registry_ref.pools.insert(id.clone(), entry.clone());
+        registry_ref.names.insert(name, id);
+    }
+    let snapshot = pool_snapshot_value(&entry.lock());
     Ok(snapshot)
 }
 
@@ -1204,32 +1282,29 @@ fn pool_get_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
         .map(VmValue::display)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| VmError::Runtime("pool_get: name is required".to_string()))?;
-    let pool_id = POOL_NAMES.with(|names| names.borrow().get(&key).cloned());
-    let id = match pool_id {
-        Some(id) => id,
-        None => {
-            if POOLS.with(|pools| pools.borrow().contains_key(&key)) {
-                key
-            } else {
-                return Ok(VmValue::Nil);
-            }
-        }
+    let registry = current_pool_registry();
+    let Some(entry) = lookup_pool_by_name_or_id_in_registry(&registry, &key) else {
+        return Ok(VmValue::Nil);
     };
-    let entry = lookup_pool(&id)?;
-    let snapshot = pool_snapshot_value(&entry.borrow());
+    let snapshot = pool_snapshot_value(&entry.lock());
     Ok(snapshot)
 }
 
 /// List every pool registered in the local pool registry.
 #[harn_builtin(sig = "__pool_list() -> list", category = "pool", runtime_only = true)]
 fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let mut entries: Vec<Rc<RefCell<PoolEntry>>> =
-        POOLS.with(|pools| pools.borrow().values().cloned().collect());
-    entries.sort_by(|a, b| a.borrow().created_at.cmp(&b.borrow().created_at));
+    let mut entries: Vec<Arc<parking_lot::Mutex<PoolEntry>>> = current_pool_registry()
+        .inner
+        .lock()
+        .pools
+        .values()
+        .cloned()
+        .collect();
+    entries.sort_by_key(|entry| entry.lock().created_at.clone());
     Ok(VmValue::List(std::sync::Arc::new(
         entries
             .iter()
-            .map(|entry| pool_snapshot_value(&entry.borrow()))
+            .map(|entry| pool_snapshot_value(&entry.lock()))
             .collect(),
     )))
 }
@@ -1247,7 +1322,7 @@ fn pool_size_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         "pool.size",
     )?;
     let entry = lookup_pool(&pool_id)?;
-    let entry = entry.borrow();
+    let entry = entry.lock();
     Ok(VmValue::Int(
         (entry.active.len() + entry.queue.len()) as i64,
     ))
@@ -1283,7 +1358,7 @@ fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         "pool.snapshot",
     )?;
     let entry = lookup_pool(&pool_id)?;
-    let snapshot = pool_snapshot_value(&entry.borrow());
+    let snapshot = pool_snapshot_value(&entry.lock());
     Ok(snapshot)
 }
 
@@ -1321,15 +1396,16 @@ async fn pool_submit_builtin(
     let priority = parse_priority(&opts)?;
     let idempotency_key = parse_idempotency_key(&opts)?;
 
-    let entry = lookup_pool(&pool_id)?;
+    let registry = ctx.pool_registry();
+    let entry = lookup_pool_in_registry(&registry, &pool_id)?;
     let key = {
-        let pool = entry.borrow();
+        let pool = entry.lock();
         parse_submit_key(&opts, &pool.queue_strategy)?
     };
 
     let state =
         submit_to_pool_entry(Some(&ctx), &entry, closure, key, priority, idempotency_key).await?;
-    let handle = task_handle_value(&state.borrow());
+    let handle = task_handle_value(&state.lock());
     Ok(handle)
 }
 
@@ -1337,20 +1413,6 @@ async fn pool_submit_builtin(
 /// Returns `None` when no pool matches. Used by the trigger dispatcher's
 /// SpawnToPool handler (#1889) so it can route inbound events into named
 /// pools without going through the Harn-level builtin surface.
-fn lookup_pool_by_name_or_id(name_or_id: &str) -> Option<Rc<RefCell<PoolEntry>>> {
-    let id = POOL_NAMES
-        .with(|names| names.borrow().get(name_or_id).cloned())
-        .or_else(|| {
-            POOLS.with(|pools| {
-                pools
-                    .borrow()
-                    .contains_key(name_or_id)
-                    .then(|| name_or_id.to_string())
-            })
-        })?;
-    POOLS.with(|pools| pools.borrow().get(&id).cloned())
-}
-
 /// Public submission outcome returned by [`submit_closure_to_named_pool`].
 /// The dispatcher inspects this to distinguish accepted-and-running tasks
 /// from accepted-but-dropped (drop_newest) tasks so it can emit the right
@@ -1384,7 +1446,8 @@ pub async fn submit_closure_to_named_pool(
     priority: i64,
     key: Option<String>,
 ) -> Result<PoolSubmitOutcome, VmError> {
-    let entry = lookup_pool_by_name_or_id(pool_name).ok_or_else(|| {
+    let registry = pool_registry_for_ctx(ctx);
+    let entry = lookup_pool_by_name_or_id_in_registry(&registry, pool_name).ok_or_else(|| {
         VmError::Runtime(format!(
             "pool: pool '{pool_name}' not found; create it with pool_create first"
         ))
@@ -1392,7 +1455,7 @@ pub async fn submit_closure_to_named_pool(
     // Trigger-dispatcher pool submissions don't carry a caller-supplied
     // idempotency key today; the dispatcher's own dedupe runs upstream.
     let state = submit_to_pool_entry(ctx, &entry, closure, key, priority, None).await?;
-    let task = state.borrow();
+    let task = state.lock();
     Ok(PoolSubmitOutcome {
         pool_id: task.pool_id.clone(),
         pool_name: task.pool_name.clone(),
@@ -1408,12 +1471,12 @@ pub async fn submit_closure_to_named_pool(
 /// the corresponding policies, and fails on `FailFast`/`FailSubmitter`.
 async fn submit_to_pool_entry(
     ctx: Option<&AsyncBuiltinCtx>,
-    entry: &Rc<RefCell<PoolEntry>>,
+    entry: &Arc<parking_lot::Mutex<PoolEntry>>,
     closure: Arc<VmClosure>,
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
-) -> Result<Rc<RefCell<TaskState>>, VmError> {
+) -> Result<Arc<parking_lot::Mutex<TaskState>>, VmError> {
     // Idempotency short-circuit: if the caller previously submitted with
     // the same key, return the existing task (terminal snapshot or
     // pending handle). Mirrors the durable channel `id`-based dedupe
@@ -1425,7 +1488,7 @@ async fn submit_to_pool_entry(
     }
     let submitted_by = current_submitter(ctx);
     let (pool_id_for_span, pool_name_for_span) = {
-        let pool = entry.borrow();
+        let pool = entry.lock();
         (pool.id.clone(), pool.name.clone())
     };
     loop {
@@ -1451,7 +1514,7 @@ async fn submit_to_pool_entry(
         let submit_link = submit_span.link();
 
         let attempt = {
-            let mut pool = entry.borrow_mut();
+            let mut pool = entry.lock();
             submit_or_wait(
                 ctx,
                 &mut pool,
@@ -1466,13 +1529,14 @@ async fn submit_to_pool_entry(
         match attempt {
             SubmitAttempt::Submitted { task, audits } => {
                 {
-                    let task_ref = task.borrow();
+                    let task_ref = task.lock();
                     submit_span.set_metadata("task_id", serde_json::json!(task_ref.id));
                     submit_span.set_metadata("status", serde_json::json!(task_ref.status.as_str()));
                 }
                 let receipt = {
-                    let task_ref = task.borrow();
-                    pool_submit_receipt(&entry.borrow(), &task_ref)
+                    let pool_ref = entry.lock();
+                    let task_ref = task.lock();
+                    pool_submit_receipt(&pool_ref, &task_ref)
                 };
                 emit_pool_submit_receipt(receipt).await;
                 for audit in audits {
@@ -1524,17 +1588,17 @@ fn current_submitter(ctx: Option<&AsyncBuiltinCtx>) -> String {
 }
 
 fn lookup_idempotency_match(
-    entry: &Rc<RefCell<PoolEntry>>,
+    entry: &Arc<parking_lot::Mutex<PoolEntry>>,
     idempotency_key: &str,
-) -> Option<Rc<RefCell<TaskState>>> {
-    let pool = entry.borrow();
+) -> Option<Arc<parking_lot::Mutex<TaskState>>> {
+    let pool = entry.lock();
     let task_id = pool.idempotency_index.get(idempotency_key)?.clone();
     pool.tasks.get(&task_id).cloned()
 }
 
 enum SubmitAttempt {
     Submitted {
-        task: Rc<RefCell<TaskState>>,
+        task: Arc<parking_lot::Mutex<TaskState>>,
         audits: Vec<PoolDropAudit>,
     },
     Wait(tokio::sync::oneshot::Receiver<()>),
@@ -1698,7 +1762,7 @@ fn submit_with_oldest_drop(
         submit_span_link,
         submitted_by,
     );
-    let replacement_task_id = state.borrow().id.clone();
+    let replacement_task_id = state.lock().id.clone();
     let mut audits = Vec::new();
     if let Some(dropped) = pool.queue.pop_front() {
         audits.push(reject_pending_task(
@@ -1743,10 +1807,10 @@ fn submit_with_newest_drop(
         submit_span_link,
         submitted_by,
     );
-    let task_id = state.borrow().id.clone();
+    let task_id = state.lock().id.clone();
     let waiters = reject_task_state(&state, reason, policy);
     wake_task_waiters(waiters);
-    persist_task_if_durable(pool, &state.borrow());
+    persist_task_if_durable(pool, &state.lock());
     let audit = pool_drop_audit(pool, &task_id, None, reason, policy, queue_depth, max_depth);
     SubmitAttempt::Submitted {
         task: state,
@@ -1763,12 +1827,12 @@ fn create_pending_task(
     idempotency_key: Option<String>,
     submit_span_link: Option<crate::tracing::SpanLink>,
     submitted_by: String,
-) -> (Rc<RefCell<TaskState>>, PendingTask) {
+) -> (Arc<parking_lot::Mutex<TaskState>>, PendingTask) {
     pool.submit_counter += 1;
     let seq = pool.submit_counter;
     let task_id = next_task_id(pool);
     let now_ms = now_ms_for_pool();
-    let state = Rc::new(RefCell::new(TaskState {
+    let state = Arc::new(parking_lot::Mutex::new(TaskState {
         id: task_id.clone(),
         pool_id: pool.id.clone(),
         pool_name: pool.name.clone(),
@@ -1793,7 +1857,7 @@ fn create_pending_task(
         pool.idempotency_index.insert(idem.clone(), task_id.clone());
     }
     pool.tasks.insert(task_id.clone(), state.clone());
-    persist_task_if_durable(pool, &state.borrow());
+    persist_task_if_durable(pool, &state.lock());
     let pending = PendingTask {
         task_id,
         closure,
@@ -1820,7 +1884,7 @@ fn persist_task_if_durable(pool: &PoolEntry, state: &TaskState) {
     let record = PoolRecord::Task {
         task: persisted_task_from_state(state),
     };
-    if let Err(err) = store.borrow().append(&record) {
+    if let Err(err) = store.lock().append(&record) {
         // Best-effort: log + swallow rather than poisoning the submit
         // path. A genuine fsync failure surfaces on the next compact.
         let _ = err;
@@ -1869,22 +1933,22 @@ fn persisted_task_from_state(state: &TaskState) -> PersistedTask {
 /// without violating idempotency. The pool file is compacted in place
 /// so the next process restart sees a tidy log.
 fn rehydrate_persisted_state(
-    entry: &Rc<RefCell<PoolEntry>>,
-    store: &Rc<RefCell<PoolDurableStore>>,
+    entry: &Arc<parking_lot::Mutex<PoolEntry>>,
+    store: &Arc<parking_lot::Mutex<PoolDurableStore>>,
     persisted: PersistedPoolState,
     stale_after_ms: i64,
 ) -> Result<(), VmError> {
     let now = now_ms_for_pool();
     let mut idempotency_index: HashMap<String, String> = HashMap::new();
-    let mut tasks: BTreeMap<String, Rc<RefCell<TaskState>>> = BTreeMap::new();
+    let mut tasks: BTreeMap<String, Arc<parking_lot::Mutex<TaskState>>> = BTreeMap::new();
     let mut rehydrated_persisted: Vec<PersistedTask> = Vec::new();
 
     {
-        let mut pool = entry.borrow_mut();
+        let mut pool = entry.lock();
         for (_, task) in persisted.tasks {
             let live = task_state_from_persisted(&pool, &task, now, stale_after_ms);
             let (task_id, idem) = {
-                let borrowed = live.borrow();
+                let borrowed = live.lock();
                 rehydrated_persisted.push(persisted_task_from_state(&borrowed));
                 (borrowed.id.clone(), borrowed.idempotency_key.clone())
             };
@@ -1899,8 +1963,8 @@ fn rehydrate_persisted_state(
 
     // Rewrite the file with the compacted snapshot. Atomic so a crash
     // mid-rewrite leaves the previous log intact.
-    let meta = persisted_meta_from_entry(&entry.borrow());
-    store.borrow().compact(&meta, &rehydrated_persisted)?;
+    let meta = persisted_meta_from_entry(&entry.lock());
+    store.lock().compact(&meta, &rehydrated_persisted)?;
     Ok(())
 }
 
@@ -1909,7 +1973,7 @@ fn task_state_from_persisted(
     persisted: &PersistedTask,
     now: i64,
     stale_after_ms: i64,
-) -> Rc<RefCell<TaskState>> {
+) -> Arc<parking_lot::Mutex<TaskState>> {
     let status = match persisted.status.as_str() {
         "queued" | "running" => {
             // Both `queued` and `running` survive a crash as "stale"
@@ -1959,7 +2023,7 @@ fn task_state_from_persisted(
         .as_ref()
         .map(|text| VmValue::String(std::sync::Arc::from(text.as_str())));
 
-    Rc::new(RefCell::new(TaskState {
+    Arc::new(parking_lot::Mutex::new(TaskState {
         id: persisted.id.clone(),
         pool_id: pool.id.clone(),
         pool_name: pool.name.clone(),
@@ -1992,11 +2056,11 @@ fn enqueue_task(pool: &mut PoolEntry, pending: PendingTask) {
     pool.queue.push_back(pending);
 }
 
-fn dispatch_ready(pool: &Rc<RefCell<PoolEntry>>) {
+fn dispatch_ready(pool: &Arc<parking_lot::Mutex<PoolEntry>>) {
     let mut freed_queue_space = false;
     loop {
         let next = {
-            let mut pool_ref = pool.borrow_mut();
+            let mut pool_ref = pool.lock();
             if pool_ref.active.len() >= pool_ref.max_concurrent {
                 break;
             }
@@ -2026,7 +2090,7 @@ fn reject_pending_task(
     let task_id = pending.task_id.clone();
     let waiters = reject_task_state(&pending.state, reason, policy);
     wake_task_waiters(waiters);
-    persist_task_if_durable(pool, &pending.state.borrow());
+    persist_task_if_durable(pool, &pending.state.lock());
     pool_drop_audit(
         pool,
         &task_id,
@@ -2039,11 +2103,11 @@ fn reject_pending_task(
 }
 
 fn reject_task_state(
-    state: &Rc<RefCell<TaskState>>,
+    state: &Arc<parking_lot::Mutex<TaskState>>,
     reason: &str,
     policy: &str,
 ) -> Vec<tokio::sync::oneshot::Sender<()>> {
-    let mut state_ref = state.borrow_mut();
+    let mut state_ref = state.lock();
     state_ref.status = TaskStatus::Rejected;
     state_ref.finished_at = Some(uuid::Uuid::now_v7().to_string());
     state_ref.heartbeat_at_ms = now_ms_for_pool();
@@ -2059,9 +2123,9 @@ fn wake_task_waiters(waiters: Vec<tokio::sync::oneshot::Sender<()>>) {
     }
 }
 
-fn wake_space_waiters(pool: &Rc<RefCell<PoolEntry>>) {
+fn wake_space_waiters(pool: &Arc<parking_lot::Mutex<PoolEntry>>) {
     let waiters = {
-        let mut pool_ref = pool.borrow_mut();
+        let mut pool_ref = pool.lock();
         std::mem::take(&mut pool_ref.space_waiters)
     };
     for waiter in waiters {
@@ -2170,7 +2234,10 @@ fn pool_dequeue_receipt(
     }
 }
 
-async fn emit_pool_dequeue_receipt(receipt: PoolDequeueReceipt) {
+async fn emit_pool_dequeue_receipt(
+    event_log: Arc<crate::event_log::AnyEventLog>,
+    receipt: PoolDequeueReceipt,
+) {
     let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
     let mut headers = BTreeMap::new();
     headers.insert("schema".to_string(), "harn.pool_dequeue.v1".to_string());
@@ -2182,7 +2249,7 @@ async fn emit_pool_dequeue_receipt(receipt: PoolDequeueReceipt) {
         "queued_for_ms": receipt.queued_for_ms,
         "slot_index": receipt.slot_index,
     });
-    let _ = ensure_pool_event_log()
+    let _ = event_log
         .append(
             &topic,
             LogEvent::new("pool_dequeue", payload).with_headers(headers),
@@ -2258,7 +2325,7 @@ fn fair_key(pending: &PendingTask) -> String {
     pending.key.clone().unwrap_or_default()
 }
 
-fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
+fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     let PendingTask {
         task_id,
         closure,
@@ -2273,7 +2340,7 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     // and the natural parent of that work is the submitter's pipeline,
     // not the unrelated current span. Linking back to the submit span
     // via `set_span_link` is what stitches the trace tree together.
-    let submit_link = state.borrow().submit_span_link.clone();
+    let submit_link = state.lock().submit_span_link.clone();
     let span_links: Vec<crate::tracing::SpanLink> = submit_link
         .into_iter()
         .map(|link| {
@@ -2284,7 +2351,7 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
         })
         .collect();
     let (pool_id_for_span, pool_name_for_span) = {
-        let pool_ref = pool.borrow();
+        let pool_ref = pool.lock();
         (pool_ref.id.clone(), pool_ref.name.clone())
     };
     let mut dequeue_span = PoolSpanGuard::start_detached(
@@ -2297,17 +2364,17 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     dequeue_span.set_metadata("task_id", serde_json::json!(task_id));
 
     {
-        let mut state_ref = state.borrow_mut();
+        let mut state_ref = state.lock();
         state_ref.status = TaskStatus::Running;
         state_ref.started_at = Some(uuid::Uuid::now_v7().to_string());
         state_ref.heartbeat_at_ms = now_ms_for_pool();
     }
     let dequeue_receipt = {
-        let mut pool_ref = pool.borrow_mut();
+        let mut pool_ref = pool.lock();
         pool_ref.active.insert(task_id, state.clone());
         let slot_index = pool_ref.active.len().saturating_sub(1);
-        let receipt = pool_dequeue_receipt(&pool_ref, &state.borrow(), slot_index);
-        persist_task_if_durable(&pool_ref, &state.borrow());
+        let receipt = pool_dequeue_receipt(&pool_ref, &state.lock(), slot_index);
+        persist_task_if_durable(&pool_ref, &state.lock());
         receipt
     };
 
@@ -2317,10 +2384,11 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     );
     dequeue_span.set_metadata("slot_index", serde_json::json!(dequeue_receipt.slot_index));
 
-    // Hand the dequeue receipt off to a tokio task. Append is async; we
-    // already hold a sync borrow on the pool registry here so awaiting in
-    // place would deadlock the next caller of `dispatch_ready`.
-    tokio::task::spawn_local(emit_pool_dequeue_receipt(dequeue_receipt));
+    // Hand the dequeue receipt off to a Tokio task. Capture the active event
+    // log before crossing the work-stealing boundary so audit events stay on
+    // the submitter's log instead of binding to a worker thread default.
+    let event_log = ensure_pool_event_log();
+    tokio::spawn(emit_pool_dequeue_receipt(event_log, dequeue_receipt));
 
     let Some(ctx) = context else {
         dequeue_span.end();
@@ -2338,26 +2406,43 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
     // under whatever spans it opens for its own work.
     dequeue_span.end();
 
-    tokio::task::spawn_local(async move {
-        let mut runner = ctx.child_vm();
-        let outcome = runner
-            .call_closure_args(&closure, crate::vm::CallArgs::Empty)
-            .await
-            .map_err(|error| error.to_string());
-        ctx.forward_output(&runner.take_output());
+    let registry = ctx.pool_registry();
+    tokio::spawn(with_pool_registry_scope(registry, async move {
+        tokio::task::yield_now().await;
+        let outcome = std::panic::AssertUnwindSafe(async {
+            let mut runner = ctx.child_vm();
+            let outcome = runner
+                .call_closure_args(&closure, crate::vm::CallArgs::Empty)
+                .await
+                .map_err(|error| error.to_string());
+            ctx.forward_output(&runner.take_output());
+            outcome
+        })
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|payload| Err(pool_panic_error(payload)));
         finalize_task(&pool, &state, outcome);
-    });
+    }));
+}
+
+fn pool_panic_error(payload: Box<dyn Any + Send>) -> String {
+    let message = payload
+        .downcast_ref::<&'static str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("unknown panic payload");
+    format!("pool task panicked: {message}")
 }
 
 fn finalize_task(
-    pool: &Rc<RefCell<PoolEntry>>,
-    state: &Rc<RefCell<TaskState>>,
+    pool: &Arc<parking_lot::Mutex<PoolEntry>>,
+    state: &Arc<parking_lot::Mutex<TaskState>>,
     outcome: Result<VmValue, String>,
 ) {
     let waiters: Vec<tokio::sync::oneshot::Sender<()>>;
     let task_id;
     {
-        let mut state_ref = state.borrow_mut();
+        let mut state_ref = state.lock();
         state_ref.finished_at = Some(uuid::Uuid::now_v7().to_string());
         state_ref.heartbeat_at_ms = now_ms_for_pool();
         match outcome {
@@ -2374,9 +2459,9 @@ fn finalize_task(
         waiters = std::mem::take(&mut state_ref.waiters);
     }
     {
-        let mut pool_ref = pool.borrow_mut();
+        let mut pool_ref = pool.lock();
         pool_ref.active.remove(&task_id);
-        persist_task_if_durable(&pool_ref, &state.borrow());
+        persist_task_if_durable(&pool_ref, &state.lock());
     }
     wake_task_waiters(waiters);
     dispatch_ready(pool);
@@ -2391,36 +2476,40 @@ fn finalize_task(
     runtime_only = true
 )]
 async fn pool_wait_builtin(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let target = args
         .first()
         .ok_or_else(|| VmError::Runtime("pool_wait: task handle is required".to_string()))?;
+    let registry = ctx.pool_registry();
     match target {
         VmValue::List(items) => {
             let mut results = Vec::with_capacity(items.len());
             for item in items.iter() {
-                results.push(wait_single_task(item).await?);
+                results.push(wait_single_task(&registry, item).await?);
             }
             Ok(VmValue::List(std::sync::Arc::new(results)))
         }
-        _ => wait_single_task(target).await,
+        _ => wait_single_task(&registry, target).await,
     }
 }
 
-async fn wait_single_task(value: &VmValue) -> Result<VmValue, VmError> {
+async fn wait_single_task(
+    registry: &Arc<PoolRegistry>,
+    value: &VmValue,
+) -> Result<VmValue, VmError> {
     let (pool_id, task_id) = task_handle_from_value(value, "pool_wait")?;
-    let entry = lookup_pool(&pool_id)?;
+    let entry = lookup_pool_in_registry(registry, &pool_id)?;
     let state = {
-        let pool = entry.borrow();
+        let pool = entry.lock();
         pool.tasks
             .get(&task_id)
             .cloned()
             .ok_or_else(|| VmError::Runtime(format!("pool_wait: task not found: {task_id}")))?
     };
     let receiver = {
-        let mut state_ref = state.borrow_mut();
+        let mut state_ref = state.lock();
         if state_ref.status.is_terminal() {
             return Ok(task_snapshot_value(&state_ref));
         }
@@ -2432,7 +2521,7 @@ async fn wait_single_task(value: &VmValue) -> Result<VmValue, VmError> {
     // receiver. Either is fine: we only care that the task reached a
     // terminal state, which `finalize_task` guarantees before signaling.
     let _ = receiver.await;
-    let snapshot = task_snapshot_value(&state.borrow());
+    let snapshot = task_snapshot_value(&state.lock());
     Ok(snapshot)
 }
 
@@ -2460,8 +2549,7 @@ pub(crate) fn register_pool_builtins(vm: &mut Vm) {
 /// `.harn/pools/` are intentionally NOT removed — that is the whole
 /// point of pipeline-scope durability.
 pub fn reset_pool_state() {
-    POOLS.with(|pools| pools.borrow_mut().clear());
-    POOL_NAMES.with(|names| names.borrow_mut().clear());
+    current_pool_registry().inner.lock().clear();
 }
 
 /// Snapshot every pool task that has not yet reached a terminal state.
@@ -2470,37 +2558,40 @@ pub fn reset_pool_state() {
 /// `UnsettledStateSnapshot` so pipeline `on_finish` callbacks (drain,
 /// abandon, handoff presets) can observe pool work alongside suspended
 /// sub-agents, queued triggers, partial handoffs, and in-flight LLM
-/// calls. Walks the thread-local `POOLS` registry once, emitting one
+/// calls. Walks the active pool registry once, emitting one
 /// JSON entry per task whose status is `queued` or `running`. Order is
 /// pool-id ascending, then queued tasks in queue order followed by
-/// running tasks in `tasks` btree order, so successive snapshots within
-/// a single thread are deterministic.
+/// running tasks in `tasks` btree order, so successive snapshots from
+/// one logical execution are deterministic.
 pub(crate) fn snapshot_pending_tasks() -> Vec<serde_json::Value> {
     let now_ms = crate::stdlib::clock::now_wall_ms();
-    POOLS.with(|pools| {
-        let registry = pools.borrow();
-        let mut ordered: Vec<(&String, &Rc<RefCell<PoolEntry>>)> = registry.iter().collect();
-        ordered.sort_by(|a, b| a.0.cmp(b.0));
-        let mut out = Vec::new();
-        for (_pool_id, entry) in ordered {
-            let pool = entry.borrow();
-            for pending in &pool.queue {
-                let task = pending.state.borrow();
-                if task.status.is_terminal() {
-                    continue;
-                }
-                out.push(pending_task_snapshot_json(&pool, &task, now_ms));
+    let mut ordered: Vec<(String, Arc<parking_lot::Mutex<PoolEntry>>)> = current_pool_registry()
+        .inner
+        .lock()
+        .pools
+        .iter()
+        .map(|(pool_id, entry)| (pool_id.clone(), entry.clone()))
+        .collect();
+    ordered.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut out = Vec::new();
+    for (_pool_id, entry) in ordered {
+        let pool = entry.lock();
+        for pending in &pool.queue {
+            let task = pending.state.lock();
+            if task.status.is_terminal() {
+                continue;
             }
-            for state in pool.tasks.values() {
-                let task = state.borrow();
-                if task.status != TaskStatus::Running {
-                    continue;
-                }
-                out.push(pending_task_snapshot_json(&pool, &task, now_ms));
-            }
+            out.push(pending_task_snapshot_json(&pool, &task, now_ms));
         }
-        out
-    })
+        for state in pool.tasks.values() {
+            let task = state.lock();
+            if task.status != TaskStatus::Running {
+                continue;
+            }
+            out.push(pending_task_snapshot_json(&pool, &task, now_ms));
+        }
+    }
+    out
 }
 
 fn pending_task_snapshot_json(

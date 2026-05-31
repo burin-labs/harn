@@ -1,13 +1,13 @@
 //! Tool, persona, and step hook registration builtins for workflow execution.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
-pub(super) type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
+pub(super) type PostHookFn =
+    Arc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction + Send + Sync>;
 
 /// Register low-level pre/post tool hooks for workflow execution.
 #[harn_builtin(
@@ -63,13 +63,13 @@ pub(super) fn register_tool_hook_builtin(
     };
 
     let pre: Option<crate::orchestration::PreToolHookFn> = deny_reason.map(|reason| {
-        Rc::new(move |_name: &str, _args: &serde_json::Value| {
+        Arc::new(move |_name: &str, _args: &serde_json::Value| {
             crate::orchestration::PreToolAction::Deny(reason.clone())
         }) as _
     });
 
     let post: Option<PostHookFn> = max_output.map(|max| {
-        Rc::new(move |_name: &str, result: &str| {
+        Arc::new(move |_name: &str, result: &str| {
             if result.len() > max {
                 crate::orchestration::PostToolAction::Modify(
                     crate::orchestration::microcompact_tool_output(result, max),

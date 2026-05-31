@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Bound;
-use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -9,6 +8,7 @@ use std::time::Duration;
 
 use sqlx_core::column::Column;
 use sqlx_core::connection::Connection;
+use sqlx_core::executor::Executor;
 use sqlx_core::query::{query, Query};
 use sqlx_core::row::Row;
 use sqlx_core::transaction::Transaction;
@@ -61,7 +61,7 @@ struct MockPool {
     calls: Vec<VmValue>,
 }
 
-type PgTxCell = Rc<Mutex<Option<Transaction<'static, Postgres>>>>;
+type PgTxCell = Arc<Mutex<Option<Transaction<'static, Postgres>>>>;
 type PgTxRegistry = BTreeMap<String, PgTxCell>;
 
 thread_local! {
@@ -399,7 +399,7 @@ pub(super) async fn run_managed_transaction(
     prepare: impl FnOnce(
         &str,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), VmError>> + '_>,
+        Box<dyn std::future::Future<Output = Result<(), VmError>> + Send + '_>,
     >,
 ) -> Result<VmValue, VmError> {
     let pool = pool_by_id(pool_id)?;
@@ -408,8 +408,8 @@ pub(super) async fn run_managed_transaction(
         .await
         .map_err(|error| runtime_error(format!("{builtin}: begin failed: {error}")))?;
     let tx_id = next_id("pgtx");
-    let tx_cell = Rc::new(Mutex::new(Some(tx)));
-    register_tx(&tx_id, Rc::clone(&tx_cell));
+    let tx_cell = Arc::new(Mutex::new(Some(tx)));
+    register_tx(&tx_id, Arc::clone(&tx_cell));
     let tx_handle = handle_value(HANDLE_TX, &tx_id, BTreeMap::new());
 
     if let Err(error) = prepare(&tx_id).await {
@@ -489,7 +489,7 @@ async fn pg_migrate_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    migrate::run(&args).await
+    migrate::run(args).await
 }
 
 #[harn_builtin(
@@ -851,8 +851,8 @@ async fn savepoint_op(
         .as_mut()
         .ok_or_else(|| runtime_error(format!("{builtin}: transaction is closed")))?;
     let sql = render_savepoint_sql(op, &name);
-    sqlx_core::raw_sql::raw_sql(&sql)
-        .execute(&mut **tx)
+    (&mut **tx)
+        .execute(sql.as_str())
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
     Ok(VmValue::Bool(true))

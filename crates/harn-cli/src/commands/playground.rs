@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 
@@ -203,7 +203,7 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
                 store_base,
             )
             .await?;
-            let bridge = Rc::new(
+            let bridge = Arc::new(
                 harn_vm::bridge::HostBridge::from_harn_module(host_vm, &config.host)
                     .await
                     .map_err(|error| format!("error: {error}\n"))?,

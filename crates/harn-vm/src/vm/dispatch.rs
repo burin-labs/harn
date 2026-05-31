@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::value::{ErrorCategory, VmBuiltinFn, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
@@ -102,12 +102,12 @@ impl Vm {
         }
         if let Some(existing) = self.builtins_by_id.get(&id) {
             if existing.name.as_ref() != name {
-                Rc::make_mut(&mut self.builtins_by_id).remove(&id);
-                Rc::make_mut(&mut self.builtin_id_collisions).insert(id);
+                Arc::make_mut(&mut self.builtins_by_id).remove(&id);
+                Arc::make_mut(&mut self.builtin_id_collisions).insert(id);
                 return;
             }
         }
-        Rc::make_mut(&mut self.builtins_by_id).insert(
+        Arc::make_mut(&mut self.builtins_by_id).insert(
             id,
             VmBuiltinEntry {
                 name: std::sync::Arc::from(name),
@@ -128,7 +128,7 @@ impl Vm {
                 .get(&id)
                 .is_some_and(|entry| entry.name.as_ref() == name)
             {
-                Rc::make_mut(&mut self.builtins_by_id).remove(&id);
+                Arc::make_mut(&mut self.builtins_by_id).remove(&id);
             }
         }
     }
@@ -136,10 +136,10 @@ impl Vm {
     /// Register a sync builtin function.
     pub fn register_builtin<F>(&mut self, name: &str, f: F)
     where
-        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
+        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + Send + Sync + 'static,
     {
-        Rc::make_mut(&mut self.builtins).insert(name.to_string(), Rc::new(f));
-        Rc::make_mut(&mut self.builtin_metadata)
+        Arc::make_mut(&mut self.builtins).insert(name.to_string(), Arc::new(f));
+        Arc::make_mut(&mut self.builtin_metadata)
             .insert(name.to_string(), VmBuiltinMetadata::sync(name.to_string()));
         self.refresh_builtin_id(name);
     }
@@ -147,11 +147,11 @@ impl Vm {
     /// Register a sync builtin function with discoverable metadata.
     pub fn register_builtin_with_metadata<F>(&mut self, metadata: VmBuiltinMetadata, f: F)
     where
-        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
+        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + Send + Sync + 'static,
     {
         let name = metadata.name().to_string();
-        Rc::make_mut(&mut self.builtins).insert(name.clone(), Rc::new(f));
-        Rc::make_mut(&mut self.builtin_metadata)
+        Arc::make_mut(&mut self.builtins).insert(name.clone(), Arc::new(f));
+        Arc::make_mut(&mut self.builtin_metadata)
             .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Sync));
         self.refresh_builtin_id(&name);
     }
@@ -181,7 +181,7 @@ impl Vm {
                     let meta = builtin_def_metadata(def, name, arity, VmBuiltinKind::Async);
                     // Wrap the function pointer that already returns an
                     // AsyncBuiltinFuture so register_async_builtin_with_metadata's
-                    // generic bound `F: Fn(Vec<VmValue>) -> Fut + 'static` is met.
+                    // generic handler/future bounds are met.
                     self.register_async_builtin_with_metadata(meta, f);
                 }
                 VmBuiltinHandler::None => {
@@ -198,14 +198,14 @@ impl Vm {
 
     /// Remove a sync builtin (so an async version can take precedence).
     pub fn unregister_builtin(&mut self, name: &str) {
-        Rc::make_mut(&mut self.builtins).remove(name);
+        Arc::make_mut(&mut self.builtins).remove(name);
         if self.async_builtins.contains_key(name) {
-            Rc::make_mut(&mut self.builtin_metadata).insert(
+            Arc::make_mut(&mut self.builtin_metadata).insert(
                 name.to_string(),
                 VmBuiltinMetadata::async_builtin(name.to_string()),
             );
         } else {
-            Rc::make_mut(&mut self.builtin_metadata).remove(name);
+            Arc::make_mut(&mut self.builtin_metadata).remove(name);
         }
         self.refresh_builtin_id(name);
     }
@@ -214,14 +214,14 @@ impl Vm {
     /// [`crate::vm::AsyncBuiltinCtx`] threaded by the dispatch loop.
     pub fn register_async_builtin<F, Fut>(&mut self, name: &str, f: F)
     where
-        F: Fn(crate::vm::AsyncBuiltinCtx, Vec<VmValue>) -> Fut + 'static,
-        Fut: Future<Output = Result<VmValue, VmError>> + 'static,
+        F: Fn(crate::vm::AsyncBuiltinCtx, Vec<VmValue>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<VmValue, VmError>> + Send + 'static,
     {
-        Rc::make_mut(&mut self.async_builtins).insert(
+        Arc::make_mut(&mut self.async_builtins).insert(
             name.to_string(),
-            Rc::new(move |ctx, args| Box::pin(f(ctx, args))),
+            Arc::new(move |ctx, args| Box::pin(f(ctx, args))),
         );
-        Rc::make_mut(&mut self.builtin_metadata).insert(
+        Arc::make_mut(&mut self.builtin_metadata).insert(
             name.to_string(),
             VmBuiltinMetadata::async_builtin(name.to_string()),
         );
@@ -235,15 +235,15 @@ impl Vm {
         metadata: VmBuiltinMetadata,
         f: F,
     ) where
-        F: Fn(crate::vm::AsyncBuiltinCtx, Vec<VmValue>) -> Fut + 'static,
-        Fut: Future<Output = Result<VmValue, VmError>> + 'static,
+        F: Fn(crate::vm::AsyncBuiltinCtx, Vec<VmValue>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<VmValue, VmError>> + Send + 'static,
     {
         let name = metadata.name().to_string();
-        Rc::make_mut(&mut self.async_builtins).insert(
+        Arc::make_mut(&mut self.async_builtins).insert(
             name.clone(),
-            Rc::new(move |ctx, args| Box::pin(f(ctx, args))),
+            Arc::new(move |ctx, args| Box::pin(f(ctx, args))),
         );
-        Rc::make_mut(&mut self.builtin_metadata)
+        Arc::make_mut(&mut self.builtin_metadata)
             .insert(name.clone(), metadata.with_kind(VmBuiltinKind::Async));
         self.refresh_builtin_id(&name);
     }

@@ -77,7 +77,7 @@ pub(super) struct Session {
     /// If a cancel was requested for the current prompt execution.
     pub(super) cancellation: SessionCancellation,
     /// Host bridge for the active prompt, if one is running.
-    pub(super) host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
+    pub(super) host_bridge: Option<Arc<harn_vm::bridge::HostBridge>>,
     /// Pending user-message inject state that survives prompt cancellation
     /// and active bridge replacement until delivery or explicit revoke.
     pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,

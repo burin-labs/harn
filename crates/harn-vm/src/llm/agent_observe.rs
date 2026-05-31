@@ -37,7 +37,7 @@
 //! `message` up to (but not including) the matching `provider_call_request`.
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::event_log::EventLog;
 use crate::value::VmError;
@@ -744,7 +744,7 @@ pub(crate) struct StreamingDetectorContext {
 /// events via the global session sink registry as the buffer grows
 /// (harn#692).
 pub(super) fn spawn_progress_forwarder(
-    bridge: &Rc<crate::bridge::HostBridge>,
+    bridge: &Arc<crate::bridge::HostBridge>,
     call_id: String,
     user_visible: bool,
     detector_ctx: Option<StreamingDetectorContext>,
@@ -871,7 +871,7 @@ fn llm_retry_backoff_ms(
 pub(crate) async fn observed_llm_call(
     opts: &super::api::LlmCallOptions,
     tool_format: Option<&str>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
     retry_config: &LlmRetryConfig,
     iteration: Option<usize>,
     user_visible: bool,

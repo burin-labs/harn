@@ -6,7 +6,6 @@
 //! `cancel_in_flight_tool_call`, and the dispatched tool's result is
 //! shaped as `status: "cancelled"`.
 
-use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -24,7 +23,7 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let bridge = Rc::new(HostBridge::from_parts(
+                let bridge = Arc::new(HostBridge::from_parts(
                     Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                     Arc::new(AtomicBool::new(false)),
                     Arc::new(Mutex::new(())),
@@ -338,7 +337,7 @@ pipeline main(_) {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let bridge = Rc::new(HostBridge::from_parts(
+                let bridge = Arc::new(HostBridge::from_parts(
                     Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                     Arc::new(AtomicBool::new(false)),
                     Arc::new(Mutex::new(())),

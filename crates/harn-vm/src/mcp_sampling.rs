@@ -522,7 +522,7 @@ fn build_spec_response(outcome: LlmOutcome, parsed: &SamplingRequest) -> JsonVal
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     fn minimal_request() -> JsonValue {
         json!({
@@ -836,7 +836,7 @@ mod tests {
             "model".to_string(),
             VmValue::String(std::sync::Arc::from("mock-model")),
         );
-        crate::stdlib::host::set_host_call_bridge(Rc::new(ApproveSamplingBridge { overrides }));
+        crate::stdlib::host::set_host_call_bridge(Arc::new(ApproveSamplingBridge { overrides }));
 
         let request = json!({
             "jsonrpc": "2.0",

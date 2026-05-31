@@ -4,14 +4,13 @@
 //! `host_call`, ...) to the ACP client via the `AcpBridge`.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use super::AcpBridge;
 
 /// Register builtins that delegate to the ACP client (editor).
-pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
+pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Arc<AcpBridge>) {
     let host_capability_manifest = bridge
         .call_client(
             "host/capabilities",

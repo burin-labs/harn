@@ -151,6 +151,10 @@ harness = false
 name = "callable_vectorcall"
 harness = false
 
+[[bench]]
+name = "pool_parallel"
+harness = false
+
 [lints]
 workspace = true
 
