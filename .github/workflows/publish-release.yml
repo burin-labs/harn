@@ -11,13 +11,12 @@ name: Publish release
 #      The tag push (under the harn-release-bot App identity) also
 #      cascades to build-release-binaries.yml for tarballs + container.
 #
-#   2. push to main — legacy/recovery drift path. If Cargo.toml's
-#      workspace version is ahead of the latest `vX.Y.Z` tag the
-#      workflow tags HEAD and publishes from there. Under the new
-#      tag-first flow this trigger usually no-ops (the tag was pushed
-#      pre-merge so post-merge main's Cargo.toml already matches the
-#      tag); it remains as the safety net for releases authored without
-#      release_harn.harn (or for an old client that doesn't push tags).
+#   2. push to main — no-op/self-heal only. A release whose Cargo.toml
+#      version is ahead of the latest `vX.Y.Z` tag must already have a
+#      matching `vX.Y.Z` tag at the bumping commit. If not, this
+#      workflow fails loudly instead of tagging main HEAD. That makes
+#      tag-first publishing mandatory: concurrent merge-queue entries
+#      cannot leak into the published artifact.
 #
 #   3. workflow_dispatch — manual recovery for the partial-failure case
 #      (tag pushed but crates.io publish was incomplete). With no
@@ -124,10 +123,33 @@ jobs:
           CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
           LATEST_VERSION="${LATEST_TAG#v}"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          MATCHING_TAG="v$CARGO_VERSION"
+          MAIN_DRIFT_PUBLISH_REF=""
           version_gt() {
             local left="$1"
             local right="$2"
             [[ "$left" != "$right" ]] && [[ "$(printf '%s\n%s\n' "$right" "$left" | sort -V | tail -n 1)" == "$left" ]]
+          }
+          resolve_tag_commit() {
+            git rev-list -n 1 "$1" 2>/dev/null || true
+          }
+          require_tag_first_main_publish() {
+            if [[ "$EVENT_NAME" != "push" || "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
+              return 0
+            fi
+            local matching_tag_commit
+            matching_tag_commit="$(resolve_tag_commit "$MATCHING_TAG")"
+            if [[ -z "$matching_tag_commit" ]]; then
+              echo "::error::Cargo.toml=$CARGO_VERSION is ahead of latest tag ${LATEST_TAG:-<none>}, but $MATCHING_TAG does not exist. Push $MATCHING_TAG at the release commit before merging; publish-release.yml will not tag main HEAD."
+              exit 1
+            fi
+            if [[ "$matching_tag_commit" != "$HEAD_SHA" ]]; then
+              echo "::error::$MATCHING_TAG points at $matching_tag_commit, but main push is $HEAD_SHA. Refusing to publish from main HEAD; re-run the tag-first release flow from the intended commit."
+              exit 1
+            fi
+            MAIN_DRIFT_PUBLISH_REF="$MATCHING_TAG"
+            echo "::notice::$MATCHING_TAG already points at this main commit; any publish recovery will use the tag, not main HEAD."
           }
 
           # Tag-push trigger ("tag is truth"). The release harness pushed
@@ -152,9 +174,11 @@ jobs:
           fi
 
           if [[ -z "$LATEST_TAG" ]]; then
+            require_tag_first_main_publish
             DRIFT=true
             echo "::notice::No vX.Y.Z tags exist yet; treating Cargo.toml=$CARGO_VERSION as drift (first release)."
           elif version_gt "$CARGO_VERSION" "$LATEST_VERSION"; then
+            require_tag_first_main_publish
             DRIFT=true
             echo "::notice::Cargo.toml=$CARGO_VERSION ahead of latest tag $LATEST_TAG → finalize needed."
           elif [[ "$CARGO_VERSION" != "$LATEST_VERSION" ]]; then
@@ -187,6 +211,10 @@ jobs:
             fi
           fi
           PUBLISH_REF=main
+          if [[ -n "$MAIN_DRIFT_PUBLISH_REF" ]]; then
+            PUBLISH_REF="$MAIN_DRIFT_PUBLISH_REF"
+            echo "::notice::Tag-first main-push recovery: publishing from $PUBLISH_REF instead of main."
+          fi
           if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DRIFT" == "false" && -n "$LATEST_TAG" ]]; then
             PUBLISH_REF="$LATEST_TAG"
             echo "::notice::Manual recovery has no tag drift; publishing from existing tag $LATEST_TAG instead of current main."
