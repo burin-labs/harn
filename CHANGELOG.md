@@ -8,6 +8,25 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.54
+
+### Changed
+
+- **VM value handles are now Send-safe shared values (#2689).** Owned runtime
+  values now use thread-safe shared ownership so `VmValue` can cross worker
+  boundaries without special host-side wrapping.
+
+### Fixed
+
+- **TypeScript protocol bindings now emit a defined type for
+  `ACPPermissionToolCall._meta`.** The TS artifact referenced the Python-only
+  `HarnExtensionMeta` name, which is undefined in TypeScript and broke
+  downstream `tsc` in consumers that vendor the bindings. It now emits
+  `ACPExtensionMeta<ACPObject>`, matching every other tool-call `_meta` field.
+  A new `dump-protocol-artifacts` self-consistency test fails the harn build on
+  any dangling `ACP`/`Harn`/`A2A`/`MCP`-prefixed type reference in the emitted
+  TypeScript, so this class of bug can no longer escape harn's CI.
+
 ## v0.8.53
 
 ### Added

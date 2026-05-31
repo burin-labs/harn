@@ -873,7 +873,7 @@ export interface ACPPermissionToolCall {
   title?: string
   kind?: string
   rawInput?: ACPValue
-  _meta?: HarnExtensionMeta
+  _meta?: ACPExtensionMeta<ACPObject>
 }
 
 export type ACPPermissionOptionKind =
@@ -4110,6 +4110,40 @@ fn normalize_line_endings(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Shift-left guard: every `ACP`/`Harn`/`A2A`/`MCP`-prefixed *type* name
+    /// referenced in the emitted TypeScript bindings must be declared in the
+    /// same artifact. The TS section once used the Python-only name
+    /// `HarnExtensionMeta` for a `_meta` field; it compiled here (it's just a
+    /// Rust string) but broke `tsc` downstream in burin-code, where the
+    /// failure surfaced far from its cause. This test fails harn's own
+    /// `cargo test` on any dangling protocol-type reference, so the class of
+    /// bug can't escape the harn build again.
+    #[test]
+    fn typescript_artifact_has_no_dangling_type_references() {
+        let ts = generate_typescript();
+        let declared: std::collections::HashSet<&str> = regex::Regex::new(
+            r"(?m)^\s*(?:export\s+)?(?:declare\s+)?(?:const\s+)?(?:interface|type|enum|class)\s+([A-Za-z_][A-Za-z0-9_]*)",
+        )
+        .unwrap()
+        .captures_iter(&ts)
+        .map(|c| c.get(1).unwrap().as_str())
+        .collect();
+        let mut dangling: Vec<&str> = regex::Regex::new(r"\b((?:ACP|Harn|A2A|MCP)[A-Za-z0-9]+)\b")
+            .unwrap()
+            .captures_iter(&ts)
+            .map(|c| c.get(1).unwrap().as_str())
+            .filter(|name| !declared.contains(name))
+            .collect();
+        dangling.sort_unstable();
+        dangling.dedup();
+        assert!(
+            dangling.is_empty(),
+            "emitted TypeScript references undeclared protocol type(s): {dangling:?}. Every \
+             ACP/Harn/A2A/MCP-prefixed type used in the bindings must be declared in the same \
+             artifact; this guard shift-lefts the burin-code `tsc` failure into harn's build."
+        );
+    }
 
     #[test]
     fn generated_types_include_harn_wire_vocabularies() {

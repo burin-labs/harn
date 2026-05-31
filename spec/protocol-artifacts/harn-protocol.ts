@@ -527,7 +527,7 @@ export interface ACPPermissionToolCall {
   title?: string
   kind?: string
   rawInput?: ACPValue
-  _meta?: HarnExtensionMeta
+  _meta?: ACPExtensionMeta<ACPObject>
 }
 
 export type ACPPermissionOptionKind =
