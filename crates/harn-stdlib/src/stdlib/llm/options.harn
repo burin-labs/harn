@@ -4,6 +4,7 @@ import { pick_keys } from "std/collections"
 fn __llm_call_option_keys() {
   return [
     "model",
+    "model_role",
     "model_tier",
     "provider",
     "api_mode",

@@ -13,6 +13,11 @@ source files. Three flavors live side by side:
   symbol graph (#2434). The default reach when one identifier needs
   to flip across the workspace without colliding on partial-name
   matches.
+- `edit_fast_apply` / `fast_apply` — merge-model-assisted full-file
+  application for broad edit intent. It reads the current file,
+  asks the configured `merge` model role for complete updated bytes,
+  validates and previews the result, then commits through
+  `edit_safe_text_patch`.
 - `edit_apply_old_new_patch` — collision-aware old/new text patch
   with exact / line / structural matching modes. The default reach
   when the language has no tree-sitter grammar or when the model
@@ -29,7 +34,8 @@ source files. Three flavors live side by side:
   `edit_explain_whitespace_difference`, `edit_strip_line_number_prefixes`.
 
 > **Feature gate.** Every helper that reads or writes a file on disk —
-> `edit_apply_node`, `edit_insert_at_anchor`, and `edit_safe_text_patch` —
+> `edit_apply_node`, `edit_insert_at_anchor`, `edit_fast_apply`, and
+> `edit_safe_text_patch` —
 > is gated on the deterministic-tools feature, the same gate the
 > `hostlib_tools_*` file I/O builtins use. Call
 > `hostlib_enable("tools:deterministic")` once at the start of the
@@ -567,6 +573,118 @@ The pure helpers (`edit_apply_old_new_patch`, `edit_splice_lines`,
 operate on in-memory strings without a path. `edit_safe_text_patch`
 is the recommended entry point any time the call ends with a write
 back to disk.
+
+## `edit_fast_apply` — merge-model-assisted full-file apply
+
+`edit_fast_apply({path, intent, ...})` is the safe fallback when an
+agent has broad edit intent but not a precise AST query yet. It
+separates "what should change" from "how to rewrite the bytes":
+
+1. Read the current file through `hostlib_fs_read_text`.
+2. Call `llm_call` with `model_role: "merge"` (or `params.model_role`)
+   and ask for complete updated file content.
+3. Reject lazy truncation and syntax errors for supported Tree-Sitter
+   languages.
+4. Route the proposed post-image through `edit_dry_run` for a unified
+   diff preview.
+5. Commit only through `edit_safe_text_patch` with the observed
+   `before_sha256` as `expected_hash`.
+
+The convenience wrapper
+`fast_apply(path, edit_intent, options = nil)` lowers to the same call.
+
+### Merge model role
+
+The merge model is configured through the normal LLM routing layer, not
+special host glue:
+
+```toml
+[model_roles.merge]
+provider = "ollama"
+model = "qwen3.6-coding"
+temperature = 0.0
+max_tokens = 12000
+```
+
+Per-call `llm_options` still win:
+
+```harn,ignore
+let result = edit_fast_apply({
+  path: "src/lib.rs",
+  intent: "Rename the local variable to make the intent clearer.",
+  llm_options: {provider: "mock", model: "mock"},
+})
+```
+
+Operational overrides are available without editing config:
+`HARN_LLM_MERGE_PROVIDER`, `HARN_LLM_MERGE_MODEL`,
+`HARN_LLM_MERGE_ROUTE_POLICY`, and the corresponding
+`HARN_LLM_FAST_APPLY_*` aliases. Generic `HARN_LLM_ROLE_<ROLE>_*`
+variables work for other roles.
+
+### Parameters
+
+| Field | Required | Notes |
+|---|---|---|
+| `path` | yes | File to mutate. |
+| `intent` / `edit_intent` / `instruction` | yes | Natural-language edit request. |
+| `model_role` | no, default `"merge"` | Role name resolved before normal provider/model routing. |
+| `llm_options` | no | Extra `llm_call` options. Explicit options win over role defaults. |
+| `dry_run` | no | Return `preview` and `per_file_unified_diff` without writing. |
+| `validate_syntax` | no, default `true` | Parse supported languages and reject `syntax_error`; unsupported paths skip validation. |
+| `session_id` | no | Routes reads and writes through the staged-fs overlay. |
+
+### Result
+
+Successful calls return `result == "applied"` or `"no_op"`. Rejections
+include `"invalid_params"`, `"llm_invalid_output"`, `"lazy_truncation"`,
+`"syntax_error"`, `"dry_run_rejected"`, and any terminal result returned
+by `edit_safe_text_patch` such as `"stale_base"` or `"hunk_conflict"`.
+
+Every result carries `telemetry` counters:
+
+```text
+{
+  apply_path: "fast_apply",
+  requested: 1,
+  llm_calls: 1,
+  success: 0|1,
+  applied: 0|1,
+  no_op: 0|1,
+  validation_rejected: 0|1,
+  rejected: 0|1,
+  dry_run: 0|1,
+}
+```
+
+`dry_run_bundle` contains the `edit_dry_run` response, and
+`safe_text_patch` is attached on committed calls so hosts can inspect
+the lower-level stale-base / hunk-conflict counters.
+
+### Example
+
+```harn,ignore
+import { edit_fast_apply } from "std/edit"
+
+pipeline default() {
+  hostlib_enable("tools:deterministic")
+  let preview = edit_fast_apply({
+    path: "src/lib.rs",
+    intent: "Change answer() to return 42 and keep the rest of the file untouched.",
+    dry_run: true,
+  })
+  __io_println(preview.result)
+  __io_println(preview.per_file_unified_diff[0].diff)
+
+  if user_approves(preview.per_file_unified_diff[0].diff) {
+    let applied = edit_fast_apply({
+      path: "src/lib.rs",
+      intent: "Change answer() to return 42 and keep the rest of the file untouched.",
+    })
+    __io_println(applied.telemetry.applied)
+  }
+}
+```
 
 ## `edit_rename_symbol` — safe cross-file rename
 

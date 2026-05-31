@@ -171,6 +171,8 @@ pub(crate) enum StructuralTarget {
     ApplyNode,
     /// Cross-file safe rename (`edit_rename_symbol`).
     RenameSymbol,
+    /// Merge-model-assisted full-file application (`edit_fast_apply`).
+    FastApply,
     /// Hash-guarded, atomic single/multi-hunk patch (`edit_safe_text_patch`).
     /// Same text transform as a raw `str_replace`, but with a stale-base
     /// guard and staged-fs atomicity — the provably-equivalent rewrite the
@@ -183,6 +185,7 @@ impl StructuralTarget {
         match self {
             Self::ApplyNode => "edit_apply_node",
             Self::RenameSymbol => "edit_rename_symbol",
+            Self::FastApply => "edit_fast_apply",
             Self::SafeTextPatch => "edit_safe_text_patch",
         }
     }
@@ -281,6 +284,7 @@ fn classify_freeform_edit(tool_name: &str, args: &JsonValue) -> Option<FreeformE
     if normalized.starts_with("edit_apply_node")
         || normalized.starts_with("edit_insert_at_anchor")
         || normalized.starts_with("edit_rename_symbol")
+        || normalized.starts_with("edit_fast_apply")
         || normalized.starts_with("edit_dry_run")
         || normalized.starts_with("edit_extract")
         || normalized.starts_with("edit_change_signature")
@@ -459,10 +463,12 @@ pub(crate) fn route(
     // Pick the structural target this freeform edit maps to. A
     // single-token rename always points at `edit_rename_symbol` (the
     // failure mode the AST tools most dramatically fix); a whole-file
-    // write points at node-level editing; everything else gets the
-    // hash-guarded patch. A persona that explicitly prefers node-level
-    // editing (its `edit_strategy.prefer` lists `edit_apply_node` ahead of
-    // any patch tool) nudges a plain hunk edit toward `edit_apply_node`.
+    // write points at `edit_fast_apply` because it needs merge-model
+    // synthesis plus dry-run/validation before bytes hit disk; everything
+    // else gets the hash-guarded patch. A persona that explicitly prefers
+    // node-level editing (its `edit_strategy.prefer` lists
+    // `edit_apply_node` ahead of any patch tool) nudges a plain hunk edit
+    // toward `edit_apply_node`.
     let rename_supported = edit
         .path
         .as_deref()
@@ -473,8 +479,10 @@ pub(crate) fn route(
         .flatten();
     let target = if rename.is_some() {
         StructuralTarget::RenameSymbol
-    } else if edit.whole_file || prefers(config, StructuralTarget::ApplyNode) {
+    } else if prefers(config, StructuralTarget::ApplyNode) {
         StructuralTarget::ApplyNode
+    } else if edit.whole_file || prefers(config, StructuralTarget::FastApply) {
+        StructuralTarget::FastApply
     } else {
         StructuralTarget::SafeTextPatch
     };
@@ -528,11 +536,18 @@ fn suggestion_body(
              `edit_apply_node` / `edit_insert_at_anchor` (target the changed declaration by AST \
              query) so untouched code keeps its exact bytes, or `edit_dry_run` to preview a plan."
         ),
+        StructuralTarget::FastApply => format!(
+            "[compass] `{tool_name}` is a whole-file edit on a parseable file. Prefer a \
+             structural primitive for localized changes; otherwise use `edit_fast_apply` so the \
+             merge model proposes complete bytes that are syntax-validated and previewed through \
+             `edit_dry_run` before the hash-guarded commit."
+        ),
         StructuralTarget::SafeTextPatch => format!(
             "[compass] `{tool_name}` is a freeform text edit on a parseable file. Prefer a \
              structural primitive (`edit_apply_node` for a node, `edit_rename_symbol` for a \
-             symbol) — or at least `edit_safe_text_patch`, which hash-guards the pre-image and \
-             writes atomically. Preview with `edit_dry_run`."
+             symbol); for broader intent use `edit_fast_apply`; for exact text replacement use \
+             `edit_safe_text_patch`, which hash-guards the pre-image and writes atomically. \
+             Preview with `edit_dry_run`."
         ),
     }
 }
@@ -800,15 +815,15 @@ mod tests {
     }
 
     #[test]
-    fn whole_file_write_suggests_apply_node() {
+    fn whole_file_write_suggests_fast_apply() {
         let args = json!({"path": "src/lib.rs", "content": "fn main() {}"});
         match route("write_file", &args, &cfg(CompassMode::Suggest)) {
             CompassDecision::Suggest {
                 target,
                 reminder_body,
             } => {
-                assert_eq!(target, StructuralTarget::ApplyNode);
-                assert!(reminder_body.contains("edit_apply_node"));
+                assert_eq!(target, StructuralTarget::FastApply);
+                assert!(reminder_body.contains("edit_fast_apply"));
             }
             other => panic!("expected Suggest for whole-file write, got {other:?}"),
         }
@@ -818,6 +833,27 @@ mod tests {
             route("write_file", &args, &cfg(CompassMode::Rewrite)),
             CompassDecision::Suggest { .. }
         ));
+    }
+
+    #[test]
+    fn persona_can_prefer_fast_apply_between_structure_and_safe_patch() {
+        let args =
+            json!({"path": "src/lib.rs", "old_text": "let a = 1;", "new_text": "let a = 2;"});
+        let config = CompassConfig {
+            mode: CompassMode::Suggest,
+            persona: "fixer".to_string(),
+            prefer: vec!["edit_fast_apply".to_string()],
+        };
+        match route("str_replace", &args, &config) {
+            CompassDecision::Suggest {
+                target,
+                reminder_body,
+            } => {
+                assert_eq!(target, StructuralTarget::FastApply);
+                assert!(reminder_body.contains("edit_fast_apply"));
+            }
+            other => panic!("expected fast-apply Suggest, got {other:?}"),
+        }
     }
 
     #[test]

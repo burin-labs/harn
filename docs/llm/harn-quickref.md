@@ -946,6 +946,7 @@ log(response.logprobs)       // present when requested and returned
 |---|---|---|---|
 | `provider` | string | `"auto"` | Explicit provider wins. `"auto"` infers from `model`; see the resolution table below. |
 | `model` | string | (inferred) | `local:gemma-4-e4b-it` strips the `local:` transport prefix and routes through Ollama. |
+| `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal routing. Explicit options win. `model_role: "merge"` / `"fast_apply"` also reads `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
 | `max_tokens` | int | 16384 | |
 | `temperature` | float | provider default | |
 | `logprobs` | bool | false | Request token log probabilities when the selected provider route supports them. |
@@ -981,9 +982,11 @@ log(response.logprobs)       // present when requested and returned
 Provider auto-resolution precedence:
 
 1. Explicit `provider` option other than `"auto"` wins.
-2. `provider: "auto"` with a `model` infers from the model selector.
-3. If `provider` is omitted, `HARN_LLM_PROVIDER` wins when set; otherwise a `model` infers the provider.
-4. Unknown model IDs fall back to `HARN_DEFAULT_PROVIDER`, then the
+2. `model_role` fills missing provider/model/routing options from
+   `[model_roles.<role>]` or role env overrides.
+3. `provider: "auto"` with a `model` infers from the model selector.
+4. If `provider` is omitted, `HARN_LLM_PROVIDER` wins when set; otherwise a `model` infers the provider.
+5. Unknown model IDs fall back to `HARN_DEFAULT_PROVIDER`, then the
    configured default provider (`anthropic` in the built-in catalog),
    and emit a warning.
 

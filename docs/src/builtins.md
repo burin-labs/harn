@@ -1885,6 +1885,11 @@ tier = "frontier"
 
 [llm.model_defaults."qwen/*"]
 temperature = 0.3
+
+[llm.model_roles.merge]
+provider = "ollama"
+model = "qwen3.6-coding"
+temperature = 0.0
 ```
 
 ## Timers

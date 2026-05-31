@@ -37,6 +37,8 @@ pub struct ProvidersConfig {
     pub tier_defaults: TierDefaults,
     #[serde(default)]
     pub model_defaults: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    #[serde(default)]
+    pub model_roles: BTreeMap<String, BTreeMap<String, toml::Value>>,
 }
 
 impl ProvidersConfig {
@@ -50,6 +52,7 @@ impl ProvidersConfig {
             && self.inference_rules.is_empty()
             && self.tier_rules.is_empty()
             && self.model_defaults.is_empty()
+            && self.model_roles.is_empty()
             && self.tier_defaults.default == default_mid()
     }
 
@@ -91,6 +94,13 @@ impl ProvidersConfig {
         for (pattern, defaults) in &overlay.model_defaults {
             self.model_defaults
                 .entry(pattern.clone())
+                .or_default()
+                .extend(defaults.clone());
+        }
+
+        for (role, defaults) in &overlay.model_roles {
+            self.model_roles
+                .entry(role.clone())
                 .or_default()
                 .extend(defaults.clone());
         }
@@ -1239,6 +1249,133 @@ pub fn model_params(model_id: &str) -> BTreeMap<String, toml::Value> {
         }
     }
     params
+}
+
+/// Get per-role LLM defaults, e.g. `[model_roles.merge]`.
+///
+/// Role defaults are intentionally shaped like ordinary `llm_call` options:
+/// callers can pin `provider`/`model`, install `route_policy` or `prefer`,
+/// and tune budget/latency knobs without creating a parallel routing stack.
+/// Environment variables provide a lightweight operational override for
+/// merge/fast-apply workers:
+///
+/// - `HARN_LLM_MERGE_PROVIDER`, `HARN_LLM_MERGE_MODEL`,
+///   `HARN_LLM_MERGE_ROUTE_POLICY`
+/// - `HARN_LLM_FAST_APPLY_PROVIDER`, `HARN_LLM_FAST_APPLY_MODEL`,
+///   `HARN_LLM_FAST_APPLY_ROUTE_POLICY`
+/// - `HARN_LLM_ROLE_<ROLE>_PROVIDER`, `_MODEL`, `_ROUTE_POLICY`
+pub fn model_role_defaults(role: &str) -> BTreeMap<String, toml::Value> {
+    let normalized = normalize_model_role_name(role);
+    if normalized.is_empty() {
+        return BTreeMap::new();
+    }
+    let config = effective_config();
+    let mut params = BTreeMap::new();
+    for key in role_lookup_keys(&normalized) {
+        extend_model_role_defaults(&config, &key, &mut params);
+    }
+    apply_model_role_env_overrides(&normalized, &mut params);
+    params
+}
+
+fn extend_model_role_defaults(
+    config: &ProvidersConfig,
+    role: &str,
+    params: &mut BTreeMap<String, toml::Value>,
+) {
+    for (configured_role, defaults) in &config.model_roles {
+        if normalize_model_role_name(configured_role) == role {
+            params.extend(defaults.clone());
+        }
+    }
+    if let Some(defaults) = config.model_roles.get(role) {
+        params.extend(defaults.clone());
+    }
+}
+
+fn normalize_model_role_name(role: &str) -> String {
+    role.trim().to_ascii_lowercase().replace('-', "_")
+}
+
+fn role_lookup_keys(role: &str) -> Vec<String> {
+    if role == "merge" {
+        vec!["fast_apply".to_string(), "merge".to_string()]
+    } else if role == "fast_apply" {
+        vec!["merge".to_string(), "fast_apply".to_string()]
+    } else {
+        vec![role.to_string()]
+    }
+}
+
+fn role_env_token(role: &str) -> String {
+    role.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn apply_model_role_env_overrides(role: &str, params: &mut BTreeMap<String, toml::Value>) {
+    for alias in role_env_aliases(role) {
+        apply_model_role_env_var(&format!("HARN_LLM_{alias}_PROVIDER"), "provider", params);
+        apply_model_role_env_var(&format!("HARN_LLM_{alias}_MODEL"), "model", params);
+        apply_model_role_env_var(
+            &format!("HARN_LLM_{alias}_ROUTE_POLICY"),
+            "route_policy",
+            params,
+        );
+        apply_model_role_env_var(
+            &format!("HARN_LLM_ROLE_{alias}_PROVIDER"),
+            "provider",
+            params,
+        );
+        apply_model_role_env_var(&format!("HARN_LLM_ROLE_{alias}_MODEL"), "model", params);
+        apply_model_role_env_var(
+            &format!("HARN_LLM_ROLE_{alias}_ROUTE_POLICY"),
+            "route_policy",
+            params,
+        );
+    }
+}
+
+fn role_env_aliases(role: &str) -> Vec<String> {
+    let token = role_env_token(role);
+    if token.is_empty() {
+        return Vec::new();
+    }
+    if token == "MERGE" {
+        vec!["FAST_APPLY".to_string(), "MERGE".to_string()]
+    } else if token == "FAST_APPLY" {
+        vec!["MERGE".to_string(), "FAST_APPLY".to_string()]
+    } else {
+        vec![token]
+    }
+}
+
+fn apply_model_role_env_var(
+    env_name: &str,
+    option_name: &str,
+    params: &mut BTreeMap<String, toml::Value>,
+) {
+    let Ok(value) = std::env::var(env_name) else {
+        return;
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    params.insert(
+        option_name.to_string(),
+        toml::Value::String(trimmed.to_string()),
+    );
 }
 
 /// Get list of configured provider names.
