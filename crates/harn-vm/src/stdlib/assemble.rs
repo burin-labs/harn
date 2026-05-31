@@ -6,7 +6,6 @@
 //! context.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::orchestration::{
     assemble_context as core_assemble, build_candidate_chunks, ArtifactRecord, AssembleDedup,
@@ -43,9 +42,12 @@ async fn assemble_context_impl(
     {
         let mut candidate_dropped = Vec::new();
         let candidates = build_candidate_chunks(&artifacts, &options, &mut candidate_dropped);
-        let query_vm =
-            VmValue::String(Rc::from(options.query.clone().unwrap_or_default().as_str()));
-        let chunks_vm = VmValue::List(Rc::new(candidates.iter().map(chunk_to_ranker_vm).collect()));
+        let query_vm = VmValue::String(std::sync::Arc::from(
+            options.query.clone().unwrap_or_default().as_str(),
+        ));
+        let chunks_vm = VmValue::List(std::sync::Arc::new(
+            candidates.iter().map(chunk_to_ranker_vm).collect(),
+        ));
         let scores = invoke_ranker_callback(
             ctx,
             ranker.as_ref().unwrap(),
@@ -119,20 +121,20 @@ fn chunk_to_ranker_vm(chunk: &AssembledChunk) -> VmValue {
     let mut map = BTreeMap::new();
     map.insert(
         "id".to_string(),
-        VmValue::String(Rc::from(chunk.id.as_str())),
+        VmValue::String(std::sync::Arc::from(chunk.id.as_str())),
     );
     map.insert(
         "artifact_id".to_string(),
-        VmValue::String(Rc::from(chunk.artifact_id.as_str())),
+        VmValue::String(std::sync::Arc::from(chunk.artifact_id.as_str())),
     );
     map.insert(
         "artifact_kind".to_string(),
-        VmValue::String(Rc::from(chunk.artifact_kind.as_str())),
+        VmValue::String(std::sync::Arc::from(chunk.artifact_kind.as_str())),
     );
     if let Some(title) = chunk.title.as_ref() {
         map.insert(
             "title".to_string(),
-            VmValue::String(Rc::from(title.as_str())),
+            VmValue::String(std::sync::Arc::from(title.as_str())),
         );
     } else {
         map.insert("title".to_string(), VmValue::Nil);
@@ -140,14 +142,14 @@ fn chunk_to_ranker_vm(chunk: &AssembledChunk) -> VmValue {
     if let Some(source) = chunk.source.as_ref() {
         map.insert(
             "source".to_string(),
-            VmValue::String(Rc::from(source.as_str())),
+            VmValue::String(std::sync::Arc::from(source.as_str())),
         );
     } else {
         map.insert("source".to_string(), VmValue::Nil);
     }
     map.insert(
         "text".to_string(),
-        VmValue::String(Rc::from(chunk.text.as_str())),
+        VmValue::String(std::sync::Arc::from(chunk.text.as_str())),
     );
     map.insert(
         "estimated_tokens".to_string(),
@@ -161,7 +163,7 @@ fn chunk_to_ranker_vm(chunk: &AssembledChunk) -> VmValue {
         "chunk_count".to_string(),
         VmValue::Int(chunk.chunk_count as i64),
     );
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 async fn invoke_ranker_callback(
@@ -216,22 +218,22 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
             let mut map = BTreeMap::new();
             map.insert(
                 "id".to_string(),
-                VmValue::String(Rc::from(chunk.id.as_str())),
+                VmValue::String(std::sync::Arc::from(chunk.id.as_str())),
             );
             map.insert(
                 "artifact_id".to_string(),
-                VmValue::String(Rc::from(chunk.artifact_id.as_str())),
+                VmValue::String(std::sync::Arc::from(chunk.artifact_id.as_str())),
             );
             map.insert(
                 "artifact_kind".to_string(),
-                VmValue::String(Rc::from(chunk.artifact_kind.as_str())),
+                VmValue::String(std::sync::Arc::from(chunk.artifact_kind.as_str())),
             );
             map.insert(
                 "title".to_string(),
                 chunk
                     .title
                     .as_ref()
-                    .map(|title| VmValue::String(Rc::from(title.as_str())))
+                    .map(|title| VmValue::String(std::sync::Arc::from(title.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
             map.insert(
@@ -239,12 +241,12 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
                 chunk
                     .source
                     .as_ref()
-                    .map(|source| VmValue::String(Rc::from(source.as_str())))
+                    .map(|source| VmValue::String(std::sync::Arc::from(source.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
             map.insert(
                 "text".to_string(),
-                VmValue::String(Rc::from(chunk.text.as_str())),
+                VmValue::String(std::sync::Arc::from(chunk.text.as_str())),
             );
             map.insert(
                 "estimated_tokens".to_string(),
@@ -259,7 +261,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
                 VmValue::Int(chunk.chunk_count as i64),
             );
             map.insert("score".to_string(), VmValue::Float(chunk.score));
-            VmValue::Dict(Rc::new(map))
+            VmValue::Dict(std::sync::Arc::new(map))
         })
         .collect();
 
@@ -270,11 +272,11 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
             let mut map = BTreeMap::new();
             map.insert(
                 "artifact_id".to_string(),
-                VmValue::String(Rc::from(summary.artifact_id.as_str())),
+                VmValue::String(std::sync::Arc::from(summary.artifact_id.as_str())),
             );
             map.insert(
                 "artifact_kind".to_string(),
-                VmValue::String(Rc::from(summary.artifact_kind.as_str())),
+                VmValue::String(std::sync::Arc::from(summary.artifact_kind.as_str())),
             );
             map.insert(
                 "chunks_included".to_string(),
@@ -288,7 +290,7 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
                 "tokens_included".to_string(),
                 VmValue::Int(summary.tokens_included as i64),
             );
-            VmValue::Dict(Rc::new(map))
+            VmValue::Dict(std::sync::Arc::new(map))
         })
         .collect();
 
@@ -299,29 +301,29 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
             let mut map = BTreeMap::new();
             map.insert(
                 "artifact_id".to_string(),
-                VmValue::String(Rc::from(exclusion.artifact_id.as_str())),
+                VmValue::String(std::sync::Arc::from(exclusion.artifact_id.as_str())),
             );
             map.insert(
                 "chunk_id".to_string(),
                 exclusion
                     .chunk_id
                     .as_ref()
-                    .map(|id| VmValue::String(Rc::from(id.as_str())))
+                    .map(|id| VmValue::String(std::sync::Arc::from(id.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
             map.insert(
                 "reason".to_string(),
-                VmValue::String(Rc::from(exclusion.reason)),
+                VmValue::String(std::sync::Arc::from(exclusion.reason)),
             );
             map.insert(
                 "detail".to_string(),
                 exclusion
                     .detail
                     .as_ref()
-                    .map(|text| VmValue::String(Rc::from(text.as_str())))
+                    .map(|text| VmValue::String(std::sync::Arc::from(text.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
-            VmValue::Dict(Rc::new(map))
+            VmValue::Dict(std::sync::Arc::new(map))
         })
         .collect();
 
@@ -332,31 +334,43 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
             let mut map = BTreeMap::new();
             map.insert(
                 "chunk_id".to_string(),
-                VmValue::String(Rc::from(reason.chunk_id.as_str())),
+                VmValue::String(std::sync::Arc::from(reason.chunk_id.as_str())),
             );
             map.insert(
                 "artifact_id".to_string(),
-                VmValue::String(Rc::from(reason.artifact_id.as_str())),
+                VmValue::String(std::sync::Arc::from(reason.artifact_id.as_str())),
             );
             map.insert(
                 "strategy".to_string(),
-                VmValue::String(Rc::from(reason.strategy)),
+                VmValue::String(std::sync::Arc::from(reason.strategy)),
             );
             map.insert("score".to_string(), VmValue::Float(reason.score));
             map.insert("included".to_string(), VmValue::Bool(reason.included));
             map.insert(
                 "reason".to_string(),
-                VmValue::String(Rc::from(reason.reason)),
+                VmValue::String(std::sync::Arc::from(reason.reason)),
             );
-            VmValue::Dict(Rc::new(map))
+            VmValue::Dict(std::sync::Arc::new(map))
         })
         .collect();
 
     let mut map = BTreeMap::new();
-    map.insert("chunks".to_string(), VmValue::List(Rc::new(chunks)));
-    map.insert("included".to_string(), VmValue::List(Rc::new(included)));
-    map.insert("dropped".to_string(), VmValue::List(Rc::new(dropped)));
-    map.insert("reasons".to_string(), VmValue::List(Rc::new(reasons)));
+    map.insert(
+        "chunks".to_string(),
+        VmValue::List(std::sync::Arc::new(chunks)),
+    );
+    map.insert(
+        "included".to_string(),
+        VmValue::List(std::sync::Arc::new(included)),
+    );
+    map.insert(
+        "dropped".to_string(),
+        VmValue::List(std::sync::Arc::new(dropped)),
+    );
+    map.insert(
+        "reasons".to_string(),
+        VmValue::List(std::sync::Arc::new(reasons)),
+    );
     map.insert(
         "total_tokens".to_string(),
         VmValue::Int(assembled.total_tokens as i64),
@@ -367,13 +381,13 @@ fn assembled_to_vm(assembled: &AssembledContext) -> VmValue {
     );
     map.insert(
         "strategy".to_string(),
-        VmValue::String(Rc::from(assembled.strategy.as_str())),
+        VmValue::String(std::sync::Arc::from(assembled.strategy.as_str())),
     );
     map.insert(
         "dedup".to_string(),
-        VmValue::String(Rc::from(assembled.dedup.as_str())),
+        VmValue::String(std::sync::Arc::from(assembled.dedup.as_str())),
     );
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 /// Convenience entry point used by the agent_loop integration hook:
@@ -394,9 +408,12 @@ pub async fn assemble_from_options(
     {
         let mut candidate_dropped = Vec::new();
         let candidates = build_candidate_chunks(artifacts, &options, &mut candidate_dropped);
-        let query_vm =
-            VmValue::String(Rc::from(options.query.clone().unwrap_or_default().as_str()));
-        let chunks_vm = VmValue::List(Rc::new(candidates.iter().map(chunk_to_ranker_vm).collect()));
+        let query_vm = VmValue::String(std::sync::Arc::from(
+            options.query.clone().unwrap_or_default().as_str(),
+        ));
+        let chunks_vm = VmValue::List(std::sync::Arc::new(
+            candidates.iter().map(chunk_to_ranker_vm).collect(),
+        ));
         Some(
             invoke_ranker_callback(
                 ctx,

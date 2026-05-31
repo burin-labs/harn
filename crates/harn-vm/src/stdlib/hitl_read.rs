@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -78,10 +77,10 @@ async fn hitl_pending_builtin(
 async fn hitl_pending_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
     let filters = parse_filters(args.first())?;
     let Some(log) = active_event_log() else {
-        return Ok(VmValue::List(Rc::new(Vec::new())));
+        return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
     };
     let rows = read_pending_rows(&log, &filters).await?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         rows.into_iter().map(pending_row_to_value).collect(),
     )))
 }
@@ -196,28 +195,34 @@ fn pending_row_to_value(row: PendingHitlRow) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert(
         "request_id".to_string(),
-        VmValue::String(Rc::from(row.request_id)),
+        VmValue::String(std::sync::Arc::from(row.request_id)),
     );
     dict.insert(
         "request_kind".to_string(),
-        VmValue::String(Rc::from(row.request_kind)),
+        VmValue::String(std::sync::Arc::from(row.request_kind)),
     );
-    dict.insert("agent".to_string(), VmValue::String(Rc::from(row.agent)));
-    dict.insert("prompt".to_string(), VmValue::String(Rc::from(row.prompt)));
+    dict.insert(
+        "agent".to_string(),
+        VmValue::String(std::sync::Arc::from(row.agent)),
+    );
+    dict.insert(
+        "prompt".to_string(),
+        VmValue::String(std::sync::Arc::from(row.prompt)),
+    );
     dict.insert(
         "trace_id".to_string(),
-        VmValue::String(Rc::from(row.trace_id)),
+        VmValue::String(std::sync::Arc::from(row.trace_id)),
     );
     dict.insert(
         "timestamp".to_string(),
-        VmValue::String(Rc::from(row.timestamp)),
+        VmValue::String(std::sync::Arc::from(row.timestamp)),
     );
     dict.insert(
         "approvers".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             row.approvers
                 .into_iter()
-                .map(|value| VmValue::String(Rc::from(value)))
+                .map(|value| VmValue::String(std::sync::Arc::from(value)))
                 .collect(),
         )),
     );
@@ -225,7 +230,7 @@ fn pending_row_to_value(row: PendingHitlRow) -> VmValue {
         "metadata".to_string(),
         crate::stdlib::json_to_vm_value(&row.metadata),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn parse_filters(value: Option<&VmValue>) -> Result<HitlPendingFilters, VmError> {

@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_hostlib::{
     code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
@@ -17,7 +17,7 @@ fn dict(entries: &[(&str, VmValue)]) -> VmValue {
     for (k, v) in entries {
         map.insert((*k).to_string(), v.clone());
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
@@ -27,7 +27,7 @@ fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
     (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
 }
 
-fn extract_dict(value: &VmValue) -> Rc<BTreeMap<String, VmValue>> {
+fn extract_dict(value: &VmValue) -> Arc<BTreeMap<String, VmValue>> {
     match value {
         VmValue::Dict(d) => d.clone(),
         other => panic!("expected dict, got {other:?}"),
@@ -64,7 +64,7 @@ fn rebuild(registry: &BuiltinRegistry, root: &std::path::Path) {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(Rc::from(root.to_string_lossy().as_ref())),
+            VmValue::String(Arc::from(root.to_string_lossy().as_ref())),
         )]),
     );
 }
@@ -80,7 +80,7 @@ fn cypher_returns_function_by_name() {
         "hostlib_code_index_cypher",
         dict(&[(
             "query",
-            VmValue::String(Rc::from(
+            VmValue::String(Arc::from(
                 "MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path",
             )),
         )]),
@@ -109,8 +109,8 @@ fn branch_overlay_create_then_query_reports_reuse() {
         &reg,
         "hostlib_code_index_branch_overlay",
         dict(&[
-            ("action", VmValue::String(Rc::from("create"))),
-            ("branch", VmValue::String(Rc::from("topic/test"))),
+            ("action", VmValue::String(Arc::from("create"))),
+            ("branch", VmValue::String(Arc::from("topic/test"))),
         ]),
     );
     let d = extract_dict(&result);
@@ -129,7 +129,7 @@ fn branch_overlay_create_then_query_reports_reuse() {
     let result = call(
         &reg,
         "hostlib_code_index_branch_overlay",
-        dict(&[("action", VmValue::String(Rc::from("deactivate")))]),
+        dict(&[("action", VmValue::String(Arc::from("deactivate")))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("active").unwrap(), VmValue::Nil));
@@ -145,7 +145,7 @@ fn freshness_detects_post_index_edits() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[("path", VmValue::String(Rc::from("src/a.rs")))]),
+        dict(&[("path", VmValue::String(Arc::from("src/a.rs")))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("known").unwrap(), VmValue::Bool(true)));
@@ -160,7 +160,7 @@ fn freshness_detects_post_index_edits() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[("path", VmValue::String(Rc::from("src/a.rs")))]),
+        dict(&[("path", VmValue::String(Arc::from("src/a.rs")))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("stale").unwrap(), VmValue::Bool(true)));
@@ -175,7 +175,7 @@ fn freshness_reports_unknown_for_unindexed_paths() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[("path", VmValue::String(Rc::from("src/does-not-exist.rs")))]),
+        dict(&[("path", VmValue::String(Arc::from("src/does-not-exist.rs")))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("known").unwrap(), VmValue::Bool(false)));

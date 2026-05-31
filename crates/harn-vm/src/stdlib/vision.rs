@@ -940,7 +940,7 @@ mod tests {
             side_effect_level: Some("process_exec".to_string()),
             ..Default::default()
         };
-        let input = VmValue::String(Rc::from(outside_image.display().to_string()));
+        let input = VmValue::String(std::sync::Arc::from(outside_image.display().to_string()));
 
         crate::orchestration::push_execution_policy(policy);
         let result = normalize_image_input(Some(&input));

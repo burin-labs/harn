@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
@@ -15,7 +13,7 @@ fn agent_trace_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         .filter_map(|e| serde_json::to_value(e).ok())
         .map(|v| json_to_vm_value(&v))
         .collect();
-    Ok(VmValue::List(Rc::new(list)))
+    Ok(VmValue::List(std::sync::Arc::new(list)))
 }
 
 /// Return a summarized view of captured agent trace events.

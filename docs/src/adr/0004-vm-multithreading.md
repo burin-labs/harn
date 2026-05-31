@@ -112,3 +112,22 @@ concurrency model.
 - If a future use case needs *shared mutable* cross-thread state (not
   share-nothing message passing), revisit the global-lock model for that
   narrow surface only — but the default stays share-nothing.
+
+## Phase 1 result
+
+Phase 1 went **unconditional**. The focused `bench_vmenv_clone`
+single-thread hot-path benchmark kept the same allocation profile (one
+8-byte allocation per call) and did not show an `Arc` regression:
+
+| Capture count | `Rc` baseline median | `Arc` result median | Change |
+| --- | ---: | ---: | ---: |
+| 0 | 16.917 ns | 16.415 ns | -3.0% |
+| 5 | 36.608 ns | 34.175 ns | -6.6% |
+| 25 | 65.582 ns | 62.646 ns | -4.5% |
+| 100 | 77.296 ns | 71.802 ns | -7.1% |
+
+The measured result is below the 3-5% regression threshold, so adding a
+`send` feature split would add test-matrix and API complexity without a
+performance justification. Reference-count cycles remain unchanged and
+out of scope: the value graph is still reference-counted rather than
+tracing-GC-backed.

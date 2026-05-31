@@ -426,12 +426,12 @@ impl crate::vm::Vm {
                 }
             },
             "summary" => match args.first() {
-                Some(state) => Ok(VmValue::String(std::rc::Rc::from(
+                Some(state) => Ok(VmValue::String(std::sync::Arc::from(
                     state_counts(state)?.summary().as_str(),
                 ))),
                 None => {
                     let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
-                    Ok(VmValue::String(std::rc::Rc::from(snapshot.summary())))
+                    Ok(VmValue::String(std::sync::Arc::from(snapshot.summary())))
                 }
             },
             "resume_subagent" => {
@@ -483,7 +483,7 @@ impl crate::vm::Vm {
             }
             "current_pipeline_id" => Ok(crate::orchestration::current_mutation_session()
                 .and_then(|session| session.run_id.or(Some(session.session_id)))
-                .map(|id| VmValue::String(std::rc::Rc::from(id)))
+                .map(|id| VmValue::String(std::sync::Arc::from(id)))
                 .unwrap_or(VmValue::Nil)),
             "handoff_to" => Ok(record_handoff_envelope(args)),
             "emit_audit" => {
@@ -687,7 +687,7 @@ impl crate::vm::Vm {
                 };
                 let mut shuffled = items.as_ref().clone();
                 shuffled.shuffle(&mut rand::rng());
-                Ok(VmValue::List(std::rc::Rc::new(shuffled)))
+                Ok(VmValue::List(std::sync::Arc::new(shuffled)))
             }
             _ => Err(method_unsupported(handle, method)),
         }
@@ -722,7 +722,7 @@ impl crate::vm::Vm {
                     if let Some(body) = args.get(1) {
                         options.insert(
                             "body".to_string(),
-                            VmValue::String(std::rc::Rc::from(body.display())),
+                            VmValue::String(std::sync::Arc::from(body.display())),
                         );
                     }
                 }
@@ -869,7 +869,7 @@ impl crate::vm::Vm {
                             message: format!("MockHarness has no fs_read response for {path}"),
                             category: ErrorCategory::NotFound,
                         })?;
-                    Ok(VmValue::Bytes(std::rc::Rc::new(bytes.to_vec())))
+                    Ok(VmValue::Bytes(std::sync::Arc::new(bytes.to_vec())))
                 }
                 "read_text" => {
                     let path = string_arg(args, 0, "HarnessFs.read_text")?;
@@ -1630,20 +1630,20 @@ fn is_egress_blocked_dict(dict: &std::collections::BTreeMap<String, VmValue>) ->
 }
 
 fn tag_egress_dict(
-    dict: std::rc::Rc<std::collections::BTreeMap<String, VmValue>>,
-) -> std::rc::Rc<std::collections::BTreeMap<String, VmValue>> {
+    dict: std::sync::Arc<std::collections::BTreeMap<String, VmValue>>,
+) -> std::sync::Arc<std::collections::BTreeMap<String, VmValue>> {
     let mut next = (*dict).clone();
     if matches!(
         next.get("code"),
         Some(VmValue::String(value)) if value.as_ref() == HARN_CAP_201_CODE
     ) {
-        return std::rc::Rc::new(next);
+        return std::sync::Arc::new(next);
     }
     next.insert(
         "code".to_string(),
-        VmValue::String(std::rc::Rc::from(HARN_CAP_201_CODE)),
+        VmValue::String(std::sync::Arc::from(HARN_CAP_201_CODE)),
     );
-    std::rc::Rc::new(next)
+    std::sync::Arc::new(next)
 }
 
 fn method_unsupported(handle: &VmHarness, method: &str) -> VmError {
@@ -1809,15 +1809,15 @@ fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValu
                 out.insert("ok".to_string(), VmValue::Bool(true));
                 out.insert(
                     "status".to_string(),
-                    VmValue::String(std::rc::Rc::from("ok")),
+                    VmValue::String(std::sync::Arc::from("ok")),
                 );
                 out.insert(
                     "value".to_string(),
-                    VmValue::String(std::rc::Rc::from(line)),
+                    VmValue::String(std::sync::Arc::from(line)),
                 );
-                VmValue::Dict(std::rc::Rc::new(out))
+                VmValue::Dict(std::sync::Arc::new(out))
             } else {
-                VmValue::String(std::rc::Rc::from(line))
+                VmValue::String(std::sync::Arc::from(line))
             }
         }
         None => {
@@ -1826,9 +1826,9 @@ fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValu
                 out.insert("ok".to_string(), VmValue::Bool(false));
                 out.insert(
                     "status".to_string(),
-                    VmValue::String(std::rc::Rc::from("eof")),
+                    VmValue::String(std::sync::Arc::from("eof")),
                 );
-                VmValue::Dict(std::rc::Rc::new(out))
+                VmValue::Dict(std::sync::Arc::new(out))
             } else {
                 VmValue::Nil
             }

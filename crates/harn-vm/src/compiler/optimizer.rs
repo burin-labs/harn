@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use harn_parser::{DictEntry, Node, SNode};
 
@@ -33,7 +32,7 @@ fn constant_value(expr: &SNode) -> Option<VmValue> {
         Node::IntLiteral(value) => Some(VmValue::Int(*value)),
         Node::FloatLiteral(value) => Some(VmValue::Float(*value)),
         Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
-            Some(VmValue::String(Rc::from(value.as_str())))
+            Some(VmValue::String(std::sync::Arc::from(value.as_str())))
         }
         Node::BoolLiteral(value) => Some(VmValue::Bool(*value)),
         Node::NilLiteral => Some(VmValue::Nil),
@@ -64,7 +63,7 @@ fn constant_value(expr: &SNode) -> Option<VmValue> {
                 }
                 values.push(constant_value(item)?);
             }
-            Some(VmValue::List(Rc::new(values)))
+            Some(VmValue::List(std::sync::Arc::new(values)))
         }
         Node::DictLiteral(entries) => {
             if entries.len() > MAX_FOLDED_COLLECTION_ITEMS {
@@ -80,7 +79,7 @@ fn constant_value(expr: &SNode) -> Option<VmValue> {
                     constant_value(&entry.value)?,
                 );
             }
-            Some(VmValue::Dict(Rc::new(values)))
+            Some(VmValue::Dict(std::sync::Arc::new(values)))
         }
         _ => None,
     }
@@ -138,7 +137,7 @@ fn fold_add(left: VmValue, right: VmValue) -> Option<VmValue> {
             let mut out = String::with_capacity(len);
             out.push_str(&left);
             out.push_str(&right);
-            Some(VmValue::String(Rc::from(out)))
+            Some(VmValue::String(std::sync::Arc::from(out)))
         }
         (VmValue::List(left), VmValue::List(right)) => {
             let len = left.len().checked_add(right.len())?;
@@ -148,7 +147,7 @@ fn fold_add(left: VmValue, right: VmValue) -> Option<VmValue> {
             let mut out = Vec::with_capacity(len);
             out.extend(left.iter().cloned());
             out.extend(right.iter().cloned());
-            Some(VmValue::List(Rc::new(out)))
+            Some(VmValue::List(std::sync::Arc::new(out)))
         }
         (VmValue::Dict(left), VmValue::Dict(right)) => {
             let len = left.len().checked_add(right.len())?;
@@ -161,7 +160,7 @@ fn fold_add(left: VmValue, right: VmValue) -> Option<VmValue> {
                     .iter()
                     .map(|(key, value)| (key.clone(), value.clone())),
             );
-            Some(VmValue::Dict(Rc::new(out)))
+            Some(VmValue::Dict(std::sync::Arc::new(out)))
         }
         _ => None,
     }
@@ -190,7 +189,7 @@ fn fold_mul(left: VmValue, right: VmValue) -> Option<VmValue> {
             if len > MAX_FOLDED_STRING_BYTES {
                 return None;
             }
-            Some(VmValue::String(Rc::from(text.repeat(count))))
+            Some(VmValue::String(std::sync::Arc::from(text.repeat(count))))
         }
         _ => None,
     }

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_parser::{Attribute, DictEntry, Node, SNode, StructField, TypedParam};
 
@@ -109,14 +109,14 @@ impl Compiler {
                     nominal_type_names: fn_compiler.nominal_type_names(),
                     params: param_slots,
                     default_start: TypedParam::default_start(params),
-                    chunk: Rc::new(fn_compiler.chunk),
+                    chunk: Arc::new(fn_compiler.chunk),
                     is_generator: false,
                     is_stream: false,
                     has_rest_param: false,
                     has_runtime_type_checks,
                 };
                 let fn_idx = self.chunk.functions.len();
-                self.chunk.functions.push(Rc::new(func));
+                self.chunk.functions.push(Arc::new(func));
                 self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
             }
         }
@@ -169,14 +169,14 @@ impl Compiler {
             nominal_type_names: fn_compiler.nominal_type_names(),
             params: param_slots,
             default_start: None,
-            chunk: Rc::new(fn_compiler.chunk),
+            chunk: Arc::new(fn_compiler.chunk),
             is_generator: false,
             is_stream: false,
             has_rest_param: false,
             has_runtime_type_checks,
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(Rc::new(func));
+        self.chunk.functions.push(Arc::new(func));
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
         self.emit_define_binding(name, false);
         Ok(())

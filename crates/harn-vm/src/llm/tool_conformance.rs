@@ -6,7 +6,6 @@
 //! HTTP runner is a convenience around that classifier.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -790,17 +789,20 @@ fn probe_tool_registry() -> VmValue {
         vm_str("The marker value to echo."),
     );
     let mut params = BTreeMap::new();
-    params.insert("value".to_string(), VmValue::Dict(Rc::new(value_param)));
+    params.insert(
+        "value".to_string(),
+        VmValue::Dict(std::sync::Arc::new(value_param)),
+    );
     let tool = vm_dict(&[
         ("name", vm_str(TOOL_PROBE_TOOL_NAME)),
         ("description", vm_str("Echo the probe marker exactly.")),
-        ("parameters", VmValue::Dict(Rc::new(params))),
+        ("parameters", VmValue::Dict(std::sync::Arc::new(params))),
     ]);
-    vm_dict(&[("tools", VmValue::List(Rc::new(vec![tool])))])
+    vm_dict(&[("tools", VmValue::List(std::sync::Arc::new(vec![tool])))])
 }
 
 fn vm_str(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value))
+    VmValue::String(std::sync::Arc::from(value))
 }
 
 fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
@@ -808,7 +810,7 @@ fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
     for (key, value) in pairs {
         map.insert((*key).to_string(), value.clone());
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn has_raw_model_tool_tag(content: &str) -> bool {

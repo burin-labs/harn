@@ -14,7 +14,6 @@
 //! dating later is straightforward if drift becomes a real problem.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::time::Duration;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -81,26 +80,28 @@ fn parse_junit_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         Some(VmValue::Bytes(b)) => (**b).clone(),
         Some(VmValue::Nil) | None => Vec::new(),
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "parse_junit_xml: expected string or bytes, got {}",
-                other.type_name()
-            )))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!(
+                    "parse_junit_xml: expected string or bytes, got {}",
+                    other.type_name()
+                ),
+            ))));
         }
     };
     let records = parse_junit_xml(&bytes);
     let list: Vec<VmValue> = records.into_iter().map(record_to_value).collect();
-    Ok(VmValue::List(Rc::new(list)))
+    Ok(VmValue::List(std::sync::Arc::new(list)))
 }
 
 fn record_to_value(record: TestRecord) -> VmValue {
     let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
     map.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(record.name.as_str())),
+        VmValue::String(std::sync::Arc::from(record.name.as_str())),
     );
     map.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(record.status.as_str())),
+        VmValue::String(std::sync::Arc::from(record.status.as_str())),
     );
     map.insert(
         "duration_ms".to_string(),
@@ -110,24 +111,24 @@ fn record_to_value(record: TestRecord) -> VmValue {
         "message".to_string(),
         record
             .message
-            .map(|s| VmValue::String(Rc::from(s)))
+            .map(|s| VmValue::String(std::sync::Arc::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "stdout".to_string(),
         record
             .stdout
-            .map(|s| VmValue::String(Rc::from(s)))
+            .map(|s| VmValue::String(std::sync::Arc::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "stderr".to_string(),
         record
             .stderr
-            .map(|s| VmValue::String(Rc::from(s)))
+            .map(|s| VmValue::String(std::sync::Arc::from(s)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn parse_junit_xml(bytes: &[u8]) -> Vec<TestRecord> {

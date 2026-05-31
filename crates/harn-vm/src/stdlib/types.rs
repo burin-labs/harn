@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -14,13 +13,13 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
 #[harn_builtin(sig = "type_of(...args: any) -> string", category = "types")]
 fn type_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(Rc::from(val.type_name())))
+    Ok(VmValue::String(std::sync::Arc::from(val.type_name())))
 }
 
 #[harn_builtin(sig = "to_string(...args: any) -> string", category = "types")]
 fn to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(Rc::from(val.display())))
+    Ok(VmValue::String(std::sync::Arc::from(val.display())))
 }
 
 #[harn_builtin(sig = "to_int(...args: any) -> int", category = "types")]
@@ -142,9 +141,9 @@ fn unreachable_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 #[harn_builtin(sig = "to_list(...args: any) -> list", category = "types")]
 fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
-        VmValue::Set(s) => Ok(VmValue::List(std::rc::Rc::new(s.to_vec()))),
+        VmValue::Set(s) => Ok(VmValue::List(std::sync::Arc::new(s.to_vec()))),
         VmValue::List(l) => Ok(VmValue::List(l.clone())),
-        other => Ok(VmValue::List(std::rc::Rc::new(vec![other.clone()]))),
+        other => Ok(VmValue::List(std::sync::Arc::new(vec![other.clone()]))),
     }
 }
 
@@ -164,7 +163,7 @@ fn len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-// `==` is structural. `is_same` is identity (Rc::ptr_eq for heap values);
+// `==` is structural. `is_same` is identity (Arc::ptr_eq for heap values);
 // for primitive scalars it reduces to structural equality.
 #[harn_builtin(sig = "is_same(a: any, b: any) -> bool", category = "types")]
 fn is_same_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -179,9 +178,9 @@ fn is_same_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 #[harn_builtin(sig = "addr_of(value: any) -> string", category = "types")]
 fn addr_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let v = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(Rc::from(crate::value::value_identity_key(
-        v,
-    ))))
+    Ok(VmValue::String(std::sync::Arc::from(
+        crate::value::value_identity_key(v),
+    )))
 }
 
 // `drop(handle)` — close a stdlib handle deterministically. Dispatch is by

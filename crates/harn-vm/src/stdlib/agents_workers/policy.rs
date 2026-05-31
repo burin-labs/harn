@@ -217,25 +217,28 @@ fn fork_worker_transcript(transcript: VmValue) -> VmValue {
     let parent_id = dict.get("id").map(|value| value.display());
     let mut next = dict.clone();
     let new_id = uuid::Uuid::now_v7().to_string();
-    next.insert("id".to_string(), VmValue::String(std::rc::Rc::from(new_id)));
+    next.insert(
+        "id".to_string(),
+        VmValue::String(std::sync::Arc::from(new_id)),
+    );
     if let Some(parent_id) = parent_id.filter(|value| !value.is_empty()) {
         let metadata = match next.get("metadata") {
             Some(VmValue::Dict(metadata)) => {
                 let mut metadata = metadata.as_ref().clone();
                 metadata.insert(
                     "parent_transcript_id".to_string(),
-                    VmValue::String(std::rc::Rc::from(parent_id)),
+                    VmValue::String(std::sync::Arc::from(parent_id)),
                 );
-                VmValue::Dict(std::rc::Rc::new(metadata))
+                VmValue::Dict(std::sync::Arc::new(metadata))
             }
-            _ => VmValue::Dict(std::rc::Rc::new(BTreeMap::from([(
+            _ => VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "parent_transcript_id".to_string(),
-                VmValue::String(std::rc::Rc::from(parent_id)),
+                VmValue::String(std::sync::Arc::from(parent_id)),
             )]))),
         };
         next.insert("metadata".to_string(), metadata);
     }
-    VmValue::Dict(std::rc::Rc::new(next))
+    VmValue::Dict(std::sync::Arc::new(next))
 }
 
 pub(in super::super) async fn compact_worker_transcript(
@@ -289,15 +292,15 @@ pub(in super::super) async fn compact_worker_transcript(
     let mut next = dict.clone();
     next.insert(
         "messages".to_string(),
-        VmValue::List(std::rc::Rc::new(vm_messages)),
+        VmValue::List(std::sync::Arc::new(vm_messages)),
     );
     next.insert(
         "events".to_string(),
-        VmValue::List(std::rc::Rc::new(events)),
+        VmValue::List(std::sync::Arc::new(events)),
     );
     next.insert(
         "summary".to_string(),
-        VmValue::String(std::rc::Rc::from(outcome.summary)),
+        VmValue::String(std::sync::Arc::from(outcome.summary)),
     );
-    Ok(VmValue::Dict(std::rc::Rc::new(next)))
+    Ok(VmValue::Dict(std::sync::Arc::new(next)))
 }

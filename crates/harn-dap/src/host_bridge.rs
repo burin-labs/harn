@@ -205,7 +205,7 @@ impl DapHostBridge {
         operation: &str,
     ) -> Result<DapHostCallReply, VmError> {
         rx.recv_timeout(REVERSE_REQUEST_TIMEOUT).map_err(|_| {
-            VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "harnHostCall timed out after {}s ({capability}.{operation})",
                 REVERSE_REQUEST_TIMEOUT.as_secs()
             ))))
@@ -238,7 +238,9 @@ impl HostCallBridge for DapHostBridge {
                 "host_call",
                 &format!("✗ {capability}.{operation} ({elapsed_ms}ms): {detail}"),
             );
-            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(detail))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                detail,
+            ))));
         }
         self.emit_output(
             "host_call",
@@ -376,8 +378,8 @@ fn json_to_vm_value(value: Value) -> VmValue {
                 VmValue::Nil
             }
         }
-        Value::String(s) => VmValue::String(std::rc::Rc::from(s)),
-        Value::Array(arr) => VmValue::List(std::rc::Rc::new(
+        Value::String(s) => VmValue::String(std::sync::Arc::from(s)),
+        Value::Array(arr) => VmValue::List(std::sync::Arc::new(
             arr.into_iter().map(json_to_vm_value).collect(),
         )),
         Value::Object(obj) => {
@@ -385,7 +387,7 @@ fn json_to_vm_value(value: Value) -> VmValue {
                 .into_iter()
                 .map(|(k, v)| (k, json_to_vm_value(v)))
                 .collect();
-            VmValue::Dict(std::rc::Rc::new(map))
+            VmValue::Dict(std::sync::Arc::new(map))
         }
     }
 }
@@ -510,8 +512,6 @@ mod tests {
     /// Spawn a helper that waits for the bridge to register a pending
     /// reverse-request and then delivers `reply` for it. Returns a
     /// `JoinHandle` so the caller can `join()` after `dispatch` returns.
-    /// VmValue is `!Send`, so we never move VmValue across threads in
-    /// these tests — only `Send` types (DapHostCallReply, scalars) do.
     fn spawn_replier(pending: PendingMap, reply: DapHostCallReply) -> thread::JoinHandle<()> {
         thread::spawn(move || {
             let req_seq = await_pending_seq(&pending);
@@ -532,7 +532,7 @@ mod tests {
         );
 
         let mut params = BTreeMap::new();
-        params.insert("path".into(), VmValue::String(std::rc::Rc::from("foo")));
+        params.insert("path".into(), VmValue::String(std::sync::Arc::from("foo")));
         let result = bridge
             .dispatch("workspace", "read_text", &params)
             .expect("dispatch ok")

@@ -34,7 +34,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -123,10 +122,10 @@ async fn pg_listen_impl(
     let mut meta = BTreeMap::new();
     meta.insert(
         "channels".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             channels
                 .iter()
-                .map(|c| VmValue::String(Rc::from(c.as_str())))
+                .map(|c| VmValue::String(std::sync::Arc::from(c.as_str())))
                 .collect(),
         )),
     );
@@ -179,23 +178,25 @@ async fn pg_listener_recv_impl(
     let mut dict = BTreeMap::new();
     dict.insert(
         "channel".to_string(),
-        VmValue::String(Rc::from(channel.clone())),
+        VmValue::String(std::sync::Arc::from(channel.clone())),
     );
     dict.insert(
         "payload".to_string(),
-        VmValue::String(Rc::from(payload.clone())),
+        VmValue::String(std::sync::Arc::from(payload.clone())),
     );
     dict.insert(
         "process_id".to_string(),
         VmValue::Int(i64::from(notification.process_id())),
     );
-    let value = VmValue::Dict(Rc::new(dict));
+    let value = VmValue::Dict(std::sync::Arc::new(dict));
 
     if record.bridge {
         let parsed_payload: serde_json::Value = serde_json::from_str(&payload)
             .unwrap_or_else(|_| serde_json::Value::String(payload.clone()));
         let mut emit_args = Vec::with_capacity(2);
-        emit_args.push(VmValue::String(Rc::from(format!("pg:{channel}"))));
+        emit_args.push(VmValue::String(std::sync::Arc::from(format!(
+            "pg:{channel}"
+        ))));
         emit_args.push(crate::stdlib::json_to_vm_value(&parsed_payload));
         let mut child = ctx.child_vm();
         let _ = child.call_named_builtin("emit_channel", emit_args).await;
@@ -252,7 +253,7 @@ async fn pg_notify_impl(
     let payload_value = args
         .get(2)
         .cloned()
-        .unwrap_or(VmValue::String(Rc::from("")));
+        .unwrap_or(VmValue::String(std::sync::Arc::from("")));
     let payload = match &payload_value {
         VmValue::Nil => String::new(),
         VmValue::String(text) => text.to_string(),
@@ -266,8 +267,8 @@ async fn pg_notify_impl(
     // synthesis. Channel names go in the first bind position too.
     let sql = "SELECT pg_notify($1, $2)";
     let params = [
-        VmValue::String(Rc::from(channel)),
-        VmValue::String(Rc::from(payload)),
+        VmValue::String(std::sync::Arc::from(channel)),
+        VmValue::String(std::sync::Arc::from(payload)),
     ];
     super::execute_stmt(target, sql, &params).await?;
     Ok(VmValue::Bool(true))
@@ -340,12 +341,12 @@ mod tests {
 
     #[test]
     fn parse_channel_list_accepts_string_or_list() {
-        let one = parse_channel_list(&VmValue::String(Rc::from("foo"))).unwrap();
+        let one = parse_channel_list(&VmValue::String(std::sync::Arc::from("foo"))).unwrap();
         assert_eq!(one, vec!["foo"]);
-        let many = parse_channel_list(&VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("foo")),
-            VmValue::String(Rc::from("bar")),
-            VmValue::String(Rc::from("foo")),
+        let many = parse_channel_list(&VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("foo")),
+            VmValue::String(std::sync::Arc::from("bar")),
+            VmValue::String(std::sync::Arc::from("foo")),
         ])))
         .unwrap();
         assert_eq!(many, vec!["bar", "foo"]);

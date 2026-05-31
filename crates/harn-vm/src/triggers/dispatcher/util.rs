@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -120,9 +119,9 @@ pub(super) fn event_to_handler_value(event: &TriggerEvent) -> Result<VmValue, Di
             let mut map = (*dict).clone();
             map.insert(
                 "raw_body".to_string(),
-                VmValue::Bytes(Rc::new(raw_body.clone())),
+                VmValue::Bytes(std::sync::Arc::new(raw_body.clone())),
             );
-            Ok(VmValue::Dict(Rc::new(map)))
+            Ok(VmValue::Dict(std::sync::Arc::new(map)))
         }
         (_, other) => Ok(other),
     }

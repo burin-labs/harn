@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -167,7 +166,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
 fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(value) = read_env_value(&name) {
-        return Ok(VmValue::String(Rc::from(value)));
+        return Ok(VmValue::String(std::sync::Arc::from(value)));
     }
     Ok(VmValue::Nil)
 }
@@ -180,7 +179,7 @@ fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
     if let Some(value) = read_env_value(&name) {
-        return Ok(VmValue::String(Rc::from(value)));
+        return Ok(VmValue::String(std::sync::Arc::from(value)));
     }
     Ok(default)
 }
@@ -194,7 +193,7 @@ fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(sig = "exec(...command: string) -> dict", category = "process")]
 fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "exec: command is required",
         ))));
     }
@@ -208,7 +207,7 @@ fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let cmd = args.first().map(|a| a.display()).unwrap_or_default();
     if cmd.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "shell: command string is required",
         ))));
     }
@@ -224,7 +223,7 @@ fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 )]
 fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "exec_at: directory and command are required",
         ))));
     }
@@ -241,14 +240,14 @@ fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 )]
 fn shell_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "shell_at: directory and command string are required",
         ))));
     }
     let dir = args[0].display();
     let cmd = args[1].display();
     if cmd.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "shell_at: command string is required",
         ))));
     }
@@ -263,7 +262,7 @@ fn username_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_default();
-    Ok(VmValue::String(Rc::from(user)))
+    Ok(VmValue::String(std::sync::Arc::from(user)))
 }
 
 #[harn_builtin(sig = "hostname() -> string", category = "process")]
@@ -278,7 +277,7 @@ fn hostname_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                 .ok_or(std::env::VarError::NotPresent)
         })
         .unwrap_or_default();
-    Ok(VmValue::String(Rc::from(name)))
+    Ok(VmValue::String(std::sync::Arc::from(name)))
 }
 
 #[harn_builtin(sig = "platform(...args: any) -> string", category = "process")]
@@ -292,12 +291,14 @@ fn platform_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     } else {
         std::env::consts::OS
     };
-    Ok(VmValue::String(Rc::from(os)))
+    Ok(VmValue::String(std::sync::Arc::from(os)))
 }
 
 #[harn_builtin(sig = "arch() -> string", category = "process")]
 fn arch_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(Rc::from(std::env::consts::ARCH)))
+    Ok(VmValue::String(std::sync::Arc::from(
+        std::env::consts::ARCH,
+    )))
 }
 
 #[harn_builtin(sig = "home_dir() -> string", category = "process")]
@@ -305,7 +306,7 @@ fn home_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_default();
-    Ok(VmValue::String(Rc::from(home)))
+    Ok(VmValue::String(std::sync::Arc::from(home)))
 }
 
 #[harn_builtin(sig = "pid(...args: any) -> int", category = "process")]
@@ -323,7 +324,7 @@ fn date_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     // visible instead of silently corrupting tapes.
     let now = crate::clock_mock::leak_audit::wall_now("stdlib/date_iso");
     let dt: chrono::DateTime<chrono::Utc> = now.into();
-    Ok(VmValue::String(Rc::from(
+    Ok(VmValue::String(std::sync::Arc::from(
         dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     )))
 }
@@ -338,19 +339,19 @@ fn cwd_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
                 .map(|p| p.to_string_lossy().into_owned())
         })
         .unwrap_or_default();
-    Ok(VmValue::String(Rc::from(dir)))
+    Ok(VmValue::String(std::sync::Arc::from(dir)))
 }
 
 #[harn_builtin(sig = "execution_root() -> string", category = "process")]
 fn execution_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(Rc::from(
+    Ok(VmValue::String(std::sync::Arc::from(
         execution_root_path().to_string_lossy().into_owned(),
     )))
 }
 
 #[harn_builtin(sig = "asset_root() -> string", category = "process")]
 fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(Rc::from(
+    Ok(VmValue::String(std::sync::Arc::from(
         asset_root_path().to_string_lossy().into_owned(),
     )))
 }
@@ -361,17 +362,19 @@ fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let mut paths = BTreeMap::new();
     paths.insert(
         "execution_root".to_string(),
-        VmValue::String(Rc::from(
+        VmValue::String(std::sync::Arc::from(
             execution_root_path().to_string_lossy().into_owned(),
         )),
     );
     paths.insert(
         "asset_root".to_string(),
-        VmValue::String(Rc::from(asset_root_path().to_string_lossy().into_owned())),
+        VmValue::String(std::sync::Arc::from(
+            asset_root_path().to_string_lossy().into_owned(),
+        )),
     );
     paths.insert(
         "state_root".to_string(),
-        VmValue::String(Rc::from(
+        VmValue::String(std::sync::Arc::from(
             crate::runtime_paths::state_root(&runtime_base)
                 .to_string_lossy()
                 .into_owned(),
@@ -379,7 +382,7 @@ fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     );
     paths.insert(
         "run_root".to_string(),
-        VmValue::String(Rc::from(
+        VmValue::String(std::sync::Arc::from(
             crate::runtime_paths::run_root(&runtime_base)
                 .to_string_lossy()
                 .into_owned(),
@@ -387,13 +390,13 @@ fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     );
     paths.insert(
         "worktree_root".to_string(),
-        VmValue::String(Rc::from(
+        VmValue::String(std::sync::Arc::from(
             crate::runtime_paths::worktree_root(&runtime_base)
                 .to_string_lossy()
                 .into_owned(),
         )),
     );
-    Ok(VmValue::Dict(Rc::new(paths)))
+    Ok(VmValue::Dict(std::sync::Arc::new(paths)))
 }
 
 #[harn_builtin(sig = "spawn_captured(opts: dict) -> dict", category = "process")]
@@ -523,7 +526,7 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
 
     let started = Instant::now();
     let mut child = command.spawn().map_err(|error| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "spawn_captured: failed to spawn '{cmd}': {error}"
         ))))
     })?;
@@ -537,9 +540,9 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         None => match child.wait_with_output() {
             Ok(output) => (output, false),
             Err(error) => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "spawn_captured: wait failed: {error}"
-                )))));
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!("spawn_captured: wait failed: {error}"),
+                ))));
             }
         },
         Some(limit) => {
@@ -558,9 +561,9 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
                         std::thread::sleep(Duration::from_millis(10));
                     }
                     Err(error) => {
-                        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                            "spawn_captured: poll failed: {error}"
-                        )))));
+                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                            format!("spawn_captured: poll failed: {error}"),
+                        ))));
                     }
                 }
             }
@@ -603,9 +606,9 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
                 match child.wait_with_output() {
                     Ok(output) => (output, false),
                     Err(error) => {
-                        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                            "spawn_captured: wait failed: {error}"
-                        )))));
+                        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                            format!("spawn_captured: wait failed: {error}"),
+                        ))));
                     }
                 }
             }
@@ -627,16 +630,20 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
     result.insert("exit_code".to_string(), VmValue::Int(exit_code));
     result.insert(
         "stdout".to_string(),
-        VmValue::String(Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())),
+        VmValue::String(std::sync::Arc::from(
+            String::from_utf8_lossy(&output.stdout).as_ref(),
+        )),
     );
     result.insert(
         "stderr".to_string(),
-        VmValue::String(Rc::from(String::from_utf8_lossy(&output.stderr).as_ref())),
+        VmValue::String(std::sync::Arc::from(
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        )),
     );
     result.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
     result.insert("success".to_string(), VmValue::Bool(success));
     result.insert("timed_out".to_string(), VmValue::Bool(timed_out));
-    Ok(VmValue::Dict(Rc::new(result)))
+    Ok(VmValue::Dict(std::sync::Arc::new(result)))
 }
 
 /// Find the project root by walking up from a base directory looking for harn.toml.
@@ -663,12 +670,14 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
 fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let dir = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
     match dir {
-        Some(d) => Ok(VmValue::String(Rc::from(d.to_string_lossy().into_owned()))),
+        Some(d) => Ok(VmValue::String(std::sync::Arc::from(
+            d.to_string_lossy().into_owned(),
+        ))),
         None => {
             let cwd = std::env::current_dir()
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            Ok(VmValue::String(Rc::from(cwd)))
+            Ok(VmValue::String(std::sync::Arc::from(cwd)))
         }
     }
 }
@@ -681,7 +690,7 @@ fn project_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
     match find_project_root(&base) {
-        Some(root) => Ok(VmValue::String(Rc::from(
+        Some(root) => Ok(VmValue::String(std::sync::Arc::from(
             root.to_string_lossy().into_owned(),
         ))),
         None => Ok(VmValue::Nil),
@@ -694,11 +703,15 @@ fn vm_output_to_value(output: std::process::Output) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert(
         "stdout".to_string(),
-        VmValue::String(Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())),
+        VmValue::String(std::sync::Arc::from(
+            String::from_utf8_lossy(&output.stdout).as_ref(),
+        )),
     );
     result.insert(
         "stderr".to_string(),
-        VmValue::String(Rc::from(String::from_utf8_lossy(&output.stderr).as_ref())),
+        VmValue::String(std::sync::Arc::from(
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        )),
     );
     result.insert(
         "status".to_string(),
@@ -708,7 +721,7 @@ fn vm_output_to_value(output: std::process::Output) -> VmValue {
         "success".to_string(),
         VmValue::Bool(output.status.success()),
     );
-    VmValue::Dict(Rc::new(result))
+    VmValue::Dict(std::sync::Arc::new(result))
 }
 
 fn exec_command(
@@ -770,9 +783,9 @@ fn process_command_config(
 
 fn prefix_process_error(error: VmError, prefix: &str) -> VmError {
     match error {
-        VmError::Thrown(VmValue::String(message)) => VmError::Thrown(VmValue::String(Rc::from(
-            format!("{prefix} failed: {message}"),
-        ))),
+        VmError::Thrown(VmValue::String(message)) => VmError::Thrown(VmValue::String(
+            std::sync::Arc::from(format!("{prefix} failed: {message}")),
+        )),
         other => other,
     }
 }

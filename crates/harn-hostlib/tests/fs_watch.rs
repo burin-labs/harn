@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_hostlib::{fs_watch::FsWatchCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
@@ -12,15 +12,15 @@ fn registry() -> BuiltinRegistry {
 }
 
 fn str_value(value: impl AsRef<str>) -> VmValue {
-    VmValue::String(Rc::from(value.as_ref()))
+    VmValue::String(Arc::from(value.as_ref()))
 }
 
 fn list(values: &[&str]) -> VmValue {
-    VmValue::List(Rc::new(values.iter().map(str_value).collect()))
+    VmValue::List(Arc::new(values.iter().map(str_value).collect()))
 }
 
 fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
-    VmValue::Dict(Rc::new(
+    VmValue::Dict(Arc::new(
         entries
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))

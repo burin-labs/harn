@@ -473,7 +473,7 @@ fn declared_mcp_tool_name_for_tool(tools_val: Option<&VmValue>, tool_name: &str)
 pub(super) fn find_tool_handler(
     tools_val: Option<&VmValue>,
     tool_name: &str,
-) -> Option<Rc<VmClosure>> {
+) -> Option<std::sync::Arc<VmClosure>> {
     let dict = tools_val?.as_dict()?;
     let tools_list = match dict.get("tools") {
         Some(VmValue::List(l)) => l,
@@ -490,7 +490,7 @@ pub(super) fn find_tool_handler(
         };
         if name == tool_name {
             if let Some(VmValue::Closure(c)) = entry.get("handler") {
-                return Some(Rc::clone(c));
+                return Some(std::sync::Arc::clone(c));
             }
             return None;
         }
@@ -517,13 +517,16 @@ mod tests {
             .map(|(name, mut entry)| {
                 entry
                     .entry("name".to_string())
-                    .or_insert_with(|| VmValue::String(Rc::from(name.to_string())));
-                VmValue::Dict(Rc::new(entry))
+                    .or_insert_with(|| VmValue::String(std::sync::Arc::from(name.to_string())));
+                VmValue::Dict(std::sync::Arc::new(entry))
             })
             .collect();
         let mut dict = BTreeMap::new();
-        dict.insert("tools".to_string(), VmValue::List(Rc::new(list)));
-        VmValue::Dict(Rc::new(dict))
+        dict.insert(
+            "tools".to_string(),
+            VmValue::List(std::sync::Arc::new(list)),
+        );
+        VmValue::Dict(std::sync::Arc::new(dict))
     }
 
     #[test]
@@ -551,7 +554,7 @@ mod tests {
         let mut entry = BTreeMap::new();
         entry.insert(
             "_mcp_server".to_string(),
-            VmValue::String(Rc::from("linear".to_string())),
+            VmValue::String(std::sync::Arc::from("linear".to_string())),
         );
         let tools = tools_dict(vec![("create_issue", entry)]);
         assert_eq!(
@@ -567,21 +570,26 @@ mod tests {
         let mut function = BTreeMap::new();
         function.insert(
             "name".to_string(),
-            VmValue::String(Rc::from("create_issue".to_string())),
+            VmValue::String(std::sync::Arc::from("create_issue".to_string())),
         );
         function.insert(
             "_mcp_server".to_string(),
-            VmValue::String(Rc::from("linear".to_string())),
+            VmValue::String(std::sync::Arc::from("linear".to_string())),
         );
         let mut entry = BTreeMap::new();
-        entry.insert("function".to_string(), VmValue::Dict(Rc::new(function)));
+        entry.insert(
+            "function".to_string(),
+            VmValue::Dict(std::sync::Arc::new(function)),
+        );
         // The outer entry has no `name` — fall back to function.name.
         let mut dict = BTreeMap::new();
         dict.insert(
             "tools".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(entry))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+                std::sync::Arc::new(entry),
+            )])),
         );
-        let tools = VmValue::Dict(Rc::new(dict));
+        let tools = VmValue::Dict(std::sync::Arc::new(dict));
         assert_eq!(
             mcp_server_for_tool(Some(&tools), "create_issue"),
             Some("linear".to_string())
@@ -647,7 +655,7 @@ mod tests {
         let mut entry = BTreeMap::new();
         entry.insert(
             "_mcp_server".to_string(),
-            VmValue::String(Rc::from("linear".to_string())),
+            VmValue::String(std::sync::Arc::from("linear".to_string())),
         );
         let tools = tools_dict(vec![("create_issue", entry)]);
         let args = serde_json::json!({});
@@ -688,11 +696,11 @@ mod tests {
         let mut entry = BTreeMap::new();
         entry.insert(
             "executor".to_string(),
-            VmValue::String(Rc::from("host_bridge")),
+            VmValue::String(std::sync::Arc::from("host_bridge")),
         );
         entry.insert(
             "host_capability".to_string(),
-            VmValue::String(Rc::from("interaction.ask")),
+            VmValue::String(std::sync::Arc::from("interaction.ask")),
         );
         let tools = tools_dict(vec![("ask_user", entry)]);
         let outcome = dispatch_tool_execution(
@@ -715,7 +723,7 @@ mod tests {
         let mut entry = BTreeMap::new();
         entry.insert(
             "executor".to_string(),
-            VmValue::String(Rc::from("provider_native")),
+            VmValue::String(std::sync::Arc::from("provider_native")),
         );
         let tools = tools_dict(vec![("tool_search", entry)]);
         let outcome = dispatch_tool_execution(
@@ -745,11 +753,11 @@ mod tests {
         let mut entry = BTreeMap::new();
         entry.insert(
             "executor".to_string(),
-            VmValue::String(Rc::from("mcp_server")),
+            VmValue::String(std::sync::Arc::from("mcp_server")),
         );
         entry.insert(
             "mcp_server".to_string(),
-            VmValue::String(Rc::from("github")),
+            VmValue::String(std::sync::Arc::from("github")),
         );
         let tools = tools_dict(vec![("github_search_issues", entry)]);
         let outcome = dispatch_tool_execution(

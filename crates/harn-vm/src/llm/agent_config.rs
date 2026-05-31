@@ -29,17 +29,26 @@ const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
 pub(crate) fn agent_feedback_message(kind: &str, content: &str) -> VmValue {
     let mut msg = std::collections::BTreeMap::new();
     if kind == PREFILL_ASSISTANT_FEEDBACK_KIND {
-        msg.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
+        msg.insert(
+            "role".to_string(),
+            VmValue::String(std::sync::Arc::from("assistant")),
+        );
         msg.insert(
             "content".to_string(),
-            VmValue::String(Rc::from(content.to_string())),
+            VmValue::String(std::sync::Arc::from(content.to_string())),
         );
-        return VmValue::Dict(Rc::new(msg));
+        return VmValue::Dict(std::sync::Arc::new(msg));
     }
     let body = format!("<runtime_feedback kind=\"{kind}\">\n{content}\n</runtime_feedback>");
-    msg.insert("role".to_string(), VmValue::String(Rc::from("user")));
-    msg.insert("content".to_string(), VmValue::String(Rc::from(body)));
-    VmValue::Dict(Rc::new(msg))
+    msg.insert(
+        "role".to_string(),
+        VmValue::String(std::sync::Arc::from("user")),
+    );
+    msg.insert(
+        "content".to_string(),
+        VmValue::String(std::sync::Arc::from(body)),
+    );
+    VmValue::Dict(std::sync::Arc::new(msg))
 }
 
 fn system_prompt_transcript_metadata(system: Option<&String>) -> Option<serde_json::Value> {

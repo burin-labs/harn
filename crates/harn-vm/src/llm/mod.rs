@@ -611,7 +611,7 @@ async fn llm_completion_builtin(
         }
     });
     let opts = extract_llm_options(&[
-        VmValue::String(Rc::from(prefix.clone())),
+        VmValue::String(std::sync::Arc::from(prefix.clone())),
         args.get(2).cloned().unwrap_or(VmValue::Nil),
         args.get(3).cloned().unwrap_or(VmValue::Nil),
     ])?;
@@ -684,7 +684,6 @@ mod tests {
     use super::{execute_llm_call, reset_llm_state, structured_output_errors};
     use crate::llm::mock;
     use crate::value::VmValue;
-    use std::rc::Rc;
 
     fn base_opts() -> LlmCallOptions {
         LlmCallOptions {
@@ -781,8 +780,11 @@ mod tests {
     fn output_validation_accepts_matching_schema() {
         let opts = base_opts();
         let mut map = std::collections::BTreeMap::new();
-        map.insert("name".to_string(), VmValue::String(Rc::from("Ada")));
-        let data = VmValue::Dict(Rc::new(map));
+        map.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from("Ada")),
+        );
+        let data = VmValue::Dict(std::sync::Arc::new(map));
         let errors = compute_validation_errors(&data, &opts);
         assert!(errors.is_empty(), "schema should pass: {errors:?}");
     }
@@ -792,7 +794,7 @@ mod tests {
         let opts = base_opts();
         let mut map = std::collections::BTreeMap::new();
         map.insert("name".to_string(), VmValue::Int(42));
-        let data = VmValue::Dict(Rc::new(map));
+        let data = VmValue::Dict(std::sync::Arc::new(map));
         let errors = compute_validation_errors(&data, &opts);
         assert!(!errors.is_empty(), "schema should fail");
         assert!(errors.join(" ").contains("string"));
@@ -800,20 +802,20 @@ mod tests {
 
     #[test]
     fn structured_output_errors_report_missing_json() {
-        let result = VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+        let result = VmValue::Dict(std::sync::Arc::new(std::collections::BTreeMap::from([
             (
                 "text".to_string(),
-                VmValue::String(Rc::from("Analyzing the task")),
+                VmValue::String(std::sync::Arc::from("Analyzing the task")),
             ),
             (
                 "protocol_violations".to_string(),
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from(
-                    "stray text outside response tags",
-                ))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from("stray text outside response tags"),
+                )])),
             ),
             (
                 "stop_reason".to_string(),
-                VmValue::String(Rc::from("length")),
+                VmValue::String(std::sync::Arc::from("length")),
             ),
         ])));
 

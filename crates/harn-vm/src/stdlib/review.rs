@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -150,8 +149,8 @@ async fn self_review_impl(
             .cloned()
             .ok_or_else(|| VmError::Runtime("self_review: invalid llm options".to_string()))?;
         let extracted = extract_llm_options(&[
-            VmValue::String(Rc::from(prompt.as_str())),
-            VmValue::String(Rc::from(system.as_str())),
+            VmValue::String(std::sync::Arc::from(prompt.as_str())),
+            VmValue::String(std::sync::Arc::from(system.as_str())),
             options.clone(),
         ])?;
         let response = execute_llm_call(ctx, extracted, Some(options_dict), None).await?;
@@ -779,11 +778,13 @@ mod tests {
         assert_eq!(default.1.as_deref(), Some("default"));
         assert!(default.0.contains("test coverage"));
 
-        let code = resolve_rubric(Some(&VmValue::String(Rc::from("code"))));
+        let code = resolve_rubric(Some(&VmValue::String(std::sync::Arc::from("code"))));
         assert_eq!(code.1.as_deref(), Some("code"));
         assert!(code.0.contains("regressions"));
 
-        let custom = resolve_rubric(Some(&VmValue::String(Rc::from("focus on docs drift"))));
+        let custom = resolve_rubric(Some(&VmValue::String(std::sync::Arc::from(
+            "focus on docs drift",
+        ))));
         assert_eq!(custom.1, None);
         assert_eq!(custom.0, "focus on docs drift");
     }

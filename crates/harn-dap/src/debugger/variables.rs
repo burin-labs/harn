@@ -475,7 +475,7 @@ impl Debugger {
                 VmValue::Dict(_) => "dict",
                 _ => "unknown",
             };
-            return Some(VmValue::String(std::rc::Rc::from(type_name)));
+            return Some(VmValue::String(std::sync::Arc::from(type_name)));
         }
 
         // Tokenize into a path of `Field(name)` and `Index(n)` segments.

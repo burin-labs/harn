@@ -118,7 +118,7 @@ pub(super) async fn execute_chunk(
     };
 
     vm.set_harness(harn_vm::Harness::real());
-    vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt.text)));
+    vm.set_global("prompt", harn_vm::VmValue::String(Arc::from(prompt.text)));
     vm.set_global(
         "prompt_content",
         harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.content.to_vec())),
@@ -129,12 +129,12 @@ pub(super) async fn execute_chunk(
     );
     vm.set_global(
         "cwd",
-        harn_vm::VmValue::String(Rc::from(setup.cwd.to_string_lossy().as_ref())),
+        harn_vm::VmValue::String(Arc::from(setup.cwd.to_string_lossy().as_ref())),
     );
 
     let mcp_globals = load_host_mcp_clients(host_bridge.clone()).await;
     if !mcp_globals.is_empty() {
-        vm.set_global("mcp", harn_vm::VmValue::Dict(Rc::new(mcp_globals)));
+        vm.set_global("mcp", harn_vm::VmValue::Dict(Arc::new(mcp_globals)));
     }
 
     builtins::register_acp_builtins(&mut vm, bridge.clone()).await;

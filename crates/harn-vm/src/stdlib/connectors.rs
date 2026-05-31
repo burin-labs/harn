@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use jsonwebtoken::jwk::JwkSet;
 use serde_json::Value as JsonValue;
@@ -44,15 +43,15 @@ async fn connector_call_impl(
     let params = match args.get(2) {
         Some(VmValue::Dict(dict)) => vm_value_to_json(&VmValue::Dict(dict.clone())),
         Some(value) if !matches!(value, VmValue::Nil) => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "connector_call: params must be a dict when provided",
             ))));
         }
-        _ => vm_value_to_json(&VmValue::Dict(Rc::new(BTreeMap::new()))),
+        _ => vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(BTreeMap::new()))),
     };
 
     let client = active_connector_client(&provider).ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "connector_call: connector `{provider}` is not active"
         ))))
     })?;
@@ -75,23 +74,25 @@ async fn secret_get_impl(
 ) -> Result<VmValue, VmError> {
     let raw = required_string_arg(&args, 0, "secret_get", "secret_id")?;
     let ctx = active_harn_connector_ctx().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "secret_get: no active Harn connector context",
         )))
     })?;
     let secret_id = parse_secret_id(raw.as_str()).ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "secret_get: expected secret id in namespace/name or namespace/name@version form",
         )))
     })?;
     let secret = ctx.secrets.get(&secret_id).await.map_err(|error| {
-        VmError::Thrown(VmValue::String(Rc::from(format!("secret_get: {error}"))))
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            "secret_get: {error}"
+        ))))
     })?;
     secret.with_exposed(|bytes| {
         std::str::from_utf8(bytes)
-            .map(|value| VmValue::String(Rc::from(value.to_string())))
+            .map(|value| VmValue::String(std::sync::Arc::from(value.to_string())))
             .map_err(|error| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                     "secret_get: secret '{secret_id}' is not valid UTF-8: {error}"
                 ))))
             })
@@ -115,12 +116,12 @@ async fn event_log_emit_impl(
         .unwrap_or(serde_json::Value::Null);
     let headers = optional_headers_arg(&args, 3, "event_log_emit")?;
     let ctx = active_harn_connector_ctx().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "event_log_emit: no active Harn connector context",
         )))
     })?;
     let topic = Topic::new(topic_name).map_err(|error| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "event_log_emit: invalid topic: {error}"
         ))))
     })?;
@@ -129,7 +130,7 @@ async fn event_log_emit_impl(
         .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
         .await
         .map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "event_log_emit: {error}"
             ))))
         })?;
@@ -150,15 +151,17 @@ async fn metrics_inc_impl(
         Some(VmValue::Int(value)) => *value,
         Some(VmValue::Float(value)) => *value as i64,
         Some(value) if !matches!(value, VmValue::Nil) => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "metrics_inc: amount must be numeric, got {}",
-                value.type_name()
-            )))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!(
+                    "metrics_inc: amount must be numeric, got {}",
+                    value.type_name()
+                ),
+            ))));
         }
         _ => 1,
     };
     let ctx = active_harn_connector_ctx().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "metrics_inc: no active Harn connector context",
         )))
     })?;
@@ -180,7 +183,7 @@ async fn connector_shared_verify_jwt_inline_impl(
     let jwks = required_json_arg(&args, 1, "connector_shared_verify_jwt_inline", "jwks")?;
     let options = optional_json_arg(&args, 2, "connector_shared_verify_jwt_inline")?;
     let jwks: JwkSet = serde_json::from_value(jwks).map_err(|error| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "connector_shared_verify_jwt_inline: invalid JWKS: {error}"
         ))))
     })?;
@@ -216,9 +219,9 @@ fn required_string_arg(
 ) -> Result<String, VmError> {
     let value = args.get(index).map(VmValue::display).unwrap_or_default();
     if value.trim().is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{builtin}: {label} is required"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{builtin}: {label} is required"),
+        ))));
     }
     Ok(value)
 }
@@ -226,7 +229,7 @@ fn required_string_arg(
 fn client_error_to_vm(error: ClientError) -> VmError {
     match error {
         ClientError::EgressBlocked(blocked) => blocked.to_vm_error(),
-        other => VmError::Thrown(VmValue::String(Rc::from(other.to_string()))),
+        other => VmError::Thrown(VmValue::String(std::sync::Arc::from(other.to_string()))),
     }
 }
 
@@ -241,9 +244,9 @@ fn optional_headers_arg(
             .iter()
             .map(|(key, value)| (key.clone(), value.display()))
             .collect()),
-        Some(_other) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{builtin}: headers must be a dict when provided"
-        ))))),
+        Some(_other) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{builtin}: headers must be a dict when provided"),
+        )))),
     }
 }
 
@@ -255,15 +258,15 @@ fn required_json_arg(
 ) -> Result<JsonValue, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(_)) => Ok(vm_value_to_json(&args[index])),
-        Some(value) if !matches!(value, VmValue::Nil) => {
-            Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+        Some(value) if !matches!(value, VmValue::Nil) => Err(VmError::Thrown(VmValue::String(
+            std::sync::Arc::from(format!(
                 "{builtin}: {label} must be a dict, got {}",
                 value.type_name()
-            )))))
-        }
-        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{builtin}: {label} is required"
-        ))))),
+            )),
+        ))),
+        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("{builtin}: {label} is required"),
+        )))),
     }
 }
 
@@ -271,10 +274,12 @@ fn optional_json_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<Js
     match args.get(index) {
         Some(VmValue::Dict(_)) => Ok(vm_value_to_json(&args[index])),
         Some(VmValue::Nil) | None => Ok(JsonValue::Object(Default::default())),
-        Some(value) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{builtin}: options must be a dict, got {}",
-            value.type_name()
-        ))))),
+        Some(value) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!(
+                "{builtin}: options must be a dict, got {}",
+                value.type_name()
+            ),
+        )))),
     }
 }
 
@@ -324,9 +329,9 @@ fn parse_jwt_algorithm(value: &str) -> Result<jsonwebtoken::Algorithm, VmError> 
         "PS384" => Ok(Algorithm::PS384),
         "PS512" => Ok(Algorithm::PS512),
         "EdDSA" => Ok(Algorithm::EdDSA),
-        other => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "connector_shared_verify_jwt_inline: unsupported JWT algorithm `{other}`"
-        ))))),
+        other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("connector_shared_verify_jwt_inline: unsupported JWT algorithm `{other}`"),
+        )))),
     }
 }
 
@@ -338,10 +343,12 @@ fn string_field(options: &JsonValue, names: &[&str]) -> Result<Option<String>, V
             }
             Some(JsonValue::Null) | None => {}
             Some(value) => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!(
                     "connector_shared_verify_jwt_inline: option `{name}` must be a string, got {}",
                     json_type_name(value)
-                )))));
+                ),
+                ))));
             }
         }
     }

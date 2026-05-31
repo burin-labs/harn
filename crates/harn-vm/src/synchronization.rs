@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -210,7 +209,7 @@ impl VmSyncRuntime {
                 rows.push(primitive.metrics_dict());
             }
         }
-        VmValue::List(Rc::new(rows))
+        VmValue::List(std::sync::Arc::new(rows))
     }
 }
 
@@ -277,11 +276,11 @@ impl VmSyncPrimitive {
         let mut dict = BTreeMap::new();
         dict.insert(
             "kind".to_string(),
-            VmValue::String(Rc::from(self.kind.as_str())),
+            VmValue::String(std::sync::Arc::from(self.kind.as_str())),
         );
         dict.insert(
             "key".to_string(),
-            VmValue::String(Rc::from(self.key.as_str())),
+            VmValue::String(std::sync::Arc::from(self.key.as_str())),
         );
         dict.insert("capacity".to_string(), VmValue::Int(self.capacity as i64));
         dict.insert(
@@ -320,7 +319,7 @@ impl VmSyncPrimitive {
             "total_held_ms".to_string(),
             VmValue::Int(metrics.total_held_ms as i64),
         );
-        VmValue::Dict(Rc::new(dict))
+        VmValue::Dict(std::sync::Arc::new(dict))
     }
 }
 
@@ -355,7 +354,7 @@ impl Drop for VmSyncLease {
 }
 
 fn cancelled_vm_error() -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(
         "kind:cancelled:VM cancelled by host",
     )))
 }

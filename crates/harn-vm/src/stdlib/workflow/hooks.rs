@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
@@ -152,7 +153,7 @@ pub(super) fn required_hook_closure(
     args: &[VmValue],
     index: usize,
     builtin: &str,
-) -> Result<Rc<crate::value::VmClosure>, VmError> {
+) -> Result<Arc<crate::value::VmClosure>, VmError> {
     match args.get(index) {
         Some(VmValue::Closure(closure)) => Ok(closure.clone()),
         Some(other) => Err(VmError::Runtime(format!(
@@ -616,28 +617,49 @@ pub(super) async fn fire_session_hook_builtin(
     let mut out: BTreeMap<String, VmValue> = BTreeMap::new();
     match control {
         crate::orchestration::HookControl::Allow => {
-            out.insert("control".to_string(), VmValue::String(Rc::from("allow")));
+            out.insert(
+                "control".to_string(),
+                VmValue::String(std::sync::Arc::from("allow")),
+            );
         }
         crate::orchestration::HookControl::Block { reason } => {
-            out.insert("control".to_string(), VmValue::String(Rc::from("block")));
-            out.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
+            out.insert(
+                "control".to_string(),
+                VmValue::String(std::sync::Arc::from("block")),
+            );
+            out.insert(
+                "reason".to_string(),
+                VmValue::String(std::sync::Arc::from(reason)),
+            );
         }
         crate::orchestration::HookControl::Decision { kind, reason } => {
-            out.insert("control".to_string(), VmValue::String(Rc::from("decision")));
-            out.insert("decision".to_string(), VmValue::String(Rc::from(kind)));
+            out.insert(
+                "control".to_string(),
+                VmValue::String(std::sync::Arc::from("decision")),
+            );
+            out.insert(
+                "decision".to_string(),
+                VmValue::String(std::sync::Arc::from(kind)),
+            );
             if let Some(reason) = reason {
-                out.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
+                out.insert(
+                    "reason".to_string(),
+                    VmValue::String(std::sync::Arc::from(reason)),
+                );
             }
         }
         crate::orchestration::HookControl::Modify { payload: modified } => {
-            out.insert("control".to_string(), VmValue::String(Rc::from("modify")));
+            out.insert(
+                "control".to_string(),
+                VmValue::String(std::sync::Arc::from("modify")),
+            );
             out.insert(
                 "modify".to_string(),
                 crate::stdlib::json_to_vm_value(&modified),
             );
         }
     }
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 /// Synchronous emit-only entry point: explicitly notify the session
@@ -696,9 +718,9 @@ pub(super) async fn drain_file_edits_builtin(
             &payload,
         )
         .await?;
-        paths.push(VmValue::String(Rc::from(edit.path)));
+        paths.push(VmValue::String(std::sync::Arc::from(edit.path)));
     }
-    Ok(VmValue::List(Rc::new(paths)))
+    Ok(VmValue::List(std::sync::Arc::new(paths)))
 }
 
 #[cfg(test)]
@@ -706,7 +728,7 @@ mod tests {
     use super::*;
 
     fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             entries
                 .iter()
                 .map(|(key, value)| ((*key).to_string(), value.clone()))
@@ -719,7 +741,7 @@ mod tests {
         let mut out = String::new();
         let err = register_tool_hook_builtin(
             &[dict(&[
-                ("pattern", VmValue::String(Rc::from("*"))),
+                ("pattern", VmValue::String(std::sync::Arc::from("*"))),
                 ("max_output", VmValue::Int(-1)),
             ])],
             &mut out,

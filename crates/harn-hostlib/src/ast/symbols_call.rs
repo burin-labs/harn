@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -52,7 +52,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     Ok(build_dict([
         ("path", str_value(&path_str)),
         ("language", str_value(language.name())),
-        ("symbols", VmValue::List(Rc::new(symbols_list))),
+        ("symbols", VmValue::List(Arc::new(symbols_list))),
     ]))
 }
 

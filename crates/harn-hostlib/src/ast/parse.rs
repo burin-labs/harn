@@ -7,7 +7,7 @@
 //! `nodes: [{id, parent_id, ...}]` array with `root_id`).
 
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Parser, Tree};
@@ -59,7 +59,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("path", str_value(&path_str)),
         ("language", str_value(language.name())),
         ("root_id", VmValue::Int(root_id as i64)),
-        ("nodes", VmValue::List(Rc::new(nodes_list))),
+        ("nodes", VmValue::List(Arc::new(nodes_list))),
         ("had_errors", VmValue::Bool(tree.root_node().has_error())),
     ]))
 }

@@ -329,7 +329,7 @@ fn apply_workflow_replay_config(
     }
     options.insert(
         "parent_worker_id".to_string(),
-        VmValue::String(Rc::from(carry.parent_worker_id)),
+        VmValue::String(std::sync::Arc::from(carry.parent_worker_id)),
     );
     if let Some(transcript) = carry.transcript {
         options.insert("transcript".to_string(), transcript);
@@ -340,7 +340,7 @@ fn apply_workflow_replay_config(
         if let Some(child_run_path) = carry.child_run_path {
             options.insert(
                 "resume_path".to_string(),
-                VmValue::String(Rc::from(child_run_path)),
+                VmValue::String(std::sync::Arc::from(child_run_path)),
             );
         }
     } else {
@@ -365,7 +365,7 @@ fn apply_sub_agent_replay_config(spec: &mut SubAgentRunSpec, next_task: &str, re
         spec.session_id = format!("sub_agent_session_{}", uuid::Uuid::now_v7());
         spec.options.insert(
             "session_id".to_string(),
-            VmValue::String(Rc::from(spec.session_id.clone())),
+            VmValue::String(std::sync::Arc::from(spec.session_id.clone())),
         );
     }
 }
@@ -715,9 +715,9 @@ async fn suspend_agent_builtin(
                     let mut entries = (**map).clone();
                     entries.insert(
                         "pre_suspend_denied".to_string(),
-                        VmValue::String(Rc::from(block_reason.clone())),
+                        VmValue::String(std::sync::Arc::from(block_reason.clone())),
                     );
-                    *map = Rc::new(entries);
+                    *map = std::sync::Arc::new(entries);
                 }
                 Ok(summary)
             });
@@ -1235,14 +1235,14 @@ fn parse_resume_options(args: &[VmValue]) -> WorkerResumeOptions {
 }
 
 fn summary_message(summary: &str) -> VmValue {
-    VmValue::Dict(Rc::new(BTreeMap::from([
+    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         (
             "role".to_string(),
-            VmValue::String(Rc::from("user".to_string())),
+            VmValue::String(std::sync::Arc::from("user".to_string())),
         ),
         (
             "content".to_string(),
-            VmValue::String(Rc::from(summary.to_string())),
+            VmValue::String(std::sync::Arc::from(summary.to_string())),
         ),
     ])))
 }
@@ -1646,9 +1646,9 @@ async fn warm_resume_worker(
                 let mut entries = (**map).clone();
                 entries.insert(
                     "pre_resume_denied".to_string(),
-                    VmValue::String(Rc::from(reason)),
+                    VmValue::String(std::sync::Arc::from(reason)),
                 );
-                *map = Rc::new(entries);
+                *map = std::sync::Arc::new(entries);
             }
             return Ok(summary);
         }
@@ -1905,7 +1905,7 @@ async fn wait_agent_builtin(
             wait_for_worker_terminal(state.clone(), "wait_agent").await?;
             results.push(worker_summary(&state.borrow())?);
         }
-        return Ok(VmValue::List(Rc::new(results)));
+        return Ok(VmValue::List(std::sync::Arc::new(results)));
     }
     let worker_id = worker_id_from_value(target)?;
     let state = with_worker_state(&worker_id, Ok)?;
@@ -1978,7 +1978,7 @@ fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             .map(|state| worker_summary(&state.borrow()))
             .collect::<Result<Vec<_>, _>>()
     })?;
-    Ok(VmValue::List(Rc::new(workers)))
+    Ok(VmValue::List(std::sync::Arc::new(workers)))
 }
 
 fn resume_conditions_error(field: &str, message: impl Into<String>) -> VmError {
@@ -2340,14 +2340,14 @@ mod suspend_tests {
     }
 
     fn message_value(role: &str, content: &str) -> VmValue {
-        VmValue::Dict(Rc::new(BTreeMap::from([
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             (
                 "role".to_string(),
-                VmValue::String(Rc::from(role.to_string())),
+                VmValue::String(std::sync::Arc::from(role.to_string())),
             ),
             (
                 "content".to_string(),
-                VmValue::String(Rc::from(content.to_string())),
+                VmValue::String(std::sync::Arc::from(content.to_string())),
             ),
         ])))
     }
@@ -2371,37 +2371,43 @@ mod suspend_tests {
     }
 
     fn auto_resume_conditions(kind: &str) -> VmValue {
-        VmValue::Dict(Rc::new(BTreeMap::from([(
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "trigger".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "kind".to_string(),
-                    VmValue::String(Rc::from(kind.to_string())),
+                    VmValue::String(std::sync::Arc::from(kind.to_string())),
                 ),
-                ("provider".to_string(), VmValue::String(Rc::from("github"))),
+                (
+                    "provider".to_string(),
+                    VmValue::String(std::sync::Arc::from("github")),
+                ),
             ]))),
         )])))
     }
 
     fn auto_resume_conditions_with_timeout(kind: &str, on_timeout: &str) -> VmValue {
-        VmValue::Dict(Rc::new(BTreeMap::from([
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             (
                 "trigger".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::from([
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                     (
                         "kind".to_string(),
-                        VmValue::String(Rc::from(kind.to_string())),
+                        VmValue::String(std::sync::Arc::from(kind.to_string())),
                     ),
-                    ("provider".to_string(), VmValue::String(Rc::from("github"))),
+                    (
+                        "provider".to_string(),
+                        VmValue::String(std::sync::Arc::from("github")),
+                    ),
                 ]))),
             ),
             (
                 "timeout".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::from([
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                     ("duration_minutes".to_string(), VmValue::Int(1)),
                     (
                         "on_timeout".to_string(),
-                        VmValue::String(Rc::from(on_timeout.to_string())),
+                        VmValue::String(std::sync::Arc::from(on_timeout.to_string())),
                     ),
                 ]))),
             ),
@@ -2409,8 +2415,11 @@ mod suspend_tests {
     }
 
     fn suspend_options(conditions: VmValue) -> VmValue {
-        VmValue::Dict(Rc::new(BTreeMap::from([
-            ("initiator".to_string(), VmValue::String(Rc::from("self"))),
+        VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+            (
+                "initiator".to_string(),
+                VmValue::String(std::sync::Arc::from("self")),
+            ),
             ("conditions".to_string(), conditions),
         ])))
     }
@@ -2442,24 +2451,32 @@ mod suspend_tests {
 
     #[test]
     fn resume_conditions_parse_round_trips_each_shape() {
-        let trigger = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let trigger = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "trigger".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
-                ("id".to_string(), VmValue::String(Rc::from("resume-review"))),
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                (
+                    "id".to_string(),
+                    VmValue::String(std::sync::Arc::from("resume-review")),
+                ),
                 (
                     "kind".to_string(),
-                    VmValue::String(Rc::from("review.approved")),
+                    VmValue::String(std::sync::Arc::from("review.approved")),
                 ),
-                ("provider".to_string(), VmValue::String(Rc::from("github"))),
+                (
+                    "provider".to_string(),
+                    VmValue::String(std::sync::Arc::from("github")),
+                ),
                 (
                     "handler".to_string(),
-                    VmValue::String(Rc::from("worker://auto-resume")),
+                    VmValue::String(std::sync::Arc::from("worker://auto-resume")),
                 ),
                 (
                     "match".to_string(),
-                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                    VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                         "events".to_string(),
-                        VmValue::List(Rc::new(vec![VmValue::String(Rc::from("review.approved"))])),
+                        VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                            std::sync::Arc::from("review.approved"),
+                        )])),
                     )]))),
                 ),
             ]))),
@@ -2469,13 +2486,13 @@ mod suspend_tests {
         );
         assert_eq!(trigger_json["trigger"]["kind"], "review.approved");
 
-        let timeout = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let timeout = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "timeout".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 ("duration_minutes".to_string(), VmValue::Int(15)),
                 (
                     "on_timeout".to_string(),
-                    VmValue::String(Rc::from("resume_with_input")),
+                    VmValue::String(std::sync::Arc::from("resume_with_input")),
                 ),
             ]))),
         )])));
@@ -2485,9 +2502,9 @@ mod suspend_tests {
         assert_eq!(timeout_json["timeout"]["duration_minutes"], 15);
         assert_eq!(timeout_json["timeout"]["on_timeout"], "resume_with_input");
 
-        let event = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let event = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "on_event".to_string(),
-            VmValue::String(Rc::from("operator.resume")),
+            VmValue::String(std::sync::Arc::from("operator.resume")),
         )])));
         let event_json = crate::llm::vm_value_to_json(
             &parse_resume_conditions_value(Some(&event)).expect("parse event"),
@@ -2497,9 +2514,9 @@ mod suspend_tests {
 
     #[test]
     fn resume_conditions_parse_reports_harn_sus_002_field() {
-        let invalid = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let invalid = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "timeout".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "duration_minutes".to_string(),
                 VmValue::Int(0),
             )]))),
@@ -2511,9 +2528,9 @@ mod suspend_tests {
             "expected HARN-SUS-002 timeout field error, got: {error}"
         );
 
-        let unknown_timeout = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let unknown_timeout = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "timeout".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 ("duration_minutes".to_string(), VmValue::Int(1)),
                 ("extra".to_string(), VmValue::Bool(true)),
             ]))),
@@ -2525,9 +2542,9 @@ mod suspend_tests {
             "expected HARN-SUS-002 timeout.extra field error, got: {unknown_timeout_error}"
         );
 
-        let invalid_event = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let invalid_event = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "on_event".to_string(),
-            VmValue::String(Rc::from("bad channel")),
+            VmValue::String(std::sync::Arc::from("bad channel")),
         )])));
         let event_error =
             parse_resume_conditions_value(Some(&invalid_event)).expect_err("invalid event topic");
@@ -2547,10 +2564,10 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("waiting on external review")),
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::String(std::sync::Arc::from("waiting on external review")),
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "initiator".to_string(),
-                    VmValue::String(Rc::from("parent")),
+                    VmValue::String(std::sync::Arc::from("parent")),
                 )]))),
             ],
         )
@@ -2629,7 +2646,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&already_suspended),
-                VmValue::String(Rc::from("operator pause")),
+                VmValue::String(std::sync::Arc::from("operator pause")),
             ],
         )
         .await
@@ -2709,7 +2726,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("waiting on external review")),
+                VmValue::String(std::sync::Arc::from("waiting on external review")),
             ],
         )
         .await
@@ -2743,7 +2760,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("waiting on external review")),
+                VmValue::String(std::sync::Arc::from("waiting on external review")),
             ],
         )
         .await
@@ -2758,7 +2775,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("different reason — should be ignored")),
+                VmValue::String(std::sync::Arc::from("different reason — should be ignored")),
             ],
         )
         .await
@@ -2779,7 +2796,7 @@ mod suspend_tests {
         // into the worker's task slot.
         let resumed = resume_agent_for_test(vec![
             handle_value(&worker_id),
-            VmValue::String(Rc::from("next: write the report")),
+            VmValue::String(std::sync::Arc::from("next: write the report")),
         ])
         .await
         .expect("resume");
@@ -2824,7 +2841,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("waiting for review")),
+                VmValue::String(std::sync::Arc::from("waiting for review")),
                 suspend_options(auto_resume_conditions("review.approved")),
             ],
         )
@@ -2868,11 +2885,11 @@ mod suspend_tests {
         let suspended = top_level_agent_suspend_builtin(
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
-                VmValue::String(Rc::from("session-top-level-auto-resume")),
-                VmValue::String(Rc::from("continue the top-level task")),
+                VmValue::String(std::sync::Arc::from("session-top-level-auto-resume")),
+                VmValue::String(std::sync::Arc::from("continue the top-level task")),
                 VmValue::Nil,
-                VmValue::Dict(Rc::new(BTreeMap::new())),
-                VmValue::String(Rc::from("waiting for review")),
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
+                VmValue::String(std::sync::Arc::from("waiting for review")),
                 auto_resume_conditions("review.approved"),
             ],
         )
@@ -2913,7 +2930,7 @@ mod suspend_tests {
                     crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
                     vec![
                         handle_value(&worker_id),
-                        VmValue::String(Rc::from("waiting for review")),
+                        VmValue::String(std::sync::Arc::from("waiting for review")),
                         suspend_options(auto_resume_conditions("review.approved")),
                     ],
                 )
@@ -2994,7 +3011,7 @@ mod suspend_tests {
                     crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
                     vec![
                         handle_value(&worker_id),
-                        VmValue::String(Rc::from("waiting for review or timeout")),
+                        VmValue::String(std::sync::Arc::from("waiting for review or timeout")),
                         suspend_options(auto_resume_conditions_with_timeout(
                             "review.approved",
                             "resume_with_input",
@@ -3058,7 +3075,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("park before fresh prompt")),
+                VmValue::String(std::sync::Arc::from("park before fresh prompt")),
             ],
         )
         .await
@@ -3066,10 +3083,10 @@ mod suspend_tests {
 
         let resumed = resume_agent_for_test(vec![
             handle_value(&worker_id),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "input".to_string(),
-                    VmValue::String(Rc::from("fresh prompt")),
+                    VmValue::String(std::sync::Arc::from("fresh prompt")),
                 ),
                 ("continue_transcript".to_string(), VmValue::Bool(false)),
             ]))),
@@ -3136,7 +3153,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("park me")),
+                VmValue::String(std::sync::Arc::from("park me")),
             ],
         )
         .await
@@ -3171,7 +3188,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("checkpoint before restart")),
+                VmValue::String(std::sync::Arc::from("checkpoint before restart")),
             ],
         )
         .await
@@ -3236,7 +3253,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("checkpoint before restart")),
+                VmValue::String(std::sync::Arc::from("checkpoint before restart")),
             ],
         )
         .await
@@ -3335,10 +3352,10 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("waiting on review")),
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::String(std::sync::Arc::from("waiting on review")),
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "initiator".to_string(),
-                    VmValue::String(Rc::from("triggered")),
+                    VmValue::String(std::sync::Arc::from("triggered")),
                 )]))),
             ],
         )
@@ -3348,10 +3365,12 @@ mod suspend_tests {
 
         resume_agent_for_test(vec![
             handle_value(&worker_id),
-            VmValue::Dict(Rc::new(BTreeMap::from([
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "input".to_string(),
-                    VmValue::String(Rc::from("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS")),
+                    VmValue::String(std::sync::Arc::from(
+                        "CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS",
+                    )),
                 ),
                 ("continue_transcript".to_string(), VmValue::Bool(false)),
             ]))),
@@ -3470,7 +3489,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("pause before another model call")),
+                VmValue::String(std::sync::Arc::from("pause before another model call")),
             ],
         )
         .await
@@ -3492,9 +3511,9 @@ mod suspend_tests {
             "agent_loop",
             "agent_loop_suspend_test",
             &[
-                VmValue::String(Rc::from("continue the task")),
+                VmValue::String(std::sync::Arc::from("continue the task")),
                 VmValue::Nil,
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "max_iterations".to_string(),
                     VmValue::Int(3),
                 )]))),
@@ -3529,7 +3548,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("checkpoint the child loop")),
+                VmValue::String(std::sync::Arc::from("checkpoint the child loop")),
             ],
         )
         .await
@@ -3590,7 +3609,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("park before close")),
+                VmValue::String(std::sync::Arc::from("park before close")),
             ],
         )
         .await
@@ -3622,14 +3641,17 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("park before empty input")),
+                VmValue::String(std::sync::Arc::from("park before empty input")),
             ],
         )
         .await
         .expect("suspend");
         let err = resume_agent_builtin(
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-            vec![handle_value(&worker_id), VmValue::String(Rc::from(""))],
+            vec![
+                handle_value(&worker_id),
+                VmValue::String(std::sync::Arc::from("")),
+            ],
         )
         .await
         .expect_err("empty resume input should be rejected");
@@ -3650,7 +3672,9 @@ mod suspend_tests {
 
         let err = resume_agent_builtin(
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
-            vec![VmValue::String(Rc::from(missing.display().to_string()))],
+            vec![VmValue::String(std::sync::Arc::from(
+                missing.display().to_string(),
+            ))],
         )
         .await
         .expect_err("missing snapshot should reject resume");
@@ -3680,16 +3704,16 @@ mod suspend_tests {
         crate::triggers::clear_trigger_registry();
         crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
         let (worker_id, dir) = seed_test_worker("worker-trigger-registration-error");
-        let invalid_trigger = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let invalid_trigger = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "trigger".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::new())),
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
         )])));
 
         let err = suspend_agent_builtin(
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("bad trigger")),
+                VmValue::String(std::sync::Arc::from("bad trigger")),
                 suspend_options(invalid_trigger),
             ],
         )
@@ -3713,7 +3737,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("bad timeout")),
+                VmValue::String(std::sync::Arc::from("bad timeout")),
                 suspend_options(auto_resume_conditions_with_timeout(
                     "review.approved",
                     "explode",
@@ -3742,7 +3766,7 @@ mod suspend_tests {
             crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
             vec![
                 handle_value(&worker_id),
-                VmValue::String(Rc::from("late suspend")),
+                VmValue::String(std::sync::Arc::from("late suspend")),
             ],
         )
         .await

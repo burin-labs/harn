@@ -7,7 +7,6 @@
 //! re-run, and that the signed timestamps reject tampered receipts.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use serde_json::Value as JsonValue;
 
@@ -81,7 +80,7 @@ fn lifecycle_receipts_snapshot_impl(
         .into_iter()
         .map(|entry| json_to_vm(&entry.to_json()))
         .collect();
-    Ok(VmValue::List(Rc::new(entries)))
+    Ok(VmValue::List(std::sync::Arc::new(entries)))
 }
 
 #[harn_builtin(
@@ -117,7 +116,7 @@ fn lifecycle_resume_input_hash_impl(
         Some(crate::llm::vm_value_to_json(&input))
     };
     let hash = hash_resume_input(json.as_ref());
-    Ok(VmValue::String(Rc::from(hash)))
+    Ok(VmValue::String(std::sync::Arc::from(hash)))
 }
 
 #[harn_builtin(
@@ -132,9 +131,9 @@ fn lifecycle_drain_decision_prompt_hash_impl(
         .first()
         .map(|value| value.display())
         .unwrap_or_default();
-    Ok(VmValue::String(Rc::from(hash_drain_decision_prompt(
-        &prompt,
-    ))))
+    Ok(VmValue::String(std::sync::Arc::from(
+        hash_drain_decision_prompt(&prompt),
+    )))
 }
 
 #[harn_builtin(
@@ -159,7 +158,7 @@ fn lifecycle_replay_resume_input_impl(
         Some(crate::llm::vm_value_to_json(&candidate))
     };
     match replay_resume_input(&receipt, candidate_json.as_ref()) {
-        Ok(cached) => Ok(VmValue::Dict(Rc::new({
+        Ok(cached) => Ok(VmValue::Dict(std::sync::Arc::new({
             let mut map = BTreeMap::new();
             map.insert("ok".to_string(), VmValue::Bool(true));
             map.insert(
@@ -195,12 +194,12 @@ fn lifecycle_replay_drain_decision_impl(
         ))
     })?;
     match replay_drain_decision(&receipt, candidate_prompt.as_deref()) {
-        Ok(action) => Ok(VmValue::Dict(Rc::new({
+        Ok(action) => Ok(VmValue::Dict(std::sync::Arc::new({
             let mut map = BTreeMap::new();
             map.insert("ok".to_string(), VmValue::Bool(true));
             map.insert(
                 "action".to_string(),
-                VmValue::String(Rc::from(drain_action_str(action))),
+                VmValue::String(std::sync::Arc::from(drain_action_str(action))),
             );
             map
         }))),
@@ -482,11 +481,11 @@ fn verification_value(result: Result<(), LifecycleReceiptError>) -> VmValue {
             map.insert("verified".to_string(), VmValue::Bool(false));
             map.insert(
                 "error".to_string(),
-                VmValue::String(Rc::from(error.to_string())),
+                VmValue::String(std::sync::Arc::from(error.to_string())),
             );
         }
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn error_value(error: LifecycleReceiptError) -> VmValue {
@@ -494,7 +493,7 @@ fn error_value(error: LifecycleReceiptError) -> VmValue {
     map.insert("ok".to_string(), VmValue::Bool(false));
     map.insert(
         "error".to_string(),
-        VmValue::String(Rc::from(error.to_string())),
+        VmValue::String(std::sync::Arc::from(error.to_string())),
     );
     let code = match &error {
         LifecycleReceiptError::ResumeInputHashMismatch { .. } => "HARN-SUS-011",
@@ -504,8 +503,11 @@ fn error_value(error: LifecycleReceiptError) -> VmValue {
         | LifecycleReceiptError::SignatureKeyMismatch { .. } => "HARN-SUS-013",
         LifecycleReceiptError::Persistence(_) => "HARN-SUS-013",
     };
-    map.insert("code".to_string(), VmValue::String(Rc::from(code)));
-    VmValue::Dict(Rc::new(map))
+    map.insert(
+        "code".to_string(),
+        VmValue::String(std::sync::Arc::from(code)),
+    );
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn json_to_vm(value: &JsonValue) -> VmValue {

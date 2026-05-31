@@ -96,23 +96,23 @@ fn register_postgres_namespace(vm: &mut Vm) {
     );
     vm.set_global(
         "pg",
-        VmValue::Dict(Rc::new(BTreeMap::from([
-            ("_namespace".to_string(), VmValue::String(Rc::from("pg"))),
+        VmValue::Dict(Arc::new(BTreeMap::from([
+            ("_namespace".to_string(), VmValue::String(Arc::from("pg"))),
             ("jsonb".to_string(), jsonb),
         ]))),
     );
 }
 
 fn namespace(name: &str, entries: &[(&str, &str)]) -> VmValue {
-    VmValue::Dict(Rc::new(
+    VmValue::Dict(Arc::new(
         std::iter::once((
             "_namespace".to_string(),
-            VmValue::String(Rc::from(name.to_string())),
+            VmValue::String(Arc::from(name.to_string())),
         ))
         .chain(entries.iter().map(|(field, builtin)| {
             (
                 (*field).to_string(),
-                VmValue::BuiltinRef(Rc::from(*builtin)),
+                VmValue::BuiltinRef(Arc::from(*builtin)),
             )
         }))
         .collect::<BTreeMap<_, _>>(),
@@ -270,7 +270,7 @@ fn stmt_cache_clear_result(
         "connections_skipped".to_string(),
         VmValue::Int(connections_skipped),
     );
-    VmValue::Dict(Rc::new(result))
+    VmValue::Dict(std::sync::Arc::new(result))
 }
 
 async fn clear_idle_statement_caches(
@@ -395,7 +395,7 @@ pub(super) async fn run_managed_transaction(
     ctx: &crate::vm::AsyncBuiltinCtx,
     pool_id: &str,
     builtin: &'static str,
-    closure: Rc<crate::value::VmClosure>,
+    closure: Arc<crate::value::VmClosure>,
     prepare: impl FnOnce(
         &str,
     ) -> std::pin::Pin<
@@ -499,7 +499,7 @@ async fn pg_migrate_impl(
 fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let fixtures = match args.first() {
         Some(VmValue::List(items)) => parse_mock_fixtures(items)?,
-        Some(VmValue::Dict(_)) => parse_mock_fixtures(&Rc::new(vec![args[0].clone()]))?,
+        Some(VmValue::Dict(_)) => parse_mock_fixtures(std::slice::from_ref(&args[0]))?,
         None | Some(VmValue::Nil) => Vec::new(),
         _ => {
             return Err(runtime_error(
@@ -533,7 +533,7 @@ fn pg_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             .map(|mock| mock.calls.clone())
             .unwrap_or_default()
     });
-    Ok(VmValue::List(Rc::new(calls)))
+    Ok(VmValue::List(std::sync::Arc::new(calls)))
 }
 
 async fn open_pool(
@@ -600,12 +600,12 @@ async fn open_pool(
     );
     meta.insert(
         "read_routing_policy".to_string(),
-        VmValue::String(Rc::from(read_routing_policy.as_str())),
+        VmValue::String(Arc::from(read_routing_policy.as_str())),
     );
     if let Some(application_name) = option_string(options, "application_name") {
         meta.insert(
             "application_name".to_string(),
-            VmValue::String(Rc::from(application_name)),
+            VmValue::String(std::sync::Arc::from(application_name)),
         );
     }
     POOLS.with(|pools| {
@@ -725,7 +725,7 @@ async fn query_many(
     routing: QueryRouting,
 ) -> Result<VmValue, VmError> {
     let rows = query_rows(target, sql, params, routing).await?;
-    Ok(VmValue::List(Rc::new(rows)))
+    Ok(VmValue::List(std::sync::Arc::new(rows)))
 }
 
 pub(super) async fn query_rows(
@@ -919,8 +919,8 @@ async fn apply_transaction_settings(
 ) -> Result<(), VmError> {
     for (key, value) in settings {
         let params = vec![
-            VmValue::String(Rc::from(key.as_str())),
-            VmValue::String(Rc::from(value.display())),
+            VmValue::String(std::sync::Arc::from(key.as_str())),
+            VmValue::String(std::sync::Arc::from(value.display())),
         ];
         let sql = "select set_config($1, $2, true)";
         let tx = tx_by_id(tx_id)?;
@@ -964,7 +964,7 @@ pub(super) fn row_to_value(row: PgRow) -> Result<VmValue, VmError> {
         let value = column_value(&row, index, column.type_info().name())?;
         map.insert(name, value);
     }
-    Ok(VmValue::Dict(Rc::new(map)))
+    Ok(VmValue::Dict(std::sync::Arc::new(map)))
 }
 
 fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, VmError> {
@@ -990,15 +990,15 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         // Harn has no Decimal type — surface NUMERIC as its canonical
         // textual representation so downstream JSON / Decimal callers can
         // round-trip without precision loss.
-        "NUMERIC" => VmValue::String(Rc::from(
+        "NUMERIC" => VmValue::String(std::sync::Arc::from(
             row.try_get::<rust_decimal::Decimal, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
         )),
-        "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" => VmValue::String(Rc::from(
+        "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" => VmValue::String(std::sync::Arc::from(
             row.try_get::<String, _>(index).map_err(decode_error)?,
         )),
-        "UUID" => VmValue::String(Rc::from(
+        "UUID" => VmValue::String(std::sync::Arc::from(
             row.try_get::<uuid::Uuid, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
@@ -1009,25 +1009,25 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 .map_err(decode_error)?;
             crate::stdlib::json_to_vm_value(&json)
         }
-        "BYTEA" => VmValue::Bytes(Rc::new(
+        "BYTEA" => VmValue::Bytes(std::sync::Arc::new(
             row.try_get::<Vec<u8>, _>(index).map_err(decode_error)?,
         )),
-        "DATE" => VmValue::String(Rc::from(
+        "DATE" => VmValue::String(std::sync::Arc::from(
             row.try_get::<time::Date, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
         )),
-        "TIME" => VmValue::String(Rc::from(
+        "TIME" => VmValue::String(std::sync::Arc::from(
             row.try_get::<time::Time, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
         )),
-        "TIMESTAMP" => VmValue::String(Rc::from(
+        "TIMESTAMP" => VmValue::String(std::sync::Arc::from(
             row.try_get::<time::PrimitiveDateTime, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
         )),
-        "TIMESTAMPTZ" => VmValue::String(Rc::from(
+        "TIMESTAMPTZ" => VmValue::String(std::sync::Arc::from(
             row.try_get::<time::OffsetDateTime, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
@@ -1042,14 +1042,14 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "FLOAT4[]" => decode_array::<f32>(row, index, |v| VmValue::Float(f64::from(v)))?,
         "FLOAT8[]" => decode_array::<f64>(row, index, VmValue::Float)?,
         "TEXT[]" | "VARCHAR[]" => {
-            decode_array::<String>(row, index, |v| VmValue::String(Rc::from(v)))?
+            decode_array::<String>(row, index, |v| VmValue::String(std::sync::Arc::from(v)))?
         }
-        "UUID[]" => {
-            decode_array::<uuid::Uuid>(row, index, |v| VmValue::String(Rc::from(v.to_string())))?
-        }
+        "UUID[]" => decode_array::<uuid::Uuid>(row, index, |v| {
+            VmValue::String(std::sync::Arc::from(v.to_string()))
+        })?,
         "JSON[]" | "JSONB[]" => {
             let values: Vec<serde_json::Value> = row.try_get(index).map_err(decode_error)?;
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 values.iter().map(crate::stdlib::json_to_vm_value).collect(),
             ))
         }
@@ -1066,22 +1066,22 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "NUMRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<rust_decimal::Decimal>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(Rc::from(v.to_string())),
+            |v| VmValue::String(Arc::from(v.to_string())),
         ),
         "DATERANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::Date>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(Rc::from(v.to_string())),
+            |v| VmValue::String(Arc::from(v.to_string())),
         ),
         "TSRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::PrimitiveDateTime>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(Rc::from(v.to_string())),
+            |v| VmValue::String(Arc::from(v.to_string())),
         ),
         "TSTZRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::OffsetDateTime>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(Rc::from(v.to_string())),
+            |v| VmValue::String(Arc::from(v.to_string())),
         ),
         // HSTORE decodes as a Harn dict<string, string|nil>. sqlx surfaces
         // it as `BTreeMap<String, Option<String>>` already.
@@ -1092,11 +1092,11 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 dict.insert(
                     key,
                     value
-                        .map(|v| VmValue::String(Rc::from(v)))
+                        .map(|v| VmValue::String(std::sync::Arc::from(v)))
                         .unwrap_or(VmValue::Nil),
                 );
             }
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         }
         // Postgres geometric types decode into dictionaries that preserve
         // the native shape while staying idiomatic to Harn callers.
@@ -1152,13 +1152,13 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 ("radius", VmValue::Float(circle.radius)),
             ])
         }
-        _ => VmValue::String(Rc::from(row.try_get::<String, _>(index).map_err(
-            |error| {
+        _ => VmValue::String(std::sync::Arc::from(
+            row.try_get::<String, _>(index).map_err(|error| {
                 runtime_error(format!(
                     "pg_query: unsupported column type {type_name}: {error}"
                 ))
-            },
-        )?)),
+            })?,
+        )),
     };
     Ok(value)
 }
@@ -1177,7 +1177,7 @@ where
         + 'static,
 {
     let values: Vec<T> = row.try_get(index).map_err(decode_error)?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         values.into_iter().map(map).collect(),
     )))
 }
@@ -1202,7 +1202,7 @@ fn range_bound_value<T>(bound: Bound<T>, map: &impl Fn(T) -> VmValue) -> (VmValu
 }
 
 fn points_value(points: Vec<sqlx_postgres::types::PgPoint>) -> VmValue {
-    VmValue::List(Rc::new(
+    VmValue::List(Arc::new(
         points
             .into_iter()
             .map(|point| point_value(point.x, point.y))
@@ -1215,7 +1215,7 @@ fn point_value(x: f64, y: f64) -> VmValue {
 }
 
 fn dict_value<const N: usize>(pairs: [(&'static str, VmValue); N]) -> VmValue {
-    VmValue::Dict(Rc::new(
+    VmValue::Dict(Arc::new(
         pairs
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
@@ -1241,7 +1241,7 @@ fn execute_result_value(rows_affected: u64, duration: std::time::Duration) -> Vm
         "duration_ms".to_string(),
         VmValue::Int(duration.as_millis() as i64),
     );
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 async fn resolve_connection_url(
@@ -1296,7 +1296,9 @@ async fn secret_url(ctx: &crate::vm::AsyncBuiltinCtx, secret_id: &str) -> Result
     let value = child_vm
         .call_named_builtin(
             "secret_get",
-            vec![VmValue::String(Rc::from(secret_id.trim().to_string()))],
+            vec![VmValue::String(std::sync::Arc::from(
+                secret_id.trim().to_string(),
+            ))],
         )
         .await?;
     ctx.forward_output(&child_vm.take_output());
@@ -1380,9 +1382,15 @@ pub(super) fn unregister_tx(id: &str) {
 }
 
 pub(super) fn handle_value(kind: &str, id: &str, mut extra: BTreeMap<String, VmValue>) -> VmValue {
-    extra.insert("_type".to_string(), VmValue::String(Rc::from(kind)));
-    extra.insert("id".to_string(), VmValue::String(Rc::from(id.to_string())));
-    VmValue::Dict(Rc::new(extra))
+    extra.insert(
+        "_type".to_string(),
+        VmValue::String(std::sync::Arc::from(kind)),
+    );
+    extra.insert(
+        "id".to_string(),
+        VmValue::String(std::sync::Arc::from(id.to_string())),
+    );
+    VmValue::Dict(std::sync::Arc::new(extra))
 }
 
 pub(super) fn handle_kind(value: &VmValue) -> Option<String> {
@@ -1646,7 +1654,7 @@ pub(super) fn runtime_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(message.into())
 }
 
-fn parse_mock_fixtures(items: &Rc<Vec<VmValue>>) -> Result<Vec<MockFixture>, VmError> {
+fn parse_mock_fixtures(items: &[VmValue]) -> Result<Vec<MockFixture>, VmError> {
     items
         .iter()
         .map(|item| {
@@ -1739,11 +1747,11 @@ mod tests {
     use crate::{compile_source, register_vm_stdlib, Vm};
 
     fn s(value: &str) -> VmValue {
-        VmValue::String(Rc::from(value))
+        VmValue::String(std::sync::Arc::from(value))
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             pairs
                 .iter()
                 .map(|(key, value)| ((*key).to_string(), value.clone()))
@@ -1854,12 +1862,15 @@ mod tests {
     #[test]
     fn mock_pool_matches_parameterized_query_and_records_calls() {
         reset_postgres_state();
-        let fixtures = VmValue::List(Rc::new(vec![dict(&[
+        let fixtures = VmValue::List(std::sync::Arc::new(vec![dict(&[
             ("sql", s("select * from claims where tenant_id = $1")),
-            ("params", VmValue::List(Rc::new(vec![s("tenant-a")]))),
+            (
+                "params",
+                VmValue::List(std::sync::Arc::new(vec![s("tenant-a")])),
+            ),
             (
                 "rows",
-                VmValue::List(Rc::new(vec![dict(&[("claim_id", s("c1"))])])),
+                VmValue::List(std::sync::Arc::new(vec![dict(&[("claim_id", s("c1"))])])),
             ),
         ])]));
         let fixture_list = match &fixtures {
@@ -1884,7 +1895,10 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(VmValue::List(Rc::new(rows)).display(), "[{claim_id: c1}]");
+        assert_eq!(
+            VmValue::List(std::sync::Arc::new(rows)).display(),
+            "[{claim_id: c1}]"
+        );
         let calls = MOCKS.with(|mocks| mocks.borrow().values().next().unwrap().calls.clone());
         assert_eq!(calls.len(), 1);
     }
@@ -1892,10 +1906,10 @@ mod tests {
     #[test]
     fn mock_execute_returns_rows_affected() {
         reset_postgres_state();
-        let fixtures = parse_mock_fixtures(&Rc::new(vec![dict(&[
+        let fixtures = parse_mock_fixtures(&[dict(&[
             ("sql", s("update receipts set status = $1")),
             ("rows_affected", VmValue::Int(3)),
-        ])]))
+        ])])
         .unwrap();
         let id = next_id("pgmock");
         MOCKS.with(|mocks| {

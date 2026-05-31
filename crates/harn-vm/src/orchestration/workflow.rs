@@ -1,7 +1,6 @@
 //! Workflow graph types, normalization, validation, and execution.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 
@@ -955,11 +954,13 @@ fn workflow_stage_llm_options(
     merge_raw_model_policy_options(&mut options, node);
     options.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(stage_session_id.to_string())),
+        VmValue::String(std::sync::Arc::from(stage_session_id.to_string())),
     );
     options.insert(
         "tool_format".to_string(),
-        VmValue::String(Rc::from(stage_agent_options.tool_format.clone())),
+        VmValue::String(std::sync::Arc::from(
+            stage_agent_options.tool_format.clone(),
+        )),
     );
     add_stage_tools_option(&mut options, tools_value, tool_names);
     options
@@ -989,13 +990,13 @@ fn add_workflow_agent_compaction_options(
     if let Some(strategy) = node.auto_compact.compact_strategy.as_ref() {
         options.insert(
             "compact_strategy".to_string(),
-            VmValue::String(Rc::from(strategy.clone())),
+            VmValue::String(std::sync::Arc::from(strategy.clone())),
         );
     }
     if let Some(strategy) = node.auto_compact.hard_limit_strategy.as_ref() {
         options.insert(
             "hard_limit_strategy".to_string(),
-            VmValue::String(Rc::from(strategy.clone())),
+            VmValue::String(std::sync::Arc::from(strategy.clone())),
         );
     }
     if let Some(value) = raw_auto_compact_int(node, "compact_keep_last")
@@ -1006,7 +1007,7 @@ fn add_workflow_agent_compaction_options(
     if let Some(prompt) = raw_auto_compact_string(node, "summarize_prompt") {
         options.insert(
             "summarize_prompt".to_string(),
-            VmValue::String(Rc::from(prompt)),
+            VmValue::String(std::sync::Arc::from(prompt)),
         );
     }
     if let Some(dict) = raw_auto_compact_dict(node) {
@@ -1053,11 +1054,13 @@ fn workflow_stage_agent_loop_options(
     insert_json_vm_option(&mut options, "approval_policy", &node.approval_policy)?;
     options.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(stage_session_id.to_string())),
+        VmValue::String(std::sync::Arc::from(stage_session_id.to_string())),
     );
     options.insert(
         "tool_format".to_string(),
-        VmValue::String(Rc::from(stage_agent_options.tool_format.clone())),
+        VmValue::String(std::sync::Arc::from(
+            stage_agent_options.tool_format.clone(),
+        )),
     );
     let stage_label = node
         .id
@@ -1411,13 +1414,13 @@ pub async fn execute_stage_node(
         crate::llm::vm_value_to_json(&result)
     } else {
         let args = vec![
-            VmValue::String(Rc::from(prepared.prompt.clone())),
+            VmValue::String(std::sync::Arc::from(prepared.prompt.clone())),
             prepared
                 .system
                 .clone()
-                .map(|s| VmValue::String(Rc::from(s)))
+                .map(|s| VmValue::String(std::sync::Arc::from(s)))
                 .unwrap_or(VmValue::Nil),
-            VmValue::Dict(Rc::new(prepared.llm_options.clone())),
+            VmValue::Dict(std::sync::Arc::new(prepared.llm_options.clone())),
         ];
         let opts = extract_llm_options(&args)?;
         let result = vm_call_llm_full(&opts).await?;

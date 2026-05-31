@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::value::{VmError, VmValue};
@@ -38,14 +37,14 @@ impl Vm {
             handler,
         });
 
-        Ok(VmValue::Dict(Rc::new(BTreeMap::from([
+        Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             ("handle".to_string(), VmValue::Int(handle)),
             (
                 "signals".to_string(),
-                VmValue::List(Rc::new(
+                VmValue::List(std::sync::Arc::new(
                     signals
                         .into_iter()
-                        .map(|signal| VmValue::String(Rc::from(signal)))
+                        .map(|signal| VmValue::String(std::sync::Arc::from(signal)))
                         .collect(),
                 )),
             ),
@@ -218,13 +217,13 @@ impl Vm {
     }
 
     pub(crate) fn interrupted_error(signal: &str) -> VmError {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "kind:interrupted:{signal}"
         ))))
     }
 
     pub(crate) fn interrupt_handler_timeout_error() -> VmError {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "kind:interrupted:handler_timeout",
         )))
     }

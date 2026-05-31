@@ -28,7 +28,7 @@
 //! separately; until then the nightly E2E job no-ops cleanly.
 
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use harn_vm::value::VmClosure;
@@ -362,7 +362,7 @@ fn worker_thread(
 /// Compile a worker script that returns a probe closure, run its top level
 /// (opening the pool), and hand back the still-live VM plus the closure so
 /// the caller can invoke it repeatedly.
-async fn build_probe_closure(script: &str) -> Result<(harn_vm::Vm, Rc<VmClosure>), String> {
+async fn build_probe_closure(script: &str) -> Result<(harn_vm::Vm, Arc<VmClosure>), String> {
     let chunk = compile_source(script).map_err(|error| format!("compile: {error}"))?;
     let mut vm = harn_vm::Vm::new();
     register_vm_stdlib(&mut vm);

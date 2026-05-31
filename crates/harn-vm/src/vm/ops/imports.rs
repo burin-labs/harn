@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::value::VmError;
 
@@ -8,7 +8,7 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let path_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), path_idx)
+            (Arc::clone(&frame.chunk), path_idx)
         };
         let import_path = Self::const_str(&chunk.constants[path_idx])?;
         self.execute_import(import_path, None).await
@@ -21,7 +21,7 @@ impl super::super::Vm {
             frame.ip += 2;
             let names_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), path_idx, names_idx)
+            (Arc::clone(&frame.chunk), path_idx, names_idx)
         };
         let import_path = Self::const_str(&chunk.constants[path_idx])?;
         let names_str = Self::const_str(&chunk.constants[names_idx])?;

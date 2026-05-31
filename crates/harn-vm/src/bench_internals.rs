@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::chunk::Op;
 use crate::{Chunk, CompiledFunction, Vm, VmClosure, VmEnv, VmValue};
@@ -374,17 +374,14 @@ pub const DIRECT_CALL_STATE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
 
 /// Microbench fixture for the direct-call inline-cache read path.
 ///
-/// `Chunk::inline_cache_entry` (the pre-optimization path) clones the
-/// wrapping `InlineCacheEntry::DirectCall { state: DirectCallState }` on
-/// every dispatch, including the outer enum's tag init and 8 bytes of
-/// padding beyond the inner `DirectCallState`. `Chunk::peek_direct_call_state`
-/// returns just the inner `DirectCallState` (still cloned because it
-/// contains the `Rc<VmClosure>` cached target) — but skipping the outer
-/// wrap saves an enum-padded memcpy plus one branch in
-/// `try_cached_direct_call`'s variant check.
+/// `Chunk::inline_cache_entry` clones the wrapping
+/// `InlineCacheEntry::DirectCall { state: DirectCallState }` on every
+/// dispatch. `Chunk::peek_direct_call_state` returns just the inner
+/// `DirectCallState`, avoiding the outer enum copy and variant check in
+/// `try_cached_direct_call`.
 ///
 /// Pre-warms every slot to `Specialized { argc: 1, hits: 1000, misses: 0,
-/// target: Rc<VmClosure> }` — the steady state of any hot
+/// target: Arc<VmClosure> }`, the steady state of any hot
 /// `x.map(predicate)`-style direct-call call site.
 pub struct DirectCallStateReadFixture {
     chunk: Chunk,
@@ -412,7 +409,7 @@ impl DirectCallStateReadFixture {
                 InlineCacheEntry::DirectCall {
                     state: DirectCallState::Specialized {
                         argc: 1,
-                        target: DirectCallTarget::Closure(Rc::clone(&target_closure)),
+                        target: DirectCallTarget::Closure(Arc::clone(&target_closure)),
                         hits: 1_000,
                         misses: 0,
                     },
@@ -447,8 +444,8 @@ impl DirectCallStateReadFixture {
         acc
     }
 
-    /// Control sweep using the pre-optimization `inline_cache_entry`
-    /// clone path. Same accumulator shape.
+    /// Control sweep using the full `inline_cache_entry` clone path. Same
+    /// accumulator shape.
     pub fn invoke_clone_control(&self) -> usize {
         use crate::chunk::{DirectCallState, InlineCacheEntry};
         let mut acc = 0usize;
@@ -465,21 +462,21 @@ impl DirectCallStateReadFixture {
     }
 }
 
-fn synthetic_direct_call_closure() -> Rc<VmClosure> {
+fn synthetic_direct_call_closure() -> Arc<VmClosure> {
     let func = CompiledFunction {
         name: "synthetic_direct_call_target".to_string(),
         type_params: Vec::new(),
         nominal_type_names: Vec::new(),
         params: Vec::new(),
         default_start: None,
-        chunk: Rc::new(Chunk::new()),
+        chunk: Arc::new(Chunk::new()),
         is_generator: false,
         is_stream: false,
         has_rest_param: false,
         has_runtime_type_checks: false,
     };
-    Rc::new(VmClosure {
-        func: Rc::new(func),
+    Arc::new(VmClosure {
+        func: Arc::new(func),
         env: VmEnv::new(),
         source_dir: None,
         module_functions: None,
@@ -502,7 +499,7 @@ impl NonModuleClosureCallFixture {
         caller_env
             .define(
                 "nested_inner",
-                VmValue::Closure(Rc::new(nested_inner)),
+                VmValue::Closure(Arc::new(nested_inner)),
                 false,
             )
             .expect("synthetic caller closure binding should be valid");
@@ -555,14 +552,14 @@ fn synthetic_closure(name: &str, env: VmEnv) -> VmClosure {
         nominal_type_names: Vec::new(),
         params: Vec::new(),
         default_start: None,
-        chunk: Rc::new(Chunk::new()),
+        chunk: Arc::new(Chunk::new()),
         is_generator: false,
         is_stream: false,
         has_rest_param: false,
         has_runtime_type_checks: false,
     };
     VmClosure {
-        func: Rc::new(func),
+        func: Arc::new(func),
         env,
         source_dir: None,
         module_functions: None,

@@ -1,13 +1,13 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::chunk::{Chunk, Constant};
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
-    fn constant_name_rc(chunk: &Chunk, idx: usize, fallback: &str) -> Rc<str> {
+    fn constant_name_rc(chunk: &Chunk, idx: usize, fallback: &str) -> Arc<str> {
         chunk
             .constant_string_rc(idx)
-            .unwrap_or_else(|| Rc::from(fallback))
+            .unwrap_or_else(|| Arc::from(fallback))
     }
 
     pub(super) fn execute_constant(&mut self) -> Result<(), VmError> {
@@ -18,14 +18,14 @@ impl super::super::Vm {
             Constant::Int(n) => VmValue::Int(*n),
             Constant::Float(n) => VmValue::Float(*n),
             Constant::String(_) => {
-                // Route through the chunk's lazy `Rc<str>` cache so
+                // Route through the chunk's lazy `Arc<str>` cache so
                 // repeated pushes of the same string constant share a
                 // single allocation instead of materializing a fresh
-                // `Rc<str>` per execution.
+                // `Arc<str>` per execution.
                 let rc = frame
                     .chunk
                     .constant_string_rc(idx)
-                    .expect("Constant::String idx must resolve to an Rc<str>");
+                    .expect("Constant::String idx must resolve to an Arc<str>");
                 VmValue::String(rc)
             }
             Constant::Bool(b) => VmValue::Bool(*b),
@@ -53,7 +53,7 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), idx)
+            (Arc::clone(&frame.chunk), idx)
         };
         let name = Self::const_str(&chunk.constants[idx])?;
         if let Some(val) = self.active_local_slot_value(name) {
@@ -64,7 +64,7 @@ impl super::super::Vm {
             .frames
             .last()
             .and_then(|f| f.module_state.as_ref())
-            .and_then(|ms| ms.borrow().get(name))
+            .and_then(|ms| ms.lock().get(name))
         {
             // Module-level var from the closure's originating module.
             self.stack.push(val);
@@ -107,7 +107,7 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), idx)
+            (Arc::clone(&frame.chunk), idx)
         };
         let name = Self::const_str(&chunk.constants[idx])?;
         let val = self.pop()?;
@@ -120,7 +120,7 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), idx)
+            (Arc::clone(&frame.chunk), idx)
         };
         let name = Self::const_str(&chunk.constants[idx])?;
         let val = self.pop()?;
@@ -220,7 +220,7 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), idx)
+            (Arc::clone(&frame.chunk), idx)
         };
         let name = Self::const_str(&chunk.constants[idx])?;
         let val = self.pop()?;
@@ -237,8 +237,9 @@ impl super::super::Vm {
             .and_then(|f| f.module_state.as_ref())
             .cloned()
         {
-            if ms.borrow().get(name).is_some() {
-                ms.borrow_mut().assign(name, val)?;
+            let mut module_state = ms.lock();
+            if module_state.get(name).is_some() {
+                module_state.assign(name, val)?;
             } else {
                 // Neither has it: let env.assign produce the diagnostic.
                 self.env.assign(name, val)?;

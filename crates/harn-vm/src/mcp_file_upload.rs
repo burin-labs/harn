@@ -8,7 +8,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use base64::Engine;
 use serde_json::Value as JsonValue;
@@ -135,32 +134,32 @@ fn status_value() -> VmValue {
     file_upload.insert(
         "spec_revision".to_string(),
         if let Some(config) = config {
-            VmValue::String(Rc::from(config.spec_revision))
+            VmValue::String(std::sync::Arc::from(config.spec_revision))
         } else {
             VmValue::Nil
         },
     );
     file_upload.insert(
         "proposal_url".to_string(),
-        VmValue::String(Rc::from(SPEC_URL)),
+        VmValue::String(std::sync::Arc::from(SPEC_URL)),
     );
     file_upload.insert(
         "wire_format".to_string(),
-        VmValue::String(Rc::from("x-mcp-file+rfc2397-data-uri")),
+        VmValue::String(std::sync::Arc::from("x-mcp-file+rfc2397-data-uri")),
     );
 
     let mut experimental = BTreeMap::new();
     experimental.insert(
         "file_upload".to_string(),
-        VmValue::Dict(Rc::new(file_upload)),
+        VmValue::Dict(std::sync::Arc::new(file_upload)),
     );
 
     let mut root = BTreeMap::new();
     root.insert(
         "experimental".to_string(),
-        VmValue::Dict(Rc::new(experimental)),
+        VmValue::Dict(std::sync::Arc::new(experimental)),
     );
-    VmValue::Dict(Rc::new(root))
+    VmValue::Dict(std::sync::Arc::new(root))
 }
 
 fn ensure_enabled(name: &str) -> Result<(), VmError> {
@@ -192,7 +191,10 @@ fn file_input_schema(options: &VmValue) -> Result<VmValue, VmError> {
         Some(opts) => list_of_strings(opts.get("accept"), "accept", "mcp.file_input")?,
         None => None,
     } {
-        descriptor.insert("accept".to_string(), VmValue::List(Rc::new(accept)));
+        descriptor.insert(
+            "accept".to_string(),
+            VmValue::List(std::sync::Arc::new(accept)),
+        );
     }
     if let Some(max_size) =
         options.and_then(|opts| int_field(opts, "max_size").or_else(|| int_field(opts, "maxSize")))
@@ -206,19 +208,31 @@ fn file_input_schema(options: &VmValue) -> Result<VmValue, VmError> {
     }
 
     let mut schema = BTreeMap::new();
-    schema.insert("type".to_string(), VmValue::String(Rc::from("string")));
-    schema.insert("format".to_string(), VmValue::String(Rc::from("uri")));
-    schema.insert(X_MCP_FILE.to_string(), VmValue::Dict(Rc::new(descriptor)));
+    schema.insert(
+        "type".to_string(),
+        VmValue::String(std::sync::Arc::from("string")),
+    );
+    schema.insert(
+        "format".to_string(),
+        VmValue::String(std::sync::Arc::from("uri")),
+    );
+    schema.insert(
+        X_MCP_FILE.to_string(),
+        VmValue::Dict(std::sync::Arc::new(descriptor)),
+    );
     if let Some(title) = options.and_then(|opts| string_field(opts, "title")) {
-        schema.insert("title".to_string(), VmValue::String(Rc::from(title)));
+        schema.insert(
+            "title".to_string(),
+            VmValue::String(std::sync::Arc::from(title)),
+        );
     }
     if let Some(description) = options.and_then(|opts| string_field(opts, "description")) {
         schema.insert(
             "description".to_string(),
-            VmValue::String(Rc::from(description)),
+            VmValue::String(std::sync::Arc::from(description)),
         );
     }
-    Ok(VmValue::Dict(Rc::new(schema)))
+    Ok(VmValue::Dict(std::sync::Arc::new(schema)))
 }
 
 fn upload_file(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -325,7 +339,7 @@ fn upload_file(args: &[VmValue]) -> Result<VmValue, VmError> {
     }
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(VmValue::String(Rc::from(format!(
+    Ok(VmValue::String(std::sync::Arc::from(format!(
         "data:{media_type};base64,{encoded}"
     ))))
 }
@@ -657,7 +671,7 @@ fn list_of_strings(
             string_vec(value, field, callee).map(|items| {
                 items
                     .into_iter()
-                    .map(|item| VmValue::String(Rc::from(item)))
+                    .map(|item| VmValue::String(std::sync::Arc::from(item)))
                     .collect()
             })
         })
@@ -751,7 +765,7 @@ mod tests {
                 spec_revision: SPEC_REVISION.to_string(),
             });
         });
-        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "max_size".to_string(),
             VmValue::Int(-1),
         )])));

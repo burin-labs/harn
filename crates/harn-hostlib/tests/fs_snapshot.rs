@@ -12,8 +12,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use harn_hostlib::tools::permissions;
 use harn_hostlib::{
@@ -36,11 +36,11 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
     for (k, v) in entries {
         map.insert(k.to_string(), v.clone());
     }
-    vec![VmValue::Dict(Rc::new(map))]
+    vec![VmValue::Dict(Arc::new(map))]
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Rc::from(s))
+    VmValue::String(Arc::from(s))
 }
 
 fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
@@ -119,7 +119,7 @@ fn explicit_snapshot_then_restore_through_builtins() {
         ("scope_id", vm_string(&fixture.scope)),
         (
             "paths",
-            VmValue::List(Rc::new(vec![vm_string(&path_str(&file))])),
+            VmValue::List(Arc::new(vec![vm_string(&path_str(&file))])),
         ),
         ("root", vm_string(&path_str(dir.path()))),
     ]))
@@ -221,7 +221,7 @@ fn list_and_drop_remove_snapshot_state_through_builtins() {
         ("scope_id", vm_string(&fixture.scope)),
         (
             "paths",
-            VmValue::List(Rc::new(vec![vm_string(&path_str(&file))])),
+            VmValue::List(Arc::new(vec![vm_string(&path_str(&file))])),
         ),
         ("root", vm_string(&path_str(dir.path()))),
     ]))

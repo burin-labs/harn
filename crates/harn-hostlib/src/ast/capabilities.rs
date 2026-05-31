@@ -19,7 +19,7 @@
 //! `unsupported_language` union member instead, carrying the same
 //! `fallback_suggestion`.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -50,7 +50,7 @@ fn matrix_response(languages: &[Language]) -> VmValue {
     build_dict([
         ("result", str_value("ok")),
         ("fallback_suggestion", str_value(TEXT_PATCH_FALLBACK)),
-        ("languages", VmValue::List(Rc::new(rows))),
+        ("languages", VmValue::List(Arc::new(rows))),
     ])
 }
 
@@ -96,7 +96,7 @@ mod tests {
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(Arc::new(map))
     }
 
     fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

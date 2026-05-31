@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{error_to_category, values_equal, ErrorCategory, VmError, VmValue};
@@ -75,7 +74,7 @@ fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
             .get(1)
             .map(|a| a.display())
             .unwrap_or_else(|| "Assertion failed".to_string());
-        return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
     }
     Ok(VmValue::Nil)
 }
@@ -94,11 +93,11 @@ fn assert_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                     args[0].display()
                 )
             });
-            return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
         }
         Ok(VmValue::Nil)
     } else {
-        Err(VmError::Thrown(VmValue::String(Rc::from(
+        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "assert_eq requires at least 2 arguments",
         ))))
     }
@@ -117,11 +116,11 @@ fn assert_ne_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                     args[0].display()
                 )
             });
-            return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
         }
         Ok(VmValue::Nil)
     } else {
-        Err(VmError::Thrown(VmValue::String(Rc::from(
+        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "assert_ne requires at least 2 arguments",
         ))))
     }
@@ -136,13 +135,15 @@ fn error_category_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
                 .get("category")
                 .map(|v| v.display())
                 .unwrap_or_else(|| "generic".to_string());
-            Ok(VmValue::String(Rc::from(cat)))
+            Ok(VmValue::String(std::sync::Arc::from(cat)))
         }
         VmValue::String(s) => {
             let err = VmError::Runtime(s.to_string());
-            Ok(VmValue::String(Rc::from(error_to_category(&err).as_str())))
+            Ok(VmValue::String(std::sync::Arc::from(
+                error_to_category(&err).as_str(),
+            )))
         }
-        _ => Ok(VmValue::String(Rc::from("generic"))),
+        _ => Ok(VmValue::String(std::sync::Arc::from("generic"))),
     }
 }
 
@@ -160,13 +161,15 @@ fn throw_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let mut err_dict = BTreeMap::new();
     err_dict.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(message.as_str())),
+        VmValue::String(std::sync::Arc::from(message.as_str())),
     );
     err_dict.insert(
         "category".to_string(),
-        VmValue::String(Rc::from(category.as_str())),
+        VmValue::String(std::sync::Arc::from(category.as_str())),
     );
-    Err(VmError::Thrown(VmValue::Dict(Rc::new(err_dict))))
+    Err(VmError::Thrown(VmValue::Dict(std::sync::Arc::new(
+        err_dict,
+    ))))
 }
 
 #[harn_builtin(sig = "is_timeout(error: any) -> bool", category = "testing")]

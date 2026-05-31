@@ -384,13 +384,16 @@ async fn host_agent_session_init(
     let mut control = BTreeMap::new();
     control.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(resolved)),
+        VmValue::String(std::sync::Arc::from(resolved)),
     );
-    control.insert("task".to_string(), VmValue::String(Rc::from(message)));
+    control.insert(
+        "task".to_string(),
+        VmValue::String(std::sync::Arc::from(message)),
+    );
     control.insert(
         "system".to_string(),
         system
-            .map(|s| VmValue::String(Rc::from(s)))
+            .map(|s| VmValue::String(std::sync::Arc::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     control.insert("max_iterations".to_string(), VmValue::Int(max_iterations));
@@ -399,7 +402,7 @@ async fn host_agent_session_init(
         VmValue::Int(max_verify_attempts),
     );
     control.insert("done".to_string(), VmValue::Bool(false));
-    Ok(VmValue::Dict(Rc::new(control)))
+    Ok(VmValue::Dict(std::sync::Arc::new(control)))
 }
 
 enum AutonomyCheck {
@@ -504,23 +507,23 @@ fn agent_init_control_done(
     let mut control = BTreeMap::new();
     control.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.to_string())),
+        VmValue::String(std::sync::Arc::from(session_id.to_string())),
     );
     control.insert(
         "task".to_string(),
-        VmValue::String(Rc::from(task.to_string())),
+        VmValue::String(std::sync::Arc::from(task.to_string())),
     );
     control.insert(
         "system".to_string(),
         system
-            .map(|s| VmValue::String(Rc::from(s.to_string())))
+            .map(|s| VmValue::String(std::sync::Arc::from(s.to_string())))
             .unwrap_or(VmValue::Nil),
     );
     control.insert("max_iterations".to_string(), VmValue::Int(0));
     control.insert("max_verify_attempts".to_string(), VmValue::Int(0));
     control.insert("done".to_string(), VmValue::Bool(true));
     control.insert("result".to_string(), result);
-    VmValue::Dict(Rc::new(control))
+    VmValue::Dict(std::sync::Arc::new(control))
 }
 
 /// Tear down a Harn-driven agent session and emit the final result dict.
@@ -793,7 +796,7 @@ fn host_agent_session_messages_builtin(
         .as_ref()
         .and_then(|v| dict_get(v, "messages"))
         .cloned()
-        .unwrap_or_else(|| VmValue::List(Rc::new(Vec::new())));
+        .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     Ok(messages)
 }
 
@@ -818,9 +821,15 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         .collect::<Vec<_>>();
     if native_calls_json.is_empty() {
         let mut msg = BTreeMap::new();
-        msg.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
-        msg.insert("content".to_string(), VmValue::String(Rc::from(text)));
-        return VmValue::Dict(Rc::new(msg));
+        msg.insert(
+            "role".to_string(),
+            VmValue::String(std::sync::Arc::from("assistant")),
+        );
+        msg.insert(
+            "content".to_string(),
+            VmValue::String(std::sync::Arc::from(text)),
+        );
+        return VmValue::Dict(std::sync::Arc::new(msg));
     }
 
     let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
@@ -906,28 +915,40 @@ fn tool_result_message_for_provider(
 ) -> VmValue {
     let mut msg = BTreeMap::new();
     if tool_format == "text" {
-        msg.insert("role".to_string(), VmValue::String(Rc::from("user")));
+        msg.insert(
+            "role".to_string(),
+            VmValue::String(std::sync::Arc::from("user")),
+        );
     } else if crate::llm::provider::provider_uses_anthropic_messages(provider, model) {
-        msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
+        msg.insert(
+            "role".to_string(),
+            VmValue::String(std::sync::Arc::from("tool_result")),
+        );
         msg.insert(
             "tool_use_id".to_string(),
-            VmValue::String(Rc::from(tool_call_id)),
+            VmValue::String(std::sync::Arc::from(tool_call_id)),
         );
     } else {
-        msg.insert("role".to_string(), VmValue::String(Rc::from("tool")));
-        msg.insert("name".to_string(), VmValue::String(Rc::from(name)));
+        msg.insert(
+            "role".to_string(),
+            VmValue::String(std::sync::Arc::from("tool")),
+        );
+        msg.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from(name)),
+        );
         if !tool_call_id.is_empty() {
             msg.insert(
                 "tool_call_id".to_string(),
-                VmValue::String(Rc::from(tool_call_id)),
+                VmValue::String(std::sync::Arc::from(tool_call_id)),
             );
         }
     }
     msg.insert(
         "content".to_string(),
-        VmValue::String(Rc::from(observation)),
+        VmValue::String(std::sync::Arc::from(observation)),
     );
-    VmValue::Dict(Rc::new(msg))
+    VmValue::Dict(std::sync::Arc::new(msg))
 }
 
 /// Recover the plan artifact from a dispatched emit_plan/update_plan result.
@@ -1141,7 +1162,7 @@ fn host_agent_session_record_usage_builtin(
     let mut out = BTreeMap::new();
     out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
     out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 /// Drain pending runtime-feedback notes for a session (no-op shim).
@@ -1166,21 +1187,24 @@ fn host_agent_session_drain_feedback_builtin(
         .into_iter()
         .map(|entry| {
             let mut item = BTreeMap::new();
-            item.insert("kind".to_string(), VmValue::String(Rc::from(entry.kind)));
+            item.insert(
+                "kind".to_string(),
+                VmValue::String(std::sync::Arc::from(entry.kind)),
+            );
             item.insert(
                 "content".to_string(),
-                VmValue::String(Rc::from(entry.content)),
+                VmValue::String(std::sync::Arc::from(entry.content)),
             );
             item.insert(
                 "source".to_string(),
-                VmValue::String(Rc::from(entry.source)),
+                VmValue::String(std::sync::Arc::from(entry.source)),
             );
             item.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
             item.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
-            VmValue::Dict(Rc::new(item))
+            VmValue::Dict(std::sync::Arc::new(item))
         })
         .collect::<Vec<_>>();
-    Ok(VmValue::List(Rc::new(drained)))
+    Ok(VmValue::List(std::sync::Arc::new(drained)))
 }
 
 /// Read accumulated token + cost totals for a session.
@@ -1200,7 +1224,7 @@ fn host_agent_session_totals_builtin(
     let mut out = BTreeMap::new();
     out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
     out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 /// Append a runtime-feedback note to the session as a synthetic user turn.
@@ -1335,11 +1359,11 @@ fn host_agent_session_active_skills_builtin(
         .into_iter()
         .map(|id| {
             let mut entry = BTreeMap::new();
-            entry.insert("id".to_string(), VmValue::String(Rc::from(id)));
-            VmValue::Dict(Rc::new(entry))
+            entry.insert("id".to_string(), VmValue::String(std::sync::Arc::from(id)));
+            VmValue::Dict(std::sync::Arc::new(entry))
         })
         .collect();
-    Ok(VmValue::List(Rc::new(list)))
+    Ok(VmValue::List(std::sync::Arc::new(list)))
 }
 
 /// Append a skill lifecycle event and notify live agent-event sinks.
@@ -2433,7 +2457,7 @@ async fn host_agent_session_push_bridge_injection(
         .map_err(|message| {
             VmError::Runtime(format!("{HOST_SESSION_PUSH_BRIDGE_INJECTION}: {message}"))
         })?;
-    Ok(VmValue::String(Rc::from(reminder_id)))
+    Ok(VmValue::String(std::sync::Arc::from(reminder_id)))
 }
 
 /// Return a FIFO snapshot of pending bridge user-message and reminder injections.
@@ -2631,12 +2655,12 @@ async fn host_autonomy_budget_check(
             let mut out = BTreeMap::new();
             out.insert("approved".to_string(), VmValue::Bool(false));
             out.insert("denial_result".to_string(), result);
-            Ok(VmValue::Dict(Rc::new(out)))
+            Ok(VmValue::Dict(std::sync::Arc::new(out)))
         }
         AutonomyCheck::Approved(_) | AutonomyCheck::NoBudget => {
             let mut out = BTreeMap::new();
             out.insert("approved".to_string(), VmValue::Bool(true));
-            Ok(VmValue::Dict(Rc::new(out)))
+            Ok(VmValue::Dict(std::sync::Arc::new(out)))
         }
     }
 }
@@ -3120,7 +3144,6 @@ mod nested_budget_tests {
     use crate::orchestration::{
         clear_execution_policy_stacks, current_execution_policy, CapabilityPolicy,
     };
-    use std::rc::Rc;
 
     fn policy_value(policy: &CapabilityPolicy) -> VmValue {
         crate::stdlib::json_to_vm_value(&serde_json::to_value(policy).unwrap())
@@ -3181,11 +3204,11 @@ mod nested_budget_tests {
         let mut opts_map = BTreeMap::new();
         opts_map.insert(
             "_nested_kind".to_string(),
-            VmValue::String(Rc::from("sub_agent_run")),
+            VmValue::String(std::sync::Arc::from("sub_agent_run")),
         );
         opts_map.insert(
             "_nested_label".to_string(),
-            VmValue::String(Rc::from("research-worker")),
+            VmValue::String(std::sync::Arc::from("research-worker")),
         );
         let error = install_session_nested_budget(&opts_map, "ignored").unwrap_err();
         match error {

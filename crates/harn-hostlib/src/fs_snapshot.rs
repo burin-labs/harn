@@ -32,7 +32,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs as stdfs;
 use std::path::{Component, Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
 use harn_vm::VmValue;
@@ -503,11 +503,11 @@ fn snapshot_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("snapshot_id", str_value(&result.snapshot_id)),
         (
             "captured_paths",
-            VmValue::List(Rc::new(
+            VmValue::List(Arc::new(
                 result
                     .captured_paths
                     .into_iter()
-                    .map(|path| VmValue::String(Rc::from(path)))
+                    .map(|path| VmValue::String(Arc::from(path)))
                     .collect(),
             )),
         ),
@@ -526,17 +526,17 @@ fn restore_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("snapshot_id", str_value(&result.snapshot_id)),
         (
             "restored_paths",
-            VmValue::List(Rc::new(
+            VmValue::List(Arc::new(
                 result
                     .restored_paths
                     .into_iter()
-                    .map(|path| VmValue::String(Rc::from(path)))
+                    .map(|path| VmValue::String(Arc::from(path)))
                     .collect(),
             )),
         ),
         (
             "skipped_paths_with_reasons",
-            VmValue::List(Rc::new(
+            VmValue::List(Arc::new(
                 result
                     .skipped_paths_with_reasons
                     .into_iter()
@@ -556,7 +556,7 @@ fn list_snapshots_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let summaries = list_snapshots(&session_id)?;
     Ok(build_dict([(
         "snapshots",
-        VmValue::List(Rc::new(
+        VmValue::List(Arc::new(
             summaries.into_iter().map(snapshot_summary_value).collect(),
         )),
     )]))
@@ -581,11 +581,11 @@ fn snapshot_summary_value(summary: SnapshotSummary) -> VmValue {
         ("taken_at_ms", VmValue::Int(summary.taken_at_ms)),
         (
             "captured_paths",
-            VmValue::List(Rc::new(
+            VmValue::List(Arc::new(
                 summary
                     .captured_paths
                     .into_iter()
-                    .map(|path| VmValue::String(Rc::from(path)))
+                    .map(|path| VmValue::String(Arc::from(path)))
                     .collect(),
             )),
         ),

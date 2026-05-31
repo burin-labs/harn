@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::value::VmClosure;
@@ -6,7 +6,7 @@ use crate::value::VmClosure;
 #[derive(Clone)]
 pub struct TriggerExpressionSpec {
     pub raw: String,
-    pub closure: Rc<VmClosure>,
+    pub closure: Arc<VmClosure>,
 }
 
 impl std::fmt::Debug for TriggerExpressionSpec {

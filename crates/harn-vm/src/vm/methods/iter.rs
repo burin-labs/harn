@@ -1,18 +1,19 @@
-use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
-use std::rc::Rc;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::value::{compare_values, values_equal, VmError, VmValue};
-use crate::vm::iter::{drain, iter_from_value, next_handle, VmIter};
+use crate::vm::iter::{drain, iter_from_value, next_handle, VmIter, VmIterHandle};
 
 impl crate::vm::Vm {
     pub(super) async fn call_iter_method(
         &mut self,
-        handle: &Rc<RefCell<VmIter>>,
+        handle: &VmIterHandle,
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        let handle = Rc::clone(handle);
+        let handle = Arc::clone(handle);
         match method {
             "map" => {
                 let f = args
@@ -20,7 +21,7 @@ impl crate::vm::Vm {
                     .filter(|v| Self::is_callable_value(v))
                     .cloned()
                     .ok_or_else(|| VmError::TypeError("iter.map: expected callable".to_string()))?;
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Map {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Map {
                     inner: handle,
                     f,
                 }))))
@@ -33,7 +34,7 @@ impl crate::vm::Vm {
                     .ok_or_else(|| {
                         VmError::TypeError("iter.filter: expected callable".to_string())
                     })?;
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Filter {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Filter {
                     inner: handle,
                     p,
                 }))))
@@ -46,7 +47,7 @@ impl crate::vm::Vm {
                     .ok_or_else(|| {
                         VmError::TypeError("iter.flat_map: expected callable".to_string())
                     })?;
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::FlatMap {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::FlatMap {
                     inner: handle,
                     f,
                     cur: None,
@@ -61,7 +62,7 @@ impl crate::vm::Vm {
                         ))
                     }
                 };
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Take {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Take {
                     inner: handle,
                     remaining: n,
                 }))))
@@ -75,7 +76,7 @@ impl crate::vm::Vm {
                         ))
                     }
                 };
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Skip {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Skip {
                     inner: handle,
                     remaining: n,
                 }))))
@@ -88,7 +89,7 @@ impl crate::vm::Vm {
                     .ok_or_else(|| {
                         VmError::TypeError("iter.take_while: expected callable".to_string())
                     })?;
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::TakeWhile {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::TakeWhile {
                     inner: handle,
                     p,
                     done: false,
@@ -102,7 +103,7 @@ impl crate::vm::Vm {
                     .ok_or_else(|| {
                         VmError::TypeError("iter.skip_while: expected callable".to_string())
                     })?;
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::SkipWhile {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::SkipWhile {
                     inner: handle,
                     p,
                     primed: false,
@@ -117,12 +118,12 @@ impl crate::vm::Vm {
                     VmValue::Iter(h) => h,
                     _ => unreachable!("iter_from_value returns Iter"),
                 };
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Zip {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Zip {
                     a: handle,
                     b: b_handle,
                 }))))
             }
-            "enumerate" => Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Enumerate {
+            "enumerate" => Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Enumerate {
                 inner: handle,
                 i: 0,
             })))),
@@ -135,7 +136,7 @@ impl crate::vm::Vm {
                     VmValue::Iter(h) => h,
                     _ => unreachable!("iter_from_value returns Iter"),
                 };
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Chain {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Chain {
                     a: handle,
                     b: b_handle,
                     on_a: true,
@@ -150,7 +151,7 @@ impl crate::vm::Vm {
                         ))
                     }
                 };
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Chunks {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Chunks {
                     inner: handle,
                     n,
                 }))))
@@ -164,7 +165,7 @@ impl crate::vm::Vm {
                         ))
                     }
                 };
-                Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Windows {
+                Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Windows {
                     inner: handle,
                     n,
                     buf: VecDeque::new(),
@@ -172,7 +173,7 @@ impl crate::vm::Vm {
             }
             "to_list" => {
                 let items = drain(&handle, self).await?;
-                Ok(VmValue::List(Rc::new(items)))
+                Ok(VmValue::List(std::sync::Arc::new(items)))
             }
             "to_set" => {
                 let items = drain(&handle, self).await?;
@@ -182,7 +183,7 @@ impl crate::vm::Vm {
                         out.push(v);
                     }
                 }
-                Ok(VmValue::Set(Rc::new(out)))
+                Ok(VmValue::Set(std::sync::Arc::new(out)))
             }
             "to_dict" => {
                 let items = drain(&handle, self).await?;
@@ -210,7 +211,7 @@ impl crate::vm::Vm {
                         }
                     }
                 }
-                Ok(VmValue::Dict(Rc::new(map)))
+                Ok(VmValue::Dict(std::sync::Arc::new(map)))
             }
             "count" => {
                 let mut n: i64 = 0;

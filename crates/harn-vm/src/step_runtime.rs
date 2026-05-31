@@ -16,7 +16,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -87,7 +87,7 @@ pub enum StepErrorBoundary {
 #[derive(Debug, Clone)]
 pub struct ActiveStep {
     pub frame_depth: usize,
-    pub definition: Rc<StepDefinition>,
+    pub definition: Arc<StepDefinition>,
     pub persona: Option<String>,
     pub args: Vec<VmValue>,
     pub input_tokens: u64,
@@ -109,7 +109,7 @@ pub struct ActiveStep {
 impl ActiveStep {
     fn new(
         frame_depth: usize,
-        definition: Rc<StepDefinition>,
+        definition: Arc<StepDefinition>,
         persona: Option<String>,
         args: Vec<VmValue>,
         span_id: u64,
@@ -138,7 +138,7 @@ impl ActiveStep {
 #[derive(Debug, Clone)]
 pub struct ActivePersona {
     pub frame_depth: usize,
-    pub definition: Rc<PersonaDefinition>,
+    pub definition: Arc<PersonaDefinition>,
 }
 
 /// Snapshot persisted into [`COMPLETED_STEPS`] when the step's frame
@@ -158,9 +158,9 @@ pub struct CompletedStep {
 }
 
 thread_local! {
-    static STEP_REGISTRY: RefCell<BTreeMap<String, Rc<StepDefinition>>> =
+    static STEP_REGISTRY: RefCell<BTreeMap<String, Arc<StepDefinition>>> =
         const { RefCell::new(BTreeMap::new()) };
-    static PERSONA_REGISTRY: RefCell<BTreeMap<String, Rc<PersonaDefinition>>> =
+    static PERSONA_REGISTRY: RefCell<BTreeMap<String, Arc<PersonaDefinition>>> =
         const { RefCell::new(BTreeMap::new()) };
     static STEP_REGISTRY_LEN: Cell<usize> = const { Cell::new(0) };
     static PERSONA_REGISTRY_LEN: Cell<usize> = const { Cell::new(0) };
@@ -206,7 +206,7 @@ pub fn register_step(function: &str, definition: StepDefinition) {
     let inserted = STEP_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .insert(function.to_string(), Rc::new(definition))
+            .insert(function.to_string(), Arc::new(definition))
             .is_none()
     });
     if inserted {
@@ -218,7 +218,7 @@ pub fn register_persona(function: &str, definition: PersonaDefinition) {
     let inserted = PERSONA_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .insert(function.to_string(), Rc::new(definition))
+            .insert(function.to_string(), Arc::new(definition))
             .is_none()
     });
     if inserted {
@@ -232,7 +232,7 @@ pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError
         .and_then(vm_str)
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "__register_persona: expected (function_name, metadata_dict)",
             )))
         })?;
@@ -241,7 +241,7 @@ pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError
         .and_then(VmValue::as_dict)
         .cloned()
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "__register_persona: metadata argument must be a dict",
             )))
         })?;
@@ -265,7 +265,7 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
         VmValue::Nil => return Ok(Vec::new()),
         VmValue::List(list) => list.as_ref(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "__register_persona: stages argument must be a list of dicts",
             ))));
         }
@@ -273,12 +273,12 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
     let mut out = Vec::with_capacity(entries.len());
     for entry in entries {
         let dict = entry.as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "__register_persona: each stage entry must be a dict",
             )))
         })?;
         let Some(name) = dict.get("name").and_then(vm_str) else {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "__register_persona: stage dict missing required 'name'",
             ))));
         };
@@ -289,7 +289,7 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
                     .iter()
                     .map(|item| {
                         vm_str(item).map(str::to_string).ok_or_else(|| {
-                            VmError::Thrown(VmValue::String(Rc::from(
+                            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                                 "__register_persona: stage allowed_tools entries must be strings",
                             )))
                         })
@@ -297,7 +297,7 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
                     .collect::<Result<Vec<_>, _>>()?,
             ),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "__register_persona: stage allowed_tools must be a list of strings",
                 ))));
             }
@@ -332,7 +332,7 @@ pub fn register_step_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .and_then(vm_str)
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "__register_step: expected (function_name, metadata_dict)",
             )))
         })?;
@@ -341,7 +341,7 @@ pub fn register_step_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .and_then(VmValue::as_dict)
         .cloned()
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "__register_step: metadata argument must be a dict",
             )))
         })?;
@@ -392,7 +392,7 @@ pub struct PersonaHookRegistration {
     pub step_name: Option<String>,
     pub event: HookEvent,
     pub threshold_pct: Option<f64>,
-    pub handler: Rc<VmClosure>,
+    pub handler: Arc<VmClosure>,
 }
 
 impl std::fmt::Debug for PersonaHookRegistration {
@@ -409,7 +409,7 @@ impl std::fmt::Debug for PersonaHookRegistration {
 
 #[derive(Debug, Clone)]
 pub struct PersonaHookInvocation {
-    pub handler: Rc<VmClosure>,
+    pub handler: Arc<VmClosure>,
     pub event: HookEvent,
 }
 
@@ -417,7 +417,7 @@ pub fn register_persona_hook(
     persona_pattern: impl Into<String>,
     event: HookEvent,
     threshold_pct: Option<f64>,
-    handler: Rc<VmClosure>,
+    handler: Arc<VmClosure>,
 ) {
     PERSONA_HOOKS.with(|hooks| {
         hooks.borrow_mut().push(PersonaHookRegistration {
@@ -435,7 +435,7 @@ pub fn register_step_hook(
     step_name: impl Into<String>,
     event: HookEvent,
     threshold_pct: Option<f64>,
-    handler: Rc<VmClosure>,
+    handler: Arc<VmClosure>,
 ) {
     PERSONA_HOOKS.with(|hooks| {
         hooks.borrow_mut().push(PersonaHookRegistration {
@@ -479,7 +479,7 @@ pub fn is_tracked_function(function_name: &str) -> bool {
             && PERSONA_REGISTRY.with(|registry| registry.borrow().contains_key(function_name)))
 }
 
-pub fn step_definition_for_function(function_name: &str) -> Option<Rc<StepDefinition>> {
+pub fn step_definition_for_function(function_name: &str) -> Option<Arc<StepDefinition>> {
     if step_registry_empty() {
         return None;
     }
@@ -858,27 +858,27 @@ fn budget_exhausted_error(
     let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
     dict.insert(
         "category".to_string(),
-        VmValue::String(Rc::from("budget_exceeded")),
+        VmValue::String(std::sync::Arc::from("budget_exceeded")),
     );
     dict.insert(
         "kind".to_string(),
-        VmValue::String(Rc::from("budget_exhausted")),
+        VmValue::String(std::sync::Arc::from("budget_exhausted")),
     );
     dict.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from("step_budget_exhausted")),
+        VmValue::String(std::sync::Arc::from("step_budget_exhausted")),
     );
     dict.insert(
         "step".to_string(),
-        VmValue::String(Rc::from(definition.name.clone())),
+        VmValue::String(std::sync::Arc::from(definition.name.clone())),
     );
     dict.insert(
         "function".to_string(),
-        VmValue::String(Rc::from(definition.function.clone())),
+        VmValue::String(std::sync::Arc::from(definition.function.clone())),
     );
     dict.insert(
         "limit".to_string(),
-        VmValue::String(Rc::from(limit.to_string())),
+        VmValue::String(std::sync::Arc::from(limit.to_string())),
     );
     dict.insert("limit_value".to_string(), VmValue::Float(limit_value));
     dict.insert(
@@ -891,7 +891,7 @@ fn budget_exhausted_error(
     );
     dict.insert(
         "error_boundary".to_string(),
-        VmValue::String(Rc::from(
+        VmValue::String(std::sync::Arc::from(
             definition
                 .error_boundary
                 .clone()
@@ -900,12 +900,12 @@ fn budget_exhausted_error(
     );
     dict.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(format!(
+        VmValue::String(std::sync::Arc::from(format!(
             "step `{}` exceeded {} budget ({} > {})",
             definition.name, limit, consumed_tokens as i64, limit_value as i64
         ))),
     );
-    VmError::Thrown(VmValue::Dict(Rc::new(dict)))
+    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 /// Returns true if the thrown value looks like a budget-exhausted
@@ -942,17 +942,17 @@ pub fn mark_escalated(err: VmError, step_name: Option<&str>, function: Option<&s
     next.insert("escalated".to_string(), VmValue::Bool(true));
     next.insert(
         "category".to_string(),
-        VmValue::String(Rc::from("handoff_escalation")),
+        VmValue::String(std::sync::Arc::from("handoff_escalation")),
     );
     if let Some(step) = step_name {
         next.entry("step".to_string())
-            .or_insert_with(|| VmValue::String(Rc::from(step.to_string())));
+            .or_insert_with(|| VmValue::String(std::sync::Arc::from(step.to_string())));
     }
     if let Some(function) = function {
         next.entry("function".to_string())
-            .or_insert_with(|| VmValue::String(Rc::from(function.to_string())));
+            .or_insert_with(|| VmValue::String(std::sync::Arc::from(function.to_string())));
     }
-    VmError::Thrown(VmValue::Dict(Rc::new(next)))
+    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(next)))
 }
 
 /// Drain the completed-step log. Used by receipt builders that want a
@@ -1011,20 +1011,26 @@ mod tests {
         budget.insert("max_tokens".to_string(), VmValue::Int(100));
         budget.insert("max_usd".to_string(), VmValue::Float(0.05));
         let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        meta.insert("name".to_string(), VmValue::String(Rc::from("plan")));
+        meta.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from("plan")),
+        );
         meta.insert(
             "model".to_string(),
-            VmValue::String(Rc::from("claude-haiku-4-5")),
+            VmValue::String(std::sync::Arc::from("claude-haiku-4-5")),
         );
         meta.insert(
             "error_boundary".to_string(),
-            VmValue::String(Rc::from("continue")),
+            VmValue::String(std::sync::Arc::from("continue")),
         );
-        meta.insert("budget".to_string(), VmValue::Dict(Rc::new(budget)));
+        meta.insert(
+            "budget".to_string(),
+            VmValue::Dict(std::sync::Arc::new(budget)),
+        );
 
         register_step_from_dict(vec![
-            VmValue::String(Rc::from("plan_step")),
-            VmValue::Dict(Rc::new(meta)),
+            VmValue::String(std::sync::Arc::from("plan_step")),
+            VmValue::Dict(std::sync::Arc::new(meta)),
         ])
         .expect("registration succeeds");
 
@@ -1096,32 +1102,43 @@ mod tests {
     fn stage_policy_narrows_but_does_not_widen_parent_policy() {
         fresh_state();
         let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        meta.insert("name".to_string(), VmValue::String(Rc::from("research")));
+        meta.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from("research")),
+        );
         register_step_from_dict(vec![
-            VmValue::String(Rc::from("research_step")),
-            VmValue::Dict(Rc::new(meta)),
+            VmValue::String(std::sync::Arc::from("research_step")),
+            VmValue::Dict(std::sync::Arc::new(meta)),
         ])
         .expect("step registration");
 
         let mut stage_dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        stage_dict.insert("name".to_string(), VmValue::String(Rc::from("research")));
+        stage_dict.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from("research")),
+        );
         // Stage tries to add `edit` on top of a parent that only allowed `read`.
         stage_dict.insert(
             "allowed_tools".to_string(),
-            VmValue::List(Rc::new(vec![
-                VmValue::String(Rc::from("read")),
-                VmValue::String(Rc::from("edit")),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from("read")),
+                VmValue::String(std::sync::Arc::from("edit")),
             ])),
         );
         let mut persona_meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        persona_meta.insert("name".to_string(), VmValue::String(Rc::from("scoped")));
+        persona_meta.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from("scoped")),
+        );
         persona_meta.insert(
             "stages".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(stage_dict))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+                std::sync::Arc::new(stage_dict),
+            )])),
         );
         register_persona_from_dict(vec![
-            VmValue::String(Rc::from("scoped_persona")),
-            VmValue::Dict(Rc::new(persona_meta)),
+            VmValue::String(std::sync::Arc::from("scoped_persona")),
+            VmValue::Dict(std::sync::Arc::new(persona_meta)),
         ])
         .expect("persona registration");
 
@@ -1144,28 +1161,41 @@ mod tests {
     fn stage_policy_is_pushed_and_popped_around_step() {
         fresh_state();
         let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        meta.insert("name".to_string(), VmValue::String(Rc::from("research")));
+        meta.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from("research")),
+        );
         register_step_from_dict(vec![
-            VmValue::String(Rc::from("research_step")),
-            VmValue::Dict(Rc::new(meta)),
+            VmValue::String(std::sync::Arc::from("research_step")),
+            VmValue::Dict(std::sync::Arc::new(meta)),
         ])
         .expect("step registration succeeds");
 
         let mut stage_dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        stage_dict.insert("name".to_string(), VmValue::String(Rc::from("research")));
+        stage_dict.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from("research")),
+        );
         stage_dict.insert(
             "allowed_tools".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("read"))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("read"),
+            )])),
         );
         let mut persona_meta: BTreeMap<String, VmValue> = BTreeMap::new();
-        persona_meta.insert("name".to_string(), VmValue::String(Rc::from("scoped")));
+        persona_meta.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from("scoped")),
+        );
         persona_meta.insert(
             "stages".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(stage_dict))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+                std::sync::Arc::new(stage_dict),
+            )])),
         );
         register_persona_from_dict(vec![
-            VmValue::String(Rc::from("scoped_persona")),
-            VmValue::Dict(Rc::new(persona_meta)),
+            VmValue::String(std::sync::Arc::from("scoped_persona")),
+            VmValue::Dict(std::sync::Arc::new(persona_meta)),
         ])
         .expect("persona registration succeeds");
 

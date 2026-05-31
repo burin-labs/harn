@@ -10,7 +10,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -501,16 +500,16 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(Rc::from(s.as_str())),
+        serde_json::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
         serde_json::Value::Array(arr) => {
-            VmValue::List(Rc::new(arr.iter().map(json_to_vm).collect()))
+            VmValue::List(std::sync::Arc::new(arr.iter().map(json_to_vm).collect()))
         }
         serde_json::Value::Object(map) => {
             let mut m = BTreeMap::new();
             for (k, v) in map {
                 m.insert(k.clone(), json_to_vm(v));
             }
-            VmValue::Dict(Rc::new(m))
+            VmValue::Dict(std::sync::Arc::new(m))
         }
     }
 }
@@ -520,7 +519,7 @@ fn namespace_fields_to_vm(fields: &BTreeMap<FieldKey, serde_json::Value>) -> VmV
     for (k, v) in fields {
         map.insert(k.clone(), json_to_vm(v));
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn directory_metadata_to_vm(meta: &DirectoryMetadata) -> VmValue {
@@ -528,7 +527,7 @@ fn directory_metadata_to_vm(meta: &DirectoryMetadata) -> VmValue {
     for (ns, fields) in &meta.namespaces {
         namespaces.insert(ns.clone(), namespace_fields_to_vm(fields));
     }
-    VmValue::Dict(Rc::new(namespaces))
+    VmValue::Dict(std::sync::Arc::new(namespaces))
 }
 
 fn normalize_directory_key(dir: &str) -> String {
@@ -676,8 +675,7 @@ fn resolve_scan_root(rel_dir: &str) -> PathBuf {
 /// `#[harn_builtin]`-emitted handler fns can access it without closure
 /// capture (which the macro doesn't support). The Harn VM executes
 /// single-threaded per run, so each `register_metadata_builtins` call
-/// replaces the cell for that thread — matching the pre-migration
-/// `Rc<RefCell<State>>` semantics one-for-one.
+/// replaces the cell for that thread.
 pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
     METADATA_STATE.with(|cell| {
         *cell.borrow_mut() = Some(MetadataState::new(base_dir));
@@ -750,7 +748,7 @@ fn metadata_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
                     for (k, v) in fields {
                         m.insert(k, json_to_vm(&v));
                     }
-                    Ok(VmValue::Dict(Rc::new(m)))
+                    Ok(VmValue::Dict(std::sync::Arc::new(m)))
                 }
                 None => Ok(VmValue::Nil),
             }
@@ -765,7 +763,7 @@ fn metadata_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             if m.is_empty() {
                 Ok(VmValue::Nil)
             } else {
-                Ok(VmValue::Dict(Rc::new(m)))
+                Ok(VmValue::Dict(std::sync::Arc::new(m)))
             }
         }
     })
@@ -821,7 +819,7 @@ fn metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             let mut item = BTreeMap::new();
             item.insert(
                 "dir".to_string(),
-                VmValue::String(Rc::from(normalize_directory_key(&dir))),
+                VmValue::String(std::sync::Arc::from(normalize_directory_key(&dir))),
             );
             match &namespace {
                 Some(ns) => {
@@ -847,9 +845,9 @@ fn metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
                     item.insert("resolved".to_string(), directory_metadata_to_vm(&resolved));
                 }
             }
-            items.push(VmValue::Dict(Rc::new(item)));
+            items.push(VmValue::Dict(std::sync::Arc::new(item)));
         }
-        Ok(VmValue::List(Rc::new(items)))
+        Ok(VmValue::List(std::sync::Arc::new(items)))
     })
 }
 
@@ -910,7 +908,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             {
                 let current_hash = compute_structure_hash(&full_dir);
                 if current_hash != stored_hash {
-                    tier1_stale.push(VmValue::String(Rc::from(dir.as_str())));
+                    tier1_stale.push(VmValue::String(std::sync::Arc::from(dir.as_str())));
                     continue;
                 }
             }
@@ -922,7 +920,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             {
                 let current_hash = compute_content_hash_for_dir(&full_dir);
                 if current_hash != stored_hash {
-                    tier2_stale.push(VmValue::String(Rc::from(dir.as_str())));
+                    tier2_stale.push(VmValue::String(std::sync::Arc::from(dir.as_str())));
                 }
             }
         }
@@ -930,9 +928,15 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         let any_stale = !tier1_stale.is_empty() || !tier2_stale.is_empty();
         let mut m = BTreeMap::new();
         m.insert("any_stale".to_string(), VmValue::Bool(any_stale));
-        m.insert("tier1".to_string(), VmValue::List(Rc::new(tier1_stale)));
-        m.insert("tier2".to_string(), VmValue::List(Rc::new(tier2_stale)));
-        Ok(VmValue::Dict(Rc::new(m)))
+        m.insert(
+            "tier1".to_string(),
+            VmValue::List(std::sync::Arc::new(tier1_stale)),
+        );
+        m.insert(
+            "tier2".to_string(),
+            VmValue::List(std::sync::Arc::new(tier2_stale)),
+        );
+        Ok(VmValue::Dict(std::sync::Arc::new(m)))
     })
 }
 
@@ -981,7 +985,9 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         let mut missing_structure_hash = Vec::new();
         let mut missing_content_hash = Vec::new();
         for (dir, meta) in &st.entries {
-            directories.push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+            directories.push(VmValue::String(std::sync::Arc::from(
+                normalize_directory_key(dir),
+            )));
             for ns in meta.namespaces.keys() {
                 namespaces.insert(ns.clone(), VmValue::Bool(true));
             }
@@ -996,12 +1002,14 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 .or_else(|| meta.namespaces.get("classification"));
             if let Some(fields) = relevant {
                 if !fields.contains_key("structureHash") && full_dir.exists() {
-                    missing_structure_hash
-                        .push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+                    missing_structure_hash.push(VmValue::String(std::sync::Arc::from(
+                        normalize_directory_key(dir),
+                    )));
                 }
                 if !fields.contains_key("contentHash") && full_dir.exists() {
-                    missing_content_hash
-                        .push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+                    missing_content_hash.push(VmValue::String(std::sync::Arc::from(
+                        normalize_directory_key(dir),
+                    )));
                 }
             }
         }
@@ -1017,28 +1025,28 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         );
         result.insert(
             "namespaces".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 namespaces
                     .keys()
                     .cloned()
-                    .map(|name| VmValue::String(Rc::from(name)))
+                    .map(|name| VmValue::String(std::sync::Arc::from(name)))
                     .collect(),
             )),
         );
         result.insert(
             "directories".to_string(),
-            VmValue::List(Rc::new(directories)),
+            VmValue::List(std::sync::Arc::new(directories)),
         );
         result.insert(
             "missing_structure_hash".to_string(),
-            VmValue::List(Rc::new(missing_structure_hash)),
+            VmValue::List(std::sync::Arc::new(missing_structure_hash)),
         );
         result.insert(
             "missing_content_hash".to_string(),
-            VmValue::List(Rc::new(missing_content_hash)),
+            VmValue::List(std::sync::Arc::new(missing_content_hash)),
         );
         result.insert("stale".to_string(), stale);
-        Ok(VmValue::Dict(Rc::new(result)))
+        Ok(VmValue::Dict(std::sync::Arc::new(result)))
     })
 }
 
@@ -1055,7 +1063,7 @@ fn compute_content_hash_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
             st.base_dir.join(&dir)
         };
         let hash = compute_content_hash_for_dir(&full_dir);
-        Ok(VmValue::String(Rc::from(hash)))
+        Ok(VmValue::String(std::sync::Arc::from(hash)))
     })
 }
 
@@ -1201,10 +1209,16 @@ fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
                     None => directory_metadata_to_vm(meta),
                 };
                 let mut item = BTreeMap::new();
-                item.insert("kind".to_string(), VmValue::String(Rc::from("file")));
-                item.insert("path".to_string(), VmValue::String(Rc::from(path.as_str())));
+                item.insert(
+                    "kind".to_string(),
+                    VmValue::String(std::sync::Arc::from("file")),
+                );
+                item.insert(
+                    "path".to_string(),
+                    VmValue::String(std::sync::Arc::from(path.as_str())),
+                );
                 item.insert("local".to_string(), local);
-                items.push(VmValue::Dict(Rc::new(item)));
+                items.push(VmValue::Dict(std::sync::Arc::new(item)));
             }
         }
         if include_dirs {
@@ -1228,17 +1242,20 @@ fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
                     None => directory_metadata_to_vm(&resolved),
                 };
                 let mut item = BTreeMap::new();
-                item.insert("kind".to_string(), VmValue::String(Rc::from("dir")));
+                item.insert(
+                    "kind".to_string(),
+                    VmValue::String(std::sync::Arc::from("dir")),
+                );
                 item.insert(
                     "path".to_string(),
-                    VmValue::String(Rc::from(normalize_directory_key(&dir))),
+                    VmValue::String(std::sync::Arc::from(normalize_directory_key(&dir))),
                 );
                 item.insert("local".to_string(), local_value);
                 item.insert("resolved".to_string(), resolved_value);
-                items.push(VmValue::Dict(Rc::new(item)));
+                items.push(VmValue::Dict(std::sync::Arc::new(item)));
             }
         }
-        Ok(VmValue::List(Rc::new(items)))
+        Ok(VmValue::List(std::sync::Arc::new(items)))
     })
 }
 
@@ -1305,7 +1322,7 @@ fn scan_directory_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     };
     let mut results: Vec<VmValue> = Vec::new();
     scan_dir_recursive(&full_dir, &scan_base, &options, &mut results, 0);
-    Ok(VmValue::List(Rc::new(results)))
+    Ok(VmValue::List(std::sync::Arc::new(results)))
 }
 
 fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
@@ -1325,7 +1342,9 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
         {
             let current_hash = compute_structure_hash(&full_dir);
             if current_hash != stored_hash {
-                tier1_stale.push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+                tier1_stale.push(VmValue::String(std::sync::Arc::from(
+                    normalize_directory_key(dir),
+                )));
                 continue;
             }
         }
@@ -1337,16 +1356,24 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
         {
             let current_hash = compute_content_hash_for_dir(&full_dir);
             if current_hash != stored_hash {
-                tier2_stale.push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+                tier2_stale.push(VmValue::String(std::sync::Arc::from(
+                    normalize_directory_key(dir),
+                )));
             }
         }
     }
     let any_stale = !tier1_stale.is_empty() || !tier2_stale.is_empty();
     let mut m = BTreeMap::new();
     m.insert("any_stale".to_string(), VmValue::Bool(any_stale));
-    m.insert("tier1".to_string(), VmValue::List(Rc::new(tier1_stale)));
-    m.insert("tier2".to_string(), VmValue::List(Rc::new(tier2_stale)));
-    VmValue::Dict(Rc::new(m))
+    m.insert(
+        "tier1".to_string(),
+        VmValue::List(std::sync::Arc::new(tier1_stale)),
+    );
+    m.insert(
+        "tier2".to_string(),
+        VmValue::List(std::sync::Arc::new(tier2_stale)),
+    );
+    VmValue::Dict(std::sync::Arc::new(m))
 }
 
 fn scan_dir_recursive(
@@ -1393,12 +1420,15 @@ fn scan_dir_recursive(
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let mut m = BTreeMap::new();
-        m.insert("path".to_string(), VmValue::String(Rc::from(rel_path)));
+        m.insert(
+            "path".to_string(),
+            VmValue::String(std::sync::Arc::from(rel_path)),
+        );
         m.insert("size".to_string(), VmValue::Int(meta.len() as i64));
         m.insert("modified".to_string(), VmValue::Int(mtime));
         m.insert("is_dir".to_string(), VmValue::Bool(meta.is_dir()));
         if (meta.is_dir() && options.include_dirs) || (!meta.is_dir() && options.include_files) {
-            results.push(VmValue::Dict(Rc::new(m)));
+            results.push(VmValue::Dict(std::sync::Arc::new(m)));
         }
         if meta.is_dir() {
             scan_dir_recursive(&entry.path(), base, options, results, depth + 1);

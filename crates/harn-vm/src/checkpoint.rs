@@ -17,7 +17,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -162,16 +161,16 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(Rc::from(s.as_str())),
+        serde_json::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
         serde_json::Value::Array(arr) => {
-            VmValue::List(Rc::new(arr.iter().map(json_to_vm).collect()))
+            VmValue::List(std::sync::Arc::new(arr.iter().map(json_to_vm).collect()))
         }
         serde_json::Value::Object(map) => {
             let mut m = BTreeMap::new();
             for (k, v) in map {
                 m.insert(k.clone(), json_to_vm(v));
             }
-            VmValue::Dict(Rc::new(m))
+            VmValue::Dict(std::sync::Arc::new(m))
         }
     }
 }
@@ -195,8 +194,7 @@ fn sanitize_pipeline_name(name: &str) -> String {
 /// defaults to "default". State is installed into a thread-local cell that
 /// the `#[harn_builtin]`-emitted handlers below read; subsequent calls on
 /// the same thread overwrite the state for that thread (the Harn VM
-/// executes single-threaded per run, so this matches the previous
-/// closure-captured `Rc<RefCell<State>>` semantics).
+/// executes single-threaded per run).
 pub fn register_checkpoint_builtins(vm: &mut Vm, base_dir: &Path, pipeline_name: &str) {
     let safe_name = sanitize_pipeline_name(pipeline_name);
     CHECKPOINT_STATE.with(|cell| {
@@ -261,9 +259,9 @@ fn checkpoint_clear_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
 fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("checkpoint_list", |state| {
         let keys = state.list();
-        Ok(VmValue::List(Rc::new(
+        Ok(VmValue::List(std::sync::Arc::new(
             keys.into_iter()
-                .map(|k| VmValue::String(Rc::from(k)))
+                .map(|k| VmValue::String(std::sync::Arc::from(k)))
                 .collect(),
         )))
     })

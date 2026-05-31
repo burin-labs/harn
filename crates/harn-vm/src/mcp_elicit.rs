@@ -19,7 +19,6 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -150,9 +149,9 @@ impl ElicitationBus {
                 .get("code")
                 .and_then(|value| value.as_i64())
                 .unwrap_or(-1);
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "mcp_elicit: client error ({code}): {message}"
-            )))));
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                format!("mcp_elicit: client error ({code}): {message}"),
+            ))));
         }
 
         let result = response.get("result").cloned().unwrap_or(JsonValue::Null);
@@ -182,16 +181,16 @@ fn canonical_id(value: &JsonValue) -> String {
 /// validation has well-defined semantics.
 fn validate_requested_schema(schema: &JsonValue) -> Result<(), VmError> {
     let object = schema.as_object().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "mcp_elicit: requestedSchema must be a JSON object",
         )))
     })?;
     match object.get("type").and_then(|value| value.as_str()) {
         Some("object") => Ok(()),
-        Some(other) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "mcp_elicit: requestedSchema.type must be \"object\" (got {other:?})"
-        ))))),
-        None => Err(VmError::Thrown(VmValue::String(Rc::from(
+        Some(other) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("mcp_elicit: requestedSchema.type must be \"object\" (got {other:?})"),
+        )))),
+        None => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "mcp_elicit: requestedSchema.type is required and must be \"object\"",
         )))),
     }
@@ -208,18 +207,21 @@ pub(crate) fn envelope_from_response(
         .get("action")
         .and_then(|value| value.as_str())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "mcp_elicit: client response missing 'action'",
             )))
         })?;
     if !matches!(action, "accept" | "decline" | "cancel") {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "mcp_elicit: client response action must be 'accept'/'decline'/'cancel' (got {action:?})"
         )))));
     }
 
     let mut envelope: BTreeMap<String, VmValue> = BTreeMap::new();
-    envelope.insert("action".to_string(), VmValue::String(Rc::from(action)));
+    envelope.insert(
+        "action".to_string(),
+        VmValue::String(std::sync::Arc::from(action)),
+    );
 
     if action == "accept" {
         let content = result
@@ -230,7 +232,7 @@ pub(crate) fn envelope_from_response(
         envelope.insert("content".to_string(), validated);
     }
 
-    Ok(VmValue::Dict(Rc::new(envelope)))
+    Ok(VmValue::Dict(std::sync::Arc::new(envelope)))
 }
 
 /// Validate the `content` field of an `accept` response against the
@@ -242,16 +244,16 @@ pub(crate) fn validate_accepted_content(
 ) -> Result<VmValue, VmError> {
     let canonical_schema = elicitation_validate_schema(&json_to_vm_value(requested_schema))
         .map_err(|error| match error {
-            VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::String(Rc::from(
-                format!("mcp_elicit: invalid requestedSchema: {s}"),
-            ))),
+            VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::String(
+                std::sync::Arc::from(format!("mcp_elicit: invalid requestedSchema: {s}")),
+            )),
             other => other,
         })?;
     let content_vm = json_to_vm_value(content);
     elicitation_validate(&content_vm, &canonical_schema).map_err(|error| match error {
-        VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::String(Rc::from(format!(
-            "mcp_elicit: content failed schema validation: {s}"
-        )))),
+        VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::String(
+            std::sync::Arc::from(format!("mcp_elicit: content failed schema validation: {s}")),
+        )),
         other => other,
     })
 }
@@ -315,10 +317,13 @@ pub(crate) async fn dispatch_inbound_elicitation(
     // Includes the originating server name so a single host can route
     // by source, and copies the raw schema through unmodified.
     let mut bridge_params: BTreeMap<String, VmValue> = BTreeMap::new();
-    bridge_params.insert("server".to_string(), VmValue::String(Rc::from(server_name)));
+    bridge_params.insert(
+        "server".to_string(),
+        VmValue::String(std::sync::Arc::from(server_name)),
+    );
     bridge_params.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(message.as_str())),
+        VmValue::String(std::sync::Arc::from(message.as_str())),
     );
     bridge_params.insert(
         "requestedSchema".to_string(),

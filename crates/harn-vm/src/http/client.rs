@@ -126,17 +126,23 @@ fn build_http_response(
 ) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert("status".to_string(), VmValue::Int(status));
-    result.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
-    result.insert("body".to_string(), VmValue::String(Rc::from(body)));
+    result.insert(
+        "headers".to_string(),
+        VmValue::Dict(std::sync::Arc::new(headers)),
+    );
+    result.insert(
+        "body".to_string(),
+        VmValue::String(std::sync::Arc::from(body)),
+    );
     result.insert(
         "final_url".to_string(),
-        VmValue::String(Rc::from(final_url)),
+        VmValue::String(std::sync::Arc::from(final_url)),
     );
     result.insert(
         "ok".to_string(),
         VmValue::Bool((200..300).contains(&(status as u16))),
     );
-    VmValue::Dict(Rc::new(result))
+    VmValue::Dict(std::sync::Arc::new(result))
 }
 
 fn build_http_download_response(
@@ -146,7 +152,10 @@ fn build_http_download_response(
 ) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert("status".to_string(), VmValue::Int(status));
-    result.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
+    result.insert(
+        "headers".to_string(),
+        VmValue::Dict(std::sync::Arc::new(headers)),
+    );
     result.insert(
         "bytes_written".to_string(),
         VmValue::Int(bytes_written as i64),
@@ -155,14 +164,17 @@ fn build_http_download_response(
         "ok".to_string(),
         VmValue::Bool((200..300).contains(&(status as u16))),
     );
-    VmValue::Dict(Rc::new(result))
+    VmValue::Dict(std::sync::Arc::new(result))
 }
 
 fn response_headers(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, VmValue> {
     let mut resp_headers = BTreeMap::new();
     for (name, value) in headers {
         if let Ok(v) = value.to_str() {
-            resp_headers.insert(name.as_str().to_string(), VmValue::String(Rc::from(v)));
+            resp_headers.insert(
+                name.as_str().to_string(),
+                VmValue::String(std::sync::Arc::from(v)),
+            );
         }
     }
     resp_headers
@@ -322,10 +334,9 @@ async fn http_verb_handler(
 ) -> Result<VmValue, VmError> {
     let url = args.first().map(|a| a.display()).unwrap_or_default();
     if url.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "http_{}: URL is required",
-            method.to_ascii_lowercase()
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("http_{}: URL is required", method.to_ascii_lowercase()),
+        ))));
     }
     let mut options = if has_body {
         match (args.get(1), args.get(2)) {
@@ -341,7 +352,10 @@ async fn http_verb_handler(
     };
     if has_body && !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
         let body = args.get(1).map(|a| a.display()).unwrap_or_default();
-        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
+        options.insert(
+            "body".to_string(),
+            VmValue::String(std::sync::Arc::from(body)),
+        );
     }
     vm_execute_http_request(method, &url, &options).await
 }
@@ -752,7 +766,7 @@ pub(super) fn parse_http_request_parts(
                 header_map.insert(reqwest::header::AUTHORIZATION, hv);
                 recorded_headers.insert(
                     "authorization".to_string(),
-                    VmValue::String(Rc::from(s.as_ref())),
+                    VmValue::String(std::sync::Arc::from(s.as_ref())),
                 );
             }
             VmValue::Dict(d) => {
@@ -764,7 +778,7 @@ pub(super) fn parse_http_request_parts(
                     header_map.insert(reqwest::header::AUTHORIZATION, hv);
                     recorded_headers.insert(
                         "authorization".to_string(),
-                        VmValue::String(Rc::from(authorization)),
+                        VmValue::String(std::sync::Arc::from(authorization)),
                     );
                 } else if let Some(VmValue::Dict(basic)) = d.get("basic") {
                     let user = basic.get("user").map(|v| v.display()).unwrap_or_default();
@@ -781,7 +795,7 @@ pub(super) fn parse_http_request_parts(
                     header_map.insert(reqwest::header::AUTHORIZATION, hv);
                     recorded_headers.insert(
                         "authorization".to_string(),
-                        VmValue::String(Rc::from(authorization)),
+                        VmValue::String(std::sync::Arc::from(authorization)),
                     );
                 }
             }
@@ -798,7 +812,7 @@ pub(super) fn parse_http_request_parts(
             header_map.insert(name, val);
             recorded_headers.insert(
                 k.to_ascii_lowercase(),
-                VmValue::String(Rc::from(v.display())),
+                VmValue::String(std::sync::Arc::from(v.display())),
             );
         }
     }
@@ -812,7 +826,7 @@ pub(super) fn parse_http_request_parts(
         }
         recorded_headers.insert(
             "content-type".to_string(),
-            VmValue::String(Rc::from(format!(
+            VmValue::String(std::sync::Arc::from(format!(
                 "multipart/form-data; boundary={MULTIPART_MOCK_BOUNDARY}"
             ))),
         );
@@ -1425,7 +1439,7 @@ pub(super) async fn vm_http_stream_open(
             streams.insert(id.clone(), handle);
             Ok(())
         })?;
-        return Ok(VmValue::String(Rc::from(id)));
+        return Ok(VmValue::String(std::sync::Arc::from(id)));
     }
 
     if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
@@ -1480,7 +1494,7 @@ pub(super) async fn vm_http_stream_open(
         streams.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(Rc::from(id)))
+    Ok(VmValue::String(std::sync::Arc::from(id)))
 }
 
 pub(super) async fn vm_http_stream_read(
@@ -1532,7 +1546,7 @@ pub(super) async fn vm_http_stream_read(
             handle.pending = pending;
         }
     });
-    Ok(VmValue::Bytes(Rc::new(chunk)))
+    Ok(VmValue::Bytes(std::sync::Arc::new(chunk)))
 }
 
 pub(super) fn vm_http_stream_info(stream_id: &str) -> Result<VmValue, VmError> {
@@ -1545,13 +1559,13 @@ pub(super) fn vm_http_stream_info(stream_id: &str) -> Result<VmValue, VmError> {
         dict.insert("status".to_string(), VmValue::Int(handle.status));
         dict.insert(
             "headers".to_string(),
-            VmValue::Dict(Rc::new(handle.headers.clone())),
+            VmValue::Dict(std::sync::Arc::new(handle.headers.clone())),
         );
         dict.insert(
             "ok".to_string(),
             VmValue::Bool((200..300).contains(&(handle.status as u16))),
         );
-        Ok(VmValue::Dict(Rc::new(dict)))
+        Ok(VmValue::Dict(std::sync::Arc::new(dict)))
     })
 }
 
@@ -1581,13 +1595,13 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             .unwrap_or_default()
             .to_uppercase();
         if method.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "http_request: method is required",
             ))));
         }
         let url = args.get(1).map(|a| a.display()).unwrap_or_default();
         if url.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "http_request: URL is required",
             ))));
         }
@@ -1665,7 +1679,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             sessions.insert(id.clone(), HttpSession { client, options });
             Ok(())
         })?;
-        Ok(VmValue::String(Rc::from(id)))
+        Ok(VmValue::String(std::sync::Arc::from(id)))
     });
 
     vm.register_async_builtin("http_session_request", |_ctx, args| async move {
@@ -1705,13 +1719,19 @@ mod tests {
         BTreeMap::from([
             (
                 "proxy".to_string(),
-                VmValue::String(Rc::from("http://proxy.local:8080")),
+                VmValue::String(std::sync::Arc::from("http://proxy.local:8080")),
             ),
             (
                 "proxy_auth".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::from([
-                    ("user".to_string(), VmValue::String(Rc::from("alice"))),
-                    ("pass".to_string(), VmValue::String(Rc::from(password))),
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                    (
+                        "user".to_string(),
+                        VmValue::String(std::sync::Arc::from("alice")),
+                    ),
+                    (
+                        "pass".to_string(),
+                        VmValue::String(std::sync::Arc::from(password)),
+                    ),
                 ]))),
             ),
         ])

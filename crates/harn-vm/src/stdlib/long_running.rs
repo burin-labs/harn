@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Instant;
@@ -27,24 +26,27 @@ impl OperationHandleInfo {
         let mut dict = BTreeMap::new();
         dict.insert(
             "handle_id".to_string(),
-            VmValue::String(Rc::from(self.handle_id)),
+            VmValue::String(std::sync::Arc::from(self.handle_id)),
         );
         dict.insert(
             "started_at".to_string(),
-            VmValue::String(Rc::from(self.started_at)),
+            VmValue::String(std::sync::Arc::from(self.started_at)),
         );
         dict.insert("ended_at".to_string(), VmValue::Nil);
         dict.insert("duration_ms".to_string(), VmValue::Int(0));
-        dict.insert("status".to_string(), VmValue::String(Rc::from("running")));
+        dict.insert(
+            "status".to_string(),
+            VmValue::String(std::sync::Arc::from("running")),
+        );
         dict.insert(
             "operation".to_string(),
-            VmValue::String(Rc::from(self.operation)),
+            VmValue::String(std::sync::Arc::from(self.operation)),
         );
         dict.insert(
             "command_or_op_descriptor".to_string(),
-            VmValue::String(Rc::from(self.descriptor)),
+            VmValue::String(std::sync::Arc::from(self.descriptor)),
         );
-        VmValue::Dict(Rc::new(dict))
+        VmValue::Dict(std::sync::Arc::new(dict))
     }
 }
 

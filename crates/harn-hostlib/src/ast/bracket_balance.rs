@@ -243,14 +243,14 @@ mod tests {
         let raw = std::collections::BTreeMap::from([
             (
                 "source".to_string(),
-                VmValue::String(std::rc::Rc::from("fn foo() {")),
+                VmValue::String(std::sync::Arc::from("fn foo() {")),
             ),
             (
                 "language".to_string(),
-                VmValue::String(std::rc::Rc::from("rust")),
+                VmValue::String(std::sync::Arc::from("rust")),
             ),
         ]);
-        let payload = VmValue::Dict(std::rc::Rc::new(raw));
+        let payload = VmValue::Dict(std::sync::Arc::new(raw));
         let result = run(&[payload]).expect("handler runs");
         match &result {
             VmValue::Dict(d) => {

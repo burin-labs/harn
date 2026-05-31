@@ -38,7 +38,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use regex::Regex;
 
@@ -53,7 +52,7 @@ pub const REGISTRY_TYPE: &str = "tool_hooks_registry";
 const VALID_SEVERITIES: &[&str] = &["error", "warning", "info"];
 
 fn err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 fn require_dict<'a>(
@@ -232,22 +231,25 @@ fn validate_rule_dict(
     let mut rule = BTreeMap::new();
     rule.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from(TOOL_RULE_TYPE)),
+        VmValue::String(std::sync::Arc::from(TOOL_RULE_TYPE)),
     );
-    rule.insert("id".to_string(), VmValue::String(Rc::from(id.as_str())));
+    rule.insert(
+        "id".to_string(),
+        VmValue::String(std::sync::Arc::from(id.as_str())),
+    );
     rule.insert("pattern".to_string(), pattern.clone());
     rule.insert(
         "applies_to".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             applies_to
                 .into_iter()
-                .map(|stack| VmValue::String(Rc::from(stack.as_str())))
+                .map(|stack| VmValue::String(std::sync::Arc::from(stack.as_str())))
                 .collect(),
         )),
     );
     rule.insert(
         "severity".to_string(),
-        VmValue::String(Rc::from(severity.as_str())),
+        VmValue::String(std::sync::Arc::from(severity.as_str())),
     );
     rule.insert(
         "rewrite".to_string(),
@@ -258,14 +260,14 @@ fn validate_rule_dict(
         config
             .get("explanation")
             .cloned()
-            .unwrap_or_else(|| VmValue::String(Rc::from(""))),
+            .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
     );
     rule.insert(
         "references".to_string(),
         config
             .get("references")
             .cloned()
-            .unwrap_or_else(|| VmValue::List(Rc::new(Vec::new()))),
+            .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))),
     );
     rule.insert(
         "priority".to_string(),
@@ -314,7 +316,7 @@ fn extract_rules(raw_rules: Option<&VmValue>, builtin: &str) -> Result<Vec<VmVal
                         "{builtin}: duplicate rule id `{id}` at indices {prev} and {idx}"
                     )));
                 }
-                rules.push(VmValue::Dict(Rc::new(rule_dict)));
+                rules.push(VmValue::Dict(std::sync::Arc::new(rule_dict)));
             }
             Ok(rules)
         }
@@ -338,24 +340,30 @@ fn build_catalogue(config: &BTreeMap<String, VmValue>) -> Result<VmValue, VmErro
     let mut catalogue = BTreeMap::new();
     catalogue.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from(CATALOGUE_TYPE)),
+        VmValue::String(std::sync::Arc::from(CATALOGUE_TYPE)),
     );
-    catalogue.insert("id".to_string(), VmValue::String(Rc::from(id.as_str())));
+    catalogue.insert(
+        "id".to_string(),
+        VmValue::String(std::sync::Arc::from(id.as_str())),
+    );
     catalogue.insert(
         "stack".to_string(),
-        VmValue::String(Rc::from(stack.as_str())),
+        VmValue::String(std::sync::Arc::from(stack.as_str())),
     );
     catalogue.insert(
         "version".to_string(),
-        VmValue::String(Rc::from(version.as_str())),
+        VmValue::String(std::sync::Arc::from(version.as_str())),
     );
     catalogue.insert(
         "source".to_string(),
-        VmValue::String(Rc::from(source.as_str())),
+        VmValue::String(std::sync::Arc::from(source.as_str())),
     );
     catalogue.insert("priority".to_string(), VmValue::Int(priority));
-    catalogue.insert("rules".to_string(), VmValue::List(Rc::new(rules)));
-    Ok(VmValue::Dict(Rc::new(catalogue)))
+    catalogue.insert(
+        "rules".to_string(),
+        VmValue::List(std::sync::Arc::new(rules)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(catalogue)))
 }
 
 fn registry_catalogues(registry: &BTreeMap<String, VmValue>) -> &[VmValue] {
@@ -462,7 +470,7 @@ async fn invoke_rule_pattern(
         }
         callable if Vm::is_callable_value(callable) => {
             let mut vm = ctx.child_vm();
-            let command = VmValue::String(Rc::from(command));
+            let command = VmValue::String(std::sync::Arc::from(command));
             let result = vm.call_callable_two(callable, &command, context).await?;
             ctx.forward_output(&vm.take_output());
             Ok(result.is_truthy())
@@ -481,41 +489,44 @@ fn make_match_record(
     let catalogue_id = catalogue
         .get("id")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(Rc::from("")));
+        .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("")));
     let stack = catalogue
         .get("stack")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(Rc::from("")));
+        .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("")));
     let mut out = BTreeMap::new();
     out.insert("catalogue_id".to_string(), catalogue_id);
     out.insert("stack".to_string(), stack);
     out.insert(
         "rule_id".to_string(),
-        VmValue::String(Rc::from(rule_id(rule).as_str())),
+        VmValue::String(std::sync::Arc::from(rule_id(rule).as_str())),
     );
     out.insert(
         "severity".to_string(),
-        VmValue::String(Rc::from(rule_severity(rule).as_str())),
+        VmValue::String(std::sync::Arc::from(rule_severity(rule).as_str())),
     );
     out.insert(
         "explanation".to_string(),
         rule.get("explanation")
             .cloned()
-            .unwrap_or_else(|| VmValue::String(Rc::from(""))),
+            .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
     );
     out.insert(
         "references".to_string(),
         rule.get("references")
             .cloned()
-            .unwrap_or_else(|| VmValue::List(Rc::new(Vec::new()))),
+            .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))),
     );
     out.insert("priority".to_string(), VmValue::Int(rule_priority(rule)));
     out.insert(
         "rewrite".to_string(),
         rule.get("rewrite").cloned().unwrap_or(VmValue::Nil),
     );
-    out.insert("rule".to_string(), VmValue::Dict(Rc::new(rule.clone())));
-    VmValue::Dict(Rc::new(out))
+    out.insert(
+        "rule".to_string(),
+        VmValue::Dict(std::sync::Arc::new(rule.clone())),
+    );
+    VmValue::Dict(std::sync::Arc::new(out))
 }
 
 pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
@@ -533,7 +544,7 @@ fn tool_rule_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         "config",
     )?;
     let rule = validate_rule_dict(config, "tool_rule")?;
-    Ok(VmValue::Dict(Rc::new(rule)))
+    Ok(VmValue::Dict(std::sync::Arc::new(rule)))
 }
 
 #[harn_builtin(sig = "catalogue(config: dict) -> dict", category = "tool_hooks")]
@@ -552,10 +563,13 @@ fn tool_hooks_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmVa
     let mut registry = BTreeMap::new();
     registry.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from(REGISTRY_TYPE)),
+        VmValue::String(std::sync::Arc::from(REGISTRY_TYPE)),
     );
-    registry.insert("catalogues".to_string(), VmValue::List(Rc::new(Vec::new())));
-    Ok(VmValue::Dict(Rc::new(registry)))
+    registry.insert(
+        "catalogues".to_string(),
+        VmValue::List(std::sync::Arc::new(Vec::new())),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(registry)))
 }
 
 #[harn_builtin(
@@ -617,9 +631,9 @@ fn tool_hooks_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     let mut next = registry;
     next.insert(
         "catalogues".to_string(),
-        VmValue::List(Rc::new(new_catalogues)),
+        VmValue::List(std::sync::Arc::new(new_catalogues)),
     );
-    Ok(VmValue::Dict(Rc::new(next)))
+    Ok(VmValue::Dict(std::sync::Arc::new(next)))
 }
 
 #[harn_builtin(
@@ -665,9 +679,9 @@ fn tool_hooks_unregister_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
     let mut next = registry;
     next.insert(
         "catalogues".to_string(),
-        VmValue::List(Rc::new(new_catalogues)),
+        VmValue::List(std::sync::Arc::new(new_catalogues)),
     );
-    Ok(VmValue::Dict(Rc::new(next)))
+    Ok(VmValue::Dict(std::sync::Arc::new(next)))
 }
 
 #[harn_builtin(
@@ -730,8 +744,11 @@ fn tool_hooks_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
             .collect()
     };
     let mut next = registry;
-    next.insert("catalogues".to_string(), VmValue::List(Rc::new(filtered)));
-    Ok(VmValue::Dict(Rc::new(next)))
+    next.insert(
+        "catalogues".to_string(),
+        VmValue::List(std::sync::Arc::new(filtered)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(next)))
 }
 
 #[harn_builtin(
@@ -777,9 +794,9 @@ fn tool_hooks_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             dict.get("priority").cloned().unwrap_or(VmValue::Int(0)),
         );
         summary.insert("rule_count".to_string(), VmValue::Int(rule_count as i64));
-        entries.push(VmValue::Dict(Rc::new(summary)));
+        entries.push(VmValue::Dict(std::sync::Arc::new(summary)));
     }
-    Ok(VmValue::List(Rc::new(entries)))
+    Ok(VmValue::List(std::sync::Arc::new(entries)))
 }
 
 #[harn_builtin(
@@ -826,7 +843,7 @@ async fn tool_hooks_match_impl(
         };
         let rules = match catalogue_dict.get("rules") {
             Some(VmValue::List(rules)) => rules.clone(),
-            _ => Rc::new(Vec::new()),
+            _ => std::sync::Arc::new(Vec::new()),
         };
         for (rule_idx, rule) in rules.iter().enumerate() {
             let VmValue::Dict(rule_dict) = rule else {
@@ -860,7 +877,7 @@ async fn tool_hooks_match_impl(
             .then_with(|| a.0.cmp(&b.0))
             .then_with(|| a.1.cmp(&b.1))
     });
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         matches
             .into_iter()
             .map(|(_, _, _, _, record)| record)
@@ -927,8 +944,9 @@ fn tool_hooks_inject_reminder_impl(
     // ttl/propagate/role_hint semantics stay in lockstep with
     // `transcript.inject_reminder`. We pass the dict directly; the
     // helper applies the same protocol defaults.
-    let reminder =
-        crate::llm::helpers::reminder_from_vm_value(&VmValue::Dict(Rc::new(options.clone())));
+    let reminder = crate::llm::helpers::reminder_from_vm_value(&VmValue::Dict(
+        std::sync::Arc::new(options.clone()),
+    ));
     // Body cannot be empty from the helper either, since we already
     // validated above. Replace whatever the helper produced with the
     // validated body to keep one source of truth.
@@ -973,14 +991,14 @@ fn tool_hooks_inject_reminder_impl(
     let mut out = BTreeMap::new();
     out.insert(
         "reminder_id".to_string(),
-        VmValue::String(Rc::from(reminder_id.as_str())),
+        VmValue::String(std::sync::Arc::from(reminder_id.as_str())),
     );
     out.insert("deduped_count".to_string(), VmValue::Int(deduped_count));
     out.insert(
         "session_attached".to_string(),
         VmValue::Bool(session_attached),
     );
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 // TH-05 (#1898) classifier cache: thread-local map keyed by
@@ -1156,40 +1174,54 @@ mod tests {
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
         config.insert(
             "id".to_string(),
-            VmValue::String(Rc::from("rust.cargo.target_dir_conflict")),
+            VmValue::String(std::sync::Arc::from("rust.cargo.target_dir_conflict")),
         );
         config.insert(
             "pattern".to_string(),
-            VmValue::String(Rc::from(r"^cargo (build|test)\b")),
+            VmValue::String(std::sync::Arc::from(r"^cargo (build|test)\b")),
         );
         config.insert(
             "applies_to".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("rust"))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("rust"),
+            )])),
         );
-        config.insert("severity".to_string(), VmValue::String(Rc::from("warning")));
+        config.insert(
+            "severity".to_string(),
+            VmValue::String(std::sync::Arc::from("warning")),
+        );
         config.insert(
             "explanation".to_string(),
-            VmValue::String(Rc::from(
+            VmValue::String(std::sync::Arc::from(
                 "Concurrent cargo runs without --target-dir thrash the lockfile",
             )),
         );
-        VmValue::Dict(Rc::new(config))
+        VmValue::Dict(std::sync::Arc::new(config))
     }
 
     fn sample_catalogue_config(rule: VmValue) -> VmValue {
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
         config.insert(
             "id".to_string(),
-            VmValue::String(Rc::from("harn-canon/rust")),
+            VmValue::String(std::sync::Arc::from("harn-canon/rust")),
         );
-        config.insert("stack".to_string(), VmValue::String(Rc::from("rust")));
-        config.insert("version".to_string(), VmValue::String(Rc::from("0.1.0")));
+        config.insert(
+            "stack".to_string(),
+            VmValue::String(std::sync::Arc::from("rust")),
+        );
+        config.insert(
+            "version".to_string(),
+            VmValue::String(std::sync::Arc::from("0.1.0")),
+        );
         config.insert(
             "source".to_string(),
-            VmValue::String(Rc::from("harn-canon")),
+            VmValue::String(std::sync::Arc::from("harn-canon")),
         );
-        config.insert("rules".to_string(), VmValue::List(Rc::new(vec![rule])));
-        VmValue::Dict(Rc::new(config))
+        config.insert(
+            "rules".to_string(),
+            VmValue::List(std::sync::Arc::new(vec![rule])),
+        );
+        VmValue::Dict(std::sync::Arc::new(config))
     }
 
     fn dict_string(dict: &BTreeMap<String, VmValue>, key: &str) -> String {
@@ -1210,13 +1242,20 @@ mod tests {
     fn tool_rule_rejects_bad_severity() {
         let vm = vm_with_stdlib();
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
-        config.insert("id".to_string(), VmValue::String(Rc::from("r")));
-        config.insert("pattern".to_string(), VmValue::String(Rc::from(".")));
+        config.insert("id".to_string(), VmValue::String(std::sync::Arc::from("r")));
+        config.insert(
+            "pattern".to_string(),
+            VmValue::String(std::sync::Arc::from(".")),
+        );
         config.insert(
             "severity".to_string(),
-            VmValue::String(Rc::from("catastrophic")),
+            VmValue::String(std::sync::Arc::from("catastrophic")),
         );
-        let result = call_sync(&vm, "tool_rule", &[VmValue::Dict(Rc::new(config))]);
+        let result = call_sync(
+            &vm,
+            "tool_rule",
+            &[VmValue::Dict(std::sync::Arc::new(config))],
+        );
         assert!(matches!(result, Err(VmError::Thrown(_))));
     }
 
@@ -1224,9 +1263,16 @@ mod tests {
     fn tool_rule_rejects_invalid_regex() {
         let vm = vm_with_stdlib();
         let mut config: BTreeMap<String, VmValue> = BTreeMap::new();
-        config.insert("id".to_string(), VmValue::String(Rc::from("r")));
-        config.insert("pattern".to_string(), VmValue::String(Rc::from("[invalid")));
-        let result = call_sync(&vm, "tool_rule", &[VmValue::Dict(Rc::new(config))]);
+        config.insert("id".to_string(), VmValue::String(std::sync::Arc::from("r")));
+        config.insert(
+            "pattern".to_string(),
+            VmValue::String(std::sync::Arc::from("[invalid")),
+        );
+        let result = call_sync(
+            &vm,
+            "tool_rule",
+            &[VmValue::Dict(std::sync::Arc::new(config))],
+        );
         let Err(VmError::Thrown(VmValue::String(message))) = result else {
             panic!("expected thrown string error, got {result:?}");
         };
@@ -1283,7 +1329,10 @@ mod tests {
         let pruned = call_sync(
             &vm,
             "tool_hooks_unregister",
-            &[registered, VmValue::String(Rc::from("harn-canon/rust"))],
+            &[
+                registered,
+                VmValue::String(std::sync::Arc::from("harn-canon/rust")),
+            ],
         )
         .expect("unregister");
         let list = call_sync(&vm, "tool_hooks_list", &[pruned]).expect("list");
@@ -1296,31 +1345,33 @@ mod tests {
 
     #[test]
     fn context_stacks_normalizes_shapes() {
-        let dict_form = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let dict_form = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "stacks".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("rust"))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("rust"),
+            )])),
         )])));
         assert_eq!(context_stacks(Some(&dict_form)), vec!["rust".to_string()]);
 
-        let dict_string = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let dict_string = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "stacks".to_string(),
-            VmValue::String(Rc::from("python")),
+            VmValue::String(std::sync::Arc::from("python")),
         )])));
         assert_eq!(
             context_stacks(Some(&dict_string)),
             vec!["python".to_string()]
         );
 
-        let list_form = VmValue::List(Rc::new(vec![
-            VmValue::String(Rc::from("typescript")),
-            VmValue::String(Rc::from("rust")),
+        let list_form = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(std::sync::Arc::from("typescript")),
+            VmValue::String(std::sync::Arc::from("rust")),
         ]));
         assert_eq!(
             context_stacks(Some(&list_form)),
             vec!["typescript".to_string(), "rust".to_string()]
         );
 
-        let raw_string = VmValue::String(Rc::from("swift"));
+        let raw_string = VmValue::String(std::sync::Arc::from("swift"));
         assert_eq!(context_stacks(Some(&raw_string)), vec!["swift".to_string()]);
 
         assert!(context_stacks(None).is_empty());
@@ -1336,24 +1387,38 @@ mod tests {
         let mut shell_cfg: BTreeMap<String, VmValue> = BTreeMap::new();
         shell_cfg.insert(
             "id".to_string(),
-            VmValue::String(Rc::from("harn-canon/shell")),
+            VmValue::String(std::sync::Arc::from("harn-canon/shell")),
         );
         // Stackless catalogue: matches every requested stack — universal rules.
         shell_cfg.insert(
             "rules".to_string(),
-            VmValue::List(Rc::new(vec![rule.clone()])),
+            VmValue::List(std::sync::Arc::new(vec![rule.clone()])),
         );
-        let shell_cat =
-            call_sync(&vm, "catalogue", &[VmValue::Dict(Rc::new(shell_cfg))]).expect("cat");
+        let shell_cat = call_sync(
+            &vm,
+            "catalogue",
+            &[VmValue::Dict(std::sync::Arc::new(shell_cfg))],
+        )
+        .expect("cat");
         let mut python_cfg: BTreeMap<String, VmValue> = BTreeMap::new();
         python_cfg.insert(
             "id".to_string(),
-            VmValue::String(Rc::from("harn-canon/python")),
+            VmValue::String(std::sync::Arc::from("harn-canon/python")),
         );
-        python_cfg.insert("stack".to_string(), VmValue::String(Rc::from("python")));
-        python_cfg.insert("rules".to_string(), VmValue::List(Rc::new(vec![rule])));
-        let py_cat =
-            call_sync(&vm, "catalogue", &[VmValue::Dict(Rc::new(python_cfg))]).expect("cat");
+        python_cfg.insert(
+            "stack".to_string(),
+            VmValue::String(std::sync::Arc::from("python")),
+        );
+        python_cfg.insert(
+            "rules".to_string(),
+            VmValue::List(std::sync::Arc::new(vec![rule])),
+        );
+        let py_cat = call_sync(
+            &vm,
+            "catalogue",
+            &[VmValue::Dict(std::sync::Arc::new(python_cfg))],
+        )
+        .expect("cat");
 
         let registry = call_sync(&vm, "tool_hooks_registry", &[]).expect("registry");
         let r1 = call_sync(&vm, "tool_hooks_register", &[registry, rust_cat]).expect("r1");
@@ -1364,7 +1429,7 @@ mod tests {
         let unfiltered = call_sync(
             &vm,
             "tool_hooks_filter",
-            &[r3.clone(), VmValue::List(Rc::new(Vec::new()))],
+            &[r3.clone(), VmValue::List(std::sync::Arc::new(Vec::new()))],
         )
         .expect("unfiltered");
         assert_eq!(
@@ -1380,7 +1445,9 @@ mod tests {
             "tool_hooks_filter",
             &[
                 r3,
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("rust"))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from("rust"),
+                )])),
             ],
         )
         .expect("filtered");
@@ -1424,20 +1491,31 @@ mod tests {
 
     fn audit_payload(rule_id: &str, command: &str) -> VmValue {
         let mut payload: BTreeMap<String, VmValue> = BTreeMap::new();
-        payload.insert("rule_id".to_string(), VmValue::String(Rc::from(rule_id)));
-        payload.insert("command".to_string(), VmValue::String(Rc::from(command)));
-        VmValue::Dict(Rc::new(payload))
+        payload.insert(
+            "rule_id".to_string(),
+            VmValue::String(std::sync::Arc::from(rule_id)),
+        );
+        payload.insert(
+            "command".to_string(),
+            VmValue::String(std::sync::Arc::from(command)),
+        );
+        VmValue::Dict(std::sync::Arc::new(payload))
     }
 
     fn reminder_options(body: &str, tag: &str, ttl: i64) -> VmValue {
         let mut options: BTreeMap<String, VmValue> = BTreeMap::new();
-        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
+        options.insert(
+            "body".to_string(),
+            VmValue::String(std::sync::Arc::from(body)),
+        );
         options.insert(
             "tags".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from(tag))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from(tag),
+            )])),
         );
         options.insert("ttl_turns".to_string(), VmValue::Int(ttl));
-        VmValue::Dict(Rc::new(options))
+        VmValue::Dict(std::sync::Arc::new(options))
     }
 
     #[test]
@@ -1449,7 +1527,7 @@ mod tests {
             &vm,
             "tool_hooks_emit_audit",
             &[
-                VmValue::String(Rc::from("tool_rewrite")),
+                VmValue::String(std::sync::Arc::from("tool_rewrite")),
                 audit_payload("rust.cargo.target_dir", "cargo build"),
             ],
         )
@@ -1471,7 +1549,7 @@ mod tests {
         let result = call_sync(
             &vm,
             "tool_hooks_emit_audit",
-            &[VmValue::String(Rc::from("")), VmValue::Nil],
+            &[VmValue::String(std::sync::Arc::from("")), VmValue::Nil],
         );
         let Err(VmError::Thrown(VmValue::String(message))) = result else {
             panic!("expected thrown error, got {result:?}");
@@ -1519,12 +1597,14 @@ mod tests {
         let mut options: BTreeMap<String, VmValue> = BTreeMap::new();
         options.insert(
             "tags".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("x"))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("x"),
+            )])),
         );
         let result = call_sync(
             &vm,
             "tool_hooks_inject_reminder",
-            &[VmValue::Dict(Rc::new(options))],
+            &[VmValue::Dict(std::sync::Arc::new(options))],
         );
         let Err(VmError::Thrown(VmValue::String(message))) = result else {
             panic!("expected thrown error, got {result:?}");
@@ -1536,9 +1616,12 @@ mod tests {
 
     fn verdict_value(kind: &str) -> VmValue {
         let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        dict.insert("kind".to_string(), VmValue::String(Rc::from(kind)));
+        dict.insert(
+            "kind".to_string(),
+            VmValue::String(std::sync::Arc::from(kind)),
+        );
         dict.insert("confidence".to_string(), VmValue::Float(0.9));
-        VmValue::Dict(Rc::new(dict))
+        VmValue::Dict(std::sync::Arc::new(dict))
     }
 
     #[test]
@@ -1550,7 +1633,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_put",
             &[
-                VmValue::String(Rc::from("scope:hashA")),
+                VmValue::String(std::sync::Arc::from("scope:hashA")),
                 verdict_value("rewrite"),
                 VmValue::Int(0),
                 VmValue::Nil,
@@ -1561,7 +1644,10 @@ mod tests {
         let got = call_sync(
             &vm,
             "__tool_hooks_classifier_cache_get",
-            &[VmValue::String(Rc::from("scope:hashA")), VmValue::Int(0)],
+            &[
+                VmValue::String(std::sync::Arc::from("scope:hashA")),
+                VmValue::Int(0),
+            ],
         )
         .expect("get");
         let dict = got.as_dict().expect("verdict dict");
@@ -1576,7 +1662,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_put",
             &[
-                VmValue::String(Rc::from("scope:expiring")),
+                VmValue::String(std::sync::Arc::from("scope:expiring")),
                 verdict_value("deny"),
                 VmValue::Int(1_000),
                 VmValue::Int(500), // 500ms TTL → expires at 1_500.
@@ -1588,7 +1674,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_get",
             &[
-                VmValue::String(Rc::from("scope:expiring")),
+                VmValue::String(std::sync::Arc::from("scope:expiring")),
                 VmValue::Int(1_200),
             ],
         )
@@ -1599,7 +1685,7 @@ mod tests {
             &vm,
             "__tool_hooks_classifier_cache_get",
             &[
-                VmValue::String(Rc::from("scope:expiring")),
+                VmValue::String(std::sync::Arc::from("scope:expiring")),
                 VmValue::Int(1_600),
             ],
         )
@@ -1613,7 +1699,7 @@ mod tests {
         let result = call_sync(
             &vm,
             "__tool_hooks_classifier_cache_get",
-            &[VmValue::String(Rc::from("")), VmValue::Int(0)],
+            &[VmValue::String(std::sync::Arc::from("")), VmValue::Int(0)],
         );
         let Err(VmError::Thrown(VmValue::String(message))) = result else {
             panic!("expected thrown error, got {result:?}");

@@ -1249,7 +1249,7 @@ async fn acp_bridge_routes_session_request_permission_response() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let server =
         AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx.clone()));
-    let bridge = Rc::new(AcpBridge {
+    let bridge = Arc::new(AcpBridge {
         session_id: "session-1".to_string(),
         output: AcpOutput::Channel(tx),
         pending: server.pending.clone(),

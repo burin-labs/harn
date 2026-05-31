@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use harn_hostlib::{ast::AstCapability, tools::permissions, BuiltinRegistry, HostlibCapability};
@@ -28,7 +28,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
     for (k, v) in pairs {
         map.insert((*k).into(), v.clone());
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -44,7 +44,7 @@ fn bench_parse_file_warm(c: &mut Criterion) {
     let path = fixture_path("rust/source.rs");
     let payload = dict(&[(
         "path",
-        VmValue::String(Rc::from(path.to_string_lossy().as_ref())),
+        VmValue::String(Arc::from(path.to_string_lossy().as_ref())),
     )]);
 
     let entry = registry
@@ -131,11 +131,11 @@ fn bench_apply_node_large(c: &mut Criterion) {
         // `dry_run` keeps the bench hermetic (no disk writes) while still
         // exercising read + parse + query + splice + re-validate.
         let payload = dict(&[
-            ("path", VmValue::String(Rc::from(path.as_str()))),
-            ("language", VmValue::String(Rc::from(language))),
-            ("query", VmValue::String(Rc::from(query))),
-            ("replacement", VmValue::String(Rc::from(replacement))),
-            ("select", VmValue::String(Rc::from("first"))),
+            ("path", VmValue::String(Arc::from(path.as_str()))),
+            ("language", VmValue::String(Arc::from(language))),
+            ("query", VmValue::String(Arc::from(query))),
+            ("replacement", VmValue::String(Arc::from(replacement))),
+            ("select", VmValue::String(Arc::from("first"))),
             ("dry_run", VmValue::Bool(true)),
         ]);
         c.bench_function(

@@ -16,8 +16,8 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::sync::{LazyLock, Mutex};
 
 use harn_vm::VmValue;
@@ -144,7 +144,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
     let entries: Vec<VmValue> = records
         .into_iter()
-        .map(|r| VmValue::Dict(Rc::new(record_to_map(r))))
+        .map(|r| VmValue::Dict(Arc::new(record_to_map(r))))
         .collect();
     Ok(ResponseBuilder::new()
         .str("result_handle", handle)
@@ -154,10 +154,10 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn record_to_map(record: test_parsers::TestRecord) -> BTreeMap<String, VmValue> {
     let mut map = BTreeMap::new();
-    map.insert("name".to_string(), VmValue::String(Rc::from(record.name)));
+    map.insert("name".to_string(), VmValue::String(Arc::from(record.name)));
     map.insert(
         "status".to_string(),
-        VmValue::String(Rc::from(record.status.as_str())),
+        VmValue::String(Arc::from(record.status.as_str())),
     );
     map.insert(
         "duration_ms".to_string(),
@@ -167,28 +167,28 @@ fn record_to_map(record: test_parsers::TestRecord) -> BTreeMap<String, VmValue> 
         "message".to_string(),
         record
             .message
-            .map(|m| VmValue::String(Rc::from(m)))
+            .map(|m| VmValue::String(Arc::from(m)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "stdout".to_string(),
         record
             .stdout
-            .map(|s| VmValue::String(Rc::from(s)))
+            .map(|s| VmValue::String(Arc::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "stderr".to_string(),
         record
             .stderr
-            .map(|s| VmValue::String(Rc::from(s)))
+            .map(|s| VmValue::String(Arc::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "path".to_string(),
         record
             .path
-            .map(|p| VmValue::String(Rc::from(p)))
+            .map(|p| VmValue::String(Arc::from(p)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(

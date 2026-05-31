@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
 
@@ -59,7 +59,7 @@ pub trait ReminderProvider {
 struct VmReminderProvider {
     id: String,
     subscribes_to: Vec<HookEvent>,
-    evaluate: Rc<VmClosure>,
+    evaluate: Arc<VmClosure>,
 }
 
 thread_local! {
@@ -406,7 +406,7 @@ fn format_workspace_anchor_body(anchor: &crate::workspace_anchor::WorkspaceAncho
 pub fn register_vm_provider(
     id: impl Into<String>,
     subscribes_to: Vec<HookEvent>,
-    evaluate: Rc<VmClosure>,
+    evaluate: Arc<VmClosure>,
 ) {
     let id = id.into();
     USER_PROVIDERS.with(|providers| {

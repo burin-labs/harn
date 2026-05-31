@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -140,7 +139,7 @@ impl Default for OrchestratorBudgetState {
 pub enum TriggerHandlerSpec {
     Local {
         raw: String,
-        closure: Rc<VmClosure>,
+        closure: Arc<VmClosure>,
     },
     A2a {
         target: String,
@@ -163,7 +162,7 @@ pub enum TriggerHandlerSpec {
         pool: String,
         priority_from: Option<String>,
         key_from: Option<String>,
-        task_factory: Rc<VmClosure>,
+        task_factory: Arc<VmClosure>,
     },
     /// Composes triggers (#1870) with the reminder pipeline (#1815) by
     /// injecting a `SystemReminder` into a target agent session's transcript
@@ -212,7 +211,7 @@ pub enum TriggerHandlerSpec {
 pub enum AgentScope {
     All,
     Concrete(Vec<String>),
-    Closure(Rc<VmClosure>),
+    Closure(Arc<VmClosure>),
 }
 
 impl AgentScope {
@@ -246,7 +245,7 @@ pub enum TargetExpr {
     Current,
     Parent,
     Concrete(String),
-    Closure(Rc<VmClosure>),
+    Closure(Arc<VmClosure>),
 }
 
 impl TargetExpr {
@@ -353,7 +352,7 @@ impl TriggerHandlerSpec {
 #[derive(Clone)]
 pub struct TriggerPredicateSpec {
     pub raw: String,
-    pub closure: Rc<VmClosure>,
+    pub closure: Arc<VmClosure>,
 }
 
 impl std::fmt::Debug for TriggerPredicateSpec {

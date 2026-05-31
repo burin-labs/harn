@@ -110,7 +110,7 @@ impl Vm {
         Rc::make_mut(&mut self.builtins_by_id).insert(
             id,
             VmBuiltinEntry {
-                name: Rc::from(name),
+                name: std::sync::Arc::from(name),
                 dispatch,
             },
         );

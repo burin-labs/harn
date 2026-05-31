@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::time::Duration as StdDuration;
 
 use futures::{pin_mut, stream::SelectAll, StreamExt};
@@ -456,7 +455,7 @@ fn parse_wait_options(value: Option<&VmValue>, builtin: &str) -> Result<WaitOpti
 }
 
 fn json_dict_field(
-    map: &Rc<BTreeMap<String, VmValue>>,
+    map: &BTreeMap<String, VmValue>,
     field: &str,
     builtin: &str,
 ) -> Result<BTreeMap<String, serde_json::Value>, VmError> {
@@ -474,10 +473,7 @@ fn json_dict_field(
         .collect())
 }
 
-fn string_field(
-    map: &Rc<BTreeMap<String, VmValue>>,
-    field: &str,
-) -> Result<Option<String>, VmError> {
+fn string_field(map: &BTreeMap<String, VmValue>, field: &str) -> Result<Option<String>, VmError> {
     let Some(value) = map.get(field) else {
         return Ok(None);
     };
@@ -574,7 +570,7 @@ fn ensure_waitpoint_event_log() -> std::sync::Arc<AnyEventLog> {
 }
 
 fn cancelled_vm_error() -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(
         "kind:cancelled:VM cancelled by host",
     )))
 }

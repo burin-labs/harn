@@ -8,7 +8,7 @@
 //! tree-sitter implementation without disturbing callers.
 
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -54,7 +54,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     Ok(build_dict([
         ("path", str_value(&path_str)),
         ("language", str_value(language)),
-        ("items", VmValue::List(Rc::new(items_list))),
+        ("items", VmValue::List(Arc::new(items_list))),
     ]))
 }
 
@@ -322,6 +322,6 @@ fn item_to_value(item: OutlineItem) -> VmValue {
         ("kind", str_value(&kind)),
         ("start_row", VmValue::Int(start_row as i64)),
         ("end_row", VmValue::Int(end_row as i64)),
-        ("children", VmValue::List(Rc::new(Vec::new()))),
+        ("children", VmValue::List(Arc::new(Vec::new()))),
     ])
 }

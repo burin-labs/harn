@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::hint::black_box;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use harn_hostlib::{
@@ -36,7 +36,7 @@ fn dict(entries: &[(&str, VmValue)]) -> VmValue {
     for (k, v) in entries {
         map.insert((*k).to_string(), v.clone());
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
@@ -73,7 +73,7 @@ fn build_corpus() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn cypher_query(reg: &BuiltinRegistry, query: &str) {
-    let payload = dict(&[("query", VmValue::String(Rc::from(query)))]);
+    let payload = dict(&[("query", VmValue::String(Arc::from(query)))]);
     let response = call(reg, "hostlib_code_index_cypher", payload);
     black_box(response);
 }
@@ -88,7 +88,7 @@ fn bench_cypher(c: &mut Criterion) {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(Rc::from(root.to_string_lossy().as_ref())),
+            VmValue::String(Arc::from(root.to_string_lossy().as_ref())),
         )]),
     );
 

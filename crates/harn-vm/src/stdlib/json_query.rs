@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::{values_equal, VmValue};
 
@@ -98,9 +97,9 @@ impl Expr {
                     for item in items.iter() {
                         mapped.extend(expr.eval(item));
                     }
-                    vec![VmValue::List(Rc::new(mapped))]
+                    vec![VmValue::List(std::sync::Arc::new(mapped))]
                 }
-                _ => vec![VmValue::List(Rc::new(Vec::new()))],
+                _ => vec![VmValue::List(std::sync::Arc::new(Vec::new()))],
             },
             Expr::Select(expr) => {
                 if expr.eval_bool(input) {
@@ -117,7 +116,7 @@ impl Expr {
                         expr.eval(input).into_iter().next().unwrap_or(VmValue::Nil),
                     );
                 }
-                vec![VmValue::Dict(Rc::new(out))]
+                vec![VmValue::Dict(std::sync::Arc::new(out))]
             }
             Expr::Literal(value) => vec![value.clone()],
             Expr::Compare { .. } | Expr::Bool { .. } | Expr::Not(_) => {
@@ -183,9 +182,11 @@ fn eval_path(input: &VmValue, steps: &[PathStep]) -> Vec<VmValue> {
                 },
                 PathStep::Slice(start, end) => match value {
                     VmValue::List(items) => {
-                        next.push(VmValue::List(Rc::new(slice_list(&items, *start, *end))));
+                        next.push(VmValue::List(std::sync::Arc::new(slice_list(
+                            &items, *start, *end,
+                        ))));
                     }
-                    _ => next.push(VmValue::List(Rc::new(Vec::new()))),
+                    _ => next.push(VmValue::List(std::sync::Arc::new(Vec::new()))),
                 },
             }
         }
@@ -253,24 +254,26 @@ fn eval_builtin(builtin: Builtin, input: &VmValue) -> VmValue {
             _ => 1,
         }),
         Builtin::Keys => match input {
-            VmValue::Dict(map) => VmValue::List(Rc::new(
+            VmValue::Dict(map) => VmValue::List(std::sync::Arc::new(
                 map.keys()
-                    .map(|key| VmValue::String(Rc::from(key.as_str())))
+                    .map(|key| VmValue::String(std::sync::Arc::from(key.as_str())))
                     .collect(),
             )),
-            VmValue::List(items) => VmValue::List(Rc::new(
+            VmValue::List(items) => VmValue::List(std::sync::Arc::new(
                 (0..items.len())
                     .map(|index| VmValue::Int(index as i64))
                     .collect(),
             )),
-            _ => VmValue::List(Rc::new(Vec::new())),
+            _ => VmValue::List(std::sync::Arc::new(Vec::new())),
         },
         Builtin::Values => match input {
-            VmValue::Dict(map) => VmValue::List(Rc::new(map.values().cloned().collect())),
+            VmValue::Dict(map) => {
+                VmValue::List(std::sync::Arc::new(map.values().cloned().collect()))
+            }
             VmValue::List(items) | VmValue::Set(items) => VmValue::List(items.clone()),
-            _ => VmValue::List(Rc::new(Vec::new())),
+            _ => VmValue::List(std::sync::Arc::new(Vec::new())),
         },
-        Builtin::Type => VmValue::String(Rc::from(jq_type_name(input))),
+        Builtin::Type => VmValue::String(std::sync::Arc::from(jq_type_name(input))),
     }
 }
 
@@ -435,7 +438,7 @@ impl<'a> Parser<'a> {
             return self.parse_object();
         }
         if self.peek_char() == Some('"') {
-            return Ok(Expr::Literal(VmValue::String(Rc::from(
+            return Ok(Expr::Literal(VmValue::String(std::sync::Arc::from(
                 self.parse_string()?.as_str(),
             ))));
         }

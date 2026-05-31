@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use super::*;
 
@@ -11,7 +10,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> BTreeMap<String, VmValue> {
 }
 
 fn s(v: &str) -> VmValue {
-    VmValue::String(Rc::from(v))
+    VmValue::String(std::sync::Arc::from(v))
 }
 
 fn render(tpl: &str, b: &BTreeMap<String, VmValue>) -> String {
@@ -23,7 +22,7 @@ fn render_with_spans(tpl: &str, b: &BTreeMap<String, VmValue>) -> (String, Vec<P
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(Rc::new(items))
+    VmValue::List(std::sync::Arc::new(items))
 }
 
 #[test]
@@ -37,7 +36,7 @@ fn provenance_expr_span_matches_output_range() {
     let mut user = BTreeMap::new();
     user.insert("name".to_string(), s("alice"));
     let b = dict(&[
-        ("user", VmValue::Dict(Rc::new(user))),
+        ("user", VmValue::Dict(std::sync::Arc::new(user))),
         ("count", VmValue::Int(42)),
     ]);
     let (out, spans) = render_with_spans("hello {{ user.name }} ({{ count | default: 0 }})", &b);
@@ -81,7 +80,7 @@ fn provenance_legacy_bare_interp_span_tracked() {
 fn provenance_includes_loop_iterations() {
     let b = dict(&[(
         "items",
-        VmValue::List(Rc::new(vec![s("a"), s("b"), s("c")])),
+        VmValue::List(std::sync::Arc::new(vec![s("a"), s("b"), s("c")])),
     )]);
     let tpl = "{{for x in items}}[{{x}}]{{end}}";
     let (out, spans) = render_with_spans(tpl, &b);
@@ -102,7 +101,7 @@ fn provenance_includes_loop_iterations() {
 fn provenance_preview_is_truncated() {
     let mut wrap = BTreeMap::new();
     wrap.insert("val".to_string(), s(&"x".repeat(500)));
-    let b = dict(&[("blob", VmValue::Dict(Rc::new(wrap)))]);
+    let b = dict(&[("blob", VmValue::Dict(std::sync::Arc::new(wrap)))]);
     let (_, spans) = render_with_spans("{{blob.val}}", &b);
     let expr = spans
         .iter()
@@ -153,14 +152,14 @@ fn if_elif_else() {
 
 #[test]
 fn for_loop_basic() {
-    let items = VmValue::List(Rc::new(vec![s("a"), s("b"), s("c")]));
+    let items = VmValue::List(std::sync::Arc::new(vec![s("a"), s("b"), s("c")]));
     let b = dict(&[("xs", items)]);
     assert_eq!(render("{{for x in xs}}{{x}},{{end}}", &b), "a,b,c,");
 }
 
 #[test]
 fn for_loop_vars() {
-    let items = VmValue::List(Rc::new(vec![s("a"), s("b")]));
+    let items = VmValue::List(std::sync::Arc::new(vec![s("a"), s("b")]));
     let b = dict(&[("xs", items)]);
     let tpl = "{{for x in xs}}{{loop.index}}:{{x}}{{if !loop.last}},{{end}}{{end}}";
     assert_eq!(render(tpl, &b), "1:a,2:b");
@@ -168,7 +167,7 @@ fn for_loop_vars() {
 
 #[test]
 fn for_empty_else() {
-    let b = dict(&[("xs", VmValue::List(Rc::new(vec![])))]);
+    let b = dict(&[("xs", VmValue::List(std::sync::Arc::new(vec![])))]);
     assert_eq!(render("{{for x in xs}}A{{else}}empty{{end}}", &b), "empty");
 }
 
@@ -177,7 +176,7 @@ fn for_dict_kv() {
     let mut d: BTreeMap<String, VmValue> = BTreeMap::new();
     d.insert("a".into(), VmValue::Int(1));
     d.insert("b".into(), VmValue::Int(2));
-    let b = dict(&[("m", VmValue::Dict(Rc::new(d)))]);
+    let b = dict(&[("m", VmValue::Dict(std::sync::Arc::new(d)))]);
     assert_eq!(
         render("{{for k, v in m}}{{k}}={{v}};{{end}}", &b),
         "a=1;b=2;"
@@ -188,13 +187,16 @@ fn for_dict_kv() {
 fn nested_path() {
     let mut inner: BTreeMap<String, VmValue> = BTreeMap::new();
     inner.insert("name".into(), s("Alice"));
-    let b = dict(&[("user", VmValue::Dict(Rc::new(inner)))]);
+    let b = dict(&[("user", VmValue::Dict(std::sync::Arc::new(inner)))]);
     assert_eq!(render("{{user.name}}", &b), "Alice");
 }
 
 #[test]
 fn list_index() {
-    let b = dict(&[("xs", VmValue::List(Rc::new(vec![s("a"), s("b"), s("c")])))]);
+    let b = dict(&[(
+        "xs",
+        VmValue::List(std::sync::Arc::new(vec![s("a"), s("b"), s("c")])),
+    )]);
     assert_eq!(render("{{xs[1]}}", &b), "b");
 }
 
@@ -212,7 +214,10 @@ fn filter_default() {
 
 #[test]
 fn filter_join() {
-    let b = dict(&[("xs", VmValue::List(Rc::new(vec![s("a"), s("b")])))]);
+    let b = dict(&[(
+        "xs",
+        VmValue::List(std::sync::Arc::new(vec![s("a"), s("b")])),
+    )]);
     assert_eq!(render("{{xs | join: \", \"}}", &b), "a, b");
 }
 
@@ -273,15 +278,15 @@ fn logical_section_scaffolding_follows_llm_capabilities() {
 
 #[test]
 fn logical_section_tools_and_output_format_use_section_args() {
-    let tool = VmValue::Dict(Rc::new(BTreeMap::from([
+    let tool = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         ("name".to_string(), s("read_file")),
         ("description".to_string(), s("Read a file")),
     ])));
-    let schema = VmValue::Dict(Rc::new(BTreeMap::from([
+    let schema = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
         ("type".to_string(), s("object")),
         (
             "properties".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "answer".to_string(),
                 s("string"),
             )]))),
@@ -410,7 +415,7 @@ fn logical_section_provenance_adjusts_child_spans() {
 fn filter_json() {
     let b = dict(&[(
         "x",
-        VmValue::Dict(Rc::new({
+        VmValue::Dict(std::sync::Arc::new({
             let mut m = BTreeMap::new();
             m.insert("a".into(), VmValue::Int(1));
             m

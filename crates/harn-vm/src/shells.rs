@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 #[cfg(not(windows))]
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
@@ -187,7 +186,7 @@ pub fn shell_descriptor_to_vm_value(shell: &ShellDescriptor) -> VmValue {
     map.insert("default_args".to_string(), string_list(&shell.default_args));
     map.insert("login_args".to_string(), string_list(&shell.login_args));
     map.insert("source".to_string(), string(&shell.source));
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
@@ -202,14 +201,14 @@ pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
         "shell".to_string(),
         shell_descriptor_to_vm_value(&invocation.shell),
     );
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn shell_catalog_to_vm_value(catalog: &ShellCatalog) -> VmValue {
     let mut map = BTreeMap::new();
     map.insert(
         "shells".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             catalog
                 .shells
                 .iter()
@@ -225,7 +224,7 @@ fn shell_catalog_to_vm_value(catalog: &ShellCatalog) -> VmValue {
             .map(|id| string(id))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(std::sync::Arc::new(map))
 }
 
 fn shell_descriptor_from_vm_dict(
@@ -573,11 +572,13 @@ fn vm_string_list(value: &VmValue) -> Option<Vec<String>> {
 }
 
 fn string(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value.to_string()))
+    VmValue::String(std::sync::Arc::from(value.to_string()))
 }
 
 fn string_list(values: &[String]) -> VmValue {
-    VmValue::List(Rc::new(values.iter().map(|value| string(value)).collect()))
+    VmValue::List(std::sync::Arc::new(
+        values.iter().map(|value| string(value)).collect(),
+    ))
 }
 
 #[cfg(test)]

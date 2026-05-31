@@ -18,7 +18,6 @@
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
-use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -99,7 +98,7 @@ pub enum OnViolation {
     /// Custom callback: `fn(req) -> "error" | "audit_only" |
     /// "quarantine"`. The callback closure is invoked with a request
     /// dict and the string outcome decides the next step.
-    Callback(Rc<VmClosure>),
+    Callback(Arc<VmClosure>),
 }
 
 impl OnViolation {
@@ -392,30 +391,30 @@ pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
     let mut dict = BTreeMap::new();
     dict.insert(
         "type".to_string(),
-        VmValue::String(Rc::from("NetPolicyViolation")),
+        VmValue::String(std::sync::Arc::from("NetPolicyViolation")),
     );
     dict.insert(
         "category".to_string(),
-        VmValue::String(Rc::from("net_policy_violation")),
+        VmValue::String(std::sync::Arc::from("net_policy_violation")),
     );
     dict.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(format!(
+        VmValue::String(std::sync::Arc::from(format!(
             "harness.net.{} blocked {}: {}",
             audit.method, audit.url, audit.reason
         ))),
     );
     dict.insert(
         "method".to_string(),
-        VmValue::String(Rc::from(audit.method.as_str())),
+        VmValue::String(std::sync::Arc::from(audit.method.as_str())),
     );
     dict.insert(
         "url".to_string(),
-        VmValue::String(Rc::from(audit.url.as_str())),
+        VmValue::String(std::sync::Arc::from(audit.url.as_str())),
     );
     dict.insert(
         "host".to_string(),
-        VmValue::String(Rc::from(audit.host.as_str())),
+        VmValue::String(std::sync::Arc::from(audit.host.as_str())),
     );
     dict.insert(
         "port".to_string(),
@@ -426,24 +425,24 @@ pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
     );
     dict.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from(audit.reason.as_str())),
+        VmValue::String(std::sync::Arc::from(audit.reason.as_str())),
     );
     dict.insert(
         "outcome".to_string(),
-        VmValue::String(Rc::from(audit.outcome)),
+        VmValue::String(std::sync::Arc::from(audit.outcome)),
     );
     dict.insert(
         "matched_rule".to_string(),
         audit
             .matched_rule
             .as_deref()
-            .map(|raw| VmValue::String(Rc::from(raw)))
+            .map(|raw| VmValue::String(std::sync::Arc::from(raw)))
             .unwrap_or(VmValue::Nil),
     );
     if audit.bypass {
         dict.insert("bypass".to_string(), VmValue::Bool(true));
     }
-    VmError::Thrown(VmValue::Dict(Rc::new(dict)))
+    VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 /// Build the request envelope handed to the user `on_violation`
@@ -453,15 +452,15 @@ pub fn violation_request_value(audit: &NetPolicyAudit) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert(
         "method".to_string(),
-        VmValue::String(Rc::from(audit.method.as_str())),
+        VmValue::String(std::sync::Arc::from(audit.method.as_str())),
     );
     dict.insert(
         "url".to_string(),
-        VmValue::String(Rc::from(audit.url.as_str())),
+        VmValue::String(std::sync::Arc::from(audit.url.as_str())),
     );
     dict.insert(
         "host".to_string(),
-        VmValue::String(Rc::from(audit.host.as_str())),
+        VmValue::String(std::sync::Arc::from(audit.host.as_str())),
     );
     dict.insert(
         "port".to_string(),
@@ -472,17 +471,17 @@ pub fn violation_request_value(audit: &NetPolicyAudit) -> VmValue {
     );
     dict.insert(
         "reason".to_string(),
-        VmValue::String(Rc::from(audit.reason.as_str())),
+        VmValue::String(std::sync::Arc::from(audit.reason.as_str())),
     );
     dict.insert(
         "matched_rule".to_string(),
         audit
             .matched_rule
             .as_deref()
-            .map(|raw| VmValue::String(Rc::from(raw)))
+            .map(|raw| VmValue::String(std::sync::Arc::from(raw)))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 /// Emit a `harness.net.policy.audit` event to the active event log,
@@ -525,7 +524,7 @@ fn normalize_host(host: &str) -> String {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 /// VM-side helpers used by both the constructor builtins
@@ -649,7 +648,7 @@ pub mod parse {
         };
         let on_violation = match dict.get("on_violation") {
             Some(VmValue::String(s)) => OnViolation::parse_str(s.as_ref())?,
-            Some(VmValue::Closure(closure)) => OnViolation::Callback(Rc::clone(closure)),
+            Some(VmValue::Closure(closure)) => OnViolation::Callback(Arc::clone(closure)),
             Some(VmValue::Nil) | None => OnViolation::Error,
             Some(other) => {
                 return Err(vm_error(format!(
@@ -826,11 +825,14 @@ mod tests {
 
     #[test]
     fn parse_string_rule_branches_on_shape() {
-        let domain = parse::rule_from_vm(&VmValue::String(Rc::from("github.com"))).unwrap();
+        let domain =
+            parse::rule_from_vm(&VmValue::String(std::sync::Arc::from("github.com"))).unwrap();
         assert!(matches!(domain.matcher, NetMatcher::Host(_)));
-        let wildcard = parse::rule_from_vm(&VmValue::String(Rc::from("*.github.com"))).unwrap();
+        let wildcard =
+            parse::rule_from_vm(&VmValue::String(std::sync::Arc::from("*.github.com"))).unwrap();
         assert!(matches!(wildcard.matcher, NetMatcher::Suffix(_)));
-        let cidr_rule = parse::rule_from_vm(&VmValue::String(Rc::from("10.0.0.0/8"))).unwrap();
+        let cidr_rule =
+            parse::rule_from_vm(&VmValue::String(std::sync::Arc::from("10.0.0.0/8"))).unwrap();
         assert!(matches!(cidr_rule.matcher, NetMatcher::Cidr(_)));
     }
 

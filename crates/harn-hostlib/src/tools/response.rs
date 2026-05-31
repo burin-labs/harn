@@ -2,7 +2,7 @@
 //! `schemas/tools/<method>.response.json` contracts.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -21,7 +21,7 @@ impl ResponseBuilder {
 
     pub(crate) fn str(mut self, key: &str, value: impl Into<String>) -> Self {
         self.inner
-            .insert(key.to_string(), VmValue::String(Rc::from(value.into())));
+            .insert(key.to_string(), VmValue::String(Arc::from(value.into())));
         self
     }
 
@@ -39,7 +39,7 @@ impl ResponseBuilder {
         match value {
             Some(v) => {
                 self.inner
-                    .insert(key.to_string(), VmValue::String(Rc::from(v.into())));
+                    .insert(key.to_string(), VmValue::String(Arc::from(v.into())));
             }
             None => {
                 self.inner.insert(key.to_string(), VmValue::Nil);
@@ -55,17 +55,17 @@ impl ResponseBuilder {
 
     pub(crate) fn dict(mut self, key: &str, value: BTreeMap<String, VmValue>) -> Self {
         self.inner
-            .insert(key.to_string(), VmValue::Dict(Rc::new(value)));
+            .insert(key.to_string(), VmValue::Dict(Arc::new(value)));
         self
     }
 
     pub(crate) fn list(mut self, key: &str, value: Vec<VmValue>) -> Self {
         self.inner
-            .insert(key.to_string(), VmValue::List(Rc::new(value)));
+            .insert(key.to_string(), VmValue::List(Arc::new(value)));
         self
     }
 
     pub(crate) fn build(self) -> VmValue {
-        VmValue::Dict(Rc::new(self.inner))
+        VmValue::Dict(Arc::new(self.inner))
     }
 }

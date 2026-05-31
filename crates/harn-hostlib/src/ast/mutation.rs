@@ -23,7 +23,7 @@
 //! editing helpers.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -411,17 +411,17 @@ fn unsupported_language_response(name: &str) -> VmValue {
 }
 
 fn not_found_response(available: Vec<String>, suggestions: Vec<String>) -> VmValue {
-    let available_list = VmValue::List(Rc::new(
+    let available_list = VmValue::List(Arc::new(
         available.into_iter().map(|s| str_value(&s)).collect(),
     ));
-    let suggestions_list = VmValue::List(Rc::new(
+    let suggestions_list = VmValue::List(Arc::new(
         suggestions.into_iter().map(|s| str_value(&s)).collect(),
     ));
     let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
     dict.insert("result".into(), str_value("not_found"));
     dict.insert("available".into(), available_list);
     dict.insert("suggestions".into(), suggestions_list);
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(Arc::new(dict))
 }
 
 fn ambiguous_response(match_count: usize) -> VmValue {
@@ -436,7 +436,7 @@ mod tests {
     use super::*;
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(Rc::from(s))
+        VmValue::String(Arc::from(s))
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
@@ -444,7 +444,7 @@ mod tests {
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(Arc::new(map))
     }
 
     fn dict_field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::stdlib::register_vm_stdlib;
 use crate::values_equal;
 use crate::{Chunk, VmError, VmValue};
@@ -69,7 +67,7 @@ fn test_evaluate_in_frame_literal() {
     ));
     assert!(values_equal(
         &eval(&mut vm, "\"hi\" + \" there\"").unwrap(),
-        &VmValue::String(Rc::from("hi there"))
+        &VmValue::String(std::sync::Arc::from("hi there"))
     ));
     assert!(values_equal(
         &eval(&mut vm, "5 > 3 && 2 < 4").unwrap(),
@@ -89,7 +87,7 @@ fn test_evaluate_in_frame_sees_locals() {
 
     assert!(values_equal(
         &eval(&mut vm, "user").unwrap(),
-        &VmValue::String(Rc::from("alice"))
+        &VmValue::String(std::sync::Arc::from("alice"))
     ));
     assert!(values_equal(
         &eval(&mut vm, "count * 2").unwrap(),
@@ -97,7 +95,7 @@ fn test_evaluate_in_frame_sees_locals() {
     ));
     assert!(values_equal(
         &eval(&mut vm, "user + \" has \" + to_string(count)").unwrap(),
-        &VmValue::String(Rc::from("alice has 42"))
+        &VmValue::String(std::sync::Arc::from("alice has 42"))
     ));
 }
 
@@ -166,7 +164,7 @@ fn test_set_variable_in_frame_updates_let_binding() {
     });
     assert!(values_equal(
         &eval(&mut vm, "label").unwrap(),
-        &VmValue::String(Rc::from("x42"))
+        &VmValue::String(std::sync::Arc::from("x42"))
     ));
 }
 

@@ -712,7 +712,7 @@ pub fn register_composition_builtins(vm: &mut Vm) {
                     "composition_typescript_declarations: invalid manifest: {error}"
                 ))
             })?;
-        Ok(VmValue::String(Rc::from(
+        Ok(VmValue::String(std::sync::Arc::from(
             composition_typescript_declarations(&manifest),
         )))
     });
@@ -726,7 +726,9 @@ pub fn register_composition_builtins(vm: &mut Vm) {
             serde_json::from_value(manifest_value).map_err(|error| {
                 VmError::Runtime(format!("composition_harn_api: invalid manifest: {error}"))
             })?;
-        Ok(VmValue::String(Rc::from(composition_harn_api(&manifest))))
+        Ok(VmValue::String(std::sync::Arc::from(composition_harn_api(
+            &manifest,
+        ))))
     });
 
     vm.register_builtin("composition_crystallization_trace", |args, _out| {

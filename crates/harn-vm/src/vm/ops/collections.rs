@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::chunk::{InlineCacheEntry, PropertyCacheTarget};
 use crate::value::{VmError, VmValue};
@@ -19,7 +19,7 @@ impl super::super::Vm {
 
     fn char_to_value(ch: char) -> VmValue {
         let mut buffer = [0; 4];
-        VmValue::String(Rc::from(ch.encode_utf8(&mut buffer)))
+        VmValue::String(std::sync::Arc::from(ch.encode_utf8(&mut buffer)))
     }
 
     fn index_from_end(index: i64) -> Option<usize> {
@@ -119,10 +119,10 @@ impl super::super::Vm {
             (PropertyCacheTarget::PairFirst, VmValue::Pair(p)) => Some(p.0.clone()),
             (PropertyCacheTarget::PairSecond, VmValue::Pair(p)) => Some(p.1.clone()),
             (PropertyCacheTarget::EnumVariant, VmValue::EnumVariant(enum_variant)) => {
-                Some(VmValue::String(Rc::clone(&enum_variant.variant)))
+                Some(VmValue::String(Arc::clone(&enum_variant.variant)))
             }
             (PropertyCacheTarget::EnumFields, VmValue::EnumVariant(enum_variant)) => {
-                Some(VmValue::List(Rc::clone(&enum_variant.fields)))
+                Some(VmValue::List(Arc::clone(&enum_variant.fields)))
             }
             _ => None,
         }
@@ -130,12 +130,12 @@ impl super::super::Vm {
 
     fn property_cache_target(obj: &VmValue, name: &str) -> Option<PropertyCacheTarget> {
         match obj {
-            VmValue::Dict(_) => Some(PropertyCacheTarget::DictField(Rc::from(name))),
+            VmValue::Dict(_) => Some(PropertyCacheTarget::DictField(Arc::from(name))),
             VmValue::StructInstance { layout, .. } => {
                 layout
                     .field_index(name)
                     .map(|index| PropertyCacheTarget::StructField {
-                        field_name: Rc::from(name),
+                        field_name: Arc::from(name),
                         index,
                     })
             }
@@ -182,8 +182,8 @@ impl super::super::Vm {
                 _ => VmValue::Nil,
             },
             VmValue::EnumVariant(enum_variant) => match name {
-                "variant" => VmValue::String(Rc::clone(&enum_variant.variant)),
-                "fields" => VmValue::List(Rc::clone(&enum_variant.fields)),
+                "variant" => VmValue::String(Arc::clone(&enum_variant.variant)),
+                "fields" => VmValue::List(Arc::clone(&enum_variant.fields)),
                 _ => VmValue::Nil,
             },
             VmValue::StructInstance { layout, fields } => layout
@@ -233,7 +233,7 @@ impl super::super::Vm {
         let count = frame.chunk.read_u16(frame.ip) as usize;
         frame.ip += 2;
         let items = self.stack.split_off(self.stack.len().saturating_sub(count));
-        self.stack.push(VmValue::List(Rc::new(items)));
+        self.stack.push(VmValue::List(std::sync::Arc::new(items)));
     }
 
     pub(super) fn execute_build_dict(&mut self) {
@@ -250,7 +250,7 @@ impl super::super::Vm {
                 map.insert(key.display(), value);
             }
         }
-        self.stack.push(VmValue::Dict(Rc::new(map)));
+        self.stack.push(VmValue::Dict(std::sync::Arc::new(map)));
     }
 
     pub(super) fn execute_subscript(&mut self, optional: bool) -> Result<(), VmError> {
@@ -343,10 +343,10 @@ impl super::super::Vm {
                     }
                 };
                 if start >= end {
-                    VmValue::List(Rc::new(vec![]))
+                    VmValue::List(std::sync::Arc::new(vec![]))
                 } else {
                     let sliced: Vec<VmValue> = items[start as usize..end as usize].to_vec();
-                    VmValue::List(Rc::new(sliced))
+                    VmValue::List(std::sync::Arc::new(sliced))
                 }
             }
             VmValue::String(s) => {
@@ -384,7 +384,7 @@ impl super::super::Vm {
                     }
                 };
                 if start >= end {
-                    VmValue::String(Rc::from(""))
+                    VmValue::String(std::sync::Arc::from(""))
                 } else {
                     let start_idx = start as usize;
                     let end_idx = end as usize;
@@ -398,7 +398,7 @@ impl super::super::Vm {
                         .nth(end_idx)
                         .map(|(b, _)| b)
                         .unwrap_or(s.len());
-                    VmValue::String(Rc::from(&s[byte_start..byte_end]))
+                    VmValue::String(std::sync::Arc::from(&s[byte_start..byte_end]))
                 }
             }
             _ => {
@@ -458,7 +458,7 @@ impl super::super::Vm {
             frame.ip += 2;
             let var_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), prop_idx, var_idx)
+            (Arc::clone(&frame.chunk), prop_idx, var_idx)
         };
         let prop_name = Self::const_str(&chunk.constants[prop_idx])?;
         let var_name = Self::const_str(&chunk.constants[var_idx])?;
@@ -477,7 +477,7 @@ impl super::super::Vm {
                 VmValue::Dict(map) => {
                     let mut new_map = (*map).clone();
                     new_map.insert(prop_name.to_string(), new_value);
-                    assign_value(self, VmValue::Dict(Rc::new(new_map)))?;
+                    assign_value(self, VmValue::Dict(std::sync::Arc::new(new_map)))?;
                 }
                 VmValue::StructInstance { .. } => {
                     let new_obj = obj
@@ -501,14 +501,14 @@ impl super::super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let var_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), var_idx)
+            (Arc::clone(&frame.chunk), var_idx)
         };
         let var_name = Self::const_str(&chunk.constants[var_idx])?;
         let index = self.pop()?;
         let new_value = self.pop()?;
 
         // Fast path: when the binding is an active local slot, mutate the
-        // contained dict/list in place via `Rc::make_mut`. This skips the
+        // contained dict/list in place via `Arc::make_mut`. This skips the
         // defensive `VmValue::clone` + collection clone the env-fallback
         // path has to pay, which is the per-iteration cost behind builder
         // loops like `out[k] = v` and `aliases[id] = …`.
@@ -532,14 +532,14 @@ impl super::super::Vm {
                                 "Index {i} out of bounds for list of length {len}",
                             )));
                         }
-                        Rc::make_mut(items)[idx] = new_value;
+                        Arc::make_mut(items)[idx] = new_value;
                         slot.synced = false;
                     }
                     return Ok(());
                 }
                 VmValue::Dict(map) => {
                     let key = index.display();
-                    Rc::make_mut(map).insert(key, new_value);
+                    Arc::make_mut(map).insert(key, new_value);
                     slot.synced = false;
                     return Ok(());
                 }
@@ -549,14 +549,14 @@ impl super::super::Vm {
 
         // Fallback: variable lives in `env` (e.g. captured by a closure or
         // declared in an outer scope). The env path still has to rebind
-        // because `env.get` returns by value, but `Rc::try_unwrap` keeps
+        // because `env.get` returns by value, but `Arc::try_unwrap` keeps
         // the no-other-references case allocation-free.
         if let Some(obj) = self.env.get(var_name) {
             match obj {
                 VmValue::List(items) => {
                     if let Some(i) = index.as_int() {
                         let mut new_items =
-                            Rc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
+                            Arc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
                         let idx = if i < 0 {
                             (new_items.len() as i64 + i).max(0) as usize
                         } else {
@@ -571,14 +571,15 @@ impl super::super::Vm {
                         }
                         new_items[idx] = new_value;
                         self.env
-                            .assign(var_name, VmValue::List(Rc::new(new_items)))?;
+                            .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;
                     }
                 }
                 VmValue::Dict(map) => {
                     let key = index.display();
-                    let mut new_map = Rc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
+                    let mut new_map = Arc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
                     new_map.insert(key, new_value);
-                    self.env.assign(var_name, VmValue::Dict(Rc::new(new_map)))?;
+                    self.env
+                        .assign(var_name, VmValue::Dict(std::sync::Arc::new(new_map)))?;
                 }
                 _ => {}
             }
@@ -593,7 +594,8 @@ impl super::super::Vm {
         let start = self.stack.len().saturating_sub(count);
         let result = Self::concat_display_values(&self.stack[start..]);
         self.stack.truncate(start);
-        self.stack.push(VmValue::String(Rc::from(result)));
+        self.stack
+            .push(VmValue::String(std::sync::Arc::from(result)));
     }
 
     pub(super) fn execute_build_enum(&mut self) -> Result<(), VmError> {
@@ -605,7 +607,7 @@ impl super::super::Vm {
             frame.ip += 2;
             let field_count = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), enum_idx, variant_idx, field_count)
+            (Arc::clone(&frame.chunk), enum_idx, variant_idx, field_count)
         };
         let enum_name = chunk
             .constant_string_rc(enum_idx)
@@ -628,7 +630,7 @@ impl super::super::Vm {
             frame.ip += 2;
             let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            (Rc::clone(&frame.chunk), enum_idx, variant_idx)
+            (Arc::clone(&frame.chunk), enum_idx, variant_idx)
         };
         let enum_name = Self::const_str(&chunk.constants[enum_idx])?;
         let variant_name = Self::const_str(&chunk.constants[variant_idx])?;

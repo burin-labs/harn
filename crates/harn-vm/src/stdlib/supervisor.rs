@@ -45,7 +45,7 @@ struct RestartPolicy {
 struct ChildSpec {
     name: String,
     kind: String,
-    task: Rc<VmClosure>,
+    task: Arc<VmClosure>,
     restart: RestartPolicy,
     active_lease: Option<String>,
 }
@@ -975,7 +975,7 @@ fn supervisor_handle_value(state: &SupervisorState) -> VmValue {
     dict.insert("_type".to_string(), string_value("supervisor"));
     dict.insert("id".to_string(), string_value(&state.id));
     dict.insert("name".to_string(), string_value(&state.name));
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn supervisor_state_value(state: &SupervisorState) -> VmValue {
@@ -991,11 +991,11 @@ fn supervisor_state_value(state: &SupervisorState) -> VmValue {
     dict.insert("metrics".to_string(), metrics_value(state));
     dict.insert(
         "children".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             state.children.iter().map(child_state_value).collect(),
         )),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn child_state_value(child: &ChildSlot) -> VmValue {
@@ -1039,7 +1039,7 @@ fn child_state_value(child: &ChildSlot) -> VmValue {
             .map(VmValue::Int)
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn metrics_value(state: &SupervisorState) -> VmValue {
@@ -1053,16 +1053,18 @@ fn metrics_value(state: &SupervisorState) -> VmValue {
         VmValue::Int(state.suppressed_count),
     );
     dict.insert("escalated".to_string(), VmValue::Int(state.escalated_count));
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn events_value(state: &SupervisorState) -> VmValue {
-    VmValue::List(Rc::new(state.events.iter().map(event_value).collect()))
+    VmValue::List(std::sync::Arc::new(
+        state.events.iter().map(event_value).collect(),
+    ))
 }
 
 pub(crate) fn supervisor_debug_values() -> VmValue {
     SUPERVISORS.with(|registry| {
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             registry
                 .borrow()
                 .values()
@@ -1121,7 +1123,7 @@ fn event_value(event: &SupervisorEvent) -> VmValue {
             .map(string_value)
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn child_context_value(supervisor_id: &str, spec: &ChildSpec, generation: u64) -> VmValue {
@@ -1131,7 +1133,7 @@ fn child_context_value(supervisor_id: &str, spec: &ChildSpec, generation: u64) -
     dict.insert("child_kind".to_string(), string_value(&spec.kind));
     dict.insert("attempt".to_string(), VmValue::Int(generation as i64 + 1));
     dict.insert("restart_count".to_string(), VmValue::Int(generation as i64));
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn push_event(
@@ -1173,7 +1175,7 @@ fn emit_event_log(event: &SupervisorEvent) {
 }
 
 fn string_value(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value))
+    VmValue::String(std::sync::Arc::from(value))
 }
 
 fn duration_ms(value: &VmValue) -> Option<u64> {
@@ -1249,16 +1251,17 @@ mod tests {
 
     #[test]
     fn parses_restart_policy_aliases() {
-        let policy = parse_restart_policy(Some(&VmValue::Dict(Rc::new(BTreeMap::from([
-            ("mode".to_string(), string_value("on-failure")),
-            ("max".to_string(), VmValue::Int(2)),
-            ("window".to_string(), VmValue::Duration(500)),
-            ("backoff".to_string(), string_value("10ms")),
-            ("factor".to_string(), VmValue::Float(3.0)),
-            ("jitter".to_string(), VmValue::Int(4)),
-            ("circuit_open".to_string(), string_value("1s")),
-        ])))))
-        .unwrap();
+        let policy =
+            parse_restart_policy(Some(&VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
+                ("mode".to_string(), string_value("on-failure")),
+                ("max".to_string(), VmValue::Int(2)),
+                ("window".to_string(), VmValue::Duration(500)),
+                ("backoff".to_string(), string_value("10ms")),
+                ("factor".to_string(), VmValue::Float(3.0)),
+                ("jitter".to_string(), VmValue::Int(4)),
+                ("circuit_open".to_string(), string_value("1s")),
+            ])))))
+            .unwrap();
 
         assert_eq!(policy.mode, RestartMode::OnFailure);
         assert_eq!(policy.max_restarts, Some(2));

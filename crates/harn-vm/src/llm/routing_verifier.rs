@@ -16,7 +16,7 @@
 //! test-run shells out under a per-verifier timeout.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use harn_parser::DiagnosticSeverity;
@@ -421,7 +421,7 @@ pub(crate) fn build_refine_nudge(reasons: &[String]) -> String {
 // ---------------------------------------------------------------------------
 
 fn runtime_error(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message)))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
 }
 
 fn parse_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<Option<String>, VmError> {
@@ -467,7 +467,7 @@ fn parse_regex_list(
     };
     let items = match value {
         VmValue::List(items) => items.clone(),
-        VmValue::String(s) => Rc::new(vec![VmValue::String(s.clone())]),
+        VmValue::String(s) => Arc::new(vec![VmValue::String(s.clone())]),
         other => {
             return Err(runtime_error(format!(
                 "routing_policy.escalate_on[*].{key}: expected a list of regex strings, got {}",
@@ -667,7 +667,7 @@ pub(crate) fn parse_escalate_on(value: Option<&VmValue>) -> Result<Vec<Verifier>
     let items = match value {
         VmValue::Nil => return Ok(Vec::new()),
         VmValue::List(items) => items.clone(),
-        VmValue::Dict(_) | VmValue::String(_) => Rc::new(vec![value.clone()]),
+        VmValue::Dict(_) | VmValue::String(_) => Arc::new(vec![value.clone()]),
         other => {
             return Err(runtime_error(format!(
                 "routing_policy.escalate_on: expected a list of verifier specs, got {}",
@@ -692,11 +692,11 @@ pub(crate) fn verifiers_summary(verifiers: &[Verifier]) -> VmValue {
             let mut dict = BTreeMap::new();
             dict.insert(
                 "kind".to_string(),
-                VmValue::String(Rc::from(v.kind_label())),
+                VmValue::String(std::sync::Arc::from(v.kind_label())),
             );
             dict.insert(
                 "name".to_string(),
-                VmValue::String(Rc::from(v.name().to_string())),
+                VmValue::String(std::sync::Arc::from(v.name().to_string())),
             );
             let on_fail = match v {
                 Verifier::TypeCheck { on_fail, .. }
@@ -705,15 +705,15 @@ pub(crate) fn verifiers_summary(verifiers: &[Verifier]) -> VmValue {
             };
             dict.insert(
                 "on_fail".to_string(),
-                VmValue::String(Rc::from(match on_fail {
+                VmValue::String(std::sync::Arc::from(match on_fail {
                     FailMode::Refine => "refine",
                     FailMode::Escalate => "escalate",
                 })),
             );
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         })
         .collect();
-    VmValue::List(Rc::new(items))
+    VmValue::List(std::sync::Arc::new(items))
 }
 
 #[cfg(test)]
@@ -729,7 +729,9 @@ mod tests {
 
     #[test]
     fn shorthand_typecheck_parses() {
-        let spec = VmValue::List(Rc::new(vec![VmValue::String(Rc::from("typecheck"))]));
+        let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+            std::sync::Arc::from("typecheck"),
+        )]));
         let verifiers = parse_escalate_on(Some(&spec)).expect("parses");
         assert_eq!(verifiers.len(), 1);
         assert!(matches!(verifiers[0], Verifier::TypeCheck { .. }));
@@ -737,10 +739,12 @@ mod tests {
 
     #[test]
     fn lint_requires_at_least_one_rule() {
-        let spec = VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(dict(&[(
-            "kind",
-            VmValue::String(Rc::from("lint")),
-        )])))]));
+        let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+            std::sync::Arc::new(dict(&[(
+                "kind",
+                VmValue::String(std::sync::Arc::from("lint")),
+            )])),
+        )]));
         let err = parse_escalate_on(Some(&spec)).unwrap_err();
         let message = match err {
             VmError::Thrown(VmValue::String(s)) => s.to_string(),
@@ -751,10 +755,12 @@ mod tests {
 
     #[test]
     fn test_run_requires_command() {
-        let spec = VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(dict(&[(
-            "kind",
-            VmValue::String(Rc::from("test_run")),
-        )])))]));
+        let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+            std::sync::Arc::new(dict(&[(
+                "kind",
+                VmValue::String(std::sync::Arc::from("test_run")),
+            )])),
+        )]));
         let err = parse_escalate_on(Some(&spec)).unwrap_err();
         let message = match err {
             VmError::Thrown(VmValue::String(s)) => s.to_string(),

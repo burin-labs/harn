@@ -405,29 +405,30 @@ impl SkillSource for HostSkillSource {
 /// dict only — callers assemble the outer registry.
 pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     use crate::value::VmValue;
-    use std::rc::Rc;
 
     let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
     entry.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(skill.manifest.name.as_str())),
+        VmValue::String(std::sync::Arc::from(skill.manifest.name.as_str())),
     );
     entry.insert(
         "short".to_string(),
-        VmValue::String(Rc::from(skill.manifest.short.as_str())),
+        VmValue::String(std::sync::Arc::from(skill.manifest.short.as_str())),
     );
     entry.insert(
         "description".to_string(),
-        VmValue::String(Rc::from(if skill.manifest.description.is_empty() {
-            skill.manifest.short.as_str()
-        } else {
-            skill.manifest.description.as_str()
-        })),
+        VmValue::String(std::sync::Arc::from(
+            if skill.manifest.description.is_empty() {
+                skill.manifest.short.as_str()
+            } else {
+                skill.manifest.description.as_str()
+            },
+        )),
     );
     if let Some(when) = &skill.manifest.when_to_use {
         entry.insert(
             "when_to_use".to_string(),
-            VmValue::String(Rc::from(when.as_str())),
+            VmValue::String(std::sync::Arc::from(when.as_str())),
         );
     }
     if skill.manifest.disable_model_invocation {
@@ -436,12 +437,12 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.allowed_tools.is_empty() {
         entry.insert(
             "allowed_tools".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
                     .allowed_tools
                     .iter()
-                    .map(|t| VmValue::String(Rc::from(t.as_str())))
+                    .map(|t| VmValue::String(std::sync::Arc::from(t.as_str())))
                     .collect(),
             )),
         );
@@ -452,12 +453,12 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.paths.is_empty() {
         entry.insert(
             "paths".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
                     .paths
                     .iter()
-                    .map(|p| VmValue::String(Rc::from(p.as_str())))
+                    .map(|p| VmValue::String(std::sync::Arc::from(p.as_str())))
                     .collect(),
             )),
         );
@@ -465,32 +466,35 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if let Some(context) = &skill.manifest.context {
         entry.insert(
             "context".to_string(),
-            VmValue::String(Rc::from(context.as_str())),
+            VmValue::String(std::sync::Arc::from(context.as_str())),
         );
     }
     if let Some(agent) = &skill.manifest.agent {
         entry.insert(
             "agent".to_string(),
-            VmValue::String(Rc::from(agent.as_str())),
+            VmValue::String(std::sync::Arc::from(agent.as_str())),
         );
     }
     if !skill.manifest.hooks.is_empty() {
         let mut hooks: BTreeMap<String, VmValue> = BTreeMap::new();
         for (k, v) in &skill.manifest.hooks {
-            hooks.insert(k.clone(), VmValue::String(Rc::from(v.as_str())));
+            hooks.insert(k.clone(), VmValue::String(std::sync::Arc::from(v.as_str())));
         }
-        entry.insert("hooks".to_string(), VmValue::Dict(Rc::new(hooks)));
+        entry.insert(
+            "hooks".to_string(),
+            VmValue::Dict(std::sync::Arc::new(hooks)),
+        );
     }
     if let Some(model) = &skill.manifest.model {
         entry.insert(
             "model".to_string(),
-            VmValue::String(Rc::from(model.as_str())),
+            VmValue::String(std::sync::Arc::from(model.as_str())),
         );
     }
     if let Some(effort) = &skill.manifest.effort {
         entry.insert(
             "effort".to_string(),
-            VmValue::String(Rc::from(effort.as_str())),
+            VmValue::String(std::sync::Arc::from(effort.as_str())),
         );
     }
     if skill.manifest.require_signature {
@@ -499,12 +503,12 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.trusted_signers.is_empty() {
         entry.insert(
             "trusted_signers".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
                     .trusted_signers
                     .iter()
-                    .map(|fingerprint| VmValue::String(Rc::from(fingerprint.as_str())))
+                    .map(|fingerprint| VmValue::String(std::sync::Arc::from(fingerprint.as_str())))
                     .collect(),
             )),
         );
@@ -512,63 +516,64 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if let Some(shell) = &skill.manifest.shell {
         entry.insert(
             "shell".to_string(),
-            VmValue::String(Rc::from(shell.as_str())),
+            VmValue::String(std::sync::Arc::from(shell.as_str())),
         );
     }
     if let Some(hint) = &skill.manifest.argument_hint {
         entry.insert(
             "argument_hint".to_string(),
-            VmValue::String(Rc::from(hint.as_str())),
+            VmValue::String(std::sync::Arc::from(hint.as_str())),
         );
     }
     entry.insert(
         "body".to_string(),
-        VmValue::String(Rc::from(skill.body.as_str())),
+        VmValue::String(std::sync::Arc::from(skill.body.as_str())),
     );
     if let Some(dir) = &skill.skill_dir {
         entry.insert(
             "skill_dir".to_string(),
-            VmValue::String(Rc::from(dir.display().to_string())),
+            VmValue::String(std::sync::Arc::from(dir.display().to_string())),
         );
     }
     entry.insert(
         "source".to_string(),
-        VmValue::String(Rc::from(skill.layer.label())),
+        VmValue::String(std::sync::Arc::from(skill.layer.label())),
     );
     if let Some(ns) = &skill.namespace {
         entry.insert(
             "namespace".to_string(),
-            VmValue::String(Rc::from(ns.as_str())),
+            VmValue::String(std::sync::Arc::from(ns.as_str())),
         );
     }
-    VmValue::Dict(Rc::new(entry))
+    VmValue::Dict(std::sync::Arc::new(entry))
 }
 
 pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmValue {
     use crate::value::VmValue;
-    use std::rc::Rc;
 
     let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
     entry.insert(
         "name".to_string(),
-        VmValue::String(Rc::from(skill.manifest.name.as_str())),
+        VmValue::String(std::sync::Arc::from(skill.manifest.name.as_str())),
     );
     entry.insert(
         "short".to_string(),
-        VmValue::String(Rc::from(skill.manifest.short.as_str())),
+        VmValue::String(std::sync::Arc::from(skill.manifest.short.as_str())),
     );
     entry.insert(
         "description".to_string(),
-        VmValue::String(Rc::from(if skill.manifest.description.is_empty() {
-            skill.manifest.short.as_str()
-        } else {
-            skill.manifest.description.as_str()
-        })),
+        VmValue::String(std::sync::Arc::from(
+            if skill.manifest.description.is_empty() {
+                skill.manifest.short.as_str()
+            } else {
+                skill.manifest.description.as_str()
+            },
+        )),
     );
     if let Some(when) = &skill.manifest.when_to_use {
         entry.insert(
             "when_to_use".to_string(),
-            VmValue::String(Rc::from(when.as_str())),
+            VmValue::String(std::sync::Arc::from(when.as_str())),
         );
     }
     if skill.manifest.disable_model_invocation {
@@ -577,12 +582,12 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     if !skill.manifest.allowed_tools.is_empty() {
         entry.insert(
             "allowed_tools".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
                     .allowed_tools
                     .iter()
-                    .map(|tool| VmValue::String(Rc::from(tool.as_str())))
+                    .map(|tool| VmValue::String(std::sync::Arc::from(tool.as_str())))
                     .collect(),
             )),
         );
@@ -593,12 +598,12 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     if !skill.manifest.paths.is_empty() {
         entry.insert(
             "paths".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
                     .paths
                     .iter()
-                    .map(|path| VmValue::String(Rc::from(path.as_str())))
+                    .map(|path| VmValue::String(std::sync::Arc::from(path.as_str())))
                     .collect(),
             )),
         );
@@ -606,57 +611,63 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     if let Some(context) = &skill.manifest.context {
         entry.insert(
             "context".to_string(),
-            VmValue::String(Rc::from(context.as_str())),
+            VmValue::String(std::sync::Arc::from(context.as_str())),
         );
     }
     if let Some(agent) = &skill.manifest.agent {
         entry.insert(
             "agent".to_string(),
-            VmValue::String(Rc::from(agent.as_str())),
+            VmValue::String(std::sync::Arc::from(agent.as_str())),
         );
     }
     if !skill.manifest.hooks.is_empty() {
         let mut hooks: BTreeMap<String, VmValue> = BTreeMap::new();
         for (key, value) in &skill.manifest.hooks {
-            hooks.insert(key.clone(), VmValue::String(Rc::from(value.as_str())));
+            hooks.insert(
+                key.clone(),
+                VmValue::String(std::sync::Arc::from(value.as_str())),
+            );
         }
-        entry.insert("hooks".to_string(), VmValue::Dict(Rc::new(hooks)));
+        entry.insert(
+            "hooks".to_string(),
+            VmValue::Dict(std::sync::Arc::new(hooks)),
+        );
     }
     if let Some(model) = &skill.manifest.model {
         entry.insert(
             "model".to_string(),
-            VmValue::String(Rc::from(model.as_str())),
+            VmValue::String(std::sync::Arc::from(model.as_str())),
         );
     }
     if let Some(effort) = &skill.manifest.effort {
         entry.insert(
             "effort".to_string(),
-            VmValue::String(Rc::from(effort.as_str())),
+            VmValue::String(std::sync::Arc::from(effort.as_str())),
         );
     }
     if let Some(shell) = &skill.manifest.shell {
         entry.insert(
             "shell".to_string(),
-            VmValue::String(Rc::from(shell.as_str())),
+            VmValue::String(std::sync::Arc::from(shell.as_str())),
         );
     }
     if let Some(hint) = &skill.manifest.argument_hint {
         entry.insert(
             "argument_hint".to_string(),
-            VmValue::String(Rc::from(hint.as_str())),
+            VmValue::String(std::sync::Arc::from(hint.as_str())),
         );
     }
     entry.insert(
         "source".to_string(),
-        VmValue::String(Rc::from(skill.layer.label())),
+        VmValue::String(std::sync::Arc::from(skill.layer.label())),
     );
     if let Some(ns) = &skill.namespace {
         entry.insert(
             "namespace".to_string(),
-            VmValue::String(Rc::from(ns.as_str())),
+            VmValue::String(std::sync::Arc::from(ns.as_str())),
         );
     }
-    VmValue::Dict(Rc::new(entry))
+    VmValue::Dict(std::sync::Arc::new(entry))
 }
 
 #[cfg(test)]

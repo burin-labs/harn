@@ -97,10 +97,9 @@ pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
 ///
 /// **Thread-local invariant.** Pipeline closure subscribers live on the
 /// session's `SessionState.subscribers` in `crate::agent_sessions`,
-/// which is a `thread_local!` because `VmValue` wraps `Rc` and can't
-/// cross threads. The agent loop runs on a tokio `LocalSet`-pinned
-/// task, and `agent_subscribe` (the host builtin that appends to the
-/// session) runs on that same task, so the invariant holds.
+/// which is a `thread_local!` owned by the agent loop. The loop runs on
+/// a tokio `LocalSet`-pinned task, and `agent_subscribe` appends on that
+/// same task, so subscriber ordering stays deterministic.
 pub(crate) async fn emit_agent_event_with_ctx(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     event: &AgentEvent,

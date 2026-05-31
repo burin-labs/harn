@@ -359,7 +359,7 @@ mod tests {
         let mut opts = BTreeMap::new();
         opts.insert(
             "autonomy_budget".to_string(),
-            VmValue::Dict(std::rc::Rc::new(BTreeMap::new())),
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
         );
         let parsed = parse_autonomy_budget(Some(&opts), "session-1", "agent_loop").expect("parse");
         assert!(parsed.is_none());

@@ -15,7 +15,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -636,7 +635,7 @@ fn scan_result_to_value(result: &ScanResult, delta: Option<&ScanDelta>) -> VmVal
 
 fn list_of<T>(items: &[T], to_value: fn(&T) -> VmValue) -> VmValue {
     let list: Vec<VmValue> = items.iter().map(to_value).collect();
-    VmValue::List(Rc::new(list))
+    VmValue::List(Arc::new(list))
 }
 
 fn project_to_value(project: &ProjectMetadata) -> VmValue {
@@ -661,7 +660,7 @@ fn project_to_value(project: &ProjectMetadata) -> VmValue {
         ("languages", list_of(&project.languages, language_to_value)),
         ("test_commands", test_commands_dict),
         ("detected_test_command", detected),
-        ("code_patterns", VmValue::List(Rc::new(code_patterns))),
+        ("code_patterns", VmValue::List(Arc::new(code_patterns))),
         ("total_files", VmValue::Int(project.total_files as i64)),
         ("total_lines", VmValue::Int(project.total_lines as i64)),
         ("last_scanned_at", str_value(&project.last_scanned_at)),
@@ -685,7 +684,7 @@ fn folder_to_value(folder: &FolderRecord) -> VmValue {
         ("file_count", VmValue::Int(folder.file_count as i64)),
         ("line_count", VmValue::Int(folder.line_count as i64)),
         ("dominant_language", str_value(&folder.dominant_language)),
-        ("key_symbol_names", VmValue::List(Rc::new(names))),
+        ("key_symbol_names", VmValue::List(Arc::new(names))),
     ])
 }
 
@@ -707,7 +706,7 @@ fn file_to_value(file: &FileRecord) -> VmValue {
             "last_modified_unix_ms",
             VmValue::Int(file.last_modified_unix_ms),
         ),
-        ("imports", VmValue::List(Rc::new(imports))),
+        ("imports", VmValue::List(Arc::new(imports))),
         ("churn_score", VmValue::Float(file.churn_score)),
         ("corresponding_test_file", test_pair),
     ])
@@ -756,9 +755,9 @@ fn delta_to_value(delta: &ScanDelta) -> VmValue {
     let modified: Vec<VmValue> = delta.modified.iter().map(str_value).collect();
     let removed: Vec<VmValue> = delta.removed.iter().map(str_value).collect();
     build_dict([
-        ("added", VmValue::List(Rc::new(added))),
-        ("modified", VmValue::List(Rc::new(modified))),
-        ("removed", VmValue::List(Rc::new(removed))),
+        ("added", VmValue::List(Arc::new(added))),
+        ("modified", VmValue::List(Arc::new(modified))),
+        ("removed", VmValue::List(Arc::new(removed))),
         ("full_rescan", VmValue::Bool(delta.full_rescan)),
     ])
 }

@@ -219,7 +219,7 @@ pub(crate) fn policy_registry_len() -> usize {
 // ---------------------------------------------------------------------------
 
 fn runtime_error(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message)))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
 }
 
 fn parse_label(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
@@ -544,7 +544,7 @@ pub(crate) fn build_routing_policy(config: &BTreeMap<String, VmValue>) -> Result
     summary.insert(ROUTING_POLICY_TAG.to_string(), VmValue::Bool(true));
     summary.insert(
         "label".to_string(),
-        VmValue::String(Rc::from(label.clone())),
+        VmValue::String(std::sync::Arc::from(label.clone())),
     );
     summary.insert("chain".to_string(), chain_summary_value(&chain));
     if budget.envelope().is_some() {
@@ -573,7 +573,7 @@ pub(crate) fn build_routing_policy(config: &BTreeMap<String, VmValue>) -> Result
     };
     let handle = intern_policy(parsed);
     summary.insert(HANDLE_KEY.to_string(), VmValue::Int(handle as i64));
-    Ok(VmValue::Dict(Rc::new(summary)))
+    Ok(VmValue::Dict(std::sync::Arc::new(summary)))
 }
 
 fn chain_summary_value(chain: &[ChainLink]) -> VmValue {
@@ -583,11 +583,11 @@ fn chain_summary_value(chain: &[ChainLink]) -> VmValue {
             let mut dict = BTreeMap::new();
             dict.insert(
                 "provider".to_string(),
-                VmValue::String(Rc::from(link.provider.clone())),
+                VmValue::String(std::sync::Arc::from(link.provider.clone())),
             );
             dict.insert(
                 "model".to_string(),
-                VmValue::String(Rc::from(link.model.clone())),
+                VmValue::String(std::sync::Arc::from(link.model.clone())),
             );
             if let Some(timeout) = link.timeout_ms {
                 dict.insert("timeout_ms".to_string(), VmValue::Int(timeout as i64));
@@ -595,13 +595,13 @@ fn chain_summary_value(chain: &[ChainLink]) -> VmValue {
             if let Some(label) = &link.label {
                 dict.insert(
                     "label".to_string(),
-                    VmValue::String(Rc::from(label.clone())),
+                    VmValue::String(std::sync::Arc::from(label.clone())),
                 );
             }
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         })
         .collect();
-    VmValue::List(Rc::new(items))
+    VmValue::List(std::sync::Arc::new(items))
 }
 
 fn failover_value(failover: &FailoverRules) -> VmValue {
@@ -611,20 +611,26 @@ fn failover_value(failover: &FailoverRules) -> VmValue {
         .iter()
         .map(|s| VmValue::Int(*s as i64))
         .collect();
-    dict.insert("on_status".to_string(), VmValue::List(Rc::new(statuses)));
+    dict.insert(
+        "on_status".to_string(),
+        VmValue::List(std::sync::Arc::new(statuses)),
+    );
     let kinds: Vec<VmValue> = failover
         .on_error_kinds
         .iter()
-        .map(|s| VmValue::String(Rc::from(s.clone())))
+        .map(|s| VmValue::String(std::sync::Arc::from(s.clone())))
         .collect();
-    dict.insert("on_error_kinds".to_string(), VmValue::List(Rc::new(kinds)));
+    dict.insert(
+        "on_error_kinds".to_string(),
+        VmValue::List(std::sync::Arc::new(kinds)),
+    );
     if let Some(ms) = failover.on_timeout_ms {
         dict.insert("on_timeout_ms".to_string(), VmValue::Int(ms as i64));
     }
     if let Some(max) = failover.max_attempts {
         dict.insert("max_attempts".to_string(), VmValue::Int(max as i64));
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn latency_value(latency: &LatencyRules) -> VmValue {
@@ -635,7 +641,7 @@ fn latency_value(latency: &LatencyRules) -> VmValue {
     if let Some(ms) = latency.race_after_ms {
         dict.insert("race_after_ms".to_string(), VmValue::Int(ms as i64));
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn budget_value(budget: &BudgetRules) -> VmValue {
@@ -648,9 +654,9 @@ fn budget_value(budget: &BudgetRules) -> VmValue {
     }
     dict.insert(
         "on_exceed".to_string(),
-        VmValue::String(Rc::from(budget.on_exceed_or_abort().as_str())),
+        VmValue::String(std::sync::Arc::from(budget.on_exceed_or_abort().as_str())),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn observe_value(observe: &ObserveRules) -> VmValue {
@@ -658,10 +664,10 @@ fn observe_value(observe: &ObserveRules) -> VmValue {
     if let Some(event) = &observe.emit_event {
         dict.insert(
             "emit_event".to_string(),
-            VmValue::String(Rc::from(event.clone())),
+            VmValue::String(std::sync::Arc::from(event.clone())),
         );
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 /// Pull the parsed config off a dict produced by `routing_policy(...)`.
@@ -1812,19 +1818,19 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
             dict.insert("index".to_string(), VmValue::Int(attempt.index as i64));
             dict.insert(
                 "provider".to_string(),
-                VmValue::String(Rc::from(attempt.provider.clone())),
+                VmValue::String(std::sync::Arc::from(attempt.provider.clone())),
             );
             dict.insert(
                 "model".to_string(),
-                VmValue::String(Rc::from(attempt.model.clone())),
+                VmValue::String(std::sync::Arc::from(attempt.model.clone())),
             );
             dict.insert(
                 "label".to_string(),
-                VmValue::String(Rc::from(attempt.label.clone())),
+                VmValue::String(std::sync::Arc::from(attempt.label.clone())),
             );
             dict.insert(
                 "status".to_string(),
-                VmValue::String(Rc::from(attempt.status.as_str())),
+                VmValue::String(std::sync::Arc::from(attempt.status.as_str())),
             );
             dict.insert(
                 "duration_ms".to_string(),
@@ -1843,21 +1849,24 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                 let mut err_dict = BTreeMap::new();
                 err_dict.insert(
                     "category".to_string(),
-                    VmValue::String(Rc::from(error.category.clone())),
+                    VmValue::String(std::sync::Arc::from(error.category.clone())),
                 );
                 err_dict.insert(
                     "message".to_string(),
-                    VmValue::String(Rc::from(error.message.clone())),
+                    VmValue::String(std::sync::Arc::from(error.message.clone())),
                 );
                 if let Some(status) = error.status {
                     err_dict.insert("status".to_string(), VmValue::Int(status as i64));
                 }
-                dict.insert("error".to_string(), VmValue::Dict(Rc::new(err_dict)));
+                dict.insert(
+                    "error".to_string(),
+                    VmValue::Dict(std::sync::Arc::new(err_dict)),
+                );
             }
             if let Some(outcome) = attempt.verifier_outcome {
                 dict.insert(
                     "verifier_outcome".to_string(),
-                    VmValue::String(Rc::from(outcome.as_str())),
+                    VmValue::String(std::sync::Arc::from(outcome.as_str())),
                 );
             }
             if !attempt.verifier_signals.is_empty() {
@@ -1868,34 +1877,34 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                         let mut sig_dict = BTreeMap::new();
                         sig_dict.insert(
                             "name".to_string(),
-                            VmValue::String(Rc::from(signal.name.clone())),
+                            VmValue::String(std::sync::Arc::from(signal.name.clone())),
                         );
                         sig_dict.insert(
                             "kind".to_string(),
-                            VmValue::String(Rc::from(signal.kind.clone())),
+                            VmValue::String(std::sync::Arc::from(signal.kind.clone())),
                         );
                         sig_dict.insert(
                             "signal".to_string(),
-                            VmValue::String(Rc::from(signal.signal.clone())),
+                            VmValue::String(std::sync::Arc::from(signal.signal.clone())),
                         );
                         if let Some(reason) = &signal.reason {
                             sig_dict.insert(
                                 "reason".to_string(),
-                                VmValue::String(Rc::from(reason.clone())),
+                                VmValue::String(std::sync::Arc::from(reason.clone())),
                             );
                         }
-                        VmValue::Dict(Rc::new(sig_dict))
+                        VmValue::Dict(std::sync::Arc::new(sig_dict))
                     })
                     .collect();
                 dict.insert(
                     "verifier_signals".to_string(),
-                    VmValue::List(Rc::new(signals)),
+                    VmValue::List(std::sync::Arc::new(signals)),
                 );
             }
-            VmValue::Dict(Rc::new(dict))
+            VmValue::Dict(std::sync::Arc::new(dict))
         })
         .collect();
-    VmValue::List(Rc::new(items))
+    VmValue::List(std::sync::Arc::new(items))
 }
 
 #[cfg(test)]
@@ -1915,29 +1924,32 @@ mod tests {
         let config = dict(&[
             (
                 "chain",
-                VmValue::List(Rc::new(vec![
-                    VmValue::String(Rc::from("mock:mock")),
-                    VmValue::Dict(Rc::new(dict(&[
-                        ("provider", VmValue::String(Rc::from("mock"))),
-                        ("model", VmValue::String(Rc::from("mock-2"))),
+                VmValue::List(std::sync::Arc::new(vec![
+                    VmValue::String(std::sync::Arc::from("mock:mock")),
+                    VmValue::Dict(std::sync::Arc::new(dict(&[
+                        ("provider", VmValue::String(std::sync::Arc::from("mock"))),
+                        ("model", VmValue::String(std::sync::Arc::from("mock-2"))),
                     ]))),
                 ])),
             ),
             (
                 "failover",
-                VmValue::Dict(Rc::new(dict(&[
+                VmValue::Dict(std::sync::Arc::new(dict(&[
                     (
                         "on_status",
-                        VmValue::List(Rc::new(vec![VmValue::Int(429), VmValue::Int(500)])),
+                        VmValue::List(std::sync::Arc::new(vec![
+                            VmValue::Int(429),
+                            VmValue::Int(500),
+                        ])),
                     ),
                     ("max_attempts", VmValue::Int(2)),
                 ]))),
             ),
             (
                 "budget",
-                VmValue::Dict(Rc::new(dict(&[
+                VmValue::Dict(std::sync::Arc::new(dict(&[
                     ("per_call_usd", VmValue::Float(0.5)),
-                    ("on_exceed", VmValue::String(Rc::from("abort"))),
+                    ("on_exceed", VmValue::String(std::sync::Arc::from("abort"))),
                 ]))),
             ),
         ]);
@@ -1957,7 +1969,7 @@ mod tests {
     #[test]
     fn build_rejects_empty_chain() {
         clear_policy_registry();
-        let config = dict(&[("chain", VmValue::List(Rc::new(Vec::new())))]);
+        let config = dict(&[("chain", VmValue::List(std::sync::Arc::new(Vec::new())))]);
         let err = build_routing_policy(&config).unwrap_err();
         let message = match err {
             VmError::Thrown(VmValue::String(s)) => s.to_string(),
@@ -1972,13 +1984,15 @@ mod tests {
         let config = dict(&[
             (
                 "chain",
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("mock:mock"))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from("mock:mock"),
+                )])),
             ),
             (
                 "failover",
-                VmValue::Dict(Rc::new(dict(&[(
+                VmValue::Dict(std::sync::Arc::new(dict(&[(
                     "on_status",
-                    VmValue::List(Rc::new(vec![VmValue::Int(42)])),
+                    VmValue::List(std::sync::Arc::new(vec![VmValue::Int(42)])),
                 )]))),
             ),
         ]);

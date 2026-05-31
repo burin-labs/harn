@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -130,7 +130,7 @@ fn run_status(repo: &PathBuf) -> Result<VmValue, HostlibError> {
             ("path", str_value(path)),
         ]));
     }
-    Ok(VmValue::List(Rc::new(entries)))
+    Ok(VmValue::List(Arc::new(entries)))
 }
 
 fn run_diff(
@@ -197,7 +197,7 @@ fn run_log(
             ("subject", str_value(parts[4])),
         ]));
     }
-    Ok(VmValue::List(Rc::new(commits)))
+    Ok(VmValue::List(Arc::new(commits)))
 }
 
 fn run_blame(
@@ -238,7 +238,7 @@ fn run_blame(
             ]));
         }
     }
-    Ok(VmValue::List(Rc::new(blame_entries)))
+    Ok(VmValue::List(Arc::new(blame_entries)))
 }
 
 fn run_show(repo: &PathBuf, rev: Option<&str>) -> Result<VmValue, HostlibError> {
@@ -277,7 +277,7 @@ fn run_branch_list(repo: &PathBuf) -> Result<VmValue, HostlibError> {
             ("sha", str_value(parts[1])),
         ]));
     }
-    Ok(VmValue::List(Rc::new(branches)))
+    Ok(VmValue::List(Arc::new(branches)))
 }
 
 fn run_current_branch(repo: &PathBuf) -> Result<VmValue, HostlibError> {
@@ -306,7 +306,7 @@ fn run_remote_list(repo: &PathBuf) -> Result<VmValue, HostlibError> {
             ("url", str_value(url)),
         ]));
     }
-    Ok(VmValue::List(Rc::new(remotes)))
+    Ok(VmValue::List(Arc::new(remotes)))
 }
 
 /// Validate a user-supplied revision/refspec/range. We forward the value

@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
@@ -37,7 +37,7 @@ use mock::{mock_call_headers_value, redact_mock_call_url};
 struct HttpServerRoute {
     method: String,
     template: String,
-    handler: Rc<VmClosure>,
+    handler: Arc<VmClosure>,
     max_body_bytes: Option<usize>,
     retain_raw_body: Option<bool>,
 }
@@ -45,11 +45,11 @@ struct HttpServerRoute {
 #[derive(Clone)]
 struct HttpServer {
     routes: Vec<HttpServerRoute>,
-    before: Vec<Rc<VmClosure>>,
-    after: Vec<Rc<VmClosure>>,
+    before: Vec<Arc<VmClosure>>,
+    after: Vec<Arc<VmClosure>>,
     ready: bool,
-    readiness: Option<Rc<VmClosure>>,
-    shutdown_hooks: Vec<Rc<VmClosure>>,
+    readiness: Option<Arc<VmClosure>>,
+    shutdown_hooks: Vec<Arc<VmClosure>>,
     shutdown: bool,
     max_body_bytes: usize,
     retain_raw_body: bool,
@@ -89,7 +89,7 @@ pub fn reset_http_state() {
 }
 
 pub(super) fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 pub(super) fn next_transport_handle(prefix: &str) -> String {
@@ -122,11 +122,11 @@ pub(super) fn get_options_arg(args: &[VmValue], index: usize) -> BTreeMap<String
 }
 
 fn vm_string(value: impl AsRef<str>) -> VmValue {
-    VmValue::String(Rc::from(value.as_ref()))
+    VmValue::String(std::sync::Arc::from(value.as_ref()))
 }
 
 fn dict_value(entries: BTreeMap<String, VmValue>) -> VmValue {
-    VmValue::Dict(Rc::new(entries))
+    VmValue::Dict(std::sync::Arc::new(entries))
 }
 
 fn get_bool_option(options: &BTreeMap<String, VmValue>, key: &str, default: bool) -> bool {
@@ -165,7 +165,7 @@ fn server_from_value(value: &VmValue, builtin: &str) -> Result<String, VmError> 
     handle_from_value(value, builtin)
 }
 
-fn closure_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<Rc<VmClosure>, VmError> {
+fn closure_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<Arc<VmClosure>, VmError> {
     match args.get(index) {
         Some(VmValue::Closure(closure)) => Ok(closure.clone()),
         Some(other) => Err(vm_error(format!(
@@ -309,7 +309,7 @@ fn request_value(
     request.insert(
         "raw_body".to_string(),
         if retain_raw_body {
-            VmValue::Bytes(Rc::new(body_bytes.to_vec()))
+            VmValue::Bytes(std::sync::Arc::new(body_bytes.to_vec()))
         } else {
             VmValue::Nil
         },
@@ -387,7 +387,7 @@ fn response_with_kind(
             response.insert("body".to_string(), vm_string(other.display()));
             response.insert(
                 "raw_body".to_string(),
-                VmValue::Bytes(Rc::new(other.display().into_bytes())),
+                VmValue::Bytes(std::sync::Arc::new(other.display().into_bytes())),
             );
         }
     }
@@ -493,7 +493,7 @@ fn matching_route(
 
 async fn call_server_closure(
     ctx: &crate::vm::AsyncBuiltinCtx,
-    closure: &Rc<VmClosure>,
+    closure: &Arc<VmClosure>,
     args: &[VmValue],
     _builtin: &str,
 ) -> Result<VmValue, VmError> {
@@ -653,9 +653,12 @@ fn register_http_tls_builtins(vm: &mut Vm) {
         let mut extra = BTreeMap::new();
         extra.insert(
             "cert_path".to_string(),
-            VmValue::String(Rc::from(cert_path)),
+            VmValue::String(std::sync::Arc::from(cert_path)),
         );
-        extra.insert("key_path".to_string(), VmValue::String(Rc::from(key_path)));
+        extra.insert(
+            "key_path".to_string(),
+            VmValue::String(std::sync::Arc::from(key_path)),
+        );
         Ok(http_server_tls_config_value(
             "pem", true, "https", true, extra,
         ))
@@ -670,20 +673,20 @@ fn register_http_tls_builtins(vm: &mut Vm) {
         let mut extra = BTreeMap::new();
         extra.insert(
             "hosts".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 hosts
                     .into_iter()
-                    .map(|host| VmValue::String(Rc::from(host)))
+                    .map(|host| VmValue::String(std::sync::Arc::from(host)))
                     .collect(),
             )),
         );
         extra.insert(
             "cert_pem".to_string(),
-            VmValue::String(Rc::from(cert.cert.pem())),
+            VmValue::String(std::sync::Arc::from(cert.cert.pem())),
         );
         extra.insert(
             "key_pem".to_string(),
-            VmValue::String(Rc::from(cert.signing_key.serialize_pem())),
+            VmValue::String(std::sync::Arc::from(cert.signing_key.serialize_pem())),
         );
         Ok(http_server_tls_config_value(
             "self_signed_dev",
@@ -699,7 +702,9 @@ fn register_http_tls_builtins(vm: &mut Vm) {
                 "http_server_security_headers: requires a TLS config dict",
             ));
         };
-        Ok(VmValue::Dict(Rc::new(http_server_security_headers(config))))
+        Ok(VmValue::Dict(std::sync::Arc::new(
+            http_server_security_headers(config),
+        )))
     });
 }
 
@@ -992,8 +997,8 @@ fn register_http_server_builtins(vm: &mut Vm) {
     vm.register_builtin("http_response_bytes", |args, _out| {
         let body = match args.first() {
             Some(VmValue::Bytes(bytes)) => VmValue::Bytes(bytes.clone()),
-            Some(value) => VmValue::Bytes(Rc::new(value.display().into_bytes())),
-            None => VmValue::Bytes(Rc::new(Vec::new())),
+            Some(value) => VmValue::Bytes(std::sync::Arc::new(value.display().into_bytes())),
+            None => VmValue::Bytes(std::sync::Arc::new(Vec::new())),
         };
         let options = get_options_arg(args, 1);
         let status = options
@@ -1058,7 +1063,7 @@ fn register_http_mock_builtins(vm: &mut Vm) {
             "redact_sensitive",
             get_bool_option(&options, "redact_headers", true),
         ) && !include_sensitive;
-        Ok(VmValue::List(Rc::new(http_mock_calls_value(
+        Ok(VmValue::List(std::sync::Arc::new(http_mock_calls_value(
             redact_sensitive,
         ))))
     });
@@ -1072,14 +1077,20 @@ fn http_server_tls_config_value(
     extra: BTreeMap<String, VmValue>,
 ) -> VmValue {
     let mut dict = BTreeMap::new();
-    dict.insert("mode".to_string(), VmValue::String(Rc::from(mode)));
+    dict.insert(
+        "mode".to_string(),
+        VmValue::String(std::sync::Arc::from(mode)),
+    );
     dict.insert("terminate_tls".to_string(), VmValue::Bool(terminate_tls));
-    dict.insert("scheme".to_string(), VmValue::String(Rc::from(scheme)));
+    dict.insert(
+        "scheme".to_string(),
+        VmValue::String(std::sync::Arc::from(scheme)),
+    );
     dict.insert("hsts".to_string(), VmValue::Bool(hsts));
     for (key, value) in extra {
         dict.insert(key, value);
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn hsts_options(options: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
@@ -1124,7 +1135,7 @@ fn http_server_security_headers(config: &BTreeMap<String, VmValue>) -> BTreeMap<
     }
     BTreeMap::from([(
         "strict-transport-security".to_string(),
-        VmValue::String(Rc::from(value)),
+        VmValue::String(std::sync::Arc::from(value)),
     )])
 }
 

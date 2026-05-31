@@ -2,7 +2,6 @@
 //! rather than `url` to avoid colliding with the `url` crate.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use url::Url;
 
@@ -33,18 +32,21 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 #[harn_builtin(sig = "url_parse(url: string) -> dict", category = "url")]
 fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw = args.first().map(|a| a.display()).unwrap_or_default();
-    let parsed = Url::parse(&raw)
-        .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("url_parse: {e}")))))?;
+    let parsed = Url::parse(&raw).map_err(|e| {
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            "url_parse: {e}"
+        ))))
+    })?;
     let mut dict = BTreeMap::new();
     dict.insert(
         "scheme".to_string(),
-        VmValue::String(Rc::from(parsed.scheme())),
+        VmValue::String(std::sync::Arc::from(parsed.scheme())),
     );
     dict.insert(
         "host".to_string(),
         parsed
             .host_str()
-            .map(|h| VmValue::String(Rc::from(h)))
+            .map(|h| VmValue::String(std::sync::Arc::from(h)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -54,19 +56,22 @@ fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
             .map(|p| VmValue::Int(p as i64))
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert("path".to_string(), VmValue::String(Rc::from(parsed.path())));
+    dict.insert(
+        "path".to_string(),
+        VmValue::String(std::sync::Arc::from(parsed.path())),
+    );
     dict.insert(
         "query".to_string(),
         parsed
             .query()
-            .map(|q| VmValue::String(Rc::from(q)))
+            .map(|q| VmValue::String(std::sync::Arc::from(q)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "fragment".to_string(),
         parsed
             .fragment()
-            .map(|f| VmValue::String(Rc::from(f)))
+            .map(|f| VmValue::String(std::sync::Arc::from(f)))
             .unwrap_or(VmValue::Nil),
     );
     let username = parsed.username();
@@ -75,65 +80,73 @@ fn url_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         if username.is_empty() {
             VmValue::Nil
         } else {
-            VmValue::String(Rc::from(username))
+            VmValue::String(std::sync::Arc::from(username))
         },
     );
     dict.insert(
         "password".to_string(),
         parsed
             .password()
-            .map(|p| VmValue::String(Rc::from(p)))
+            .map(|p| VmValue::String(std::sync::Arc::from(p)))
             .unwrap_or(VmValue::Nil),
     );
-    Ok(VmValue::Dict(Rc::new(dict)))
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 #[harn_builtin(sig = "url_build(parts: dict) -> string", category = "url")]
 fn url_build_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::Dict(parts)) = args.first() else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "url_build: expected a dict of url parts",
         ))));
     };
     let scheme = dict_str(parts, "scheme").ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from("url_build: 'scheme' is required")))
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            "url_build: 'scheme' is required",
+        )))
     })?;
     let host = dict_str(parts, "host").unwrap_or("");
     let path = dict_str(parts, "path").unwrap_or("/");
 
     let mut parsed = if host.is_empty() {
-        Url::parse(&format!("{scheme}:{path}"))
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("url_build: {e}")))))?
+        Url::parse(&format!("{scheme}:{path}")).map_err(|e| {
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                "url_build: {e}"
+            ))))
+        })?
     } else {
-        let mut url = Url::parse(&format!("{scheme}://placeholder.invalid/"))
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("url_build: {e}")))))?;
+        let mut url = Url::parse(&format!("{scheme}://placeholder.invalid/")).map_err(|e| {
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                "url_build: {e}"
+            ))))
+        })?;
         url.set_host(Some(host)).map_err(|_| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "url_build: invalid host '{host}'"
             ))))
         })?;
         if let Some(username) = dict_str(parts, "username").filter(|value| !value.is_empty()) {
             url.set_username(username).map_err(|_| {
-                VmError::Thrown(VmValue::String(Rc::from(
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "url_build: username is not allowed for this URL",
                 )))
             })?;
         }
         if let Some(password) = dict_str(parts, "password") {
             url.set_password(Some(password)).map_err(|_| {
-                VmError::Thrown(VmValue::String(Rc::from(
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "url_build: password is not allowed for this URL",
                 )))
             })?;
         }
         if let Some(port) = parts.get("port").and_then(|v| v.as_int()) {
             if !(0..=u16::MAX as i64).contains(&port) {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "url_build: invalid port {port}"
-                )))));
+                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    format!("url_build: invalid port {port}"),
+                ))));
             }
             url.set_port(Some(port as u16)).map_err(|_| {
-                VmError::Thrown(VmValue::String(Rc::from(
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "url_build: port is not allowed for this URL",
                 )))
             })?;
@@ -148,7 +161,7 @@ fn url_build_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     if let Some(f) = dict_str(parts, "fragment").filter(|value| !value.is_empty()) {
         parsed.set_fragment(Some(f));
     }
-    Ok(VmValue::String(Rc::from(parsed.as_str())))
+    Ok(VmValue::String(std::sync::Arc::from(parsed.as_str())))
 }
 
 #[harn_builtin(sig = "query_parse(query: string) -> list", category = "url")]
@@ -158,28 +171,31 @@ fn query_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let pairs: Vec<VmValue> = url::form_urlencoded::parse(trimmed.as_bytes())
         .map(|(k, v)| {
             let mut row = BTreeMap::new();
-            row.insert("key".to_string(), VmValue::String(Rc::from(k.into_owned())));
+            row.insert(
+                "key".to_string(),
+                VmValue::String(std::sync::Arc::from(k.into_owned())),
+            );
             row.insert(
                 "value".to_string(),
-                VmValue::String(Rc::from(v.into_owned())),
+                VmValue::String(std::sync::Arc::from(v.into_owned())),
             );
-            VmValue::Dict(Rc::new(row))
+            VmValue::Dict(std::sync::Arc::new(row))
         })
         .collect();
-    Ok(VmValue::List(Rc::new(pairs)))
+    Ok(VmValue::List(std::sync::Arc::new(pairs)))
 }
 
 #[harn_builtin(sig = "query_stringify(pairs: list) -> string", category = "url")]
 fn query_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(VmValue::List(items)) = args.first() else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "query_stringify: expected a list of {key, value} dicts",
         ))));
     };
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     for item in items.iter() {
         let VmValue::Dict(pair) = item else {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "query_stringify: each item must be a {key, value} dict",
             ))));
         };
@@ -187,5 +203,5 @@ fn query_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         let value = pair.get("value").map(|v| v.display()).unwrap_or_default();
         serializer.append_pair(key, &value);
     }
-    Ok(VmValue::String(Rc::from(serializer.finish())))
+    Ok(VmValue::String(std::sync::Arc::from(serializer.finish())))
 }

@@ -1,7 +1,6 @@
 //! Host workflow registration-layer builtins for the Harn stdlib executor.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::orchestration::{normalize_workflow_value, ArtifactRecord, WorkflowEdge};
 use crate::stdlib::macros::harn_builtin;
@@ -115,10 +114,10 @@ pub(super) async fn host_workflow_stage_complete_builtin(
     dict.insert(
         "branch".to_string(),
         branch
-            .map(|branch| VmValue::String(Rc::from(branch)))
+            .map(|branch| VmValue::String(std::sync::Arc::from(branch)))
             .unwrap_or(VmValue::Nil),
     );
-    Ok(VmValue::Dict(Rc::new(dict)))
+    Ok(VmValue::Dict(std::sync::Arc::new(dict)))
 }
 
 /// Record workflow stage transitions and checkpoint low-level run state.

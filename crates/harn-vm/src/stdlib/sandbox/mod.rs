@@ -38,7 +38,6 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::rc::Rc;
 
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{ErrorCategory, VmError, VmValue};
@@ -255,7 +254,7 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     category = "sandbox"
 )]
 fn sandbox_active_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(Rc::from(active_backend_name())))
+    Ok(VmValue::String(std::sync::Arc::from(active_backend_name())))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -277,7 +276,7 @@ fn sandbox_active_profile_impl(_args: &[VmValue], _out: &mut String) -> Result<V
     let profile = crate::orchestration::current_execution_policy()
         .map(|policy| policy.sandbox_profile)
         .unwrap_or(SandboxProfile::Unrestricted);
-    Ok(VmValue::String(Rc::from(profile.as_str())))
+    Ok(VmValue::String(std::sync::Arc::from(profile.as_str())))
 }
 
 /// A workspace-root scope violation: a path that resolved outside every
@@ -437,7 +436,7 @@ pub fn command_output(
         crate::testbench::process_tape::intercept_spawn(program, args, config.cwd.as_deref())
     {
         return intercepted.map_err(|message| {
-            VmError::Thrown(crate::value::VmValue::String(std::rc::Rc::from(message)))
+            VmError::Thrown(crate::value::VmValue::String(std::sync::Arc::from(message)))
         });
     }
 
@@ -605,9 +604,9 @@ fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {
 }
 
 fn spawn_error(error: std::io::Error) -> VmError {
-    VmError::Thrown(crate::value::VmValue::String(std::rc::Rc::from(format!(
-        "process spawn failed: {error}"
-    ))))
+    VmError::Thrown(crate::value::VmValue::String(std::sync::Arc::from(
+        format!("process spawn failed: {error}"),
+    )))
 }
 
 /// Resolve the fallback policy for the requested profile. `OsHardened`

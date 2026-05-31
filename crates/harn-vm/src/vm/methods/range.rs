@@ -21,7 +21,7 @@ impl crate::vm::Vm {
             }
             "first" => Ok(r.first().map(VmValue::Int).unwrap_or(VmValue::Nil)),
             "last" => Ok(r.last().map(VmValue::Int).unwrap_or(VmValue::Nil)),
-            "to_string" => Ok(VmValue::String(std::rc::Rc::from(obj.display()))),
+            "to_string" => Ok(VmValue::String(std::sync::Arc::from(obj.display()))),
             _ => return None,
         };
         Some(result)

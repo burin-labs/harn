@@ -19,7 +19,6 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -498,14 +497,6 @@ impl Harness {
     }
 
     fn with_mode(clock: Arc<dyn Clock>, mode: HarnessMode) -> Self {
-        // `HarnessInner` becomes !Send/!Sync once a `NetPolicy` with a
-        // `Rc<VmClosure>` callback is attached (issue #1913). The
-        // closure is only invoked on the VM thread that originated
-        // the harness method call, so the practical safety of the Arc
-        // is unchanged; the clippy lint is suppressed at the
-        // construction sites that legitimately store the inner state
-        // in shared ownership.
-        #[allow(clippy::arc_with_non_send_sync)]
         let inner = Arc::new(HarnessInner {
             clock,
             mode,
@@ -712,7 +703,7 @@ fn paused_clock_at_unix_ms(unix_ms: i64) -> Arc<PausedClock> {
 }
 
 pub(crate) fn vm_string(value: impl Into<String>) -> crate::VmValue {
-    crate::VmValue::String(Rc::from(value.into()))
+    crate::VmValue::String(std::sync::Arc::from(value.into()))
 }
 
 impl Default for Harness {

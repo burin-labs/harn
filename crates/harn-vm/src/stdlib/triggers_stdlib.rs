@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::time::Duration;
 
 use harn_parser::diagnostic_codes::Code;
@@ -139,7 +138,7 @@ fn handler_context_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(sig = "list_providers_native() -> list", category = "triggers")]
 fn list_providers_native_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         registered_provider_metadata()
             .into_iter()
             .map(|provider| value_from_serde(&provider))
@@ -149,7 +148,7 @@ fn list_providers_native_impl(_args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(sig = "trigger_list(...args: any) -> list", category = "triggers")]
 fn trigger_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         snapshot_trigger_bindings()
             .into_iter()
             .map(|binding| value_from_serde(&binding))
@@ -222,7 +221,7 @@ async fn trigger_inspect_dlq_impl(
     _args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let entries = inspect_dlq_entries().await?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         entries
             .into_iter()
             .map(|entry| value_from_serde(&entry))
@@ -245,7 +244,7 @@ async fn trigger_inspect_lifecycle_impl(
         _ => None,
     });
     let entries = inspect_lifecycle_events(kind.as_deref()).await?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         entries
             .into_iter()
             .map(|entry| value_from_serde(&entry))
@@ -268,7 +267,7 @@ async fn trigger_inspect_action_graph_impl(
         _ => None,
     });
     let entries = inspect_action_graph_events(trace_id.as_deref()).await?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         entries
             .into_iter()
             .map(|entry| value_from_serde(&entry))
@@ -303,7 +302,7 @@ async fn trust_graph_record_impl(
         VmError::Runtime("trust_graph_record: expected decision dict".to_string())
     })?;
     let record = append_trust_record_from_decision_for("trust_graph_record", decision).await?;
-    Ok(VmValue::String(Rc::from(record.record_id)))
+    Ok(VmValue::String(std::sync::Arc::from(record.record_id)))
 }
 
 #[harn_builtin(
@@ -327,7 +326,7 @@ async fn trust_query_impl(
     if filters.grouped_by_trace {
         return Ok(value_from_serde(&group_trust_records_by_trace(&records)));
     }
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         records
             .into_iter()
             .map(|record| value_from_serde(&record))
@@ -404,7 +403,7 @@ async fn trust_query_ns_impl(
     let records = query_trust_graph_records(&log, &filters)
         .await
         .map_err(|error| VmError::Runtime(format!("trust.query: {error}")))?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         records
             .into_iter()
             .map(|record| value_from_serde(&record))
@@ -425,7 +424,7 @@ async fn trust_record_ns_impl(
         .first()
         .ok_or_else(|| VmError::Runtime("trust.record: expected decision dict".to_string()))?;
     let record = append_trust_record_from_decision_for("trust.record", decision).await?;
-    Ok(VmValue::String(Rc::from(record.record_id)))
+    Ok(VmValue::String(std::sync::Arc::from(record.record_id)))
 }
 
 #[harn_builtin(
@@ -517,7 +516,7 @@ async fn correction_query_impl(
     let records = crate::query_correction_records(&log, &filters)
         .await
         .map_err(|error| VmError::Runtime(format!("correction_query: {error}")))?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         records
             .into_iter()
             .map(|record| value_from_serde(&record))
@@ -542,7 +541,7 @@ async fn corrections_record_ns_impl(
     let record = crate::append_correction_record(&log, &record)
         .await
         .map_err(|error| VmError::Runtime(format!("corrections.record: {error}")))?;
-    Ok(VmValue::String(Rc::from(record.correction_id)))
+    Ok(VmValue::String(std::sync::Arc::from(record.correction_id)))
 }
 
 #[harn_builtin(
@@ -563,7 +562,7 @@ async fn corrections_query_ns_impl(
     let records = crate::query_correction_records(&log, &filters)
         .await
         .map_err(|error| VmError::Runtime(format!("corrections.query: {error}")))?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         records
             .into_iter()
             .map(|record| value_from_serde(&record))
@@ -622,7 +621,7 @@ async fn webhook_intake_deregister_impl(
     category = "triggers"
 )]
 fn webhook_intake_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         snapshot_webhook_intakes()
             .into_iter()
             .map(|snapshot| value_from_serde(&snapshot))
@@ -653,7 +652,7 @@ async fn webhook_intake_recent_impl(
     let entries = recent_webhook_deliveries(&intake_id, limit)
         .await
         .map_err(webhook_intake_error)?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         entries
             .iter()
             .map(crate::stdlib::json_to_vm_value)
@@ -728,15 +727,18 @@ fn register_trust_namespace(vm: &mut Vm) {
     let names = ["query", "record", "score", "policy_for", "verify_chain"];
     vm.set_global(
         "trust",
-        VmValue::Dict(Rc::new(
-            std::iter::once(("_namespace".to_string(), VmValue::String(Rc::from("trust"))))
-                .chain(names.into_iter().map(|name| {
-                    (
-                        name.to_string(),
-                        VmValue::BuiltinRef(Rc::from(format!("trust.{name}"))),
-                    )
-                }))
-                .collect::<BTreeMap<_, _>>(),
+        VmValue::Dict(std::sync::Arc::new(
+            std::iter::once((
+                "_namespace".to_string(),
+                VmValue::String(std::sync::Arc::from("trust")),
+            ))
+            .chain(names.into_iter().map(|name| {
+                (
+                    name.to_string(),
+                    VmValue::BuiltinRef(std::sync::Arc::from(format!("trust.{name}"))),
+                )
+            }))
+            .collect::<BTreeMap<_, _>>(),
         )),
     );
 }
@@ -745,15 +747,15 @@ fn register_corrections_namespace(vm: &mut Vm) {
     let names = ["query", "record"];
     vm.set_global(
         "corrections",
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(Rc::from("corrections")),
+                VmValue::String(std::sync::Arc::from("corrections")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(Rc::from(format!("corrections.{name}"))),
+                    VmValue::BuiltinRef(std::sync::Arc::from(format!("corrections.{name}"))),
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
@@ -1489,9 +1491,9 @@ pub(crate) fn validate_resume_trigger_spec(
     config: &BTreeMap<String, VmValue>,
 ) -> Result<(), VmError> {
     let mut normalized = config.clone();
-    normalized
-        .entry("handler".to_string())
-        .or_insert_with(|| VmValue::String(Rc::from("worker://__resume_auto_resume__")));
+    normalized.entry("handler".to_string()).or_insert_with(|| {
+        VmValue::String(std::sync::Arc::from("worker://__resume_auto_resume__"))
+    });
     parse_trigger_config(&normalized).map(|_| ())
 }
 
@@ -1532,7 +1534,7 @@ pub(crate) async fn register_auto_resume_trigger(
     let mut normalized = trigger_config.as_ref().clone();
     normalized.insert(
         "handler".to_string(),
-        VmValue::String(Rc::from("worker://__resume_auto_resume__")),
+        VmValue::String(std::sync::Arc::from("worker://__resume_auto_resume__")),
     );
     let mut spec = parse_trigger_config(&normalized).map_err(|error| {
         suspend_diagnostic_error(
@@ -2914,7 +2916,7 @@ mod tests {
         id: &str,
         fingerprint: &str,
         handler_name: &str,
-        closure: Rc<crate::value::VmClosure>,
+        closure: std::sync::Arc<crate::value::VmClosure>,
     ) -> TriggerBindingSpec {
         TriggerBindingSpec {
             id: id.to_string(),
@@ -3077,7 +3079,7 @@ pub fn on_tick_v4(event: TriggerEvent) -> dict {
         let replay = vm
             .call_named_builtin(
                 "trigger_replay",
-                vec![VmValue::String(Rc::from("evt-stale"))],
+                vec![VmValue::String(std::sync::Arc::from("evt-stale"))],
             )
             .await
             .expect("trigger replay succeeds");

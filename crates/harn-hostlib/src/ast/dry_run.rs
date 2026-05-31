@@ -47,7 +47,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -148,7 +148,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn require_plan(
     dict: &BTreeMap<String, VmValue>,
-) -> Result<Vec<Rc<BTreeMap<String, VmValue>>>, HostlibError> {
+) -> Result<Vec<Arc<BTreeMap<String, VmValue>>>, HostlibError> {
     match dict.get("plan") {
         None | Some(VmValue::Nil) => Err(HostlibError::MissingParameter {
             builtin: BUILTIN,
@@ -217,7 +217,7 @@ enum OpOutcome {
     },
 }
 
-fn dispatch_op(session_id: &str, index: usize, raw: &Rc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn dispatch_op(session_id: &str, index: usize, raw: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
     let dict = raw.as_ref();
     let op_name = match dict.get("op") {
         Some(VmValue::String(s)) => s.to_string(),
@@ -263,11 +263,11 @@ fn dispatch_op(session_id: &str, index: usize, raw: &Rc<BTreeMap<String, VmValue
     }
 }
 
-fn run_apply_node(session_id: &str, raw: &Rc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn run_apply_node(session_id: &str, raw: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
     delegate_to_builtin(session_id, raw, "apply_node", super::apply_node::run)
 }
 
-fn run_insert_at_anchor(session_id: &str, raw: &Rc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn run_insert_at_anchor(session_id: &str, raw: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
     delegate_to_builtin(
         session_id,
         raw,
@@ -283,7 +283,7 @@ fn run_insert_at_anchor(session_id: &str, raw: &Rc<BTreeMap<String, VmValue>>) -
 /// even if the caller passed conflicting values.
 fn delegate_to_builtin(
     session_id: &str,
-    raw: &Rc<BTreeMap<String, VmValue>>,
+    raw: &Arc<BTreeMap<String, VmValue>>,
     op_label: &'static str,
     runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
 ) -> OpOutcome {
@@ -291,7 +291,7 @@ fn delegate_to_builtin(
     forwarded.remove("op");
     forwarded.insert("session_id".to_string(), str_value(session_id));
     forwarded.insert("dry_run".to_string(), VmValue::Bool(false));
-    let request = VmValue::Dict(Rc::new(forwarded));
+    let request = VmValue::Dict(Arc::new(forwarded));
     match runner(&[request]) {
         Ok(VmValue::Dict(result)) => parse_builtin_outcome(&result, op_label),
         Ok(_) => OpOutcome::Error {
@@ -306,7 +306,7 @@ fn delegate_to_builtin(
 }
 
 fn parse_builtin_outcome(
-    result: &Rc<BTreeMap<String, VmValue>>,
+    result: &Arc<BTreeMap<String, VmValue>>,
     op_label: &'static str,
 ) -> OpOutcome {
     let result_str = match result.get("result") {
@@ -359,7 +359,7 @@ fn classify_builtin_failure(result: &str) -> &'static str {
     }
 }
 
-fn run_safe_text_patch(session_id: &str, raw: &Rc<BTreeMap<String, VmValue>>) -> OpOutcome {
+fn run_safe_text_patch(session_id: &str, raw: &Arc<BTreeMap<String, VmValue>>) -> OpOutcome {
     let dict = raw.as_ref();
     let path_str = match require_string(BUILTIN, dict, "path") {
         Ok(s) => s,
@@ -527,7 +527,7 @@ fn build_response(
     summary: SummaryCounts,
     op_outcomes: &[OpOutcome],
 ) -> VmValue {
-    let per_file_value = VmValue::List(Rc::new(
+    let per_file_value = VmValue::List(Arc::new(
         per_file
             .iter()
             .map(|entry| {
@@ -547,7 +547,7 @@ fn build_response(
         ("ops_applied", VmValue::Int(summary.ops_applied as i64)),
         ("ops_rejected", VmValue::Int(summary.ops_rejected as i64)),
     ]);
-    let ops_value = VmValue::List(Rc::new(
+    let ops_value = VmValue::List(Arc::new(
         op_outcomes.iter().map(op_outcome_to_value).collect(),
     ));
 
@@ -608,7 +608,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(Rc::from(s))
+        VmValue::String(Arc::from(s))
     }
 
     fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
@@ -616,11 +616,11 @@ mod tests {
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(Arc::new(map))
     }
 
     fn vm_list(items: &[VmValue]) -> VmValue {
-        VmValue::List(Rc::new(items.to_vec()))
+        VmValue::List(Arc::new(items.to_vec()))
     }
 
     fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {

@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::runtime_limits::RuntimeLimits;
@@ -285,8 +284,8 @@ fn validate_against_schema_inner(
                     }
                 }
                 normalized = match &normalized {
-                    VmValue::Set(_) => VmValue::Set(Rc::new(normalized_items)),
-                    _ => VmValue::List(Rc::new(normalized_items)),
+                    VmValue::Set(_) => VmValue::Set(std::sync::Arc::new(normalized_items)),
+                    _ => VmValue::List(std::sync::Arc::new(normalized_items)),
                 };
             }
         }
@@ -499,7 +498,7 @@ fn validate_object_fields(
         }
         VmValue::struct_instance_with_layout(layout.struct_name().to_string(), field_names, merged)
     } else {
-        VmValue::Dict(Rc::new(merged))
+        VmValue::Dict(std::sync::Arc::new(merged))
     };
 
     (normalized, errors)

@@ -162,7 +162,7 @@ async fn verify_stage_reads_transcript_from_session_store() {
     let mut raw_model_policy = std::collections::BTreeMap::new();
     raw_model_policy.insert(
         "session_id".to_string(),
-        crate::value::VmValue::String(std::rc::Rc::from(session_id.clone())),
+        crate::value::VmValue::String(std::sync::Arc::from(session_id.clone())),
     );
 
     let node = crate::orchestration::WorkflowNode {
@@ -180,7 +180,7 @@ async fn verify_stage_reads_transcript_from_session_store() {
             output_kinds: vec!["verification_result".to_string()],
             ..Default::default()
         },
-        raw_model_policy: Some(crate::value::VmValue::Dict(std::rc::Rc::new(
+        raw_model_policy: Some(crate::value::VmValue::Dict(std::sync::Arc::new(
             raw_model_policy,
         ))),
         ..Default::default()

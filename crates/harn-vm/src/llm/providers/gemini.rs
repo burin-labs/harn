@@ -1,7 +1,5 @@
 //! Google Gemini provider.
 
-use std::rc::Rc;
-
 use crate::llm::api::{
     DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry, ReasoningEffort,
     ThinkingConfig,
@@ -188,20 +186,20 @@ impl GeminiProvider {
             .json(&body);
         let req = crate::llm::api::apply_auth_headers(req, &request.api_key, pdef.as_ref());
         let response = req.send().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "gemini API error: {error}"
             ))))
         })?;
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 crate::llm::api::classify_provider_http_error("gemini", status, None, &body)
                     .message,
             ))));
         }
         let json: serde_json::Value = response.json().await.map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "gemini response parse error: {error}"
             ))))
         })?;
@@ -356,9 +354,9 @@ fn parse_response(
         .and_then(|error| error.get("message"))
         .and_then(|value| value.as_str())
     {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "gemini API error: {message}"
-        )))));
+        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("gemini API error: {message}"),
+        ))));
     }
     let mut text = String::new();
     let mut thinking = String::new();

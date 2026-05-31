@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::{OnceLock, RwLock};
 
@@ -489,41 +488,41 @@ fn policy_summary() -> VmValue {
         dict.insert("configured".to_string(), VmValue::Bool(true));
         dict.insert(
             "source".to_string(),
-            VmValue::String(Rc::from(configured.source)),
+            VmValue::String(std::sync::Arc::from(configured.source)),
         );
         dict.insert(
             "default".to_string(),
-            VmValue::String(Rc::from(match configured.policy.default {
+            VmValue::String(std::sync::Arc::from(match configured.policy.default {
                 DefaultAction::Allow => "allow",
                 DefaultAction::Deny => "deny",
             })),
         );
         dict.insert(
             "allow".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 configured
                     .policy
                     .allow
                     .iter()
-                    .map(|rule| VmValue::String(Rc::from(rule.raw.as_str())))
+                    .map(|rule| VmValue::String(std::sync::Arc::from(rule.raw.as_str())))
                     .collect(),
             )),
         );
         dict.insert(
             "deny".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 configured
                     .policy
                     .deny
                     .iter()
-                    .map(|rule| VmValue::String(Rc::from(rule.raw.as_str())))
+                    .map(|rule| VmValue::String(std::sync::Arc::from(rule.raw.as_str())))
                     .collect(),
             )),
         );
     } else {
         dict.insert("configured".to_string(), VmValue::Bool(false));
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 impl EgressRule {
@@ -660,7 +659,7 @@ fn redact_sensitive_url(url: &str) -> String {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message.into())))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
 }
 
 impl EgressBlocked {
@@ -668,27 +667,27 @@ impl EgressBlocked {
         let mut dict = BTreeMap::new();
         dict.insert(
             "type".to_string(),
-            VmValue::String(Rc::from("EgressBlocked")),
+            VmValue::String(std::sync::Arc::from("EgressBlocked")),
         );
         dict.insert(
             "category".to_string(),
-            VmValue::String(Rc::from("egress_blocked")),
+            VmValue::String(std::sync::Arc::from("egress_blocked")),
         );
         dict.insert(
             "message".to_string(),
-            VmValue::String(Rc::from(self.to_string())),
+            VmValue::String(std::sync::Arc::from(self.to_string())),
         );
         dict.insert(
             "surface".to_string(),
-            VmValue::String(Rc::from(self.surface.as_str())),
+            VmValue::String(std::sync::Arc::from(self.surface.as_str())),
         );
         dict.insert(
             "url".to_string(),
-            VmValue::String(Rc::from(self.url.as_str())),
+            VmValue::String(std::sync::Arc::from(self.url.as_str())),
         );
         dict.insert(
             "host".to_string(),
-            VmValue::String(Rc::from(self.host.as_str())),
+            VmValue::String(std::sync::Arc::from(self.host.as_str())),
         );
         dict.insert(
             "port".to_string(),
@@ -698,9 +697,9 @@ impl EgressBlocked {
         );
         dict.insert(
             "reason".to_string(),
-            VmValue::String(Rc::from(self.reason.as_str())),
+            VmValue::String(std::sync::Arc::from(self.reason.as_str())),
         );
-        VmError::Thrown(VmValue::Dict(Rc::new(dict)))
+        VmError::Thrown(VmValue::Dict(std::sync::Arc::new(dict)))
     }
 }
 
@@ -741,10 +740,10 @@ mod tests {
     }
 
     fn strings(values: &[&str]) -> VmValue {
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             values
                 .iter()
-                .map(|value| VmValue::String(Rc::from(*value)))
+                .map(|value| VmValue::String(std::sync::Arc::from(*value)))
                 .collect(),
         ))
     }
@@ -753,7 +752,7 @@ mod tests {
     fn exact_host_and_port_restriction() {
         let _guard = install(&[
             ("allow", strings(&["api.example.com:443"])),
-            ("default", VmValue::String(Rc::from("deny"))),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
         ]);
         assert!(check_url("http_get", "https://api.example.com/users")
             .unwrap()
@@ -769,7 +768,7 @@ mod tests {
     fn suffix_wildcard_matches_subdomains_only() {
         let _guard = install(&[
             ("allow", strings(&["*.example.com"])),
-            ("default", VmValue::String(Rc::from("deny"))),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
         ]);
         assert!(check_url("http_get", "https://api.example.com")
             .unwrap()
@@ -783,7 +782,7 @@ mod tests {
     fn cidr_matches_ip_literals() {
         let _guard = install(&[
             ("allow", strings(&["127.0.0.0/8"])),
-            ("default", VmValue::String(Rc::from("deny"))),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
         ]);
         assert!(check_url("http_get", "http://127.10.20.30:8080")
             .unwrap()
@@ -798,7 +797,7 @@ mod tests {
         let _guard = install(&[
             ("allow", strings(&["*.example.com"])),
             ("deny", strings(&["blocked.example.com"])),
-            ("default", VmValue::String(Rc::from("deny"))),
+            ("default", VmValue::String(std::sync::Arc::from("deny"))),
         ]);
         let blocked = check_url("http_get", "https://blocked.example.com")
             .unwrap()
@@ -808,7 +807,7 @@ mod tests {
 
     #[test]
     fn blocked_urls_redact_sensitive_query_values() {
-        let _guard = install(&[("default", VmValue::String(Rc::from("deny")))]);
+        let _guard = install(&[("default", VmValue::String(std::sync::Arc::from("deny")))]);
         let blocked = check_url(
             "http_get",
             "https://api.example.com/resource?access_token=secret-token&ok=1",

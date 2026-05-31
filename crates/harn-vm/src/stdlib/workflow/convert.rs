@@ -1,7 +1,5 @@
 //! VM/JSON conversion helpers for workflow graphs.
 
-use std::rc::Rc;
-
 use crate::orchestration::WorkflowGraph;
 use crate::value::{VmError, VmValue};
 
@@ -41,10 +39,16 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
         };
         let mut node_map = (*node_dict).clone();
         node_map.insert("tools".to_string(), raw_tools);
-        nodes.insert(node_id.clone(), VmValue::Dict(Rc::new(node_map)));
+        nodes.insert(
+            node_id.clone(),
+            VmValue::Dict(std::sync::Arc::new(node_map)),
+        );
     }
-    graph_dict.insert("nodes".to_string(), VmValue::Dict(Rc::new(nodes)));
-    Ok(VmValue::Dict(Rc::new(graph_dict)))
+    graph_dict.insert(
+        "nodes".to_string(),
+        VmValue::Dict(std::sync::Arc::new(nodes)),
+    );
+    Ok(VmValue::Dict(std::sync::Arc::new(graph_dict)))
 }
 
 pub(super) fn filter_workflow_tools(
@@ -97,7 +101,7 @@ pub(super) fn filter_workflow_tools(
 pub(super) fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> VmValue {
     match tools {
         VmValue::Nil => VmValue::Nil,
-        VmValue::List(items) => VmValue::List(Rc::new(
+        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
             items
                 .iter()
                 .filter(|item| {
@@ -118,9 +122,9 @@ pub(super) fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> V
             let tool_items = map
                 .get("tools")
                 .map(|value| filter_workflow_tools_vm(value, allowed))
-                .unwrap_or_else(|| VmValue::List(Rc::new(Vec::new())));
+                .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
             filtered.insert("tools".to_string(), tool_items);
-            VmValue::Dict(Rc::new(filtered))
+            VmValue::Dict(std::sync::Arc::new(filtered))
         }
         VmValue::Dict(map) => {
             let keep = map

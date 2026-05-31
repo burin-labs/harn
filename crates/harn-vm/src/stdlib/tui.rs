@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write};
 use std::process::{Command, Stdio};
-use std::rc::Rc;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -302,9 +301,12 @@ fn page_result(ok: bool, paged: bool, error: Option<String>) -> VmValue {
         ("paged".to_string(), VmValue::Bool(paged)),
     ]);
     if let Some(error) = error {
-        result.insert("error".to_string(), VmValue::String(Rc::from(error)));
+        result.insert(
+            "error".to_string(),
+            VmValue::String(std::sync::Arc::from(error)),
+        );
     }
-    VmValue::Dict(Rc::new(result))
+    VmValue::Dict(std::sync::Arc::new(result))
 }
 
 fn terminal_width(default_width: usize) -> usize {
@@ -337,7 +339,6 @@ fn platform_terminal_width() -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::rc::Rc;
 
     use crate::value::VmValue;
 
@@ -351,14 +352,17 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone()))
             .collect::<BTreeMap<_, _>>();
-        vec![VmValue::Dict(Rc::new(map))]
+        vec![VmValue::Dict(std::sync::Arc::new(map))]
     }
 
     #[test]
     fn page_content_adds_title_rule_and_default_footer() {
         let opts = parse_page_options(&dict(&[
-            ("title", VmValue::String(Rc::from("Audit"))),
-            ("body", VmValue::String(Rc::from("line one\nline two"))),
+            ("title", VmValue::String(std::sync::Arc::from("Audit"))),
+            (
+                "body",
+                VmValue::String(std::sync::Arc::from("line one\nline two")),
+            ),
         ]))
         .unwrap();
 
@@ -371,8 +375,8 @@ mod tests {
     #[test]
     fn page_options_accept_markdown_passthrough() {
         let opts = parse_page_options(&dict(&[
-            ("body", VmValue::String(Rc::from("# Heading"))),
-            ("format", VmValue::String(Rc::from("markdown"))),
+            ("body", VmValue::String(std::sync::Arc::from("# Heading"))),
+            ("format", VmValue::String(std::sync::Arc::from("markdown"))),
             ("no_pager", VmValue::Bool(true)),
         ]))
         .unwrap();

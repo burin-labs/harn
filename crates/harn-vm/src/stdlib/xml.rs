@@ -31,7 +31,6 @@
 //! resolved.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -58,7 +57,7 @@ fn to_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let options = args.get(1).and_then(VmValue::as_dict);
     let opts = XmlOptions::from_dict(options);
     let xml = render_xml(value, &opts)?;
-    Ok(VmValue::String(Rc::from(xml)))
+    Ok(VmValue::String(std::sync::Arc::from(xml)))
 }
 
 #[harn_builtin(
@@ -325,13 +324,13 @@ fn parse_xml(text: &str, parse_opts: &ParseOptions) -> Result<VmValue, VmError> 
     };
     p.skip_ws_and_prologue()?;
     if p.pos >= p.src.len() {
-        return Ok(VmValue::Dict(Rc::new(BTreeMap::new())));
+        return Ok(VmValue::Dict(std::sync::Arc::new(BTreeMap::new())));
     }
     let (tag, value) = p.parse_element()?;
     p.skip_ws_and_prologue().ok();
     let mut out = BTreeMap::new();
     out.insert(tag, value);
-    Ok(VmValue::Dict(Rc::new(out)))
+    Ok(VmValue::Dict(std::sync::Arc::new(out)))
 }
 
 struct Parser<'a> {
@@ -520,7 +519,9 @@ impl<'a> Parser<'a> {
 }
 
 fn parse_error(msg: String) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(format!("from_xml: {msg}"))))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        "from_xml: {msg}"
+    ))))
 }
 
 fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -600,37 +601,40 @@ fn finalize_element(
         if values.len() > 1 {
             if opts.preserve_repeated_tag {
                 let mut out = BTreeMap::new();
-                out.insert(tag, VmValue::List(Rc::new(values)));
-                return VmValue::Dict(Rc::new(out));
+                out.insert(tag, VmValue::List(std::sync::Arc::new(values)));
+                return VmValue::Dict(std::sync::Arc::new(out));
             }
-            return VmValue::List(Rc::new(values));
+            return VmValue::List(std::sync::Arc::new(values));
         }
         let mut out = BTreeMap::new();
         out.insert(tag, values.into_iter().next().unwrap());
-        return VmValue::Dict(Rc::new(out));
+        return VmValue::Dict(std::sync::Arc::new(out));
     }
     let mut out = BTreeMap::new();
     for (tag, mut values) in children {
         if values.len() == 1 {
             out.insert(tag, values.pop().unwrap());
         } else {
-            out.insert(tag, VmValue::List(Rc::new(values)));
+            out.insert(tag, VmValue::List(std::sync::Arc::new(values)));
         }
     }
     if !attrs.is_empty() {
         let mut attr_dict = BTreeMap::new();
         for (k, v) in attrs {
-            attr_dict.insert(k, VmValue::String(Rc::from(v)));
+            attr_dict.insert(k, VmValue::String(std::sync::Arc::from(v)));
         }
-        out.insert("@attr".to_string(), VmValue::Dict(Rc::new(attr_dict)));
+        out.insert(
+            "@attr".to_string(),
+            VmValue::Dict(std::sync::Arc::new(attr_dict)),
+        );
     }
     if !trimmed.is_empty() {
         out.insert(
             "@text".to_string(),
-            VmValue::String(Rc::from(trimmed.to_string())),
+            VmValue::String(std::sync::Arc::from(trimmed.to_string())),
         );
     }
-    VmValue::Dict(Rc::new(out))
+    VmValue::Dict(std::sync::Arc::new(out))
 }
 
 fn scalar_from_text(text: &str) -> VmValue {
@@ -645,7 +649,7 @@ fn scalar_from_text(text: &str) -> VmValue {
     match text {
         "true" => VmValue::Bool(true),
         "false" => VmValue::Bool(false),
-        _ => VmValue::String(Rc::from(text.to_string())),
+        _ => VmValue::String(std::sync::Arc::from(text.to_string())),
     }
 }
 
@@ -653,10 +657,13 @@ fn attrs_to_value(attrs: Vec<(String, String)>) -> VmValue {
     let mut out = BTreeMap::new();
     let mut attr_dict = BTreeMap::new();
     for (k, v) in attrs {
-        attr_dict.insert(k, VmValue::String(Rc::from(v)));
+        attr_dict.insert(k, VmValue::String(std::sync::Arc::from(v)));
     }
-    out.insert("@attr".to_string(), VmValue::Dict(Rc::new(attr_dict)));
-    VmValue::Dict(Rc::new(out))
+    out.insert(
+        "@attr".to_string(),
+        VmValue::Dict(std::sync::Arc::new(attr_dict)),
+    );
+    VmValue::Dict(std::sync::Arc::new(out))
 }
 
 #[cfg(test)]
@@ -668,7 +675,7 @@ mod tests {
         for (k, v) in entries {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(std::sync::Arc::new(map))
     }
 
     fn opts() -> XmlOptions {
@@ -687,7 +694,7 @@ mod tests {
     #[test]
     fn renders_flat_dict() {
         let value = dict(&[
-            ("name", VmValue::String(Rc::from("Ada"))),
+            ("name", VmValue::String(std::sync::Arc::from("Ada"))),
             ("year", VmValue::Int(1815)),
         ]);
         let xml = render_xml(&value, &opts()).unwrap();
@@ -698,9 +705,9 @@ mod tests {
     fn renders_list_as_repeated_items() {
         let value = dict(&[(
             "previous_chats",
-            VmValue::List(Rc::new(vec![
-                VmValue::String(Rc::from("x.jsonl")),
-                VmValue::String(Rc::from("y.jsonl")),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(std::sync::Arc::from("x.jsonl")),
+                VmValue::String(std::sync::Arc::from("y.jsonl")),
             ])),
         )]);
         let xml = render_xml(&value, &opts()).unwrap();
@@ -712,7 +719,7 @@ mod tests {
 
     #[test]
     fn escapes_special_chars_in_text() {
-        let value = dict(&[("msg", VmValue::String(Rc::from("<a> & </b>")))]);
+        let value = dict(&[("msg", VmValue::String(std::sync::Arc::from("<a> & </b>")))]);
         let xml = render_xml(&value, &opts()).unwrap();
         assert_eq!(xml, "<root><msg>&lt;a&gt; &amp; &lt;/b&gt;</msg></root>");
     }
@@ -730,8 +737,8 @@ mod tests {
         let mut o = opts();
         o.pretty = true;
         let value = dict(&[
-            ("a", VmValue::String(Rc::from("x"))),
-            ("b", VmValue::String(Rc::from("y"))),
+            ("a", VmValue::String(std::sync::Arc::from("x"))),
+            ("b", VmValue::String(std::sync::Arc::from("y"))),
         ]);
         let xml = render_xml(&value, &o).unwrap();
         assert_eq!(xml, "<root>\n  <a>x</a>\n  <b>y</b>\n</root>");

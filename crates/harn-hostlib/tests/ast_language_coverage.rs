@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_hostlib::{ast::AstCapability, tools::permissions, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
@@ -26,11 +26,11 @@ fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
     for (k, v) in pairs {
         map.insert((*k).into(), v.clone());
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Rc::from(s))
+    VmValue::String(Arc::from(s))
 }
 
 fn invoke(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {

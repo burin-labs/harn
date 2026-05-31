@@ -120,16 +120,16 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(Rc::from(s.as_str())),
+        serde_json::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
         serde_json::Value::Array(arr) => {
-            VmValue::List(Rc::new(arr.iter().map(json_to_vm).collect()))
+            VmValue::List(std::sync::Arc::new(arr.iter().map(json_to_vm).collect()))
         }
         serde_json::Value::Object(map) => {
             let mut m = BTreeMap::new();
             for (k, v) in map {
                 m.insert(k.clone(), json_to_vm(v));
             }
-            VmValue::Dict(Rc::new(m))
+            VmValue::Dict(std::sync::Arc::new(m))
         }
     }
 }
@@ -172,9 +172,9 @@ pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {
     let s = Rc::clone(&state);
     vm.register_builtin("store_list", move |_args, _out| {
         let keys = s.borrow_mut().list();
-        Ok(VmValue::List(Rc::new(
+        Ok(VmValue::List(std::sync::Arc::new(
             keys.into_iter()
-                .map(|k| VmValue::String(Rc::from(k)))
+                .map(|k| VmValue::String(std::sync::Arc::from(k)))
                 .collect(),
         )))
     });

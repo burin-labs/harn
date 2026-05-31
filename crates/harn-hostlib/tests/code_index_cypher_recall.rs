@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_hostlib::{
     code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
@@ -23,7 +23,7 @@ fn dict(entries: &[(&str, VmValue)]) -> VmValue {
     for (k, v) in entries {
         map.insert((*k).to_string(), v.clone());
     }
-    VmValue::Dict(Rc::new(map))
+    VmValue::Dict(Arc::new(map))
 }
 
 fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
@@ -33,14 +33,14 @@ fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
     (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
 }
 
-fn extract_dict(value: &VmValue) -> Rc<BTreeMap<String, VmValue>> {
+fn extract_dict(value: &VmValue) -> Arc<BTreeMap<String, VmValue>> {
     match value {
         VmValue::Dict(d) => d.clone(),
         other => panic!("expected dict, got {other:?}"),
     }
 }
 
-fn extract_list(value: &VmValue) -> Rc<Vec<VmValue>> {
+fn extract_list(value: &VmValue) -> Arc<Vec<VmValue>> {
     match value {
         VmValue::List(l) => l.clone(),
         other => panic!("expected list, got {other:?}"),
@@ -58,7 +58,7 @@ fn ground_truth_recall_at_least_80_percent() {
     let _ = call(
         &registry,
         "hostlib_code_index_rebuild",
-        dict(&[("root", VmValue::String(Rc::from(root_str.as_str())))]),
+        dict(&[("root", VmValue::String(Arc::from(root_str.as_str())))]),
     );
 
     let qa_text =
@@ -85,7 +85,7 @@ fn ground_truth_recall_at_least_80_percent() {
             .map(|v| v.as_str().unwrap().to_string())
             .collect();
 
-        let payload = dict(&[("query", VmValue::String(Rc::from(cypher)))]);
+        let payload = dict(&[("query", VmValue::String(Arc::from(cypher)))]);
         let result = call(&registry, "hostlib_code_index_cypher", payload);
         let dict_view = extract_dict(&result);
         let rows = extract_list(dict_view.get("rows").expect("rows in cypher response"));

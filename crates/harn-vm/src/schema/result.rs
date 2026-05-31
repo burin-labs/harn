@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::VmValue;
 
@@ -17,7 +16,7 @@ pub(super) fn result_err_value(errors: Vec<String>, value: Option<VmValue>) -> V
     let mut payload = BTreeMap::new();
     payload.insert(
         "message".to_string(),
-        VmValue::String(Rc::from(
+        VmValue::String(std::sync::Arc::from(
             errors
                 .first()
                 .cloned()
@@ -26,15 +25,19 @@ pub(super) fn result_err_value(errors: Vec<String>, value: Option<VmValue>) -> V
     );
     payload.insert(
         "errors".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             errors
                 .into_iter()
-                .map(|err| VmValue::String(Rc::from(err)))
+                .map(|err| VmValue::String(std::sync::Arc::from(err)))
                 .collect(),
         )),
     );
     if let Some(value) = value {
         payload.insert("value".to_string(), value);
     }
-    VmValue::enum_variant("Result", "Err", vec![VmValue::Dict(Rc::new(payload))])
+    VmValue::enum_variant(
+        "Result",
+        "Err",
+        vec![VmValue::Dict(std::sync::Arc::new(payload))],
+    )
 }

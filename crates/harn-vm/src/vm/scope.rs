@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 
@@ -62,7 +62,7 @@ impl Vm {
         call_env
     }
 
-    pub(crate) fn resolve_named_closure(&self, name: &str) -> Option<Rc<VmClosure>> {
+    pub(crate) fn resolve_named_closure(&self, name: &str) -> Option<Arc<VmClosure>> {
         if let Some(VmValue::Closure(closure)) = self.active_local_slot_value(name) {
             return Some(closure);
         }
@@ -72,7 +72,7 @@ impl Vm {
         self.frames
             .last()
             .and_then(|frame| frame.module_functions.as_ref())
-            .and_then(|registry| registry.borrow().get(name).cloned())
+            .and_then(|registry| registry.lock().get(name).cloned())
     }
 
     fn prepare_closure_local_slots(
@@ -141,7 +141,7 @@ impl Vm {
         }
 
         self.frames.push(CallFrame {
-            chunk: Rc::clone(&closure.func.chunk),
+            chunk: Arc::clone(&closure.func.chunk),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env,
@@ -258,8 +258,8 @@ impl Vm {
         if let Err(error) = crate::typecheck::validate_user_call(&closure.func, args, None) {
             let _ = tx.try_send(Err(error));
             return VmValue::generator(VmGenerator {
-                done: Rc::new(std::cell::Cell::new(false)),
-                receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+                done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                receiver: Arc::new(tokio::sync::Mutex::new(rx)),
             });
         }
 
@@ -273,7 +273,7 @@ impl Vm {
         let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
         Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
 
-        let chunk = Rc::clone(&closure.func.chunk);
+        let chunk = Arc::clone(&closure.func.chunk);
         let saved_source_dir = if let Some(ref dir) = closure.source_dir {
             let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
             crate::stdlib::set_thread_source_dir(dir);
@@ -307,17 +307,17 @@ impl Vm {
             // the sender is dropped, signaling completion to the receiver.
         });
 
-        let receiver = Rc::new(tokio::sync::Mutex::new(rx));
+        let receiver = Arc::new(tokio::sync::Mutex::new(rx));
         if closure.func.is_stream {
             return VmValue::stream(VmStream {
-                done: Rc::new(std::cell::Cell::new(false)),
+                done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 receiver,
                 cancel: None,
             });
         }
 
         VmValue::generator(VmGenerator {
-            done: Rc::new(std::cell::Cell::new(false)),
+            done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             receiver,
         })
     }

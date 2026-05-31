@@ -2,7 +2,6 @@ pub mod backend;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use backend::{
     BackendScope, BackendWriteOptions, ConflictPolicy, DurableStateBackend, FilesystemBackend,
@@ -89,7 +88,7 @@ fn agent_state_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let key = required_arg_string(args, 1, "__agent_state_read", "key")?;
     let scope = scope_from_handle(handle)?;
     match backend.read(&scope, &key)? {
-        Some(content) => Ok(VmValue::String(Rc::from(content))),
+        Some(content) => Ok(VmValue::String(std::sync::Arc::from(content))),
         None => Ok(VmValue::Nil),
     }
 }
@@ -106,9 +105,9 @@ fn agent_state_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let items = backend
         .list(&scope)?
         .into_iter()
-        .map(|key| VmValue::String(Rc::from(key)))
+        .map(|key| VmValue::String(std::sync::Arc::from(key)))
         .collect();
-    Ok(VmValue::List(Rc::new(items)))
+    Ok(VmValue::List(std::sync::Arc::new(items)))
 }
 
 #[harn_builtin(
@@ -330,29 +329,34 @@ fn handle_value(
     conflict_policy: ConflictPolicy,
 ) -> VmValue {
     let mut handle = BTreeMap::new();
-    handle.insert("_type".to_string(), VmValue::String(Rc::from(HANDLE_TYPE)));
+    handle.insert(
+        "_type".to_string(),
+        VmValue::String(std::sync::Arc::from(HANDLE_TYPE)),
+    );
     handle.insert(
         "backend".to_string(),
-        VmValue::String(Rc::from(backend.backend_name())),
+        VmValue::String(std::sync::Arc::from(backend.backend_name())),
     );
     handle.insert(
         "root".to_string(),
-        VmValue::String(Rc::from(scope.root.to_string_lossy().into_owned())),
+        VmValue::String(std::sync::Arc::from(
+            scope.root.to_string_lossy().into_owned(),
+        )),
     );
     handle.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(scope.namespace.clone())),
+        VmValue::String(std::sync::Arc::from(scope.namespace.clone())),
     );
     handle.insert(
         "handoff_key".to_string(),
-        VmValue::String(Rc::from(HANDOFF_KEY)),
+        VmValue::String(std::sync::Arc::from(HANDOFF_KEY)),
     );
     handle.insert(
         "conflict_policy".to_string(),
-        VmValue::String(Rc::from(conflict_policy.as_str())),
+        VmValue::String(std::sync::Arc::from(conflict_policy.as_str())),
     );
     handle.insert("writer".to_string(), writer_vm_value(writer));
-    VmValue::Dict(Rc::new(handle))
+    VmValue::Dict(std::sync::Arc::new(handle))
 }
 
 fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
@@ -362,7 +366,7 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
         writer
             .writer_id
             .as_ref()
-            .map(|item| VmValue::String(Rc::from(item.clone())))
+            .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
     value.insert(
@@ -370,7 +374,7 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
         writer
             .stage_id
             .as_ref()
-            .map(|item| VmValue::String(Rc::from(item.clone())))
+            .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
     value.insert(
@@ -378,7 +382,7 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
         writer
             .session_id
             .as_ref()
-            .map(|item| VmValue::String(Rc::from(item.clone())))
+            .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
     value.insert(
@@ -386,10 +390,10 @@ fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
         writer
             .worker_id
             .as_ref()
-            .map(|item| VmValue::String(Rc::from(item.clone())))
+            .map(|item| VmValue::String(std::sync::Arc::from(item.clone())))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(value))
+    VmValue::Dict(std::sync::Arc::new(value))
 }
 
 fn scope_from_handle(handle: &BTreeMap<String, VmValue>) -> Result<BackendScope, VmError> {

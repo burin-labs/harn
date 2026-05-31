@@ -1,7 +1,6 @@
 //! Deterministic helpers behind the `harness.crypto.*` capability surface.
 
 use std::borrow::Cow;
-use std::rc::Rc;
 
 use crate::value::VmValue;
 
@@ -17,5 +16,5 @@ pub(crate) fn sha256_hex(args: &[VmValue]) -> String {
 }
 
 pub(crate) fn sha256_hex_value(args: &[VmValue]) -> VmValue {
-    VmValue::String(Rc::from(sha256_hex(args)))
+    VmValue::String(std::sync::Arc::from(sha256_hex(args)))
 }

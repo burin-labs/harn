@@ -224,13 +224,13 @@ fn test_evaluate() {
 
 #[test]
 fn test_evaluate_dot_access() {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     let mut dbg = Debugger::new();
     let mut inner = BTreeMap::new();
     inner.insert("bar".to_string(), VmValue::Int(99));
     dbg.variables
-        .insert("foo".to_string(), VmValue::Dict(Rc::new(inner)));
+        .insert("foo".to_string(), VmValue::Dict(Arc::new(inner)));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -245,15 +245,15 @@ fn test_evaluate_dot_access() {
 
 #[test]
 fn test_evaluate_nested_dot_access() {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     let mut dbg = Debugger::new();
     let mut inner = BTreeMap::new();
     inner.insert("c".to_string(), VmValue::String("deep".into()));
     let mut outer = BTreeMap::new();
-    outer.insert("b".to_string(), VmValue::Dict(Rc::new(inner)));
+    outer.insert("b".to_string(), VmValue::Dict(Arc::new(inner)));
     dbg.variables
-        .insert("a".to_string(), VmValue::Dict(Rc::new(outer)));
+        .insert("a".to_string(), VmValue::Dict(Arc::new(outer)));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -267,13 +267,13 @@ fn test_evaluate_nested_dot_access() {
 
 #[test]
 fn test_evaluate_complex_value_has_var_ref() {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     let mut dbg = Debugger::new();
     let mut map = BTreeMap::new();
     map.insert("key".to_string(), VmValue::Int(1));
     dbg.variables
-        .insert("d".to_string(), VmValue::Dict(Rc::new(map)));
+        .insert("d".to_string(), VmValue::Dict(Arc::new(map)));
 
     let responses = dbg.handle_message(make_request(
         1,

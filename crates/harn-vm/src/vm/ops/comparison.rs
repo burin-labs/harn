@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::chunk::AdaptiveBinaryOp;
 use crate::value::{values_equal, VmError, VmValue};
@@ -216,7 +216,7 @@ fn typed_bool_pair(name: &str, a: VmValue, b: VmValue) -> Result<(bool, bool), V
 }
 
 #[inline]
-fn typed_string_pair(name: &str, a: VmValue, b: VmValue) -> Result<(Rc<str>, Rc<str>), VmError> {
+fn typed_string_pair(name: &str, a: VmValue, b: VmValue) -> Result<(Arc<str>, Arc<str>), VmError> {
     match (a, b) {
         (VmValue::String(x), VmValue::String(y)) => Ok((x, y)),
         (a, b) => Err(VmError::TypeError(format!(

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -17,7 +16,7 @@ pub fn finish_span_from_args(args: &[VmValue]) -> Result<(String, String, String
     let span = match args.first() {
         Some(VmValue::Dict(d)) => d,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
+            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "trace_end: argument must be a span dict from trace_start",
             ))));
         }
@@ -96,11 +95,20 @@ fn trace_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     });
 
     let mut span = BTreeMap::new();
-    span.insert("trace_id".to_string(), VmValue::String(Rc::from(trace_id)));
-    span.insert("span_id".to_string(), VmValue::String(Rc::from(span_id)));
-    span.insert("name".to_string(), VmValue::String(Rc::from(name)));
+    span.insert(
+        "trace_id".to_string(),
+        VmValue::String(std::sync::Arc::from(trace_id)),
+    );
+    span.insert(
+        "span_id".to_string(),
+        VmValue::String(std::sync::Arc::from(span_id)),
+    );
+    span.insert(
+        "name".to_string(),
+        VmValue::String(std::sync::Arc::from(name)),
+    );
     span.insert("start_ms".to_string(), VmValue::Int(start_ms));
-    Ok(VmValue::Dict(Rc::new(span)))
+    Ok(VmValue::Dict(std::sync::Arc::new(span)))
 }
 
 #[harn_builtin(sig = "trace_end(...args: any) -> nil", category = "tracing")]
@@ -109,9 +117,18 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
     let level_num = 1_u8;
     if level_num >= VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) {
         let mut fields = BTreeMap::new();
-        fields.insert("trace_id".to_string(), VmValue::String(Rc::from(trace_id)));
-        fields.insert("span_id".to_string(), VmValue::String(Rc::from(span_id)));
-        fields.insert("name".to_string(), VmValue::String(Rc::from(name)));
+        fields.insert(
+            "trace_id".to_string(),
+            VmValue::String(std::sync::Arc::from(trace_id)),
+        );
+        fields.insert(
+            "span_id".to_string(),
+            VmValue::String(std::sync::Arc::from(span_id)),
+        );
+        fields.insert(
+            "name".to_string(),
+            VmValue::String(std::sync::Arc::from(name)),
+        );
         fields.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
         let line = vm_build_log_line("info", "span_end", Some(&fields));
         out.push_str(&line);
@@ -122,7 +139,7 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(sig = "trace_id(...args: any) -> string?", category = "tracing")]
 fn trace_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match current_trace_context().map(|context| context.0) {
-        Some(trace_id) => Ok(VmValue::String(Rc::from(trace_id))),
+        Some(trace_id) => Ok(VmValue::String(std::sync::Arc::from(trace_id))),
         None => Ok(VmValue::Nil),
     }
 }
@@ -139,10 +156,16 @@ fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     };
     let api_key_set = crate::llm_config::provider_key_available(&provider);
     let mut info = BTreeMap::new();
-    info.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
-    info.insert("model".to_string(), VmValue::String(Rc::from(model)));
+    info.insert(
+        "provider".to_string(),
+        VmValue::String(std::sync::Arc::from(provider)),
+    );
+    info.insert(
+        "model".to_string(),
+        VmValue::String(std::sync::Arc::from(model)),
+    );
     info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
-    Ok(VmValue::Dict(Rc::new(info)))
+    Ok(VmValue::Dict(std::sync::Arc::new(info)))
 }
 
 #[harn_builtin(sig = "enable_tracing(enabled?: bool) -> nil", category = "tracing")]
@@ -159,12 +182,14 @@ fn enable_tracing_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn trace_spans_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let spans = crate::tracing::peek_spans();
     let vm_spans: Vec<VmValue> = spans.iter().map(crate::tracing::span_to_vm_value).collect();
-    Ok(VmValue::List(Rc::new(vm_spans)))
+    Ok(VmValue::List(std::sync::Arc::new(vm_spans)))
 }
 
 #[harn_builtin(sig = "trace_summary(...args: any) -> string", category = "tracing")]
 fn trace_summary_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(Rc::from(crate::tracing::format_summary())))
+    Ok(VmValue::String(std::sync::Arc::from(
+        crate::tracing::format_summary(),
+    )))
 }
 
 #[harn_builtin(
@@ -205,7 +230,7 @@ fn llm_usage_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     );
     usage.insert("call_count".to_string(), VmValue::Int(call_count));
     usage.insert("total_calls".to_string(), VmValue::Int(call_count));
-    Ok(VmValue::Dict(Rc::new(usage)))
+    Ok(VmValue::Dict(std::sync::Arc::new(usage)))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[

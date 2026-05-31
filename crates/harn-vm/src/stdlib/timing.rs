@@ -25,7 +25,6 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -88,11 +87,14 @@ fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         crate::tracing::span_start_user_timing(name.clone(), attrs_btree);
 
     let mut handle = BTreeMap::new();
-    handle.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+    handle.insert(
+        "name".to_string(),
+        VmValue::String(std::sync::Arc::from(name.as_str())),
+    );
     handle.insert("span_id".to_string(), VmValue::Int(span_id as i64));
     handle.insert(
         "trace_id".to_string(),
-        VmValue::String(Rc::from(trace_id.as_str())),
+        VmValue::String(std::sync::Arc::from(trace_id.as_str())),
     );
     handle.insert(
         "parent_span_id".to_string(),
@@ -114,10 +116,12 @@ fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     );
     handle.insert(
         "kind".to_string(),
-        VmValue::String(Rc::from(crate::tracing::SpanKind::UserTiming.as_str())),
+        VmValue::String(std::sync::Arc::from(
+            crate::tracing::SpanKind::UserTiming.as_str(),
+        )),
     );
 
-    Ok(VmValue::Dict(Rc::new(handle)))
+    Ok(VmValue::Dict(std::sync::Arc::new(handle)))
 }
 
 #[harn_builtin(sig = "__timing_now_monotonic_ms() -> int", category = "timing")]

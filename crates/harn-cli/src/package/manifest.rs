@@ -1224,7 +1224,7 @@ pub struct CollectedManifestTrigger {
 pub enum CollectedTriggerHandler {
     Local {
         reference: TriggerFunctionRef,
-        closure: Rc<harn_vm::VmClosure>,
+        closure: Arc<harn_vm::VmClosure>,
     },
     A2a {
         target: String,
@@ -1242,11 +1242,11 @@ pub enum CollectedTriggerHandler {
 #[allow(dead_code)] // Predicate closures are validated now and reused by harn#161 dispatch gating.
 pub struct CollectedTriggerPredicate {
     pub reference: TriggerFunctionRef,
-    pub closure: Rc<harn_vm::VmClosure>,
+    pub closure: Arc<harn_vm::VmClosure>,
 }
 
 pub(crate) type ManifestModuleCacheKey = (PathBuf, Option<String>, Option<String>);
-pub(crate) type ManifestModuleExports = BTreeMap<String, Rc<harn_vm::VmClosure>>;
+pub(crate) type ManifestModuleExports = BTreeMap<String, Arc<harn_vm::VmClosure>>;
 
 static MANIFEST_PROVIDER_SCHEMA_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 

@@ -2,7 +2,6 @@
 //! values, plus the mock-provider completion response.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use super::telemetry::ProviderTelemetry;
 use crate::value::VmValue;
@@ -100,15 +99,15 @@ pub(crate) fn vm_build_llm_result(
     let mut dict = BTreeMap::new();
     dict.insert(
         "text".to_string(),
-        VmValue::String(Rc::from(result.text.as_str())),
+        VmValue::String(std::sync::Arc::from(result.text.as_str())),
     );
     dict.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(result.model.as_str())),
+        VmValue::String(std::sync::Arc::from(result.model.as_str())),
     );
     dict.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(result.provider.as_str())),
+        VmValue::String(std::sync::Arc::from(result.provider.as_str())),
     );
     dict.insert(
         "input_tokens".to_string(),
@@ -148,7 +147,10 @@ pub(crate) fn vm_build_llm_result(
     if let Some(ref telemetry_dict) = telemetry_dict {
         usage.insert("provider_telemetry".to_string(), telemetry_dict.clone());
     }
-    dict.insert("usage".to_string(), VmValue::Dict(Rc::new(usage)));
+    dict.insert(
+        "usage".to_string(),
+        VmValue::Dict(std::sync::Arc::new(usage)),
+    );
     if let Some(telemetry_dict) = telemetry_dict {
         dict.insert("provider_telemetry".to_string(), telemetry_dict);
     }
@@ -182,7 +184,10 @@ pub(crate) fn vm_build_llm_result(
     };
     if !merged_tool_calls.is_empty() {
         let calls: Vec<VmValue> = merged_tool_calls.iter().map(json_to_vm_value).collect();
-        dict.insert("tool_calls".to_string(), VmValue::List(Rc::new(calls)));
+        dict.insert(
+            "tool_calls".to_string(),
+            VmValue::List(std::sync::Arc::new(calls)),
+        );
     }
     // Expose native_tool_calls separately so the agent loop can distinguish
     // provider-native tool calls from text-parsed ones for native_tool_fallback
@@ -191,7 +196,7 @@ pub(crate) fn vm_build_llm_result(
     let native_calls: Vec<VmValue> = result.tool_calls.iter().map(json_to_vm_value).collect();
     dict.insert(
         "native_tool_calls".to_string(),
-        VmValue::List(Rc::new(native_calls)),
+        VmValue::List(std::sync::Arc::new(native_calls)),
     );
 
     if let Some(parse) = tagged.as_ref() {
@@ -199,34 +204,34 @@ pub(crate) fn vm_build_llm_result(
             let violations: Vec<VmValue> = parse
                 .violations
                 .iter()
-                .map(|v| VmValue::String(Rc::from(v.as_str())))
+                .map(|v| VmValue::String(std::sync::Arc::from(v.as_str())))
                 .collect();
             dict.insert(
                 "protocol_violations".to_string(),
-                VmValue::List(Rc::new(violations)),
+                VmValue::List(std::sync::Arc::new(violations)),
             );
         }
         if !parse.errors.is_empty() {
             let errors: Vec<VmValue> = parse
                 .errors
                 .iter()
-                .map(|e| VmValue::String(Rc::from(e.as_str())))
+                .map(|e| VmValue::String(std::sync::Arc::from(e.as_str())))
                 .collect();
             dict.insert(
                 "tool_parse_errors".to_string(),
-                VmValue::List(Rc::new(errors)),
+                VmValue::List(std::sync::Arc::new(errors)),
             );
         }
         if let Some(ref body) = parse.done_marker {
             dict.insert(
                 "done_marker".to_string(),
-                VmValue::String(Rc::from(body.as_str())),
+                VmValue::String(std::sync::Arc::from(body.as_str())),
             );
         }
         if !parse.canonical.is_empty() {
             dict.insert(
                 "canonical_text".to_string(),
-                VmValue::String(Rc::from(parse.canonical.as_str())),
+                VmValue::String(std::sync::Arc::from(parse.canonical.as_str())),
             );
         }
         // Always emit `prose` (fall back to raw text) so callers have a
@@ -239,42 +244,42 @@ pub(crate) fn vm_build_llm_result(
         };
         dict.insert(
             "prose".to_string(),
-            VmValue::String(Rc::from(prose.as_str())),
+            VmValue::String(std::sync::Arc::from(prose.as_str())),
         );
     } else {
         dict.insert(
             "prose".to_string(),
-            VmValue::String(Rc::from(result.text.as_str())),
+            VmValue::String(std::sync::Arc::from(result.text.as_str())),
         );
     }
 
     if let Some(ref thinking) = result.thinking {
         dict.insert(
             "thinking".to_string(),
-            VmValue::String(Rc::from(thinking.as_str())),
+            VmValue::String(std::sync::Arc::from(thinking.as_str())),
         );
         dict.insert(
             "private_reasoning".to_string(),
-            VmValue::String(Rc::from(thinking.as_str())),
+            VmValue::String(std::sync::Arc::from(thinking.as_str())),
         );
     }
     if let Some(ref summary) = result.thinking_summary {
         dict.insert(
             "thinking_summary".to_string(),
-            VmValue::String(Rc::from(summary.as_str())),
+            VmValue::String(std::sync::Arc::from(summary.as_str())),
         );
     }
 
     if let Some(ref stop_reason) = result.stop_reason {
         dict.insert(
             "stop_reason".to_string(),
-            VmValue::String(Rc::from(stop_reason.as_str())),
+            VmValue::String(std::sync::Arc::from(stop_reason.as_str())),
         );
     }
     if let Some(ref request_id) = result.telemetry.request_id {
         dict.insert(
             "provider_response_id".to_string(),
-            VmValue::String(Rc::from(request_id.as_str())),
+            VmValue::String(std::sync::Arc::from(request_id.as_str())),
         );
     }
 
@@ -293,11 +298,11 @@ pub(crate) fn vm_build_llm_result(
     };
     dict.insert(
         "visible_text".to_string(),
-        VmValue::String(Rc::from(visible_text.as_str())),
+        VmValue::String(std::sync::Arc::from(visible_text.as_str())),
     );
     dict.insert(
         "blocks".to_string(),
-        VmValue::List(Rc::new(
+        VmValue::List(std::sync::Arc::new(
             result
                 .blocks
                 .iter()
@@ -308,7 +313,7 @@ pub(crate) fn vm_build_llm_result(
     if !result.logprobs.is_empty() {
         dict.insert(
             "logprobs".to_string(),
-            VmValue::List(Rc::new(
+            VmValue::List(std::sync::Arc::new(
                 result
                     .logprobs
                     .iter()
@@ -318,7 +323,7 @@ pub(crate) fn vm_build_llm_result(
         );
     }
 
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> LlmResult {

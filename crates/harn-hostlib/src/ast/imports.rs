@@ -24,7 +24,7 @@
 //! ```
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
@@ -111,7 +111,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
             entry.insert("text".into(), str_value(stmt));
             entry.insert("line".into(), VmValue::Int(line as i64));
-            VmValue::Dict(Rc::new(entry))
+            VmValue::Dict(Arc::new(entry))
         })
         .collect();
 
@@ -125,7 +125,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
-        ("statements", VmValue::List(Rc::new(statement_values))),
+        ("statements", VmValue::List(Arc::new(statement_values))),
     ]))
 }
 
@@ -140,7 +140,7 @@ fn unsupported(path: Option<&str>) -> VmValue {
         ),
         ("language", str_value("")),
         ("supported", VmValue::Bool(false)),
-        ("statements", VmValue::List(Rc::new(Vec::new()))),
+        ("statements", VmValue::List(Arc::new(Vec::new()))),
     ])
 }
 

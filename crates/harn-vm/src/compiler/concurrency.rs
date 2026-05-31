@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_parser::{BindingPattern, ParallelMode, SNode, SelectCase, TypeExpr, TypedParam};
 
@@ -73,14 +73,14 @@ impl Compiler {
             nominal_type_names: fn_compiler.nominal_type_names(),
             params: param_slots,
             default_start: None,
-            chunk: Rc::new(fn_compiler.chunk),
+            chunk: Arc::new(fn_compiler.chunk),
             is_generator: false,
             is_stream: false,
             has_rest_param: false,
             has_runtime_type_checks,
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(Rc::new(func));
+        self.chunk.functions.push(Arc::new(func));
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
         let op = match mode {
             ParallelMode::Count => Op::Parallel,
@@ -106,14 +106,14 @@ impl Compiler {
             nominal_type_names: fn_compiler.nominal_type_names(),
             params: vec![],
             default_start: None,
-            chunk: Rc::new(fn_compiler.chunk),
+            chunk: Arc::new(fn_compiler.chunk),
             is_generator: false,
             is_stream: false,
             has_rest_param: false,
             has_runtime_type_checks: false,
         };
         let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(Rc::new(func));
+        self.chunk.functions.push(Arc::new(func));
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
         self.chunk.emit(Op::Spawn, self.line);
         Ok(())

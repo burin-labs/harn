@@ -6,7 +6,7 @@
 //! the rest of the `ast::*` builtins.
 
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::Node;
@@ -58,7 +58,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 ("language", str_value(language.name())),
                 ("supported", VmValue::Bool(false)),
                 ("had_errors", VmValue::Bool(false)),
-                ("errors", VmValue::List(Rc::new(Vec::new()))),
+                ("errors", VmValue::List(Arc::new(Vec::new()))),
                 ("top_level_decl_count", VmValue::Int(0)),
             ]))
         }
@@ -76,7 +76,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
         ("had_errors", VmValue::Bool(had_errors)),
-        ("errors", VmValue::List(Rc::new(errors_list))),
+        ("errors", VmValue::List(Arc::new(errors_list))),
         ("top_level_decl_count", VmValue::Int(top_level as i64)),
     ]))
 }
@@ -357,12 +357,12 @@ mod tests {
     fn run_with(content: &str, language: &str) -> VmValue {
         use std::collections::BTreeMap;
         let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        dict.insert("content".into(), VmValue::String(Rc::from(content)));
-        dict.insert("language".into(), VmValue::String(Rc::from(language)));
-        run(&[VmValue::Dict(Rc::new(dict))]).expect("parse_errors run")
+        dict.insert("content".into(), VmValue::String(Arc::from(content)));
+        dict.insert("language".into(), VmValue::String(Arc::from(language)));
+        run(&[VmValue::Dict(Arc::new(dict))]).expect("parse_errors run")
     }
 
-    fn list_field(value: &VmValue, key: &str) -> Rc<Vec<VmValue>> {
+    fn list_field(value: &VmValue, key: &str) -> Arc<Vec<VmValue>> {
         match value {
             VmValue::Dict(d) => match d.get(key) {
                 Some(VmValue::List(l)) => l.clone(),
@@ -417,7 +417,7 @@ mod tests {
     fn rejects_when_no_content_or_path() {
         use std::collections::BTreeMap;
         let dict: BTreeMap<String, VmValue> = BTreeMap::new();
-        let err = run(&[VmValue::Dict(Rc::new(dict))]).expect_err("must reject empty payload");
+        let err = run(&[VmValue::Dict(Arc::new(dict))]).expect_err("must reject empty payload");
         match err {
             HostlibError::MissingParameter { builtin, param } => {
                 assert_eq!(builtin, BUILTIN);

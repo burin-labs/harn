@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -154,7 +153,7 @@ impl VmSharedStateRuntime {
         let mut maps = self.maps.borrow_mut();
         let map = maps.entry(scoped.clone()).or_default();
         map.metrics.read_count += 1;
-        VmValue::Dict(Rc::new(map.entries.clone()))
+        VmValue::Dict(std::sync::Arc::new(map.entries.clone()))
     }
 
     pub(crate) fn map_set(&self, scoped: &ScopedKey, key: String, value: VmValue) -> VmValue {
@@ -216,11 +215,11 @@ impl VmSharedStateRuntime {
             .or_insert_with(|| {
                 let capacity = capacity.max(1);
                 let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
-                // Mailboxes follow the same local-task invariant as channels:
-                // VmValue is !Send and these handles stay on the VM LocalSet.
-                #[allow(clippy::arc_with_non_send_sync)]
+                // Mailboxes follow the same local-task ownership invariant as
+                // channels: sends and receives are coordinated by the VM that
+                // opened the handle.
                 let channel = VmChannelHandle {
-                    name: Rc::from(scoped.key.clone()),
+                    name: std::sync::Arc::from(scoped.key.clone()),
                     sender: Arc::new(sender),
                     receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
                     closed: Arc::new(AtomicBool::new(false)),
@@ -324,7 +323,7 @@ impl VmSharedStateRuntime {
                         mailbox_metrics_value(mailbox),
                     ));
                 }
-                VmValue::List(Rc::new(values))
+                VmValue::List(std::sync::Arc::new(values))
             }
         }
     }
@@ -334,28 +333,28 @@ fn handle_value(kind: &str, scoped: &ScopedKey) -> VmValue {
     let mut value = BTreeMap::new();
     value.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from(kind.to_string())),
+        VmValue::String(std::sync::Arc::from(kind.to_string())),
     );
     value.insert(
         "scope".to_string(),
-        VmValue::String(Rc::from(scoped.scope.clone())),
+        VmValue::String(std::sync::Arc::from(scoped.scope.clone())),
     );
     value.insert(
         "key".to_string(),
-        VmValue::String(Rc::from(scoped.key.clone())),
+        VmValue::String(std::sync::Arc::from(scoped.key.clone())),
     );
-    VmValue::Dict(Rc::new(value))
+    VmValue::Dict(std::sync::Arc::new(value))
 }
 
 fn snapshot_value(value: VmValue, version: u64) -> VmValue {
     let mut snapshot = BTreeMap::new();
     snapshot.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from("shared_snapshot")),
+        VmValue::String(std::sync::Arc::from("shared_snapshot")),
     );
     snapshot.insert("value".to_string(), value);
     snapshot.insert("version".to_string(), VmValue::Int(version as i64));
-    VmValue::Dict(Rc::new(snapshot))
+    VmValue::Dict(std::sync::Arc::new(snapshot))
 }
 
 fn snapshot_expected(value: &VmValue) -> (VmValue, Option<u64>) {
@@ -401,7 +400,7 @@ fn shared_metrics_value(metrics: &SharedMetrics, version: u64) -> VmValue {
         "stale_read_count".to_string(),
         VmValue::Int(metrics.stale_read_count as i64),
     );
-    VmValue::Dict(Rc::new(value))
+    VmValue::Dict(std::sync::Arc::new(value))
 }
 
 fn empty_shared_metrics() -> VmValue {
@@ -434,7 +433,7 @@ fn mailbox_metrics_value(mailbox: &Mailbox) -> VmValue {
         "closed".to_string(),
         VmValue::Bool(mailbox.channel.closed.load(Ordering::SeqCst)),
     );
-    VmValue::Dict(Rc::new(value))
+    VmValue::Dict(std::sync::Arc::new(value))
 }
 
 fn empty_mailbox_metrics() -> VmValue {
@@ -445,24 +444,24 @@ fn empty_mailbox_metrics() -> VmValue {
     value.insert("received_count".to_string(), VmValue::Int(0));
     value.insert("failed_send_count".to_string(), VmValue::Int(0));
     value.insert("closed".to_string(), VmValue::Bool(false));
-    VmValue::Dict(Rc::new(value))
+    VmValue::Dict(std::sync::Arc::new(value))
 }
 
 fn with_scope_fields(kind: &str, scoped: &ScopedKey, metrics: VmValue) -> VmValue {
     let mut value = metrics.as_dict().cloned().unwrap_or_default();
     value.insert(
         "_type".to_string(),
-        VmValue::String(Rc::from(kind.to_string())),
+        VmValue::String(std::sync::Arc::from(kind.to_string())),
     );
     value.insert(
         "scope".to_string(),
-        VmValue::String(Rc::from(scoped.scope.clone())),
+        VmValue::String(std::sync::Arc::from(scoped.scope.clone())),
     );
     value.insert(
         "key".to_string(),
-        VmValue::String(Rc::from(scoped.key.clone())),
+        VmValue::String(std::sync::Arc::from(scoped.key.clone())),
     );
-    VmValue::Dict(Rc::new(value))
+    VmValue::Dict(std::sync::Arc::new(value))
 }
 
 impl Default for SharedCell {

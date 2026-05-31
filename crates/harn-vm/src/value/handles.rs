@@ -1,6 +1,7 @@
-use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicI64};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use super::{VmError, VmValue};
 
@@ -17,7 +18,7 @@ pub struct VmTaskHandle {
 /// A channel handle for the VM (uses tokio mpsc).
 #[derive(Debug, Clone)]
 pub struct VmChannelHandle {
-    pub name: Rc<str>,
+    pub name: Arc<str>,
     pub sender: Arc<tokio::sync::mpsc::Sender<VmValue>>,
     pub receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<VmValue>>>,
     pub closed: Arc<AtomicBool>,
@@ -178,22 +179,42 @@ impl VmRange {
 #[derive(Debug, Clone)]
 pub struct VmGenerator {
     /// Whether the generator has finished (returned or exhausted).
-    pub done: Rc<std::cell::Cell<bool>>,
+    pub done: Arc<AtomicBool>,
     /// Receiver end of the yield channel (generator sends values here).
     /// Wrapped in a shared async mutex so recv() can be called without holding
-    /// a RefCell borrow across await points.
-    pub receiver: Rc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Result<VmValue, VmError>>>>,
+    /// a synchronous iterator-state lock across await points.
+    pub receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Result<VmValue, VmError>>>>,
+}
+
+impl VmGenerator {
+    pub(crate) fn is_done(&self) -> bool {
+        self.done.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn mark_done(&self) {
+        self.done.store(true, Ordering::Relaxed);
+    }
 }
 
 /// A stream object: lazily produces values from a `gen fn`.
 #[derive(Debug, Clone)]
 pub struct VmStream {
     /// Whether the stream has finished (returned, thrown, or exhausted).
-    pub done: Rc<std::cell::Cell<bool>>,
+    pub done: Arc<AtomicBool>,
     /// Receiver end of the stream channel.
-    pub receiver: Rc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Result<VmValue, VmError>>>>,
+    pub receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Result<VmValue, VmError>>>>,
     /// Optional cancellation hook for host-backed streams.
     pub cancel: Option<VmStreamCancel>,
+}
+
+impl VmStream {
+    pub(crate) fn is_done(&self) -> bool {
+        self.done.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn mark_done(&self) {
+        self.done.store(true, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone)]

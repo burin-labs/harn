@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use serde_json::error::Category;
 
@@ -34,8 +33,7 @@ pub(crate) enum JsonStreamStatus {
 /// Send-safe Rust API for the incremental JSON validator. Mirrors the
 /// `std/json/stream` script builtin but uses `serde_json::Value` as the
 /// schema storage so the LLM streaming transport can hold it across
-/// off-thread awaits (the script-facing `JsonStreamValidator` carries
-/// `VmValue`, which is `Rc`-backed and therefore `!Send`).
+/// off-thread awaits without depending on VM heap identity.
 ///
 /// The canonicalized schema is rebuilt per feed inside [`Self::feed`];
 /// canonicalization is a cheap tree walk so callers pay nothing
@@ -54,8 +52,8 @@ impl StreamSchemaValidator {
     pub(crate) fn from_json_schema(schema: &serde_json::Value) -> Result<Self, String> {
         let schema_vm = schema::json_to_vm_value(schema);
         // Validate that the schema canonicalizes; we don't keep the
-        // VmValue around (would be !Send) but failing here gives callers
-        // an early signal that the schema is malformed.
+        // VmValue around because the streaming transport stores a JSON copy,
+        // but failing here gives callers an early malformed-schema signal.
         schema::schema_from_json_schema_value(&schema_vm).map_err(|err| err.to_string())?;
         Ok(Self {
             schema_json: schema.clone(),
@@ -171,7 +169,7 @@ fn create_validator(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmError>
             },
         );
     });
-    Ok(VmValue::String(Rc::from(handle)))
+    Ok(VmValue::String(std::sync::Arc::from(handle)))
 }
 
 #[harn_builtin(
@@ -536,14 +534,17 @@ fn status_value(status: &JsonStreamStatus) -> VmValue {
             let payload = BTreeMap::from([
                 (
                     "reason".to_string(),
-                    VmValue::String(Rc::from(reason.as_str())),
+                    VmValue::String(std::sync::Arc::from(reason.as_str())),
                 ),
-                ("path".to_string(), VmValue::String(Rc::from(path.as_str()))),
+                (
+                    "path".to_string(),
+                    VmValue::String(std::sync::Arc::from(path.as_str())),
+                ),
             ]);
             VmValue::enum_variant(
                 "JsonStreamStatus",
                 "Invalid",
-                vec![VmValue::Dict(Rc::new(payload))],
+                vec![VmValue::Dict(std::sync::Arc::new(payload))],
             )
         }
     }
@@ -558,21 +559,33 @@ fn verdict_value(status: &JsonStreamStatus) -> VmValue {
     let mut dict = BTreeMap::new();
     match status {
         JsonStreamStatus::Pending => {
-            dict.insert("verdict".to_string(), VmValue::String(Rc::from("pending")));
+            dict.insert(
+                "verdict".to_string(),
+                VmValue::String(std::sync::Arc::from("pending")),
+            );
         }
         JsonStreamStatus::Valid => {
-            dict.insert("verdict".to_string(), VmValue::String(Rc::from("valid")));
+            dict.insert(
+                "verdict".to_string(),
+                VmValue::String(std::sync::Arc::from("valid")),
+            );
         }
         JsonStreamStatus::Invalid { reason, path } => {
-            dict.insert("verdict".to_string(), VmValue::String(Rc::from("invalid")));
+            dict.insert(
+                "verdict".to_string(),
+                VmValue::String(std::sync::Arc::from("invalid")),
+            );
             dict.insert(
                 "reason".to_string(),
-                VmValue::String(Rc::from(reason.as_str())),
+                VmValue::String(std::sync::Arc::from(reason.as_str())),
             );
-            dict.insert("path".to_string(), VmValue::String(Rc::from(path.as_str())));
+            dict.insert(
+                "path".to_string(),
+                VmValue::String(std::sync::Arc::from(path.as_str())),
+            );
         }
     }
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn early_invalid(buffer: &str, schema: &VmValue) -> Option<EarlyInvalid> {
@@ -640,7 +653,7 @@ fn early_invalid_object(
                     let value = schema::json_to_vm_value(&json);
                     if let Some(invalid) = schema_validation_error(
                         &value,
-                        &VmValue::Dict(Rc::new(child_schema.clone())),
+                        &VmValue::Dict(std::sync::Arc::new(child_schema.clone())),
                         &child_path,
                     ) {
                         return Some(invalid);
@@ -873,7 +886,7 @@ fn char_at(buffer: &str, index: usize) -> Option<char> {
 }
 
 fn thrown(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(Rc::from(message)))
+    VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
 }
 
 #[cfg(test)]
@@ -881,11 +894,11 @@ mod tests {
     use super::*;
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(Rc::from(value))
+        VmValue::String(std::sync::Arc::from(value))
     }
 
     fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             entries
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))
@@ -894,7 +907,7 @@ mod tests {
     }
 
     fn list(items: Vec<VmValue>) -> VmValue {
-        VmValue::List(Rc::new(items))
+        VmValue::List(std::sync::Arc::new(items))
     }
 
     fn status_variant(value: &VmValue) -> String {

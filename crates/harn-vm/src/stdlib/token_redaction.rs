@@ -181,7 +181,7 @@ fn token_redaction_redact_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
     let text = required_string_arg(args, 0, "__token_redaction_redact", "text")?;
     let policy = redact::current_policy();
     let redacted = policy.redact_string(&text).into_owned();
-    Ok(VmValue::String(Rc::from(redacted.as_str())))
+    Ok(VmValue::String(std::sync::Arc::from(redacted.as_str())))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -199,9 +199,9 @@ fn token_redaction_default_patterns_impl(
     }
     let names: Vec<VmValue> = default_pattern_names()
         .into_iter()
-        .map(|name| VmValue::String(Rc::from(name)))
+        .map(|name| VmValue::String(std::sync::Arc::from(name)))
         .collect();
-    Ok(VmValue::List(Rc::new(names)))
+    Ok(VmValue::List(std::sync::Arc::new(names)))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -219,9 +219,9 @@ fn token_redaction_custom_patterns_impl(
     }
     let names: Vec<VmValue> = custom_pattern_names()
         .into_iter()
-        .map(|name| VmValue::String(Rc::from(name.as_str())))
+        .map(|name| VmValue::String(std::sync::Arc::from(name.as_str())))
         .collect();
-    Ok(VmValue::List(Rc::new(names)))
+    Ok(VmValue::List(std::sync::Arc::new(names)))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -244,11 +244,11 @@ fn token_redaction_drain_audit_impl(
             let mut entry: BTreeMap<String, VmValue> = BTreeMap::new();
             entry.insert(
                 "code".to_string(),
-                VmValue::String(Rc::from(TOKEN_REDACTION_DIAGNOSTIC)),
+                VmValue::String(std::sync::Arc::from(TOKEN_REDACTION_DIAGNOSTIC)),
             );
             entry.insert(
                 "pattern".to_string(),
-                VmValue::String(Rc::from(event.pattern_name.as_str())),
+                VmValue::String(std::sync::Arc::from(event.pattern_name.as_str())),
             );
             entry.insert(
                 "match_count".to_string(),
@@ -258,10 +258,10 @@ fn token_redaction_drain_audit_impl(
                 "bytes_redacted".to_string(),
                 VmValue::Int(event.bytes_redacted as i64),
             );
-            VmValue::Dict(Rc::new(entry))
+            VmValue::Dict(std::sync::Arc::new(entry))
         })
         .collect();
-    Ok(VmValue::List(Rc::new(list)))
+    Ok(VmValue::List(std::sync::Arc::new(list)))
 }
 
 fn required_string_arg(

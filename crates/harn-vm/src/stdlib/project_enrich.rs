@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 use serde_yml::Value as YamlValue;
@@ -87,7 +86,7 @@ async fn project_enrich_impl(
     let enriched_evidence =
         augment_project_evidence(&root, &base_evidence, options.include_operator_meta);
     let base_dict = enriched_evidence.as_dict().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "project.enrich: base_evidence must be a dict",
         )))
     })?;
@@ -127,19 +126,19 @@ async fn project_enrich_impl(
             "_provenance".to_string(),
             provenance_value(None, estimated_input_tokens, 0, false),
         );
-        return Ok(VmValue::Dict(Rc::new(budget_result)));
+        return Ok(VmValue::Dict(std::sync::Arc::new(budget_result)));
     }
 
     let llm_options_value = llm_options_value(&options, &rendered_prompt);
     let extracted = extract_llm_options(&[
-        VmValue::String(Rc::from(rendered_prompt.as_str())),
+        VmValue::String(std::sync::Arc::from(rendered_prompt.as_str())),
         VmValue::Nil,
         llm_options_value.clone(),
     ])?;
     match execute_llm_call(ctx, extracted, llm_options_value.as_dict().cloned(), None).await {
         Ok(response) => {
             let response_dict = response.as_dict().ok_or_else(|| {
-                VmError::Thrown(VmValue::String(Rc::from(
+                VmError::Thrown(VmValue::String(std::sync::Arc::from(
                     "project.enrich: expected llm response dict",
                 )))
             })?;
@@ -184,7 +183,7 @@ async fn project_enrich_impl(
 
 fn parse_project_enrich_options(value: Option<&VmValue>) -> Result<ProjectEnrichOptions, VmError> {
     let dict = value.and_then(VmValue::as_dict).ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "project.enrich: options dict is required",
         )))
     })?;
@@ -193,12 +192,12 @@ fn parse_project_enrich_options(value: Option<&VmValue>) -> Result<ProjectEnrich
         .and_then(value_as_string)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(
                 "project.enrich: options.prompt must be a non-empty string",
             )))
         })?;
     let schema = dict.get("schema").cloned().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(Rc::from(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(
             "project.enrich: options.schema is required",
         )))
     })?;
@@ -258,15 +257,14 @@ fn resolve_existing_directory(path: &str) -> Result<PathBuf, VmError> {
     };
     if target.exists() {
         target.canonicalize().map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "project.enrich: failed to resolve path: {error}"
             ))))
         })
     } else {
-        Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-            "project.enrich: path does not exist: {}",
-            target.display()
-        )))))
+        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            format!("project.enrich: path does not exist: {}", target.display()),
+        ))))
     }
 }
 
@@ -460,7 +458,7 @@ fn augment_project_evidence(
             ci_evidence_value(collect_ci_evidence(root)),
         );
     }
-    VmValue::Dict(Rc::new(merged))
+    VmValue::Dict(std::sync::Arc::new(merged))
 }
 
 fn collect_ci_evidence(root: &Path) -> CiEvidence {
@@ -1488,7 +1486,7 @@ fn enrichment_bindings(
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "path".to_string(),
-        VmValue::String(Rc::from(root.to_string_lossy().into_owned())),
+        VmValue::String(std::sync::Arc::from(root.to_string_lossy().into_owned())),
     );
     bindings.insert("base_evidence".to_string(), base_evidence.clone());
     bindings.insert("evidence".to_string(), base_evidence.clone());
@@ -1498,17 +1496,20 @@ fn enrichment_bindings(
             let mut value = BTreeMap::new();
             value.insert(
                 "path".to_string(),
-                VmValue::String(Rc::from(file.rel_path.clone())),
+                VmValue::String(std::sync::Arc::from(file.rel_path.clone())),
             );
             value.insert(
                 "content".to_string(),
-                VmValue::String(Rc::from(file.content.clone())),
+                VmValue::String(std::sync::Arc::from(file.content.clone())),
             );
             value.insert("truncated".to_string(), VmValue::Bool(file.truncated));
-            VmValue::Dict(Rc::new(value))
+            VmValue::Dict(std::sync::Arc::new(value))
         })
         .collect::<Vec<_>>();
-    bindings.insert("files".to_string(), VmValue::List(Rc::new(file_values)));
+    bindings.insert(
+        "files".to_string(),
+        VmValue::List(std::sync::Arc::new(file_values)),
+    );
     if let Some(dict) = base_evidence.as_dict() {
         for (key, value) in dict.iter() {
             bindings.entry(key.clone()).or_insert_with(|| value.clone());
@@ -1521,11 +1522,11 @@ fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> V
     let mut llm_options = BTreeMap::new();
     llm_options.insert(
         "provider".to_string(),
-        VmValue::String(Rc::from(options.provider.clone())),
+        VmValue::String(std::sync::Arc::from(options.provider.clone())),
     );
     llm_options.insert(
         "model".to_string(),
-        VmValue::String(Rc::from(options.model.clone())),
+        VmValue::String(std::sync::Arc::from(options.model.clone())),
     );
     if let Some(temperature) = options.temperature {
         llm_options.insert("temperature".to_string(), VmValue::Float(temperature));
@@ -1533,7 +1534,7 @@ fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> V
     llm_options.insert("output_schema".to_string(), options.schema.clone());
     llm_options.insert(
         "output_validation".to_string(),
-        VmValue::String(Rc::from("error")),
+        VmValue::String(std::sync::Arc::from("error")),
     );
     llm_options.insert(
         "schema_retries".to_string(),
@@ -1541,16 +1542,18 @@ fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> V
     );
     llm_options.insert(
         "response_format".to_string(),
-        VmValue::String(Rc::from("json")),
+        VmValue::String(std::sync::Arc::from("json")),
     );
     llm_options.insert(
         "messages".to_string(),
-        VmValue::List(Rc::new(vec![json_to_vm_value(&serde_json::json!({
-            "role": "user",
-            "content": rendered_prompt,
-        }))])),
+        VmValue::List(std::sync::Arc::new(vec![json_to_vm_value(
+            &serde_json::json!({
+                "role": "user",
+                "content": rendered_prompt,
+            }),
+        )])),
     );
-    VmValue::Dict(Rc::new(llm_options))
+    VmValue::Dict(std::sync::Arc::new(llm_options))
 }
 
 fn validation_envelope(
@@ -1564,13 +1567,13 @@ fn validation_envelope(
     dict.insert("base_evidence".to_string(), base_evidence.clone());
     dict.insert(
         "validation_error".to_string(),
-        VmValue::String(Rc::from(message)),
+        VmValue::String(std::sync::Arc::from(message)),
     );
     dict.insert(
         "_provenance".to_string(),
         provenance_value(model, input_tokens, output_tokens, false),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 fn attach_provenance(
@@ -1587,7 +1590,7 @@ fn attach_provenance(
                 "_provenance".to_string(),
                 provenance_value(model, input_tokens, output_tokens, cached),
             );
-            VmValue::Dict(Rc::new(merged))
+            VmValue::Dict(std::sync::Arc::new(merged))
         }
         other => {
             let mut wrapped = BTreeMap::new();
@@ -1596,7 +1599,7 @@ fn attach_provenance(
                 "_provenance".to_string(),
                 provenance_value(model, input_tokens, output_tokens, cached),
             );
-            VmValue::Dict(Rc::new(wrapped))
+            VmValue::Dict(std::sync::Arc::new(wrapped))
         }
     }
 }
@@ -1613,11 +1616,11 @@ fn attach_ci_metadata(value: VmValue, base_evidence: &VmValue) -> VmValue {
         let mut wrapped = BTreeMap::new();
         wrapped.insert("data".to_string(), value);
         wrapped.insert("ci".to_string(), ci_value);
-        return VmValue::Dict(Rc::new(wrapped));
+        return VmValue::Dict(std::sync::Arc::new(wrapped));
     };
     let mut merged = (*dict).clone();
     merged.insert("ci".to_string(), ci_value);
-    VmValue::Dict(Rc::new(merged))
+    VmValue::Dict(std::sync::Arc::new(merged))
 }
 
 fn provenance_value(
@@ -1634,12 +1637,15 @@ fn provenance_value(
     provenance.insert(
         "model".to_string(),
         model
-            .map(|value| VmValue::String(Rc::from(value)))
+            .map(|value| VmValue::String(std::sync::Arc::from(value)))
             .unwrap_or(VmValue::Nil),
     );
-    provenance.insert("tokens".to_string(), VmValue::Dict(Rc::new(tokens)));
+    provenance.insert(
+        "tokens".to_string(),
+        VmValue::Dict(std::sync::Arc::new(tokens)),
+    );
     provenance.insert("cached".to_string(), VmValue::Bool(cached));
-    VmValue::Dict(Rc::new(provenance))
+    VmValue::Dict(std::sync::Arc::new(provenance))
 }
 
 fn result_with_cached_flag(value: VmValue, cached: bool) -> VmValue {
@@ -1655,9 +1661,9 @@ fn result_with_cached_flag(value: VmValue, cached: bool) -> VmValue {
     provenance.insert("cached".to_string(), VmValue::Bool(cached));
     merged.insert(
         "_provenance".to_string(),
-        VmValue::Dict(Rc::new(provenance)),
+        VmValue::Dict(std::sync::Arc::new(provenance)),
     );
-    VmValue::Dict(Rc::new(merged))
+    VmValue::Dict(std::sync::Arc::new(merged))
 }
 
 fn hash_relevant_files(files: &[RelevantFile]) -> String {
@@ -1703,7 +1709,7 @@ fn read_cached_result(path: &Path) -> Result<Option<CacheRecord>, VmError> {
     serde_json::from_str::<CacheRecord>(&content)
         .map(Some)
         .map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "project.enrich: failed to parse cache {}: {error}",
                 path.display()
             ))))
@@ -1713,7 +1719,7 @@ fn read_cached_result(path: &Path) -> Result<Option<CacheRecord>, VmError> {
 fn write_cached_result(path: &Path, value: &VmValue) -> Result<(), VmError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
+            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                 "project.enrich: failed to create cache dir {}: {error}",
                 parent.display()
             ))))
@@ -1723,12 +1729,12 @@ fn write_cached_result(path: &Path, value: &VmValue) -> Result<(), VmError> {
         result: vm_value_to_json(value),
     };
     let serialized = serde_json::to_string_pretty(&record).map_err(|error| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "project.enrich: failed to serialize cache record: {error}"
         ))))
     })?;
     std::fs::write(path, serialized).map_err(|error| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
+        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
             "project.enrich: failed to write cache {}: {error}",
             path.display()
         ))))
@@ -1913,7 +1919,7 @@ commands:
     #[test]
     fn attach_provenance_wraps_non_dict_results() {
         let result = attach_provenance(
-            VmValue::String(Rc::from("hi")),
+            VmValue::String(std::sync::Arc::from("hi")),
             Some("mock-model".to_string()),
             10,
             4,
@@ -1938,7 +1944,7 @@ commands:
         let options = ProjectEnrichOptions {
             base_evidence: None,
             prompt: "Return JSON.".to_string(),
-            schema: VmValue::Dict(Rc::new(BTreeMap::new())),
+            schema: VmValue::Dict(std::sync::Arc::new(BTreeMap::new())),
             budget_tokens: 4000,
             model: "mock-model".to_string(),
             provider: "mock".to_string(),
@@ -2137,18 +2143,24 @@ jobs:
             "pub fn greet() -> &'static str { \"hi\" }\n",
         );
 
-        let base = VmValue::Dict(Rc::new(BTreeMap::from([
+        let base = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
             (
                 "languages".to_string(),
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("rust"))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from("rust"),
+                )])),
             ),
             (
                 "anchors".to_string(),
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("Cargo.toml"))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from("Cargo.toml"),
+                )])),
             ),
             (
                 "lockfiles".to_string(),
-                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("Cargo.lock"))])),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    std::sync::Arc::from("Cargo.lock"),
+                )])),
             ),
         ])));
         let files = collect_relevant_files(dir.path(), &base);
@@ -2163,20 +2175,20 @@ jobs:
 
     #[test]
     fn attach_ci_metadata_merges_ci_block_into_result() {
-        let base = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let base = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "ci".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "merge_policy".to_string(),
-                VmValue::Dict(Rc::new(BTreeMap::from([(
+                VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                     "squash_only".to_string(),
                     VmValue::Bool(true),
                 )]))),
             )]))),
         )])));
         let result = attach_ci_metadata(
-            VmValue::Dict(Rc::new(BTreeMap::from([(
+            VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "summary".to_string(),
-                VmValue::String(Rc::from("ok")),
+                VmValue::String(std::sync::Arc::from("ok")),
             )]))),
             &base,
         );

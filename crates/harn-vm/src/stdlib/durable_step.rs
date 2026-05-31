@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -92,15 +91,18 @@ fn register_step_namespace(vm: &mut Vm) {
     let names = ["run", "inspect"];
     vm.set_global(
         "step",
-        VmValue::Dict(Rc::new(
-            std::iter::once(("_namespace".to_string(), VmValue::String(Rc::from("step"))))
-                .chain(names.into_iter().map(|name| {
-                    (
-                        name.to_string(),
-                        VmValue::BuiltinRef(Rc::from(format!("step.{name}"))),
-                    )
-                }))
-                .collect::<BTreeMap<_, _>>(),
+        VmValue::Dict(std::sync::Arc::new(
+            std::iter::once((
+                "_namespace".to_string(),
+                VmValue::String(std::sync::Arc::from("step")),
+            ))
+            .chain(names.into_iter().map(|name| {
+                (
+                    name.to_string(),
+                    VmValue::BuiltinRef(std::sync::Arc::from(format!("step.{name}"))),
+                )
+            }))
+            .collect::<BTreeMap<_, _>>(),
         )),
     );
 }
@@ -175,7 +177,7 @@ async fn step_inspect(ctx: &AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
     let namespace = parse_step_inspect_namespace(args, &child_vm)?;
     let topic = topic_for_namespace(&namespace)?;
     let records = read_step_records(&ensure_step_event_log(), &topic).await?;
-    Ok(VmValue::List(Rc::new(
+    Ok(VmValue::List(std::sync::Arc::new(
         records
             .into_iter()
             .filter(|record| record.namespace == namespace)
@@ -491,7 +493,7 @@ mod tests {
     use super::*;
 
     fn vm_str(value: &str) -> VmValue {
-        VmValue::String(Rc::from(value))
+        VmValue::String(std::sync::Arc::from(value))
     }
 
     #[test]
@@ -522,7 +524,7 @@ mod tests {
 
     #[test]
     fn options_reject_unknown_keys() {
-        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "namesapce".to_string(),
             vm_str("oops"),
         )])));

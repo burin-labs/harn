@@ -1,22 +1,24 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::*;
+
+static_assertions::assert_impl_all!(VmValue: Send, Sync);
 
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn vm_value_layout_budget() {
     assert_eq!(std::mem::size_of::<VmValue>(), 32);
     assert_eq!(std::mem::size_of::<Option<VmValue>>(), 32);
-    assert_eq!(std::mem::size_of::<Rc<VmEnumVariant>>(), 8);
+    assert_eq!(std::mem::size_of::<Arc<VmEnumVariant>>(), 8);
     assert_eq!(std::mem::size_of::<VmChannelHandle>(), 40);
-    assert_eq!(std::mem::size_of::<Rc<VmChannelHandle>>(), 8);
+    assert_eq!(std::mem::size_of::<Arc<VmChannelHandle>>(), 8);
     assert_eq!(std::mem::size_of::<VmAtomicHandle>(), 8);
     assert_eq!(std::mem::size_of::<VmRange>(), 24);
     assert_eq!(std::mem::size_of::<VmGenerator>(), 16);
 }
 
 fn s(val: &str) -> VmValue {
-    VmValue::String(Rc::from(val))
+    VmValue::String(std::sync::Arc::from(val))
 }
 
 fn i(val: i64) -> VmValue {
@@ -24,11 +26,11 @@ fn i(val: i64) -> VmValue {
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(Rc::new(items))
+    VmValue::List(std::sync::Arc::new(items))
 }
 
 fn dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
-    VmValue::Dict(Rc::new(
+    VmValue::Dict(std::sync::Arc::new(
         pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
     ))
 }

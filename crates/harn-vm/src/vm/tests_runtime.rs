@@ -988,7 +988,7 @@ log(value)
 }"#,
         |vm| {
             vm.register_async_builtin("test_async", |_ctx, args| async move {
-                Ok(VmValue::String(Rc::from(format!(
+                Ok(VmValue::String(std::sync::Arc::from(format!(
                     "async:{}",
                     args[0].display()
                 ))))
@@ -1599,21 +1599,25 @@ fn test_host_signal_token_dispatches_matching_signal() {
             out.push_str("[harn] int\n");
             Ok(VmValue::Nil)
         });
-        let term_options = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let term_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "signals".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("SIGTERM"))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("SIGTERM"),
+            )])),
         )])));
-        let int_options = VmValue::Dict(Rc::new(BTreeMap::from([(
+        let int_options = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
             "signals".to_string(),
-            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("SIGINT"))])),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                std::sync::Arc::from("SIGINT"),
+            )])),
         )])));
         vm.register_interrupt_handler(
-            VmValue::BuiltinRef(Rc::from("term_marker")),
+            VmValue::BuiltinRef(std::sync::Arc::from("term_marker")),
             Some(&term_options),
         )
         .unwrap();
         vm.register_interrupt_handler(
-            VmValue::BuiltinRef(Rc::from("int_marker")),
+            VmValue::BuiltinRef(std::sync::Arc::from("int_marker")),
             Some(&int_options),
         )
         .unwrap();

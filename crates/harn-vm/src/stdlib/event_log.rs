@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use futures::StreamExt;
 
@@ -101,8 +102,8 @@ async fn event_log_subscribe_impl(
     });
 
     Ok(VmValue::stream(VmStream {
-        done: Rc::new(std::cell::Cell::new(false)),
-        receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+        done: Arc::new(AtomicBool::new(false)),
+        receiver: Arc::new(tokio::sync::Mutex::new(rx)),
         cancel: None,
     }))
 }
@@ -117,15 +118,15 @@ fn register_event_log_namespace(vm: &mut Vm) {
     let names = ["emit", "latest", "subscribe"];
     vm.set_global(
         "event_log",
-        VmValue::Dict(Rc::new(
+        VmValue::Dict(std::sync::Arc::new(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(Rc::from("event_log")),
+                VmValue::String(std::sync::Arc::from("event_log")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(Rc::from(format!("event_log.{name}"))),
+                    VmValue::BuiltinRef(std::sync::Arc::from(format!("event_log.{name}"))),
                 )
             }))
             .collect::<BTreeMap<_, _>>(),

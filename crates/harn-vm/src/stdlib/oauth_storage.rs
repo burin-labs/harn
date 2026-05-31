@@ -36,7 +36,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::Mutex;
 
 use aes_gcm::aead::{Aead, KeyInit, Payload};
@@ -213,7 +212,7 @@ fn memory_handle() -> VmValue {
     let mut fields = BTreeMap::new();
     fields.insert(HANDLE_KEY_KIND.to_string(), string_value(KIND_MEMORY));
     fields.insert(HANDLE_KEY_ID.to_string(), string_value(&id));
-    VmValue::Dict(Rc::new(fields))
+    VmValue::Dict(std::sync::Arc::new(fields))
 }
 
 fn file_handle(path: &str, secret: &[u8]) -> VmValue {
@@ -230,7 +229,7 @@ fn file_handle(path: &str, secret: &[u8]) -> VmValue {
     fields.insert(HANDLE_KEY_KIND.to_string(), string_value(KIND_FILE));
     fields.insert(HANDLE_KEY_ID.to_string(), string_value(&id));
     fields.insert(HANDLE_KEY_PATH.to_string(), string_value(path));
-    VmValue::Dict(Rc::new(fields))
+    VmValue::Dict(std::sync::Arc::new(fields))
 }
 
 fn cloud_handle(kind: &'static str) -> VmValue {
@@ -243,11 +242,11 @@ fn cloud_handle(kind: &'static str) -> VmValue {
     fields.insert(HANDLE_KEY_KIND.to_string(), string_value(kind));
     fields.insert(HANDLE_KEY_ID.to_string(), string_value(kind));
     fields.insert(HANDLE_KEY_SCOPE.to_string(), string_value(scope));
-    VmValue::Dict(Rc::new(fields))
+    VmValue::Dict(std::sync::Arc::new(fields))
 }
 
 fn string_value(value: &str) -> VmValue {
-    VmValue::String(Rc::from(value))
+    VmValue::String(std::sync::Arc::from(value))
 }
 
 fn handle_kind(handle: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
@@ -290,7 +289,7 @@ async fn backend_set(
     token: &BTreeMap<String, VmValue>,
     ttl_seconds: Option<i64>,
 ) -> Result<(), VmError> {
-    let json_token = vm_value_to_json(&VmValue::Dict(Rc::new(token.clone())));
+    let json_token = vm_value_to_json(&VmValue::Dict(std::sync::Arc::new(token.clone())));
     match handle_kind(handle)?.as_str() {
         KIND_MEMORY => {
             memory_set(&handle_id(handle)?, key, json_token, ttl_seconds);

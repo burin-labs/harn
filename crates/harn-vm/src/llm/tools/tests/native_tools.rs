@@ -4,7 +4,6 @@ use super::{
 };
 use crate::llm::provider::NativeToolSearchShape;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 #[test]
 fn vm_tools_to_native_emits_defer_loading_for_anthropic() {
@@ -60,7 +59,10 @@ fn vm_tools_to_native_emits_namespace_for_openai_compat() {
     let deferred = vm_dict(&[
         ("name", vm_str("deploy")),
         ("description", vm_str("Deploy the app")),
-        ("parameters", super::VmValue::Dict(Rc::new(deferred_params))),
+        (
+            "parameters",
+            super::VmValue::Dict(std::sync::Arc::new(deferred_params)),
+        ),
         ("defer_loading", vm_bool(true)),
         ("namespace", vm_str("ops")),
     ]);
@@ -166,7 +168,10 @@ fn vm_tools_to_native_normalizes_nested_harn_type_aliases() {
     let tool = vm_dict(&[
         ("name", vm_str("rank")),
         ("description", vm_str("Rank results")),
-        ("parameters", super::VmValue::Dict(Rc::new(params))),
+        (
+            "parameters",
+            super::VmValue::Dict(std::sync::Arc::new(params)),
+        ),
     ]);
     let registry = vm_list(vec![tool]);
 
@@ -207,7 +212,10 @@ fn vm_tools_to_native_preserves_json_schema_required_arrays() {
     let tool = vm_dict(&[
         ("name", vm_str("submit")),
         ("description", vm_str("Submit payload")),
-        ("parameters", super::VmValue::Dict(Rc::new(params))),
+        (
+            "parameters",
+            super::VmValue::Dict(std::sync::Arc::new(params)),
+        ),
     ]);
     let registry = vm_list(vec![tool]);
 

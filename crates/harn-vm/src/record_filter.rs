@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
 
@@ -12,7 +12,7 @@ const FILTER_FN_NAME: &str = "__harn_record_filter";
 pub struct CompiledRecordFilter {
     vm: Vm,
     chunk: Chunk,
-    closure: Option<Rc<VmClosure>>,
+    closure: Option<Arc<VmClosure>>,
     normalized_expr: String,
 }
 

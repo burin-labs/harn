@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_hostlib::tools::permissions;
 use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
@@ -23,14 +23,14 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
     for (k, v) in entries {
         map.insert(k.to_string(), v.clone());
     }
-    vec![VmValue::Dict(Rc::new(map))]
+    vec![VmValue::Dict(Arc::new(map))]
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Rc::from(s))
+    VmValue::String(Arc::from(s))
 }
 
-fn matches_in(result: &VmValue) -> &Rc<Vec<VmValue>> {
+fn matches_in(result: &VmValue) -> &Arc<Vec<VmValue>> {
     match result {
         VmValue::Dict(d) => match d.get("matches") {
             Some(VmValue::List(rows)) => rows,
@@ -129,7 +129,7 @@ fn search_respects_exclude_globs() {
         ("fixed_strings", VmValue::Bool(true)),
         (
             "exclude_globs",
-            VmValue::List(Rc::new(vec![vm_string("logs/**")])),
+            VmValue::List(Arc::new(vec![vm_string("logs/**")])),
         ),
     ]))
     .unwrap();

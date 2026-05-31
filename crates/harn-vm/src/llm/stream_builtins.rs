@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::value::{VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue};
@@ -29,7 +29,9 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         if provider == "mock" {
             let words: Vec<&str> = prompt_text.split_whitespace().collect();
             for word in &words {
-                let _ = tx_for_task.send(VmValue::String(Rc::from(*word))).await;
+                let _ = tx_for_task
+                    .send(VmValue::String(std::sync::Arc::from(*word)))
+                    .await;
             }
             closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
             return;
@@ -39,14 +41,14 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Err(e) = result {
             let _ = tx_for_task
-                .send(VmValue::String(Rc::from(format!("error: {e}"))))
+                .send(VmValue::String(std::sync::Arc::from(format!("error: {e}"))))
                 .await;
         }
     });
 
     #[allow(clippy::arc_with_non_send_sync)]
     let handle = VmChannelHandle {
-        name: Rc::from("llm_stream"),
+        name: Arc::from("llm_stream"),
         sender: tx_arc,
         receiver: Arc::new(tokio::sync::Mutex::new(rx)),
         closed,
@@ -63,24 +65,27 @@ fn llm_stream_chunk(
     let mut dict = std::collections::BTreeMap::new();
     dict.insert(
         "delta".to_string(),
-        VmValue::String(Rc::from(delta.to_string())),
+        VmValue::String(std::sync::Arc::from(delta.to_string())),
     );
     dict.insert(
         "visible_delta".to_string(),
-        VmValue::String(Rc::from(visible_delta.to_string())),
+        VmValue::String(std::sync::Arc::from(visible_delta.to_string())),
     );
     dict.insert(
         "partial".to_string(),
-        VmValue::String(Rc::from(partial.to_string())),
+        VmValue::String(std::sync::Arc::from(partial.to_string())),
     );
-    dict.insert("role".to_string(), VmValue::String(Rc::from("assistant")));
+    dict.insert(
+        "role".to_string(),
+        VmValue::String(std::sync::Arc::from("assistant")),
+    );
     dict.insert(
         "finish_reason".to_string(),
         finish_reason
-            .map(|reason| VmValue::String(Rc::from(reason.to_string())))
+            .map(|reason| VmValue::String(std::sync::Arc::from(reason.to_string())))
             .unwrap_or(VmValue::Nil),
     );
-    VmValue::Dict(Rc::new(dict))
+    VmValue::Dict(std::sync::Arc::new(dict))
 }
 
 async fn forward_llm_stream_delta(
@@ -170,7 +175,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                         }
                         Err(join_err) if join_err.is_cancelled() => {}
                         Err(join_err) => {
-                            let err = VmError::Thrown(VmValue::String(Rc::from(format!(
+                            let err = VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
                                 "llm_stream_call background task failed: {join_err}"
                             ))));
                             send_llm_stream_error(&stream_tx, err, &provider, &model).await;
@@ -183,8 +188,8 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
     });
 
     Ok(VmValue::stream(VmStream {
-        done: Rc::new(std::cell::Cell::new(false)),
-        receiver: Rc::new(tokio::sync::Mutex::new(stream_rx)),
+        done: Arc::new(AtomicBool::new(false)),
+        receiver: Arc::new(tokio::sync::Mutex::new(stream_rx)),
         cancel: Some(cancel),
     }))
 }

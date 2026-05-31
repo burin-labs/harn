@@ -16,7 +16,6 @@
 //!   eval scripts can route on it without re-deriving provider names.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use crate::value::VmValue;
 
@@ -298,7 +297,7 @@ impl ProviderTelemetry {
         if !self.source.is_empty() {
             dict.insert(
                 "source".to_string(),
-                VmValue::String(Rc::from(self.source.as_str())),
+                VmValue::String(std::sync::Arc::from(self.source.as_str())),
             );
         }
         insert_opt_u64(&mut dict, "server_total_ms", self.server_total_ms);
@@ -320,7 +319,7 @@ impl ProviderTelemetry {
         if let Some(ref model) = self.runtime_loaded_model {
             dict.insert(
                 "runtime_loaded_model".to_string(),
-                VmValue::String(Rc::from(model.as_str())),
+                VmValue::String(std::sync::Arc::from(model.as_str())),
             );
         }
         insert_opt_u64(&mut dict, "runtime_memory_bytes", self.runtime_memory_bytes);
@@ -332,16 +331,16 @@ impl ProviderTelemetry {
         if let Some(ref expires) = self.runtime_keep_alive_until {
             dict.insert(
                 "runtime_keep_alive_until".to_string(),
-                VmValue::String(Rc::from(expires.as_str())),
+                VmValue::String(std::sync::Arc::from(expires.as_str())),
             );
         }
         if let Some(ref request_id) = self.request_id {
             dict.insert(
                 "request_id".to_string(),
-                VmValue::String(Rc::from(request_id.as_str())),
+                VmValue::String(std::sync::Arc::from(request_id.as_str())),
             );
         }
-        Some(VmValue::Dict(Rc::new(dict)))
+        Some(VmValue::Dict(std::sync::Arc::new(dict)))
     }
 }
 

@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
-use std::{cell::RefCell, future::Future, pin::Pin};
+use std::sync::Arc;
+use std::{future::Future, pin::Pin};
 
 use crate::harness::VmHarness;
 use crate::mcp::VmMcpClientHandle;
@@ -24,6 +25,8 @@ pub type VmAsyncBuiltinFn = Rc<
         Vec<VmValue>,
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>,
 >;
+
+type Shared<T> = Arc<T>;
 
 /// Indexed runtime layout for a Harn struct instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,9 +91,9 @@ impl StructLayout {
 /// Runtime payload for a Harn enum variant.
 #[derive(Debug, Clone)]
 pub struct VmEnumVariant {
-    pub enum_name: Rc<str>,
-    pub variant: Rc<str>,
-    pub fields: Rc<Vec<VmValue>>,
+    pub enum_name: Shared<str>,
+    pub variant: Shared<str>,
+    pub fields: Shared<Vec<VmValue>>,
 }
 
 impl VmEnumVariant {
@@ -113,104 +116,104 @@ impl VmEnumVariant {
 pub enum VmValue {
     Int(i64),
     Float(f64),
-    String(Rc<str>),
-    Bytes(Rc<Vec<u8>>),
+    String(Shared<str>),
+    Bytes(Shared<Vec<u8>>),
     Bool(bool),
     Nil,
-    List(Rc<Vec<VmValue>>),
-    Dict(Rc<BTreeMap<String, VmValue>>),
-    Closure(Rc<VmClosure>),
+    List(Shared<Vec<VmValue>>),
+    Dict(Shared<BTreeMap<String, VmValue>>),
+    Closure(Shared<VmClosure>),
     /// Reference to a registered builtin function, used when a builtin name is
     /// referenced as a value (e.g. `snake_dict.rekey(snake_to_camel)`). The
     /// contained string is the builtin's registered name.
-    BuiltinRef(Rc<str>),
+    BuiltinRef(Shared<str>),
     /// Compact builtin reference for callback positions. Carries the name for
     /// policy, diagnostics, and fallback if the ID cannot be used.
     BuiltinRefId {
         id: BuiltinId,
-        name: Rc<str>,
+        name: Shared<str>,
     },
     Duration(i64),
-    EnumVariant(Rc<VmEnumVariant>),
+    EnumVariant(Shared<VmEnumVariant>),
     StructInstance {
-        layout: Rc<StructLayout>,
-        fields: Rc<Vec<Option<VmValue>>>,
+        layout: Shared<StructLayout>,
+        fields: Shared<Vec<Option<VmValue>>>,
     },
-    TaskHandle(Rc<str>),
-    Channel(Rc<VmChannelHandle>),
-    Atomic(Rc<VmAtomicHandle>),
-    Rng(Rc<VmRngHandle>),
-    SyncPermit(Rc<VmSyncPermitHandle>),
-    McpClient(Rc<VmMcpClientHandle>),
-    Set(Rc<Vec<VmValue>>),
-    Generator(Rc<VmGenerator>),
-    Stream(Rc<VmStream>),
+    TaskHandle(Shared<str>),
+    Channel(Shared<VmChannelHandle>),
+    Atomic(Shared<VmAtomicHandle>),
+    Rng(Shared<VmRngHandle>),
+    SyncPermit(Shared<VmSyncPermitHandle>),
+    McpClient(Shared<VmMcpClientHandle>),
+    Set(Shared<Vec<VmValue>>),
+    Generator(Shared<VmGenerator>),
+    Stream(Shared<VmStream>),
     Range(VmRange),
     /// Lazy iterator handle. Single-pass, fused. See `crate::vm::iter::VmIter`.
-    Iter(Rc<RefCell<crate::vm::iter::VmIter>>),
+    Iter(crate::vm::iter::VmIterHandle),
     /// Two-element pair value. Produced by `pair(a, b)`, yielded by the
     /// Dict iterator source, and (later) by `zip` / `enumerate` combinators.
     /// Accessed via `.first` / `.second`, and destructurable in
     /// `for (a, b) in ...` loops.
-    Pair(Rc<(VmValue, VmValue)>),
+    Pair(Shared<(VmValue, VmValue)>),
     /// Capability handle threaded into `main(harness: Harness)`. The same
     /// variant carries the root handle and each typed sub-handle (`stdio`,
     /// `clock`, `fs`, `env`, `random`, `net`) so they share one value shape
     /// but stay distinguishable via `VmHarness::kind`.
-    Harness(Rc<VmHarness>),
+    Harness(Shared<VmHarness>),
 }
 
 impl VmValue {
     pub fn enum_variant(
-        enum_name: impl Into<Rc<str>>,
-        variant: impl Into<Rc<str>>,
+        enum_name: impl Into<Shared<str>>,
+        variant: impl Into<Shared<str>>,
         fields: Vec<VmValue>,
     ) -> Self {
-        VmValue::EnumVariant(Rc::new(VmEnumVariant {
+        VmValue::EnumVariant(Shared::new(VmEnumVariant {
             enum_name: enum_name.into(),
             variant: variant.into(),
-            fields: Rc::new(fields),
+            fields: Shared::new(fields),
         }))
     }
 
-    pub fn task_handle(id: impl Into<Rc<str>>) -> Self {
+    pub fn task_handle(id: impl Into<Shared<str>>) -> Self {
         VmValue::TaskHandle(id.into())
     }
 
     pub fn channel(handle: VmChannelHandle) -> Self {
-        VmValue::Channel(Rc::new(handle))
+        VmValue::Channel(Shared::new(handle))
     }
 
     pub fn atomic(handle: VmAtomicHandle) -> Self {
-        VmValue::Atomic(Rc::new(handle))
+        VmValue::Atomic(Shared::new(handle))
     }
 
     pub fn rng(handle: VmRngHandle) -> Self {
-        VmValue::Rng(Rc::new(handle))
+        VmValue::Rng(Shared::new(handle))
     }
 
     pub fn sync_permit(handle: VmSyncPermitHandle) -> Self {
-        VmValue::SyncPermit(Rc::new(handle))
+        VmValue::SyncPermit(Shared::new(handle))
     }
 
     pub fn mcp_client(handle: VmMcpClientHandle) -> Self {
-        VmValue::McpClient(Rc::new(handle))
+        VmValue::McpClient(Shared::new(handle))
     }
 
     pub fn generator(generator: VmGenerator) -> Self {
-        VmValue::Generator(Rc::new(generator))
+        VmValue::Generator(Shared::new(generator))
     }
 
     pub fn stream(stream: VmStream) -> Self {
-        VmValue::Stream(Rc::new(stream))
+        VmValue::Stream(Shared::new(stream))
     }
 
     pub fn harness(handle: VmHarness) -> Self {
-        VmValue::Harness(Rc::new(handle))
+        VmValue::Harness(Shared::new(handle))
     }
 
     pub fn struct_instance(
-        struct_name: impl Into<Rc<str>>,
+        struct_name: impl Into<Shared<str>>,
         fields: BTreeMap<String, VmValue>,
     ) -> Self {
         Self::struct_instance_from_map(struct_name.into().to_string(), fields)
@@ -312,7 +315,7 @@ impl VmValue {
         struct_name: impl Into<String>,
         fields: BTreeMap<String, VmValue>,
     ) -> Self {
-        let layout = Rc::new(StructLayout::from_map(struct_name, &fields));
+        let layout = Shared::new(StructLayout::from_map(struct_name, &fields));
         let slots = layout
             .field_names()
             .iter()
@@ -320,7 +323,7 @@ impl VmValue {
             .collect();
         VmValue::StructInstance {
             layout,
-            fields: Rc::new(slots),
+            fields: Shared::new(slots),
         }
     }
 
@@ -329,7 +332,7 @@ impl VmValue {
         field_names: Vec<String>,
         field_values: BTreeMap<String, VmValue>,
     ) -> Self {
-        let layout = Rc::new(StructLayout::new(struct_name, field_names));
+        let layout = Shared::new(StructLayout::new(struct_name, field_names));
         let fields = layout
             .field_names()
             .iter()
@@ -337,7 +340,7 @@ impl VmValue {
             .collect();
         VmValue::StructInstance {
             layout,
-            fields: Rc::new(fields),
+            fields: Shared::new(fields),
         }
     }
 
@@ -353,10 +356,10 @@ impl VmValue {
                     new_fields.resize(index + 1, None);
                 }
                 new_fields[index] = Some(value);
-                Rc::clone(layout)
+                Shared::clone(layout)
             }
             None => {
-                let new_layout = Rc::new(layout.with_appended_field(field_name.to_string()));
+                let new_layout = Shared::new(layout.with_appended_field(field_name.to_string()));
                 new_fields.push(Some(value));
                 new_layout
             }
@@ -364,7 +367,7 @@ impl VmValue {
 
         Some(VmValue::StructInstance {
             layout,
-            fields: Rc::new(new_fields),
+            fields: Shared::new(new_fields),
         })
     }
 
@@ -509,14 +512,14 @@ impl VmValue {
                 out.push(')');
             }
             VmValue::Generator(g) => {
-                if g.done.get() {
+                if g.is_done() {
                     out.push_str("<generator (done)>");
                 } else {
                     out.push_str("<generator>");
                 }
             }
             VmValue::Stream(s) => {
-                if s.done.get() {
+                if s.is_done() {
                     out.push_str("<stream (done)>");
                 } else {
                     out.push_str("<stream>");
@@ -531,7 +534,7 @@ impl VmValue {
                 }
             }
             VmValue::Iter(h) => {
-                if matches!(&*h.borrow(), crate::vm::iter::VmIter::Exhausted) {
+                if matches!(&*h.lock(), crate::vm::iter::VmIter::Exhausted) {
                     out.push_str("<iter (exhausted)>");
                 } else {
                     out.push_str("<iter>");

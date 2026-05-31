@@ -37,7 +37,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -317,7 +317,7 @@ fn applied_response(
     replacement: &str,
     dry_run: bool,
 ) -> VmValue {
-    VmValue::Dict(Rc::new(
+    VmValue::Dict(Arc::new(
         [
             ("result".to_string(), str_value("applied")),
             ("applied".to_string(), VmValue::Bool(true)),
@@ -326,7 +326,7 @@ fn applied_response(
             ("match_count".to_string(), VmValue::Int(chosen.len() as i64)),
             (
                 "edits".to_string(),
-                VmValue::List(Rc::new(
+                VmValue::List(Arc::new(
                     chosen
                         .iter()
                         .map(|s| edit_to_value(s, replacement))
@@ -360,14 +360,14 @@ fn no_match_response(path: &str, query: &str, target_capture: &str, details: &st
 }
 
 fn ambiguous_response(match_count: usize, spans: &[Span]) -> VmValue {
-    VmValue::Dict(Rc::new(
+    VmValue::Dict(Arc::new(
         [
             ("result".to_string(), str_value("ambiguous")),
             ("applied".to_string(), VmValue::Bool(false)),
             ("match_count".to_string(), VmValue::Int(match_count as i64)),
             (
                 "spans".to_string(),
-                VmValue::List(Rc::new(spans.iter().map(span_to_value).collect())),
+                VmValue::List(Arc::new(spans.iter().map(span_to_value).collect())),
             ),
             (
                 "details".to_string(),
@@ -468,7 +468,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(Rc::from(s))
+        VmValue::String(Arc::from(s))
     }
 
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
@@ -476,7 +476,7 @@ mod tests {
         for (k, v) in pairs {
             map.insert((*k).to_string(), v.clone());
         }
-        VmValue::Dict(Rc::new(map))
+        VmValue::Dict(Arc::new(map))
     }
 
     fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
