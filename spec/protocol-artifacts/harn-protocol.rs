@@ -92,6 +92,10 @@ pub const ACP_DISPATCHED_METHOD_WORKFLOW_RESUME: &str = "workflow/resume";
 pub const ACP_DISPATCHED_METHOD_HARN_WORKFLOW_RESUME: &str = "harn.workflow.resume";
 pub const ACP_DISPATCHED_METHOD_MCP_CATALOG: &str = "mcp/catalog";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_CATALOG: &str = "harn.mcp.catalog";
+pub const ACP_DISPATCHED_METHOD_MCP_AUTHORIZE: &str = "mcp/authorize";
+pub const ACP_DISPATCHED_METHOD_HARN_MCP_AUTHORIZE: &str = "harn.mcp.authorize";
+pub const ACP_DISPATCHED_METHOD_MCP_OAUTH_CALLBACK: &str = "mcp/oauth_callback";
+pub const ACP_DISPATCHED_METHOD_HARN_MCP_OAUTH_CALLBACK: &str = "harn.mcp.oauth_callback";
 
 /// Every JSON-RPC method the ACP adapter actually dispatches, including the workspace-management, workflow-control, and HITL methods the stable bindings do not yet expose as typed enums. Reconciled against the `match` arms in `harn-serve`'s ACP adapter.
 pub const ACP_DISPATCHED_METHODS: &[&str] = &[
@@ -133,6 +137,10 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.workflow.resume",
     "mcp/catalog",
     "harn.mcp.catalog",
+    "mcp/authorize",
+    "harn.mcp.authorize",
+    "mcp/oauth_callback",
+    "harn.mcp.oauth_callback",
 ];
 
 pub const ACP_CLIENT_METHOD_FS_READ_TEXT_FILE: &str = "fs/read_text_file";
@@ -276,6 +284,7 @@ pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
 pub const HARN_AGENT_EVENT_KIND_LOOP_CONTROL_DECISION: &str = "loop_control_decision";
 pub const HARN_AGENT_EVENT_KIND_LOOP_STUCK: &str = "loop_stuck";
+pub const HARN_AGENT_EVENT_KIND_MCP_AUTH_REQUIRED: &str = "mcp_auth_required";
 pub const HARN_AGENT_EVENT_KIND_MCP_CATALOG_CHANGED: &str = "mcp_catalog_changed";
 pub const HARN_AGENT_EVENT_KIND_MCP_NOTIFICATION: &str = "mcp_notification";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
@@ -304,6 +313,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "judge_decision",
     "loop_control_decision",
     "loop_stuck",
+    "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
     "progress_reported",

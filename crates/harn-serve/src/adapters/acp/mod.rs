@@ -73,6 +73,37 @@ use io::send_json_response;
 
 const ACP_AUTH_REQUIRED_CODE: i64 = -32000;
 
+/// Default loopback redirect for `mcp/authorize` when the client does not
+/// supply one. TUI/headless clients capture this with a loopback listener
+/// (matching `harn mcp login`); GUI clients pass their own URL scheme instead.
+const MCP_DEFAULT_OAUTH_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
+
+/// Parse `state`, `code`, and the optional `iss` issuer out of a captured OAuth
+/// redirect URL (e.g. `burin://oauth/callback?code=…&state=…&iss=…`). Returns
+/// an error describing what the provider sent back when `code`/`state` are
+/// absent (including a propagated `error`/`error_description` query).
+fn parse_oauth_redirect_url(
+    redirect_url: &str,
+) -> Result<(String, String, Option<String>), String> {
+    let parsed =
+        url::Url::parse(redirect_url).map_err(|error| format!("invalid redirectUrl: {error}"))?;
+    let query = |key: &str| {
+        parsed
+            .query_pairs()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.into_owned())
+    };
+    if let Some(error) = query("error") {
+        let description = query("error_description")
+            .map(|description| format!(": {description}"))
+            .unwrap_or_default();
+        return Err(format!("authorization failed: {error}{description}"));
+    }
+    let state = query("state").ok_or_else(|| "redirectUrl is missing state".to_string())?;
+    let code = query("code").ok_or_else(|| "redirectUrl is missing code".to_string())?;
+    Ok((state, code, query("iss")))
+}
+
 #[derive(Clone)]
 struct InjectControlRecord {
     owner: serde_json::Value,
@@ -2422,6 +2453,123 @@ impl AcpServer {
         }
     }
 
+    /// `mcp/authorize`: begin an interactive OAuth authorization for an MCP
+    /// server. harn does discovery + client resolution + PKCE, registers the
+    /// pending flow, and returns the browser URL plus the `state` the matching
+    /// `mcp/oauth_callback` must echo. The client opens `authorizeUrl`; the
+    /// redirect's `code`+`state` come back via `mcp/oauth_callback`. Token
+    /// exchange and storage stay in harn.
+    async fn handle_mcp_authorize(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(url) = params
+            .get("url")
+            .or_else(|| params.get("resource"))
+            .and_then(|value| value.as_str())
+        else {
+            self.send_error(
+                id,
+                -32602,
+                "mcp/authorize requires url (the MCP server URL)",
+            );
+            return;
+        };
+        let redirect_uri = params
+            .get("redirectUri")
+            .and_then(|value| value.as_str())
+            .unwrap_or(MCP_DEFAULT_OAUTH_REDIRECT_URI)
+            .to_string();
+        let string_param = |key: &str| {
+            params
+                .get(key)
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        };
+        // An explicit auth mode (cimd/dcr/static/byo) is optional; harn
+        // auto-selects (CIMD-default) when the client omits it.
+        let mode = match params.get("mode").and_then(|value| value.as_str()) {
+            Some(raw) => match serde_json::from_value(serde_json::json!(raw)) {
+                Ok(mode) => Some(mode),
+                Err(_) => {
+                    self.send_error(
+                        id,
+                        -32602,
+                        "mcp/authorize: invalid mode (expected cimd|dcr|static|byo)",
+                    );
+                    return;
+                }
+            },
+            None => None,
+        };
+        let request = harn_vm::mcp_oauth::BeginAuthorization {
+            server_url: url.to_string(),
+            redirect_uri,
+            mode,
+            client_id: string_param("clientId"),
+            client_secret: string_param("clientSecret"),
+            static_secret_id: string_param("staticSecretId"),
+            scopes: string_param("scope"),
+        };
+        match harn_vm::mcp_oauth::begin_authorization(request).await {
+            Ok(pending) => self.send_response(
+                id,
+                serde_json::json!({
+                    "authorizeUrl": pending.authorize_url,
+                    "state": pending.state,
+                    "redirectUri": pending.redirect_uri,
+                    "resource": pending.resource,
+                    "issuer": pending.issuer,
+                }),
+            ),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
+
+    /// `mcp/oauth_callback`: complete an authorization begun by `mcp/authorize`.
+    /// Accepts either explicit `state`+`code` (+optional `issuer`) or a full
+    /// `redirectUrl` (the captured `burin://…?code=…&state=…&iss=…`) to parse
+    /// them from. harn exchanges the code and stores the token.
+    async fn handle_mcp_oauth_callback(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let parsed = params
+            .get("redirectUrl")
+            .and_then(|value| value.as_str())
+            .map(parse_oauth_redirect_url);
+        let (state, code, issuer) = match parsed {
+            Some(Ok(parts)) => parts,
+            Some(Err(error)) => {
+                self.send_error(id, -32602, &error);
+                return;
+            }
+            None => {
+                let field = |key: &str| {
+                    params
+                        .get(key)
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                };
+                let (Some(state), Some(code)) = (field("state"), field("code")) else {
+                    self.send_error(
+                        id,
+                        -32602,
+                        "mcp/oauth_callback requires state and code (or redirectUrl)",
+                    );
+                    return;
+                };
+                (state, code, field("issuer"))
+            }
+        };
+        match harn_vm::mcp_oauth::complete_authorization(&state, &code, issuer.as_deref()).await {
+            Ok(token) => self.send_response(
+                id,
+                serde_json::json!({
+                    "ok": true,
+                    "resource": token.resource,
+                    "issuer": token.issuer,
+                    "expiresAt": token.expires_at_unix,
+                }),
+            ),
+            Err(error) => self.send_error(id, -32000, &error),
+        }
+    }
+
     async fn handle_hitl_respond(&self, id: &serde_json::Value, params: &serde_json::Value) {
         let session_cwd = params
             .get("sessionId")
@@ -3519,6 +3667,18 @@ impl AcpServer {
                     return;
                 }
                 self.handle_mcp_catalog(&id, &params);
+            }
+            "mcp/authorize" | "harn.mcp.authorize" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_mcp_authorize(&id, &params).await;
+            }
+            "mcp/oauth_callback" | "harn.mcp.oauth_callback" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_mcp_oauth_callback(&id, &params).await;
             }
             _ => {
                 if !id.is_null() {

@@ -612,23 +612,32 @@ pub fn validate_authorization_response_issuer(
     metadata: &OAuthAuthorizationServerMetadata,
     response_issuer: Option<&str>,
 ) -> Result<(), String> {
-    match (
+    validate_authorization_response_issuer_value(
+        &metadata.issuer,
         metadata.authorization_response_iss_parameter_supported,
         response_issuer,
-    ) {
-        (true, Some(actual)) if actual == metadata.issuer => Ok(()),
-        (true, Some(actual)) => Err(format!(
-            "authorization response issuer mismatch: expected '{}', got '{}'",
-            metadata.issuer, actual
+    )
+}
+
+/// Validate the RFC 9207 `iss` authorization-response parameter against the
+/// expected issuer. A redirect's `iss` (when present) must match; when the
+/// authorization server advertises `iss` support it MUST also be present.
+/// Callers that hold the parsed metadata should prefer
+/// [`validate_authorization_response_issuer`]; this value form is for paths
+/// that only retain the issuer + support flag (e.g. a pending OAuth flow).
+pub fn validate_authorization_response_issuer_value(
+    expected_issuer: &str,
+    iss_supported: bool,
+    response_issuer: Option<&str>,
+) -> Result<(), String> {
+    match (iss_supported, response_issuer) {
+        (_, Some(actual)) if actual == expected_issuer => Ok(()),
+        (_, Some(actual)) => Err(format!(
+            "authorization response issuer mismatch: expected '{expected_issuer}', got '{actual}'"
         )),
         (true, None) => Err(
             "authorization response did not include required RFC 9207 iss parameter".to_string(),
         ),
-        (false, Some(actual)) if actual == metadata.issuer => Ok(()),
-        (false, Some(actual)) => Err(format!(
-            "authorization response issuer mismatch: expected '{}', got '{}'",
-            metadata.issuer, actual
-        )),
         (false, None) => Ok(()),
     }
 }

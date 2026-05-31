@@ -93,6 +93,7 @@ public enum HarnProtocolConstants {
         "judge_decision",
         "loop_control_decision",
         "loop_stuck",
+        "mcp_auth_required",
         "mcp_catalog_changed",
         "mcp_notification",
         "progress_reported",

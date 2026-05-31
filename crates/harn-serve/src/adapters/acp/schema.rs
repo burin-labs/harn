@@ -67,6 +67,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "judge_decision",
     "loop_control_decision",
     "loop_stuck",
+    "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
     "progress_reported",

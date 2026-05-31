@@ -1472,6 +1472,22 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::McpAuthRequired {
+                session_id,
+                server,
+                resource,
+                scope,
+            } => {
+                self.emit_agent_event_ext(
+                    "mcp_auth_required",
+                    session_id,
+                    serde_json::json!({
+                        "server": server,
+                        "resource": resource,
+                        "scope": scope,
+                    }),
+                );
+            }
         }
     }
 }

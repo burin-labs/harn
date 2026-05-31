@@ -741,6 +741,45 @@ async fn mcp_catalog_changed_allows_serverless_allowlist_update() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn mcp_auth_required_reaches_acp_as_ext_event() {
+    let actual = collect_notifications(vec![AgentEvent::McpAuthRequired {
+        session_id: "session-1".to_string(),
+        server: "notion".to_string(),
+        resource: "https://mcp.notion.com".to_string(),
+        scope: Some("read write".to_string()),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "mcp_auth_required");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["server"], "notion");
+    assert_eq!(params["resource"], "https://mcp.notion.com");
+    assert_eq!(params["scope"], "read write");
+    assert!(
+        HARN_AGENT_EVENT_KINDS.contains(&"mcp_auth_required"),
+        "mcp_auth_required must be advertised so clients can subscribe"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mcp_auth_required_omits_absent_scope() {
+    let actual = collect_notifications(vec![AgentEvent::McpAuthRequired {
+        session_id: "session-1".to_string(),
+        server: "notion".to_string(),
+        resource: "https://mcp.notion.com".to_string(),
+        scope: None,
+    }])
+    .await;
+
+    let params = &actual[0]["params"];
+    assert_eq!(params["kind"], "mcp_auth_required");
+    assert!(params["scope"].is_null());
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn harn_extension_session_update_fixtures_are_pinned() {
     let actual = collect_notifications(extension_fixture_events()).await;
     let expected: serde_json::Value = serde_json::from_str(include_str!(
