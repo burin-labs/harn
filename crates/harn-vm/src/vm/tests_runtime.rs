@@ -1964,7 +1964,7 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
             r#"pipeline t(task) {{ file_exists("{}") }}"#,
             outside_file.display()
         ),
-        policy.clone(),
+        policy,
     )
     .expect("file_exists outside sandbox should soft-false, not error");
     assert!(
