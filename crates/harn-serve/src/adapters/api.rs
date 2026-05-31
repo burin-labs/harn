@@ -81,6 +81,10 @@ pub struct ApiServer {
 impl ApiServer {
     pub fn new(mut config: ApiServerConfig) -> Self {
         config.acp.auth_policy = AuthPolicy::allow_all();
+        let provider_catalog = ProviderCatalogRuntime {
+            llm_config_overrides: config.acp.llm_config_overrides.clone(),
+            llm_capability_overrides: config.acp.llm_capability_overrides.clone(),
+        };
         let (client, response_rx) = AcpClient::start(config.acp);
         let (events_tx, _) = broadcast::channel(1024);
         let state = ApiState {
@@ -89,6 +93,7 @@ impl ApiServer {
             events_tx,
             auth_policy: config.auth_policy,
             permissions: Arc::new(InMemoryPermissionStore::default()),
+            provider_catalog,
         };
         client.spawn_output_loop(response_rx, state.clone());
         Self { state }
@@ -126,6 +131,22 @@ struct ApiState {
     /// path, and (eventually) the `harness.permissions.*` host calls
     /// all read and write the same store.
     permissions: Arc<InMemoryPermissionStore>,
+    provider_catalog: ProviderCatalogRuntime,
+}
+
+#[derive(Clone, Default)]
+struct ProviderCatalogRuntime {
+    llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
+    llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
+}
+
+impl ProviderCatalogRuntime {
+    fn artifact(&self) -> harn_vm::provider_catalog::ProviderCatalogArtifact {
+        harn_vm::provider_catalog::artifact_with_overrides(
+            self.llm_config_overrides.as_ref(),
+            self.llm_capability_overrides.as_ref(),
+        )
+    }
 }
 
 struct ApiStateInner {
@@ -588,6 +609,7 @@ fn api_router(state: ApiState) -> Router {
         .route("/v1", get(api_root))
         .route("/v1/runtime", get(runtime))
         .route("/v1/capabilities", get(capabilities))
+        .route("/v1/provider-catalog", get(provider_catalog))
         .route("/v1/tools", get(list_tools))
         .route("/v1/tools/{tool_id}", get(get_tool))
         .route(
@@ -696,6 +718,7 @@ async fn api_root() -> Response {
         "resources": {
             "runtime": "/v1/runtime",
             "capabilities": "/v1/capabilities",
+            "provider_catalog": "/v1/provider-catalog",
             "tools": "/v1/tools",
             "workspaces": "/v1/workspaces",
             "sessions": "/v1/sessions",
@@ -731,6 +754,17 @@ async fn runtime(
         "capabilities": capability_values()
     }))
     .into_response()
+}
+
+async fn provider_catalog(
+    State(state): State<ApiState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
+        return response;
+    }
+    Json(state.provider_catalog.artifact()).into_response()
 }
 
 async fn capabilities(
@@ -2562,6 +2596,7 @@ fn capability_values() -> Vec<Value> {
         json!({"id": "tasks", "description": "Submit prompts asynchronously, track task status, and abort active tasks."}),
         json!({"id": "events", "description": "Read snapshots and stream live session, task, tool, permission, and runtime events over SSE."}),
         json!({"id": "permissions", "description": "Approve or deny host permission and HITL requests through the same ACP runtime path."}),
+        json!({"id": "provider_catalog", "description": "Read the normalized Harn provider/model catalog used by this runtime."}),
         json!({"id": "tools", "description": "Inspect the local control-plane tool registry exposed by this server."}),
         json!({"id": "workspace.files", "description": "Read and write UTF-8 workspace files under registered workspace roots."}),
     ]
@@ -2839,6 +2874,79 @@ mod tests {
             .await
             .expect("body");
         serde_json::from_slice(&body).expect("json")
+    }
+
+    #[tokio::test]
+    async fn provider_catalog_endpoint_matches_export_artifact_with_overrides() {
+        let _reset = crate::test_support::LlmOverrideReset;
+        let overlay = crate::test_support::fixture_provider_overlay();
+        let capability_overlay = crate::test_support::fixture_capability_overlay();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("agent.harn");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
+        let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().to_string());
+        config.acp = config
+            .acp
+            .with_llm_overrides(Some(overlay.clone()), Some(capability_overlay.clone()));
+        let server = ApiServer::new(config);
+
+        let response = api_router(server.state)
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/provider-catalog")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = read_json(response).await;
+        let expected = serde_json::to_value(harn_vm::provider_catalog::artifact_with_overrides(
+            Some(&overlay),
+            Some(&capability_overlay),
+        ))
+        .expect("expected catalog json");
+        assert_eq!(body, expected);
+
+        let providers = body["providers"].as_array().expect("providers");
+        let provider = providers
+            .iter()
+            .find(|provider| provider["id"] == "fixture_runtime")
+            .expect("fixture provider");
+        assert_eq!(provider["classification"], "hosted");
+        assert_eq!(
+            provider["auth"],
+            json!({
+                "style": "bearer",
+                "env": ["FIXTURE_RUNTIME_API_KEY"],
+                "required": true
+            })
+        );
+
+        let models = body["models"].as_array().expect("models");
+        let model = models
+            .iter()
+            .find(|model| model["id"] == "fixture-model-v1")
+            .expect("fixture model");
+        assert_eq!(model["context_window"], 12345);
+        assert_eq!(model["pricing"]["input_per_mtok"], 1.25);
+        assert_eq!(model["aliases"], json!(["fixture-default"]));
+        assert_eq!(model["tool_support"]["native"], true);
+        assert_eq!(model["tool_support"]["tool_search"], json!(["hosted"]));
+        assert_eq!(
+            model["capability_tags"],
+            json!([
+                "streaming",
+                "tools",
+                "tool_search",
+                "vision",
+                "prompt_caching",
+                "thinking",
+                "extended_thinking",
+                "structured_output"
+            ])
+        );
     }
 
     #[tokio::test]

@@ -12,8 +12,8 @@ use std::process;
 
 use harn_serve::adapters::acp::{
     ACP_SCHEMA_COMPATIBILITY, ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::agent_events::{ToolCallErrorCategory, ToolCallStatus, WorkerEvent};
@@ -69,6 +69,7 @@ const ACP_CLIENT_METHODS: &[&str] = &[
 const ACP_DISPATCHED_METHODS: &[&str] = &[
     "initialize",
     "authenticate",
+    HARN_PROVIDER_CATALOG_METHOD,
     "session/new",
     "session/load",
     "session/resume",
@@ -404,6 +405,7 @@ fn generate_manifest() -> Result<String, String> {
             "sessionUpdateVariants": all_acp_session_updates(),
             "harnSessionUpdateExtensions": HARN_SESSION_UPDATE_EXTENSIONS,
             "harnAgentEventMethod": HARN_AGENT_EVENT_METHOD,
+            "harnProviderCatalogMethod": HARN_PROVIDER_CATALOG_METHOD,
             "harnAgentEventKinds": HARN_AGENT_EVENT_KINDS,
             "toolLifecycleExtensionFields": HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
             "contentExtensionFields": HARN_CONTENT_EXTENSION_FIELDS,
@@ -585,6 +587,9 @@ fn generate_typescript() -> String {
     ));
     out.push_str("export const HARN_AGENT_EVENT_METHOD = ");
     out.push_str(&json_string_literal(HARN_AGENT_EVENT_METHOD));
+    out.push('\n');
+    out.push_str("export const HARN_PROVIDER_CATALOG_METHOD = ");
+    out.push_str(&json_string_literal(HARN_PROVIDER_CATALOG_METHOD));
     out.push('\n');
     out.push_str(&ts_array(
         "HARN_AGENT_EVENT_KINDS",
@@ -1151,6 +1156,10 @@ fn generate_swift() -> String {
     out.push_str(&format!(
         "    public static let harnAgentEventMethod = {}\n",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
+    ));
+    out.push_str(&format!(
+        "    public static let harnProviderCatalogMethod = {}\n",
+        json_string_literal(HARN_PROVIDER_CATALOG_METHOD)
     ));
     for (name, value) in [
         ("mcpProtocolVersion", MCP_PROTOCOL_VERSION),
@@ -2161,6 +2170,7 @@ fn generate_python() -> String {
     for (name, value) in [
         ("HARN_PROTOCOL_ARTIFACT_VERSION", env!("CARGO_PKG_VERSION")),
         ("HARN_AGENT_EVENT_METHOD", HARN_AGENT_EVENT_METHOD),
+        ("HARN_PROVIDER_CATALOG_METHOD", HARN_PROVIDER_CATALOG_METHOD),
         ("ACP_SCHEMA_COMPATIBILITY", ACP_SCHEMA_COMPATIBILITY),
         ("A2A_PROTOCOL_VERSION", A2A_PROTOCOL_VERSION),
         ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
@@ -2656,6 +2666,7 @@ fn python_public_names() -> Vec<String> {
     let names = [
         "HARN_PROTOCOL_ARTIFACT_VERSION",
         "HARN_AGENT_EVENT_METHOD",
+        "HARN_PROVIDER_CATALOG_METHOD",
         "ACP_SCHEMA_COMPATIBILITY",
         "A2A_PROTOCOL_VERSION",
         "MCP_PROTOCOL_VERSION",
@@ -2847,6 +2858,11 @@ fn generate_go() -> String {
             "// HarnAgentEventMethod is the JSON-RPC method for `_harn/agentEvent` notifications.\n",
             "HarnAgentEventMethod",
             HARN_AGENT_EVENT_METHOD,
+        ),
+        (
+            "// HarnProviderCatalogMethod is the JSON-RPC method for Harn's provider catalog extension.\n",
+            "HarnProviderCatalogMethod",
+            HARN_PROVIDER_CATALOG_METHOD,
         ),
         (
             "// ACPSchemaCompatibility is the upstream ACP schema version Harn tracks.\n",
@@ -3484,6 +3500,11 @@ fn generate_rust() -> String {
         "pub const HARN_AGENT_EVENT_METHOD: &str = {};\n\n",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
     ));
+    out.push_str("/// JSON-RPC method for Harn's provider catalog extension.\n");
+    out.push_str(&format!(
+        "pub const HARN_PROVIDER_CATALOG_METHOD: &str = {};\n\n",
+        json_string_literal(HARN_PROVIDER_CATALOG_METHOD)
+    ));
 
     out.push_str(&rust_const_group(
         "ACP_AGENT_METHOD",
@@ -3773,6 +3794,7 @@ fn generate_round_trip_fixture() -> Result<String, String> {
     let fixture = json!({
         "artifactVersion": env!("CARGO_PKG_VERSION"),
         "harnAgentEventMethod": HARN_AGENT_EVENT_METHOD,
+        "harnProviderCatalogMethod": HARN_PROVIDER_CATALOG_METHOD,
         "envelopes": {
             "request": request,
             "response": response,
@@ -4263,6 +4285,10 @@ mod tests {
             "pub const HARN_AGENT_EVENT_METHOD: &str = {};",
             json_string_literal(HARN_AGENT_EVENT_METHOD)
         )));
+        assert!(rust.contains(&format!(
+            "pub const HARN_PROVIDER_CATALOG_METHOD: &str = {};",
+            json_string_literal(HARN_PROVIDER_CATALOG_METHOD)
+        )));
         // Method-name constants, both the stable and the full dispatched surface.
         assert!(
             rust.contains("pub const ACP_AGENT_METHOD_SESSION_PROMPT: &str = \"session/prompt\"")
@@ -4346,6 +4372,9 @@ mod tests {
             let trimmed = line.trim();
             // Match-arm heads look like `"method" => {` or `"a" | "b" => {`.
             if !trimmed.contains("=>") || !trimmed.starts_with('"') {
+                if trimmed.starts_with("HARN_PROVIDER_CATALOG_METHOD") {
+                    dispatched.insert(HARN_PROVIDER_CATALOG_METHOD.to_string());
+                }
                 continue;
             }
             let arm = trimmed.split("=>").next().unwrap_or("");
@@ -4393,6 +4422,10 @@ mod tests {
         {
             assert!(py.contains(value), "Python artifact missing {value}");
         }
+        assert!(
+            py.contains(HARN_PROVIDER_CATALOG_METHOD),
+            "Python artifact missing {HARN_PROVIDER_CATALOG_METHOD}"
+        );
         for value in worker_status_values() {
             assert!(py.contains(&value), "Python artifact missing {value}");
         }
@@ -4421,6 +4454,10 @@ mod tests {
         {
             assert!(go.contains(value), "Go artifact missing {value}");
         }
+        assert!(
+            go.contains(HARN_PROVIDER_CATALOG_METHOD),
+            "Go artifact missing {HARN_PROVIDER_CATALOG_METHOD}"
+        );
         for value in worker_status_values() {
             assert!(go.contains(&value), "Go artifact missing {value}");
         }
@@ -4442,6 +4479,10 @@ mod tests {
         assert_eq!(
             fixture["envelopes"]["agentEventNotification"]["method"],
             json!(HARN_AGENT_EVENT_METHOD)
+        );
+        assert_eq!(
+            fixture["harnProviderCatalogMethod"],
+            json!(HARN_PROVIDER_CATALOG_METHOD)
         );
         assert_eq!(
             fixture["envelopes"]["agentEventNotification"]["params"]["kind"],

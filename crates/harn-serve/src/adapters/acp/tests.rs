@@ -4,7 +4,8 @@ use super::{
     acp_agent_capabilities, configured_llm_route_for_capabilities, sanitize_visible_assistant_text,
     AcpBridge, AcpOutput, AcpServer, AcpServerConfig, SessionCancellation, ACP_AUTH_REQUIRED_CODE,
     ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
 use harn_vm::visible_text::VisibleTextState;
@@ -1372,6 +1373,44 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
         capabilities["sessionCapabilities"].get("fork").is_none(),
         "Harn-only session/fork must not be advertised as an ACP SessionCapability"
     );
+    assert_eq!(
+        capabilities["_meta"]["harn"]["extensionMethods"][HARN_PROVIDER_CATALOG_METHOD]["schema"],
+        harn_vm::provider_catalog::PROVIDER_CATALOG_SCHEMA_ID
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_provider_catalog_method_matches_export_artifact_with_overrides() {
+    let _reset = crate::test_support::LlmOverrideReset;
+    let overlay = crate::test_support::fixture_provider_overlay();
+    let capability_overlay = crate::test_support::fixture_capability_overlay();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(
+        AcpServerConfig::new(None)
+            .with_llm_overrides(Some(overlay.clone()), Some(capability_overlay.clone())),
+        AcpOutput::Channel(tx),
+    );
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": HARN_PROVIDER_CATALOG_METHOD,
+            "params": {},
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    let expected = serde_json::to_value(harn_vm::provider_catalog::artifact_with_overrides(
+        Some(&overlay),
+        Some(&capability_overlay),
+    ))
+    .expect("expected catalog json");
+    assert_eq!(response["result"], expected);
+    assert!(response["result"]["providers"]
+        .as_array()
+        .expect("providers")
+        .iter()
+        .any(|provider| provider["id"] == "fixture_runtime"));
 }
 
 #[test]

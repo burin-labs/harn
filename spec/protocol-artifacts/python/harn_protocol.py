@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar, Union
 __all__ = [
     "HARN_PROTOCOL_ARTIFACT_VERSION",
     "HARN_AGENT_EVENT_METHOD",
+    "HARN_PROVIDER_CATALOG_METHOD",
     "ACP_SCHEMA_COMPATIBILITY",
     "A2A_PROTOCOL_VERSION",
     "MCP_PROTOCOL_VERSION",
@@ -115,6 +116,7 @@ __all__ = [
 
 HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.8.55"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
+HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
 A2A_PROTOCOL_VERSION: str = "0.3.0"
 MCP_PROTOCOL_VERSION: str = "2025-11-25"

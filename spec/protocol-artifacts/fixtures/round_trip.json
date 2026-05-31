@@ -99,6 +99,7 @@
     }
   },
   "harnAgentEventMethod": "_harn/agentEvent",
+  "harnProviderCatalogMethod": "_harn/providerCatalog",
   "mcpDiscoverResult": {
     "capabilities": {
       "tools": {}

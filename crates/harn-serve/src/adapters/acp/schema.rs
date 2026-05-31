@@ -46,6 +46,7 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
 /// reference this constant so a future rename ripples through the
 /// adapter, fixtures, tests, and capability advertisement together.
 pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
+pub const HARN_PROVIDER_CATALOG_METHOD: &str = "_harn/providerCatalog";
 
 /// Harn event kinds the adapter currently emits via `_harn/agentEvent`.
 /// The list is stable wire vocabulary — adding a new kind is additive and
@@ -113,6 +114,11 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
                                     canonical ACP session/update mapping.",
                     "kinds": HARN_AGENT_EVENT_KINDS,
                     "schema": "https://harnlang.com/spec/harn-extensions/agent-event/v1",
+                },
+                HARN_PROVIDER_CATALOG_METHOD: {
+                    "description": "Return the normalized provider/model catalog used by this runtime.",
+                    "schema": harn_vm::provider_catalog::PROVIDER_CATALOG_SCHEMA_ID,
+                    "schemaVersion": harn_vm::provider_catalog::PROVIDER_CATALOG_SCHEMA_VERSION,
                 },
             },
             "hostCapabilityOperations": {

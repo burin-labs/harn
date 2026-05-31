@@ -91,8 +91,8 @@ Behavior today:
 - streams session, task, tool, and permission updates over SSE
 - forwards ACP `session/request_permission` and Harn HITL responses through
   the existing runtime path so decisions remain transcript and replay visible
-- exposes local runtime, capability, tool-registry, workspace, and UTF-8 file
-  helpers for generated SDKs
+- exposes local runtime, capability, provider-catalog, tool-registry,
+  workspace, and UTF-8 file helpers for generated SDKs
 - supports the same API-key, HMAC, and TLS listener settings as the other HTTP
   adapters
 
@@ -316,6 +316,8 @@ Mapping:
   adapter over a local WebSocket endpoint
 - the adapter owns session state, prompt execution, permission prompts, cancel
   tokens, and bidirectional `session/update` traffic
+- the `_harn/providerCatalog` extension method returns the same normalized
+  provider/model catalog artifact as `harn providers export`
 - each `session/prompt` exposes `prompt` as the text-only prompt string,
   `prompt_content` as normalized Harn content blocks, and `prompt_messages` as a
   user-role message list suitable for `llm_call(..., {messages: prompt_messages})`

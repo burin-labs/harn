@@ -19,6 +19,9 @@ pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-pro
 /// JSON-RPC method for `_harn/agentEvent` extension notifications.
 pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
 
+/// JSON-RPC method for Harn's provider catalog extension.
+pub const HARN_PROVIDER_CATALOG_METHOD: &str = "_harn/providerCatalog";
+
 pub const ACP_AGENT_METHOD_INITIALIZE: &str = "initialize";
 pub const ACP_AGENT_METHOD_SESSION_INJECT: &str = "session/inject";
 pub const ACP_AGENT_METHOD_SESSION_NEW: &str = "session/new";
@@ -56,6 +59,7 @@ pub const ACP_AGENT_METHODS: &[&str] = &[
 
 pub const ACP_DISPATCHED_METHOD_INITIALIZE: &str = "initialize";
 pub const ACP_DISPATCHED_METHOD_AUTHENTICATE: &str = "authenticate";
+pub const ACP_DISPATCHED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog";
 pub const ACP_DISPATCHED_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_DISPATCHED_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_DISPATCHED_METHOD_SESSION_RESUME: &str = "session/resume";
@@ -101,6 +105,7 @@ pub const ACP_DISPATCHED_METHOD_HARN_MCP_OAUTH_CALLBACK: &str = "harn.mcp.oauth_
 pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "initialize",
     "authenticate",
+    "_harn/providerCatalog",
     "session/new",
     "session/load",
     "session/resume",

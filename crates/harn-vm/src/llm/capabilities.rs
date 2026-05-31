@@ -663,7 +663,15 @@ pub fn set_user_overrides_from_manifest_toml(src: &str) -> Result<(), String> {
 /// later rules (and later layers in the family chain) are ignored.
 pub fn lookup(provider: &str, model: &str) -> Capabilities {
     let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
-    let mut caps = lookup_with(provider, model, builtin(), user.as_ref());
+    lookup_with_user_overrides(provider, model, user.as_ref())
+}
+
+pub fn lookup_with_user_overrides(
+    provider: &str,
+    model: &str,
+    user_overrides: Option<&CapabilitiesFile>,
+) -> Capabilities {
+    let mut caps = lookup_with(provider, model, builtin(), user_overrides);
     if provider != "openai" && provider != "mock" {
         caps.responses_api = false;
         caps.hosted_tools.clear();

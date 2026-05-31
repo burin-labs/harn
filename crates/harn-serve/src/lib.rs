@@ -96,3 +96,63 @@ pub use ws::{
     ws_route, WsConfig, WsError, WsMessage, WsSession, DEFAULT_IDLE_PING_MS,
     DEFAULT_MAX_MESSAGE_BYTES,
 };
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    pub(crate) struct LlmOverrideReset;
+
+    impl Drop for LlmOverrideReset {
+        fn drop(&mut self) {
+            harn_vm::llm_config::clear_user_overrides();
+            harn_vm::llm::capabilities::clear_user_overrides();
+        }
+    }
+
+    pub(crate) fn fixture_provider_overlay() -> harn_vm::llm_config::ProvidersConfig {
+        harn_vm::llm_config::parse_config_toml(
+            r#"
+[providers.fixture_runtime]
+display_name = "Fixture Runtime"
+base_url = "https://fixture.example/v1"
+base_url_env = "FIXTURE_RUNTIME_BASE_URL"
+chat_endpoint = "/chat/completions"
+auth_style = "bearer"
+auth_env = "FIXTURE_RUNTIME_API_KEY"
+features = ["chat", "tools"]
+rpm = 42
+
+[aliases]
+fixture-default = { id = "fixture-model-v1", provider = "fixture_runtime", tool_format = "native" }
+
+[models.fixture-model-v1]
+name = "Fixture Model v1"
+provider = "fixture_runtime"
+context_window = 12345
+runtime_context_window = 8192
+capabilities = ["tool_use", "json"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 2.5 }
+availability = "serverless"
+tier = "small"
+family = "fixture-family"
+lineage = "fixture-lineage"
+"#,
+        )
+        .expect("fixture provider overlay parses")
+    }
+
+    pub(crate) fn fixture_capability_overlay() -> harn_vm::llm::capabilities::CapabilitiesFile {
+        toml::from_str(
+            r#"
+[[provider.fixture_runtime]]
+model_match = "fixture-model-v1"
+native_tools = true
+tool_search = ["hosted"]
+vision = true
+structured_output = "native"
+prompt_caching = true
+thinking_modes = ["effort"]
+"#,
+        )
+        .expect("fixture capability overlay parses")
+    }
+}

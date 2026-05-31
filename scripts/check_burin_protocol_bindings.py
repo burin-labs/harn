@@ -25,7 +25,7 @@ TARGETS = (
     ),
     (
         ARTIFACTS / "harn-protocol.ts",
-        Path("tui/src/generated/harn-protocol.ts"),
+        Path("server/src/generated/harn-protocol.ts"),
     ),
 )
 
