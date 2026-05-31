@@ -348,6 +348,19 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
         return Ok(());
     }
+    // Standard process I/O device files are not workspace filesystem
+    // mutations: writing to /dev/stdout, /dev/stderr, or /dev/null (and the
+    // numeric /dev/fd/<N> descriptors they alias) targets the process's own
+    // output streams, not the sandboxed tree. A pipeline that falls back to
+    // /dev/stdout for debug output must not read as a sandbox violation, so
+    // allow these regardless of the configured roots. Matched on the
+    // lexically-normalized path (not the canonicalized form): canonicalize()
+    // rewrites /dev/stdout to a per-process /dev/fd/<…>.output alias that no
+    // longer looks like a standard device. Kept deliberately narrow — only
+    // the well-known device files, no broader /dev access.
+    if is_standard_io_device(&normalize_io_device_path(path)) {
+        return Ok(());
+    }
     let candidate = normalize_for_policy(path);
     let roots = normalized_workspace_roots(&policy);
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
@@ -766,6 +779,42 @@ fn path_is_within(path: &Path, root: &Path) -> bool {
     path == root || path.starts_with(root)
 }
 
+/// Resolve `path` to an absolute, lexically-normalized form for the standard
+/// I/O device check. Unlike [`normalize_for_policy`] this never calls
+/// `canonicalize`, which on macOS rewrites `/dev/stdout` to a per-process
+/// `/dev/fd/<…>.output` alias that no longer matches a known device file.
+fn normalize_io_device_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        crate::stdlib::process::execution_root_path().join(path)
+    };
+    normalize_lexically(&absolute)
+}
+
+/// Whether `path` is one of the standard process I/O device files that the
+/// sandbox treats as a stream rather than a workspace mutation: `/dev/stdout`,
+/// `/dev/stderr`, `/dev/null`, or a numeric file-descriptor `/dev/fd/<N>`.
+/// `path` must already be absolute and lexically normalized.
+fn is_standard_io_device(path: &Path) -> bool {
+    matches!(
+        path.to_str(),
+        Some("/dev/stdout" | "/dev/stderr" | "/dev/null")
+    ) || is_dev_fd_descriptor(path)
+}
+
+/// Whether `path` is exactly `/dev/fd/<N>` for a non-empty run of ASCII
+/// digits (the numeric file-descriptor aliases for the standard streams).
+fn is_dev_fd_descriptor(path: &Path) -> bool {
+    let Some(text) = path.to_str() else {
+        return false;
+    };
+    let Some(fd) = text.strip_prefix("/dev/fd/") else {
+        return false;
+    };
+    !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
 pub(crate) fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
     fn rank(value: &str) -> usize {
@@ -952,6 +1001,68 @@ mod tests {
         );
 
         pop_execution_policy();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn standard_io_device_files_allowed_under_restricted_profile() {
+        // Writing to the standard process I/O streams is not a workspace
+        // mutation, so a restricted profile with a workspace root that does
+        // not contain /dev must still allow them — while a genuine
+        // out-of-root write is still rejected.
+        let workspace = tempfile::tempdir().unwrap();
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        });
+
+        for device in ["/dev/stdout", "/dev/stderr", "/dev/null"] {
+            assert!(
+                check_fs_path_scope(Path::new(device), FsAccess::Write).is_ok(),
+                "write to standard device {device} must be allowed"
+            );
+            // Reads of the same devices are likewise allowed.
+            assert!(
+                check_fs_path_scope(Path::new(device), FsAccess::Read).is_ok(),
+                "read of standard device {device} must be allowed"
+            );
+        }
+        // Numeric /dev/fd/<N> descriptors are allowed.
+        assert!(check_fs_path_scope(Path::new("/dev/fd/1"), FsAccess::Write).is_ok());
+        assert!(check_fs_path_scope(Path::new("/dev/fd/2"), FsAccess::Write).is_ok());
+
+        // A non-device path outside the workspace is still rejected.
+        let stranger = tempfile::tempdir().unwrap();
+        assert!(
+            check_fs_path_scope(&stranger.path().join("escape.txt"), FsAccess::Write).is_err(),
+            "a real out-of-root write must still be rejected"
+        );
+        // Other /dev entries are NOT broadly allowed — the allowlist is narrow.
+        assert!(
+            check_fs_path_scope(Path::new("/dev/sda"), FsAccess::Write).is_err(),
+            "/dev/sda must not be allowed by the standard-device allowlist"
+        );
+        assert!(
+            check_fs_path_scope(Path::new("/dev/fd/notanumber"), FsAccess::Write).is_err(),
+            "non-numeric /dev/fd/<x> must not be allowed"
+        );
+
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn is_standard_io_device_matches_only_known_streams() {
+        assert!(is_standard_io_device(Path::new("/dev/stdout")));
+        assert!(is_standard_io_device(Path::new("/dev/stderr")));
+        assert!(is_standard_io_device(Path::new("/dev/null")));
+        assert!(is_standard_io_device(Path::new("/dev/fd/0")));
+        assert!(is_standard_io_device(Path::new("/dev/fd/12")));
+        assert!(!is_standard_io_device(Path::new("/dev/fd/")));
+        assert!(!is_standard_io_device(Path::new("/dev/fd/1a")));
+        assert!(!is_standard_io_device(Path::new("/dev/stdoutx")));
+        assert!(!is_standard_io_device(Path::new("/dev/random")));
+        assert!(!is_standard_io_device(Path::new("/tmp/dev/null")));
     }
 
     #[test]

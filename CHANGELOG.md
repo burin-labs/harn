@@ -8,6 +8,23 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.55
+
+### Fixed
+
+- **Sandbox no longer over-restricts standard I/O device files or out-of-scope
+  existence probes (HARN-CAP-201).** Two legitimate non-workspace operations
+  that the read-only-sandbox-roots feature (#2726, v0.8.53) began rejecting are
+  allowed again, unblocking eval/setup pipelines on v0.8.53+ sandboxes on both
+  the Rust and Node surfaces. Writing to `/dev/stdout`, `/dev/stderr`,
+  `/dev/null`, and the numeric `/dev/fd/<N>` descriptors is permitted under a
+  restricted profile — these target the process's own I/O streams, not the
+  sandboxed tree — while every other out-of-root path stays denied. A presence
+  probe (`exists`/`file_exists`/`harness.fs.exists`) for a path outside the
+  sandbox now reads as "absent" (`false`) instead of throwing a violation,
+  matching how OS sandboxes make out-of-jail paths appear non-existent. Reading
+  file *content* outside the configured roots is still denied.
+
 ## v0.8.54
 
 ### Changed
