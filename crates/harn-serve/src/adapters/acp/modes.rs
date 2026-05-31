@@ -390,7 +390,17 @@ fn split_provider_prefix(value: &str) -> Option<(&str, &str)> {
 
 /// Capability ceiling enforced while a prompt runs in this mode. Harn's
 /// autonomy-tier policy remains authoritative; ACP modes only select the tier.
-pub(super) fn policy_for_mode(mode_id: &str) -> Option<CapabilityPolicy> {
+///
+/// `read_only_roots` carries the embedder's extra read-only sandbox roots
+/// (see [`super::AcpServerConfig::with_read_only_roots`]). They are unioned
+/// into the per-turn policy's `read_only_roots` so they survive the push and
+/// are honored by `check_fs_path_scope`. Because they only populate the
+/// read-only dimension, they grant reads under those roots without widening
+/// write or exec scope.
+pub(super) fn policy_for_mode(
+    mode_id: &str,
+    read_only_roots: &[String],
+) -> Option<CapabilityPolicy> {
     let mode = definition(mode_id)?;
     if mode.autonomy_tier == AutonomyTier::ActAuto {
         // Full-access mode leaves the ambient host/runtime policy as the
@@ -398,7 +408,24 @@ pub(super) fn policy_for_mode(mode_id: &str) -> Option<CapabilityPolicy> {
         // fallbacks look policy-governed and block them.
         return None;
     }
-    Some(harn_vm::policy_for_autonomy_tier(mode.autonomy_tier))
+    let mut policy = harn_vm::policy_for_autonomy_tier(mode.autonomy_tier);
+    union_read_only_roots(&mut policy, read_only_roots);
+    Some(policy)
+}
+
+/// Add `roots` to `policy.read_only_roots`, skipping duplicates. The autonomy
+/// tier seeds an empty read-only set, so this is the union that lets embedder
+/// bundled-asset roots survive the per-turn policy push.
+fn union_read_only_roots(policy: &mut CapabilityPolicy, roots: &[String]) {
+    for root in roots {
+        if !policy
+            .read_only_roots
+            .iter()
+            .any(|existing| existing == root)
+        {
+            policy.read_only_roots.push(root.clone());
+        }
+    }
 }
 
 /// RAII guard that pushes a CapabilityPolicy on construction and pops it on
@@ -408,8 +435,8 @@ pub(super) struct ModePolicyGuard {
 }
 
 impl ModePolicyGuard {
-    pub(super) fn enter(mode_id: &str) -> Self {
-        match policy_for_mode(mode_id) {
+    pub(super) fn enter(mode_id: &str, read_only_roots: &[String]) -> Self {
+        match policy_for_mode(mode_id, read_only_roots) {
             Some(policy) => {
                 harn_vm::orchestration::push_execution_policy(policy);
                 Self { pushed: true }
@@ -611,31 +638,66 @@ mod tests {
 
     #[test]
     fn policy_for_code_is_none() {
-        assert!(policy_for_mode("code").is_none());
+        assert!(policy_for_mode("code", &[]).is_none());
     }
 
     #[test]
     fn policy_for_architect_clamps_to_read_only() {
-        let policy = policy_for_mode("architect").expect("architect has policy");
+        let policy = policy_for_mode("architect", &[]).expect("architect has policy");
         assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
     }
 
     #[test]
     fn policy_for_ask_clamps_to_read_only() {
-        let policy = policy_for_mode("ask").expect("ask has policy");
+        let policy = policy_for_mode("ask", &[]).expect("ask has policy");
         assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
     }
 
     #[test]
     fn policy_for_shadow_blocks_side_effects() {
-        let policy = policy_for_mode("shadow").expect("shadow has policy");
+        let policy = policy_for_mode("shadow", &[]).expect("shadow has policy");
         assert_eq!(policy.side_effect_level.as_deref(), Some("none"));
         assert_eq!(policy.recursion_limit, Some(0));
     }
 
     #[test]
     fn policy_for_unknown_mode_is_none() {
-        assert!(policy_for_mode("not-a-real-mode").is_none());
+        assert!(policy_for_mode("not-a-real-mode", &[]).is_none());
+    }
+
+    #[test]
+    fn embedder_read_only_roots_union_into_per_turn_policy() {
+        let roots = vec![
+            "/opt/burin/pipelines".to_string(),
+            "/opt/burin/pipelines/partials".to_string(),
+        ];
+        let policy = policy_for_mode("architect", &roots).expect("architect has policy");
+        // Embedder roots survive the per-turn push as read-only entries...
+        assert_eq!(policy.read_only_roots, roots);
+        // ...without widening the writable workspace or relaxing the side
+        // effect ceiling (reads only).
+        assert!(policy.workspace_roots.is_empty());
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
+    }
+
+    #[test]
+    fn embedder_read_only_roots_dedupe_on_union() {
+        let roots = vec![
+            "/opt/burin/pipelines".to_string(),
+            "/opt/burin/pipelines".to_string(),
+        ];
+        let policy = policy_for_mode("ask", &roots).expect("ask has policy");
+        assert_eq!(
+            policy.read_only_roots,
+            vec!["/opt/burin/pipelines".to_string()]
+        );
+    }
+
+    #[test]
+    fn code_mode_ignores_embedder_read_only_roots() {
+        // Full-access mode pushes no per-turn policy; the ambient sandbox is
+        // already unrestricted so there is nothing to union into.
+        assert!(policy_for_mode("code", &["/opt/burin/pipelines".to_string()]).is_none());
     }
 
     #[test]
