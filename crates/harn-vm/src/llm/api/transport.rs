@@ -136,14 +136,21 @@ fn classify_transport_http_error(
 /// provider plugin architecture.
 ///
 /// The dispatch order is:
-/// 1. Check the thread-local provider registry (populated by `register_default_providers`)
-/// 2. Fall back to config-based resolution (for dynamically-configured providers)
-/// 3. Use the legacy inline dispatch as a final fallback
+/// 1. Route providers declared with `protocol = "acp"` to the ACP adapter
+/// 2. Check the thread-local provider registry (populated by `register_default_providers`)
+/// 3. Fall back to config-based resolution (for dynamically-configured providers)
+/// 4. Use the legacy inline dispatch as a final fallback
 pub(super) async fn vm_call_llm_api(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
     let provider = &opts.provider;
+
+    if crate::llm::providers::AcpProvider::is_configured_acp(provider) {
+        return crate::llm::providers::AcpProvider::new(provider.clone())
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
 
     if crate::llm::provider::is_provider_registered(provider) {
         return dispatch_to_registered_provider(opts, delta_tx).await;

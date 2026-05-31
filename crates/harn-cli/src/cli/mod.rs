@@ -172,8 +172,8 @@ pub(crate) use routes::RoutesArgs;
 pub(crate) use run::RunArgs;
 pub(crate) use runs::{ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use serve::{
-    A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs, ServeCommand,
-    ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs,
+    A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs,
+    ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs,
 };
 pub(crate) use session::{
     SessionArgs, SessionCommand, SessionExportArgs, SessionImportArgs, SessionSchemaArgs,

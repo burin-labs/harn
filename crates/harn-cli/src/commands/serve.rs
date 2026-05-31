@@ -14,11 +14,12 @@ use axum::{Json, Router};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{stream, StreamExt};
 use harn_serve::{
-    A2aHttpServeOptions, A2aServer, A2aServerConfig, AcpProfileConfig, ApiHttpServeOptions,
-    ApiKeyAuthConfig, ApiKeyEntry, ApiServer, ApiServerConfig, AuthMethodConfig, AuthPolicy,
-    AuthRequest, AuthorizationDecision, DispatchCore, DispatchCoreConfig, ExportCatalog,
-    ExportedCallableKind, HmacAuthConfig, HttpTlsConfig, McpHttpServeOptions, McpServer,
-    McpServerConfig, SiteHttpServeOptions, SiteServer, SiteServerConfig, MCP_PROTOCOL_VERSION,
+    A2aHttpServeOptions, A2aServer, A2aServerConfig, AcpProfileConfig, AcpWebSocketServeOptions,
+    ApiHttpServeOptions, ApiKeyAuthConfig, ApiKeyEntry, ApiServer, ApiServerConfig,
+    AuthMethodConfig, AuthPolicy, AuthRequest, AuthorizationDecision, DispatchCore,
+    DispatchCoreConfig, ExportCatalog, ExportedCallableKind, HmacAuthConfig, HttpTlsConfig,
+    McpHttpServeOptions, McpServer, McpServerConfig, SiteHttpServeOptions, SiteServer,
+    SiteServerConfig, MCP_PROTOCOL_VERSION,
 };
 use serde_json::Value as JsonValue;
 use time::Duration;
@@ -26,8 +27,8 @@ use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::cli::{
-    A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeObsMode,
-    ServeTlsMode, SiteServeArgs,
+    A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs,
+    ServeObsMode, ServeTlsMode, SiteServeArgs,
 };
 
 /// Default 10 MiB request-body cap applied to every `harn serve` HTTP
@@ -88,17 +89,39 @@ fn guard_serve_bind_auth(
 
 pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
     apply_obs_mode(args.obs)?;
-    crate::acp::run_acp_server(
-        args.file.as_deref(),
-        build_auth_policy(&args.api_key, args.hmac_secret.as_ref()),
-        args.trace,
-        harn_serve::AcpProfileConfig {
-            text: args.profile.text,
-            json_path: args.profile.json_path.clone(),
-        },
-    )
-    .await;
-    Ok(())
+    let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
+    let profile = harn_serve::AcpProfileConfig {
+        text: args.profile.text,
+        json_path: args.profile.json_path.clone(),
+    };
+    match args.transport {
+        AcpServeTransport::Stdio => {
+            crate::acp::run_acp_server(args.file.as_deref(), auth_policy, args.trace, profile)
+                .await;
+            Ok(())
+        }
+        AcpServeTransport::Websocket => {
+            let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
+            guard_serve_bind_auth("acp", args.bind, &auth_policy, &tls)?;
+            if args.trace {
+                harn_vm::llm::enable_tracing();
+            }
+            crate::acp::ensure_acp_event_log(args.file.as_deref());
+            let result = harn_serve::run_acp_websocket_server(
+                crate::acp::server_config(args.file.clone(), auth_policy).with_profile(profile),
+                AcpWebSocketServeOptions {
+                    bind: args.bind,
+                    path: args.path.clone(),
+                    tls,
+                },
+            )
+            .await;
+            if args.trace {
+                eprint!("{}", crate::commands::run::render_trace_summary());
+            }
+            result
+        }
+    }
 }
 
 pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {

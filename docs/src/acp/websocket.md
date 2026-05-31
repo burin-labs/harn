@@ -1,6 +1,20 @@
 # ACP over WebSocket
 
-`harn orchestrator serve` exposes ACP at:
+Harn exposes ACP over WebSocket in two places:
+
+- `harn serve acp --transport websocket <file.harn>` starts a direct
+  single-socket ACP endpoint for editor hosts that want to attach to one Harn
+  agent server.
+- `harn orchestrator serve` mounts the retained multi-client hub at `/acp` for
+  browser or remote IDE integrations that need attach/replay semantics.
+
+The direct endpoint defaults to:
+
+```text
+ws://127.0.0.1:8789/acp
+```
+
+The orchestrator endpoint is:
 
 ```text
 ws://<host>/acp
@@ -12,14 +26,20 @@ This page covers only the WebSocket transport. The canonical ACP behavior guide
 is [MCP, ACP, and A2A integration](../mcp-and-acp.md#acp-agent-client-protocol);
 the broader entry-point table is [Protocol support matrix](../protocol-support.md).
 
-Use `wss://` when the orchestrator is served with `--cert` and `--key`.
-Plain `ws://` is intended for local development or trusted private networks.
+Use `wss://` when the server is served with `--cert` and `--key`. Plain
+`ws://` is intended for local development or trusted private networks.
 
 ## Authentication
 
-If `HARN_ORCHESTRATOR_API_KEYS` is set, `/acp` requires
-`Authorization: Bearer <api-key>` during the WebSocket upgrade. Failed
-authentication returns `401 Unauthorized` before the upgrade completes.
+For `harn serve acp --transport websocket`, `--api-key` /
+`HARN_SERVE_API_KEY` advertises ACP `authMethods`. Clients may either send
+`Authorization: Bearer <api-key>` or `X-API-Key` during the WebSocket upgrade
+to pre-authorize the connection, or connect without those headers and complete
+the normal in-band ACP `authenticate` method after `initialize`.
+
+For `harn orchestrator serve`, if `HARN_ORCHESTRATOR_API_KEYS` is set, `/acp`
+requires `Authorization: Bearer <api-key>` during the WebSocket upgrade.
+Failed authentication returns `401 Unauthorized` before the upgrade completes.
 
 The endpoint uses the orchestrator listener origin guard. Configure browser
 origins in `harn.toml`:
@@ -110,8 +130,14 @@ surface as stdio ACP:
 - `workflow/*`
 - `harn.hitl.respond`
 
-The transport assigns every outbound JSON-RPC frame a stable Harn extension
-event id:
+The direct `harn serve acp --transport websocket` endpoint runs one ACP server
+per socket. Use the orchestrator `/acp` hub when clients need retained sessions,
+multi-client attach, role arbitration, or replay.
+
+## Retained Orchestrator Sessions
+
+The orchestrator transport assigns every outbound JSON-RPC frame a stable Harn
+extension event id:
 
 ```json
 {

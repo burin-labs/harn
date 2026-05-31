@@ -2042,12 +2042,16 @@ binds to `127.0.0.1:8080` by default; use `--bind 0.0.0.0:PORT` only with
 explicit auth and TLS or a trusted edge proxy.
 
 `harn serve acp` starts the packaged ACP adapter on stdio for editor and IDE
-hosts. It creates ACP sessions, executes the target pipeline for each
-`session/prompt`, streams `AgentEvent` values as `session/update`
-notifications, and forwards permission prompts through
-`session/request_permission`. Use `--api-key <key>` / `HARN_SERVE_API_KEY` or
-`--hmac-secret <secret>` / `HARN_SERVE_HMAC_SECRET` to advertise ACP
-`authMethods` and require `authenticate` before protected session methods.
+hosts. Pass `--transport websocket` to expose the same single-connection ACP
+session server at `--bind` and `--path` instead. It creates ACP sessions,
+executes the target pipeline for each `session/prompt`, streams `AgentEvent`
+values as `session/update` notifications, and forwards permission prompts
+through `session/request_permission`. Use `--api-key <key>` /
+`HARN_SERVE_API_KEY` or `--hmac-secret <secret>` /
+`HARN_SERVE_HMAC_SECRET` to advertise ACP `authMethods` and require
+`authenticate` before protected session methods. WebSocket clients can also
+pre-authenticate the upgrade with `Authorization: Bearer <key>` or
+`X-API-Key`.
 Use `--profile` / `HARN_PROFILE=1` to print one categorical timing rollup per
 executed `session/prompt`; use `--profile-json <path>` /
 `HARN_PROFILE_JSON=<path>` to append per-turn NDJSON records with

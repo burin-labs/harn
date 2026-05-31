@@ -563,7 +563,8 @@ Add to `claude_desktop_config.json`:
 ## ACP (Agent Client Protocol)
 
 ACP lets host applications and local clients use Harn as a
-runtime backend. Communication is JSON-RPC 2.0 over stdin/stdout.
+runtime backend. Communication is JSON-RPC 2.0 over stdin/stdout or
+WebSocket text frames.
 
 Bridge-level tool gates and daemon idle/resume notifications are documented in
 [Bridge protocol](./bridge-protocol.md).
@@ -572,13 +573,17 @@ Bridge-level tool gates and daemon idle/resume notifications are documented in
 
 ```bash
 harn serve acp pipeline.harn      # execute a specific pipeline per prompt
+harn serve acp --transport websocket --bind 127.0.0.1:8789 pipeline.harn
 ```
 
 The packaged ACP adapter is exposed through `harn serve acp`. Pass
 `--api-key <key>` or set `HARN_SERVE_API_KEY` to require clients to complete
 ACP `authenticate` before creating sessions. Harn advertises the configured
 methods in `initialize.authMethods`; unauthenticated protected requests return
-ACP `auth_required` with the same method details.
+ACP `auth_required` with the same method details. WebSocket clients may also
+send the key as `Authorization: Bearer <key>` or `X-API-Key` during the
+upgrade; header authentication pre-authorizes that ACP connection while
+headerless clients can still use the in-band ACP `authenticate` method.
 
 ### Protocol overview
 

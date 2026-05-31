@@ -96,6 +96,12 @@ pub struct ProviderDef {
     pub display_name: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
+    /// Provider protocol. Omitted providers use Harn's normal HTTP provider
+    /// path; `acp` launches an Agent Client Protocol server and drives it as
+    /// an agent-backed provider.
+    #[serde(default)]
+    pub protocol: Option<String>,
+    #[serde(default)]
     pub base_url: String,
     #[serde(default)]
     pub base_url_env: Option<String>,
@@ -111,6 +117,16 @@ pub struct ProviderDef {
     pub chat_endpoint: String,
     #[serde(default)]
     pub completion_endpoint: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub mcp_servers: Vec<serde_json::Value>,
     #[serde(default)]
     pub healthcheck: Option<HealthcheckDef>,
     #[serde(default)]
@@ -143,6 +159,7 @@ impl Default for ProviderDef {
         Self {
             display_name: None,
             icon: None,
+            protocol: None,
             base_url: String::new(),
             base_url_env: None,
             auth_style: default_bearer(),
@@ -151,6 +168,11 @@ impl Default for ProviderDef {
             extra_headers: BTreeMap::new(),
             chat_endpoint: String::new(),
             completion_endpoint: None,
+            command: None,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            cwd: None,
+            mcp_servers: Vec::new(),
             healthcheck: None,
             features: Vec::new(),
             fallback: None,
@@ -727,6 +749,16 @@ pub fn provider_config(name: &str) -> Option<ProviderDef> {
     effective_config().providers.get(name).cloned()
 }
 
+pub fn provider_protocol(name: &str) -> Option<String> {
+    provider_config(name).and_then(|def| def.protocol)
+}
+
+pub fn provider_uses_acp(name: &str) -> bool {
+    provider_protocol(name)
+        .as_deref()
+        .is_some_and(|protocol| protocol.eq_ignore_ascii_case("acp"))
+}
+
 /// Get model-specific default parameters (temperature, etc.).
 /// Matches glob patterns in model_defaults keys.
 pub fn model_params(model_id: &str) -> BTreeMap<String, toml::Value> {
@@ -806,6 +838,9 @@ pub fn qc_default_model(provider: &str) -> Option<String> {
 }
 
 pub fn default_model_for_provider(provider: &str) -> String {
+    if provider_uses_acp(provider) {
+        return "default".to_string();
+    }
     match provider {
         "local" => std::env::var("LOCAL_LLM_MODEL")
             .or_else(|_| std::env::var("HARN_LLM_MODEL"))
