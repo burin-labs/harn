@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::Value as JsonValue;
@@ -398,7 +398,7 @@ pub(crate) fn dispatch_mock_host_call(
 /// blocking channel — see `harn-dap`'s `DapHostBridge` for the canonical
 /// pattern. Sync keeps the boundary simple and avoids forcing the entire
 /// dispatch path into an opaque future.
-pub trait HostCallBridge {
+pub trait HostCallBridge: Send + Sync {
     fn dispatch(
         &self,
         capability: &str,
@@ -416,14 +416,14 @@ pub trait HostCallBridge {
 }
 
 thread_local! {
-    static HOST_CALL_BRIDGE: RefCell<Option<Rc<dyn HostCallBridge>>> = const { RefCell::new(None) };
+    static HOST_CALL_BRIDGE: RefCell<Option<Arc<dyn HostCallBridge>>> = const { RefCell::new(None) };
 }
 
 /// Install a bridge for the current thread. The bridge is consulted on
 /// every `host_call` *after* mock matching but *before* the built-in
 /// match arms, so embedders can override anything they like (and equally
 /// punt on anything they don't, by returning `Ok(None)`).
-pub fn set_host_call_bridge(bridge: Rc<dyn HostCallBridge>) {
+pub fn set_host_call_bridge(bridge: Arc<dyn HostCallBridge>) {
     HOST_CALL_BRIDGE.with(|b| *b.borrow_mut() = Some(bridge));
 }
 
@@ -458,7 +458,9 @@ fn empty_tool_list_value() -> VmValue {
     VmValue::List(std::sync::Arc::new(Vec::new()))
 }
 
-fn current_vm_host_bridge(ctx: Option<&AsyncBuiltinCtx>) -> Option<Rc<crate::bridge::HostBridge>> {
+fn current_vm_host_bridge(
+    ctx: Option<&AsyncBuiltinCtx>,
+) -> Option<std::sync::Arc<crate::bridge::HostBridge>> {
     ctx.and_then(|ctx| ctx.child_vm().bridge.clone())
 }
 
@@ -697,7 +699,7 @@ async fn dispatch_process_exec_after_policy(
     // attacker-controlled code) pass `sandbox_profile: "os_hardened"`
     // without having to rewrite the surrounding policy. The override
     // is scoped to this call and pops with the guard at end-of-scope.
-    let _profile_guard = match optional_string(params, "sandbox_profile") {
+    let profile_guard = match optional_string(params, "sandbox_profile") {
         Some(value) => Some(push_sandbox_profile_override(&value)?),
         None => None,
     };
@@ -737,6 +739,7 @@ async fn dispatch_process_exec_after_policy(
     let child = cmd
         .spawn()
         .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
+    drop(profile_guard);
     let pid = child.id();
     let timed_out;
     let output_result = if let Some(timeout_ms) = timeout_ms {
@@ -1159,9 +1162,11 @@ mod tests {
         dispatch_host_tool_call, dispatch_host_tool_list, dispatch_mock_host_call, push_host_mock,
         reset_host_state, resolve_process_exec_cwd, set_host_call_bridge, HostCallBridge, HostMock,
     };
-    use std::cell::Cell;
     use std::collections::BTreeMap;
-    use std::rc::Rc;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     use crate::value::{VmError, VmValue};
 
@@ -1351,7 +1356,7 @@ mod tests {
     }
 
     struct CountingProcessExecBridge {
-        calls: Rc<Cell<usize>>,
+        calls: Arc<AtomicUsize>,
     }
 
     impl HostCallBridge for CountingProcessExecBridge {
@@ -1364,7 +1369,7 @@ mod tests {
             if (capability, operation) != ("process", "exec") {
                 return Ok(None);
             }
-            self.calls.set(self.calls.get() + 1);
+            self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(Some(VmValue::Dict(std::sync::Arc::new(BTreeMap::from([
                 (
                     "status".to_string(),
@@ -1395,7 +1400,7 @@ mod tests {
     fn host_tool_list_uses_installed_host_call_bridge() {
         run_host_async_test(|| async {
             reset_host_state();
-            set_host_call_bridge(Rc::new(TestHostToolBridge));
+            set_host_call_bridge(Arc::new(TestHostToolBridge));
             let tools = dispatch_host_tool_list().await.expect("tool list");
             clear_host_call_bridge();
 
@@ -1412,7 +1417,7 @@ mod tests {
     #[test]
     fn host_tool_call_uses_installed_host_call_bridge() {
         run_host_async_test(|| async {
-            set_host_call_bridge(Rc::new(TestHostToolBridge));
+            set_host_call_bridge(Arc::new(TestHostToolBridge));
             let args = VmValue::Dict(std::sync::Arc::new(BTreeMap::from([(
                 "path".to_string(),
                 VmValue::String(std::sync::Arc::from("README.md".to_string())),
@@ -1429,8 +1434,8 @@ mod tests {
     fn process_exec_bridge_is_gated_by_command_policy() {
         run_host_async_test(|| async {
             crate::orchestration::clear_command_policies();
-            let calls = Rc::new(Cell::new(0));
-            set_host_call_bridge(Rc::new(CountingProcessExecBridge {
+            let calls = Arc::new(AtomicUsize::new(0));
+            set_host_call_bridge(Arc::new(CountingProcessExecBridge {
                 calls: calls.clone(),
             }));
             crate::orchestration::push_command_policy(crate::orchestration::CommandPolicy {
@@ -1464,7 +1469,11 @@ mod tests {
             crate::orchestration::clear_command_policies();
             clear_host_call_bridge();
 
-            assert_eq!(calls.get(), 0, "blocked command must not reach host bridge");
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                0,
+                "blocked command must not reach host bridge"
+            );
             let result = result.as_dict().expect("blocked result dict");
             assert_eq!(result.get("status").unwrap().display(), "blocked");
             assert!(

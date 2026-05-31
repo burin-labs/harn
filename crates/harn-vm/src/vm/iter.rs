@@ -186,8 +186,9 @@ impl VmIter {
     pub fn next<'a>(
         &'a mut self,
         vm: &'a mut crate::vm::Vm,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<VmValue>, VmError>> + 'a>>
-    {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<VmValue>, VmError>> + Send + 'a>,
+    > {
         Box::pin(async move { self.next_impl(vm).await })
     }
 
@@ -884,7 +885,9 @@ fn empty_broadcast_state() -> VmBroadcastState {
 fn try_next_ready<'a>(
     handle: &'a VmIterHandle,
     vm: &'a mut crate::vm::Vm,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<VmValue>, VmError>> + 'a>> {
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<Option<VmValue>, VmError>> + Send + 'a>,
+> {
     Box::pin(async move {
         let mut state = std::mem::replace(&mut *handle.lock(), VmIter::Exhausted);
         let result = state.try_next_ready_impl(vm).await;

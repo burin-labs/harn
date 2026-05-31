@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::path::Path;
 use std::process::Stdio;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -16,7 +16,7 @@ use crate::vm::Vm;
 const VISION_OCR_AUDIT_TOPIC: &str = "audit.vision_ocr";
 
 thread_local! {
-    static OCR_BACKEND_OVERRIDE: RefCell<Option<Rc<dyn OcrBackend>>> = RefCell::new(None);
+    static OCR_BACKEND_OVERRIDE: RefCell<Option<Arc<dyn OcrBackend>>> = RefCell::new(None);
 }
 
 #[derive(Clone, Debug)]
@@ -195,8 +195,8 @@ struct OcrBlockState {
     confidence: ConfidenceAccumulator,
 }
 
-#[async_trait(?Send)]
-trait OcrBackend {
+#[async_trait]
+trait OcrBackend: Send + Sync {
     fn name(&self) -> &'static str;
 
     async fn recognize(
@@ -215,7 +215,7 @@ pub(crate) fn reset_vision_state() {
 }
 
 #[cfg(test)]
-fn install_test_backend(backend: Rc<dyn OcrBackend>) {
+fn install_test_backend(backend: Arc<dyn OcrBackend>) {
     OCR_BACKEND_OVERRIDE.with(|slot| {
         *slot.borrow_mut() = Some(backend);
     });
@@ -238,11 +238,11 @@ pub(crate) fn register_vision_builtins(vm: &mut Vm) {
     });
 }
 
-fn current_backend() -> Rc<dyn OcrBackend> {
+fn current_backend() -> Arc<dyn OcrBackend> {
     OCR_BACKEND_OVERRIDE.with(|slot| {
         slot.borrow()
             .clone()
-            .unwrap_or_else(|| Rc::new(TesseractCliBackend))
+            .unwrap_or_else(|| Arc::new(TesseractCliBackend))
     })
 }
 
@@ -670,7 +670,7 @@ async fn audit_vision_ocr_active(
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl OcrBackend for TesseractCliBackend {
     fn name(&self) -> &'static str {
         "tesseract_cli"
@@ -866,7 +866,7 @@ mod tests {
         words: Vec<OcrWordText>,
     }
 
-    #[async_trait(?Send)]
+    #[async_trait]
     impl OcrBackend for MockBackend {
         fn name(&self) -> &'static str {
             "mock_ocr"
@@ -1009,7 +1009,7 @@ mod tests {
         reset_vision_state();
         crate::event_log::reset_active_event_log();
         let log = crate::event_log::install_memory_for_current_thread(32);
-        install_test_backend(Rc::new(MockBackend {
+        install_test_backend(Arc::new(MockBackend {
             words: vec![
                 word(1, 1, 1, 1, 1, 0, 0, 12, 10, 98.0, "Alpha"),
                 word(1, 1, 1, 1, 2, 14, 0, 10, 10, 97.0, "Beta"),

@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -94,7 +93,7 @@ struct SupervisorState {
 
 #[derive(Clone)]
 struct SupervisorHandle {
-    state: Rc<RefCell<SupervisorState>>,
+    state: Arc<parking_lot::Mutex<SupervisorState>>,
     _tx: mpsc::UnboundedSender<SupervisorMsg>,
 }
 
@@ -144,7 +143,7 @@ async fn supervisor_start_impl(
         .first()
         .ok_or_else(|| VmError::Runtime("supervisor_start: spec is required".to_string()))?;
     let handle = start_supervisor(base_vm, spec)?;
-    let value = supervisor_handle_value(&handle.state.borrow());
+    let value = supervisor_handle_value(&handle.state.lock());
     Ok(value)
 }
 
@@ -154,7 +153,7 @@ async fn supervisor_start_impl(
 )]
 fn supervisor_state_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let state = supervisor_from_args(args, "supervisor_state")?;
-    let value = supervisor_state_value(&state.borrow());
+    let value = supervisor_state_value(&state.lock());
     Ok(value)
 }
 
@@ -164,7 +163,7 @@ fn supervisor_state_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 )]
 fn supervisor_events_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let state = supervisor_from_args(args, "supervisor_events")?;
-    let value = events_value(&state.borrow());
+    let value = events_value(&state.lock());
     Ok(value)
 }
 
@@ -174,7 +173,7 @@ fn supervisor_events_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 )]
 fn supervisor_metrics_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let state = supervisor_from_args(args, "supervisor_metrics")?;
-    let value = metrics_value(&state.borrow());
+    let value = metrics_value(&state.lock());
     Ok(value)
 }
 
@@ -191,12 +190,12 @@ async fn supervisor_stop_impl(
     let timeout_ms = args
         .get(1)
         .and_then(duration_ms)
-        .unwrap_or_else(|| supervisor_lookup(&id).map_or(5000, |h| h.state.borrow().shutdown_ms));
+        .unwrap_or_else(|| supervisor_lookup(&id).map_or(5000, |h| h.state.lock().shutdown_ms));
     let handle = supervisor_lookup(&id)
         .ok_or_else(|| VmError::Runtime(format!("supervisor_stop: unknown supervisor '{id}'")))?;
 
     {
-        let mut state = handle.state.borrow_mut();
+        let mut state = handle.state.lock();
         if state.status != "stopped" {
             state.status = "draining".to_string();
             state.stop_requested = true;
@@ -217,7 +216,7 @@ async fn supervisor_stop_impl(
     loop {
         if handle
             .state
-            .borrow()
+            .lock()
             .children
             .iter()
             .all(|child| !matches!(child.status.as_str(), "running" | "draining"))
@@ -231,7 +230,7 @@ async fn supervisor_stop_impl(
     }
 
     {
-        let mut state = handle.state.borrow_mut();
+        let mut state = handle.state.lock();
         let mut forced = false;
         for idx in 0..state.children.len() {
             let child = &mut state.children[idx];
@@ -266,11 +265,11 @@ async fn supervisor_stop_impl(
         );
     }
 
-    if let Some(join) = handle.state.borrow_mut().supervisor_join.take() {
+    if let Some(join) = handle.state.lock().supervisor_join.take() {
         join.abort();
     }
 
-    let value = supervisor_state_value(&handle.state.borrow());
+    let value = supervisor_state_value(&handle.state.lock());
     Ok(value)
 }
 
@@ -321,7 +320,7 @@ fn start_supervisor(base_vm: Vm, spec_value: &VmValue) -> Result<SupervisorHandl
         })
         .collect();
 
-    let state = Rc::new(RefCell::new(SupervisorState {
+    let state = Arc::new(parking_lot::Mutex::new(SupervisorState {
         id,
         name,
         strategy,
@@ -348,26 +347,26 @@ fn start_supervisor(base_vm: Vm, spec_value: &VmValue) -> Result<SupervisorHandl
     SUPERVISORS.with(|registry| {
         registry
             .borrow_mut()
-            .insert(state.borrow().id.clone(), handle.clone());
+            .insert(state.lock().id.clone(), handle.clone());
     });
 
     let supervisor_join =
-        tokio::task::spawn_local(supervisor_loop(state.clone(), tx, rx, Rc::new(base_vm)));
-    state.borrow_mut().supervisor_join = Some(supervisor_join);
+        tokio::task::spawn_local(supervisor_loop(state.clone(), tx, rx, Arc::new(base_vm)));
+    state.lock().supervisor_join = Some(supervisor_join);
     Ok(handle)
 }
 
 async fn supervisor_loop(
-    state: Rc<RefCell<SupervisorState>>,
+    state: Arc<parking_lot::Mutex<SupervisorState>>,
     tx: mpsc::UnboundedSender<SupervisorMsg>,
     mut rx: mpsc::UnboundedReceiver<SupervisorMsg>,
-    base_vm: Rc<Vm>,
+    base_vm: Arc<Vm>,
 ) {
     {
-        let mut state_ref = state.borrow_mut();
+        let mut state_ref = state.lock();
         push_event(&mut state_ref, None, "supervisor_started", None);
     }
-    let len = state.borrow().children.len();
+    let len = state.lock().children.len();
     for index in 0..len {
         spawn_child(state.clone(), tx.clone(), base_vm.clone(), index, false);
     }
@@ -381,7 +380,7 @@ async fn supervisor_loop(
                 output,
             } => {
                 if !output.is_empty() {
-                    let mut state_ref = state.borrow_mut();
+                    let mut state_ref = state.lock();
                     let name = state_ref
                         .children
                         .get(index)
@@ -399,7 +398,7 @@ async fn supervisor_loop(
             }
             SupervisorMsg::RestartDue { index, generation } => {
                 let should_spawn = {
-                    let state_ref = state.borrow();
+                    let state_ref = state.lock();
                     state_ref.children.get(index).is_some_and(|child| {
                         child.generation == generation && !state_ref.stop_requested
                     })
@@ -410,8 +409,8 @@ async fn supervisor_loop(
             }
         }
 
-        if supervisor_terminal(&state.borrow()) {
-            let mut state_ref = state.borrow_mut();
+        if supervisor_terminal(&state.lock()) {
+            let mut state_ref = state.lock();
             if state_ref.status == "running" {
                 state_ref.status = "completed".to_string();
                 push_event(&mut state_ref, None, "supervisor_completed", None);
@@ -422,9 +421,9 @@ async fn supervisor_loop(
 }
 
 fn handle_child_exit(
-    state: Rc<RefCell<SupervisorState>>,
+    state: Arc<parking_lot::Mutex<SupervisorState>>,
     tx: mpsc::UnboundedSender<SupervisorMsg>,
-    base_vm: Rc<Vm>,
+    base_vm: Arc<Vm>,
     index: usize,
     generation: u64,
     result: Result<VmValue, String>,
@@ -433,7 +432,7 @@ fn handle_child_exit(
     let mut restart_plan = Vec::new();
 
     {
-        let mut state_ref = state.borrow_mut();
+        let mut state_ref = state.lock();
         if index >= state_ref.children.len() || state_ref.children[index].generation != generation {
             return;
         }
@@ -663,14 +662,14 @@ fn restart_decision(
 }
 
 fn spawn_child(
-    state: Rc<RefCell<SupervisorState>>,
+    state: Arc<parking_lot::Mutex<SupervisorState>>,
     tx: mpsc::UnboundedSender<SupervisorMsg>,
-    base_vm: Rc<Vm>,
+    base_vm: Arc<Vm>,
     index: usize,
     is_restart: bool,
 ) {
     let (spec, supervisor_id, generation, cancel_token) = {
-        let mut state_ref = state.borrow_mut();
+        let mut state_ref = state.lock();
         if state_ref.stop_requested || index >= state_ref.children.len() {
             return;
         }
@@ -725,7 +724,7 @@ fn spawn_child(
         });
     });
 
-    if let Some(child) = state.borrow_mut().children.get_mut(index) {
+    if let Some(child) = state.lock().children.get_mut(index) {
         child.join = Some(join);
     }
 }
@@ -926,7 +925,7 @@ fn require_dict<'a>(
 fn supervisor_from_args(
     args: &[VmValue],
     builtin: &str,
-) -> Result<Rc<RefCell<SupervisorState>>, VmError> {
+) -> Result<Arc<parking_lot::Mutex<SupervisorState>>, VmError> {
     let id = supervisor_id_from_args(args, builtin)?;
     supervisor_lookup(&id)
         .map(|handle| handle.state)
@@ -1068,7 +1067,7 @@ pub(crate) fn supervisor_debug_values() -> VmValue {
             registry
                 .borrow()
                 .values()
-                .map(|handle| supervisor_state_value(&handle.state.borrow()))
+                .map(|handle| supervisor_state_value(&handle.state.lock()))
                 .collect(),
         ))
     })
@@ -1078,7 +1077,7 @@ pub(crate) fn reset_supervisor_state() {
     SUPERVISORS.with(|registry| {
         let mut registry = registry.borrow_mut();
         for handle in registry.values_mut() {
-            let mut state = handle.state.borrow_mut();
+            let mut state = handle.state.lock();
             for child in &mut state.children {
                 if let Some(token) = &child.cancel_token {
                     token.store(true, Ordering::SeqCst);

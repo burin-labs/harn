@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use harn_vm::llm::enable_tracing;
 use harn_vm::{
@@ -86,7 +86,7 @@ impl Debugger {
         // DAP client via reverse requests instead of erroring out.
         clear_host_call_bridge();
         if let Some(bridge) = &self.host_bridge {
-            set_host_call_bridge(Rc::new(bridge.clone()));
+            set_host_call_bridge(Arc::new(bridge.clone()));
         }
 
         if let Some(ref path) = self.source_path {
@@ -119,16 +119,24 @@ impl Debugger {
                 .map(|fb| fb.name.clone())
                 .collect(),
         );
-        *self.latest_debug_state.borrow_mut() = None;
-        let latest_debug_state = Rc::clone(&self.latest_debug_state);
+        *self
+            .latest_debug_state
+            .lock()
+            .expect("debug state mutex poisoned") = None;
+        let latest_debug_state = Arc::clone(&self.latest_debug_state);
         vm.set_debug_hook(move |state| {
-            *latest_debug_state.borrow_mut() = Some(state.clone());
+            *latest_debug_state
+                .lock()
+                .expect("debug state mutex poisoned") = Some(state.clone());
             DebugAction::Continue
         });
 
         // Push the initial frame but don't run -- the first continue/step drives execution.
         vm.start(&chunk);
-        *self.latest_debug_state.borrow_mut() = Some(vm.debug_state());
+        *self
+            .latest_debug_state
+            .lock()
+            .expect("debug state mutex poisoned") = Some(vm.debug_state());
         self.vm = Some(vm);
         Ok(())
     }

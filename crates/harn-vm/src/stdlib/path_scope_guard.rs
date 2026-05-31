@@ -9,7 +9,7 @@
 //! reanchor, fork to sub-agent) before rejecting the call.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
 use crate::orchestration::{
@@ -86,7 +86,7 @@ fn register_path_scope_guard(args: &[VmValue], _out: &mut String) -> Result<VmVa
     let on_violation = parse_on_violation(&opts)?;
     let mount_modes = parse_mount_modes(&opts)?;
 
-    let pre: PreToolHookFn = Rc::new(move |tool_name: &str, args: &serde_json::Value| {
+    let pre: PreToolHookFn = Arc::new(move |tool_name: &str, args: &serde_json::Value| {
         let Some(session_id) = crate::agent_sessions::current_session_id() else {
             return PreToolAction::Allow;
         };

@@ -3,7 +3,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use regex::Regex;
@@ -16,22 +15,22 @@ use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, S
 use crate::value::{VmClosure, VmError, VmValue};
 
 tokio::task_local! {
-    static HOOK_REMINDER_REPORTS_TASK: Rc<RefCell<Vec<serde_json::Value>>>;
+    static HOOK_REMINDER_REPORTS_TASK: Arc<parking_lot::Mutex<Vec<serde_json::Value>>>;
 }
 
 fn record_hook_reminder_report(report: serde_json::Value) {
-    let _ = HOOK_REMINDER_REPORTS_TASK.try_with(|reports| reports.borrow_mut().push(report));
+    let _ = HOOK_REMINDER_REPORTS_TASK.try_with(|reports| reports.lock().push(report));
 }
 
 pub async fn scope_hook_reminder_reports<F, T>(future: F) -> (T, Vec<serde_json::Value>)
 where
     F: Future<Output = T>,
 {
-    let reports = Rc::new(RefCell::new(Vec::new()));
+    let reports = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let output = HOOK_REMINDER_REPORTS_TASK
         .scope(reports.clone(), future)
         .await;
-    let reports = std::mem::take(&mut *reports.borrow_mut());
+    let reports = std::mem::take(&mut *reports.lock());
     (output, reports)
 }
 
@@ -357,8 +356,8 @@ pub enum PostToolAction {
 }
 
 /// Callback types for legacy tool lifecycle hooks.
-pub type PreToolHookFn = Rc<dyn Fn(&str, &serde_json::Value) -> PreToolAction>;
-pub type PostToolHookFn = Rc<dyn Fn(&str, &str) -> PostToolAction>;
+pub type PreToolHookFn = Arc<dyn Fn(&str, &serde_json::Value) -> PreToolAction + Send + Sync>;
+pub type PostToolHookFn = Arc<dyn Fn(&str, &str) -> PostToolAction + Send + Sync>;
 
 /// A registered tool hook with a name pattern and callbacks.
 #[derive(Clone)]

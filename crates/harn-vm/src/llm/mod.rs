@@ -179,7 +179,7 @@ pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
 use self::call::{llm_call_impl, llm_safe_envelope_err, llm_safe_envelope_ok};
@@ -210,7 +210,7 @@ pub mod bench_internals {
     }
 }
 
-pub fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
+pub fn install_current_host_bridge(bridge: Arc<crate::bridge::HostBridge>) {
     agent_runtime::install_current_host_bridge(bridge);
 }
 

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use harn_parser::TypeExpr;
@@ -16,6 +17,11 @@ use crate::runtime_guards::RuntimeParamGuard;
 /// by code length (one slot per cacheable opcode), so `u32::MAX` is safely
 /// out of the addressable slot range.
 pub(crate) const NO_INLINE_CACHE_SLOT: u32 = u32::MAX;
+static NEXT_CHUNK_CACHE_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_chunk_cache_id() -> u64 {
+    NEXT_CHUNK_CACHE_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Bytecode opcodes for the Harn VM. The enum, the byte-to-variant
 /// mapping, the sync and async dispatch tables, the disassembly
@@ -238,8 +244,12 @@ impl fmt::Display for Constant {
 }
 
 /// A compiled chunk of bytecode.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Chunk {
+    /// Runtime-only identity for VM-local inline cache storage. It is not
+    /// serialized; freshly compiled or loaded chunks get new ids, while clones
+    /// keep the same id because they represent the same bytecode object.
+    cache_id: u64,
     /// The bytecode instructions.
     pub code: Vec<u8>,
     /// Constant pool.
@@ -272,8 +282,9 @@ pub struct Chunk {
     /// index instead of a `BTreeMap::get` (O(1) vs O(log n) with the
     /// associated pointer chasing). Derived; intentionally not serialized.
     inline_cache_index: Vec<u32>,
-    /// Shared cache entries so cloned chunks in call frames warm the same side
-    /// table as the compiled chunk used by tests/debugging.
+    /// Test/bench scratch entries for validating inline-cache transitions.
+    /// Runtime execution keeps live cache entries on each `Vm` isolate so
+    /// parallel workers do not contend on shared compiled chunks.
     inline_caches: Arc<Mutex<Vec<InlineCacheEntry>>>,
     /// Lazily-materialized shared string cache for `Constant::String` entries,
     /// parallel to `constants`. String constants are materialized once per
@@ -319,9 +330,37 @@ pub struct Chunk {
 pub type ChunkRef = Arc<Chunk>;
 pub type CompiledFunctionRef = Arc<CompiledFunction>;
 
+impl Clone for Chunk {
+    fn clone(&self) -> Self {
+        Self {
+            cache_id: self.cache_id,
+            code: self.code.clone(),
+            constants: self.constants.clone(),
+            lines: self.lines.clone(),
+            columns: self.columns.clone(),
+            source_file: self.source_file.clone(),
+            current_col: self.current_col,
+            functions: self.functions.clone(),
+            inline_cache_slots: self.inline_cache_slots.clone(),
+            inline_cache_index: self.inline_cache_index.clone(),
+            inline_caches: Arc::new(Mutex::new(vec![
+                InlineCacheEntry::Empty;
+                self.inline_cache_slot_count()
+            ])),
+            constant_strings: Arc::new(Mutex::new(vec![None; self.constants.len()])),
+            local_slots: self.local_slots.clone(),
+            references_outer_names: self.references_outer_names,
+            #[cfg(debug_assertions)]
+            balance_depth: self.balance_depth,
+            #[cfg(debug_assertions)]
+            balance_nonlinear: self.balance_nonlinear,
+        }
+    }
+}
+
 /// Serializable snapshot of a [`Chunk`] suitable for the on-disk bytecode
 /// cache and for in-memory stdlib artifact caches. Inline-cache state is
-/// dropped at freeze time because it warms at runtime per-process; the
+/// dropped at freeze time because it warms at runtime per VM isolate; the
 /// rest of the chunk round-trips byte-identically.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedChunk {
@@ -584,6 +623,7 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
 impl Chunk {
     pub fn new() -> Self {
         Self {
+            cache_id: next_chunk_cache_id(),
             code: Vec::new(),
             constants: Vec::new(),
             lines: Vec::new(),
@@ -870,6 +910,14 @@ impl Chunk {
         }
     }
 
+    pub(crate) fn inline_cache_slot_count(&self) -> usize {
+        self.inline_cache_slots.len()
+    }
+
+    pub(crate) fn cache_id(&self) -> u64 {
+        self.cache_id
+    }
+
     /// Pre-optimization control path: the `BTreeMap`-backed lookup the
     /// dispatcher used before the flat `Vec<u32>` side-table. Exposed
     /// only behind the `vm-bench-internals` feature so the criterion
@@ -926,6 +974,7 @@ impl Chunk {
     /// savings compound across the millions of dispatches a typical
     /// loop body issues.
     #[inline]
+    #[cfg(any(test, feature = "vm-bench-internals"))]
     pub(crate) fn peek_adaptive_binary_cache(
         &self,
         slot: usize,
@@ -948,6 +997,7 @@ impl Chunk {
     /// per-dispatch savings compound across the millions of method calls a
     /// typical pipeline (`xs.filter(...).map(...).count()`) issues.
     #[inline]
+    #[cfg(any(test, feature = "vm-bench-internals"))]
     pub(crate) fn peek_method_cache(&self, slot: usize) -> Option<(u16, usize, MethodCacheTarget)> {
         match self.inline_caches.lock().get(slot)? {
             &InlineCacheEntry::Method {
@@ -969,6 +1019,7 @@ impl Chunk {
     /// memcpy. Fires on every `Op::GetProperty` / `Op::GetPropertyOpt`
     /// dispatch, which is the dominant opcode for any field-read-heavy code.
     #[inline]
+    #[cfg(any(test, feature = "vm-bench-internals"))]
     pub(crate) fn peek_property_cache(&self, slot: usize) -> Option<(u16, PropertyCacheTarget)> {
         match self.inline_caches.lock().get(slot)? {
             InlineCacheEntry::Property { name_idx, target } => Some((*name_idx, target.clone())),
@@ -986,6 +1037,7 @@ impl Chunk {
     /// fast path inside `Op::CallBuiltin`. Single peek per dispatch covers
     /// both the read check and the write-back computation.
     #[inline]
+    #[cfg(any(test, feature = "vm-bench-internals"))]
     pub(crate) fn peek_direct_call_state(&self, slot: usize) -> Option<DirectCallState> {
         match self.inline_caches.lock().get(slot)? {
             InlineCacheEntry::DirectCall { state } => Some(state.clone()),
@@ -993,6 +1045,7 @@ impl Chunk {
         }
     }
 
+    #[cfg(any(test, feature = "vm-bench-internals"))]
     pub(crate) fn set_inline_cache_entry(&self, slot: usize, entry: InlineCacheEntry) {
         if let Some(existing) = self.inline_caches.lock().get_mut(slot) {
             *existing = entry;
@@ -1035,6 +1088,7 @@ impl Chunk {
             }
         }
         Self {
+            cache_id: next_chunk_cache_id(),
             code: cached.code.clone(),
             constants: cached.constants.clone(),
             lines: cached.lines.clone(),
@@ -1075,11 +1129,6 @@ impl Chunk {
             scope_depth,
         });
         idx as u16
-    }
-
-    #[cfg(test)]
-    pub(crate) fn inline_cache_entries(&self) -> Vec<InlineCacheEntry> {
-        self.inline_caches.lock().clone()
     }
 
     /// Read a u64 argument at the given position.

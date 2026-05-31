@@ -106,7 +106,7 @@ impl InProcessHost {
         &'a self,
         method: &'a str,
         params: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, VmError>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, VmError>> + Send + 'a>> {
         Box::pin(async move {
             match method {
                 "builtin_call" => {

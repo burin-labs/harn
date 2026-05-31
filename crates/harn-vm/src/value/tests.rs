@@ -3,6 +3,10 @@ use std::sync::Arc;
 use super::*;
 
 static_assertions::assert_impl_all!(VmValue: Send, Sync);
+static_assertions::assert_impl_all!(crate::Chunk: Send, Sync);
+static_assertions::assert_impl_all!(crate::vm::Vm: Send);
+static_assertions::assert_impl_all!(VmBuiltinFn: Send, Sync);
+static_assertions::assert_impl_all!(VmAsyncBuiltinFn: Send, Sync);
 
 #[cfg(target_pointer_width = "64")]
 #[test]

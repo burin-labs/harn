@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -45,9 +44,9 @@ struct Mailbox {
 
 #[derive(Default)]
 pub(crate) struct VmSharedStateRuntime {
-    cells: RefCell<BTreeMap<ScopedKey, SharedCell>>,
-    maps: RefCell<BTreeMap<ScopedKey, SharedMap>>,
-    mailboxes: RefCell<BTreeMap<ScopedKey, Mailbox>>,
+    cells: parking_lot::Mutex<BTreeMap<ScopedKey, SharedCell>>,
+    maps: parking_lot::Mutex<BTreeMap<ScopedKey, SharedMap>>,
+    mailboxes: parking_lot::Mutex<BTreeMap<ScopedKey, Mailbox>>,
 }
 
 impl VmSharedStateRuntime {
@@ -57,7 +56,7 @@ impl VmSharedStateRuntime {
 
     pub(crate) fn open_cell(&self, scoped: ScopedKey, initial: VmValue) -> VmValue {
         self.cells
-            .borrow_mut()
+            .lock()
             .entry(scoped.clone())
             .or_insert_with(|| SharedCell {
                 value: initial,
@@ -68,21 +67,21 @@ impl VmSharedStateRuntime {
     }
 
     pub(crate) fn cell_get(&self, scoped: &ScopedKey) -> VmValue {
-        let mut cells = self.cells.borrow_mut();
+        let mut cells = self.cells.lock();
         let cell = cells.entry(scoped.clone()).or_default();
         cell.metrics.read_count += 1;
         cell.value.clone()
     }
 
     pub(crate) fn cell_snapshot(&self, scoped: &ScopedKey) -> VmValue {
-        let mut cells = self.cells.borrow_mut();
+        let mut cells = self.cells.lock();
         let cell = cells.entry(scoped.clone()).or_default();
         cell.metrics.read_count += 1;
         snapshot_value(cell.value.clone(), cell.version)
     }
 
     pub(crate) fn cell_set(&self, scoped: &ScopedKey, value: VmValue) -> VmValue {
-        let mut cells = self.cells.borrow_mut();
+        let mut cells = self.cells.lock();
         let cell = cells.entry(scoped.clone()).or_default();
         let old = std::mem::replace(&mut cell.value, value);
         cell.version = cell.version.saturating_add(1);
@@ -96,7 +95,7 @@ impl VmSharedStateRuntime {
         expected: &VmValue,
         new_value: VmValue,
     ) -> bool {
-        let mut cells = self.cells.borrow_mut();
+        let mut cells = self.cells.lock();
         let cell = cells.entry(scoped.clone()).or_default();
         let (expected_value, expected_version) = snapshot_expected(expected);
         let version_matches = expected_version.is_none_or(|version| version == cell.version);
@@ -122,7 +121,7 @@ impl VmSharedStateRuntime {
         initial: Option<BTreeMap<String, VmValue>>,
     ) -> VmValue {
         self.maps
-            .borrow_mut()
+            .lock()
             .entry(scoped.clone())
             .or_insert_with(|| SharedMap {
                 entries: initial.unwrap_or_default(),
@@ -133,14 +132,14 @@ impl VmSharedStateRuntime {
     }
 
     pub(crate) fn map_get(&self, scoped: &ScopedKey, key: &str, default: VmValue) -> VmValue {
-        let mut maps = self.maps.borrow_mut();
+        let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         map.metrics.read_count += 1;
         map.entries.get(key).cloned().unwrap_or(default)
     }
 
     pub(crate) fn map_snapshot(&self, scoped: &ScopedKey, key: &str) -> VmValue {
-        let mut maps = self.maps.borrow_mut();
+        let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         map.metrics.read_count += 1;
         snapshot_value(
@@ -150,14 +149,14 @@ impl VmSharedStateRuntime {
     }
 
     pub(crate) fn map_entries(&self, scoped: &ScopedKey) -> VmValue {
-        let mut maps = self.maps.borrow_mut();
+        let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         map.metrics.read_count += 1;
         VmValue::Dict(std::sync::Arc::new(map.entries.clone()))
     }
 
     pub(crate) fn map_set(&self, scoped: &ScopedKey, key: String, value: VmValue) -> VmValue {
-        let mut maps = self.maps.borrow_mut();
+        let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         let old = map.entries.insert(key, value).unwrap_or(VmValue::Nil);
         map.version = map.version.saturating_add(1);
@@ -166,7 +165,7 @@ impl VmSharedStateRuntime {
     }
 
     pub(crate) fn map_delete(&self, scoped: &ScopedKey, key: &str) -> VmValue {
-        let mut maps = self.maps.borrow_mut();
+        let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         let old = map.entries.remove(key).unwrap_or(VmValue::Nil);
         if !matches!(old, VmValue::Nil) {
@@ -183,7 +182,7 @@ impl VmSharedStateRuntime {
         expected: &VmValue,
         new_value: VmValue,
     ) -> bool {
-        let mut maps = self.maps.borrow_mut();
+        let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
         let current = map.entries.get(&key).cloned().unwrap_or(VmValue::Nil);
         let (expected_value, expected_version) = snapshot_expected(expected);
@@ -210,7 +209,7 @@ impl VmSharedStateRuntime {
 
     pub(crate) fn open_mailbox(&self, scoped: ScopedKey, capacity: usize) -> VmValue {
         self.mailboxes
-            .borrow_mut()
+            .lock()
             .entry(scoped.clone())
             .or_insert_with(|| {
                 let capacity = capacity.max(1);
@@ -237,7 +236,7 @@ impl VmSharedStateRuntime {
     }
 
     pub(crate) fn mailbox(&self, scoped: &ScopedKey) -> Option<VmValue> {
-        if self.mailboxes.borrow().contains_key(scoped) {
+        if self.mailboxes.lock().contains_key(scoped) {
             Some(handle_value("mailbox", scoped))
         } else {
             None
@@ -246,13 +245,13 @@ impl VmSharedStateRuntime {
 
     pub(crate) fn mailbox_channel(&self, scoped: &ScopedKey) -> Option<VmChannelHandle> {
         self.mailboxes
-            .borrow()
+            .lock()
             .get(scoped)
             .map(|mailbox| mailbox.channel.clone())
     }
 
     pub(crate) fn note_mailbox_send(&self, scoped: &ScopedKey, ok: bool) {
-        if let Some(mailbox) = self.mailboxes.borrow().get(scoped) {
+        if let Some(mailbox) = self.mailboxes.lock().get(scoped) {
             if ok {
                 mailbox.sent_count.fetch_add(1, Ordering::SeqCst);
                 mailbox.depth.fetch_add(1, Ordering::SeqCst);
@@ -263,7 +262,7 @@ impl VmSharedStateRuntime {
     }
 
     pub(crate) fn note_mailbox_receive(&self, scoped: &ScopedKey) {
-        if let Some(mailbox) = self.mailboxes.borrow().get(scoped) {
+        if let Some(mailbox) = self.mailboxes.lock().get(scoped) {
             mailbox.received_count.fetch_add(1, Ordering::SeqCst);
             let _ = mailbox
                 .depth
@@ -274,7 +273,7 @@ impl VmSharedStateRuntime {
     }
 
     pub(crate) fn close_mailbox(&self, scoped: &ScopedKey) -> bool {
-        let Some(mailbox) = self.mailboxes.borrow().get(scoped).cloned() else {
+        let Some(mailbox) = self.mailboxes.lock().get(scoped).cloned() else {
             return false;
         };
         !mailbox.channel.closed.swap(true, Ordering::SeqCst)
@@ -284,39 +283,39 @@ impl VmSharedStateRuntime {
         match (kind, scoped) {
             (Some("shared_cell"), Some(scoped)) => self
                 .cells
-                .borrow()
+                .lock()
                 .get(scoped)
                 .map(|cell| shared_metrics_value(&cell.metrics, cell.version))
                 .unwrap_or_else(empty_shared_metrics),
             (Some("shared_map"), Some(scoped)) => self
                 .maps
-                .borrow()
+                .lock()
                 .get(scoped)
                 .map(|map| shared_metrics_value(&map.metrics, map.version))
                 .unwrap_or_else(empty_shared_metrics),
             (Some("mailbox"), Some(scoped)) => self
                 .mailboxes
-                .borrow()
+                .lock()
                 .get(scoped)
                 .map(mailbox_metrics_value)
                 .unwrap_or_else(empty_mailbox_metrics),
             _ => {
                 let mut values = Vec::new();
-                for (scoped, cell) in self.cells.borrow().iter() {
+                for (scoped, cell) in self.cells.lock().iter() {
                     values.push(with_scope_fields(
                         "shared_cell",
                         scoped,
                         shared_metrics_value(&cell.metrics, cell.version),
                     ));
                 }
-                for (scoped, map) in self.maps.borrow().iter() {
+                for (scoped, map) in self.maps.lock().iter() {
                     values.push(with_scope_fields(
                         "shared_map",
                         scoped,
                         shared_metrics_value(&map.metrics, map.version),
                     ));
                 }
-                for (scoped, mailbox) in self.mailboxes.borrow().iter() {
+                for (scoped, mailbox) in self.mailboxes.lock().iter() {
                     values.push(with_scope_fields(
                         "mailbox",
                         scoped,

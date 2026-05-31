@@ -44,7 +44,7 @@
 //! wants to recover the schema-shaped payload after the fact.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
 
@@ -70,7 +70,7 @@ const ERR_TRANSPORT: &str = "transport";
 /// agent loop. Pass `None` from non-bridge call sites.
 pub(crate) async fn schema_recover_impl(
     args: Vec<VmValue>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -546,7 +546,7 @@ async fn run_llm_repair(
     schema: &VmValue,
     repair: &LlmRepairConfig,
     base_opts: &Option<BTreeMap<String, VmValue>>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<Option<VmValue>, String> {
     let prompt = build_repair_prompt(text, schema);
     let merged_options = merge_repair_options(base_opts.as_ref(), &repair.overrides, schema);

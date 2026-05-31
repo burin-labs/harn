@@ -9,8 +9,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
+use sqlx_core::executor::Executor;
 use sqlx_core::row::Row;
 use sqlx_postgres::PgPool;
 
@@ -25,7 +27,7 @@ const MIGRATION_LOCK_KEY: i64 = 0x4861_726E_4D67_7201;
 
 const DEFAULT_TABLE: &str = "harn_migrations";
 
-pub(super) async fn run(args: &[VmValue]) -> Result<VmValue, VmError> {
+pub(super) async fn run(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let pool_handle = args.first().ok_or_else(|| {
         runtime_error("pg_migrate: pool handle is required as the first argument")
     })?;
@@ -53,27 +55,27 @@ pub(super) async fn run(args: &[VmValue]) -> Result<VmValue, VmError> {
     let entries = discover_migrations(&dir)?;
 
     let started = Instant::now();
-    acquire_lock(&pool).await?;
+    acquire_lock(pool.clone()).await?;
     let result = async {
-        ensure_migrations_table(&pool, &table_name).await?;
-        let applied = applied_set(&pool, &table_name).await?;
+        ensure_migrations_table(pool.clone(), table_name.clone()).await?;
+        let applied = applied_set(pool.clone(), table_name.clone()).await?;
 
         let mut applied_now = Vec::new();
         let mut skipped = Vec::new();
-        for entry in &entries {
+        for entry in entries.iter().cloned() {
             if applied.contains(&entry.name) {
                 skipped.push(entry.name.clone());
                 continue;
             }
             if !dry_run {
-                apply_one(&pool, &table_name, entry).await?;
+                apply_one(pool.clone(), table_name.clone(), entry.clone()).await?;
             }
             applied_now.push(entry.name.clone());
         }
         Ok::<_, VmError>((applied_now, skipped))
     }
     .await;
-    release_lock(&pool).await;
+    release_lock(pool.clone()).await;
     let (applied_now, skipped) = result?;
 
     let mut response = BTreeMap::new();
@@ -130,6 +132,7 @@ fn dir_arg(dict: &BTreeMap<String, VmValue>, key: &str) -> Result<PathBuf, VmErr
     }
 }
 
+#[derive(Clone)]
 struct MigrationEntry {
     name: String,
     path: PathBuf,
@@ -164,7 +167,7 @@ fn discover_migrations(dir: &Path) -> Result<Vec<MigrationEntry>, VmError> {
     Ok(entries)
 }
 
-async fn ensure_migrations_table(pool: &PgPool, table: &str) -> Result<(), VmError> {
+async fn ensure_migrations_table(pool: Arc<PgPool>, table: String) -> Result<(), VmError> {
     let sql = format!(
         "CREATE TABLE IF NOT EXISTS \"{table}\" (\
              name TEXT PRIMARY KEY,\
@@ -172,17 +175,17 @@ async fn ensure_migrations_table(pool: &PgPool, table: &str) -> Result<(), VmErr
              checksum BYTEA NOT NULL\
          )"
     );
-    sqlx_core::raw_sql::raw_sql(&sql)
-        .execute(pool)
+    pool.as_ref()
+        .execute(sql.as_str())
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: ensure table failed: {error}")))?;
     Ok(())
 }
 
-async fn applied_set(pool: &PgPool, table: &str) -> Result<BTreeSet<String>, VmError> {
+async fn applied_set(pool: Arc<PgPool>, table: String) -> Result<BTreeSet<String>, VmError> {
     let sql = format!("SELECT name FROM \"{table}\"");
     let rows = sqlx_core::query::query::<sqlx_postgres::Postgres>(&sql)
-        .fetch_all(pool)
+        .fetch_all(pool.as_ref())
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: select applied failed: {error}")))?;
     Ok(rows
@@ -191,7 +194,7 @@ async fn applied_set(pool: &PgPool, table: &str) -> Result<BTreeSet<String>, VmE
         .collect::<BTreeSet<_>>())
 }
 
-async fn apply_one(pool: &PgPool, table: &str, entry: &MigrationEntry) -> Result<(), VmError> {
+async fn apply_one(pool: Arc<PgPool>, table: String, entry: MigrationEntry) -> Result<(), VmError> {
     let sql = std::fs::read_to_string(&entry.path).map_err(|error| {
         runtime_error(format!(
             "pg_migrate: could not read {}: {error}",
@@ -205,8 +208,8 @@ async fn apply_one(pool: &PgPool, table: &str, entry: &MigrationEntry) -> Result
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: begin failed: {error}")))?;
 
-    sqlx_core::raw_sql::raw_sql(&sql)
-        .execute(&mut *tx)
+    (&mut *tx)
+        .execute(sql.as_str())
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: applying {}: {error}", entry.name)))?;
 
@@ -225,19 +228,19 @@ async fn apply_one(pool: &PgPool, table: &str, entry: &MigrationEntry) -> Result
     })
 }
 
-async fn acquire_lock(pool: &PgPool) -> Result<(), VmError> {
+async fn acquire_lock(pool: Arc<PgPool>) -> Result<(), VmError> {
     sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT pg_advisory_lock($1)")
         .bind(MIGRATION_LOCK_KEY)
-        .execute(pool)
+        .execute(pool.as_ref())
         .await
         .map_err(|error| runtime_error(format!("pg_migrate: advisory lock failed: {error}")))?;
     Ok(())
 }
 
-async fn release_lock(pool: &PgPool) {
+async fn release_lock(pool: Arc<PgPool>) {
     let _ = sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT pg_advisory_unlock($1)")
         .bind(MIGRATION_LOCK_KEY)
-        .execute(pool)
+        .execute(pool.as_ref())
         .await;
 }
 

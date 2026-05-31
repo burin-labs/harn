@@ -54,7 +54,14 @@ impl ProvidersConfig {
     }
 
     pub fn merge_from(&mut self, overlay: &ProvidersConfig) {
-        self.providers.extend(overlay.providers.clone());
+        for (name, provider) in &overlay.providers {
+            match self.providers.get_mut(name) {
+                Some(existing) => existing.merge_from(provider),
+                None => {
+                    self.providers.insert(name.clone(), provider.clone());
+                }
+            }
+        }
         self.aliases.extend(overlay.aliases.clone());
         self.alias_tool_calling
             .extend(overlay.alias_tool_calling.clone());
@@ -90,68 +97,137 @@ impl ProvidersConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ProviderDef {
-    #[serde(default)]
     pub display_name: Option<String>,
-    #[serde(default)]
     pub icon: Option<String>,
     /// Provider protocol. Omitted providers use Harn's normal HTTP provider
     /// path; `acp` launches an Agent Client Protocol server and drives it as
     /// an agent-backed provider.
-    #[serde(default)]
     pub protocol: Option<String>,
-    #[serde(default)]
     pub base_url: String,
-    #[serde(default)]
     pub base_url_env: Option<String>,
-    #[serde(default = "default_bearer")]
     pub auth_style: String,
-    #[serde(default)]
     pub auth_header: Option<String>,
-    #[serde(default)]
     pub auth_env: AuthEnv,
-    #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
-    #[serde(default)]
     pub chat_endpoint: String,
-    #[serde(default)]
     pub completion_endpoint: Option<String>,
-    #[serde(default)]
     pub command: Option<String>,
-    #[serde(default)]
     pub args: Vec<String>,
-    #[serde(default)]
     pub env: BTreeMap<String, String>,
-    #[serde(default)]
     pub cwd: Option<String>,
-    #[serde(default)]
     pub mcp_servers: Vec<serde_json::Value>,
-    #[serde(default)]
     pub healthcheck: Option<HealthcheckDef>,
-    #[serde(default)]
     pub features: Vec<String>,
     /// Fallback provider name to try if this provider fails.
-    #[serde(default)]
     pub fallback: Option<String>,
     /// Number of retries before falling back (default 0).
-    #[serde(default)]
     pub retry_count: Option<u32>,
     /// Delay between retries in milliseconds (default 1000).
-    #[serde(default)]
     pub retry_delay_ms: Option<u64>,
     /// Maximum requests per minute. None = unlimited.
-    #[serde(default)]
     pub rpm: Option<u32>,
     /// Provider/catalog pricing in USD per 1k input tokens.
-    #[serde(default)]
     pub cost_per_1k_in: Option<f64>,
     /// Provider/catalog pricing in USD per 1k output tokens.
-    #[serde(default)]
     pub cost_per_1k_out: Option<f64>,
     /// Observed or configured p50 latency in milliseconds.
-    #[serde(default)]
     pub latency_p50_ms: Option<u64>,
+    #[doc(hidden)]
+    pub auth_style_explicit: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProviderDefWire {
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    protocol: Option<String>,
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    base_url_env: Option<String>,
+    #[serde(default)]
+    auth_style: Option<String>,
+    #[serde(default)]
+    auth_header: Option<String>,
+    #[serde(default)]
+    auth_env: AuthEnv,
+    #[serde(default)]
+    extra_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    chat_endpoint: String,
+    #[serde(default)]
+    completion_endpoint: Option<String>,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    mcp_servers: Vec<serde_json::Value>,
+    #[serde(default)]
+    healthcheck: Option<HealthcheckDef>,
+    #[serde(default)]
+    features: Vec<String>,
+    #[serde(default)]
+    fallback: Option<String>,
+    #[serde(default)]
+    retry_count: Option<u32>,
+    #[serde(default)]
+    retry_delay_ms: Option<u64>,
+    #[serde(default)]
+    rpm: Option<u32>,
+    #[serde(default)]
+    cost_per_1k_in: Option<f64>,
+    #[serde(default)]
+    cost_per_1k_out: Option<f64>,
+    #[serde(default)]
+    latency_p50_ms: Option<u64>,
+}
+
+impl<'de> Deserialize<'de> for ProviderDef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = ProviderDefWire::deserialize(deserializer)?;
+        let auth_style_explicit = wire.auth_style.is_some();
+        Ok(Self {
+            display_name: wire.display_name,
+            icon: wire.icon,
+            protocol: wire.protocol,
+            base_url: wire.base_url,
+            base_url_env: wire.base_url_env,
+            auth_style: wire.auth_style.unwrap_or_else(default_bearer),
+            auth_header: wire.auth_header,
+            auth_env: wire.auth_env,
+            extra_headers: wire.extra_headers,
+            chat_endpoint: wire.chat_endpoint,
+            completion_endpoint: wire.completion_endpoint,
+            command: wire.command,
+            args: wire.args,
+            env: wire.env,
+            cwd: wire.cwd,
+            mcp_servers: wire.mcp_servers,
+            healthcheck: wire.healthcheck,
+            features: wire.features,
+            fallback: wire.fallback,
+            retry_count: wire.retry_count,
+            retry_delay_ms: wire.retry_delay_ms,
+            rpm: wire.rpm,
+            cost_per_1k_in: wire.cost_per_1k_in,
+            cost_per_1k_out: wire.cost_per_1k_out,
+            latency_p50_ms: wire.latency_p50_ms,
+            auth_style_explicit,
+        })
+    }
 }
 
 impl Default for ProviderDef {
@@ -182,7 +258,66 @@ impl Default for ProviderDef {
             cost_per_1k_in: None,
             cost_per_1k_out: None,
             latency_p50_ms: None,
+            auth_style_explicit: false,
         }
+    }
+}
+
+impl ProviderDef {
+    fn merge_from(&mut self, overlay: &ProviderDef) {
+        merge_option(&mut self.display_name, &overlay.display_name);
+        merge_option(&mut self.icon, &overlay.icon);
+        merge_option(&mut self.protocol, &overlay.protocol);
+        merge_string(&mut self.base_url, &overlay.base_url);
+        merge_option(&mut self.base_url_env, &overlay.base_url_env);
+        let overlay_uses_default_auth_style = overlay.auth_style == default_bearer();
+        if overlay.auth_style_explicit
+            || !overlay_uses_default_auth_style
+            || self.auth_style == default_bearer()
+        {
+            self.auth_style = overlay.auth_style.clone();
+            self.auth_style_explicit |=
+                overlay.auth_style_explicit || !overlay_uses_default_auth_style;
+        }
+        merge_option(&mut self.auth_header, &overlay.auth_header);
+        if !overlay.auth_env.is_none() {
+            self.auth_env = overlay.auth_env.clone();
+        }
+        self.extra_headers.extend(overlay.extra_headers.clone());
+        merge_string(&mut self.chat_endpoint, &overlay.chat_endpoint);
+        merge_option(&mut self.completion_endpoint, &overlay.completion_endpoint);
+        merge_option(&mut self.command, &overlay.command);
+        merge_vec(&mut self.args, &overlay.args);
+        self.env.extend(overlay.env.clone());
+        merge_option(&mut self.cwd, &overlay.cwd);
+        merge_vec(&mut self.mcp_servers, &overlay.mcp_servers);
+        merge_option(&mut self.healthcheck, &overlay.healthcheck);
+        merge_vec(&mut self.features, &overlay.features);
+        merge_option(&mut self.fallback, &overlay.fallback);
+        merge_option(&mut self.retry_count, &overlay.retry_count);
+        merge_option(&mut self.retry_delay_ms, &overlay.retry_delay_ms);
+        merge_option(&mut self.rpm, &overlay.rpm);
+        merge_option(&mut self.cost_per_1k_in, &overlay.cost_per_1k_in);
+        merge_option(&mut self.cost_per_1k_out, &overlay.cost_per_1k_out);
+        merge_option(&mut self.latency_p50_ms, &overlay.latency_p50_ms);
+    }
+}
+
+fn merge_option<T: Clone>(base: &mut Option<T>, overlay: &Option<T>) {
+    if overlay.is_some() {
+        *base = overlay.clone();
+    }
+}
+
+fn merge_string(base: &mut String, overlay: &str) {
+    if !overlay.is_empty() {
+        *base = overlay.to_string();
+    }
+}
+
+fn merge_vec<T: Clone>(base: &mut Vec<T>, overlay: &[T]) {
+    if !overlay.is_empty() {
+        *base = overlay.to_vec();
     }
 }
 
@@ -199,6 +334,12 @@ pub enum AuthEnv {
     None,
     Single(String),
     Multiple(Vec<String>),
+}
+
+impl AuthEnv {
+    fn is_none(&self) -> bool {
+        matches!(self, AuthEnv::None)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -549,12 +690,14 @@ pub fn load_config() -> &'static ProvidersConfig {
                 return config;
             }
         }
-        if let Some(home) = dirs_or_home() {
-            let path = format!("{home}/.config/harn/providers.toml");
-            if let Some(overlay) = read_external_config(&path, false) {
-                config.merge_from(&overlay);
-                let _ = CONFIG_PATH.set(path);
-                return config;
+        if should_load_home_config() {
+            if let Some(home) = dirs_or_home() {
+                let path = format!("{home}/.config/harn/providers.toml");
+                if let Some(overlay) = read_external_config(&path, false) {
+                    config.merge_from(&overlay);
+                    let _ = CONFIG_PATH.set(path);
+                    return config;
+                }
             }
         }
         config
@@ -587,6 +730,12 @@ fn read_external_config(path: &str, verbose: bool) -> Option<ProvidersConfig> {
             None
         }
     }
+}
+
+fn should_load_home_config() -> bool {
+    // Unit tests should cover embedded defaults plus explicit overlays, not
+    // whichever provider file happens to exist on the developer machine.
+    !cfg!(test)
 }
 
 /// Parse a provider/model catalog overlay in the same shape as
@@ -2118,6 +2267,64 @@ mod tests {
         assert!(merged.providers.contains_key("anthropic"));
         assert!(merged.providers.contains_key("ollama"));
         assert_eq!(merged.aliases["quickstart"].id, "llama3.2");
+    }
+
+    #[test]
+    fn partial_provider_overlay_preserves_builtin_provider_metadata() {
+        let overlay = parse_config_toml(
+            r#"
+            [providers.ollama]
+            base_url = "http://localhost:11435"
+            extra_headers = { "x-local" = "1" }
+            "#,
+        )
+        .expect("provider overlay parses");
+
+        let merged = merge_global_config(overlay);
+        let ollama = merged
+            .providers
+            .get("ollama")
+            .expect("ollama remains configured");
+
+        assert_eq!(ollama.base_url, "http://localhost:11435");
+        assert_eq!(ollama.auth_style, "none");
+        assert_eq!(ollama.chat_endpoint, "/api/chat");
+        assert_eq!(ollama.completion_endpoint.as_deref(), Some("/api/generate"));
+        assert_eq!(ollama.cost_per_1k_in, Some(0.0));
+        assert_eq!(ollama.cost_per_1k_out, Some(0.0));
+        assert_eq!(
+            ollama
+                .healthcheck
+                .as_ref()
+                .and_then(|healthcheck| healthcheck.path.as_deref()),
+            Some("/api/tags")
+        );
+        assert_eq!(
+            ollama.extra_headers.get("x-local").map(String::as_str),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn partial_provider_overlay_can_explicitly_replace_default_auth_style() {
+        let overlay = parse_config_toml(
+            r#"
+            [providers.ollama]
+            auth_style = "bearer"
+            auth_env = "OLLAMA_API_KEY"
+            "#,
+        )
+        .expect("provider overlay parses");
+
+        let merged = merge_global_config(overlay);
+        let ollama = merged
+            .providers
+            .get("ollama")
+            .expect("ollama remains configured");
+
+        assert_eq!(ollama.auth_style, "bearer");
+        assert_eq!(auth_env_names(&ollama.auth_env), vec!["OLLAMA_API_KEY"]);
+        assert_eq!(ollama.chat_endpoint, "/api/chat");
     }
 
     #[test]

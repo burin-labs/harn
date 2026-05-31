@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -91,8 +90,8 @@ pub(super) async fn prepare_vm_baseline(
 /// Execute a compiled chunk with ACP bridge builtins.
 pub(super) async fn execute_chunk(
     chunk: harn_vm::Chunk,
-    bridge: Rc<AcpBridge>,
-    host_bridge: Rc<harn_vm::bridge::HostBridge>,
+    bridge: Arc<AcpBridge>,
+    host_bridge: Arc<harn_vm::bridge::HostBridge>,
     prompt: PromptGlobals<'_>,
     setup: VmSetup<'_>,
 ) -> Result<String, String> {
@@ -223,7 +222,7 @@ pub(super) async fn execute_chunk(
 }
 
 pub(super) async fn load_host_mcp_clients(
-    host_bridge: Rc<harn_vm::bridge::HostBridge>,
+    host_bridge: Arc<harn_vm::bridge::HostBridge>,
 ) -> BTreeMap<String, harn_vm::VmValue> {
     let mut mcp_dict = BTreeMap::new();
     let capabilities = host_bridge

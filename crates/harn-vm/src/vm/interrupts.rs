@@ -91,7 +91,7 @@ impl Vm {
     pub(crate) fn dispatch_interrupt_handlers<'a>(
         &'a mut self,
         signal: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, VmError>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<bool, VmError>> + Send + 'a>> {
         Box::pin(async move {
             let signal = normalize_signal(signal)?;
             self.interrupted = true;

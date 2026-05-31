@@ -20,7 +20,7 @@ impl StaticCompositionToolHost {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl CompositionToolHost for StaticCompositionToolHost {
     async fn call(&self, binding: &BindingManifestEntry, input: Value) -> CompositionToolOutput {
         if let Some(value) = self.outputs.get(&binding.name) {
@@ -55,7 +55,7 @@ impl ClosureCompositionToolHost {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl CompositionToolHost for ClosureCompositionToolHost {
     async fn call(&self, binding: &BindingManifestEntry, input: Value) -> CompositionToolOutput {
         let mut vm = self.ctx.child_vm();

@@ -1,7 +1,6 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -212,7 +211,7 @@ pub(super) struct WorkerState {
 }
 
 thread_local! {
-    pub(super) static WORKER_REGISTRY: RefCell<BTreeMap<String, Rc<RefCell<WorkerState>>>> = const { RefCell::new(BTreeMap::new()) };
+    pub(super) static WORKER_REGISTRY: RefCell<BTreeMap<String, Arc<parking_lot::Mutex<WorkerState>>>> = const { RefCell::new(BTreeMap::new()) };
     static WORKER_COUNTER: Cell<u64> = const { Cell::new(0) };
 }
 
@@ -228,7 +227,7 @@ pub(super) fn reset_worker_registry() {
     WORKER_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
         for state in registry.values() {
-            let mut worker = state.borrow_mut();
+            let mut worker = state.lock();
             worker.cancel_token.store(true, Ordering::SeqCst);
             worker.suspend_signal.store(true, Ordering::SeqCst);
             if let Some(handle) = worker.handle.take() {
@@ -482,7 +481,7 @@ pub(super) fn worker_summary(state: &WorkerState) -> Result<VmValue, VmError> {
 
 pub(super) fn with_worker_state<T>(
     worker_id: &str,
-    f: impl FnOnce(Rc<RefCell<WorkerState>>) -> Result<T, VmError>,
+    f: impl FnOnce(Arc<parking_lot::Mutex<WorkerState>>) -> Result<T, VmError>,
 ) -> Result<T, VmError> {
     WORKER_REGISTRY.with(|registry| {
         let state = registry

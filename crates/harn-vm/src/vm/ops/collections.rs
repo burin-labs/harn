@@ -413,15 +413,16 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_get_property(&mut self, optional: bool) -> Result<(), VmError> {
-        let (name_idx, cache_slot, cached_property) = {
+        let (chunk, name_idx, cache_slot) = {
             let frame = self.frames.last_mut().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
+            let chunk = Arc::clone(&frame.chunk);
             let name_idx = frame.chunk.read_u16(frame.ip);
             frame.ip += 2;
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cached_property = cache_slot.and_then(|slot| frame.chunk.peek_property_cache(slot));
-            (name_idx, cache_slot, cached_property)
+            (chunk, name_idx, cache_slot)
         };
+        let cached_property = cache_slot.and_then(|slot| self.peek_property_cache(&chunk, slot));
 
         let obj = self.pop()?;
         if optional && matches!(obj, VmValue::Nil) {
@@ -432,8 +433,7 @@ impl super::super::Vm {
             self.stack.push(result);
         } else {
             let (result, target) = {
-                let frame = self.frames.last().unwrap();
-                let name = Self::const_str(&frame.chunk.constants[name_idx as usize])?;
+                let name = Self::const_str(&chunk.constants[name_idx as usize])?;
                 (
                     Self::resolve_property(&obj, name, optional)?,
                     Self::property_cache_target(&obj, name),
@@ -441,10 +441,11 @@ impl super::super::Vm {
             };
 
             if let (Some(slot), Some(target)) = (cache_slot, target) {
-                let frame = self.frames.last().unwrap();
-                frame
-                    .chunk
-                    .set_inline_cache_entry(slot, InlineCacheEntry::Property { name_idx, target });
+                self.set_inline_cache_entry(
+                    &chunk,
+                    slot,
+                    InlineCacheEntry::Property { name_idx, target },
+                );
             }
             self.stack.push(result);
         }

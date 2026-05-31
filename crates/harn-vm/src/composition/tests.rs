@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use serde_json::Value;
 
@@ -224,7 +224,7 @@ async fn harn_composition_executes_read_only_binding_and_records_child_trace() {
             manifest,
             ..CompositionExecutionRequest::default()
         },
-        Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
+        Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
     )
     .await;
     assert!(report.ok, "{}", report.summary);
@@ -253,7 +253,7 @@ async fn harn_composition_denies_mutating_binding_calls() {
             manifest,
             ..CompositionExecutionRequest::default()
         },
-        Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
+        Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
     )
     .await;
     assert!(!report.ok);
@@ -289,7 +289,7 @@ async fn harn_composition_records_denied_manifest_binding_as_child_failure() {
             manifest,
             ..CompositionExecutionRequest::default()
         },
-        Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
+        Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
     )
     .await;
     assert!(!report.ok);
@@ -324,7 +324,7 @@ async fn harn_composition_enforces_child_call_cap() {
             },
             ..CompositionExecutionRequest::default()
         },
-        Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
+        Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
     )
     .await;
     assert!(!report.ok);
@@ -337,7 +337,7 @@ async fn harn_composition_enforces_child_call_cap() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn harn_composition_dispatcher_closure_receives_real_inputs_and_returns_outputs() {
-    use std::cell::RefCell;
+    use parking_lot::Mutex;
     let tools = serde_json::json!([
         {
             "name": "read_file",
@@ -348,9 +348,9 @@ async fn harn_composition_dispatcher_closure_receives_real_inputs_and_returns_ou
     let manifest = binding_manifest_from_tool_surface(&tools, BindingManifestOptions::default());
 
     struct CapturingHost {
-        calls: RefCell<Vec<(String, Value)>>,
+        calls: Mutex<Vec<(String, Value)>>,
     }
-    #[async_trait::async_trait(?Send)]
+    #[async_trait::async_trait]
     impl CompositionToolHost for CapturingHost {
         async fn call(
             &self,
@@ -358,7 +358,7 @@ async fn harn_composition_dispatcher_closure_receives_real_inputs_and_returns_ou
             input: Value,
         ) -> CompositionToolOutput {
             self.calls
-                .borrow_mut()
+                .lock()
                 .push((binding.name.clone(), input.clone()));
             CompositionToolOutput::ok(serde_json::json!({
                 "path": input.get("path").cloned().unwrap_or(Value::Null),
@@ -366,8 +366,8 @@ async fn harn_composition_dispatcher_closure_receives_real_inputs_and_returns_ou
             }))
         }
     }
-    let host = Rc::new(CapturingHost {
-        calls: RefCell::new(Vec::new()),
+    let host = Arc::new(CapturingHost {
+        calls: Mutex::new(Vec::new()),
     });
     let report = execute_harn_composition(
         CompositionExecutionRequest {
@@ -380,10 +380,10 @@ async fn harn_composition_dispatcher_closure_receives_real_inputs_and_returns_ou
     )
     .await;
     assert!(report.ok, "{}", report.summary);
-    assert_eq!(host.calls.borrow().len(), 1);
-    assert_eq!(host.calls.borrow()[0].0, "read_file");
+    assert_eq!(host.calls.lock().len(), 1);
+    assert_eq!(host.calls.lock()[0].0, "read_file");
     assert_eq!(
-        host.calls.borrow()[0].1.get("path").and_then(Value::as_str),
+        host.calls.lock()[0].1.get("path").and_then(Value::as_str),
         Some("README.md")
     );
     assert_eq!(
@@ -404,7 +404,7 @@ async fn harn_composition_enforces_output_cap() {
             },
             ..CompositionExecutionRequest::default()
         },
-        Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
+        Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
     )
     .await;
     assert!(!report.ok);

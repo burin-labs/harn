@@ -51,7 +51,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
@@ -1583,7 +1582,7 @@ impl AcpServer {
             Arc::new(AcpAgentEventSink::new(output.clone())),
         );
 
-        let bridge = Rc::new(AcpBridge {
+        let bridge = Arc::new(AcpBridge {
             session_id: sid.clone(),
             output: output.clone(),
             pending: pending.clone(),
@@ -1593,7 +1592,7 @@ impl AcpServer {
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
         });
         let bridge_output = output.clone();
-        let host_bridge = Rc::new(
+        let host_bridge = Arc::new(
             harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
                 bridge.pending.clone(),
                 cancellation.cancelled.clone(),

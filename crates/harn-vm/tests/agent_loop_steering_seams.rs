@@ -19,7 +19,6 @@
 //! unchanged versus a control run, and the `loop_exit` checkpoint
 //! reports the delivery.
 
-use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -37,7 +36,7 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let bridge = Rc::new(HostBridge::from_parts(
+                let bridge = Arc::new(HostBridge::from_parts(
                     Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                     Arc::new(AtomicBool::new(false)),
                     Arc::new(Mutex::new(())),

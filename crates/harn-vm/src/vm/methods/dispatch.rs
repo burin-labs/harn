@@ -44,7 +44,7 @@ impl crate::vm::Vm {
         obj: VmValue,
         method: &'a str,
         args: &'a [VmValue],
-    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
         Box::pin(async move {
             if let Some(result) = Self::call_method_sync(&obj, method, args) {
                 return result;

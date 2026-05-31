@@ -65,16 +65,17 @@ impl super::super::Vm {
         // that the variant-checking match would just throw away. Since
         // `AdaptiveBinaryState: Copy`, the read here is a single scalar
         // move (`u8`/`u64` fields, all stack-resident).
-        let (cache_slot, cached_state) = {
+        let (chunk, cache_slot) = {
             let frame = self.frames.last().unwrap();
             let op_offset = frame.ip.saturating_sub(1);
+            let chunk = Arc::clone(&frame.chunk);
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            let cached_state = cache_slot
-                .and_then(|slot| frame.chunk.peek_adaptive_binary_cache(slot))
-                .filter(|(cached_op, _)| *cached_op == op)
-                .map(|(_, state)| state);
-            (cache_slot, cached_state)
+            (chunk, cache_slot)
         };
+        let cached_state = cache_slot
+            .and_then(|slot| self.peek_adaptive_binary_cache(&chunk, slot))
+            .filter(|(cached_op, _)| *cached_op == op)
+            .map(|(_, state)| state);
 
         let b = self.pop()?;
         let a = self.pop()?;
@@ -84,8 +85,8 @@ impl super::super::Vm {
             Self::try_specialized_binary(op, cached_state, &a, &b)
         {
             if let Some(slot) = cache_slot {
-                let frame = self.frames.last().unwrap();
-                frame.chunk.set_inline_cache_entry(
+                self.set_inline_cache_entry(
+                    &chunk,
                     slot,
                     InlineCacheEntry::AdaptiveBinary {
                         op,
@@ -98,8 +99,8 @@ impl super::super::Vm {
             let result = Self::generic_binary_result(self, op, a, b)?;
             if let (Some(slot), Some(shape)) = (cache_slot, shape) {
                 let next_state = Self::next_adaptive_binary_state(cached_state, shape);
-                let frame = self.frames.last().unwrap();
-                frame.chunk.set_inline_cache_entry(
+                self.set_inline_cache_entry(
+                    &chunk,
                     slot,
                     InlineCacheEntry::AdaptiveBinary {
                         op,

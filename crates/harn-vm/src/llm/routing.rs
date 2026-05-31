@@ -9,8 +9,8 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::json;
@@ -180,7 +180,7 @@ impl RoutingPolicyConfig {
 // ---------------------------------------------------------------------------
 
 thread_local! {
-    static POLICY_REGISTRY: RefCell<BTreeMap<u64, Rc<RoutingPolicyConfig>>> =
+    static POLICY_REGISTRY: RefCell<BTreeMap<u64, Arc<RoutingPolicyConfig>>> =
         const { RefCell::new(BTreeMap::new()) };
 }
 
@@ -189,12 +189,12 @@ static POLICY_COUNTER: AtomicU64 = AtomicU64::new(1);
 fn intern_policy(policy: RoutingPolicyConfig) -> u64 {
     let handle = POLICY_COUNTER.fetch_add(1, Ordering::SeqCst);
     POLICY_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(handle, Rc::new(policy));
+        registry.borrow_mut().insert(handle, Arc::new(policy));
     });
     handle
 }
 
-fn lookup_policy(handle: u64) -> Option<Rc<RoutingPolicyConfig>> {
+fn lookup_policy(handle: u64) -> Option<Arc<RoutingPolicyConfig>> {
     POLICY_REGISTRY.with(|registry| registry.borrow().get(&handle).cloned())
 }
 
@@ -676,7 +676,7 @@ fn observe_value(observe: &ObserveRules) -> VmValue {
 /// present but the handle is missing (corruption indicator).
 pub(crate) fn extract_routing_policy(
     options: Option<&BTreeMap<String, VmValue>>,
-) -> Result<Option<Rc<RoutingPolicyConfig>>, VmError> {
+) -> Result<Option<Arc<RoutingPolicyConfig>>, VmError> {
     let Some(opts) = options else {
         return Ok(None);
     };
@@ -1110,7 +1110,7 @@ fn duration_ms(elapsed: Duration) -> u64 {
 /// the user-visible budget.
 async fn execute_link(
     opts: &LlmCallOptions,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<super::api::LlmResult, VmError> {
     let retry_config = super::agent_observe::LlmRetryConfig {
         retries: 0,
@@ -1276,7 +1276,7 @@ fn emit_verifier_signal_event(
 pub(crate) async fn execute_with_routing(
     policy: &RoutingPolicyConfig,
     mut base_opts: LlmCallOptions,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<(super::api::LlmResult, RoutingTrace), VmError> {
     let dispatch = policy.dispatch_label();
     let mut trace = RoutingTrace {
@@ -1582,7 +1582,7 @@ async fn run_race(
     link: &ChainLink,
     link_label: &str,
     opts: &LlmCallOptions,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    bridge: Option<&Arc<crate::bridge::HostBridge>>,
     race_after_ms: u64,
     primary_timeout_ms: u64,
     backup_label: String,

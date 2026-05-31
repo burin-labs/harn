@@ -200,7 +200,7 @@ pub fn needs_async_side_effect_enforcement(name: &str) -> bool {
 pub fn enforce_builtin_side_effect_boxed<'a>(
     name: &'a str,
     args: &'a [VmValue],
-) -> Pin<Box<dyn Future<Output = Result<Option<AutonomyDecision>, VmError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<Option<AutonomyDecision>, VmError>> + Send + 'a>> {
     Box::pin(enforce_builtin_side_effect(name, args))
 }
 

@@ -32,6 +32,14 @@ impl Vm {
 
     /// Execute a compiled chunk.
     pub async fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
+        let registry = self.pool_registry.clone();
+        crate::stdlib::pool::with_pool_registry_scope(registry, async {
+            self.execute_scoped(chunk).await
+        })
+        .await
+    }
+
+    async fn execute_scoped(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
         let span_id = crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "main".into());
         let result = self.run_chunk(chunk).await;
         let result = match result {

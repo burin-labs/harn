@@ -282,7 +282,7 @@ impl CompositionToolOutput {
     }
 }
 
-#[async_trait::async_trait(?Send)]
-pub trait CompositionToolHost {
+#[async_trait::async_trait]
+pub trait CompositionToolHost: Send + Sync {
     async fn call(&self, binding: &BindingManifestEntry, input: Value) -> CompositionToolOutput;
 }

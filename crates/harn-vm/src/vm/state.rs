@@ -1,5 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
-use std::rc::Rc;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -147,15 +146,15 @@ pub struct Vm {
     pub(crate) stack: Vec<VmValue>,
     pub(crate) env: VmEnv,
     pub(crate) output: String,
-    pub(crate) builtins: Rc<BTreeMap<String, VmBuiltinFn>>,
-    pub(crate) async_builtins: Rc<BTreeMap<String, VmAsyncBuiltinFn>>,
-    pub(crate) builtin_metadata: Rc<BTreeMap<String, VmBuiltinMetadata>>,
+    pub(crate) builtins: Arc<BTreeMap<String, VmBuiltinFn>>,
+    pub(crate) async_builtins: Arc<BTreeMap<String, VmAsyncBuiltinFn>>,
+    pub(crate) builtin_metadata: Arc<BTreeMap<String, VmBuiltinMetadata>>,
     /// Numeric side index for builtins. Name-keyed maps remain authoritative;
     /// this index is the hot path for direct builtin bytecode and callback refs.
-    pub(crate) builtins_by_id: Rc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
+    pub(crate) builtins_by_id: Arc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
     /// IDs with detected name collisions. Collided names safely fall back to
     /// the authoritative name-keyed lookup path.
-    pub(crate) builtin_id_collisions: Rc<HashSet<BuiltinId>>,
+    pub(crate) builtin_id_collisions: Arc<HashSet<BuiltinId>>,
     /// Iterator state for for-in loops.
     pub(crate) iterators: Vec<IterState>,
     /// Call frame stack.
@@ -167,7 +166,11 @@ pub struct Vm {
     /// Shared process-local synchronization primitives inherited by child VMs.
     pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
     /// Shared process-local cells, maps, and mailboxes inherited by child VMs.
-    pub(crate) shared_state_runtime: Rc<crate::shared_state::VmSharedStateRuntime>,
+    pub(crate) shared_state_runtime: Arc<crate::shared_state::VmSharedStateRuntime>,
+    /// Per-isolate inline cache entries keyed by compiled chunk identity.
+    pub(crate) inline_caches: HashMap<u64, Vec<crate::chunk::InlineCacheEntry>>,
+    /// VM-scoped pool registry inherited by child VMs and scoped into Tokio tasks.
+    pub(crate) pool_registry: Arc<crate::stdlib::pool::PoolRegistry>,
     /// Permits acquired by lexical synchronization blocks in this VM.
     pub(crate) held_sync_guards: Vec<crate::synchronization::VmSyncHeldGuard>,
     /// Counter for generating unique task IDs.
@@ -207,17 +210,17 @@ pub struct Vm {
     /// Modules currently being imported (cycle prevention).
     pub(crate) imported_paths: Vec<std::path::PathBuf>,
     /// Loaded module cache keyed by canonical or synthetic module path.
-    pub(crate) module_cache: Rc<BTreeMap<std::path::PathBuf, LoadedModule>>,
+    pub(crate) module_cache: Arc<BTreeMap<std::path::PathBuf, LoadedModule>>,
     /// Source text keyed by canonical or synthetic module path for debugger retrieval.
-    pub(crate) source_cache: Rc<BTreeMap<std::path::PathBuf, String>>,
+    pub(crate) source_cache: Arc<BTreeMap<std::path::PathBuf, String>>,
     /// Source file path for error reporting.
     pub(crate) source_file: Option<String>,
     /// Source text for error reporting.
     pub(crate) source_text: Option<String>,
     /// Optional bridge for delegating unknown builtins in bridge mode.
-    pub(crate) bridge: Option<Rc<crate::bridge::HostBridge>>,
+    pub(crate) bridge: Option<Arc<crate::bridge::HostBridge>>,
     /// Builtins denied by sandbox mode (`--deny` / `--allow` flags).
-    pub(crate) denied_builtins: Rc<HashSet<String>>,
+    pub(crate) denied_builtins: Arc<HashSet<String>>,
     /// Cancellation token for cooperative graceful shutdown (set by parent).
     pub(crate) cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub(crate) interrupt_signal_token: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
@@ -243,9 +246,9 @@ pub struct Vm {
     pub(crate) project_root: Option<std::path::PathBuf>,
     /// Global constants (e.g. `pi`, `e`). Checked as a fallback in `GetVar`
     /// after the environment, so user-defined variables can shadow them.
-    pub(crate) globals: Rc<BTreeMap<String, VmValue>>,
+    pub(crate) globals: Arc<BTreeMap<String, VmValue>>,
     /// Optional debugger hook invoked when execution advances to a new source line.
-    pub(crate) debug_hook: Option<Box<DebugHook>>,
+    pub(crate) debug_hook: Option<parking_lot::Mutex<Box<DebugHook>>>,
     /// Effective runtime ceilings for this VM execution.
     pub(crate) runtime_limits: RuntimeLimits,
 }
@@ -256,37 +259,37 @@ pub struct Vm {
 /// The baseline intentionally does not snapshot execution state. Each
 /// instantiation gets fresh stacks, frames, tasks, cancellation fields, sync
 /// primitives, shared cells/maps/mailboxes, and debug state. Builtin tables are
-/// shared through `Rc` until a per-execution rebind needs copy-on-write.
+/// shared through `Arc` until a per-execution rebind needs copy-on-write.
 #[derive(Clone)]
 pub struct VmBaseline {
-    builtins: Rc<BTreeMap<String, VmBuiltinFn>>,
-    async_builtins: Rc<BTreeMap<String, VmAsyncBuiltinFn>>,
-    builtin_metadata: Rc<BTreeMap<String, VmBuiltinMetadata>>,
-    builtins_by_id: Rc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
-    builtin_id_collisions: Rc<HashSet<BuiltinId>>,
+    builtins: Arc<BTreeMap<String, VmBuiltinFn>>,
+    async_builtins: Arc<BTreeMap<String, VmAsyncBuiltinFn>>,
+    builtin_metadata: Arc<BTreeMap<String, VmBuiltinMetadata>>,
+    builtins_by_id: Arc<BTreeMap<BuiltinId, VmBuiltinEntry>>,
+    builtin_id_collisions: Arc<HashSet<BuiltinId>>,
     source_dir: Option<std::path::PathBuf>,
     source_file: Option<String>,
     source_text: Option<String>,
     project_root: Option<std::path::PathBuf>,
-    globals: Rc<BTreeMap<String, VmValue>>,
-    denied_builtins: Rc<HashSet<String>>,
+    globals: Arc<BTreeMap<String, VmValue>>,
+    denied_builtins: Arc<HashSet<String>>,
     runtime_limits: RuntimeLimits,
 }
 
 impl VmBaseline {
     pub fn from_vm(vm: &Vm) -> Self {
         Self {
-            builtins: Rc::clone(&vm.builtins),
-            async_builtins: Rc::clone(&vm.async_builtins),
-            builtin_metadata: Rc::clone(&vm.builtin_metadata),
-            builtins_by_id: Rc::clone(&vm.builtins_by_id),
-            builtin_id_collisions: Rc::clone(&vm.builtin_id_collisions),
+            builtins: Arc::clone(&vm.builtins),
+            async_builtins: Arc::clone(&vm.async_builtins),
+            builtin_metadata: Arc::clone(&vm.builtin_metadata),
+            builtins_by_id: Arc::clone(&vm.builtins_by_id),
+            builtin_id_collisions: Arc::clone(&vm.builtin_id_collisions),
             source_dir: vm.source_dir.clone(),
             source_file: vm.source_file.clone(),
             source_text: vm.source_text.clone(),
             project_root: vm.project_root.clone(),
-            globals: Rc::clone(&vm.globals),
-            denied_builtins: Rc::clone(&vm.denied_builtins),
+            globals: Arc::clone(&vm.globals),
+            denied_builtins: Arc::clone(&vm.denied_builtins),
             runtime_limits: vm.runtime_limits,
         }
     }
@@ -304,17 +307,19 @@ impl VmBaseline {
             stack: Vec::with_capacity(256),
             env: VmEnv::new(),
             output: String::new(),
-            builtins: Rc::clone(&self.builtins),
-            async_builtins: Rc::clone(&self.async_builtins),
-            builtin_metadata: Rc::clone(&self.builtin_metadata),
-            builtins_by_id: Rc::clone(&self.builtins_by_id),
-            builtin_id_collisions: Rc::clone(&self.builtin_id_collisions),
+            builtins: Arc::clone(&self.builtins),
+            async_builtins: Arc::clone(&self.async_builtins),
+            builtin_metadata: Arc::clone(&self.builtin_metadata),
+            builtins_by_id: Arc::clone(&self.builtins_by_id),
+            builtin_id_collisions: Arc::clone(&self.builtin_id_collisions),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
-            shared_state_runtime: Rc::new(crate::shared_state::VmSharedStateRuntime::new()),
+            shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
+            inline_caches: HashMap::new(),
+            pool_registry: crate::stdlib::pool::new_pool_registry(),
             held_sync_guards: Vec::new(),
             task_counter: 0,
             runtime_context_counter: 0,
@@ -329,12 +334,12 @@ impl VmBaseline {
             last_line: 0,
             source_dir: self.source_dir.clone(),
             imported_paths: Vec::new(),
-            module_cache: Rc::new(BTreeMap::new()),
-            source_cache: Rc::new(source_cache),
+            module_cache: Arc::new(BTreeMap::new()),
+            source_cache: Arc::new(source_cache),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             bridge: None,
-            denied_builtins: Rc::clone(&self.denied_builtins),
+            denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: None,
             interrupt_signal_token: None,
             cancel_grace_instructions_remaining: None,
@@ -347,7 +352,7 @@ impl VmBaseline {
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: self.project_root.clone(),
-            globals: Rc::clone(&self.globals),
+            globals: Arc::clone(&self.globals),
             debug_hook: None,
             runtime_limits: self.runtime_limits,
         };
@@ -527,17 +532,19 @@ impl Vm {
             stack: Vec::with_capacity(256),
             env: VmEnv::new(),
             output: String::new(),
-            builtins: Rc::new(BTreeMap::new()),
-            async_builtins: Rc::new(BTreeMap::new()),
-            builtin_metadata: Rc::new(BTreeMap::new()),
-            builtins_by_id: Rc::new(BTreeMap::new()),
-            builtin_id_collisions: Rc::new(HashSet::new()),
+            builtins: Arc::new(BTreeMap::new()),
+            async_builtins: Arc::new(BTreeMap::new()),
+            builtin_metadata: Arc::new(BTreeMap::new()),
+            builtins_by_id: Arc::new(BTreeMap::new()),
+            builtin_id_collisions: Arc::new(HashSet::new()),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
-            shared_state_runtime: Rc::new(crate::shared_state::VmSharedStateRuntime::new()),
+            shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
+            inline_caches: HashMap::new(),
+            pool_registry: crate::stdlib::pool::new_pool_registry(),
             held_sync_guards: Vec::new(),
             task_counter: 0,
             runtime_context_counter: 0,
@@ -552,12 +559,12 @@ impl Vm {
             last_line: 0,
             source_dir: None,
             imported_paths: Vec::new(),
-            module_cache: Rc::new(BTreeMap::new()),
-            source_cache: Rc::new(BTreeMap::new()),
+            module_cache: Arc::new(BTreeMap::new()),
+            source_cache: Arc::new(BTreeMap::new()),
             source_file: None,
             source_text: None,
             bridge: None,
-            denied_builtins: Rc::new(HashSet::new()),
+            denied_builtins: Arc::new(HashSet::new()),
             cancel_token: None,
             interrupt_signal_token: None,
             cancel_grace_instructions_remaining: None,
@@ -570,7 +577,7 @@ impl Vm {
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: None,
-            globals: Rc::new(BTreeMap::new()),
+            globals: Arc::new(BTreeMap::new()),
             debug_hook: None,
             runtime_limits: RuntimeLimits::default(),
         }
@@ -611,21 +618,21 @@ impl Vm {
     }
 
     /// Set the bridge for delegating unknown builtins in bridge mode.
-    pub fn set_bridge(&mut self, bridge: Rc<crate::bridge::HostBridge>) {
+    pub fn set_bridge(&mut self, bridge: Arc<crate::bridge::HostBridge>) {
         self.bridge = Some(bridge);
     }
 
     /// Set builtins that are denied in sandbox mode.
     /// When called, the given builtin names will produce a permission error.
     pub fn set_denied_builtins(&mut self, denied: HashSet<String>) {
-        self.denied_builtins = Rc::new(denied);
+        self.denied_builtins = Arc::new(denied);
     }
 
     /// Set source info for error reporting (file path and source text).
     pub fn set_source_info(&mut self, file: &str, text: &str) {
         self.source_file = Some(file.to_string());
         self.source_text = Some(text.to_string());
-        Rc::make_mut(&mut self.source_cache)
+        Arc::make_mut(&mut self.source_cache)
             .insert(std::path::PathBuf::from(file), text.to_string());
     }
 
@@ -674,17 +681,19 @@ impl Vm {
             stack: Vec::with_capacity(64),
             env: self.env.clone(),
             output: String::new(),
-            builtins: Rc::clone(&self.builtins),
-            async_builtins: Rc::clone(&self.async_builtins),
-            builtin_metadata: Rc::clone(&self.builtin_metadata),
-            builtins_by_id: Rc::clone(&self.builtins_by_id),
-            builtin_id_collisions: Rc::clone(&self.builtin_id_collisions),
+            builtins: Arc::clone(&self.builtins),
+            async_builtins: Arc::clone(&self.async_builtins),
+            builtin_metadata: Arc::clone(&self.builtin_metadata),
+            builtins_by_id: Arc::clone(&self.builtins_by_id),
+            builtin_id_collisions: Arc::clone(&self.builtin_id_collisions),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
             sync_runtime: self.sync_runtime.clone(),
             shared_state_runtime: self.shared_state_runtime.clone(),
+            inline_caches: HashMap::new(),
+            pool_registry: self.pool_registry.clone(),
             held_sync_guards: Vec::new(),
             task_counter: 0,
             runtime_context_counter: self.runtime_context_counter,
@@ -699,12 +708,12 @@ impl Vm {
             last_line: 0,
             source_dir: self.source_dir.clone(),
             imported_paths: Vec::new(),
-            module_cache: Rc::clone(&self.module_cache),
-            source_cache: Rc::clone(&self.source_cache),
+            module_cache: Arc::clone(&self.module_cache),
+            source_cache: Arc::clone(&self.source_cache),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             bridge: self.bridge.clone(),
-            denied_builtins: Rc::clone(&self.denied_builtins),
+            denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: self.cancel_token.clone(),
             interrupt_signal_token: self.interrupt_signal_token.clone(),
             cancel_grace_instructions_remaining: None,
@@ -717,7 +726,7 @@ impl Vm {
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: self.project_root.clone(),
-            globals: Rc::clone(&self.globals),
+            globals: Arc::clone(&self.globals),
             debug_hook: None,
             runtime_limits: self.runtime_limits,
         }
@@ -783,7 +792,7 @@ impl Vm {
     /// Set a global constant (e.g. `pi`, `e`).
     /// Stored separately from the environment so user-defined variables can shadow them.
     pub fn set_global(&mut self, name: &str, value: VmValue) {
-        Rc::make_mut(&mut self.globals).insert(name.to_string(), value);
+        Arc::make_mut(&mut self.globals).insert(name.to_string(), value);
     }
 
     /// Read a previously-installed global (the value `set_global` /

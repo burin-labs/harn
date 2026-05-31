@@ -1,13 +1,12 @@
-use std::cell::Cell;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::compiler::{Compiler, CompilerOptions};
 use crate::stdlib::register_vm_stdlib;
 use crate::{
-    AdaptiveBinaryOp, AdaptiveBinaryState, BinaryShape, Chunk, DirectCallState, InlineCacheEntry,
+    AdaptiveBinaryOp, AdaptiveBinaryState, BinaryShape, DirectCallState, InlineCacheEntry,
     MethodCacheTarget, PropertyCacheTarget, VmError, VmValue,
 };
 use harn_lexer::Lexer;
@@ -75,7 +74,7 @@ fn run_harn_result_display_with_options(
     })
 }
 
-fn run_harn_with_chunk(source: &str) -> (Chunk, String, VmValue) {
+fn run_harn_with_inline_cache_entries(source: &str) -> (Vec<InlineCacheEntry>, String, VmValue) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -93,7 +92,8 @@ fn run_harn_with_chunk(source: &str) -> (Chunk, String, VmValue) {
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 let result = vm.execute(&chunk).await.unwrap();
-                (chunk, vm.output().to_string(), result)
+                let inline_cache_entries = vm.inline_cache_entries_for_chunk(&chunk);
+                (inline_cache_entries, vm.output().to_string(), result)
             })
             .await
     })
@@ -577,7 +577,7 @@ fn test_list_properties() {
 
 #[test]
 fn test_inline_cache_warms_property_sites() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r#"pipeline t(task) {
 let list = [1, 2, 3]
 let text = ""
@@ -600,7 +600,6 @@ log(total)
         out.trim_end(),
         "[harn] right\n[harn] right\n[harn] right\n[harn] 12"
     );
-    let entries = chunk.inline_cache_entries();
     assert!(
         entries.iter().any(|entry| matches!(
             entry,
@@ -635,7 +634,7 @@ log(total)
 
 #[test]
 fn test_inline_cache_warms_dict_and_struct_property_sites() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r"pipeline t(task) {
 struct Point {
   x: int
@@ -654,7 +653,6 @@ log(total)
     );
 
     assert_eq!(out.trim_end(), "[harn] 30");
-    let entries = chunk.inline_cache_entries();
     assert!(
         entries.iter().any(|entry| matches!(
             entry,
@@ -679,7 +677,7 @@ log(total)
 
 #[test]
 fn test_inline_cache_replaces_polymorphic_property_site() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r#"pipeline t(task) {
 for value in [[1, 2], "ab"] {
   log(value.count)
@@ -688,7 +686,6 @@ for value in [[1, 2], "ab"] {
     );
 
     assert_eq!(out.trim_end(), "[harn] 2\n[harn] 2");
-    let entries = chunk.inline_cache_entries();
     assert!(
         entries.iter().any(|entry| matches!(
             entry,
@@ -703,7 +700,7 @@ for value in [[1, 2], "ab"] {
 
 #[test]
 fn test_inline_cache_warms_method_sites() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r#"pipeline t(task) {
 let list = [1, 2, 3]
 let text = "abc"
@@ -729,7 +726,6 @@ log(total)
     );
 
     assert_eq!(out.trim_end(), "[harn] 45");
-    let entries = chunk.inline_cache_entries();
     for target in [
         MethodCacheTarget::ListCount,
         MethodCacheTarget::ListContains,
@@ -756,7 +752,7 @@ log(total)
 
 #[test]
 fn test_adaptive_inline_cache_specializes_generic_integer_add_site() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r"pipeline t(task) {
 fn erase(x) {
   return x
@@ -772,7 +768,6 @@ log(total)
     );
 
     assert_eq!(out.trim_end(), "[harn] 28");
-    let entries = chunk.inline_cache_entries();
     assert!(
         entries.iter().any(|entry| matches!(
             entry,
@@ -791,7 +786,7 @@ log(total)
 
 #[test]
 fn test_adaptive_inline_cache_deoptimizes_mixed_binary_shapes() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r"pipeline t(task) {
 fn erase(x) {
   return x
@@ -806,7 +801,6 @@ log(acc)
     );
 
     assert_eq!(out.trim_end(), "[harn] 15.0");
-    let entries = chunk.inline_cache_entries();
     assert!(
         entries.iter().any(|entry| matches!(
             entry,
@@ -825,7 +819,7 @@ log(acc)
 
 #[test]
 fn test_adaptive_inline_cache_specializes_named_closure_call_site() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r"pipeline t(task) {
 fn inc(x) {
   return x + 1
@@ -841,7 +835,6 @@ log(total)
     );
 
     assert_eq!(out.trim_end(), "[harn] 36");
-    let entries = chunk.inline_cache_entries();
     assert!(
         entries.iter().any(|entry| matches!(
             entry,
@@ -855,7 +848,7 @@ log(total)
 
 #[test]
 fn test_adaptive_inline_cache_deoptimizes_rebound_closure_call_site() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r"pipeline t(task) {
 fn inc(x) {
   return x + 1
@@ -878,7 +871,6 @@ log(total)
     );
 
     assert_eq!(out.trim_end(), "[harn] 51");
-    let entries = chunk.inline_cache_entries();
     assert!(
         entries.iter().any(|entry| matches!(
             entry,
@@ -892,7 +884,7 @@ log(total)
 
 #[test]
 fn test_inline_cache_warms_spread_method_site() {
-    let (chunk, out, _) = run_harn_with_chunk(
+    let (entries, out, _) = run_harn_with_inline_cache_entries(
         r"pipeline t(task) {
 let list = [1, 2, 3]
 let args = []
@@ -905,7 +897,6 @@ while i < 3 {
     );
 
     assert_eq!(out.trim_end(), "[harn] 3\n[harn] 3\n[harn] 3");
-    let entries = chunk.inline_cache_entries();
     assert!(
         entries.iter().any(|entry| matches!(
             entry,
@@ -1067,7 +1058,7 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
-                vm.set_bridge(Rc::new(bridge));
+                vm.set_bridge(Arc::new(bridge));
                 vm.execute(&chunk).await.unwrap();
                 vm.output().trim().to_string()
             })
@@ -1728,7 +1719,7 @@ await(handle)
             let program = parser.parse().unwrap();
             let chunk = Compiler::new().compile(&program).unwrap();
 
-            let marker = Rc::new(Cell::new(false));
+            let marker = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let marker_for_builtin = marker.clone();
             let cancel_token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let vm_cancel_token = cancel_token.clone();
@@ -1736,7 +1727,7 @@ await(handle)
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
                 vm.register_builtin("mark", move |_, _| {
-                    marker_for_builtin.set(true);
+                    marker_for_builtin.store(true, std::sync::atomic::Ordering::SeqCst);
                     Ok(VmValue::Nil)
                 });
                 vm.install_cancel_token(vm_cancel_token);
@@ -1755,7 +1746,7 @@ await(handle)
             tokio::time::advance(Duration::from_secs(1)).await;
             tokio::task::yield_now().await;
             assert!(
-                !marker.get(),
+                !marker.load(std::sync::atomic::Ordering::SeqCst),
                 "spawned task should be aborted when parent await is cancelled"
             );
         })

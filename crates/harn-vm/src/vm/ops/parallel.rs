@@ -165,14 +165,21 @@ impl super::super::Vm {
                     "parallel",
                     Some(task_group_id.clone()),
                 );
+                let registry = child.pool_registry.clone();
                 let closure = closure.clone();
-                futures.push(async move {
-                    let arg = VmValue::Int(i as i64);
-                    let result = child
-                        .call_closure_args(&closure, CallArgs::One(&arg))
-                        .await?;
-                    Ok::<(VmValue, String), VmError>((result, std::mem::take(&mut child.output)))
-                });
+                futures.push(crate::stdlib::pool::with_pool_registry_scope(
+                    registry,
+                    async move {
+                        let arg = VmValue::Int(i as i64);
+                        let result = child
+                            .call_closure_args(&closure, CallArgs::One(&arg))
+                            .await?;
+                        Ok::<(VmValue, String), VmError>((
+                            result,
+                            std::mem::take(&mut child.output),
+                        ))
+                    },
+                ));
             }
             let joined = run_capped_ordered(futures, cap, "Parallel task error").await?;
             let mut results = Vec::with_capacity(count);
@@ -209,17 +216,21 @@ impl super::super::Vm {
                         "parallel each",
                         Some(task_group_id.clone()),
                     );
+                    let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(async move {
-                        let result = child
-                            .call_closure_args(&closure, CallArgs::One(&item))
-                            .await?;
-                        Ok::<(VmValue, String), VmError>((
-                            result,
-                            std::mem::take(&mut child.output),
-                        ))
-                    });
+                    futures.push(crate::stdlib::pool::with_pool_registry_scope(
+                        registry,
+                        async move {
+                            let result = child
+                                .call_closure_args(&closure, CallArgs::One(&item))
+                                .await?;
+                            Ok::<(VmValue, String), VmError>((
+                                result,
+                                std::mem::take(&mut child.output),
+                            ))
+                        },
+                    ));
                 }
                 let joined = run_capped_ordered(futures, cap, "Parallel map error").await?;
                 let mut results = Vec::with_capacity(len);
@@ -256,13 +267,17 @@ impl super::super::Vm {
                         "parallel each as stream",
                         Some(task_group_id.clone()),
                     );
+                    let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(async move {
-                        child
-                            .call_closure_args(&closure, CallArgs::One(&item))
-                            .await
-                    });
+                    futures.push(crate::stdlib::pool::with_pool_registry_scope(
+                        registry,
+                        async move {
+                            child
+                                .call_closure_args(&closure, CallArgs::One(&item))
+                                .await
+                        },
+                    ));
                 }
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
@@ -306,15 +321,19 @@ impl super::super::Vm {
                         "parallel settle",
                         Some(task_group_id.clone()),
                     );
+                    let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(async move {
-                        let result = child
-                            .call_closure_args(&closure, CallArgs::One(&item))
-                            .await;
-                        let output = std::mem::take(&mut child.output);
-                        (result, output)
-                    });
+                    futures.push(crate::stdlib::pool::with_pool_registry_scope(
+                        registry,
+                        async move {
+                            let result = child
+                                .call_closure_args(&closure, CallArgs::One(&item))
+                                .await;
+                            let output = std::mem::take(&mut child.output);
+                            (result, output)
+                        },
+                    ));
                 }
                 let joined = run_capped_ordered(futures, cap, "Parallel settle error").await?;
                 let mut results = Vec::with_capacity(len);
@@ -369,10 +388,14 @@ impl super::super::Vm {
             );
             let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
             child.cancel_token = Some(cancel_token.clone());
-            let handle = tokio::task::spawn_local(async move {
-                let result = child.call_closure_args(&closure, CallArgs::Empty).await?;
-                Ok((result, std::mem::take(&mut child.output)))
-            });
+            let registry = child.pool_registry.clone();
+            let handle = tokio::task::spawn_local(crate::stdlib::pool::with_pool_registry_scope(
+                registry,
+                async move {
+                    let result = child.call_closure_args(&closure, CallArgs::Empty).await?;
+                    Ok((result, std::mem::take(&mut child.output)))
+                },
+            ));
             self.spawned_tasks.insert(
                 task_id.clone(),
                 VmTaskHandle {
