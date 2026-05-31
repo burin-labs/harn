@@ -48,6 +48,17 @@ pub(crate) fn collect_preflight_diagnostics(
     program: &[SNode],
     config: &CheckConfig,
 ) -> Vec<PreflightDiagnostic> {
+    let module_graph = harn_modules::build(std::slice::from_ref(&path.to_path_buf()));
+    collect_preflight_diagnostics_with_module_graph(path, source, program, config, &module_graph)
+}
+
+pub(crate) fn collect_preflight_diagnostics_with_module_graph(
+    path: &Path,
+    source: &str,
+    program: &[SNode],
+    config: &CheckConfig,
+    module_graph: &harn_modules::ModuleGraph,
+) -> Vec<PreflightDiagnostic> {
     let mut diagnostics = Vec::new();
     let mut visited = HashSet::new();
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -71,7 +82,7 @@ pub(crate) fn collect_preflight_diagnostics(
     );
 
     scan_import_collisions(&canonical, source, program, &mut diagnostics);
-    scan_re_export_conflicts(&canonical, source, program, &mut diagnostics);
+    scan_re_export_conflicts(&canonical, source, program, module_graph, &mut diagnostics);
     scan_static_tool_surface_preflight(&canonical, source, program, config, &mut diagnostics);
     scan_effect_inheritance_preflight(&canonical, source, program, &mut diagnostics);
 

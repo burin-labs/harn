@@ -12,7 +12,7 @@ use super::analysis::{
     span_from_parser_error, FileAnalysisError,
 };
 use super::outcome::{print_lint_diagnostics, CommandOutcome};
-use super::preflight::{collect_preflight_diagnostics, is_preflight_allowed};
+use super::preflight::{collect_preflight_diagnostics_with_module_graph, is_preflight_allowed};
 
 pub(crate) const CHECK_SCHEMA_VERSION: u32 = 1;
 
@@ -216,7 +216,13 @@ fn check_file_report_inner(
         help: diag.suggestion.clone(),
     }));
 
-    let preflight_diagnostics = collect_preflight_diagnostics(path, &source, &program, config);
+    let preflight_diagnostics = collect_preflight_diagnostics_with_module_graph(
+        path,
+        &source,
+        &program,
+        config,
+        module_graph,
+    );
     let preflight_severity = PreflightSeverity::from_opt(config.preflight_severity.as_deref());
     if preflight_severity != PreflightSeverity::Off {
         let (severity_label, category) = match preflight_severity {

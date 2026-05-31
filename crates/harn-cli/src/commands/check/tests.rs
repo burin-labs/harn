@@ -15,7 +15,10 @@ use super::config::{build_module_graph, collect_cross_file_imports};
 use super::host_capabilities::parse_host_capability_value;
 use super::lint::lint_file_inner;
 use super::lint_report::lint_file_report;
-use super::preflight::{collect_preflight_diagnostics, is_preflight_allowed};
+use super::preflight::{
+    collect_preflight_diagnostics, collect_preflight_diagnostics_with_module_graph,
+    is_preflight_allowed,
+};
 
 fn parse_program(source: &str) -> Vec<SNode> {
     let mut lexer = Lexer::new(source);
@@ -589,6 +592,39 @@ pipeline main() {
             .iter()
             .all(|d| !d.message.contains("import collision")),
         "unexpected collision: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_re_export_conflicts_use_supplied_module_graph() {
+    let dir = unique_temp_dir("harn-check-re-export-conflict");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.harn"), "pub fn helper() { 1 }\n").unwrap();
+    std::fs::write(dir.join("b.harn"), "pub fn helper() { 2 }\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pub import { helper } from "a.harn"
+pub import { helper } from "b.harn"
+
+pipeline main() {}
+"#;
+    std::fs::write(&file, source).unwrap();
+    let program = parse_program(source);
+    let module_graph = build_module_graph(&[file.clone(), dir.join("a.harn"), dir.join("b.harn")]);
+    let diagnostics = collect_preflight_diagnostics_with_module_graph(
+        &file,
+        source,
+        &program,
+        &CheckConfig::default(),
+        &module_graph,
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("re-export conflict")),
+        "expected re-export conflict diagnostic, got: {:?}",
         diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
     let _ = std::fs::remove_dir_all(&dir);
