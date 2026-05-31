@@ -244,7 +244,50 @@ impl AnalysisDatabase {
         }
     }
 
+    pub fn set_parsed_source(
+        &mut self,
+        id: SourceId,
+        source: String,
+        version: SourceVersion,
+        program: Vec<SNode>,
+    ) -> SourceUpdate {
+        let digest = SourceDigest::from_source(&source);
+        match self.entries.get_mut(&id) {
+            None => {
+                let mut entry = SourceEntry::new(source, version, digest);
+                entry.program = Some(Ok(program));
+                self.entries.insert(id, entry);
+                SourceUpdate::Inserted
+            }
+            Some(entry) if entry.digest == digest => {
+                entry.version = version;
+                entry.program = Some(Ok(program));
+                SourceUpdate::Unchanged
+            }
+            Some(entry) => {
+                entry.replace_source(source, version, digest);
+                entry.program = Some(Ok(program));
+                SourceUpdate::Changed
+            }
+        }
+    }
+
     pub fn parse(&mut self, id: &SourceId) -> Result<ParseOutput, AnalysisError> {
+        if let Some(entry) = self.entries.get(id) {
+            if let Some(program) = &entry.program {
+                return match program {
+                    Ok(program) => Ok(ParseOutput {
+                        source: entry.source.clone(),
+                        program: program.clone(),
+                    }),
+                    Err(errors) => Err(AnalysisError::Parse {
+                        source: entry.source.clone(),
+                        errors: errors.clone(),
+                    }),
+                };
+            }
+        }
+
         let mut lexed = false;
         let mut parsed_now = false;
         let entry = self.entry_mut(id)?;
@@ -424,6 +467,27 @@ mod tests {
         assert_eq!(db.stats().lex_runs, 2);
         assert_eq!(db.stats().parse_runs, 2);
         assert_eq!(db.stats().typecheck_runs, 2);
+    }
+
+    #[test]
+    fn parsed_source_seed_skips_lex_and_parse() {
+        let mut db = AnalysisDatabase::new();
+        let id = source_id();
+        let source = "let x = 1\n".to_string();
+        let mut lexer = Lexer::new(&source);
+        let tokens = lexer.tokenize().expect("tokenize");
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse");
+
+        assert_eq!(
+            db.set_parsed_source(id.clone(), source, SourceVersion(1), program),
+            SourceUpdate::Inserted
+        );
+        db.typecheck(&id, TypeCheckConfig::new())
+            .expect("seeded check");
+        assert_eq!(db.stats().lex_runs, 0);
+        assert_eq!(db.stats().parse_runs, 0);
+        assert_eq!(db.stats().typecheck_runs, 1);
     }
 
     #[test]

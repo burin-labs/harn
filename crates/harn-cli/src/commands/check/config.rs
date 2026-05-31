@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process;
 
 use crate::config as harn_config;
 use crate::package::CheckConfig;
+use harn_parser::analysis::{AnalysisDatabase, SourceId, SourceVersion};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HarnLintConfig {
@@ -101,11 +102,59 @@ pub(crate) fn collect_cross_file_imports(
 }
 
 pub(crate) fn build_module_graph(files: &[PathBuf]) -> harn_modules::ModuleGraph {
+    ensure_module_dependencies(files);
+    harn_modules::build(files)
+}
+
+pub(crate) fn build_module_graph_and_seed_analysis(
+    files: &[PathBuf],
+    analysis: &mut AnalysisDatabase,
+) -> harn_modules::ModuleGraph {
+    ensure_module_dependencies(files);
+    let mut build = harn_modules::build_with_parsed_sources(files);
+    let mut targets_by_canonical: HashMap<PathBuf, Vec<&PathBuf>> = HashMap::new();
+    for (canonical, file) in files.iter().filter_map(|file| {
+        std::fs::canonicalize(file)
+            .ok()
+            .map(|canonical| (canonical, file))
+    }) {
+        targets_by_canonical
+            .entry(canonical)
+            .or_default()
+            .push(file);
+    }
+    for (canonical, files) in targets_by_canonical {
+        if let Some(parsed) = build.parsed_sources.remove(&canonical) {
+            let mut files = files;
+            if let Some(file) = files.pop() {
+                for file in files {
+                    seed_parsed_source(analysis, file, parsed.clone());
+                }
+                seed_parsed_source(analysis, file, parsed);
+            }
+        }
+    }
+    build.graph
+}
+
+fn seed_parsed_source(
+    analysis: &mut AnalysisDatabase,
+    path: &Path,
+    parsed: harn_modules::ParsedModuleSource,
+) {
+    analysis.set_parsed_source(
+        SourceId::path(path),
+        parsed.source,
+        SourceVersion(1),
+        parsed.program,
+    );
+}
+
+fn ensure_module_dependencies(files: &[PathBuf]) {
     for file in files {
         if let Err(error) = crate::package::ensure_dependencies_materialized(file) {
             eprintln!("error: {error}");
             process::exit(1);
         }
     }
-    harn_modules::build(files)
 }

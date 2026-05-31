@@ -451,9 +451,10 @@ async fn async_main() {
                 }
                 command_error("no .harn files found under the given target(s)");
             }
-            let module_graph = commands::check::build_module_graph(&files);
-            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+            let module_graph =
+                commands::check::build_module_graph_and_seed_analysis(&files, &mut analysis);
+            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             let mut should_fail = false;
             let mut json_files = Vec::new();
             for file in &files {
@@ -568,9 +569,10 @@ async fn async_main() {
                 }
                 command_error("no .harn or .harn.prompt files found under the given target(s)");
             }
-            let module_graph = commands::check::build_module_graph(&files);
-            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+            let module_graph =
+                commands::check::build_module_graph_and_seed_analysis(&files, &mut analysis);
+            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             if args.json {
                 // `--json` always reports without modifying source — `--fix`
                 // is intentionally orthogonal to structured output so agents

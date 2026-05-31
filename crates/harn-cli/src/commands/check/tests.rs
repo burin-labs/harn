@@ -11,7 +11,9 @@ use crate::package::CheckConfig;
 use super::bundle::build_bundle_manifest;
 use super::check_cmd::{check_file_inner, check_file_report};
 use super::config::collect_harn_targets;
-use super::config::{build_module_graph, collect_cross_file_imports};
+use super::config::{
+    build_module_graph, build_module_graph_and_seed_analysis, collect_cross_file_imports,
+};
 use super::host_capabilities::parse_host_capability_value;
 use super::lint::lint_file_inner;
 use super::lint_report::lint_file_report;
@@ -1678,6 +1680,46 @@ pipeline main() {
     assert_eq!(after_check.typecheck_runs, 1);
     assert_eq!(after_lint.typecheck_runs, 1);
     assert_eq!(after_lint.parse_runs, after_check.parse_runs);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn seeded_module_graph_avoids_reparsing_for_check() {
+    let dir = unique_temp_dir("harn-check-seeded-parse");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+pipeline main() {
+  log("ready")
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let module_graph = build_module_graph_and_seed_analysis(&files, &mut analysis);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let config = CheckConfig::default();
+
+    let report = check_file_report(
+        &mut analysis,
+        &file,
+        &config,
+        &cross_file_imports,
+        &module_graph,
+        false,
+    );
+    assert!(matches!(
+        report.status,
+        super::check_cmd::CheckFileStatus::Ok
+    ));
+    let stats = analysis.stats();
+    assert_eq!(stats.lex_runs, 0);
+    assert_eq!(stats.parse_runs, 0);
+    assert_eq!(stats.typecheck_runs, 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
