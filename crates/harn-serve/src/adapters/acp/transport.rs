@@ -2,7 +2,222 @@
 use super::*;
 
 use std::future::Future;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{OriginalUri, State};
+use axum::http::{HeaderMap, Method, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::Router;
+
+use crate::ws::{WsConfig, WsMessage, WsSession};
+use crate::{AuthRequest, HttpTlsConfig};
+
+#[derive(Clone, Debug)]
+pub struct AcpWebSocketServeOptions {
+    pub bind: SocketAddr,
+    pub path: String,
+    pub tls: HttpTlsConfig,
+}
+
+impl Default for AcpWebSocketServeOptions {
+    fn default() -> Self {
+        Self {
+            bind: SocketAddr::from(([127, 0, 0, 1], 8789)),
+            path: "/acp".to_string(),
+            tls: HttpTlsConfig::plain(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AcpWebSocketState {
+    config: AcpServerConfig,
+}
+
+/// Start an ACP WebSocket endpoint. Each accepted WebSocket gets its own
+/// channel-backed ACP server running on a dedicated current-thread runtime.
+pub async fn run_acp_websocket_server(
+    config: AcpServerConfig,
+    options: AcpWebSocketServeOptions,
+) -> Result<(), String> {
+    if !options.path.starts_with('/') {
+        return Err(format!(
+            "ACP WebSocket path must start with `/`; got `{}`",
+            options.path
+        ));
+    }
+
+    let router = acp_websocket_router(config, &options.path);
+    let router = crate::tls::apply_security_headers(router, &options.tls);
+    let listener = crate::tls::bind_listener(options.bind)?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(|error| format!("failed to read local addr: {error}"))?;
+    eprintln!(
+        "[harn] ACP WebSocket server ready on {}://{local_addr}{}",
+        options.tls.listener_scheme(),
+        options.path
+    );
+    crate::tls::serve_router_from_tcp(listener, router, &options.tls)
+        .await
+        .map_err(|error| format!("ACP WebSocket server failed: {error}"))
+}
+
+fn acp_websocket_router(config: AcpServerConfig, path: &str) -> Router {
+    let state = AcpWebSocketState { config };
+    Router::new()
+        .route(path, get(acp_websocket_upgrade))
+        .with_state(state)
+}
+
+async fn acp_websocket_upgrade(
+    State(state): State<AcpWebSocketState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let principal =
+        match pre_authenticated_principal(&state.config.auth_policy, &headers, uri.path()).await {
+            Ok(principal) => principal,
+            Err(response) => return response,
+        };
+    let mut config = state.config.clone();
+    if let Some(principal) = principal {
+        config = config.with_authenticated_principal(principal);
+    }
+    crate::ws::ws_accept(WsConfig::default(), headers, upgrade, move |session| {
+        acp_websocket_session(config.clone(), session)
+    })
+    .await
+}
+
+async fn pre_authenticated_principal(
+    auth_policy: &AuthPolicy,
+    headers: &HeaderMap,
+    path: &str,
+) -> Result<Option<AuthenticatedPrincipal>, Response> {
+    if auth_policy.methods.is_empty() {
+        return Ok(None);
+    }
+
+    let auth = AuthRequest::from_http(&Method::GET, path, Vec::new(), headers);
+    if auth.api_key().is_none() {
+        return Ok(None);
+    }
+
+    match auth_policy.authorize(&auth).await {
+        AuthorizationDecision::Authorized(principal) => Ok(Some(principal)),
+        AuthorizationDecision::Rejected(message) => Err(acp_ws_unauthorized(message)),
+        AuthorizationDecision::MissingScope { required, granted } => Err(acp_ws_unauthorized(
+            crate::forbidden_message(&required, &granted),
+        )),
+        AuthorizationDecision::McpNotAllowlisted { reason, .. } => Err(acp_ws_unauthorized(reason)),
+    }
+}
+
+fn acp_ws_unauthorized(message: String) -> Response {
+    (StatusCode::UNAUTHORIZED, message).into_response()
+}
+
+async fn acp_websocket_session(config: AcpServerConfig, session: WsSession) {
+    let (request_tx, request_rx) = mpsc::unbounded_channel::<serde_json::Value>();
+    let (response_tx, mut response_rx) = mpsc::unbounded_channel::<String>();
+
+    let worker_thread = std::thread::Builder::new()
+        .name("harn-acp-ws".to_string())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    eprintln!("[harn] failed to start ACP WebSocket runtime: {error}");
+                    return;
+                }
+            };
+            runtime.block_on(run_acp_channel_server(config, request_rx, response_tx));
+        });
+    let worker_thread = match worker_thread {
+        Ok(worker_thread) => worker_thread,
+        Err(error) => {
+            let _ = session
+                .send(
+                    serde_json::to_string(&harn_vm::jsonrpc::error_response(
+                        serde_json::Value::Null,
+                        -32000,
+                        &format!("failed to start ACP worker: {error}"),
+                    ))
+                    .unwrap_or_else(|_| {
+                        r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"failed to start ACP worker"}}"#
+                            .to_string()
+                    }),
+                )
+                .await;
+            let _ = session.close(1011, "failed to start ACP worker").await;
+            return;
+        }
+    };
+
+    loop {
+        tokio::select! {
+            incoming = session.recv() => {
+                match incoming {
+                    Ok(Some(WsMessage::Text(text))) => {
+                        match serde_json::from_str::<serde_json::Value>(&text) {
+                            Ok(message) => {
+                                if request_tx.send(message).is_err() {
+                                    let _ = session.close(1011, "ACP worker stopped").await;
+                                    break;
+                                }
+                            }
+                            Err(error) => {
+                                let response = harn_vm::jsonrpc::error_response(
+                                    serde_json::Value::Null,
+                                    -32700,
+                                    &format!("Parse error: {error}"),
+                                );
+                                if let Ok(line) = serde_json::to_string(&response) {
+                                    let _ = session.send(line).await;
+                                }
+                            }
+                        }
+                    }
+                    Ok(Some(WsMessage::Binary(_))) => {
+                        let response = harn_vm::jsonrpc::error_response(
+                            serde_json::Value::Null,
+                            -32600,
+                            "Invalid Request: ACP WebSocket messages must be JSON text frames",
+                        );
+                        if let Ok(line) = serde_json::to_string(&response) {
+                            let _ = session.send(line).await;
+                        }
+                        let _ = session.close(1003, "ACP requires text frames").await;
+                        break;
+                    }
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+            outgoing = response_rx.recv() => {
+                match outgoing {
+                    Some(line) => {
+                        if session.send(line).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+
+    drop(request_tx);
+    let _ = tokio::task::spawn_blocking(move || worker_thread.join()).await;
+}
 
 /// Cross-thread control surface for an in-process ACP channel server.
 ///
@@ -377,5 +592,81 @@ pub async fn run_acp_server(config: AcpServerConfig) {
         .await;
     if profile_enabled {
         harn_vm::tracing::set_tracing_enabled(false);
+    }
+}
+
+#[cfg(test)]
+mod websocket_tests {
+    use super::*;
+
+    use futures::{SinkExt, StreamExt};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::tungstenite::Message;
+
+    async fn spawn_acp_ws(config: AcpServerConfig) -> SocketAddr {
+        let app = acp_websocket_router(config, "/acp");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        addr
+    }
+
+    async fn recv_json(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> serde_json::Value {
+        let message = socket
+            .next()
+            .await
+            .expect("ACP WS stream closed")
+            .expect("ACP WS frame");
+        let text = message.into_text().expect("text frame");
+        serde_json::from_str(&text).expect("ACP JSON")
+    }
+
+    #[tokio::test]
+    async fn acp_websocket_initialize_and_session_new_roundtrip() {
+        let addr = spawn_acp_ws(AcpServerConfig::new(None)).await;
+        let url = format!("ws://{addr}/acp");
+        let (mut socket, _response) = tokio_tungstenite::connect_async(url).await.unwrap();
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {},
+                }))
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let initialize = recv_json(&mut socket).await;
+        assert_eq!(initialize["id"], 1);
+        assert_eq!(initialize["result"]["agentInfo"]["name"], "harn");
+
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/new",
+                    "params": {"cwd": "."},
+                }))
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let created = recv_json(&mut socket).await;
+        assert_eq!(created["id"], 2);
+        assert!(created["result"]["sessionId"].as_str().is_some());
+
+        socket.send(Message::Close(None)).await.unwrap();
     }
 }

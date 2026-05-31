@@ -33,9 +33,9 @@ pub(crate) use adapter::DispatchRuntime;
 pub use adapter::{AdapterDescriptor, TransportAdapter};
 pub use adapters::a2a::{A2aHttpServeOptions, A2aServer, A2aServerConfig, A2A_PROTOCOL_VERSION};
 pub use adapters::acp::{
-    run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server, AcpChannelHandle,
-    AcpProfileConfig, AcpRuntimeConfigurator, AcpServer, AcpServerConfig,
-    NoopAcpRuntimeConfigurator,
+    run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server,
+    run_acp_websocket_server, AcpChannelHandle, AcpProfileConfig, AcpRuntimeConfigurator,
+    AcpServer, AcpServerConfig, AcpWebSocketServeOptions, NoopAcpRuntimeConfigurator,
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{

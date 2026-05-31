@@ -312,6 +312,8 @@ Typical fit:
 Mapping:
 
 - `harn serve acp <file.harn>` starts the packaged stdio ACP adapter
+- `harn serve acp --transport websocket <file.harn>` exposes the same packaged
+  adapter over a local WebSocket endpoint
 - the adapter owns session state, prompt execution, permission prompts, cancel
   tokens, and bidirectional `session/update` traffic
 - each `session/prompt` exposes `prompt` as the text-only prompt string,

@@ -43,7 +43,8 @@ use sessions::{
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
-    run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server, AcpChannelHandle,
+    run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server,
+    run_acp_websocket_server, AcpChannelHandle, AcpWebSocketServeOptions,
 };
 
 use std::collections::{BTreeMap, HashMap};
@@ -504,6 +505,7 @@ impl AcpProfileConfig {
 pub struct AcpServerConfig {
     pub pipeline: Option<String>,
     pub auth_policy: AuthPolicy,
+    pub authenticated_principal: Option<AuthenticatedPrincipal>,
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
     pub llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
@@ -516,6 +518,7 @@ impl AcpServerConfig {
         Self {
             pipeline,
             auth_policy: AuthPolicy::allow_all(),
+            authenticated_principal: None,
             runtime_configurator: Arc::new(NoopAcpRuntimeConfigurator),
             llm_config_overrides: None,
             llm_capability_overrides: None,
@@ -538,6 +541,11 @@ impl AcpServerConfig {
 
     pub fn with_auth_policy(mut self, auth_policy: AuthPolicy) -> Self {
         self.auth_policy = auth_policy;
+        self
+    }
+
+    pub fn with_authenticated_principal(mut self, principal: AuthenticatedPrincipal) -> Self {
+        self.authenticated_principal = Some(principal);
         self
     }
 
@@ -659,7 +667,7 @@ impl AcpServer {
             },
             pipeline: config.pipeline,
             auth_policy: config.auth_policy,
-            authenticated_principal: None,
+            authenticated_principal: config.authenticated_principal,
             runtime_configurator: config.runtime_configurator,
             sessions: HashMap::new(),
             inject_controls: HashMap::new(),

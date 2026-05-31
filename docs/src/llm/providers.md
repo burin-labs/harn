@@ -385,6 +385,44 @@ The provider files in steps 2-4 are overlays, so a starter file can set
 definition. That gives packages a stable, declarative way to ship provider
 adapters and model aliases without editing Rust-side registration code.
 
+### ACP agent providers
+
+External ACP agents can be registered as LLM providers by declaring
+`protocol = "acp"`. Harn launches the configured command over stdio, performs
+`initialize`, creates a session, sends the `llm_call` prompt as
+`session/prompt`, and collects `agent_message_chunk` updates into the normal
+`LlmResult`.
+
+```toml
+[llm.providers.codex_acp]
+protocol = "acp"
+command = "codex-acp"
+args = []
+auth_style = "none"
+cwd = "."
+mcp_servers = []
+```
+
+Provider-specific call overrides use the provider name as the option key:
+
+```harn
+let answer = llm_call("Summarize the current workspace", nil, {
+  provider: "codex_acp",
+  model: "default",
+  codex_acp: {
+    cwd: cwd(),
+    args: ["--profile", "default"],
+    mcpServers: [],
+  },
+})
+```
+
+The adapter treats host-mediated ACP requests conservatively: it cancels
+`session/request_permission` and returns method-not-found for other client
+methods instead of granting file, shell, or UI authority through an LLM
+provider call. Use `harn serve acp` when a real editor or host should own those
+permissions.
+
 ## Provider API details
 
 ### Anthropic

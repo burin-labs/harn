@@ -10,6 +10,7 @@
 //! - **Bedrock / Azure OpenAI / Vertex AI** — enterprise cloud shims
 //! - **Mock** — deterministic test responses without any network I/O
 
+mod acp;
 pub(crate) mod anthropic;
 pub(crate) mod azure_openai;
 pub(crate) mod bedrock;
@@ -21,6 +22,7 @@ pub(crate) mod openai_compat;
 pub(crate) mod openai_responses;
 pub(crate) mod vertex;
 
+pub(crate) use acp::AcpProvider;
 pub(crate) use anthropic::AnthropicProvider;
 pub(crate) use azure_openai::AzureOpenAiProvider;
 pub(crate) use bedrock::BedrockProvider;

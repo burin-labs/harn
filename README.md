@@ -559,6 +559,7 @@ Run Harn as an ACP backend:
 
 ```bash
 harn serve acp agent.harn
+harn serve acp --transport websocket --bind 127.0.0.1:8789 agent.harn
 harn serve acp --api-key "$HARN_ACP_KEY" agent.harn
 HARN_PROFILE_JSON=/tmp/acp.ndjson harn serve acp agent.harn
 ```

@@ -54,7 +54,7 @@ pub(crate) struct ServeArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ServeCommand {
-    /// Serve a .harn agent over stdio using ACP.
+    /// Serve a .harn agent using ACP.
     Acp(ServeAcpArgs),
     /// Serve a .harn agent over HTTP using A2A.
     A2a(A2aServeArgs),
@@ -75,12 +75,36 @@ pub(crate) enum ServeCommand {
 
 #[derive(Debug, Args)]
 pub(crate) struct ServeAcpArgs {
+    /// Transport to expose for ACP clients.
+    #[arg(long, value_enum, default_value_t = AcpServeTransport::Stdio)]
+    pub transport: AcpServeTransport,
+    /// Socket address to bind when serving ACP over WebSocket.
+    #[arg(
+        long,
+        env = "HARN_SERVE_ACP_BIND",
+        default_value = "127.0.0.1:8789",
+        value_name = "ADDR"
+    )]
+    pub bind: SocketAddr,
+    /// WebSocket endpoint path when `--transport websocket` is selected.
+    #[arg(long, default_value = "/acp", value_name = "PATH")]
+    pub path: String,
     /// Static API keys accepted by the ACP authenticate method.
     #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
     pub api_key: Vec<String>,
     /// Shared secret for HMAC authentication through the ACP authenticate method.
     #[arg(long = "hmac-secret", env = "HARN_SERVE_HMAC_SECRET")]
     pub hmac_secret: Option<String>,
+    /// TLS listener mode for WebSocket transport. Supplying both `--cert` and
+    /// `--key` implies `pem`.
+    #[arg(long = "tls", value_enum, default_value_t = ServeTlsMode::Plain)]
+    pub tls: ServeTlsMode,
+    /// PEM-encoded certificate chain for WebSocket TLS termination.
+    #[arg(long, env = "HARN_SERVE_CERT", value_name = "PATH")]
+    pub cert: Option<PathBuf>,
+    /// PEM-encoded private key for WebSocket TLS termination.
+    #[arg(long, env = "HARN_SERVE_KEY", value_name = "PATH")]
+    pub key: Option<PathBuf>,
     /// Enable LLM trace summaries on shutdown.
     #[arg(
         long = "trace",
@@ -95,10 +119,16 @@ pub(crate) struct ServeAcpArgs {
     #[command(flatten)]
     pub profile: ProfileArgs,
     /// Path to the `.harn` file to serve. Optional: when omitted, `harn
-    /// serve acp` boots a file-less ("attach") ACP stdio server that
+    /// serve acp` boots a file-less ("attach") ACP server that
     /// waits for `initialize` / `session/new` from the connecting editor
     /// instead of binding to a script up front.
     pub file: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum AcpServeTransport {
+    Stdio,
+    Websocket,
 }
 
 #[derive(Debug, Args)]

@@ -672,6 +672,12 @@ fn provider_def_to_vm_value(
     if let Some(icon) = &pdef.icon {
         dict.insert("icon".to_string(), VmValue::String(Rc::from(icon.as_str())));
     }
+    if let Some(protocol) = &pdef.protocol {
+        dict.insert(
+            "protocol".to_string(),
+            VmValue::String(Rc::from(protocol.as_str())),
+        );
+    }
     dict.insert(
         "base_url".to_string(),
         VmValue::String(Rc::from(pdef.base_url.as_str())),
@@ -706,6 +712,33 @@ fn provider_def_to_vm_value(
         dict.insert(
             "completion_endpoint".to_string(),
             VmValue::String(Rc::from(endpoint.as_str())),
+        );
+    }
+    if let Some(command) = &pdef.command {
+        dict.insert(
+            "command".to_string(),
+            VmValue::String(Rc::from(command.as_str())),
+        );
+    }
+    if !pdef.args.is_empty() {
+        dict.insert(
+            "args".to_string(),
+            string_list_to_vm_value(pdef.args.clone()),
+        );
+    }
+    if !pdef.env.is_empty() {
+        dict.insert(
+            "env".to_string(),
+            json_to_vm_value(&serde_json::json!(pdef.env)),
+        );
+    }
+    if let Some(cwd) = &pdef.cwd {
+        dict.insert("cwd".to_string(), VmValue::String(Rc::from(cwd.as_str())));
+    }
+    if !pdef.mcp_servers.is_empty() {
+        dict.insert(
+            "mcp_servers".to_string(),
+            json_to_vm_value(&serde_json::Value::Array(pdef.mcp_servers.clone())),
         );
     }
     if let Some(header) = &pdef.auth_header {

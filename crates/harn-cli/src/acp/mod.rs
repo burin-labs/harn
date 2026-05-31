@@ -52,7 +52,7 @@ pub(crate) fn server_config(pipeline: Option<String>, auth_policy: AuthPolicy) -
         .with_llm_overrides(extensions.llm, extensions.capabilities)
 }
 
-fn ensure_acp_event_log(pipeline: Option<&str>) {
+pub(crate) fn ensure_acp_event_log(pipeline: Option<&str>) {
     if harn_vm::event_log::active_event_log().is_none() {
         let base_dir = pipeline
             .map(Path::new)
