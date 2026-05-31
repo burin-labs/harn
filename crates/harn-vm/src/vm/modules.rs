@@ -572,23 +572,43 @@ mod tests {
             .build()
             .expect("runtime builds");
 
-        let first_exports = runtime.block_on(async {
-            let mut first_vm = Vm::new();
-            first_vm
-                .load_module_exports_from_import("std/agent/prompts")
-                .await
-                .expect("first stdlib import succeeds")
-        });
+        let (first_exports, second_exports, first_state_weak, second_state_weak) = runtime
+            .block_on(async {
+                let mut first_vm = Vm::new();
+                let first_exports = first_vm
+                    .load_module_exports_from_import("std/agent/prompts")
+                    .await
+                    .expect("first stdlib import succeeds");
+                let first_state = first_exports
+                    .get("render_agent_prompt")
+                    .expect("first export exists")
+                    .module_state()
+                    .expect("first module state stays live while VM owns module");
+                let first_state_weak = Arc::downgrade(&first_state);
+                let first_state_ptr = Arc::as_ptr(&first_state);
+
+                let mut second_vm = Vm::new();
+                let second_exports = second_vm
+                    .load_module_exports_from_import("std/agent/prompts")
+                    .await
+                    .expect("second stdlib import succeeds");
+                let second_state = second_exports
+                    .get("render_agent_prompt")
+                    .expect("second export exists")
+                    .module_state()
+                    .expect("second module state stays live while VM owns module");
+                let second_state_weak = Arc::downgrade(&second_state);
+
+                assert_ne!(first_state_ptr, Arc::as_ptr(&second_state));
+                (
+                    first_exports,
+                    second_exports,
+                    first_state_weak,
+                    second_state_weak,
+                )
+            });
         let first_cached =
             cached_stdlib_module_ptr("agent/prompts").expect("first import cached stdlib artifact");
-
-        let second_exports = runtime.block_on(async {
-            let mut second_vm = Vm::new();
-            second_vm
-                .load_module_exports_from_import("std/agent/prompts")
-                .await
-                .expect("second stdlib import succeeds")
-        });
         assert_eq!(
             cached_stdlib_module_ptr("agent/prompts"),
             Some(first_cached)
@@ -604,10 +624,10 @@ mod tests {
         assert!(!Arc::ptr_eq(first, second));
         assert!(!Arc::ptr_eq(&first.func, &second.func));
         assert!(!Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
-        assert!(!Arc::ptr_eq(
-            &first.module_state().expect("first module state"),
-            &second.module_state().expect("second module state")
-        ));
+        assert!(first.module_state().is_none());
+        assert!(second.module_state().is_none());
+        assert!(first_state_weak.upgrade().is_none());
+        assert!(second_state_weak.upgrade().is_none());
     }
 
     #[test]
